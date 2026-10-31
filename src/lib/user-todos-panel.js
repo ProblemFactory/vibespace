@@ -767,6 +767,7 @@ export function installUserTodos(app) {
   }
   // lane chat-needs-you-card: the chat's needs cards draw THE rows (renderRow / patchRow, the mini inbox's context) and wire
   // THE verbs through the panel — never a second implementation of a row or of an answer
+  let chromeFrame = 0; // (r16: chromeMoved's frame)
   app.foryouRows = {
     wire: wireMiniRows,
     reconcile: (container, entries) => reconcileRows(container, entries, null, miniCtx, { arm: false }), // round 4 (#3): the card stamps once per pass that changed
@@ -777,9 +778,12 @@ export function installUserTodos(app) {
     stash: stashDrafts, // round 3 (#4): a card's typed reply is a draft before its words are replaced
     fold: (box) => foldBox(box), // …and a box kept on an answered card folds (its text a draft) when the person leaves it — THE one exit
     // lane needs-card-tail r15 (its own 700 px shot: a late run's strip grew under a stack placed a moment before — the card
-    // stood on the strip's clock line until the next 1 s tick): a window's own controls changed size (chat-needs-card _dockPass:
-    // the strip grew, shrank or went) ⇒ the stack and the toasts stand clear of them at once
-    chromeMoved: () => { if (annStack && annStack.isConnected) annPlace(); placeToastsSoon(); },
+    // stood on the strip's clock line until the next 1 s tick): a window's own controls changed size ⇒ the stack and the toasts
+    // stand clear of them at once. r16 (the r15 acceptance: _dockPass read the strip's height on every pass, and a strip that
+    // re-wrapped at a clock word or a window's resize never passed there): its ONE road is the strip's ResizeObserver
+    // (chat-needs-card _dockWire); strips that changed in one frame are one move — the first call places (every strip's size
+    // is laid out when the observer runs), the frame's others are none. → whether it placed
+    chromeMoved: () => { if (chromeFrame) return false; chromeFrame = requestAnimationFrame(() => { chromeFrame = 0; }); if (annStack && annStack.isConnected) annPlace(); placeToastsSoon(); return true; },
   };
   app._syncInboxBadges = scheduleBadges;
 
@@ -1322,6 +1326,33 @@ export function installUserTodos(app) {
   // the card itself gone ⇒ the stack's top), new cards wait until the pointer leaves (annLayout), and the viewport clamp ALWAYS
   // runs. Held = a mouse or a pen resting on it (a finger's tap leaves a sticky :hover — never a hold)
   const annHeld = () => !!annAt && !!annPin && !!annStack.matches?.(':hover');
+  // r16 (the r15 acceptance: the pointer on the second card, the top one gone — the card folded into «N more» unfolded BELOW the
+  // read one and the held stack ran onto the For-you button and a maximized chat's strip, the clamp moving the read card): A
+  // HELD STACK OBEYS THE FREE ONE'S RULE — the read card keeps its rectangle; a card of it that would stand on what the free
+  // stack avoids (chromeAvoidRects: a composer, a strip, a title bar's buttons), on the For-you button or past the screen's
+  // edge FOLDS into «N more» (the farthest from the read card first; the «N more» line itself last) until the pointer leaves —
+  // annLayout unfolds nothing while held, so the clamp after it has nothing to move (it moves the read card only when that card
+  // itself is past the edge: a window that shrank under it). → the stack's top
+  const annFold = (pin, left, top, w, vh) => {
+    const a = annAnchor(), ar = a ? a.getBoundingClientRect() : null, tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
+    const avoid = [...chromeAvoidRects(left, left + w, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), ...(ar && ar.width ? [ar] : [])];
+    const topY = tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY = vh - 4, more = annStack.querySelector(':scope > .uta-more');
+    let moreOff = false;
+    for (let k = 0; k < 32; k++) {
+      const sr = annStack.getBoundingClientRect(), dy = top - sr.top; // (measured where the stack stands now; it will stand dy lower)
+      const kids = [...annStack.querySelectorAll(':scope > .uta-card'), more].filter((e) => e && !e.hidden), at = pin ? kids.indexOf(pin) : -1;
+      const bad = kids.map((e) => { const b = e.getBoundingClientRect(), t0 = b.top + dy, b0 = b.bottom + dy; return e !== pin && (t0 < topY || b0 > bottomY || avoid.some((x) => x.left < left + w && x.right > left && x.top < b0 && x.bottom > t0)); });
+      const below = bad.some((x, j) => x && j > at), above = bad.some((x, j) => x && j < at);
+      if (!below && !above) break;
+      const cards = kids.filter((e) => e !== more && e !== pin);
+      const fold = below ? (cards.filter((e) => kids.indexOf(e) > at).pop() || (more && !more.hidden && more !== pin ? more : null)) : cards.find((e) => kids.indexOf(e) < at) || null;
+      if (!fold) break;
+      fold.hidden = true;
+      if (fold === more) moreOff = true; else annMore(moreOff); // (a fold counted in «N more» — the line, once put away, stays away)
+      top = pin ? annStack.getBoundingClientRect().top + (annPin.top - pin.getBoundingClientRect().top) : top; // (the read card's place kept)
+    }
+    return top;
+  };
   const annPlace = () => {
     if (!annStack || !annStack.isConnected) return;
     const Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
@@ -1329,6 +1360,7 @@ export function installUserTodos(app) {
     if (annHeld()) {
       const el = annPin.el.parentNode === annStack && !annPin.el.hidden ? annPin.el : null;
       left = pr.left; top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);
+      top = annFold(el, left, top, pr.width, vh);
     } else {
       const a = annAnchor(), r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
       left = r ? r.right - pr.width : (vw - pr.width) / 2;
@@ -1343,7 +1375,8 @@ export function installUserTodos(app) {
         topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
       if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - pr.height;
     }
-    top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP: nothing off the screen, held or not
+    const ph = annStack.getBoundingClientRect().height; // (r16: a held stack folded since `pr` — its own height now)
+    top = Math.max(4, Math.min(vh - ph - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP: nothing off the screen, held or not
     annStack.style.top = (top / Z) + 'px';
     annStack.style.left = (left / Z) + 'px';
     const at = `${Math.round(top)},${Math.round(left)}`;
@@ -1399,14 +1432,21 @@ export function installUserTodos(app) {
     if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; annPin = null; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
     const held = annHeld(); // r15: a card that arrives while a pointer rests on the stack waits off it until the pointer leaves
     const order = [...annCards.values()].filter((c) => !held || c.el.parentNode === annStack).sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
-    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });
-    const more = annStack.querySelector(':scope > .uta-more'), n = order.length - ANN_SHOWN;
-    more.hidden = n <= 0;
-    if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
+    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN || (held && c.el.hidden); }); // r16: a held stack UNFOLDS nothing — a card gone above the read one never brings a folded one out below it
+    const more = annStack.querySelector(':scope > .uta-more');
     const kids = [...annStack.querySelectorAll(':scope > .uta-card')]; // moved only when the order changed (a card under the pointer stays put)
     for (const c of order) if (c.el.parentNode !== annStack) c.until = Math.max(c.until, Date.now() + ANN_MS); // (a card that waited: its time from when it shows)
     if (kids.length !== order.length || kids.some((e, k) => e !== order[k].el)) for (const c of order) annStack.insertBefore(c.el, more);
+    annMore(held && more.hidden);
     annPlace();
+  };
+  /** THE «N more waiting» LINE: the cards the stack folds (r16: what a held stack folded too) — `kept` = a held stack's line
+   *  that was put away stays away (it never comes out under the read card) */
+  const annMore = (kept = false) => {
+    const more = annStack.querySelector(':scope > .uta-more'), n = [...annStack.querySelectorAll(':scope > .uta-card')].filter((e) => e.hidden).length;
+    if (kept && more.hidden) return;
+    more.hidden = n <= 0;
+    if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
   };
   const annPaint = (c, it) => {
     const w = annWords(it);

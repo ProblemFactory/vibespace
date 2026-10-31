@@ -966,17 +966,25 @@ function standingCardOf(item, { t = fmt } = {}) {
 /** lane needs-card-tail r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» for a run
  *  ask with the hosts, the warning row, the «asked again» line and the cut hidden: A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT
  *  SHOW): WHAT THE STRIP SAYS BEFORE IT ANSWERS — the facts an answer decides on, from THE card's model (`card` = runCardOf):
- *  the hosts row (or its «unknown (why)»), every warning row, the «asked again» line, the command's cut. Drawn WHOLE (wrapped,
- *  never an ellipsis) while their words fit the strip's bound (RUN_STRIP_MAX characters — a strip, not a card) ⇒ `fits`, every
- *  answer the card offers; else the strip draws none of them and offers what needs none — Allow once / Deny — and says where
- *  the rest is (its card). → null (no card) | {rows, again, cut, fits} */
-const RUN_STRIP_MAX = 200;
+ *  the hosts row (or its «unknown (why)»), every warning row, the «asked again» line, the command's cut, in the card's order.
+ *  r16 (the r15 acceptance: twelve hosts hid a SHORT writable-program warning and the «asked again» line, and the strip still
+ *  offered Allow once): THE BOUND IS THE HOSTS ROW'S ALONE — the hosts drawn whole (wrapped, never an ellipsis) while their words
+ *  fit RUN_STRIP_MAX characters ⇒ `fits`, every answer the card offers; else the row says they are on its card (`out`) and
+ *  «Always» is the card's. Every warning row and the «asked again» line are ALWAYS drawn — short by construction: a value past
+ *  RUN_STRIP_SEG characters keeps its tail (where a path ends is what runs), the line past RUN_STRIP_LINE its head — so the
+ *  answers that need no hosts (Allow once / Deny) stand beside every warning. THE RULE for any row the strip comes to draw:
+ *  only the hosts have a bound; a row that warns, or explains what a writing answer does, is always drawn (short by
+ *  construction). → null (no card) | {rows, again, cut, fits} */
+const RUN_STRIP_MAX = 200, RUN_STRIP_SEG = 60, RUN_STRIP_LINE = 160;
 function runStripOf(card) {
   if (!card) return null;
   const words = (segs) => segs.map((x) => (x.code != null ? x.code : x.mono != null ? x.mono : x.aside != null ? ' ' + x.aside : x.text || '')).join('');
-  const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn);
-  const n = rows.reduce((k, r) => k + r.label.length + 1 + r.lines.map(words).join(', ').length, 0) + (card.again ? words(card.again).length : 0);
-  return { rows, again: card.again, cut: !!card.cut, fits: n <= RUN_STRIP_MAX };
+  const short = (segs) => segs.map((x) => { const k = x.code != null ? 'code' : x.mono != null ? 'mono' : null; return k && x[k].length > RUN_STRIP_SEG ? { ...x, [k]: '\u2026' + x[k].slice(-(RUN_STRIP_SEG - 1)) } : x; });
+  const hosts = card.rows.find((r) => r.key === 'hosts');
+  const fits = !hosts || hosts.label.length + 1 + hosts.lines.map(words).join(', ').length <= RUN_STRIP_MAX;
+  const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn).map((r) => (r.key === 'hosts' ? { ...r, out: !fits } : { ...r, lines: r.lines.map(short) }));
+  const again = card.again && words(card.again).length > RUN_STRIP_LINE ? [{ text: words(card.again).slice(0, RUN_STRIP_LINE - 1) + '\u2026' }] : card.again;
+  return { rows, again, cut: !!card.cut, fits };
 }
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
  *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */

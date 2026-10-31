@@ -440,9 +440,8 @@ export class NeedsCards {
       entry = open ? { item: open.item } : { item: (todos.resolved || []).find((i) => i.id === kept) || (this._dockItem && this._dockItem.id === kept ? this._dockItem : { ...cur._item }), resolved: true };
     }
     const sig = entry ? `${entry.item.id}\u0000${entry.resolved ? 'r' : 'o'}\u0000${d ? d.n : 0}` : '';
-    const h0 = dock.hidden ? 0 : dock.offsetHeight; // r15: a strip that changes size says so (foryouRows.chromeMoved — the stack and the toasts follow at once)
     if (!entry) {
-      if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); this.app.foryouRows?.chromeMoved?.(); }
+      if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); }
       this._dockItem = null; this._dockSig = '';
       return;
     }
@@ -464,7 +463,6 @@ export class NeedsCards {
     // acceptance's age tick rebuilt the Allow and left it unstamped ⇒ «just-moved» for ever) any patch that made a button
     const made = [...rows.querySelectorAll('button')].some((b) => !had.has(b));
     if (sig !== this._dockSig || made) { this._dockSig = sig; this.app.foryouRows?.arm?.(dock); }
-    if (dock.offsetHeight !== h0) this.app.foryouRows?.chromeMoved?.();
   }
 
   /** The strip's parts, built once a view: the head (icon + count), the row's holder, «View all»; its one wiring — THE verbs
@@ -511,8 +509,11 @@ export class NeedsCards {
       landIt(ev, q);
     }, { signal: own });
     // the strip's size moved the list's bottom edge: a pinned view stays at the live tail (a reader in history keeps the
-    // line they read — the list shrinks below it, scrollTop unchanged)
-    if (typeof ResizeObserver === 'function') (this._dockRO = new ResizeObserver(() => { const v = this.view; if (v._pinned && !v._disposed) v._scrollToBottom?.(); })).observe(dock);
+    // line they read — the list shrinks below it, scrollTop unchanged). r16 (the r15 acceptance: its size read on every pass,
+    // A PASS THAT CHANGED NO CARD READS NO LAYOUT; and a strip re-wrapped by its clock's words or a window's resize never passed
+    // there): THE ONE ROAD of a strip that changes size — it grew, shrank, went, re-wrapped — is this observer: the announce's
+    // stack and the toasts stand clear of it at once (foryouRows.chromeMoved — one move a frame, however many strips)
+    if (typeof ResizeObserver === 'function') (this._dockRO = new ResizeObserver(() => { const v = this.view; if (v._pinned && !v._disposed) v._scrollToBottom?.(); this.app.foryouRows?.chromeMoved?.(); })).observe(dock);
   }
 
   /** The card of item `id` in this list, or null. */
@@ -842,8 +843,8 @@ export class NeedsCards {
     // there): an open card that ends at the live end with no card drawn MARKS THE DOCK, where it waits (_dockMark: the strip
     // flashes once, its count in the attention fill) — never silent; one filed before the record was kept is also SAID
     // r15 (the r14 acceptance): the words say what the strip offers — a run ask whose facts are too long for it answers there with
-    // Allow once / Deny only (user-todos-row stripWithholds), «Always» and what it decides on are its card's, in For you
-    const atEndSaid = () => { if (isCard) this._dockMark(); if (isCard && idx === -1) showToast(stripWithholds(item).length ? t('Asked before this conversation\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you') : t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
+    // Allow once / Deny only (user-todos-row stripWithholds), «Always» and the hosts it sends to are its card's, in For you (r16)
+    const atEndSaid = () => { if (isCard) this._dockMark(); if (isCard && idx === -1) showToast(stripWithholds(item).length ? t('Asked before this conversation\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you') : t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;

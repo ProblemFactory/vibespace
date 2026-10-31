@@ -1758,7 +1758,7 @@ console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the b
   ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
   ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.ut-announce'\), \(el\) => el\.id === 'global-toasts'/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
   ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
-  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.filter\(\(c\) => !held \|\| c\.el\.parentNode === annStack\)\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) /* r15: a held stack's arrivals wait (㉝) */ && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
+  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.filter\(\(c\) => !held \|\| c\.el\.parentNode === annStack\)\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) /* r15: a held stack's arrivals wait (㉝) */ && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN \|\| \(held && c\.el\.hidden\); \}\);/.test(an) /* r16: a held stack unfolds nothing (㉞) */, 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
   ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
 }
 
@@ -1944,7 +1944,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
     try {
       let nudged = 0;
-      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: (q) => q === ':hover' && hover }; // (read for its size: 380 × 200, three cards)
+      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: (q) => q === ':hover' && hover, querySelector: () => null, querySelectorAll: () => [] }; // (read for its size: 380 × 200, three cards; r16: no cards of its own to fold)
       const S = { annStack: st, annAnchor: () => (anchor ? { getBoundingClientRect: () => anchor } : null), uiScale: () => 1, annAt: '', annPin: hover ? { el: {}, top: 0 } : null,
         window: globalThis.window, document: doc, chromeAvoidRects: avoid, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
       const A = run(slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S); // (r15: annHeld rides the slice — a tree before it, its own annPlace)
@@ -1975,7 +1975,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), getElementById: () => null };
     globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
     try {
-      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: () => false };
+      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: () => false, querySelector: () => null, querySelectorAll: () => [] };
       const S = { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '', annPin: null,
         window: globalThis.window, document: doc, chromeAvoidRects: U.chromeAvoidRects, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
       const A = run(slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S); // (r15: annHeld rides the slice — a tree before it, its own annPlace)
@@ -2174,12 +2174,12 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     ok(/Asked again — it differs from the command you let through: its arguments changed/.test(g.again.facts) && g.again.answers.includes('always'),
       `RED-able (r15 — 2353267f1 hid the «asked again» line): a near-identical rerun ⇒ the strip says the one way it differs before its Always («${(g.again.facts.match(/Asked again[^]*?changed/) || [''])[0]}»)`, g.again);
     ok(/The command is cut — its card holds the whole/.test(g.cut.facts), `RED-able (r15 — 2353267f1 hid the cut line): a command the card cuts ⇒ the strip says it is cut («The command is cut — its card holds the whole»)`, g.cut);
-    ok(!g.many.answers.includes('always') && g.many.answers.join() === 'once,deny' && /what it decides on, and «Always», are on its card/.test(g.many.facts) && !g.many.facts.includes('replica-0'),
-      `RED-able (r15): facts too long for a strip (twelve hosts) ⇒ none of them, the line that says where they are («${g.many.facts.trim().slice(0, 80)}»), and only the answers that need none (${J(g.many.answers)}) — never an «Always» beside hosts it does not show`, g.many);
+    ok(!g.many.answers.includes('always') && g.many.answers.join() === 'once,deny' && /Sends to \(too long to show here — the hosts, and «Always», are on its card\)/.test(g.many.facts) && !g.many.facts.includes('replica-0'),
+      `RED-able (r15; r16 — the bound is the hosts row's alone): hosts too long for a strip (twelve) ⇒ their row says they are on its card («${g.many.facts.trim().slice(0, 90)}»), and only the answers that need no hosts (${J(g.many.answers)}) — never an «Always» beside hosts it does not show`, g.many);
     const wNone = R.stripWithholds?.(asks.many.item, ctx.t) ?? null, wPast = R.stripWithholds?.(asks.past.item, ctx.t) ?? null; // (2353267f1 has none: null)
-    const toastPick = /showToast\(stripWithholds\(item\)\.length \? t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you'\) : t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'\)/.test(CARD);
-    const keyed = ['The command is cut — its card holds the whole', 'Too long to show here — what it decides on is on its card', 'Too long to show here — what it decides on, and «Always», are on its card', "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you"].every((k) => ZH.includes(J(k) + ':') && JA.includes(J(k) + ':'));
-    ok(J(wNone) === '["always"]' && J(wPast) === '[]' && toastPick && keyed, `the landing's toast says what the strip offers — the strip that withholds «Always» (${J(wNone)}) is named «offers Allow once and Deny — «Always» … on its card in For you»; one that offers all (${J(wPast)}) keeps «answer it in the strip»; every new word in zh and ja`, { wNone, wPast, toastPick, keyed });
+    const toastPick = /showToast\(stripWithholds\(item\)\.length \? t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you'\) : t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'\)/.test(CARD);
+    const keyed = ['The command is cut — its card holds the whole', '(too long to show here — the hosts are on its card)', '(too long to show here — the hosts, and «Always», are on its card)', "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you"].every((k) => ZH.includes(J(k) + ':') && JA.includes(J(k) + ':'));
+    ok(J(wNone) === '["always"]' && J(wPast) === '[]' && toastPick && keyed, `the landing's toast says what the strip offers — the strip that withholds «Always» (${J(wNone)}) is named «offers Allow once and Deny — «Always» and the hosts it sends to … on its card in For you»; one that offers all (${J(wPast)}) keeps «answer it in the strip»; every new word in zh and ja`, { wNone, wPast, toastPick, keyed });
     // the controls: a renderer that offers «Always» whatever fits; a strip grammar that hides the facts again
     const mut = src.replace("answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;');
     const Rm = await import(pathToFileURL(mutantCopies('utrow15', ROOT).write(REL, mut, 'stripall')).href);
@@ -2194,11 +2194,12 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
   const FA = await import(pathToFileURL(path.join(ROOT, 'src/foryou-actions.js')).href), U = await import(pathToFileURL(path.join(ROOT, 'src/lib/utils.js')).href);
   const PLACE = slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'); // (2353267f1 has no annHeld — its annPlace, so its red is the behaviour)
   const LAYOUT = slice('  const annLayout = () => {', '  const annPaint = ');
-  const hold = ({ vh = 800 } = {}) => {
+  const hold = ({ vh = 800, avoid = () => [] } = {}) => {
     const H = 66, G = 6, MH = 26, had = { document: globalThis.document, window: globalThis.window };
     const cards = [], more = { cls: 'more', hidden: true, textContent: '', parentNode: null };
     const st = { isConnected: true, style: {}, hover: false, remove() { this.isConnected = false; } };
     more.parentNode = st;
+    more.getBoundingClientRect = () => { const y = yOf(more); return box(0, y, 380, y + MH); }; // (r16: the «N more» line folds too)
     const shown = () => [...cards.filter((c) => !c.hidden), ...(more.hidden ? [] : [more])];
     const yOf = (e) => { let y = parseFloat(st.style.top || '0'); for (const x of shown()) { if (x === e) return y; y += (x === more ? MH : H) + G; } return NaN; };
     st.getBoundingClientRect = () => { const n = shown(), t = parseFloat(st.style.top || '0'), h = n.reduce((a, e, k) => a + (e === more ? MH : H) + (k ? G : 0), 0), l = parseFloat(st.style.left || '0'); return box(l, t, l + 380, t + h); };
@@ -2208,7 +2209,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     const card = (id, at) => { const el = { id, hidden: false, parentNode: null }; el.getBoundingClientRect = () => { const y = yOf(el); return box(0, y, 380, y + H); }; return { el, key: { id, createdAt: at }, until: Date.now() + 20000, expiredAt: 0 }; };
     const annCards = new Map();
     const S = { annStack: st, annCards, annAnchor: () => ({ getBoundingClientRect: () => box(1200, 760, 1240, 796) }), uiScale: () => 1, annAt: '', annPin: null, annTimer: 0, ANN_SHOWN: 3, ANN_MS: 20000,
-      window: { innerWidth: 1280, innerHeight: vh }, document: { querySelectorAll: () => [], getElementById: () => null }, chromeAvoidRects: () => [], toastDeskSpot: U.toastDeskSpot, placeToastsSoon() {}, annAside() {}, annWatch() {},
+      window: { innerWidth: 1280, innerHeight: vh }, document: { querySelectorAll: () => [], getElementById: () => null }, chromeAvoidRects: (...a) => avoid(...a), toastDeskSpot: U.toastDeskSpot, placeToastsSoon() {}, annAside() {}, annWatch() {},
       newestFirst: FA.newestFirst, t: (k, p) => k.replace('{n}', p ? p.n : ''), clearInterval() {} };
     const A = run((PLACE || '') + (LAYOUT || ''), 'annPlace, annLayout', S);
     const add = (id, at) => { const c = card(id, at); annCards.set(id, c); return c; };
@@ -2216,7 +2217,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     const rest = (c) => { st.hover = true; S.annPin = { el: c.el, top: c.el.getBoundingClientRect().top }; };
     const leave = () => { st.hover = false; S.annPin = null; };
     const span = (c) => (c.el.parentNode === st && !c.el.hidden ? [c.el.getBoundingClientRect().top, c.el.getBoundingClientRect().bottom] : null);
-    return { A, S, st, add, drop, rest, leave, span, bottom: () => st.getBoundingClientRect().bottom, top: () => st.getBoundingClientRect().top, setVh: (v) => { S.window.innerHeight = v; } };
+    return { A, S, st, cards, more, add, drop, rest, leave, span, bottom: () => st.getBoundingClientRect().bottom, top: () => st.getBoundingClientRect().top, setVh: (v) => { S.window.innerHeight = v; } };
   };
   const growth = (() => { const h = hold(); if (h.A.threw) return { threw: h.A.threw }; const a = h.add('A', 1000); h.A.annLayout(); const before = h.span(a); h.rest(a); const b = h.add('B', 2000); h.A.annLayout();
     const held = { a: h.span(a), b: h.span(b), bottom: h.bottom() }; h.leave(); h.A.annLayout(); return { before, held, after: { a: h.span(a), b: h.span(b), bottom: h.bottom() } }; })();
@@ -2237,7 +2238,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
   const goneOf = (h) => { const c3 = [h.add('A', 1000), h.add('B', 2000), h.add('C', 3000)]; h.A.annLayout(); h.rest(c3[0]); h.drop('C'); h.A.annLayout(); return { held: h.span(c3[0]) }; };
   const shrinkOf = (h) => { const a = h.add('A', 1000); h.A.annLayout(); h.rest(a); h.setVh(700); h.A.annPlace(); return { bottom: h.bottom() }; };
   const all = (PLACE || '') + (LAYOUT || '');
-  const mq = all.replace('.filter((c) => !held || c.el.parentNode === annStack)', ''), mp = all.replace('top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);', 'top = pr.top;'), mc = all.replace("top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP", '// THE CLAMP');
+  const mq = all.replace('.filter((c) => !held || c.el.parentNode === annStack)', ''), mp = all.replace('top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);', 'top = pr.top;'), mc = all.includes('vh - ph - 4') ? all.replace("top = Math.max(4, Math.min(vh - ph - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP", '// THE CLAMP') : all.replace("top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP", '// THE CLAMP'); // (r16: the clamp reads the folded height)
   const rq = withSrc(mq, fourthOf), rp = withSrc(mp, goneOf), rc = withSrc(mc, shrinkOf);
   ok(mq !== all && mp !== all && mc !== all && !same(rq.held, [688, 754]) && !same(rp.held, [688, 754]) && rc.bottom > 696,
     `CONTROL (r15): the mutant that lets a card in under a held stack folds the read one away (${J(rq.held)}); the one without the pin lets it slide (${J(rp.held)}); the one without the clamp leaves the stack past the viewport (bottom ${rc.bottom}) — the legs go red`, { rq, rp, rc });
@@ -2253,24 +2254,127 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     `RED-able (r15 — 2353267f1: «${r14}» outside the ≤ 520 px query — a late run's sentence past a 700 px window's edge): the strip's clock line can shrink to its line and wraps there at every width («${(r15 || '').trim()}»); the phone's is a whole line of its own`, { r15 });
   ok(!fits(r14), 'CONTROL (r15): 2353267f1\'s rule (`flex: none; white-space: nowrap`) neither wraps nor ellipsizes — the leg goes red');
   // D — A STRIP THAT CHANGES SIZE SAYS SO (r15 — its own 700 px shot: a late run's strip grew under a stack placed a moment
-  // before, the card on the strip's clock line until the next 1 s tick): the REAL _dockPass over stubs — the strip grew, kept
-  // its size, went ⇒ foryouRows.chromeMoved (the stack and the toasts re-placed at once) once, never, once
+  // before). r16 (the r15 acceptance: _dockPass read the strip's height before and after EVERY pass — A PASS THAT CHANGED NO
+  // CARD READS NO LAYOUT — and a strip re-wrapped by its clock's words or a window's resize never passed there): ONE road, the
+  // strip's own ResizeObserver; strips that changed in one frame are ONE move. The REAL _dockPass over stubs (its layout reads
+  // counted: shown, grown, the same, gone) and the REAL observer callback + the REAL foryouRows.chromeMoved over a frame clock
   const dps = slice('  _dockPass(waiting) {', '  /** The strip\'s parts, built once a view', CARD), body = (x) => (x ? x.slice(x.indexOf('{') + 1, x.lastIndexOf('}')) : null);
   const sized = (src, steps) => {
-    let h = 58, moved = 0; const item = { id: 'ut-r15sz', status: 'open' };
+    let h = 58, moved = 0, reads = 0; const item = { id: 'ut-r15sz', status: 'open' };
     const row = { dataset: { id: item.id }, querySelector: () => null };
     const rows = { querySelector: (q) => (/ut-item/.test(q) ? row : null), querySelectorAll: () => [], replaceChildren() {} };
     const count = { textContent: '', title: '' }, all = { hidden: true, textContent: '' };
-    const dock = { hidden: false, get offsetHeight() { return this.hidden ? 0 : h; }, querySelector: (q) => (/cad-count/.test(q) ? count : /cad-all/.test(q) ? all : null) };
+    const dock = { hidden: false, get offsetHeight() { reads++; return this.hidden ? 0 : h; }, getBoundingClientRect() { reads++; return box(0, 0, 600, h); }, querySelector: (q) => (/cad-count/.test(q) ? count : /cad-all/.test(q) ? all : null) };
     const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null, app: { foryouRows: { reconcileDock: () => { h = self.next; }, arm() {}, chromeMoved: () => { moved++; } } } };
     let f; try { f = new Function('scope', `with (scope) { return function (waiting) { ${src} }; }`)(new Proxy({ dockOf: (l) => (l.length ? { newest: l[0].item, n: l.length, words: { text: 'waiting for you · 1', title: '' } } : null), t: (k) => k, boxInUse: () => false, inboxModel: () => ({ todos: {} }), console }, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
-    return steps.map(([next, list]) => { moved = 0; self.next = next; f.call(self, list ? [{ item }] : []); return moved; });
+    return steps.map(([next, list]) => { moved = 0; reads = 0; self.next = next; f.call(self, list ? [{ item }] : []); return [moved, reads]; });
   };
   const sz = sized(body(dps), [[58, true], [106, true], [106, true], [106, false]]);
-  const szm = sized(body(dps && dps.replace('    if (dock.offsetHeight !== h0) this.app.foryouRows?.chromeMoved?.();\n', '')), [[58, true], [106, true]]);
-  const cm = /chromeMoved: \(\) => \{ if \(annStack && annStack\.isConnected\) annPlace\(\); placeToastsSoon\(\); \},/.test(P);
-  ok(J(sz) === '[0,1,0,1]' && cm, `RED-able (r15 — 2353267f1: nothing followed a strip that grew but the 1 s tick): the REAL _dockPass says a size change — shown at its size ${J(sz[0])}, grown ${J(sz[1])}, the same ${J(sz[2])}, gone ${J(sz[3])} (calls of foryouRows.chromeMoved); chromeMoved re-places the stack and asks the toasts again`, { sz, cm });
-  ok(J(szm) === '[0,0]', `CONTROL (r15): the mutant without the size check never says the growth (${J(szm)}) — the leg goes red`, szm);
+  // the observer and chromeMoved over a frame clock: rAF callbacks run at the frame's start, the observer's after its layout
+  const roSrc = (CARD.match(/new ResizeObserver\((\(\) => \{ const v = this\.view;[^\n]*?\})\)\)\.observe\(dock\);/) || [])[1] || null;
+  const cmSrc = (P.match(/\n    chromeMoved: (\(\) => \{[^\n]*\}),\n/) || [])[1] || null;
+  const frames = (ro, cm, plan) => {
+    let raf = [], placed = 0, asked = 0;
+    const S2 = { chromeFrame: 0, requestAnimationFrame: (fn) => { raf.push(fn); return raf.length; }, annStack: { isConnected: true }, annPlace: () => { placed++; }, placeToastsSoon: () => { asked++; } };
+    let chromeMoved; try { chromeMoved = new Function('scope', `with (scope) { return (${cm}); }`)(new Proxy(S2, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
+    const view = () => ({ _pinned: false, _disposed: false }), strips = [0, 1].map(() => { const self = { view: view(), app: { foryouRows: { chromeMoved } } }; try { return new Function(`return function () { return (${ro}); }`)().call(self); } catch (e) { return () => {}; } });
+    return plan.map((which) => { const q = raf; raf = []; for (const fn of q) fn(); const p0 = placed, a0 = asked; for (const k of which) strips[k](); return [placed - p0, asked - a0]; });
+  };
+  const PLAN = [[0, 1], [1], []]; // frame 1: two strips changed (a broadcast); frame 2: one re-wrapped (its clock's words / a resize); frame 3: none
+  const fr = roSrc && cmSrc ? frames(roSrc, cmSrc, PLAN) : null;
+  ok(J(sz) === '[[0,0],[0,0],[0,0],[0,0]]' && J(fr) === '[[1,1],[1,1],[0,0]]',
+    `RED-able (r16 — 882665da7 read the strip's height twice a pass and called chromeMoved from _dockPass alone): the REAL _dockPass reads NO layout and moves nothing — [chromeMoved calls, layout reads] shown / grown / the same / gone ${J(sz)}; THE ONE ROAD is the strip's observer — two strips changed in one frame ⇒ one placement and one ask of the toasts, one re-wrapped the next frame ⇒ one more, a frame without a change ⇒ none (${J(fr)})`, { sz, fr, ro: !!roSrc, cm: !!cmSrc });
+  const frm = roSrc && cmSrc ? frames(roSrc, cmSrc.replace('if (chromeFrame) return false; ', ''), PLAN) : null, fro = roSrc && cmSrc ? frames(roSrc.replace(' this.app.foryouRows?.chromeMoved?.();', ''), cmSrc, PLAN) : null;
+  ok(!!frm && J(frm[0]) === '[2,2]' && !!fro && J(fro) === '[[0,0],[0,0],[0,0]]', `CONTROL (r16): the mutant without the frame's guard places twice for one frame (${J(frm && frm[0])}); the observer without chromeMoved never says a size change (${J(fro)}) — the legs go red`, { frm, fro });
+
+  console.log('㉞ A HELD STACK OBEYS THE FREE ONE\'S RULE · THE STRIP\'S BOUND IS THE HOSTS ROW\'S (lane needs-card-tail r16 — the r15 acceptance: the pointer on the second card, the top one gone — the folded card unfolded below and the stack ran onto the For-you button and a maximized chat\'s strip; twelve hosts hid a writable program\'s warning beside Allow once)');
+  // A — ㉝ B's stack (66 px cards, 6 px gap, the «N more» row 26 px, the For-you button at 760–796, vh 800): N cards placed, the
+  // mouse resting on the SECOND, the top one answered elsewhere (annRefresh: dropped + annLayout); the avoid rects are what the
+  // REAL annPlace asks chromeAvoidRects for (a maximized chat's strip 568–649 + composer 649–728 — the acceptance's geometry)
+  const STRIP = box(0, 568, 1280, 649), COMPO = box(0, 649, 1280, 728);
+  const held = (n, { rects = [], src = null, then = null } = {}) => {
+    let av = rects; const h = hold({ avoid: () => av });
+    if (h.A.threw) return { threw: h.A.threw };
+    if (src) { const A2 = run(src, 'annPlace, annLayout', h.S); if (A2.threw) return { threw: A2.threw }; h.A.annPlace = A2.annPlace; h.A.annLayout = A2.annLayout; }
+    const cs = Array.from({ length: n }, (_, k) => h.add('C' + k, 1000 * (k + 1))), order = [...cs].reverse(); // (newest first)
+    h.A.annLayout();
+    const free = [h.top(), h.bottom()], pin = order[1], pinAt = h.span(pin);
+    h.rest(pin);
+    if (then) then(h, { set: (r) => { av = r; }, order });
+    else { h.drop(order[0].key.id); h.A.annLayout(); }
+    const vis = [...h.cards.filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()), ...(h.more.hidden ? [] : [h.more.getBoundingClientRect()])];
+    return { free, pinAt, pinNow: h.span(pin), stack: [h.top(), h.bottom()], vis: vis.map((r) => [r.top, r.bottom]), folded: h.cards.filter((e) => e.hidden).map((e) => e.id), more: h.more.hidden ? null : h.more.textContent, h };
+  };
+  const clearOf = (v, ...rs) => !!v && !v.threw && v.vis.every(([t0, b0]) => rs.every((r) => !(t0 < r.bottom && b0 > r.top)));
+  const BTN16 = box(1200, 760, 1240, 796);
+  const c4 = held(4), c5 = held(5), cm4 = held(4, { rects: [STRIP, COMPO] }), cm5 = held(5, { rects: [STRIP, COMPO] });
+  const kept = (v) => !!v && !v.threw && same(v.pinAt, v.pinNow);
+  ok(kept(c4) && kept(c5) && c4.stack[1] < 760 && c5.stack[1] < 760 && clearOf(c4, BTN16) && clearOf(c5, BTN16) && J(c4.free) === '[512,754]',
+    `RED-able (r16 — 882665da7: 4 cards 512–754 → 584–794 over the button; 5 cards → 554–796, the clamp moving the read card 584 → 554): the pointer on the second card, the top one gone ⇒ the read card keeps ${J(c4.pinAt)} → ${J(c4.pinNow)} (4 cards: the stack ${J(c4.stack)}, «${c4.more}»; 5 cards: ${J(c5.pinAt)} → ${J(c5.pinNow)}, the stack ${J(c5.stack)}, «${c5.more}») — nothing at or below the For-you button's 760`, { c4: { ...c4, h: 0 }, c5: { ...c5, h: 0 } });
+  ok(kept(cm4) && kept(cm5) && clearOf(cm4, STRIP, COMPO) && clearOf(cm5, STRIP, COMPO),
+    `RED-able (r16 — 882665da7: 318–560 → 390–600 / 390–632, on the strip's Allow / Deny): a maximized chat's strip and composer under the stack's place — the same press ⇒ the read card keeps ${J(cm4.pinAt)} → ${J(cm4.pinNow)}, the stack ${J(cm4.stack)} (5 cards: ${J(cm5.stack)}) — nothing over the strip (568–649) or the composer (649–728)`, { cm4: { ...cm4, h: 0 }, cm5: { ...cm5, h: 0 } });
+  // the strip GROWS under a held stack (a re-wrap — chromeMoved re-places it held): the cards below the read one that would stand
+  // on it fold into «N more»; the window shrinks under it: the same, never the clamp moving the read card
+  const grow = (h, { set }) => { set([box(0, 500, 1280, 649), COMPO]); h.A.annPlace(); };
+  const shrink16 = (h) => { h.setVh(740); h.A.annPlace(); };
+  const gr = held(4, { rects: [STRIP, COMPO], then: grow }), sh = held(4, { then: shrink16 });
+  ok(kept(gr) && clearOf(gr, box(0, 500, 1280, 649), COMPO) && gr.folded.length >= 2 && !!gr.more && kept(sh) && sh.stack[1] <= 736 && sh.stack[0] >= 4,
+    `r16: the strip grows to 500 under a held stack ⇒ what would stand on it folds (${J(gr.folded)}, «${gr.more}») — the read card keeps ${J(gr.pinAt)} → ${J(gr.pinNow)}, the stack ${J(gr.stack)}; the viewport shrinks to 740 ⇒ the same fold, never the clamp moving the read card (${J(sh.pinAt)} → ${J(sh.pinNow)}, the stack ${J(sh.stack)})`, { gr: { ...gr, h: 0 }, sh: { ...sh, h: 0 } });
+  // a card gone above the read one never brings a folded one out below it — even with ROOM below (the chat closed while held)
+  const roomy = (h, { set, order }) => { set([]); h.A.annPlace(); h.drop(order[0].key.id); h.A.annLayout(); };
+  const rm = held(4, { rects: [STRIP, COMPO], then: roomy });
+  ok(kept(rm) && rm.folded.includes('C0') && rm.stack[1] <= rm.free[1],
+    `r16: the chat closes under a held stack (room below it now), then the top card goes ⇒ the folded card stays folded (${J(rm.folded)}) — the stack never grows downward while held (${J(rm.free)} → ${J(rm.stack)})`, { ...rm, h: 0 });
+  // the controls: «a held stack unfolds», «the held branch without avoid rects», «the held branch without its fold» (r15's)
+  const PL16 = PLACE || '', LY16 = LAYOUT || '';
+  const mUnfold = PL16 + LY16.replace('k >= ANN_SHOWN || (held && c.el.hidden)', 'k >= ANN_SHOWN');
+  const mAvoid = PL16.replace("const avoid = [...chromeAvoidRects(left, left + w, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), ...(ar && ar.width ? [ar] : [])];", 'const avoid = [];') + LY16;
+  const mFold = PL16.replace('      top = annFold(el, left, top, pr.width, vh);\n', '') + LY16;
+  const xu = held(4, { rects: [STRIP, COMPO], then: roomy, src: mUnfold }), xa = held(4, { rects: [STRIP, COMPO], then: grow, src: mAvoid }), xf = held(4, { then: shrink16, src: mFold }), xf2 = held(4, { rects: [STRIP, COMPO], then: grow, src: mFold });
+  ok(mUnfold !== PL16 + LY16 && mAvoid !== PL16 + LY16 && mFold !== PL16 + LY16 && !xu.threw && !xu.folded.includes('C0') && !xa.threw && !clearOf(xa, box(0, 500, 1280, 649)) && !xf.threw && !kept(xf) && !xf2.threw && !clearOf(xf2, box(0, 500, 1280, 649)),
+    `CONTROL (r16): the mutant that unfolds under a held stack brings the folded card out below the read one (folded ${J(xu.folded)}, the stack ${J(xu.stack)}); the held branch without avoid rects leaves a card on the grown strip (${J(xa.vis)}); without its fold the clamp moves the read card (${J(xf.pinAt)} → ${J(xf.pinNow)}) and a card stays on the strip (${J(xf2.vis)}) — the legs go red`, { xu: { ...xu, h: 0 }, xa: { ...xa, h: 0 }, xf: { ...xf, h: 0 } });
+  // B — THE STRIP'S BOUND IS THE HOSTS ROW'S ALONE: the REAL renderRow with the strip's ctx (㉝ A's reading of chat.css's grammar);
+  // every warning row and the «asked again» line drawn whatever the hosts; the PURE runStripOf's `fits` and its mutant
+  const hadB = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  const noopB = () => {}, mkElB = () => { let html = ''; return { dataset: {}, className: '', get innerHTML() { return html; }, set innerHTML(v) { html = v; }, querySelector: () => null, querySelectorAll: () => [], appendChild: noopB, addEventListener: noopB, setAttribute: noopB, classList: { add: noopB, remove: noopB, toggle: noopB, contains: () => false }, style: {} }; };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noopB; globalThis.removeEventListener = globalThis.removeEventListener || noopB;
+  globalThis.localStorage = { getItem: () => null, setItem: noopB, removeItem: noopB };
+  globalThis.document = { createElement: mkElB, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noopB, removeEventListener: noopB, documentElement: { style: {}, lang: 'en' }, body: mkElB(), head: mkElB() };
+  try {
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs')); const { createRequire } = await import('node:module');
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'S', replyState: () => ({ show: false }), mini: true, noPick: true };
+    const twelve = { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) }, five = { known: true, list: twelve.list.slice(0, 5) };
+    const writable = (extra = {}) => ({ tool: { ...base.tool, path: '~/workspace/ops/bin/psql', writable: true, ...extra }, always: { offered: false, why: 'program-writable', directive: null } });
+    const A16 = {
+      warn: runAsk('ut-r16warn', { ...base, hosts: twelve, ...writable() }, { always: false }),
+      again: runAsk('ut-r16again', { ...base, hosts: twelve, whyAgain: { code: 'args' } }),
+      longp: runAsk('ut-r16longp', { ...base, ...writable({ path: '/srv/' + 'deep/'.repeat(300) + 'evil-tail/run.sh' }) }, { always: false }),
+      fits: runAsk('ut-r16fits', { ...base, hosts: five, whyAgain: { code: 'args' } }),
+    };
+    const g16 = Object.fromEntries(Object.entries(A16).map(([k, a]) => [k, stripSees(R.renderRow(a, ctx).innerHTML, CC)]));
+    const html = (k) => R.renderRow(A16[k], ctx).innerHTML, rowOf = (k, fact) => (html(k).match(new RegExp(`<span class="ut-run-grow[^"]*" data-fact="${fact}">[\\s\\S]*?</span></span>`)) || [''])[0];
+    const hostsOut = (k) => /ut-run-out/.test(rowOf(k, 'hosts')) && /too long to show here — the hosts/.test(rowOf(k, 'hosts'));
+    const w = g16.warn, a = g16.again, lp = g16.longp, f = g16.fits;
+    ok(w.warn && /Program [^]*\(in a folder an agent can write\)/.test(w.facts) && /ut-run-warn/.test(rowOf('warn', 'program')) && hostsOut('warn') && !w.facts.includes('replica-0') && w.answers.join() === 'once,deny',
+      `RED-able (r16 — 882665da7: twelve hosts ⇒ «Too long to show here…» alone — the warning not drawn beside Allow once): twelve hosts + a program an agent can write ⇒ its warning row drawn in the warning accent («${(w.facts.match(/Program[^]*?write\)/) || [''])[0]}»), the hosts row saying they are on its card, ${J(w.answers)}`, w);
+    ok(/Asked again — it differs from the command you let through: its arguments changed/.test(a.facts) && hostsOut('again') && a.answers.join() === 'once,deny',
+      `RED-able (r16 — 882665da7 hid the «asked again» line behind twelve hosts): twelve hosts + a near-identical rerun ⇒ the line drawn («${(a.facts.match(/Asked again[^]*?changed/) || [''])[0]}»), the hosts on its card and «Always» with them — ${J(a.answers)}`, a);
+    const lpRow = rowOf('longp', 'program').replace(/<[^>]+>/g, '');
+    ok(/evil-tail\/run\.sh/.test(lpRow) && /\(in a folder an agent can write\)/.test(lpRow) && lpRow.length < 140 && lp.answers.join() === 'once,deny',
+      `r16: a warning row is short by construction — a 1 500-character program path keeps its TAIL («${lpRow}», ${lpRow.length} characters) and its warning words whole`, { lpRow });
+    const FAm = await import(pathToFileURL(path.join(ROOT, 'src/foryou-actions.js')).href);
+    const card = FAm.runCardOf(A16.fits.item, { t: ctx.t }), st16 = FAm.runStripOf(card);
+    ok(!!st16 && st16.fits && f.answers.join() === 'once,always,deny' && f.facts.includes('replica-4') && /Asked again/.test(f.facts),
+      `r16: the bound counts the HOSTS row alone — five hosts (${five.list.join(', ').length} characters) + the «asked again» line ⇒ fits (${st16 && st16.fits}), the hosts whole and every answer the card offers (${J(f.answers)})`, { st16: st16 && { fits: st16.fits }, f });
+    const FAS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8');
+    const from = "const fits = !hosts || hosts.label.length + 1 + hosts.lines.map(words).join(', ').length <= RUN_STRIP_MAX;";
+    const mutFA = FAS.replace(from, "const fits = card.rows.filter((r) => r.key === 'hosts' || r.warn).reduce((k, r) => k + r.label.length + 1 + r.lines.map(words).join(', ').length, 0) + (card.again ? words(card.again).length : 0) <= RUN_STRIP_MAX;");
+    const FAx = mutFA !== FAS ? createRequire(import.meta.url)(mutantCopies('fa16', ROOT).write('src/foryou-actions.js', mutFA, 'stripcount')) : null;
+    const stx = FAx ? FAx.runStripOf(FAx.runCardOf(A16.fits.item, { t: ctx.t })) : null;
+    ok(!!stx && stx.fits === false, `CONTROL (r16): the mutant that counts the warnings and the «asked again» line inside the bound (882665da7's) withholds five hosts that fit, and «Always» with them (fits ${stx && stx.fits}) — the leg goes red`, { stx: stx && stx.fits });
+  } catch (e) { ok(false, '㉞ B: the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(hadB)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

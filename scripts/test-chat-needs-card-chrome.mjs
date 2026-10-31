@@ -1798,7 +1798,7 @@ try {
     const RUNM_OF = (id) => `(() => { ${R21} const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), row = d && d.querySelector('.ut-item[data-id="${id}"]'); if (!row) return null; const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
       const ans = [...row.querySelectorAll('.ut-run-answer > button')].filter(vis).map((b) => ({ k: b.dataset.answer, ...R(b) })), cmd = row.querySelector('.ut-run-cmd'), dl = row.querySelector('.ut-deadline'), g = row.querySelector('.ut-run-gist'), w = row.closest('.window');
       const line = (q) => { const e = g && g.querySelector(q); return vis(e) ? e.textContent : null; };
-      const gist = vis(g) ? { text: g.textContent, out: g.classList.contains('ut-run-gist-out'), again: line('.ut-run-again'), cut: line('.ut-run-cut'), clip: g.scrollWidth - g.clientWidth, ...R(g),
+      const gist = vis(g) ? { text: g.textContent, out: !!g.querySelector('.ut-run-out'), again: line('.ut-run-again'), cut: line('.ut-run-cut'), clip: g.scrollWidth - g.clientWidth, ...R(g),
         rows: [...g.querySelectorAll('.ut-run-grow')].filter(vis).map((e) => ({ k: e.dataset.fact, warn: e.classList.contains('ut-run-warn'), text: e.textContent, color: getComputedStyle(e.querySelector('.ut-run-val')).color, ...R(e) })) } : null;
       return { ans, cmd: vis(cmd) ? { text: cmd.textContent.slice(0, 40), h: Math.round(cmd.getBoundingClientRect().height) } : null, clock: vis(dl) ? dl.textContent : null, dl: vis(dl) ? { ...R(dl), clip: dl.scrollWidth - dl.clientWidth } : null, over: d.scrollWidth - d.clientWidth, facts: !!row.querySelector('.ut-run-facts') && vis(row.querySelector('.ut-run-facts')), gist, vw: innerWidth, wr: w ? Math.floor(w.getBoundingClientRect().right) : null, textColor: getComputedStyle(row).color }; })()`;
     const RUNM = RUNM_OF('ut-r14run01');
@@ -1815,6 +1815,9 @@ try {
       ['writable', runV('ut-r15writ2', { ...FXR, tool: { ...FXR.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false })],
       ['again', runV('ut-r15agan3', { ...FXR, whyAgain: { code: 'args' } })],
       ['many', runV('ut-r15many4', { ...FXR, hosts: { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) } })],
+      // r16 (the r15 acceptance: twelve hosts hid a writable program's warning and the «asked again» line beside Allow once)
+      ['manywarn', runV('ut-r16mwrn8', { ...FXR, hosts: { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) }, tool: { ...FXR.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false })],
+      ['manyagain', runV('ut-r16magn9', { ...FXR, hosts: { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) }, whyAgain: { code: 'args' } })],
     ];
     const v15 = {};
     for (const [k, it] of V15) {
@@ -1833,8 +1836,13 @@ try {
       !!wr && wr.warn && /in a folder an agent can write/.test(wr.text) && !!hr && wr.color !== hr.color && whole(wv) && ks(wv) === 'once,deny', wv);
     check(`RED-able (r15 — 2353267f1 hid the «asked again» line): a near-identical rerun ⇒ the strip says how it differs («${av && av.gist && av.gist.again}») before its ${J(ks(av))}`,
       !!av && !!av.gist && /Asked again — it differs from the command you let through: its arguments changed/.test(av.gist.again || '') && whole(av) && ks(av) === 'once,always,deny', av);
-    check(`r15: facts too long for a strip (twelve hosts) ⇒ none of them, the line that says where they are («${mv && mv.gist && mv.gist.text}») and only ${J(ks(mv))} — «Always» is the card's`,
-      !!mv && !!mv.gist && mv.gist.out && /what it decides on, and «Always», are on its card/.test(mv.gist.text) && !/replica-0/.test(mv.gist.text) && ks(mv) === 'once,deny' && whole(mv), mv);
+    check(`r15; r16 (the bound is the hosts row's): hosts too long for a strip (twelve) ⇒ their row says they are on its card («${mv && mv.gist && mv.gist.text}») and only ${J(ks(mv))} — «Always» is the card's`,
+      !!mv && !!mv.gist && mv.gist.out && /Sends to \(too long to show here — the hosts, and «Always», are on its card\)/.test(mv.gist.text) && !/replica-0/.test(mv.gist.text) && ks(mv) === 'once,deny' && whole(mv), mv);
+    const mw = v15.manywarn, ma = v15.manyagain, mwr = mw && mw.gist && mw.gist.rows.find((r) => r.k === 'program'), mwh = mw && mw.gist && mw.gist.rows.find((r) => r.k === 'hosts');
+    check(`RED-able (r16 — 882665da7: twelve hosts ⇒ «Too long to show here…» alone beside Allow once): twelve hosts + a program an agent can write ⇒ its warning row drawn («${mwr && mwr.text}», the warning accent ${mwr && mwr.color}), the hosts row on its card («${mwh && mwh.text}»), ${J(ks(mw))}`,
+      !!mwr && mwr.warn && /in a folder an agent can write/.test(mwr.text) && !!mwh && /too long to show here — the hosts are on its card/.test(mwh.text) && whole(mw) && ks(mw) === 'once,deny', mw);
+    check(`RED-able (r16 — 882665da7 hid the «asked again» line behind twelve hosts): twelve hosts + a near-identical rerun ⇒ the line drawn («${ma && ma.gist && ma.gist.again}»), «Always» with the hosts on its card — ${J(ks(ma))}`,
+      !!ma && !!ma.gist && /Asked again — it differs from the command you let through: its arguments changed/.test(ma.gist.again || '') && ma.gist.out && whole(ma) && ks(ma) === 'once,deny', ma);
     // (d) MINOR D (1): a FORM the system opened — BEHIND the maximized chat, under the stack ⇒ the card shows; in front ⇒ aside
     const F21 = `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'form' && !x.isMinimized); return w || null; })()`;
     await A.evalJs(`(() => { window.__sh21 = app.pluginClient._hostApi({ id: 'r14probe', version: '1' }, new AbortController()).createModalShell({ id: 'r14form', title: 'A form the system opened', kind: 'form', opener: 'system', escapeToClose: true }); window.__sh21.body.innerHTML = '<label>Name <input class="r14-in"></label>'; return 1; })()`);
@@ -1941,7 +1949,138 @@ try {
   } catch (e) { fail++; console.log('  ✗ ㉑ threw: ' + (e?.message || e)); }
   lap('㉑ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  console.log('㉒ A HELD STACK OBEYS THE FREE ONE\'S RULE · A STRIP\'S SIZE HAS ONE ROAD · A BROADCAST READS NO STRIP\'S LAYOUT (lane needs-card-tail r16 — the r15 acceptance: the mouse on the second card, the top one gone — the stack ran onto the For-you button and a maximized chat\'s strip; chromeMoved read layout on every pass and missed a re-wrap)');
+  try {
+    await A.front(); await A.device(1280, 800, { mouse: true });
+    const R22 = `const R = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) } : null; };`;
+    const PUSH22 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const noToasts = `(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`;
+    const mouse = (x, y) => A.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    const CHATOF = (sid) => `[...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${J(sid)})`;
+    const s22 = await newConv('held'); await sleep(600); sayTo(s22, 'hello'); await sleep(1500);
+    await A.evalJs(`(() => { app.phoneHome?.hide?.(); for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); app.attachSession(${J(s22)}, 'held', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`);
+    await A.waitFor(`!!${CHATOF(s22)}`, 8000); await sleep(1000);
+    const KEY22 = await A.evalJs(`(app.foryouRows.keysForWin(${CHATOF(s22)}.id) || [])[0] || null`);
+    await A.evalJs(`(() => { app.wm.closeWindow(${CHATOF(s22)}.id); return 1; })()`); await sleep(600); // (a), (b): nothing by the For-you button but the button
+    const T22 = Date.now(), ex22 = (id, at) => ({ id, sessionKey: KEY22, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: at, expiresAt: T22 + 3600e3,
+      text: `Allow "held" to run step ${id.slice(-1)} on exmac?`, detail: 'echo ' + id, action: { type: 'exit-run-ask', askId: id.slice(-1).repeat(32), machine: 'exmac', cmd: 'echo ' + id } });
+    const STK = `(() => { ${R22} const s = document.querySelector('.ut-announce'); if (!s) return null; const kids = [...s.children].filter((e) => !e.hidden && e.getClientRects().length).map((e) => ({ id: e.dataset.id || 'more', ...R(e) }));
+      const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && !x.isMinimized), q = (sel) => (w ? R(w.element.querySelector(sel)) : null);
+      return { stack: R(s), kids, btn: R(document.getElementById('taskbar-user-todos')), strip: q('.chat-attn-dock'), comp: q('.chat-input-area'), aside: getComputedStyle(s).visibility === 'hidden', hover: s.matches(':hover') }; })()`;
+    const meets = (a, b) => !!a && !!b && a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
+    // the mouse rests on the SECOND card; the top one is answered elsewhere (the snapshot without it); then the mouse leaves
+    const heldCase = async (n, tag, shot) => {
+      await A.evalJs(PUSH22('[]')); await A.waitFor(`!document.querySelector('.ut-announce .uta-card')`, 6000); await sleep(400);
+      const items = Array.from({ length: n }, (_, k) => ex22(`ut-r16${tag}${k + 1}`, T22 - (n - k) * 1000));
+      await A.evalJs(PUSH22(J(items))); await A.waitFor(`document.querySelectorAll('.ut-announce .uta-card').length === ${n}`, 8000); await sleep(1300);
+      await A.evalJs(noToasts);
+      const free = await A.evalJs(STK), k2 = free && free.kids[1];
+      if (!k2) return { free };
+      await mouse((k2.l + k2.r) / 2, (k2.t + k2.b) / 2); await sleep(500);
+      const pinned = await A.evalJs(STK);
+      await A.evalJs(PUSH22(J(items.slice(0, n - 1)))); await sleep(1600); // (two ticks of the stack's own clock after it)
+      await A.evalJs(noToasts);
+      const held = await A.evalJs(STK);
+      await A.shot(shot);
+      await mouse(40, 300); await sleep(700);
+      const after = await A.evalJs(STK);
+      const pin = (v) => v && v.kids.find((x) => x.id === k2.id);
+      return { free, pinned, held, after, pinId: k2.id, pinAt: pin(pinned), pinNow: pin(held), gone: !!held && !held.kids.some((x) => x.id === items[n - 1].id) };
+    };
+    const sameR = (a, b) => !!a && !!b && a.l === b.l && a.t === b.t && a.r === b.r && a.b === b.b;
+    const byBtn = (v) => !!v && !!v.held && v.gone && v.held.hover && sameR(v.pinAt, v.pinNow) && v.held.kids.every((x) => x.b <= v.held.btn.t) && !!v.after && v.after.kids.every((x) => !meets(x, v.after.btn));
+    // (a) four cards, (b) five, by the For-you button
+    const h4 = await heldCase(4, 'a', 'desktop-1280-held-four.png'), h5 = await heldCase(5, 'b', 'desktop-1280-held-five.png');
+    check(`RED-able (r16 — 882665da7: the card folded into «N more» unfolded below the read one — 4 cards ran onto the For-you button, 5 moved the read card by the clamp): the mouse on the second card, the top one answered elsewhere ⇒ the read card keeps ${J(h4.pinAt)} → ${J(h4.pinNow)} (4 cards: ${J(h4.held && h4.held.kids.map((x) => [x.t, x.b]))}), ${J(h5.pinAt)} → ${J(h5.pinNow)} (5 cards: ${J(h5.held && h5.held.kids.map((x) => [x.t, x.b]))}) — nothing below the button's top ${h4.held && h4.held.btn && h4.held.btn.t}; the mouse gone ⇒ the stack clear of the button`,
+      byBtn(h4) && byBtn(h5), { h4, h5 });
+    // (c) a maximized chat: its strip and composer under the stack's place — the same press
+    await A.evalJs(`(() => { app.attachSession(${J(s22)}, 'held', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`); await A.waitFor(`!!${CHATOF(s22)}`, 8000); await sleep(800);
+    await A.evalJs(`(() => { const w = ${CHATOF(s22)}; app.wm.focusWindow?.(w.id); if (!w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(900);
+    const hm = await heldCase(4, 'c', 'desktop-1280-held-maxchat.png'), hm5 = await heldCase(5, 'd', 'desktop-1280-held-maxchat-five.png');
+    const clearMax = (v) => !!v && !!v.held && v.gone && v.held.hover && sameR(v.pinAt, v.pinNow) && !!v.held.strip && !!v.held.comp && v.held.kids.every((x) => !meets(x, v.held.strip) && !meets(x, v.held.comp));
+    check(`RED-able (r16 — 882665da7: 318–560 → 390–600 / 390–632 on the strip's Allow / Deny): a maximized chat — the mouse on the second card, the top one answered elsewhere ⇒ the read card keeps ${J(hm.pinAt)} → ${J(hm.pinNow)}; the cards ${J(hm.held && hm.held.kids.map((x) => [x.t, x.b]))} (5: ${J(hm5.held && hm5.held.kids.map((x) => [x.t, x.b]))}) — nothing over the strip ${J(hm.held && hm.held.strip)} or the composer ${J(hm.held && hm.held.comp)}`,
+      clearMax(hm) && clearMax(hm5), { hm, hm5 });
+    await A.evalJs(PUSH22('[]')); await sleep(600);
+    // (d) THE ONE ROAD: the strip re-wraps at its clock's words (tickDeadlines writes them — no broadcast, no _dockPass) and at
+    // a window's resize ⇒ the stack is re-placed IN THAT FRAME (foryouRows.chromeMoved from the strip's observer), once a frame
+    const FX22 = JSON.parse(fs.readFileSync(new URL('./fixtures/vault-run-card-facts.json', import.meta.url), 'utf8')).variants.find((v) => v.name === 'hosts-known-always').facts;
+    const RUN22 = (exp) => ({ id: 'ut-r16clock', sessionKey: KEY22, status: 'open', kind: 'action', origin: 'vault', by: 'agent', urgency: 'urgent', text: 'held wants to run a command with a stored secret', detail: 'Program: psql', createdAt: T22, expiresAt: exp,
+      action: { type: 'vault-run-ask', askId: 'c'.repeat(32), always: true, tool: 'x' }, facts: FX22 });
+    await A.evalJs(`(() => { const w = ${CHATOF(s22)}; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.focusWindow?.(w.id); return 1; })()`); await sleep(600);
+    const AT22 = (W) => `(() => { const w = ${CHATOF(s22)}; app.wm.resizeWindowTo(w.id, { w: ${W}, h: 520 }); const ws = app.wm.workspace.getBoundingClientRect(); w.element.style.left = Math.max(0, ws.width - ${W} - 8) + 'px'; w.element.style.top = Math.max(0, ws.height - 520 - 8) + 'px'; return 1; })()`;
+    await A.evalJs(AT22(560)); await sleep(500);
+    // the ask's clock by the SERVER's time (its line counts by hubNow — the snapshot's `now`), a fresh id each try; THE
+    // PRECONDITION is said and tried again (the full suite's runner-fonts run on 3a30a2cd5 saw no size change after the watch
+    // went on): the clock still «… left» when the watch goes on, its words turning after it, the strip changing size at the turn
+    const PUSHCLK = (id, inMs) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos, base = Number(todos.now) || Date.now(); const it = ${J(RUN22(0))}; it.id = ${J(id)}; it.action.askId = ${J(id)}.slice(-1).repeat(32); it.expiresAt = base + ${inMs}; todos.open = [it]; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    // the width at which the clock's «time is up» words take one more line than its «… left» words — both in the warn style the
+    // line wears near its end; the dock's height measured with each, restored in the same task (nothing laid out between)
+    const SWEEP22 = `(() => { const w = ${CHATOF(s22)}, d = w.element.querySelector('.chat-attn-dock'), dl = d.querySelector('.ut-deadline'), due = "time is up by the server's clock — waiting for the server", ws = app.wm.workspace.getBoundingClientRect();
+      for (let W = 760; W >= 300; W -= 8) { app.wm.resizeWindowTo(w.id, { w: W, h: 520 }); w.element.style.left = Math.max(0, ws.width - W - 8) + 'px'; const t0 = dl.textContent, w0 = dl.classList.contains('ut-deadline-warn'); dl.classList.add('ut-deadline-warn'); const h1 = d.offsetHeight; dl.textContent = due; const h2 = d.offsetHeight; dl.textContent = t0; dl.classList.toggle('ut-deadline-warn', w0); if (h2 > h1 + 4) return W; }
+      return null; })()`;
+    const READ22 = `(() => { ${R22} const s = document.querySelector('.ut-announce'), d = ${CHATOF(s22)}.element.querySelector('.chat-attn-dock'); return { ...JSON.parse(JSON.stringify(window.__cm22 || {})), stack: R(s), strip: R(d), clock: (d.querySelector('.ut-deadline') || {}).textContent || '', aside: !!s && getComputedStyle(s).visibility === 'hidden' }; })()`;
+    const WATCH22 = `(() => { if (window.__cmF22) app.foryouRows.chromeMoved = window.__cmF22; window.__ro22?.disconnect(); window.__mo22?.disconnect();
+      const d = ${CHATOF(s22)}.element.querySelector('.chat-attn-dock'), f = app.foryouRows.chromeMoved, dl = () => d.querySelector('.ut-deadline'); window.__cm22 = { placed: [], calls: 0, sizes: [], dueAt: 0 }; window.__cmF22 = f;
+      app.foryouRows.chromeMoved = () => { const r = f(); window.__cm22.calls++; if (r) window.__cm22.placed.push(performance.now()); return r; };
+      (window.__mo22 = new MutationObserver(() => { if (!window.__cm22.dueAt && /time is up/.test((dl() || {}).textContent || '')) window.__cm22.dueAt = performance.now(); })).observe(d, { childList: true, characterData: true, subtree: true });
+      (window.__ro22 = new ResizeObserver(() => window.__cm22.sizes.push({ at: performance.now(), h: d.offsetHeight }))).observe(d); return /left/.test((dl() || {}).textContent || ''); })()`;
+    const clockTry = async (k) => {
+      const id = 'ut-r16clk' + k, DL = `${CHATOF(s22)}.element.querySelector('.chat-attn-dock .ut-item[data-id="${id}"] .ut-deadline')`;
+      await A.evalJs(AT22(560)); await sleep(400);
+      await A.evalJs(PUSHCLK(id, 24000)); await A.waitFor(`!!${DL} && /left/.test(${DL}.textContent)`, 8000); await sleep(400);
+      const W = await A.evalJs(SWEEP22);
+      if (W) await A.evalJs(AT22(W));
+      await sleep(800); await A.evalJs(noToasts);
+      const live = await A.evalJs(WATCH22);
+      await A.waitFor(`/time is up/.test((${DL} || {}).textContent || '')`, 32000); await sleep(500);
+      const v = await A.evalJs(READ22);
+      return { ...v, W, live, id, after: (v.sizes || []).filter((z) => v.dueAt && z.at >= v.dueAt - 1) };
+    };
+    let rw = null, tries22 = 0;
+    for (; tries22 < 3; tries22++) {
+      rw = await clockTry(tries22 + 1);
+      if (rw.live && rw.dueAt && rw.after.length > 0) break;
+      console.log(`    (㉒ d: try ${tries22 + 1} — ${!rw.live ? 'the clock was past «left» when the watch went on' : !rw.dueAt ? 'its words never turned' : 'the strip kept its size at the turn'} (${rw.W} px); again with a fresh ask)`);
+    }
+    const W22 = rw.W;
+    await A.shot('desktop-dock-clock-rewrap.png');
+    const inFrame = (sizes, placed) => sizes.length > 0 && sizes.every((z) => placed.some((p) => Math.abs(p - z.at) < 20)); // (each size the observer saw: a placement in its frame)
+    check(`RED-able (r16 — 882665da7: a strip re-wrapped by its clock's words never reached chromeMoved — the stack followed at the 1 s tick): a ${W22} px chat at the For-you button's side (try ${Math.min(tries22, 2) + 1}), its clock turned to «${(rw.clock || '').trim().slice(0, 40)}…» — the strip ${J((rw.sizes || []).map((z) => z.h))} px, ${J(rw.after.map((z) => z.h))} after the turn ⇒ the stack re-placed in the frame of each (${(rw.placed || []).length} placement(s), ${rw.calls} call(s)); the stack ${J(rw.stack)} clear of the strip ${J(rw.strip)}`,
+      !!W22 && rw.live && rw.after.length > 0 && inFrame(rw.after, rw.placed) && rw.placed.length <= rw.calls && !meets(rw.stack, rw.strip), rw);
+    const n0 = rw.placed.length, s0 = rw.sizes.length;
+    await A.evalJs(AT22(Math.max(300, (W22 || 560) - 150))); await sleep(700);
+    const rz = await A.evalJs(READ22);
+    await A.shot('desktop-dock-resized.png');
+    const newSizes = rz.sizes.slice(s0), newPlaced = rz.placed.slice(n0);
+    check(`RED-able (r16 — 882665da7: a window's resize re-wrapped the strip outside _dockPass): the window resized ⇒ the strip ${J(newSizes.map((z) => z.h))} px, the stack re-placed in that frame — ${newPlaced.length} placement(s) for ${newSizes.length} size change(s) (the toasts asked with each); the stack ${J(rz.stack)} clear of the strip ${J(rz.strip)}`,
+      newSizes.length >= 1 && newPlaced.length === newSizes.length && newSizes.every((z) => newPlaced.some((p) => Math.abs(p - z.at) < 20)) && !meets(rz.stack, rz.strip), { rz, newSizes, newPlaced });
+    await A.evalJs(`(() => { if (window.__cmF22) app.foryouRows.chromeMoved = window.__cmF22; window.__ro22?.disconnect(); window.__mo22?.disconnect(); delete window.__cm22; delete window.__cmF22; return 1; })()`);
+    await A.evalJs(PUSH22('[]')); await sleep(500);
+    // (e) THE COST: four open strips, one broadcast that rewords each — the strip's layout reads in the passes (a counted
+    // offsetHeight getter on .chat-attn-dock) and the page's layouts (CDP Performance LayoutCount) over the broadcast's frames
+    const more22 = []; for (const tag of ['held2', 'held3', 'held4']) { const sid = await newConv(tag); more22.push(sid); sayTo(sid, 'hello'); }
+    await sleep(1800);
+    const all22 = [s22, ...more22];
+    await A.evalJs(`(() => { for (const [k, sid] of ${J(all22)}.entries()) { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid); if (!w) app.attachSession(sid, 'strip ' + k, ${J(WORK)}, { mode: 'chat', backend: 'claude' }); } return 1; })()`);
+    await A.waitFor(`${J(all22)}.every((sid) => [...app.wm.windows.values()].some((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid))`, 12000); await sleep(1200);
+    const KEYS22 = await A.evalJs(`${J(all22)}.map((sid) => { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid); return (app.foryouRows.keysForWin(w.id) || [])[0] || null; })`);
+    const four = (v) => KEYS22.map((key, k) => ({ ...ex22(`ut-r16cost${k + 1}`, T22 - (4 - k) * 1000), sessionKey: key, text: `Strip ${k + 1} asks ${v}?` }));
+    await A.evalJs(PUSH22(J(four('once')))); await A.waitFor(`document.querySelectorAll('.chat-attn-dock:not([hidden]) .ut-item').length === 4`, 8000); await sleep(1500);
+    await A.cdp('Performance.enable');
+    const lc = async () => ((await A.cdp('Performance.getMetrics')).metrics.find((m) => m.name === 'LayoutCount') || {}).value;
+    await A.evalJs(`(() => { const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight'); window.__ohD = d; window.__dockReads = 0; Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { if (this.classList && this.classList.contains('chat-attn-dock')) window.__dockReads++; return d.get.call(this); } }); return 1; })()`);
+    const l0 = await lc();
+    await A.evalJs(`(async () => { await (${PUSH22(J(four('again')))}); for (let k = 0; k < 4; k++) await new Promise((r) => requestAnimationFrame(r)); return 1; })()`);
+    const l1 = await lc();
+    const cost = await A.evalJs(`(() => { const n = window.__dockReads; Object.defineProperty(HTMLElement.prototype, 'offsetHeight', window.__ohD); delete window.__ohD; delete window.__dockReads; return { reads: n, reworded: [...document.querySelectorAll('.chat-attn-dock:not([hidden]) .ut-item .ut-text')].filter((e) => /asks again/.test(e.textContent)).length }; })()`);
+    console.log(`    (㉒ e: four strips, one broadcast — the strips' layout reads ${cost.reads}, the page's layouts ${l1 - l0})`);
+    check(`RED-able (r16 — 882665da7 read each strip's height before and after its pass): four open strips, one broadcast that rewords each (${cost.reworded} reworded) ⇒ the passes read NO strip's layout (${cost.reads} reads; the page laid out ${l1 - l0} times over the broadcast's frames)`, cost.reworded === 4 && cost.reads === 0, { cost, layouts: l1 - l0 });
+    await A.evalJs(PUSH22('d.todos.open')); await sleep(500);
+    await A.evalJs(`(() => { for (const sid of ${J(more22)}) { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid); if (w) app.wm.closeWindow(w.id); } return 1; })()`); await sleep(400);
+  } catch (e) { fail++; console.log('  ✗ ㉒ threw: ' + (e?.message || e)); }
+  lap('㉒ done');
+
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

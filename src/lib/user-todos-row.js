@@ -257,19 +257,20 @@ const runWindowOffHtml = (v) => (v && v.window && v.window.excepted ? `<span cla
 // above the answers, on every surface that draws the card (the tray / chat row, the For-you window's pane, the phone), whatever
 // the hint does — and a card the press drew again carries its mark first
 const runChangesHtml = (v) => (v && v.changes ? `<div class="ut-run-changes" data-changes="${v.changes.lines.length}">${v.changes.redrawn ? `<span class="ut-run-line ut-run-redrawn">${escHtml(v.changes.redrawn)}</span>` : ''}${linesHtml(v.changes.lines)}</div>` : '');
-/** The answers the STRIP withholds from a run ask its card offers (its facts too long for a strip) — the landing's toast says so
- *  (runCardOf: a run ask's card, else null — no branch on the type here). */
+/** The answers the STRIP withholds from a run ask its card offers (its hosts too long for a strip — r16: the hosts row's bound
+ *  alone) — the landing's toast says so (runCardOf: a run ask's card, else null — no branch on the type here). */
 export const stripWithholds = (i, t = tr) => { const v = i && i.action && i.action.askId ? runCardOf(i, { t }) : null; return v && !runStripOf(v).fits ? heldAnswers(i).filter((a) => a === 'always') : []; };
 /** lane needs-card-tail r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» with
  *  the hosts, the warning row, the «asked again» line and the cut hidden by its grammar): THE STRIP'S RUN CARD — its command
  *  head, WHAT ITS ANSWERS DECIDE ON (foryou-actions runStripOf: the hosts, every warning row, the «asked again» line, the
- *  cut — whole, wrapped, the card's own words and accent) and the answers those facts carry; facts too long for a strip ⇒
- *  none of them, a line that says where they are, and only the answers that need none (Allow once / Deny — «Always» is the
- *  card's). A press point never sends a scope it does not show. */
-const stripGistHtml = (s, t, always) => (s.fits
-  ? `<div class="ut-run-gist">${s.rows.map((r) => `<span class="ut-run-grow${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span> <span class="ut-run-val">${r.lines.map((l) => segHtml(l)).join(escHtml(t(', ')))}</span></span>`).join('')}`
-    + `${s.again ? `<span class="ut-run-again">${segHtml(s.again)}</span>` : ''}${s.cut ? `<span class="ut-run-cut">${escHtml(t('The command is cut — its card holds the whole'))}</span>` : ''}</div>`
-  : `<div class="ut-run-gist ut-run-gist-out">${escHtml(always ? t('Too long to show here — what it decides on, and «Always», are on its card') : t('Too long to show here — what it decides on is on its card'))}</div>`);
+ *  cut — whole, wrapped, the card's own words and accent) and the answers those facts carry. r16 (the r15 acceptance: twelve
+ *  hosts hid a writable program's warning and the «asked again» line beside Allow once): hosts too long for a strip ⇒ THEIR row
+ *  says they are on its card (and «Always» with them — the card's); every warning row and the «asked again» line drawn
+ *  whatever the hosts. A press point never sends a scope it does not show. */
+const stripGistHtml = (s, t, always) => `<div class="ut-run-gist">${s.rows.map((r) => `<span class="ut-run-grow${r.warn ? ' ut-run-warn' : ''}${r.out ? ' ut-run-out' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span> <span class="ut-run-val">${r.out
+  ? `<span class="ut-run-aside">${escHtml(always ? t('(too long to show here — the hosts, and «Always», are on its card)') : t('(too long to show here — the hosts are on its card)'))}</span>`
+  : r.lines.map((l) => segHtml(l)).join(escHtml(t(', ')))}</span></span>`).join('')}`
+  + `${s.again ? `<span class="ut-run-again">${segHtml(s.again)}</span>` : ''}${s.cut ? `<span class="ut-run-cut">${escHtml(t('The command is cut — its card holds the whole'))}</span>` : ''}</div>`;
 export function runFactsHtml(i, t, { buttons = true, strip = false } = {}) {
   const v = runCardOf(i, { t });
   if (!v) return '';
