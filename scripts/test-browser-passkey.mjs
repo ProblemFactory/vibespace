@@ -20,6 +20,12 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r4 its acceptance r3 (MEASURED on real Chrome: ONE WebAuthn request per page — a modal get beside an open autofill get is
+//       refused with OperationError): a request that is not an autofill one ENDS the page's open autofill request first (held:
+//       rejected in-page; in flight: aborted through the hook's own signal — the page sees AbortError) and reaches Chrome after it;
+//       a modal never ends a modal; the person's once-authenticator leaves only with the ceremony that paired it; a refusal goes
+//       with its browser; no watch ⇒ «not watching right now» (no claimed cause); the cancel names the site its page ended
+//       — and THE HOLDER ROWS (r4's live ⑪): the production wiring gives his row once, flagged (his browsing ⇒ his watch)
 //   ⑨r3 its acceptance r2: the hook's `pending` is the whole start event (an autofill get stays one across a re-arm, no For-you
 //       item); his autofill holds no queue; his Close ends only the watch HE opened; a restarted hub finds the hook (names from the
 //       browser's devtools id); the unwatched cause from the machine handle's answer; the gave-up line's Retry press
@@ -121,17 +127,23 @@ console.log('② the words en / zh / ja');
 }
 
 console.log('③ THE HOOK over a fake navigator.credentials');
-function fakeRealm({ any = true } = {}) {
-  const calls = [], sent = [];
+function fakeRealm({ any = true, one = false } = {}) {
+  const calls = [], sent = [], busyRefused = [];
   class CredentialsContainer {}
+  // `one` (⑨r4): Chrome as MEASURED (acceptance r3, S11c) — ONE WebAuthn request per page: a second while one is open is refused
+  // with OperationError at once, the open one untouched; an aborted one is gone (the next one is taken)
+  let open = null;
   const native = (kind) => ({ [kind](opts, ...rest) {
     calls.push({ kind, self: this, opts, rest });
     if (!opts || !opts.publicKey) return Promise.resolve({ type: 'password' });
     const sig = opts.signal;
-    return new Promise((res, rej) => {
+    if (one && open) { busyRefused.push(kind); return Promise.reject(new DOMException('A request is already pending.', 'OperationError')); }
+    const pr = new Promise((res, rej) => {
       if (opts.publicKey.answer) return res({ type: 'public-key' });
       if (sig) { if (sig.aborted) return rej(sig.reason); sig.addEventListener('abort', () => rej(sig.reason), { once: true }); }
     });
+    if (one) { open = pr; const free = () => { if (open === pr) open = null; }; pr.then(free, free); }
+    return pr;
   } })[kind];
   for (const k of ['get', 'create', 'store']) Object.defineProperty(CredentialsContainer.prototype, k, { value: native(k), writable: true, enumerable: true, configurable: true });
   const AS = any ? AbortSignal : new Proxy(AbortSignal, { get: (t, p) => (p === 'any' ? undefined : Reflect.get(t, p)) });
@@ -144,7 +156,7 @@ function fakeRealm({ any = true } = {}) {
   const cfg = { chan, key: 'k'.repeat(32), expose: (c) => { box.ctl = c; } };
   const RG = { document: doc, EventTarget, [binding]: (s) => sent.push(JSON.parse(s)) }; // the isolated-world reporter half: its own global, the same document
   PK.installReporter(RG, { binding, chan });
-  return { G, cfg, calls, sent, nav: new CredentialsContainer(), box, doc, binding, chan, RG };
+  return { G, cfg, calls, sent, nav: new CredentialsContainer(), box, doc, binding, chan, RG, busyRefused };
 }
 const tick = () => new Promise((r) => setTimeout(r, 5));
 for (const any of [true, false]) {
@@ -646,14 +658,14 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
   const rule1 = (v) => v.atHumanStart === 'open' && v.reopened && v.afterHeal === 'open';
   const rule2 = (v) => !!(v.his && v.his.state === 'passkey' && v.his.passkey.state === 'passkey_open' && v.hisView && v.hisView.passkey.state === 'passkey_open' && v.hisView.passkey.id === v.his.passkey.id);
   const rule3 = (v) => !!(v.conv && v.conv.headed === true && v.conv.display === ':1' && (!v.his || v.his.display === ':1') && WORDS3(v) && v.item && v.item.i18n.detail[0] && v.item.i18n.detail[0].key === v.P.DOORS_WORDS && v.item.i18n.detail[0].params.display === ':1' && v.item.detail.startsWith('Chrome\'s own passkey window is on the virtual display :1'));
-  const rule4 = (v) => !!(v.unwatched && v.unwatched.state === 'unknown' && v.unwatched.text === v.P.UNKNOWN_TEXT && v.unwatchedView && v.unwatchedView.passkey.state === 'unknown' && Object.values(v.census).every((b) => b && b.state === 'passkey_open'));
+  const rule4 = (v) => !!(v.unwatched && v.unwatched.state === 'unknown' && [v.P.UNKNOWN_TEXT, v.P.NOT_WATCHED_TEXT].includes(v.unwatched.text) && v.unwatchedView && v.unwatchedView.passkey.state === 'unknown' && Object.values(v.census).every((b) => b && b.state === 'passkey_open'));
   const L = await judge(REPO);
   ok(L.atHumanStart === 'open', '⑨ rule 1: the person\'s press (`human-start` — no agent verb, no window yet) OPENS the watch on his browser', L.atHumanStart);
   ok(L.reopened && L.afterHeal === 'open', '⑨ rule 1: a socket that closed under his browsing is opened again (re-opened on reconnect), and a heal (`browser-ready`) while he holds it is watched again', { reopened: L.reopened, afterHeal: L.afterHeal });
   ok(L.withoutHim === 'none', '⑨ rule 1 CONTROL: the same close with nobody browsing it himself ⇒ no re-arm (a conversation\'s browser is armed by its verbs and its view, as before)', L.withoutHim);
   ok(rule2(L), '⑨ rule 2: HIS key (`hu-…`) has the fact his window renders — stuckForKey (the session-row shape) and passkeyFactOf (his relay\'s record) both say passkey_open, the same ceremony', { his: L.his, view: L.hisView });
   ok(rule3(L), '⑨ rule 3: a headed browser on the virtual display :1 — the fact names the display; the banner names it + Desktop + the phone\'s QR + the site\'s other method + `passkey register vercel.com`; the For-you item\'s first line carries the same doors', { conv: L.conv && { headed: L.conv.headed, display: L.conv.display }, his: L.his && L.his.display, words: L.words && L.words.desktop, item: L.item && L.item.i18n.detail });
-  ok(rule4(L), `⑨ rule 4: NEVER SILENCE — an unwatched browser's block is \`unknown\` with UNKNOWN_TEXT (never null), and every road gives a non-null block in a ceremony (${Object.entries(L.census).map(([k, b]) => k + '=' + (b && b.state)).join(', ')})`, { unwatched: L.unwatched, census: L.census });
+  ok(rule4(L), `⑨ rule 4: NEVER SILENCE — an unwatched browser's block is \`unknown\` with its sentence (never null; ⑨r4 pins «not watching right now»), and every road gives a non-null block in a ceremony (${Object.entries(L.census).map(([k, b]) => k + '=' + (b && b.state)).join(', ')})`, { unwatched: L.unwatched, census: L.census });
   // the words en / zh / ja (② style): the doors line + the quiet unknown line
   {
     const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
@@ -934,7 +946,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
 
   // ⑨r3 — acceptance r2 of lane passkey-browse-yourself (baf2bd229): every leg below is RED on baf2bd229 by name
   console.log('⑨r3 acceptance r2: an autofill get stays one across a re-arm; his autofill holds no queue; his Close ends only his watch; a restart finds the hook; the true cause; the Retry door');
-  const hookRealm = (host = 'github.com') => { const r = fakeRealm(); let hc = 5_000_000; r.G.DOMException = DOMException; r.G.btoa = btoa; r.G.location = { hostname: host, origin: 'https://' + host }; r.G.Date = { now: () => hc }; r.cfg.hold = true; r.cfg.holdMs = 60000; PK.installHook(r.G, r.cfg); return Object.assign(r, { step: (ms) => { hc += ms; }, ctl: (verb, id) => r.box.ctl(r.cfg.key, verb, id) }); };
+  const hookRealm = (host = 'github.com', o = {}) => { const r = fakeRealm(o); let hc = 5_000_000; r.G.DOMException = DOMException; r.G.btoa = btoa; r.G.location = { hostname: host, origin: 'https://' + host }; r.G.Date = { now: () => hc }; r.cfg.hold = true; r.cfg.holdMs = 60000; PK.installHook(r.G, r.cfg); return Object.assign(r, { step: (ms) => { hc += ms; }, ctl: (verb, id) => r.box.ctl(r.cfg.key, verb, id) }); };
   const AGE = PK.FOR_YOU_AFTER_MS + 1000;
   const STORE = () => ({ file: null, cipher: PS2.cipherOf(crypto2, crypto2.randomBytes(32)) });
   let autofillPending = [], modalPending = [];
@@ -961,8 +973,9 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       await X.opened();
       X.world.pending = list; const items0 = X.items.length;
       try { X.f.sock().h.close(); } catch { /* */ }
-      await until2(() => X.world.sockets === 2 && X.w() && X.w().state === 'open'); await sleep2(15);
-      const rec = (X.w() ? X.w().targets.get('T1').pk.records : []).find((x) => x.again) || null;
+      const again = () => { const t = X.w() && X.w().targets.get('T1'); return (t ? t.pk.records : []).find((x) => x.again) || null; };
+      await until2(() => X.world.sockets === 2 && X.w() && X.w().state === 'open'); await until2(() => !!again(), 1000); await sleep2(15); // r4: the re-arm's `pending` answer recorded — never a fixed sleep (r4's own timing run: 1 in 3 read before it under a heavy suite's load)
+      const rec = again();
       const out = { row: (X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey || {}).state, view: (X.D.passkeyFactOf({ profileId: PID, browserKey: HK }) || { passkey: {} }).passkey.state || null, items: X.items.length - items0, conditional: !!(rec && rec.conditional), age: rec ? X.now() - rec.startedAt : null };
       X.D.shutdown(); return out;
     };
@@ -970,21 +983,23 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     ok(auto.conditional && auto.row === 'none' && auto.view === null && auto.items === 0 && !modal.conditional && modal.row === 'passkey_open' && modal.view === 'passkey_open' && modal.age === AGE && modal.items === 1,
       '⑨r3 MAJOR (the watch): an AUTOFILL get open across a re-arm (github.com/login\'s conditional request, the real hook\'s `pending` answer) is recorded as one — none, no banner, 0 For-you items; a MODAL get pending across it is passkey_open with its age and its For-you item', { auto, modal });
   }
-  // the found one: his autofill (handed to Chrome as is) holds no queue — his «Sign in with a passkey» reaches the watch at once
+  // the found one: his autofill (handed to Chrome as is) holds no queue — his «Sign in with a passkey» reaches the watch at once;
+  // ⑨r4: and CHROME (the fake as measured: one request per page) takes it — the autofill request ended first (AbortError)
   {
     const X = world2({ holders: 'human', print: false, store: STORE() });
     await X.opened();
-    const r = hookRealm('github.com'); let fwd = 0;
+    const r = hookRealm('github.com', { one: true }); let fwd = 0; let auto = null, modal = null;
     X.world.hook = (args) => r.box.ctl(r.cfg.key, args[1], args[2]); // the watch's verbs reach the REAL hook
     const forward = () => { for (const s of r.sent.slice(fwd)) X.say(s); fwd = r.sent.length; };
-    r.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } }).catch(() => {}); await tick(); forward();
+    r.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } }).then(() => { auto = 'ok'; }, (e) => { auto = e.name; }); await tick(); forward();
     await until2(() => r.calls.length >= 1, 1000); await sleep2(20);
     const verbs1 = X.calls('Runtime.callFunctionOn', (m) => m.params.functionDeclaration === PK.CTL_FN).map(verbOf).filter((v) => v !== 'pending' && v !== 'wait');
-    r.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } }).catch(() => {}); await tick(); forward();
-    await sleep2(40); X.step(PK.PENDING_SAID_MS + 100);
+    r.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } }).then(() => { modal = 'ok'; }, (e) => { modal = e.name; }); await tick(); forward();
+    await until2(() => r.calls.length >= 2, 1000); await sleep2(40); forward(); await sleep2(20); X.step(PK.PENDING_SAID_MS + 100);
     const starts = r.sent.filter((x) => x.ev === 'start').length, view = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
-    ok(verbs1[0] === 'pass' && starts === 2 && !!view && view.passkey.state === 'passkey_open' && r.calls.length === 2,
-      '⑨r3 his AUTOFILL get is handed to Chrome as is (`pass`: no vault key, no queue) — his own «Sign in with a passkey» that follows starts AT ONCE (its start reaches the watch: passkey_open, Chrome\'s own window), never queued behind an autofill request that stays open as long as the page', { verbs1, starts, view: view && view.passkey.state, natives: r.calls.length });
+    const recs = X.w().targets.get('T1').pk.records.map((x) => ({ conditional: !!x.conditional, outcome: x.outcome }));
+    ok(verbs1[0] === 'pass' && starts === 2 && !!view && view.passkey.state === 'passkey_open' && r.calls.length === 2 && auto === 'AbortError' && modal === null && r.busyRefused.length === 0 && recs.some((x) => x.conditional && x.outcome === 'aborted-by-page') && recs.some((x) => !x.conditional && x.outcome === 'pending'),
+      '⑨r3/⑨r4 his AUTOFILL get is handed to Chrome as is (`pass`: no vault key, no queue) — his own «Sign in with a passkey» that follows starts at once AND Chrome takes it (Chrome as measured: one request per page): the hook ended the autofill request first (the page sees AbortError, the record aborted-by-page), his sign-in waits in Chrome\'s own window (passkey_open), never OperationError', { verbs1, starts, view: view && view.passkey.state, natives: r.calls.length, auto, modal, busyRefused: r.busyRefused, recs });
     X.D.shutdown();
   }
   // MINOR: his Close ends only the watch HE opened
@@ -1071,8 +1086,123 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const unk = (live.split('    } else if (pkUnknown) {')[1] || '').split('\n    }\n')[0];
-    ok(words.retry === 'Retry' && plain.retry === '' && /Retry in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'viewer' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
-      '⑨r3 TO VERIFY 2: the gave-up line names a door that WORKS — his window draws a Retry press (only on gave-up), the bridge turns `passkey-retry` into a fresh arm (the tries start over); never the false «the next action on this browser reconnects» (his clicks never re-arm)', { retry: words.retry, plain: plain.retry, arms, refused });
+    ok(words.retry === 'Retry' && plain.retry === '' && /Retry in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
+      '⑨r3 TO VERIFY 2: the gave-up line names a door that WORKS — his window draws a Retry press (only on gave-up), the bridge turns `passkey-retry` into a fresh arm (the tries start over; his own browsing window arms as HIM — ⑨r4, the opener a hub restart keeps); never the false «the next action on this browser reconnects» (his clicks never re-arm)', { retry: words.retry, plain: plain.retry, arms, refused });
+  }
+  // ⑨r4 — acceptance r3 of lane passkey-browse-yourself (cd3185a84): every leg below is RED on cd3185a84 by name
+  console.log('⑨r4 acceptance r3: one WebAuthn request per page (Chrome as measured) — a modal request ends the open autofill one first; the once-authenticator leaves with its own ceremony; a refusal goes with its browser; «not watching right now»; the cancel names its site');
+  // THE HOOK alone, over the fake Chrome as measured (one request per page)
+  {
+    const settle4 = (pr) => { const o = { v: null }; pr.then(() => { o.v = 'ok'; }, (e) => { o.v = e.name; }); return o; };
+    const starts = (r) => r.sent.filter((x) => x.ev === 'start');
+    const endOf = (r, id) => r.sent.find((x) => x.ev === 'end' && x.id === id) || null;
+    // (a) his autofill PASSED (in flight in Chrome), then his modal get
+    const a = hookRealm('github.com', { one: true });
+    const a1 = settle4(a.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    a.ctl('pass', starts(a)[0].id); await tick();
+    const a2 = settle4(a.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    a.ctl('release', (starts(a)[1] || {}).id); await tick(); await tick();
+    const A = { auto: a1.v, autoEnd: endOf(a, starts(a)[0].id), modal: a2.v, natives: a.calls.length, refused: a.busyRefused.length, sig2: a.calls[1] ? !!(a.calls[1].opts.signal && a.calls[1].opts.signal.aborted) : null };
+    // (b) the autofill still HELD (no verdict yet), then a modal get
+    const b = hookRealm('github.com', { one: true });
+    const b1 = settle4(b.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    const b2 = settle4(b.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    b.ctl('release', (starts(b)[1] || {}).id); await tick(); await tick();
+    const B = { auto: b1.v, autoEnd: endOf(b, starts(b)[0].id), modal: b2.v, natives: b.calls.length, refused: b.busyRefused.length };
+    // (c) the agent road: an autofill RELEASED with a key (it holds the document's queue), then a modal get
+    const c = hookRealm('github.com', { one: true });
+    const c1 = settle4(c.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    c.ctl('release', starts(c)[0].id); await tick();
+    const c2 = settle4(c.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    c.ctl('drained', 0); await tick(); await tick();
+    const cStart2 = starts(c)[1] || {};
+    c.ctl('release', cStart2.id); await tick(); await tick();
+    const C = { auto: c1.v, modalStarted: !!cStart2.id, modal: c2.v, natives: c.calls.length, refused: c.busyRefused.length };
+    // CONTROL: a modal never ends a modal — the second queues behind the first (the document's queue, as before)
+    const d = hookRealm('github.com', { one: true });
+    const d1 = settle4(d.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick();
+    d.ctl('release', starts(d)[0].id); await tick();
+    const d2 = settle4(d.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick(); await tick();
+    const D4 = { first: d1.v, second: d2.v, starts: starts(d).length, natives: d.calls.length };
+    ok(A.auto === 'AbortError' && !!A.autoEnd && A.autoEnd.outcome === 'aborted-by-page' && A.autoEnd.name === 'AbortError' && A.modal === null && A.natives === 2 && A.refused === 0 && A.sig2 === false
+      && B.auto === 'AbortError' && !!B.autoEnd && B.autoEnd.outcome === 'aborted-by-page' && B.natives === 1 && B.modal === null && B.refused === 0
+      && C.auto === 'AbortError' && C.modalStarted && C.modal === null && C.natives === 2 && C.refused === 0
+      && D4.first === null && D4.second === null && D4.starts === 1 && D4.natives === 1,
+      '⑨r4 THE HOOK (Chrome as measured: one WebAuthn request per page): a request that is not an autofill one ENDS the page\'s open autofill request first — passed and in flight (aborted through the hook\'s own signal), still held (rejected in-page, never sent), released with a key on the agent road (its queue lets go) — the page\'s autofill promise rejects AbortError (end aborted-by-page) and the modal reaches Chrome after it, never OperationError; CONTROL: a modal never ends a modal (the second queues)', { A, B, C, D: D4 });
+  }
+  // nit 7.1: the person's once-authenticator leaves ONLY with the ceremony that paired it
+  {
+    const cipher = PS2.cipherOf(crypto2, crypto2.randomBytes(32));
+    const store = { file: PS2.withRow(null, PID, { credentialId: 'Kvault004', rpId: 'vercel.com', userName: 'me', displayName: 'Me', keySealed: cipher.seal('pkcs8-key-text'), signCount: 1, createdBy: 'human', createdAt: 1, lastUsedAt: 0, uses: 0, policy: 'yes' }), cipher };
+    const X = world2({ holders: 'human', store, print: false });
+    await X.opened();
+    const verbN = (v) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === v).length;
+    X.say({ ev: 'start', id: 1, kind: 'get', rpId: 'vercel.com', origin: 'https://vercel.com', mediation: 'conditional' }); await until2(() => verbN('pass') > 0); await sleep2(10);
+    X.start(2, 'vercel.com'); await until2(() => released(X) > 0); await sleep2(20);
+    const paired = { ui: X.calls('WebAuthn.enable').map((m) => m.params.enableUI), auth: X.calls('WebAuthn.addVirtualAuthenticator').length, added: X.calls('WebAuthn.addCredential').length, pass: verbN('pass') };
+    const d0 = verbN('drained');
+    X.say({ ev: 'end', id: 1, outcome: 'aborted-by-page', name: 'AbortError' }); await sleep2(40);
+    const mid = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, drained: verbN('drained') - d0, auth: !!X.w().targets.get('T1').pk.auth };
+    X.end(2); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0); await sleep2(20);
+    const after = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, disabled: X.calls('WebAuthn.disable').length, drained: verbN('drained') - d0, auth: X.w().targets.get('T1').pk.auth || null };
+    ok(paired.pass === 1 && paired.ui.length === 1 && paired.ui[0] === true && paired.auth === 1 && paired.added === 1 && mid.removed === 0 && mid.drained === 0 && mid.auth && after.removed === 1 && after.disabled >= 1 && after.drained === 1 && !after.auth,
+      '⑨r4 (nit 7.1) the vault ceremony\'s authenticator leaves ONLY with the ceremony that paired it — his autofill request (passed) ending while his vault sign-in is in flight touches no authenticator and sends no drain; his sign-in\'s own end removes it', { paired, mid, after });
+    X.D.shutdown();
+  }
+  // nits 7.3 + 7.4: a refusal is its browser's (gone when it stops or starts again); no watch, nothing refused ⇒ no claimed cause
+  {
+    const ep = { ok: false, code: 'not-running', error: 'the browser is not running' };
+    const X = world2({ holders: 'human', print: false, ep });
+    const pkNow = () => X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey || {};
+    const before = pkNow();
+    await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true }); await sleep2(20);
+    const refused = pkNow();
+    await X.lease({ kind: 'browser-stopped', profileId: PID }); await sleep2(10);
+    const stopped = pkNow();
+    await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true }); await sleep2(20);
+    const again = pkNow();
+    X.world.H.human = false; await X.lease({ kind: 'browser-ready', profileId: PID }); await sleep2(10);
+    const ready = pkNow();
+    const words = PK.passkeyWords(before, null);
+    ok(before.why === 'not-watched' && before.text === PK.NOT_WATCHED_TEXT && !/started before/.test(before.text + words.line) && refused.why === 'refused' && /not running/.test(refused.text) && stopped.why === 'not-watched' && again.why === 'refused' && ready.why === 'not-watched',
+      '⑨r4 (nits 7.3 + 7.4) a browser with no watch and nothing refused says «not watching right now» (never the claimed «started before» — before the first arm the cause is not known); a refusal is said while it stands and goes with its browser (stopped, started again)', { before: before.why, refused: refused.why, stopped: stopped.why, again: again.why, ready: ready.why, line: words.line });
+    X.D.shutdown();
+  }
+  // the cancel names the site of the request it ended, even when the page's own end lands before the cancel's answer
+  {
+    const X = world2({ holders: 'human', print: false, store: STORE() });
+    await X.opened();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await sleep2(10);
+    X.world.hook = (args) => { if (args[1] === 'cancel') X.say({ ev: 'end', id: 1, outcome: 'cancelled', name: 'AbortError' }); return 1; };
+    const cn = await X.D.cancelPasskey({ profileId: PID, browserKey: HK, ephemeral: false }, { by: 'user' });
+    X.world.hook = null;
+    ok(cn.ok && cn.n === 1 && cn.rpId === 'vercel.com' && /\(vercel\.com\)/.test(cn.text),
+      '⑨r4 the cancel names the site of the request it ended (read before its await — the page\'s own end can land first; r3\'s real-Chrome S11b said «this site»)', cn);
+    X.D.shutdown();
+  }
+  // THE HOLDER ROWS (found by r4's live ⑪ a2 / g on real Chrome): ONE production composer (browser-dialogs.holdersOfKeeper) gives
+  // HIS row once, flagged — the keeper's list carries it too (holderRows: `human: true`), and r2–r3's inline wiring copied it without
+  // the flag, so his own browsing never got his watch. The wiring and test-browser-live build the watch's holdersOf WITH it (no copy).
+  {
+    const Dm = require(path.join(REPO, 'src/server/browser-dialogs.js')), BP = require(path.join(REPO, 'src/browser-profiles.js'));
+    const HUK = 'hu-0000a4a4', CONV = 'bk-0000c4c4';
+    const keeperW = (conv) => ({ list: () => ({ leases: BP.holderRows({ leases: conv ? [{ profileId: PID, browserKey: CONV, sessionId: 's-c' }] : [], profiles: [{ id: PID, label: 'Mine' }], browsers: {}, humans: [{ profileId: PID, browserKey: HUK, human: true, input: 'user' }] }) }), humanOf: () => ({ browserKey: HUK, input: 'user' }) });
+    const compose = typeof Dm.holdersOfKeeper === 'function' ? Dm.holdersOfKeeper : null;
+    const alone = compose ? compose(keeperW(false))(PID) : [], shared = compose ? compose(() => keeperW(true))(PID) : [];
+    const listed = keeperW(false).list().leases.filter((l) => l.browserKey === HUK);
+    // the REAL watch over the production composer's rows: his browsing alone ⇒ his watch; a conversation beside him ⇒ the agent's
+    const modeWith = async (conv) => {
+      const world = { sockets: 0, refuse: false, pending: [], print: false, H: {} }; const f = sock2(world);
+      const Dw = Dm.create({ keeper: { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async () => ({ ok: true, url: 'ws://fake' }), onLease: () => () => {}, browserOf: () => ({ state: 'ready', launch: 'attach' }) }, WebSocketImpl: f.FakeWS, log: { warn() {}, log() {} }, now: () => 1_000_000, holdersOf: compose ? compose(keeperW(conv)) : () => [], leaseCountOf: () => 1, tabsOf: () => ['T1'], rearmMs: 20 });
+      await Dw.arm(PID, { by: 'person' }); await until2(() => Dw._watches.get(PID) && Dw._watches.get(PID).state === 'open');
+      const m = (Dw._watches.get(PID) || {}).mode; Dw.shutdown(); return m;
+    };
+    const mode = await modeWith(false), modeShared = await modeWith(true);
+    const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), lsrc = fs.readFileSync(path.join(REPO, 'scripts/test-browser-live.mjs'), 'utf8');
+    const wired = /const holdersOf = require\('\.\/browser-dialogs'\)\.holdersOfKeeper\(\(\) => browserKeeper\);/.test(wsrc) && /browser-dialogs'\)\.create\(\{\s*keeper: browserKeeper, holdersOf,/.test(wsrc), live = /const holdersOf = D11\.holdersOfKeeper\(kk\);/.test(lsrc);
+    const copies = [wsrc, lsrc].filter((t) => /holdersOf = \(profileId\) =>/.test(t)).length;
+    ok(!!compose && listed.length === 1 && listed[0].human === true && alone.filter((h) => h.browserKey === HUK).length === 1 && alone.every((h) => h.human) && alone[0].input === 'user' && shared.filter((h) => !h.human).map((h) => h.browserKey).join() === CONV && mode === 'person' && modeShared === 'agent' && wired && live && copies === 0,
+      '⑨r4 THE HOLDER ROWS (live ⑪ a2 / g, real Chrome): ONE production composer (browser-dialogs holdersOfKeeper) gives HIS row once, flagged — the keeper\'s list carries it too (`human: true`) and r2–r3\'s inline wiring copied it without the flag, so his own browsing never got his watch; over the composer\'s rows his browsing alone ⇒ the person\'s watch, a conversation beside him ⇒ the agent\'s; the wiring and test-browser-live build the watch\'s holdersOf WITH it (no copy left)', { compose: !!compose, listed: listed.length, alone, shared, mode, modeShared, wired, live, copies });
   }
 }
 

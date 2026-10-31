@@ -279,7 +279,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!dialogs) return;
     const pid = relayProfileId(relay);
     if (!pid) return;
-    dialogs.arm(pid, { by: 'viewer' }).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact
+    dialogs.arm(pid, { by: isHuman(relay) ? 'person' : 'viewer' }).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact (acceptance r3: his own browsing window's arm is HIS — after a hub restart it arms first, and his Close still ends the watch he opened)
   }
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);

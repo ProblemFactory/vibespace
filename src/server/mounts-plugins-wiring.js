@@ -1132,7 +1132,7 @@ function createSessionMessages(session, sessionId) {
       // the .197 integration (browse-yourself × browser-stuck): the USER browsing a profile himself is a holder of its browser
       // too — his row (no session: never told, never woken) makes the browser SHARED, so a conversation whose tab the watch
       // cannot attribute is told of no dialog (a dialog on HIS tab is his), and while he drives an alert is held for him
-      const holdersOf = (profileId) => { try { const out = (browserKeeper.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = typeof browserKeeper.humanOf === 'function' ? browserKeeper.humanOf(profileId) : null; if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } };
+      const holdersOf = require('./browser-dialogs').holdersOfKeeper(() => browserKeeper); // lane passkey-browse-yourself r4: THE ONE composer of the holder rows (his row once, flagged — r2–r3's inline copy dropped the flag on the keeper's own copy of his row and appended it again: his browsing never got his watch; live ⑪ a2 / g on real Chrome)
       browserDialogs = require('./browser-dialogs').create({
         keeper: browserKeeper, holdersOf,
         vaultUse: (entry, use, o) => vault.noteUse(entry, use, o), // lane passkey-sink: a kernel's passkey signature / new key is a USE of the passkeys' key (purpose + receipt — the use law's ONE writer)

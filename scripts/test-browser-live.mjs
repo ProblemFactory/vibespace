@@ -468,7 +468,7 @@ async function legPasskeyRoads() {
   // the keeper as the watch reads it — (d) stubs the attach road's display record on this headless browser
   let stubDisplay = null;
   const kview = { ...kk, browserOf: (id) => { const r = kk.browserOf(id); return r && stubDisplay ? { ...r, displaySession: { id: 'da-0000stub', display: stubDisplay } } : r; } };
-  const holdersOf = (profileId) => { try { const out = (kk.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = kk.humanOf(profileId); if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } }; // mounts-plugins-wiring's own
+  const holdersOf = D11.holdersOfKeeper(kk); // the production composer (mounts-plugins-wiring builds the watch's holdersOf with it — r4: never a copy shaped like it)
   const fy = [];
   const dialogs = D11.create({ keeper: kview, log: quiet, holdersOf, leaseCountOf: (pid) => new Set(holdersOf(pid).map((h) => h.browserKey)).size, forYou: { add: (pid, it) => { fy.push(it); return 'fy-' + fy.length; }, resolve: () => { } }, labelOf: () => prof.label });
   kk.setStuckSource((bk) => dialogs.stuckForKey(bk));

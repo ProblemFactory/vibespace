@@ -6415,6 +6415,7 @@ export default {
   "This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.": "这个浏览器运行在另一台机器上——VibeSpace 在这里看不到它的通行密钥请求；一个不动的网页可能正在那边等通行密钥。", // lane passkey-browse-yourself (acceptance r1)
   "VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.": "VibeSpace 与这个浏览器的连接断了，已停止重试——现在看不到通行密钥请求；一个不动的网页可能正在等通行密钥。按「重试」重新连接。", // lane passkey-browse-yourself (acceptance r2)
   "VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.": "VibeSpace 无法监看这个浏览器（{cause}）——看不到它的通行密钥请求；一个不动的网页可能正在等通行密钥。", // lane passkey-browse-yourself (acceptance r2)
+  "VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.": "VibeSpace 现在没有在监看这个浏览器——看不到它的通行密钥请求；一个不动的网页可能正在等通行密钥。", // lane passkey-browse-yourself (acceptance r3)
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "浏览器「{label}」正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "这个对话的另一个浏览器正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)
   "The passkey wait had already ended": "这次通行密钥等待已经结束了", // lane passkey-browse-yourself (acceptance r1)

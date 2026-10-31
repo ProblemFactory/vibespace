@@ -185,6 +185,7 @@ function unknownOf(v) {
   if (v.why === 'remote') return { state: 'unknown', why: 'remote', text: REMOTE_TEXT };
   if (v.why === 'gave-up') return { state: 'unknown', why: 'gave-up', text: GAVE_UP_TEXT };
   if (v.why === 'refused' && cause) return { state: 'unknown', why: 'refused', cause, text: fill(REFUSED_TEXT, { cause }) };
+  if (v.why === 'not-watched') return { state: 'unknown', why: 'not-watched', text: NOT_WATCHED_TEXT }; // acceptance r3
   return { state: 'unknown', text: UNKNOWN_TEXT };
 }
 const passkeyPasses = (verb) => PASSKEY_PASS_VERBS.includes(str(verb));
@@ -212,6 +213,9 @@ const REMOTE_TEXT = 'This browser runs on another machine — VibeSpace cannot s
 // acceptance r2: the gave-up line names the door that WORKS — his clicks never re-arm (only Retry, a Browse press or a command does)
 const GAVE_UP_TEXT = 'VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry in the browser window (or the next command on this browser) connects again.';
 const REFUSED_TEXT = 'VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.';
+/** acceptance r3: no watch is open on this browser and none was refused — before the first arm (a hub just restarted) the cause is
+ *  not known, so none is claimed (UNKNOWN_TEXT's «started before» stays the open watch's tab whose hook never armed). */
+const NOT_WATCHED_TEXT = 'VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.';
 
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
@@ -220,7 +224,7 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 function passkeyWords(b, tIn, { headed = false, card = null, display = null } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line; a Retry press when the re-arms stopped), never nothing
-  if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.') : b.why === 'refused' && b.cause ? t('VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.', { cause: str(b.cause) }) : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '', retry: b.why === 'gave-up' ? t('Retry') : '' }; // acceptance r2: gave-up ⇒ the Retry press (the bridge re-arms)
+  if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.') : b.why === 'refused' && b.cause ? t('VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.', { cause: str(b.cause) }) : b.why === 'not-watched' ? t('VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.') : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '', retry: b.why === 'gave-up' ? t('Retry') : '' }; // acceptance r2: gave-up ⇒ the Retry press (the bridge re-arms)
   if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
   const rp = rpWord(b.rpId) || t('this site');
   if (b.state === PASSKEY_ASK_CODE) {
@@ -343,7 +347,10 @@ function installHook(G, cfg) {
   let seq = 0, tell = send, key = String(cfg.key || '');
   let busy = null;      // hold mode: a released ceremony in flight (+ the watch's drain) — a later one of this document queues behind it
   // (acceptance r2 of lane passkey-browse-yourself: never behind one the watch PASSED — `pass` = handed to Chrome as is, no key loaded:
-  //  the person's AUTOFILL get, open as long as the page is; his «Sign in with a passkey» then goes on at once, Chrome ends the autofill one)
+  //  the person's AUTOFILL get, open as long as the page is. Acceptance r3, MEASURED on real Chrome: Chrome takes ONE WebAuthn request
+  //  per page at a time — a modal get while an autofill get is open is refused with OperationError in ~20 ms and the autofill one
+  //  stays open. So the hook OWNS the autofill request it passes on (its own signal is in the native call) and ends it when a request
+  //  that is not an autofill one starts on the page — `supersede` below)
   let drainedFn = null;
   const say = (o) => { try { tell(enc(o)); } catch (e) { /* the watch went */ } };
   const err = (name, msg) => { try { return new G.DOMException(msg, name); } catch (e) { const x = new Error(msg); x.name = name; return x; } };
@@ -365,6 +372,11 @@ function installHook(G, cfg) {
     if (mediation === 'conditional') o.mediation = 'conditional';
     return o;
   };
+  /** Acceptance r3 of lane passkey-browse-yourself (Chrome refuses a second WebAuthn request while an autofill one is open —
+   *  measured): a request that is not an autofill one ENDS this document's open autofill requests first — a held one is rejected
+   *  in-page (never sent to Chrome), one in flight is aborted through the hook's own signal; the page's conditional promise rejects
+   *  with AbortError, as the WebAuthn spec has a page do itself. → the native settles the new request waits for (bounded). */
+  const supersede = () => { const out = []; for (const r of reg.values()) if (r.cond && !r.ctl.signal.aborted) { r.superseded = true; r.ctl.abort(); if (r.native) out.push(r.native); } return out; };
   /** The watch's verbs on a held ceremony (through `ctl` only). */
   const control = (verb, id) => {
     if (verb === 'cancel') { let n = 0; for (const r of reg.values()) if (!r.ctl.signal.aborted) { r.cancelled = true; r.ctl.abort(); n++; } return n; }
@@ -411,10 +423,10 @@ function installHook(G, cfg) {
       if (!pk || typeof pk !== 'object' || (mediation === 'conditional' && !cfg.hold)) return Reflect.apply(native, this, args);
       const id = ++seq;
       const ctl = new AC();
-      const rec = { ctl, cancelled: false, held: false, kind, rp: rpOf(kind, pk), at: nowMs(), start: null };
+      const rec = { ctl, cancelled: false, held: false, kind, rp: rpOf(kind, pk), at: nowMs(), start: null, cond: mediation === 'conditional', native: null, superseded: false };
       const signal = callerSignal ? both(callerSignal, ctl.signal) : ctl.signal;
       const pass = [Object.create(opts, { signal: { value: signal, enumerable: true } }), ...args.slice(1)];
-      const ended = (e) => (rec.cancelled ? 'cancelled' : (callerSignal && callerSignal.aborted ? 'aborted-by-page' : (e ? 'error' : 'ok')));
+      const ended = (e) => (rec.cancelled ? 'cancelled' : ((callerSignal && callerSignal.aborted) || rec.superseded ? 'aborted-by-page' : (e ? 'error' : 'ok'))); // acceptance r3: an autofill request the page's next one ended = the page's own move
       if (!cfg.hold) {
         rec.start = { ev: 'start', id, kind, rpId: rec.rp };
         reg.set(id, rec);
@@ -428,6 +440,7 @@ function installHook(G, cfg) {
       // lane passkey-store-core: HOLD — the native call waits for the watch's verdict (the store's key is loaded into the
       // tab's empty authenticator only on `release`); no verdict in cfg.holdMs ⇒ rejected in-page (P0 ④: never the native call)
       const self = this;
+      const ending = rec.cond ? [] : supersede(); // acceptance r3: ONE request per page — the open autofill one ends first (above)
       return new Promise((resolve, reject) => {
         let timer = null;
         const done = (outcome, name) => { if (!reg.has(id)) return; reg.delete(id); if (timer) clearTimeout(timer); say({ ev: 'end', id, outcome, name }); };
@@ -437,13 +450,20 @@ function installHook(G, cfg) {
           rec.held = false; if (timer) clearTimeout(timer);
           let settle = null; const mine = new Promise((r) => { settle = r; }); if (!plain) busy = mine;
           const after = () => { if (plain) return settle(); /* it held no queue — nor the watch's drain of the one that does */ new Promise((r) => { drainedFn = r; setTimeout(r, 300); }) /* the watch serializes a tab's ceremonies itself; this only spares a dead watch's page */.then(() => { if (busy === mine) busy = null; settle(); }); };
-          let p;
-          try { p = Reflect.apply(native, self, pass); } catch (e) { done('error', e && e.name); reject(e); after(); return; }
-          Promise.resolve(p).then((v) => { done('ok'); resolve(v); after(); }, (e) => { done(ended(e), String((e && e.name) || 'Error')); reject(e); after(); });
+          const go = () => {
+            let p;
+            try { p = Reflect.apply(native, self, pass); } catch (e) { done('error', e && e.name); reject(e); after(); return; }
+            rec.native = Promise.resolve(p).then(() => {}, () => {}); // acceptance r3: what a later request waits for once it ended this one
+            Promise.resolve(p).then((v) => { done('ok'); resolve(v); after(); }, (e) => { done(ended(e), String((e && e.name) || 'Error')); reject(e); after(); });
+          };
+          // acceptance r3: Chrome's own request ended before this one is made (the autofill request it superseded settles at once
+          // on its abort; the bound only spares a page whose native never settles)
+          if (ending.length) Promise.race([Promise.all(ending), new Promise((r) => setTimeout(r, 1000))]).then(go); else go();
         };
         signal.addEventListener('abort', () => rec.fail(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.'), rec.cancelled ? 'cancelled' : 'aborted-by-page'), { once: true });
         const start = () => {
           if (signal.aborted) { reject(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.')); return; }
+          if (!rec.cond) ending.push(...supersede()); // acceptance r3: an autofill request that started while this one queued ends too
           rec.held = true; rec.start = { ev: 'start', id, kind, rpId: rec.rp, ...fields(kind, pk, mediation) }; reg.set(id, rec);
           say(rec.start);
           rec.arm();
@@ -495,7 +515,7 @@ const HOOK_HOLD_MS = 1500;
 module.exports = {
   passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
-  NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, waitsSaid,
+  NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, NOT_WATCHED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, waitsSaid,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
   loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };
