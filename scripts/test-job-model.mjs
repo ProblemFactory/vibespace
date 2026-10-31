@@ -178,7 +178,8 @@ const nf = M.nextFire({ cron: '0 3 * * *' }, base);
 ok(nf > base && nf - base <= 24 * 3600e3 + 60e3, 'daily cron next-fire lands within 24h (a pinned clock: Aug 17 05:00 PDT)');
 const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDate() === 18, 'daily cron fires at 03:00 local (Aug 18)');
 // ── schedules across daylight saving (America/Los_Angeles 2026: spring-forward Mar 8 02:00 PST → 03:00 PDT; fall-back Nov 1
-// 02:00 PDT → 01:00 PST). The first five legs pin what c0faf8120 already did; the last two were RED there (the product's bug).
+// 02:00 PDT → 01:00 PST). RED on c0faf8120 (the product): the jump leg (it skipped the day), strictly-after and the repeated-hour
+// storm; the rest pin what it already did.
 {
   const T = (iso) => Date.parse(iso); const iso = (t) => new Date(t).toISOString();
   const nx = (cron, from) => M.nextFire({ cron }, T(from));
@@ -192,8 +193,14 @@ const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDa
     'fall-back: the daily 03:00 fires at 03:00 PST — 18 h after 10:00 PDT, 25 h after the day before\'s fire (never 02:00 or 04:00)');
   ok(nx('0 3 * * *', '2026-03-07T10:00:00-08:00') === T('2026-03-08T03:00:00-07:00') && nx('0 3 * * *', '2026-03-07T03:00:00-08:00') === T('2026-03-07T03:00:00-08:00') + 23 * 3600e3,
     'spring-forward: the daily 03:00 fires at 03:00 PDT — 16 h after 10:00 PST, 23 h after the day before\'s fire');
-  ok(nx('30 2 * * *', '2026-03-07T10:00:00-08:00') === T('2026-03-09T02:30:00-07:00') && nx('30 2 * * *', '2026-03-08T01:59:00-08:00') === T('2026-03-09T02:30:00-07:00'),
-    'spring-forward: 02:30 does not exist on Mar 8 — no fire that day, the next is Mar 9 02:30 PDT (a skip, said in nextFire; the scan is bounded)');
+  // the integrator's ruling (10-31): a time that does not exist that day fires ONCE AT THE JUMP (03:00 PDT), as cronie / systemd do
+  const jump = fires('30 2 * * *', T('2026-03-07T10:00:00-08:00'), T('2026-03-09T10:00:00-07:00'));
+  ok(nx('30 2 * * *', '2026-03-07T10:00:00-08:00') === T('2026-03-08T03:00:00-07:00') && nx('30 2 * * *', '2026-03-08T01:59:00-08:00') === T('2026-03-08T03:00:00-07:00')
+    && nx('30 2 * * *', '2026-03-08T03:00:00-07:00') === T('2026-03-09T02:30:00-07:00') && jump.map(iso).join() === '2026-03-08T10:00:00.000Z,2026-03-09T09:30:00.000Z',
+    'spring-forward: 02:30 does not exist on Mar 8 — ONE fire at the jump (03:00 PDT, strictly after now), then Mar 9 02:30 PDT', jump.map(iso).join(' '));
+  const hr = fires('0 * * * *', T('2026-03-08T00:30:00-08:00'), T('2026-03-08T04:30:00-07:00'));
+  ok(hr.map(iso).join() === '2026-03-08T09:00:00.000Z,2026-03-08T10:00:00.000Z,2026-03-08T11:00:00.000Z',
+    'spring-forward: hourly — the missing 02:00 meets 03:00 at the jump: ONE fire there (01:00 PST, 03:00 PDT, 04:00 PDT)', hr.map(iso).join(' '));
   const sf = fires('*/15 * * * *', T('2026-03-08T01:00:00-08:00'), T('2026-03-08T03:30:00-07:00'));
   ok(sf.map(iso).join() === ['09:15', '09:30', '09:45', '10:00', '10:15', '10:30'].map((h) => `2026-03-08T${h}:00.000Z`).join(),
     'spring-forward: */15 keeps 15 real minutes across the jump (01:45 PST ⇒ 03:00 PDT)', sf.map(iso).join(' '));

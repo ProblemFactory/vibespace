@@ -145,17 +145,26 @@ function nextFire(schedule, afterMs, rand) {
     // fall-back night `new Date(afterMs).setSeconds(0)` re-resolves the wall time to its FIRST pass, an hour back, so a cron
     // created, started or resumed 01:00–01:59 after the change got a fire before `afterMs` and fired at every tick (lane int361).
     // Daylight saving, said once: a local time that happens twice (fall-back) fires at its FIRST pass only — the repeated pass is
-    // skipped, so an hourly job waits two real hours once; a local time that does not exist that day (spring-forward, 02:30 on the
-    // change day) does not fire that day — the next day's does. The scan is bounded either way: no wall time is waited for.
-    const d = new Date(0);
+    // skipped, so an hourly job waits two real hours once; a local time that does not exist that day (spring-forward, 02:30 on
+    // the change day) fires ONCE AT THE JUMP — the first instant after the gap (03:00), as cronie and systemd timers do; a daily
+    // job never silently skips its day. Every skipped time meets at that one instant, so it is one fire.
+    const hit = (mi, h, dom, mon, dow) => c.mi.has(mi) && c.h.has(h) && c.mon.has(mon + 1)
+      // standard cron: dom/dow OR each other when both restricted
+      && (c.domStar || c.dowStar ? (c.dom.has(dom) && c.dow.has(dow)) : (c.dom.has(dom) || c.dow.has(dow)));
+    const d = new Date(0), w = new Date(0);
     let t = Math.floor(afterMs / 60e3) * 60e3 + 60e3;
+    d.setTime(t - 60e3); let off = d.getTimezoneOffset();
     for (let i = 0; i < 366 * 24 * 60; i++, t += 60e3) { // ≤1y scan
       d.setTime(t);
-      const ok = c.mi.has(d.getMinutes()) && c.h.has(d.getHours()) && c.mon.has(d.getMonth() + 1)
-        // standard cron: dom/dow OR each other when both restricted
-        && (c.domStar || c.dowStar ? (c.dom.has(d.getDate()) && c.dow.has(d.getDay())) : (c.dom.has(d.getDate()) || c.dow.has(d.getDay())));
+      const was = off; off = d.getTimezoneOffset();
       // the first pass: the Date constructor resolves an ambiguous local time to its EARLIER instant (ECMA-262 LocalTime → UTC)
-      if (ok && new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()).getTime() === t) return t;
+      if (hit(d.getMinutes(), d.getHours(), d.getDate(), d.getMonth(), d.getDay())
+        && new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()).getTime() === t) return t;
+      // the jump: the wall clock skipped `was − off` minutes just before t — each read as UTC fields of its wall-clock value
+      for (let k = 1; k <= was - off; k++) {
+        w.setTime(t - (off + k) * 60e3);
+        if (hit(w.getUTCMinutes(), w.getUTCHours(), w.getUTCDate(), w.getUTCMonth(), w.getUTCDay())) return t;
+      }
     }
     return null;
   }
