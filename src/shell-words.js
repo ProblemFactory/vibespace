@@ -91,14 +91,42 @@ const PARAM_WORD = /\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})/;
 const expanded = (raw) => PARAM_WORD.test(String(raw).replace(/\$?'[^']*'/g, '').replace(/\\[^]/g, ''));
 /** r14: a substitution inside quoted text — `$(`, `${`, `$((`, a backtick */
 const SUBST = /\$[({]|`/;
+/** r17 (the r16 review F5): a SUBSCRIPT's start — a NAME's last character before `[`: an ASCII word character, the `}` of
+ *  `${a}[`, or ANY non-ASCII character (zsh under a UTF-8 locale takes letters, digits and spacing marks: `é[`, `数[`,
+ *  `டி[` — its U+0BBF no letter; no libc's table is guessed). r16 took `\w` alone: `let "é[\$(C &)]=1"` read inert while
+ *  zsh ran the CLI and it outlived the shell */
+const SUB_START = /(?:[\w}]|[^\x00-\x7f])\[/g;
+/** r17 (the r16 review F6): does a subscript's SPAN hold a substitution — the span as EACH shell skips it: nested brackets
+ *  and a `\X` (both), a quoted part (`quotes`: bash's — `a[']'$(C)]`, a `\"` inside "…"; zsh reads a quote as text:
+ *  `a['[']$(C)]`), the quoted part's own `$(`. r14–r16 ended the span at the first `]`. Linear: a start inside a span
+ *  read is skipped */
+const subscriptSubst = (t, quotes) => {
+  let seen = -1;
+  for (const m of t.matchAll(SUB_START)) {
+    let k = m.index + m[0].length;
+    if (k <= seen) continue;
+    for (let d = 1; k < t.length && d > 0; k++) {
+      const c = t[k];
+      if (c === '\\') k++;
+      else if (c === '`' || (c === '$' && (t[k + 1] === '(' || t[k + 1] === '{'))) return true;
+      else if (quotes && (c === "'" || c === '"')) { let e = k + 1; while (e < t.length && t[e] !== c) e += c === '"' && t[e] === '\\' ? 2 : 1; if (SUBST.test(t.slice(k + 1, e))) return true; k = e; }
+      else if (c === '[') d++;
+      else if (c === ']') d--;
+    }
+    seen = k;
+  }
+  return false;
+};
 /** r16 (the r15 review F1): the text of a `$'…'` as bash and zsh DECODE it — `\NNN` (octal, its low 8 bits: `\044` and
  *  `\444` are both `$`), `\xHH`, `\uHHHH`, `\UHHHHHHHH`, the letters (`\n`, `\e` …); any other `\X` is X (zsh's reading —
  *  bash keeps the `\`, its `\c` a control character: neither ever a `$`, a backtick or a bracket). r15 read
- *  `$'a[\x24(C &)]'` as `a[x24(C &)]`: inert, while `let` ran C in every shell and it outlived the shell */
-const ANSI_ESC = /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|([^]))/g;
+ *  `$'a[\x24(C &)]'` as `a[x24(C &)]`: inert, while `let` ran C in every shell and it outlived the shell. r17 (the r16
+ *  review, a nit): bash's `\cX` that makes a NUL (X a blank, `@`, a backtick, U+0800–U+0FFF: its first byte keeps no low
+ *  five bits) decodes as one — readWord reads a NUL UNKNOWN */
+const ANSI_ESC = /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|(c)(?=[ @`\u0800-\u0fff])|([^]))/g;
 const ANSI_LETTER = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
 const ansiCode = (n) => String.fromCodePoint(n > 0x10ffff ? 0xfffd : n);
-const ansiDecode = (t) => String(t).replace(ANSI_ESC, (m, o, x, u, U, c) => (c !== undefined ? ANSI_LETTER[c] || c : ansiCode(o ? parseInt(o, 8) & 0xff : parseInt(x || u || U, 16))));
+const ansiDecode = (t) => String(t).replace(ANSI_ESC, (m, o, x, u, U, z, c) => (z ? '\0' : c !== undefined ? ANSI_LETTER[c] || c : ansiCode(o ? parseInt(o, 8) & 0xff : parseInt(x || u || U, 16))));
 /** r16: a `$'…'` in a text (its `\'` escaped) */
 const ANSI_SPAN = /\$'((?:[^'\\]|\\[^])*)'/g;
 /** r14: a `${ … }` that EVALUATES its value — zsh's `(e)` flag (`${(e)x}`), bash's `@P` (a prompt's `$( … )` runs) */
@@ -330,7 +358,11 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       if (ch === '$' && s[i + 1] === "'") {   // ANSI-C quoting: `$'don\'t …'` — a `\` escapes the next character
         let j = i + 2;
         for (; j < s.length && s[j] !== "'"; j++) if (s[j] === '\\') j++;
-        v += ansiDecode(s.slice(i + 2, j));   // r16: DECODED — `$'a[\x24(C &)]'` is `a[$(C &)]` to bash and zsh — row:ansi-c
+        const dec = ansiDecode(s.slice(i + 2, j));
+        v += dec;   // r16: DECODED — `$'a[\x24(C &)]'` is `a[$(C &)]` to bash and zsh — row:ansi-c
+        // r17 (the r16 review, a nit): a decoded NUL — bash ends the text there, exec an argument (`$'vibespace-channels\0'
+        // read …` runs the CLI, `bash -c $'true\0; C'` nothing, zsh's eval runs past it): UNKNOWN
+        if (dec.includes('\0')) unknown(i, 'nul');
         if (j >= s.length) unknown(i, 'unclosed');
         i = j + 1; q = true;
         continue;
@@ -381,8 +413,10 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // `[[ 'a[$(C)]' -eq 0 ]]`: bash and zsh evaluate it) — UNKNOWN. r15: `t` is a whole word's literal text (readWord's
   // end) — r14 read only a single quote's or `$'…'`'s, never a double quote's `\$(` or an unquoted `\$\(`. r16 (the r15
   // review F3): a subscript follows its NAME (`a[`, `${a}[`) — markdown in a quoted argument (`--text "See [\`a.js\`](u)"`)
-  // is none: r15 read such a line UNKNOWN, and a chained compose's head opened at its `vibespace-status` again
-  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : /[\w}]\[[^\]]*(\$[({]|`)/.test(t)) unknown(at, pw ? 'param' : 'subscript'); };
+  // is none: r15 read such a line UNKNOWN, and a chained compose's head opened at its `vibespace-status` again. r17 (the
+  // r16 review F5 + F6): the name any character a shell takes, the span as bash or zsh skips it (subscriptSubst) — the
+  // cost: a non-ASCII character right before a markdown bracket holding inline code (`修复了[\`foo\`](u)`) is a name
+  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : subscriptSubst(t, true) || subscriptSubst(t, false)) unknown(at, pw ? 'param' : 'subscript'); };
   let i = 0;
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
     const ch = s[i];
@@ -689,11 +723,14 @@ const followed = (x, fds) => (FILE_OPS.has(x.op) && x.v === '/dev/null') || (DUP
  *  line that declares nothing — 'r10: C & x=1; wait', 'r10: C & x=1 y=two; wait' (every upper-case name may be one of
  *  either shell's own: `UID=0` and `SECONDS=1/0` end zsh) */
 const PLAIN_SET = /^([a-z_][a-z0-9_]*)=/;
-/** r10: a word that WRITES a name — `x=…`, `x+=…`, `x[k]=…` — and a `${x:=…}` / `${x=…}` anywhere in a word */
+/** r10: a word that WRITES a name — `x=…`, `x+=…`, `x[k]=…` — and a `${x:=…}` / `${x=…}` anywhere in a word. r17: a
+ *  `${`'s flags group and subscript read within 64 characters (evalsParam's window, r14) — r10–r16 read `[^)]*` /
+ *  `[^\]]*` from every `${(` / `${a[`: an unclosed 64–80 KB nest took 0.4–1 s here (master: under 1 ms) */
 const NAME_SET = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?\+?=/;
-const SETS_IN_WORD = /\$\{(\([^)]*\))?[#!^=~+]*[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?:{0,2}=/;
-/** r11: zsh's `(P)` flag — the name is another parameter's value (`: ${(P)n::=on}` sets `options[errexit]`) */
-const INDIRECT = /\$\{\([^)]*P/;
+const SETS_IN_WORD = /\$\{(\([^)]{0,64}\))?[#!^=~+]*[A-Za-z_][A-Za-z0-9_]*(\[[^\]]{0,64}\])?:{0,2}=/;
+/** r11: zsh's `(P)` flag — the name is another parameter's value (`: ${(P)n::=on}` sets `options[errexit]`). r17: its `P`
+ *  within 64 characters of the `(` */
+const INDIRECT = /\$\{\([^)P]{0,64}P/;
 /** r11: bash's `{NAME}>file` / `{NAME}<&0` — the redirection WRITES NAME (the descriptor's number, 10 and up): `true
  *  {IFS}>/dev/null; C & wait $!` outlives in bash (`wait $!` splits the pid on 1 and 0 and returns at once) */
 const VARFD = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
@@ -712,11 +749,13 @@ const varfd = (c, x) => { const m = !x.q && VARFD.exec(x.v); return !!m && /^[<>
  *  `read y <<< "${!x}"`). */
 const SUB_EXP = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
 const SUB_NAME = /^[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
-const SUBSTR = /\$\{[#!]?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(\[[^\]]*\])?:(?![-=?+])(?!\s*-?\d+\s*(:\s*-?\d+\s*)?\})/;
+const SUBSTR = /\$\{[#!]?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(\[[^\]]{0,64}\])?:(?![-=?+])(?!\s*-?\d+\s*(:\s*-?\d+\s*)?\})/;   // r17: the subscript within 64 characters
 // r16 (the r15 review, note b): `${…@P}` read from a `${` to the next `}` or `${` only — the same texts match (a match
 // from an earlier `${` is one from the last `${` before its `@P}`), never a read to the text's end from every `${` (r15:
-// an unclosed 200 KB `${a:-` nest took 2.4 s here, and the compact head paid it per card)
-const EVALS = /\$\[|\$\{(?:[^}$]|\$(?!\{))*@P\}|\$\{\([^)]*e[^)]*\)|\$\{!(?!\})|\$\{[\s|]/;
+// an unclosed 200 KB `${a:-` nest took 2.4 s here, and the compact head paid it per card). r17 (the r16 review F7): zsh's
+// `(e)` flag read within the 64 characters evalsParam reads (r14) — a `)` there, an `e` before it — never `[^)]*e[^)]*\)`
+// from every `${(` (r11–r16: cubic on an unclosed `${(e` nest — 16 KB took 28–30 s)
+const EVALS = /\$\[|\$\{(?:[^}$]|\$(?!\{))*@P\}|\$\{\((?=[^)]{0,64}\))[^)e]*e|\$\{!(?!\})|\$\{[\s|]/;
 /** r12: bash 5.3's function substitution — `${ cmd; }` / `${| cmd; }` (a blank, a newline or `|` after the brace) */
 const FUNSUB = /[ \t\n|]/;
 const ARITH_OPS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
