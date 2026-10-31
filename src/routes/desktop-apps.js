@@ -57,6 +57,9 @@
  *                                     engine, the ONE owner of lease.input
  *                                     (a takeover also makes that viewer the
  *                                     ACTIVE one — x5)
+ *   GET  /api/desktop/apps/:id/browser-seat?viewer=<id>  lane desktop-x-seat-browser: a browser display's seat for ONE
+ *                                     of this window's sockets ({seat:'input'|'watch'|null, why, profileId}) — the window's door
+ *   POST /api/desktop/apps/:id/browser-seat   r2: «Use it here» {viewerId} — that pane takes his seat (a person's press only)
  *   GET  /api/desktop/apps/:id/viewers        P8-2 x5 (design §7 P8-2 "x5 多客户端 =
  *   POST /api/desktop/apps/:id/viewers/takeover  单活跃 viewer"): who watches the
  *                                     window and which pane is ACTIVE (the
@@ -908,6 +911,35 @@ router.post('/api/desktop/apps/:id/secrets/forget', async (req, res) => {
   if (!ctx.keeper.forgetAppSecrets) return res.json({ ok: true, forgot: 0 });
   const r = await ctx.keeper.forgetAppSecrets(req.params.id);
   res.status(r.ok ? 200 : 500).json(r.ok ? r : { error: r.why, code: 'forget-failed' });
+});
+// lane desktop-x-seat-browser (ONE PERSON, ONE SEAT): a BROWSER DISPLAY's seat for one socket of the asking window (its viewer id
+// is that socket's own secret — a window asks for itself): 'input' | 'watch' (the relay's verdict, the bridge's own; r2: + `why`
+// — 'other-window' / 'not-browsing' / 'watch-mode', the code the bridge also TELLS that socket) — the window says WHY it only
+// watches and opens the way (never a silent watch); any other app answers seat null
+router.get('/api/desktop/apps/:id/browser-seat', (req, res) => {
+  const id = req.params.id;
+  if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  const viewerId = String(req.query.viewer || '');
+  if (!VIEWER_RE.test(viewerId)) return res.status(400).json({ error: 'the seat is asked for one socket (viewer)', code: 'bad-request' });
+  const rec = ctx.keeper.get(id);
+  if (!rec) return res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' });
+  const v = typeof ctx.browserSeat === 'function' ? ctx.browserSeat(id, viewerId) : null;
+  const seat = v && v.seat;
+  res.json({ ok: true, seat: seat === 'input' || seat === 'active' || seat === 'watch' || seat === 'size' ? seat : null, why: (v && v.why) || null, profileId: (rec && rec.forBrowser) || null, connected: ctx.stream ? ctx.stream.viewerAlive(id, viewerId) : null });
+});
+// r2 (acceptance FAIL 1 — one person, one seat): «Use it here» — THIS pane of his takes his seat on the browser display (his other
+// panes watch, told 'other-window'). A person's press only: an agent's token is refused by name, like every whole-display door.
+router.post('/api/desktop/apps/:id/browser-seat', (req, res) => {
+  const id = req.params.id;
+  if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'a browser display\'s seat is the person\'s — an agent token may not take it', code: 'human_only' });
+  const viewerId = String(req.body?.viewerId || '');
+  if (!VIEWER_RE.test(viewerId)) return res.status(400).json({ error: 'Use it here needs the pane\'s viewer id (viewerId)', code: 'bad-request' });
+  if (!ctx.keeper.get(id)) return res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' });
+  if (ctx.stream && !ctx.stream.viewerAlive(id, viewerId)) return fail(res, { code: 'no_viewer', message: 'this pane is not connected to the display yet — wait for it to reconnect, then Use it here' });
+  const r = typeof ctx.takeBrowserSeat === 'function' ? ctx.takeBrowserSeat(id, viewerId) : { ok: false, code: 'not-a-browser-display', error: 'only a browser display has a person\'s seat' };
+  if (!r.ok) return fail(res, { code: r.code, message: r.error });
+  res.json({ ok: true, seat: r.seat || null, why: r.why || null });
 });
 router.get('/api/desktop/apps/:id/viewers', (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });

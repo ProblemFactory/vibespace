@@ -132,6 +132,7 @@ const COPY_DEDUP_MS = 150;
 const TAP_FPS = require('../browser-trace.js').TRACE_TAP_FPS;
 const TF = require('./turn-facts.js'); // verify r1: the restore waits for a KNOWN running turn (the keeper's own rule for releases)
 const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user's own browsing window — its controls, its acts
+const PIC = require('../browser-picture.js'); // lane desktop-x-seat-browser: the desktop window's seat on a browser display (PURE deskSeat)
 
 function create({ keeper = null, activeSessions, requestAuthed, log = console, now = Date.now, limits = S.BACKPRESSURE,
   WebSocketImpl = WebSocket, connectTimeoutMs = 20000, getTelemetry = () => null, platform = process.platform, inputWindow = INPUT_WINDOW,
@@ -185,6 +186,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   const unsubLease = keeper && typeof keeper.onLease === 'function' ? keeper.onLease((ev) => {
     // BROWSE YOURSELF (B-6ae8): his browsing ended (Close, the keep ran out, the browser stopped / quit, the profile deleted)
     // ⇒ every window of it is told WHY, typed, and let go (a Close closes it; the others say "Browse again")
+    if (ev && (ev.kind === 'human-start' || ev.kind === 'human-end') && ev.profileId) { noteHumanSeat(ev.profileId); askXScope(ev.profileId, ev.kind); } // lane desktop-x-seat-browser: his own view of the display takes / loses his input (r2: on HIS window only — its reach read again)
     if (ev && ev.kind === 'human-end' && ev.key) {
       for (const r of [...relays.values()]) if (isHuman(r) && r.target.key === ev.key) { broadcast(r, { type: 'status', state: 'human-ended', reason: ev.reason || 'released', deleted: !!ev.deleted }); endRelay(r, 1000, null); }
       return;
@@ -1363,13 +1365,65 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   /** The seat of ONE viewer of a relay on the X picture: 'active' (it drives: input + the window's geometry), 'size' (nobody drives
    *  and its pane rules: the geometry only — xpra's own configure-window sizes Chrome's window to it), else 'watch'. */
   const xSeatOf = (relay, viewerId) => (relay.mode === 'takeover' ? (relay.holder === viewerId ? 'active' : 'watch') : xRulerOf(relay) === viewerId ? 'size' : 'watch');
-  /** The desktop bridge's per-packet question for a display-for-browser socket: its ticket's viewer's seat ('watch' for a stranger). */
-  function xSeat(dsId, ticket) {
+  /** The desktop bridge's per-packet question for a display-for-browser socket: its ticket's viewer's seat ('watch' for a stranger).
+   *  lane desktop-x-seat-browser (ONE PERSON, ONE SEAT): a socket with NO ticket — the desktop window's own view of the display —
+   *  is PURE PIC.deskSeat's: 'input' when a PERSON opened it (`person`, the bridge's verdict: no agent token) while `profileId`'s
+   *  browser has its human holder (browse yourself, driving or away — the keeper's `humanOf`) and it is his ELECTED socket
+   *  (`elected`, the wiring's: one person, one seat — r2), else 'watch'. 'input' reaches xScope's windows only (the bridge). */
+  function xSeat(dsId, ticket, { profileId = null, person = false, elected = true } = {}) {
     const t = xTickets.get(String(ticket || ''));
-    if (!t || t.dsId !== String(dsId || '')) return 'watch';
+    if (!t) { const human = humanHolds(profileId); if (human && person) xScope(profileId); return PIC.deskSeat({ viewerId: ticket, person, human, elected }); }
+    if (t.dsId !== String(dsId || '')) return 'watch';
     const relay = relays.get(t.relayKey);
     if (!relay || !relay.viewers.has(t.viewerId)) return 'watch';
     return xSeatOf(relay, t.viewerId);
+  }
+  /** r2 (never silent): WHY a ticketless socket watches (PURE PIC.deskSeatWhy — 'other-window' / 'not-browsing' / 'watch-mode';
+   *  null = seated); a ticket's viewer: null (the live view tells its own). */
+  function xSeatWhy(dsId, ticket, { profileId = null, person = false, elected = true } = {}) {
+    if (xTickets.has(String(ticket || ''))) return null;
+    return PIC.deskSeatWhy({ viewerId: ticket, person, human: humanHolds(profileId), elected });
+  }
+  // ── r2 (MAJOR A): THE INPUT SEAT'S REACH — his window, its dialogs and menus (the keeper's xScopeFor), per browser, CACHED: the
+  // bridge asks per packet (sync); a miss on a window opened since, a press outside the windows read, his holding beginning ask
+  // the keeper again (one read at a time); an answer that changed re-seats that display (its sockets are told the new reach) ──
+  const xScopes = new Map(); // profileId → { scope: {wids:Set, rects, known:Set} | null, asking: bool, again: bool, at }
+  const sameScope = (a, b) => !!a && !!b && a.wids.size === b.wids.size && [...a.wids].every((w) => b.wids.has(w)) && JSON.stringify(a.rects) === JSON.stringify(b.rects);
+  /** The reach of `profileId`'s human holder now: {wids, rects, known} (Sets of numbers) or null (not read yet / nobody browses). */
+  function xScope(profileId) {
+    const pid = String(profileId || '');
+    if (!pid) return null;
+    const e = xScopes.get(pid);
+    if (!e) { askXScope(pid, 'first ask'); return null; }
+    return e.scope;
+  }
+  function askXScope(profileId, why = 'asked') {
+    const pid = String(profileId || '');
+    if (!pid || !keeper || typeof keeper.xScopeFor !== 'function') return;
+    let e = xScopes.get(pid);
+    if (!e) { e = { scope: null, asking: false, again: false, at: 0 }; xScopes.set(pid, e); }
+    if (e.asking) { e.again = true; return; }
+    const h = (() => { try { return typeof keeper.humanOf === 'function' ? keeper.humanOf(pid) : null; } catch { return null; } })();
+    if (!h || !h.browserKey) { const had = !!e.scope; e.scope = null; if (had) noteHumanSeat(pid); return; }
+    e.asking = true;
+    Promise.resolve().then(() => keeper.xScopeFor(pid, { browserKey: h.browserKey })).then((r) => {
+      const next = r && Array.isArray(r.wids) && r.wids.length ? { wids: new Set(r.wids.map(Number)), rects: (r.rects || []).map((x) => ({ wid: Number(x.wid), x: Number(x.x), y: Number(x.y), w: Number(x.w), h: Number(x.h) })), known: new Set((r.known || []).map(Number)) } : null;
+      const changed = !(next ? sameScope(e.scope, next) : !e.scope);
+      e.scope = next; e.at = now();
+      if (changed) { log.log?.(`[browser-live] ${pid}: his desktop input seat reaches ${next ? `window(s) ${[...next.wids].join(', ')}` : 'no window (his window could not be told on the display)'} (${why})`); noteHumanSeat(pid); }
+    }, (err) => { log.warn?.(`[browser-live] ${pid}: his window's reach could not be read (${why}) — ${err && err.message}`); }).finally(() => {
+      e.asking = false;
+      if (e.again) { e.again = false; askXScope(pid, 'asked again'); }
+    });
+  }
+  /** Does this profile's browser have its HUMAN holder now (browse yourself — the keeper's row; ended ⇒ none)? */
+  function humanHolds(profileId) { try { return !!profileId && !!keeper && typeof keeper.humanOf === 'function' && !!keeper.humanOf(String(profileId)); } catch { return false; } }
+  /** His holding began / ended ⇒ the display session of that browser re-seats its sockets at once (the desktop window's view of it
+   *  takes or loses his input; the keymap it sent while watching reaches xpra first — the bridge's held replay). */
+  function noteHumanSeat(profileId) {
+    let ds = null; try { const v = keeper && typeof keeper.pictureSourceFor === 'function' ? keeper.pictureSourceFor(String(profileId || '')) : null; ds = v && v.source === 'x' ? v.displaySession : null; } catch { ds = null; }
+    if (!ds) return;
+    for (const fn of [...xSeatListeners]) { try { fn(String(ds)); } catch (e) { log.warn?.(`[browser-live] the X seat listener threw — ${e && e.message}`); } }
   }
   /** Every display session a relay's tickets draw re-applies its seats (a takeover, a handback, a view gone, a new ruling pane) —
    *  and each ticket's viewer is told ITS seat (its X view sizes the window only as the ruler). */
@@ -1767,7 +1821,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     viewportRuling, agentViewport, // lane browser-viewport-answer: a pin rules an agent's raw set; the set answers with the page's size + one trace row
     tap, tapHuman, broadcastTo, TAP_FPS, viewerAlive, // P5: the recorder's seam (+ BROWSE YOURSELF: the user's own relay)
     activeTargetsFor, tapDialogAct, // lane browser-stuck: the watch's scope (the tab each relay shows) + the agent's dialog act on the trace
-    xSeat, onXSeats: (fn) => { if (typeof fn === 'function') xSeatListeners.add(fn); return () => xSeatListeners.delete(fn); } }; // lane browser-x-in-window: the desktop bridge's seat for an X picture's socket, and its refresh
+    xSeat, xSeatWhy, xScope, askXScope, onXSeats: (fn) => { if (typeof fn === 'function') xSeatListeners.add(fn); return () => xSeatListeners.delete(fn); } }; // lane browser-x-in-window: the desktop bridge's seat for an X picture's socket, and its refresh; lane desktop-x-seat-browser r2: why it watches, the input seat's reach
 }
 
 module.exports = { create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS, INPUT_WINDOW, COPY_DEDUP_MS };

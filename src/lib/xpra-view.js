@@ -146,6 +146,8 @@ export function startingText(ms) {
  *   onFront({wid,title,kind,main}|null) — the FRONT window (the topmost non-popup; `main` false = an app's second window)
  *   onSatellite({wid,title}) — S2: a secondary top-level got its slot — open (or re-bind) a satellite window for it
  *   admit(win, ctx) — lane browser-x-in-window: ONE window of a shared display (xpra-client's `admit`: the others never drawn)
+ *   onSeat({seat, why, code, refused, wids}) — lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (a seated
+ *                   source's: its seat, why it watches, the last refused act's code and count, an input seat's windows)
  *   fixedFollows  — () => true when the window adopts that size (then the picture is never scaled); default true
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
@@ -160,7 +162,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, onSeat = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
   /** lane xpra-mac-modifiers: the primary-modifier map of THIS viewer and THIS app's machine, asked per event (the one table). */
@@ -191,6 +193,11 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   let client = null;
   let viewOnly = false;
   let mode = 'active'; // x5: 'active' | 'watch' | 'blocked'
+  // lane desktop-x-seat-browser r2: setMode('input') = 'watch' + `inputSeat` — WATCH's picture (the windows where the server has
+  // them, the stage scaled to fit, NOTHING sized: no display size, no fit, no slot, no belt) with the person's keys and pointer
+  // sent (the bridge scopes them to his own window — the person's INPUT seat on a browser display)
+  let inputSeat = false;
+  const sends = () => mode === 'active' || (mode === 'watch' && inputSeat);
   let stageScale = 1;
   let pinNow = null; // lane e2b (§E2.2): the record's pin ({w, h} device px) — the X window's size; the picture always rescales
   let stageOffset = { x: 0, y: 0 };
@@ -616,6 +623,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         front: (win) => { try { onFront?.(win ? { wid: win.wid, title: win.title, kind: win.kind, main: !!client && win.wid === client.mainWid } : null); } catch {} },
         // the cursor image is device px: at a ratio > 1 it is declared at that density (image-set) so it keeps its
         // size on screen — assigned after the plain url(), which stays when a browser rejects the image-set form
+        seat: (v) => { try { onSeat?.(v); } catch (e) { log?.warn?.(`[xpra] onSeat threw: ${e && e.message}`); } }, // lane desktop-x-seat-browser r2: the bridge's word
         cursor: (cur) => {
           const u = cur ? pngDataUrl(cur.data) : null;
           pane.style.cursor = u ? `url(${u}) ${cur.xhot} ${cur.yhot}, auto` : '';
@@ -623,7 +631,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         },
       },
     });
-    client.viewOnly = viewOnly || mode !== 'active';
+    client.viewOnly = viewOnly || !sends();
     client.watch = mode === 'watch';
     client.dormant = mode === 'blocked';
     client.connect();
@@ -633,14 +641,15 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const disconnect = () => { shell.unwant(); releaseWmHold(mainPtr, null); mainPtr.press = null; try { client?.close(); } catch {} client = null; clearWindows(); for (const sat of sats.values()) sat.unbind(); try { onMain?.(null); } catch {} try { onFront?.(null); } catch {} };
   const dispose = () => { stopWait(); shell.close(); disconnect(); for (const sat of [...sats.values()]) sat.gone('main-closed'); ro?.disconnect(); clearTimeout(resizeTimer); clearTimeout(listTimer); if (mainPtr.raf) cancelAnimationFrame(mainPtr.raf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
   const focus = () => { try { ime.focus({ preventScroll: true }); } catch {} };
-  const setViewOnly = (v) => { viewOnly = !!v; if (client) client.viewOnly = viewOnly || mode !== 'active'; pane.classList.toggle('xpra-view-only', viewOnly || mode !== 'active'); };
-  /** x5: 'active' (this pane drives the app) | 'watch' (an agent drives: fit-scaled, nothing sent) | 'blocked' (another client is active: dormant). */
+  const setViewOnly = (v) => { viewOnly = !!v; if (client) client.viewOnly = viewOnly || !sends(); pane.classList.toggle('xpra-view-only', viewOnly || !sends()); };
+  /** x5: 'active' (this pane drives the app) | 'watch' (an agent drives: fit-scaled, nothing sent) | 'blocked' (another client is active: dormant);
+   *  lane desktop-x-seat-browser r2: 'input' (Watch's picture, the person's keys and pointer sent — never a size). */
   const setMode = (m) => {
-    const next = m === 'watch' || m === 'blocked' ? m : 'active';
-    if (next === mode) return;
-    mode = next;
-    if (client) { client.viewOnly = viewOnly || mode !== 'active'; client.dormant = mode === 'blocked'; client.watch = mode === 'watch'; }
-    pane.classList.toggle('xpra-view-only', viewOnly || mode !== 'active');
+    const next = m === 'watch' || m === 'blocked' || m === 'input' ? (m === 'input' ? 'watch' : m) : 'active';
+    if (next === mode && (m === 'input') === inputSeat) return;
+    mode = next; inputSeat = m === 'input';
+    if (client) { client.viewOnly = viewOnly || !sends(); client.dormant = mode === 'blocked'; client.watch = mode === 'watch'; }
+    pane.classList.toggle('xpra-view-only', viewOnly || !sends());
     pane.classList.toggle('xpra-watch', mode === 'watch');
     if (mode === 'active' && client) { const s = paneSize(); client.resize(s.width, s.height); }
     fitStage();
@@ -797,5 +806,5 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (client) client.setPin(n);
     fitStage();
   };
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, setPin, get pin() { return pinNow ? { ...pinNow } : null; }, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, closeFront, setAppState, rootToClient, attachSatellite, satellites: () => [...sats.keys()], fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!mainPtr.wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, setPin, get pin() { return pinNow ? { ...pinNow } : null; }, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, closeFront, setAppState, rootToClient, attachSatellite, satellites: () => [...sats.keys()], fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!mainPtr.wmHold; }, get mode() { return mode === 'watch' && inputSeat ? 'input' : mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

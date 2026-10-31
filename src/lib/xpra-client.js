@@ -553,6 +553,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         return;
       }
       case 'clipboard-request': { const reqId = p[1], selection = P.bytesToString(p[2]); send(lastPaste != null ? P.clipboardContents(reqId, selection, lastPaste) : P.clipboardNone(reqId, selection)); return; }
+      case 'vibespace-seat': { const v = p[1] && typeof p[1] === 'object' ? p[1] : {}; emit('seat', { seat: P.bytesToString(v.seat || ''), why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, wids: Array.isArray(v.wids) ? v.wids.map(Number) : [] }); return; } // lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (never xpra's)
       case 'ping_echo': case 'setting-change': case 'encodings': case 'bell': case 'notify_show': case 'notify_close': case 'info-response':
       case 'initiate-moveresize': case 'window-initiate-moveresize': moveResizeAsked(p); return;
       case 'new-tray': case 'send-file': case 'open-url': case 'pointer-position': case 'set-clipboard-enabled':

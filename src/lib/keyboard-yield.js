@@ -66,7 +66,12 @@ export function isFrame(el) { return !!el && el.nodeType === 1 && ['IFRAME', 'FR
  *  on cd867c05: a real press on the Desktop's noVNC canvas (and on an xpra pane) while driving was reclaimed and the
  *  typing went to the agent's PAGE — userW's report in another window. */
 const INPUT_HOSTS = '.xterm, .picture-shell';
-function inputHostOf(el) { try { return (el && typeof el.closest === 'function' && el.closest(INPUT_HOSTS)) || el; } catch { return el; } }
+/** lane desktop-x-seat-browser: a SATELLITE's xpra pane (a desktop window showing ONE more X window of its session — a browser
+ *  display's other Chrome windows) is one input with its OWN IME textarea too, and it sits in no picture shell. Measured: a press
+ *  on the person's Chrome window in its satellite focused that textarea and his DRIVING browse window reclaimed it (the press and
+ *  the focus in no common host), so his Escape went to the page and never to Chrome's own passkey dialog. The nearest host wins. */
+const SATELLITE_HOST = '.xpra-satellite';
+function inputHostOf(el) { try { return (el && typeof el.closest === 'function' && (el.closest(SATELLITE_HOST) || el.closest(INPUT_HOSTS))) || el; } catch { return el; } }
 /** verify r2 (N1): a focus target that TAKES KEYS without being a text box — noVNC's canvas (its keyboard handler listens
  *  on it) inside a picture shell. A press on it yields like a press on a text box; a script's focus on it is reclaimed. */
 function isPictureCanvas(el) {

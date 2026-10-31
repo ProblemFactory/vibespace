@@ -183,6 +183,7 @@ import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, s
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { deskDoorAct } from '../browser-picture.js'; // lane desktop-x-seat-browser r2: the Watch door's ONE act (PURE)
 /** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
 const CLOSE_STAMP_WAIT_MS = 1500;
 
@@ -475,7 +476,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     return { ok: true };
   };
   /** x5: 'active' | 'blocked' | 'watch' — this pane's state (PURE paneState over the lease + the viewers broadcast). */
-  const seatState = () => (optimistic && Date.now() < optimistic.until ? optimistic.state : paneState({ lease, myTag, active: seats.active, myPane: paneKey, known: seats.known }));
+  const seatState = () => (browserDisplay() ? bseat.seat || 'watch' : optimistic && Date.now() < optimistic.until ? optimistic.state : paneState({ lease, myTag, active: seats.active, myPane: paneKey, known: seats.known })); // lane desktop-x-seat-browser: a browser display's seat is the BROWSER's (the bridge's word to this socket; r2: unknown ⇒ watch, never paneState's 'active')
   const applyViewOnly = () => renderSeat();
   // THE PICTURE KIND IS THE RECORD'S `stream` (never a backend id) — known once the
   // first record answers, so the view is built then; both kinds share the shell.
@@ -488,7 +489,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
-    onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') applyViewOnly(); applySeamless(); },
+    onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
+    onSeat: (v) => applyBrowserSeat(v), // r2: the bridge's own word to THIS socket (its seat, why, a refused act) — never silent
     mayFocus: () => app.wm.activeWindowId === winInfo.id, // lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
   const setAppIcon = (dataUrl) => {
@@ -526,6 +528,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
       onLayout: (v) => { winInfo._desktopBarLayout = v; }, // the raw handle the heavy census reads (never the DOM)
     });
     view.mount.appendChild(blockedEl); // x5: the overlay of a blocked pane (hidden while active / watching)
+    view.mount.appendChild(xDoor); // lane desktop-x-seat-browser: a browser display's Watch door (over the picture, never over its input when held)
     // in Watch a click on the picture is a hint, never input (the view is view-only; the bridge would drop it anyway)
     view.mount.addEventListener('pointerdown', () => {
       const m = windowLiveMode({ lease, viewerTag: myTag });
@@ -536,6 +539,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     // B-5ee0 ⑥ (cannot be fixed here): xpra hands its clipboard to ONE client — the first that asked, the active pane —
     // so a Watch pane never receives what the app copies, and sends nothing. Copy / paste keys in Watch SAY so.
     view.mount.addEventListener('keydown', (e) => {
+      if (browserDisplay()) return; // lane desktop-x-seat-browser: a browser display's Watch says its own way (the door) — no «Take over» hint
       if (seatState() !== 'watch' || !(e.ctrlKey || e.metaKey) || !/^[cvx]$/i.test(e.key || '')) return;
       const now = Date.now();
       if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Copy and paste reach only the window that drives the app — xpra gives its clipboard to one viewer. Take over to copy or paste here.'), { duration: 5000 }); }
@@ -579,6 +583,88 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const resumeBtn = document.createElement('button'); resumeBtn.type = 'button'; resumeBtn.className = 'term-blocked-btn desktop-app-resume'; resumeBtn.textContent = t('Resume here');
   resumeBtn.title = t('Make this window the active one — the other client is blocked until it resumes');
   blockedEl.append(blockedTitle, blockedMsg, resumeBtn);
+  // ── lane desktop-x-seat-browser (ONE PERSON, ONE SEAT, 2026-10-30 — the owner: «桌面模式打开从一开始就无法交互»): a BROWSER
+  // DISPLAY's pane is seated by the browser, never this window's election (MEASURED: it believed itself active, sent every click
+  // and the bridge cut them all — a silent watch). r2 (acceptance r1): its seat is the BRIDGE's word to this socket (`onSeat`,
+  // in-band; GET browser-seat at every (re)connect and digest change until it speaks; a failed answer = WATCH, said — never
+  // 'active' by default): 'input' while the person browses that browser himself and this is his ELECTED pane — the view keeps
+  // Watch's picture and sends his keys and pointer, which reach HIS window only (Chrome's own dialogs over it — a passkey
+  // prompt, a print dialog — included; never a size, never an agent's window); else 'watch', SAID over the picture with who
+  // uses it and the way, the door's label IS its act (deskDoorAct): Browse yourself (his own tab — browse-yourself's road;
+  // none on a conversation's temporary browser, said why) or, his other pane holding the seat, Use it here.
+  const bseat = { seat: null, why: null, asked: 0, failed: false, refused: 0 };
+  const browserDisplay = () => !!rec && rec.kind === 'display-for-browser' && !!rec.forBrowser;
+  const xDoor = document.createElement('div'); xDoor.className = 'desktop-app-xseat'; xDoor.style.display = 'none'; xDoor.setAttribute('role', 'status');
+  const xDoorText = document.createElement('span'); xDoorText.className = 'desktop-app-xseat-text';
+  const xDoorBtn = document.createElement('button'); xDoorBtn.type = 'button'; xDoorBtn.className = 'file-tool-btn desktop-app-xseat-take';
+  xDoor.append(xDoorText, xDoorBtn);
+  const setBrowserSeat = (seat, why, { failed = false } = {}) => {
+    bseat.seat = seat === 'input' ? 'input' : 'watch'; bseat.why = why || null; bseat.failed = failed;
+    winInfo._desktopBrowserSeat = bseat.seat; winInfo._desktopBrowserSeatWhy = bseat.failed ? 'unread' : bseat.why; // the raw handles the heavy suite reads (never the DOM)
+    renderSeat();
+  };
+  const askBrowserSeat = async () => {
+    if (!browserDisplay() || !viewConnected) return;
+    const n = ++bseat.asked;
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/browser-seat?viewer=${encodeURIComponent(viewerId)}`);
+    if (closed || n !== bseat.asked) return;
+    if (!r || r.error || !r.seat) setBrowserSeat('watch', null, { failed: true }); // FAIL 3: an unread seat is WATCH, said — never 'active'
+    else setBrowserSeat(r.seat, r.why);
+  };
+  /** The bridge's word (in-band, this socket's own): the seat, why it watches, a refused act — said once per act. */
+  const applyBrowserSeat = (v) => {
+    if (!v || !browserDisplay()) return;
+    bseat.asked++; // a GET still in flight is older than this word
+    const more = (Number(v.refused) || 0) > bseat.refused;
+    bseat.refused = Number(v.refused) || 0;
+    setBrowserSeat(v.seat, v.why || null);
+    if (more && v.code === 'not-your-window' && bseat.seat === 'input') {
+      const now = Date.now();
+      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Only your own window takes your clicks and keys here — the agents\' windows are view only'), { duration: 3500 }); }
+    }
+  };
+  /** The conversations on this browser now (the digest's holder rows, by this client's names) — who the Watch sentence names. */
+  const browserUsers = () => ((app._browserProfiles && app._browserProfiles.leases) || []).filter((l) => l && l.profileId === rec.forBrowser && !l.human).map((l) => app.conversationNameOf?.(l.browserKey) || '').filter(Boolean);
+  const browserHuman = () => ((app._browserProfiles && app._browserProfiles.leases) || []).some((l) => l && l.profileId === rec.forBrowser && l.human);
+  let doorAct = null;
+  const renderBrowserDoor = () => {
+    const bd = !!view && browserDisplay();
+    const st = bd ? bseat.seat || 'watch' : null;
+    xSeatChip.style.display = st === 'input' ? '' : 'none';
+    const on = bd && st === 'watch';
+    xDoor.style.display = on ? '' : 'none';
+    if (!on) return;
+    doorAct = null;
+    if (bseat.failed) xDoorText.textContent = t('View only — this window\'s seat could not be read; it is asked again when it reconnects');
+    else if (bseat.why === 'other-window') { xDoorText.textContent = t('View only — your other window holds your seat on this browser'); doorAct = 'take'; }
+    else {
+      const prof = ((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x && x.id === rec.forBrowser) || null; // a NAMED profile — a conversation's temporary browser is not one
+      const a = deskDoorAct({ profile: prof, human: browserHuman() });
+      const names = browserUsers();
+      if (!a.act) xDoorText.textContent = t('View only — this is a conversation\'s temporary browser: only its agent uses it, it cannot be browsed yourself');
+      else { doorAct = a.act; xDoorText.textContent = names.length === 1 ? t('View only — this browser is used by the agent of «{name}»; browse it yourself to act in your own window here', { name: names[0] }) : names.length > 1 ? t('View only — this browser is used by the agents of {n} conversations; browse it yourself to act in your own window here', { n: names.length }) : t('View only — browse this browser yourself to act in your own window here'); }
+    }
+    xDoorBtn.style.display = doorAct ? '' : 'none';
+    xDoorBtn.textContent = doorAct === 'take' ? t('Use it here') : doorAct === 'open' ? t('Open your browsing window') : t('Browse yourself');
+    xDoorBtn.title = doorAct === 'take' ? t('Make this window the one your clicks and keys reach this browser through — your other window then only watches') : t('Open your own tab in this browser — your clicks and keys then reach your window here; the agents keep working in theirs');
+    xDoorBtn.dataset.act = doorAct || '';
+  };
+  /** «Use it here»: THIS pane's socket takes his seat (his other panes — a copy the layout synced to another client too — watch). */
+  const takeSeatHere = () => fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/browser-seat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
+  xDoorBtn.onclick = async () => {
+    const pid = rec && rec.forBrowser;
+    if (!pid) return;
+    if (doorAct === 'take') {
+      const r = await takeSeatHere();
+      if (!r || r.error) showToast((r && r.error) || t('server unreachable'), { type: 'error', duration: 5000 });
+      return;
+    }
+    if ((doorAct === 'browse' || doorAct === 'open') && typeof app.browseYourself === 'function') {
+      await takeSeatHere(); // the press is his act in THIS window: its pane holds his seat once he browses (MEASURED in test-browser-x-picture ⑥: a synced copy on another client connected later and, the newest, took it)
+      const p = ((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x && x.id === pid);
+      app.browseYourself(pid, { label: (p && p.label) || '' }); // browse-yourself's own road: his own tab — the seat follows (human-start re-seats this display, the bridge tells this socket)
+    }
+  };
   let lastSeat = null;
   // THE APP'S NAME (LOW-2, 2.369.156): an active / watching pane names the app by its LIVE protocol title (xpra) and
   // the record's otherwise; a BLOCKED pane has no protocol session (or only the last title it saw before the cut),
@@ -590,6 +676,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (!view) return;
     applySeamless(); // the lease / the seat are verdict inputs
     const st = seatState();
+    renderBrowserDoor(); // lane desktop-x-seat-browser: Watch is said (who + the way), the seat held is said
     if (rec) render(); else blockedTitle.textContent = titleText(); // the title bar + the overlay follow the seat (the name's source depends on it) — peer-controlled text, never markup
     if (st === lastSeat) return;
     lastSeat = st;
@@ -662,13 +749,16 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   moreBtn.innerHTML = UI_ICONS.more; moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
   // lane E: "Shared with N · <mode>" — a click opens the share dialog (a button: it does something)
   const shareChip = document.createElement('button'); shareChip.type = 'button'; shareChip.className = 'desktop-app-chip desktop-app-chip-share'; shareChip.style.display = 'none';
-  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, shareChip, hostChip, backendChip, scaleChip, pinChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
+  // lane desktop-x-seat-browser: the seat HELD, said — he browses this browser himself, so this picture takes his input
+  const xSeatChip = document.createElement('span'); xSeatChip.className = 'desktop-app-chip desktop-app-chip-xseat'; xSeatChip.style.display = 'none';
+  xSeatChip.textContent = t('You are browsing it'); xSeatChip.title = t('You browse this browser yourself, so your clicks and keys reach your own window here — Chrome\'s own windows over it included (a passkey prompt, a print dialog); the agents\' windows are view only');
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, xSeatChip, shareChip, hostChip, backendChip, scaleChip, pinChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
   // lane I: THE STRIP'S FOLD PRIORITIES (src/lib/live-bar-layout.js; the live view's rule): the picture shell's own items
   // (status — the ONE flexible item —, Paste, Reconnect, the copy chip + hint) and the mode badge + Take over / Hand
   // back never fold (0); the holder chip and, lane E, the share chip 2 (who may see this window — its words also ride the ⋯ as a fact); the origin marker and the fact chips 3 (the machine chip of a paired-machine app, 2.369.178, is one); Keep running / Stop 4 (both are
   // rows of this ⋯ menu already). Equal priorities fold right-to-left.
-  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [shareChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [pinChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
-  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [shareChip, 'share'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [pinChip, 'pin'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
+  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [xSeatChip, 2], [shareChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [pinChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
+  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [xSeatChip, 'xseat'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [shareChip, 'share'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [pinChip, 'pin'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
   let barFold = null;
   // the badge's words come from the PURE tables; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause'), t('You are driving'), t('Another viewer is driving')];
@@ -1041,6 +1131,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const off = app.ws.onGlobal((m) => {
     if (m.type === 'window-reach-updated') { const v = (m.reach || []).find((x) => x && x.handle === id) || null; if (v || reachView) applyReach(v); return; } // lane E
     if (m.type === 'desktop-app-viewers') { if (m.id === id) applyViewers(m); return; } // x5
+    if (m.type === 'browser-profiles-updated') { if (browserDisplay()) askBrowserSeat(); return; } // lane desktop-x-seat-browser: a holder came or went — this socket's seat is asked again (and the door's words)
     if (m.type === 'desktop-app-notify') { if (m.id === id) showAppNote(m); return; } // lane app-display-notify-sink
     if (m.type === 'window-leases-updated') { const l = (m.leases || []).find((x) => x && x.handle === id) || null; if ((l && !lease) || (!l && lease) || (l && lease && (l.input !== lease.input || l.sessionId !== lease.sessionId || (l.takenBy && l.takenBy.viewerId) !== (lease.takenBy && lease.takenBy.viewerId)))) applyLease(l); else lease = l; return; }
     if (m.type !== 'desktop-apps-updated') return;

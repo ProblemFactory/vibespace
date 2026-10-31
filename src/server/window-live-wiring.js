@@ -55,7 +55,36 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   const SS = require('./stream-sources.js');
   // lane browser-x-in-window (B2): an agent browser's display session is SEATED by the live view's relay (its ticket: the viewer
   // holding the browser's takeover drives, everyone else watches) — never the desktop keeper's one-active-viewer election
-  const browserSeat = browserStream && typeof browserStream.xSeat === 'function' ? (id, viewerId) => browserStream.xSeat(id, viewerId) : null;
+  // lane desktop-x-seat-browser (ONE PERSON, ONE SEAT): the sockets of a browser display a PERSON opened (the bridge's `person`: no
+  // agent token) — with the display's browser (the record's `forBrowser`) the relay seats the desktop window's own view of it.
+  // r2 (acceptance FAIL 1 — measured: two panes + another client, three 'active' sockets at once): his panes are ELECTED — the
+  // NEWEST pane wins (a pane reconnecting through a new socket keeps its place; within a pane its newest socket), «Use it here»
+  // (`takeSeat`) makes a pane the newest; the others watch and are TOLD 'other-window'. A move re-seats the display at once.
+  const PIC = require('../browser-picture.js');
+  const xPersons = new Map(); // display session id → { seq, panes: Map(pane → order), sockets: Map(viewerId → { pane, seq }) }
+  const personsOf = (id) => { let e = xPersons.get(id); if (!e) { e = { seq: 0, panes: new Map(), sockets: new Map() }; xPersons.set(id, e); } return e; };
+  /** The elected socket of a display: the newest pane's newest socket (null when no person's socket is open). */
+  const electedOf = (id) => {
+    const e = xPersons.get(id);
+    if (!e || !e.sockets.size) return null;
+    let pane = null, order = -1; for (const s of e.sockets.values()) { const o = e.panes.get(s.pane) ?? -1; if (o > order) { order = o; pane = s.pane; } }
+    let best = null, seq = -1; for (const [v, s] of e.sockets) if (s.pane === pane && s.seq > seq) { seq = s.seq; best = v; }
+    return best;
+  };
+  const isPerson = (id, viewerId) => !!viewerId && !!xPersons.get(id)?.sockets.has(String(viewerId));
+  const forBrowserOf = (id) => { try { const r = keeper.get(id); return (r && r.forBrowser) || null; } catch { return null; } };
+  const seatArgs = (id, viewerId) => ({ profileId: forBrowserOf(id), person: isPerson(id, viewerId), elected: !!viewerId && electedOf(id) === String(viewerId) });
+  const browserSeat = browserStream && typeof browserStream.xSeat === 'function' ? (id, viewerId) => browserStream.xSeat(id, viewerId, seatArgs(id, viewerId)) : null;
+  const browserSeatWhy = (id, viewerId) => (browserStream && typeof browserStream.xSeatWhy === 'function' ? browserStream.xSeatWhy(id, viewerId, seatArgs(id, viewerId)) : null);
+  /** «Use it here»: this person's pane becomes the newest — its socket takes the seat, his other panes watch. */
+  const takeBrowserSeat = (id, viewerId) => {
+    const e = xPersons.get(id), s = e && e.sockets.get(String(viewerId || ''));
+    if (!s) return { ok: false, code: 'no_viewer', error: 'this pane is not connected to the display yet — wait for it to reconnect, then Use it here' };
+    e.panes.set(s.pane, ++e.seq); s.seq = ++e.seq;
+    log.log?.(`[window] ${id}: pane ${s.pane} took his seat on the browser display («Use it here») — his other panes watch`);
+    try { streamRef?.refresh(id); } catch (err) { log.warn?.(`[window] ${id}: re-seat failed — ${err && err.message}`); }
+    return { ok: true, seat: browserSeat ? browserSeat(id, viewerId) : null, why: browserSeatWhy(id, viewerId) };
+  };
   const sources = SS.create({ vnc, keeper, engine, access, singletonId: DESKTOP_SINGLETON_ID, browserSeat });
   const src = (id) => SS.sourceOf(sources, id);
   const own = (id) => src(id).personal;
@@ -66,13 +95,36 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
     resolveTarget: (id) => src(id).target(id),
     upstreamWhy: sources.some((s) => s.upstreamWhy) ? (id) => src(id).upstreamWhy?.(id) ?? null : null, // design 014 D1: "<machine> went offline"
     forwardPort: access ? (hostId, port) => access.forwardPort(hostId, port) : null, // lane C2: a paired machine's picture port, forwarded (src/server/desktop-access.js)
-    inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : src(id).seat ? (src(id).seat(id, viewerId) === 'active' ? { relay: true } : { relay: false, code: 'watch-mode', why: 'only the viewer driving this browser types into it' }) : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated; lane browser-x-in-window: a SEATED source (an agent browser's display) relays input for its driver only — never the window engine's no-lease relay
+    inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : src(id).seat ? (src(id).seat(id, viewerId) === 'active' ? { relay: true } : { relay: false, code: 'watch-mode', why: 'only this browser\'s holder types into it — the viewer driving it, or the person browsing it himself (his own window)' }) : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated; lane browser-x-in-window: a SEATED source (an agent browser's display) relays input for its holder only — never the window engine's no-lease relay
     pinned: (id) => (!own(id) && keeper.get(id) && keeper.get(id).pin) || null, // lane e2b: the record's pin {w,h} — the keeper owns that window's geometry; r3: the xpra bridge asks xpra for it
     onViewerLeft: (id, viewerId) => { if (!own(id) && !src(id).seat) engine.viewerLeft(id, viewerId); }, // lane browser-x-in-window: an X picture's socket leaving hands nothing back (the takeover is the live view's)
     viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
-      join: (id, { viewerId, pane, prev, ua }) => { if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) }); },
-      leave: (id, viewerId) => { if (governed(id)) keeper.viewerLeft(id, viewerId); },
+      join: (id, { viewerId, pane, prev, ua, person = false }) => { // lane desktop-x-seat-browser: a seated source ELECTS its person sockets (r2: the newest pane)
+        if (src(id).seat) {
+          if (!person || !viewerId || PIC.X_TICKET_RE.test(String(viewerId))) return; // a live view's ticket is the relay's seat, never his pane
+          const e = personsOf(id), p = String(pane || viewerId);
+          if (!e.panes.has(p)) e.panes.set(p, ++e.seq); // a NEW pane is the newest; a pane reconnecting keeps its place
+          e.sockets.set(String(viewerId), { pane: p, seq: ++e.seq });
+          try { streamRef?.refresh(id); } catch (err) { log.warn?.(`[window] ${id}: re-seat failed — ${err && err.message}`); } // his other panes are told at once
+          return;
+        }
+        if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) });
+      },
+      leave: (id, viewerId) => {
+        const e = xPersons.get(id);
+        if (e && e.sockets.has(String(viewerId))) {
+          const { pane } = e.sockets.get(String(viewerId)); e.sockets.delete(String(viewerId));
+          if (![...e.sockets.values()].some((s) => s.pane === pane)) e.panes.delete(pane);
+          if (!e.sockets.size) xPersons.delete(id);
+          try { streamRef?.refresh(id); } catch (err) { log.warn?.(`[window] ${id}: re-seat failed — ${err && err.message}`); } // the next newest pane takes the seat
+        }
+        if (governed(id)) keeper.viewerLeft(id, viewerId);
+      },
       state: (id, viewerId) => (src(id).seat ? src(id).seat(id, viewerId) : governed(id) ? DV.viewerState({ active: keeper.activeViewer(id) }, viewerId, engine.leaseInput(id)) : 'free'), // lane browser-x-in-window: the browser's seat first
+      // lane desktop-x-seat-browser r2: a seated source's WHY (the code its socket is TOLD — never silent) and its INPUT seat's reach
+      why: (id, viewerId) => (src(id).seat ? browserSeatWhy(id, viewerId) : undefined),
+      scope: (id) => { const pid = src(id).seat ? forBrowserOf(id) : null; return pid && browserStream && typeof browserStream.xScope === 'function' ? browserStream.xScope(pid) : null; },
+      askScope: (id, why) => { const pid = src(id).seat ? forBrowserOf(id) : null; if (pid && browserStream && typeof browserStream.askXScope === 'function') browserStream.askXScope(pid, why); },
     },
     netemEnabled, // P8-2 validation slice: VIBESPACE_DESKTOP_NETEM=1 on a dev server only, never on by default
     log,
@@ -84,7 +136,7 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   engine.setViewerCount?.((id) => stream.connections(id)); // lane e2a r3: an agent browser's end waits while a viewer has it open
   keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
   const handover = require('./desktop-handover-engine.js').create({ dataDir, activeSessions, log }); // lane desktop-handover
-  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest, handover }); app.use(router); }
+  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest, handover, browserSeat: (id, viewerId) => (src(id).seat ? { seat: src(id).seat(id, viewerId), why: browserSeatWhy(id, viewerId) } : null), takeBrowserSeat: (id, viewerId) => (src(id).seat ? takeBrowserSeat(id, viewerId) : { ok: false, code: 'not-a-browser-display', error: 'only a browser display has a person\'s seat' }) }); app.use(router); } // lane desktop-x-seat-browser: a browser display's seat (r2: + why), asked by its window; «Use it here»
   { const wt = require('../routes/window-targets'); wt.setup({ engine, handover }); app.use(wt.router); }
   require('../routes/browser').setWindowEngine(engine); // lane e2a (§E2): `vibespace-browser new --backend desktop-app` launches through the engine
   let announced = false;

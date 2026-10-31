@@ -259,7 +259,10 @@ function prevOf(url) {
  *                   viewer's and, r3, asks xpra for the pin's desktop size itself on each viewer connection)
  *   onViewerLeft  — (id, viewerId) => void  (P9b; the holder's socket closed)
  *   viewerSeats   — P8-2 x5 (absent ⇒ every socket relayed as before, the policy above alone):
- *                   { join(id, {viewerId, pane, prev, ua}), leave(id, viewerId), state(id, viewerId) → 'active'|'blocked'|'watch'|'free' }
+ *                   { join(id, {viewerId, pane, prev, ua, person}), leave(id, viewerId), state(id, viewerId) → 'active'|'blocked'|'watch'|'free' }
+ *                   (`person`: the socket carries no agent token — lane desktop-x-seat-browser's seat on a browser display;
+ *                   r2: + 'input' — the person's INPUT seat, scoped by the relay to `scope(id)`'s windows — and the optional
+ *                   `why(id, viewerId)` (a seated source's code, TOLD to that socket), `scope(id)` / `askScope(id, why)`)
  *                   — the keeper's ONE-ACTIVE-VIEWER election composed with the engine's lease (window-live-wiring);
  *                   only a NAMED socket (`?viewer=`) is seated (2.369.156, LOW-3): an ANONYMOUS one — the hosted
  *                   upstream page, a script — is a read-only WATCH seat on a governed stream (`state(id, null)`
@@ -334,7 +337,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     if (!viewerSeats || !seat) return 'free';
     // LOW-3 (2.369.156): an anonymous socket is never elected — on a governed stream it WATCHES (the picture, nothing else)
     if (seat === ANON) { try { return viewerSeats.state(id, null) === 'free' ? 'free' : 'watch'; } catch { return 'watch'; } }
-    try { const s = viewerSeats.state(id, seat); return s === 'active' || s === 'blocked' || s === 'watch' || s === 'size' ? s : 'free'; } /* lane browser-x-in-window: + 'size' (the geometry only) — an unknown seat read as 'free' fell to the window engine's no-lease relay and let a sizing pane TYPE (measured: the RED control's forced keys reached Chrome) */ catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.state threw — relaying as before: ${e && e.message}`); return 'free'; }
+    try { const s = viewerSeats.state(id, seat); if (s === 'input') return s; /* lane desktop-x-seat-browser r2: the person's INPUT seat (the relay scopes it) */ return s === 'active' || s === 'blocked' || s === 'watch' || s === 'size' ? s : 'free'; } /* lane browser-x-in-window: + 'size' (the geometry only) — an unknown seat read as 'free' fell to the window engine's no-lease relay and let a sizing pane TYPE (measured: the RED control's forced keys reached Chrome) */ catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.state threw — relaying as before: ${e && e.message}`); return 'free'; }
   };
   /** Re-applies every socket's state for `id` (the keeper / the lease moved). A socket whose bridge has not wired
    *  its reconcile yet is skipped (LOW-1, 2.369.156: the join's own broadcast refreshes while the joining socket is
@@ -348,7 +351,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     conns.get(id).add(conn);
     conn.seat = seat;
     if (seat === ANON) { if (seatState(id, seat) === 'watch') log.log?.(`[desktop-stream] ${id}: an ANONYMOUS socket (no ?viewer=) is a read-only WATCH seat — only a named pane is ever elected`); }
-    else if (seat) { try { viewerSeats.join(id, { viewerId: seat, pane: paneOf(req.url) || seat, prev: prevOf(req.url), ua: (req.headers && req.headers['user-agent']) || '' }); } catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.join threw — ${e && e.message}`); } }
+    else if (seat) { try { viewerSeats.join(id, { viewerId: seat, pane: paneOf(req.url) || seat, prev: prevOf(req.url), ua: (req.headers && req.headers['user-agent']) || '', person: !bearerOf(req) }); } catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.join threw — ${e && e.message}`); } }
     let gone = false;
     const forget = () => {
       if (gone) return; gone = true;
@@ -361,6 +364,11 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
    *  for a re-election (the grace's end, LOW-4's older socket) while its close handshake runs — up to the ws library's
    *  30 s against a silently dropped peer. Deferred one turn: the cut runs inside the keeper's own broadcast. */
   const leaveOnCut = (seatRef) => { setImmediate(() => seatRef.forget()); };
+  // lane desktop-x-seat-browser r2: a SEATED source's word for one socket (undefined = not seated: nothing is told), and the
+  // person's input seat's reach ({wids:Set, rects, known:Set} | null) — the relay scopes and tells by them
+  const seatWhy = (id, seat) => { if (!viewerSeats || typeof viewerSeats.why !== 'function' || !seat) return undefined; try { return viewerSeats.why(id, seat === ANON ? null : seat); } catch { return undefined; } };
+  const seatScope = (id) => { if (!viewerSeats || typeof viewerSeats.scope !== 'function') return null; try { return viewerSeats.scope(id) || null; } catch { return null; } };
+  const askSeatScope = (id, why) => { if (viewerSeats && typeof viewerSeats.askScope === 'function') { try { viewerSeats.askScope(id, why); } catch { /* the next miss asks again */ } } };
   const BLOCKED_CLOSE = 4001;
   const BLOCKED_REASON = 'blocked: active on another client';
   const ENDED_CLOSE = 1001;
@@ -368,7 +376,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
   // rv-desktop-apps F-B4 (lane dc-seams-desktop, 2026-10-05): the RELAY of each stream kind is its own module, ONE
   // line in src/server/stream-relays.js. It gets what this ONE bridge owns (the seats, the stats, the named closes, the
   // keepalive, the oversize close, the input policy) and pumps its protocol's bytes; the bridge spells no kind.
-  const BRIDGE = { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, WebSocketClient, closeCodeOf, closeOversize, closed, inputPolicy, pinned, lastClose, leaveOnCut, log, netemQueue, now, onDesktopSize, onInput, onViewerLeft, open, opened, pingMs, refresh, resolveTargetSafe, seatState, stats, takeSeat, upstreamWhy, viewers, wsOversize };
+  const BRIDGE = { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, WebSocketClient, closeCodeOf, closeOversize, closed, inputPolicy, pinned, lastClose, leaveOnCut, log, netemQueue, now, onDesktopSize, onInput, onViewerLeft, open, opened, pingMs, refresh, resolveTargetSafe, seatState, seatWhy, seatScope, askSeatScope, stats, takeSeat, upstreamWhy, viewers, wsOversize };
   const bridges = Object.fromEntries(Object.entries(STREAM_RELAYS).map(([kind, r]) => [kind, r.bridgeOf(BRIDGE)]));
 
   /**

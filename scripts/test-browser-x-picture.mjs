@@ -18,7 +18,11 @@
 //      page's own keyboard) answer the sheet: the page signs in; input latency measured (a click through the X picture to
 //      the page's own pointerdown clock);
 //   ④ Hand back (a real click) ⇒ Watch again, the agent's next verb runs (the signed-in page's title) and is told the sheet
-//      closed in Chrome's window.
+//      closed in Chrome's window;
+//   ⑥ (lane desktop-x-seat-browser) ONE PERSON, ONE SEAT: the desktop window on the browser's display says Watch (who + the way),
+//      a Watch viewer held VIBESPACE_XSEAT_HOLD_MS (5 min) is never dropped by xpra, its door «Browse yourself» opens his own tab ⇒
+//      an INPUT seat (r2): every Chrome window already on the display keeps its geometry, and his click + Escape answer Chrome's
+//      OWN passkey dialog over his page (CDP's own clicks never do — measured beside it).
 // SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.38.2, Google Chrome, xpra / xauth, or when the server
 // took the driver road. Scratch only (/tmp/vs-xpicture-<pid>): never ~/.agent-browser, never the owner's display or bus,
 // never `close --all`, never the production data/. PNGs: VIBESPACE_XPIC_PNG_DIR (optional) receives the viewer's picture.
@@ -138,6 +142,8 @@ const col = http.createServer((req, res) => {
     res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="bxw realm"', 'Content-Type': 'text/html' }); res.end(pageHtml('401 needs a sign-in')); return; // DARK like the page: the RED control's region must have no white of its own
   }
   if (u.pathname === '/blk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw page')); return; }
+  // lane desktop-x-seat-browser: a page in a passkey ceremony (Chrome's OWN WebAuthn dialog — drawn by Chrome, not the page); its outcome on window.__pk
+  if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
   res.statusCode = 404; res.end();
 });
 const CP = await freePort(); await new Promise((r) => col.listen(CP, '127.0.0.1', r));
@@ -390,4 +396,86 @@ const med2 = lat2.length ? [...lat2].sort((a, b) => a - b)[Math.floor(lat2.lengt
 ok(lat2.length >= 5, `INPUT LATENCY through the SCREENCAST (CDP): ${lat2.length} presses reached the page — median ${med2} ms (${lat2.join(', ')} ms; the same clock as ③)`, JSON.stringify(lat2));
 console.log(`  [measure] screencast_input_latency_ms median=${med2} samples=${JSON.stringify(lat2)}`);
 await api('PATCH', '/api/settings', { 'browser.headed': null });
+
+// ═══ ⑥ ONE PERSON, ONE SEAT (lane desktop-x-seat-browser, 2026-10-30 — the owner, browsing his browser himself: «桌面打开虽然能看到
+// passkey 弹窗但无法点击» / «桌面模式打开从一开始就无法交互»). The desktop window on the browser's display (桌面 → it): Watch is SAID
+// while only the agent uses the browser — who, and the way — and a Watch viewer is HELD (VIBESPACE_XSEAT_HOLD_MS, 5 min by
+// default: the bridge cuts its input packets, xpra must never drop it for that — its own close is the event watched); its button
+// IS its act (r2): «Browse yourself» — his own tab, browse-yourself's road — and the window's seat becomes an INPUT seat that sizes
+// nothing (every Chrome window already on the display keeps its geometry: only the live view's ruling pane sizes one); then HIS
+// click and Escape in that window reach Chrome's OWN passkey dialog over his page — which CDP's own clicks never reach (MEASURED
+// here too: the RED control of the raw fallback).
+console.log('— ⑥ one person, one seat: the desktop window on the browser display says Watch, holds, takes the seat, answers Chrome\'s own dialog');
+{
+  const DS = rec.displaySession.id;
+  const HOLD_MS = Number(process.env.VIBESPACE_XSEAT_HOLD_MS || 300000);
+  await P.ev(`window.app.openDesktopApp(${JSON.stringify(DS)})`);
+  const DWQ = `[...window.app.wm.windows.values()].find((x) => x._desktopAppId === ${JSON.stringify(DS)} && !x._desktopSatelliteWid)`;
+  const dv = await until(async () => { const x = await P.ev(`(() => { const w = ${DWQ}; const v = w && w._desktopAppView; return v && v.state === 'connected' && w._desktopBrowserSeat ? { seat: w._desktopBrowserSeat, viewer: w._windowViewerId } : null; })()`); return x; }, 45000, 250);
+  ok(!!dv && dv.seat === 'watch', `the desktop window on display session ${DS} asks ITS seat: watch (the agent drives; nobody browses it himself) — never the silent 'active' it believed before`, JSON.stringify(dv));
+  const door = await until(async () => P.ev(`(() => { const w = ${DWQ}; const d = w && w.element.querySelector('.desktop-app-xseat'); const b = d && d.querySelector('.desktop-app-xseat-take'); return d && d.style.display !== 'none' ? { text: d.querySelector('.desktop-app-xseat-text').textContent, btn: !!b && b.style.display !== 'none', act: b && b.dataset.act, label: b && b.textContent } : null; })()`), 10000, 200);
+  ok(!!door && /^View only — (this browser is used by (the agent of «[^»]+»|the agents of \d+ conversations); browse it yourself|browse this browser yourself) to act in your own window here/.test(door.text) && door.btn && door.act === 'browse' && door.label === 'Browse yourself', `Watch is SAID over the picture — who uses it and the way, the button's label its act: "${door && door.text}"`, JSON.stringify(door));
+  // THE HOLD: pointer motion + a click every ~30 s, all cut by the bridge; xpra's own close of this socket is the event watched
+  const pane = await P.ev(`(() => { const w = ${DWQ}; window.app.wm.focusWindow(w.id); const r = w._desktopAppView.pane.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
+  const closeRe = new RegExp(`\\[desktop-stream\\] ${DS}: closed \\([^\\n]*viewer ${dv ? dv.viewer : 'none'}[^\\n]*`);
+  const tHold = Date.now(); let moves = 0;
+  while (Date.now() - tHold < HOLD_MS && !closeRe.test(journal)) {
+    const t = (Date.now() - tHold) / 1000;
+    await P.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pane.x + pane.w * (0.3 + 0.4 * Math.abs(Math.sin(t))), y: pane.y + pane.h * (0.3 + 0.4 * Math.abs(Math.cos(t))) }); moves++;
+    if (moves % 150 === 0) await P.clickAt(pane.x + pane.w / 2, pane.y + pane.h / 2);
+    await sleep(200);
+  }
+  const heldS = Math.round((Date.now() - tHold) / 1000);
+  const dropped = closeRe.exec(journal);
+  const still = await P.ev(`(() => { const w = ${DWQ}; return w && w._desktopAppView ? w._desktopAppView.state : null; })()`);
+  ok(!dropped && still === 'connected', `a WATCH viewer is held ${heldS} s (${moves} pointer moves + clicks, every one cut by the bridge): xpra never closed its socket`, dropped ? dropped[0] : still);
+  // THE DOOR: its button IS its act — Browse yourself: his own tab (browse-yourself's road), nothing of any agent touched
+  const geomQ = `(() => { const w = ${DWQ}; return (w._desktopAppView.windows() || []).filter((x) => x.kind !== 'popup').map((x) => ({ wid: x.wid, x: x.x, y: x.y, w: x.w, h: x.h, title: x.title })); })()`;
+  const before = await P.ev(geomQ);
+  const btn = await P.ev(`(() => { const w = ${DWQ}; window.app.wm.focusWindow(w.id); const b = w.element.querySelector('.desktop-app-xseat-take'); const r = b && b.getBoundingClientRect(); return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
+  if (btn) await P.clickAt(btn.x, btn.y);
+  const held = await until(async () => P.ev(`(() => { const w = ${DWQ}; const d = w.element.querySelector('.desktop-app-xseat'); const c = w.element.querySelector('.desktop-app-chip-xseat'); return w._desktopBrowserSeat === 'input' && d.style.display === 'none' && c && c.style.display !== 'none' ? { chip: c.textContent, mode: w._desktopAppView.mode } : null; })()`), 30000, 250);
+  const human = ((await api('GET', '/api/browser/profiles')).json || {}).leases?.find((l) => l && l.human && l.profileId === PID) || null;
+  const why = held ? null : await P.ev(`(() => { const w = ${DWQ}; const d = w.element.querySelector('.desktop-app-xseat'); return { seat: w._desktopBrowserSeat, why: w._desktopBrowserSeatWhy, door: d && d.style.display !== 'none' ? d.textContent : null, mode: w._desktopAppView && w._desktopAppView.mode }; })()`);
+  ok(!!btn && !!held && held.mode === 'input' && !!human, `Browse yourself (a real click) ⇒ he browses it himself (${human && human.browserKey}) and THIS picture takes his input — an INPUT seat in THIS pane though ⑤'s viewer page holds a synced copy of the window (the view's mode ${held && held.mode}): the door gone, the bar says "${held && held.chip}"`, JSON.stringify({ btn, held, human, why, journal: (journal.match(/\[(window|browser-live)\][^\n]*(seat|reach)[^\n]*/g) || []).slice(-6) }));
+  // MAJOR A (acceptance r1 — measured then: the 'active' desktop socket replayed its display size + geometry and fitted, slotted
+  // and belted the agents' windows): his seat sizes NOTHING — every Chrome window that was on the display keeps its geometry
+  await sleep(3000);
+  const afterG = await P.ev(geomQ);
+  const moved = (before || []).map((b) => ({ b, a: (afterG || []).find((x) => x.wid === b.wid) })).filter(({ b, a }) => a && (a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h));
+  ok(Array.isArray(before) && before.length >= 1 && moved.length === 0, `his INPUT seat sizes nothing: the ${before ? before.length : 0} Chrome window(s) already on the display keep their geometry (${JSON.stringify((before || []).map((x) => [x.wid, x.x, x.y, x.w, x.h]))})`, JSON.stringify(moved));
+  // THE RAW FALLBACK: Chrome's own passkey dialog over HIS page — CDP never reaches it; his click + Escape in the desktop window do
+  if (human) await api('POST', `/api/browser/browse/${human.browserKey}/navigate`, { url: `http://localhost:${CP}/pk` });
+  const H = DIR ? await agentPage(DIR, '/pk') : null;
+  let pk0 = null, pkCdp = null, pkDesk = null;
+  if (H) {
+    const b = await until(() => H.ev(`(() => { const e = document.getElementById('pkb'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`), 10000, 200);
+    const I = (q) => H.call('Input.dispatchMouseEvent', q);
+    if (b) { await I({ type: 'mouseMoved', x: b.x, y: b.y }); await I({ type: 'mousePressed', x: b.x, y: b.y, button: 'left', clickCount: 1 }); await I({ type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1 }); }
+    pk0 = await until(async () => { const v = await H.ev('window.__pk'); return v === 'pending' ? v : null; }, 5000, 100);
+    await sleep(1500); // Chrome's dialog draws
+    // CDP's own pointer over the page — where Chrome draws its dialog, the page's centre, around it: the dialog is not the page's
+    // (MEASURED besides: CDP's Escape reaches it only while Chrome's window holds the X focus — a fact of the display, not a road)
+    const vp = await H.ev('({ w: innerWidth, h: innerHeight })');
+    for (const [fx, fy] of [[0.5, 0.15], [0.5, 0.3], [0.5, 0.5], [0.62, 0.62], [0.38, 0.62]]) { const x = vp.w * fx, y = vp.h * fy; await I({ type: 'mouseMoved', x, y }); await I({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 }); await I({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }); await sleep(300); }
+    await sleep(1200);
+    pkCdp = await H.ev('window.__pk');
+    // HIS window in the desktop picture (r2: the input seat draws every window in the display's own pane, where the server has it) —
+    // a click on a visible point of it, then Escape from the viewer's keyboard
+    const his = await until(async () => { const ws = await P.ev(`(() => { const w = ${DWQ}; return w._desktopAppView.windows(); })()`); return (ws || []).find((x) => /bxw pk/.test(String(x.title || ''))) || null; }, 15000, 250);
+    if (his) await P.ev(`(() => { const s = [...window.app.wm.windows.values()].find((x) => x._desktopSatelliteWid === ${his ? his.wid : 0}); window.app.wm.focusWindow(s ? s.id : (${DWQ}).id); return true; })()`);
+    await sleep(800);
+    const at = his ? await P.ev(`(() => { for (const c of document.querySelectorAll('.xpra-win[data-wid="${his ? his.wid : 0}"] canvas')) { const r = c.getBoundingClientRect(); if (r.width < 20 || r.height < 20) continue; for (const fy of [0.6, 0.45, 0.75, 0.3, 0.9]) for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) { const x = Math.min(innerWidth - 5, Math.max(5, r.left + r.width * fx)), y = Math.min(innerHeight - 5, Math.max(5, r.top + r.height * fy)); const hit = document.elementFromPoint(x, y); if (hit && (hit === c || c.parentElement.contains(hit))) return { x, y }; } } return null; })()`) : null;
+    if (at) { await P.clickAt(at.x, at.y); await sleep(500); await P.key('Escape', { code: 'Escape', vk: 27 }); }
+    pkDesk = await until(async () => { const v = await H.ev('window.__pk'); return /rejected/.test(String(v)) ? v : null; }, 8000, 100) || (await H.ev('window.__pk'));
+    ok(!!his && !!at, `his Chrome window (${his && his.wid}) is in the desktop picture and takes a real click there`, JSON.stringify({ his, at }));
+  }
+  ok(pk0 === 'pending' && pkCdp === 'pending', `MEASURED (the RED control of the raw fallback): the page waits in navigator.credentials.get and five of CDP's own clicks never reach Chrome's dialog (${pk0} → ${pkCdp})`);
+  ok(/rejected NotAllowedError/.test(String(pkDesk)), `THE RAW FALLBACK: his click + Escape in the desktop window answer Chrome's OWN passkey dialog (__pk = ${pkDesk})`);
+  // the scene ends: his browsing closed, the display's windows closed — the layout syncs to every client, ⑤'s viewer page included
+  // (its own Take over would otherwise find the desktop window's button first: the same class)
+  if (human) await api('POST', `/api/browser/browse/${human.browserKey}/close`);
+  await P.ev(`(() => { for (const w of [...window.app.wm.windows.values()]) if (w._desktopAppId === ${JSON.stringify(DS)} || (w._browserLive && w._browserLive.isHuman && w._browserLive.isHuman())) window.app.wm.closeWindow(w.id); return true; })()`);
+  await until(async () => P.ev(`![...window.app.wm.windows.values()].some((w) => w._desktopAppId === ${JSON.stringify(DS)} || (w._browserLive && w._browserLive.isHuman && w._browserLive.isHuman()))`), 10000, 200);
+}
 await done();

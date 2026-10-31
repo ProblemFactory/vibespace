@@ -4425,6 +4425,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const p = profile(String(profileId));
     return PIC.dialogsOver(xw.wid, await xRowsOf(v.displaySession), { profileDir: p && p.dir });
   }
+  /** lane desktop-x-seat-browser r2 (MAJOR A): THE PERSON'S INPUT SEAT'S REACH on a browser display — HIS window (his holder
+   *  key's: the window of his own tab), Chrome's dialogs over it and the menus inside it (PURE PIC.xScopeOf over the display's
+   *  rows, read FRESH: a menu or a dialog that opened since is asked for). {wids: [], rects: [], known: []} off the X road / untold. */
+  async function xScopeFor(profileId, { browserKey = null } = {}) {
+    const xw = await xWindowFor(profileId, { browserKey });
+    if (xw.wid == null) return { wid: null, why: xw.why, wids: [], rects: [], known: [] };
+    const p = profile(String(profileId));
+    return { wid: xw.wid, why: xw.why, ...PIC.xScopeOf(xw.wid, await xRowsOf(xw.source.displaySession, { fresh: true }), { profileDir: p && p.dir }) };
+  }
   async function stop(profileId, { why = 'user' } = {}) {
     ensureLoaded();
     const rec = reg.browsers[profileId];
@@ -7368,6 +7377,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
     setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; wireDisplayKeeper(); }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions); lane browser-display-holders: its records read the holders, its person's stop reaches the keeper
     pictureSourceFor, xWindowFor, nativeDialogsFor, // lane browser-x-in-window (B2): the picture switch — the source verdict, the holder's X window, Chrome's own dialog windows over it
+    xScopeFor, // lane desktop-x-seat-browser r2: the person's input seat's reach (his window, its dialogs and menus)
     streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)

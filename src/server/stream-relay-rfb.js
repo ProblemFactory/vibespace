@@ -265,6 +265,7 @@ function bridgeOf(ctx) {
       // KeyEvent is cut out, the FramebufferUpdateRequest beside it goes through
       let allow = true;
       if (s === 'watch') { allow = false; lastRefusal = 'watch-mode'; }
+      else if (s === 'size' || s === 'input') { allow = false; lastRefusal = s === 'size' ? 'size-only' : 'input-only'; } // lane desktop-x-seat-browser r2: a seat scoped to ONE xpra window (or one that only sizes it) has no window to scope here — RFB has none: refused
       else if (s === 'free' && inputPolicy) { try { const p = inputPolicy(id, viewerId); if (p && p.relay === false) { allow = false; lastRefusal = p.code || 'refused'; } } catch (e) { log.warn?.(`[desktop-stream] ${id}: inputPolicy threw — relaying: ${e && e.message}`); } }
       const r = sieve.strip(m, allow);
       if (r.relay) { stats.relayed++; try { if (gate && !gate.done) gate.fromBrowser(r.relay); else sock.write(r.relay); } catch { /* socket closing */ } }

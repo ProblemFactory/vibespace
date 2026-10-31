@@ -169,6 +169,7 @@ import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
+import { deskDoorOf } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE)
 import { createXpraView, keyInputOf, workerUrlFor, streamUrl as xStreamUrl } from './xpra-view.js'; // lane browser-x-in-window: the desktop app window's view draws the browser's OWN window
 import { bufferRefresh as xBufferRefresh, focusPacket as xFocusPacket } from './xpra-proto.js'; // lane browser-x-in-window: a repaint after a resize, the window's focus at a takeover
 
@@ -550,6 +551,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // `dialog` record, from the dialog watch): the card says what the page asks, Accept / Dismiss answer it as the USER
   // (the agent's next verb is told); an UNRESPONSIVE page (the browser fact's `stuck`) offers the human Restart
   const dialogBar = document.createElement('div'); dialogBar.className = 'browser-live-dialog'; dialogBar.style.display = 'none'; dialogBar.setAttribute('role', 'alertdialog');
+  // lane desktop-x-seat-browser (THE RAW FALLBACK): Chrome's own window holds the page and THIS view cannot show it (his browse
+  // window draws the page's picture) — ONE line and its door, under the banner: the browser's display in Desktop takes his input
+  // there, on HIS window (PURE deskDoorOf / deskSeat; r2: only in his browse-yourself window — the Desktop's seat reaches his own
+  // window, never a conversation's; re-judged at every fact, X mount / unmount, mode and digest change; the passkey's sentence
+  // stays the banner's)
+  const deskDoor = document.createElement('div'); deskDoor.className = 'browser-live-deskdoor'; deskDoor.style.display = 'none';
+  const deskDoorText = document.createElement('span'); deskDoorText.className = 'browser-live-deskdoor-text'; deskDoorText.textContent = t("Open this browser's display in Desktop to act on Chrome's own window");
+  const deskDoorBtn = document.createElement('button'); deskDoorBtn.type = 'button'; deskDoorBtn.className = 'file-tool-btn browser-live-deskdoor-open'; deskDoorBtn.textContent = t('Open in Desktop');
+  deskDoor.append(deskDoorText, deskDoorBtn);
+  deskDoorBtn.onclick = () => { const ds = deskDoor.dataset.ds; if (ds && typeof app.openDesktopApp === 'function') app.openDesktopApp(ds); };
+  const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: st.fact && st.fact.stuck, human: !!H }); } catch { ds = null; } deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; };
   // lane site-reset (2026-09-30): A NAVIGATION LOOP (the browser fact's `stuck.state === 'loop'`) — the cycle's addresses,
   // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
   const loopBanner = createLoopBanner(document);
@@ -568,6 +580,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const askLine = document.createElement('div'); askLine.className = 'browser-live-ask-line'; askLine.style.display = 'none'; askLine.setAttribute('role', 'status');
   root.append(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body);
   bar.after(askLine); // lane browser-takeover-queue: right under the bar (the root's order above stays as the census pins it)
+  dialogBar.after(deskDoor); // lane desktop-x-seat-browser: the raw fallback's door, under the dialog card (the root's order above stays as the census pins it)
   if (H) { root.classList.add('human'); addrRow.style.display = ''; urlEl.style.display = 'none'; openBtn.style.display = 'none'; bindBtn.style.display = 'none'; titleBind.style.display = 'none'; closeBtn.style.display = ''; quitBtn.style.display = ''; }
   winInfo.content.appendChild(root);
 
@@ -650,7 +663,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     clearTimeout(xp.refreshTimer); xp.view = null; xp.mode = null; winInfo._liveX = null;
     xHost.textContent = ''; xHost.style.display = 'none'; canvas.style.display = '';
     send({ type: 'config', maxFps: wantFps() });
-    scheduleReport();
+    scheduleReport(); renderDeskDoor(); // lane desktop-x-seat-browser r2: the X picture gone — the raw fallback's door is judged again
   }
   /** The X view's mode follows THE takeover (the keeper's lease, the relay's `mode` records): active only while this view drives. */
   function syncX() {
@@ -801,6 +814,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (contBtn.style.display !== want) contBtn.style.display = want;
   }
   const renderMode = () => {
+    renderDeskDoor(); // lane desktop-x-seat-browser r2: the X picture mounted / the mode moved — the raw fallback's door is judged again
     const taken = st.mode === 'takeover';
     // lane I: the SHORT words on the bar (a never-fold item), the full sentence in the tooltip; lane H (naive study 2
     // finding 3 + verify r5/r6): a STOPPED browser's badge names why (those words are already short) — never 'driving'
@@ -1098,6 +1112,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   /** lane site-reset: the loop banner — the same elements, their words rewritten only where they changed. */
   const renderLoop = (loop) => loopBanner.render(loop, t);
   const renderDialog = () => {
+    renderDeskDoor(); // lane desktop-x-seat-browser: the raw fallback's door follows the same fact
     const d = st.dialog;
     renderLoop(!d && st.fact && st.fact.stuck && st.fact.stuck.state === 'loop' ? st.fact.stuck.loop : null);
     const stuck = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'unresponsive' ? st.fact.stuck : null;
@@ -2066,7 +2081,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       return;
     }
     if (msg.type === 'browser-profiles-updated') {
-      refreshSet(); renderBackend(); renderRec(); renderOwner();
+      refreshSet(); renderBackend(); renderRec(); renderOwner(); renderDeskDoor(); // lane desktop-x-seat-browser r2: the digest moved (the picture source) — the door judged again
       if (H) { renderEnds(); renderTitle(); } // BROWSE YOURSELF: who else uses his browser (the line under his two ends) and its name
       // naive study 2 (finding 3): a STOPPED view resumes when the digest says its browser runs again (a view never starts one)
       if (st.stopped && !st.connected && viewTargetRunning({ target: st.target, digest: msg }) === true) { st.reconnects = 0; connect(); }

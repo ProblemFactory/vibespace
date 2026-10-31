@@ -26,6 +26,12 @@
  * xWindowOf — the holder's X window among the display's rows (its CDP bounds, exactly; the only browser window; else none).
  * nativeDialogsOf / nativeDialogOwner — Chrome's own dialog windows on the display and the browser window each is over.
  * nativeDialogText — THE sentence the agent's verb answers `dialog_open` with while one stands (English, never t()).
+ * deskSeat — lane desktop-x-seat-browser (ONE PERSON, ONE SEAT): the seat of a socket on a browser display that carries no
+ *   ticket (the desktop window's own view of the display) — the person browsing that browser himself holds it; r2: an INPUT
+ *   seat (`input`: his keys and pointer on HIS window only — never a display size, a window geometry or a close), ONE socket
+ *   of his at a time (the newest pane — `elected`); deskSeatWhy names a watch; xScopeOf = the windows that seat reaches.
+ * deskDoorOf / DESK_DOOR_WORDS — THE RAW FALLBACK's one line in the live view: Chrome's own window holds the page, open the
+ *   browser's display in Desktop to act on it.
  */
 
 const PICTURE_X = 'x';
@@ -128,7 +134,77 @@ function nativeDialogText(n) {
   return `A window of Chrome's own, ${quoted(n.title)}, is open over your browser window — it is not part of the page: nothing you send reaches it and no snapshot shows it. Ask the user to answer it in the live view (they press Take over and use it there); your next page commands are answered with this until it closes — \`vibespace-browser tab …\`, \`close\`, \`stop\`, \`dialog status\` and \`open <another site>\` still run.`;
 }
 
+// ── lane desktop-x-seat-browser (2026-10-30, the owner: «桌面打开虽然能看到 passkey 弹窗但无法点击»): ONE PERSON, ONE SEAT ──
+/** The live view's X-picture socket names itself with its relay's ticket (`xt-` + 36 hex); every other viewer id is a pane's own. */
+const X_TICKET_RE = /^xt-[0-9a-f]{36}$/;
+/** The seat of a socket on a browser display that carries NO ticket — the desktop window's own view of the display (桌面 → the
+ *  browser's display session): 'input' when a PERSON opened it (no agent token — the bridge judges `person`) while the browser
+ *  has its HUMAN holder (browse yourself: he is one more holder) AND it is his ELECTED socket (`elected`: the newest of his panes
+ *  on that display, or the one he chose with «Use it here» — one person, one seat), else 'watch'. An INPUT seat is never the
+ *  whole xpra client (acceptance r1, MAJOR A — measured: an 'active' desktop socket replayed its display size and window
+ *  geometry and fitted, slotted and belted the agents' Chrome windows): his keys, pointer and paste reach HIS window, Chrome's
+ *  dialogs over it and the menus inside it (xScopeOf) — nothing else, never a display size, a window geometry or a close; only
+ *  the live view's ruling pane sizes a Chrome window. A ticket-shaped id never falls here: the relay's verdict is its only one. */
+function deskSeat({ viewerId = null, person = false, human = false, elected = true } = {}) {
+  if (!viewerId || X_TICKET_RE.test(String(viewerId))) return 'watch';
+  return person && human && elected ? 'input' : 'watch';
+}
+/** WHY a desktop socket of a browser display watches — the code its relay TELLS that socket (never silent, FAIL 3):
+ *  'other-window' (his browsing holds the seat in his OTHER pane — «Use it here» moves it), 'not-browsing' (a person's pane
+ *  while nobody browses the browser himself: its agents use it — «Browse yourself» is the way), 'watch-mode' (an agent's
+ *  token, a ticket-shaped id, no id); null = the seat is held. */
+function deskSeatWhy({ viewerId = null, person = false, human = false, elected = true } = {}) {
+  if (!viewerId || X_TICKET_RE.test(String(viewerId)) || !person) return 'watch-mode';
+  if (!human) return 'not-browsing';
+  return elected ? null : 'other-window';
+}
+const inRect = (p, r) => !!r && p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h;
+/** THE INPUT SEAT'S REACH over the display's rows: HIS window (`wid`), Chrome's dialog windows over it (dialogsOver) and the
+ *  nameless menus that opened inside it (an override-redirect row whose top-left is inside his window — the live view's
+ *  admitX rule) — never another browser window of the profile. `known` = every row id read (a window opened since is asked
+ *  for, never guessed). → { wids: number[], rects: [{wid,x,y,w,h}], known: number[] } (empty when his window is not told). */
+function xScopeOf(wid, rows = [], { profileDir = null } = {}) {
+  const all = Array.isArray(rows) ? rows : [];
+  const known = all.map((r) => Number(r && r.id)).filter(Number.isFinite);
+  const me = wid == null ? null : all.find((r) => r && Number(r.id) === Number(wid)) || null;
+  if (!me) return { wids: [], rects: [], known };
+  const rect = (r) => ({ wid: Number(r.id), x: num(r.x), y: num(r.y), w: num(r.w), h: num(r.h) });
+  const mine = rect(me);
+  const out = [mine];
+  for (const d of dialogsOver(wid, all, { profileDir })) out.push({ wid: d.wid, x: d.x, y: d.y, w: d.w, h: d.h });
+  for (const r of all) {
+    if (!r || out.some((o) => o.wid === Number(r.id)) || isBrowserRow(r, profileDir) || r.frame != null || num(r.depth) > 1) continue; // a top-level only
+    const title = typeof r.title === 'string' ? r.title : (typeof r.name === 'string' ? r.name : '');
+    if (title.trim() || r.cls || r.instance || !(num(r.w) > 1 && num(r.h) > 1)) continue; // a menu: nameless, classless, unmanaged
+    if (inRect({ x: num(r.x), y: num(r.y) }, mine)) out.push(rect(r));
+  }
+  return { wids: out.map((o) => o.wid), rects: out, known };
+}
+/** MAJOR B (acceptance r1): the Watch door's ONE act IS its label — browse-yourself's own road and its first refusal: his own
+ *  tab in this browser ('browse' — «Browse yourself»; 'open' — «Open your browsing window» while he already browses it from
+ *  another pane), never a takeover of an agent's tab, and never on a conversation's TEMPORARY browser (its profile is not a
+ *  named one — browseYourselfVerdict's not_attachable: no button, the words say why). → {act, code} */
+function deskDoorAct({ profile = null, human = false } = {}) {
+  if (!profile || profile.ephemeral === true) return { act: null, code: 'not_attachable' };
+  return { act: human ? 'open' : 'browse', code: null };
+}
+/** THE RAW FALLBACK's ONE LINE (the live view): Chrome's own window holds the page and this view cannot show it (the page's
+ *  picture — his browse window — or an X picture not mounted yet) — the browser's display, opened in Desktop, takes his input
+ *  there (deskSeat). English: the client's literal t() keys. A passkey request's own sentence is browser-passkey.js's; this
+ *  line is only the way to it, never a second sentence. */
+const DESK_DOOR_WORDS = Object.freeze({ line: "Open this browser's display in Desktop to act on Chrome's own window", button: 'Open in Desktop' });
+/** → the display session the door opens, or null: the browser is on the X road (it HAS a display), this view does not draw it,
+ *  it is HIS browse-yourself window (`human` — r2: the Desktop's input seat reaches his own window only, so a conversation's
+ *  view never sends him where nothing of it can be answered), and the browser's fact says Chrome's OWN window holds the page —
+ *  a passkey request on a headed browser (Chrome's WebAuthn dialog: drawn by Chrome, not the page — MEASURED: CDP's clicks
+ *  never reach it), Chrome's own sign-in sheet. */
+function deskDoorOf({ source = null, xShown = false, stuck = null, human = false } = {}) {
+  if (!human || !source || source.source !== PICTURE_X || !source.displaySession || xShown || !stuck) return null;
+  const native = (stuck.state === 'passkey' && stuck.headed === true) || (stuck.state === 'prompt' && !!stuck.prompt && stuck.prompt.native === true);
+  return native ? String(source.displaySession) : null;
+}
+
 module.exports = {
-  PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H,
-  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText,
+  PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
+  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xScopeOf, deskDoorAct, deskDoorOf,
 };
