@@ -433,6 +433,7 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     else if (k !== 'overage') delete out[k]; // never leave a stale bucket the model does not carry
   }
   out.limits = merged.limits;
+  delete out.windowChangeUnsaid; // a direct writer's unsaid change is said by THIS write (below) or by nobody
   // THE STORED RESET-CREDIT COUNT survives a push that does not state it (r2,
   // reproduced: one passive codex push erased it from the file the roster and
   // the rung read). The producer's own count wins when it has one; else the
@@ -453,7 +454,12 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   } catch (e) {
     return { ok: false, why: 'write failed: ' + e.message };
   }
-  const windowChange = replace ? null : windowChangeOf(prevObj, prevSet, merged);
+  // …or the change a DIRECT writer saw and left unsaid (the shipped statusline: `windowChangeUnsaid`) — said here
+  // once when the merged set agrees with it, and the marker never outlives this write.
+  const unsaid = (prevObj && prevObj.windowChangeUnsaid) || (obj && obj.windowChangeUnsaid) || null;
+  const nowPlan = quotaModel.planLimit(merged);
+  const unsaidHolds = !!(unsaid && unsaid.kind === '5h' && (unsaid.change === 'removed' ? !!quotaModel.absentSince(nowPlan, '5h') : unsaid.change === 'restored' ? !!quotaModel.windowOfKind(nowPlan, '5h') : false));
+  const windowChange = replace ? null : (windowChangeOf(prevObj, prevSet, merged) || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));
   if (windowChange && _onWindowChange) { try { _onWindowChange({ key, ...windowChange, source: source || (obj && obj.source) || null }); } catch { } }
   return { ok: true, file, limits: merged.limits, object: out, ...(windowChange ? { windowChange } : {}) };
 }

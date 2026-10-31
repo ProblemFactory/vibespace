@@ -562,11 +562,11 @@ function writeUsage(p) {
   // Throttle: the statusline re-renders often; one write / 25s per account is
   // plenty (usage windows move slowly) and keeps disk churn negligible.
   try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < THROTTLE_MS) return; } catch {}
-  // NO FABRICATED 5-HOUR WINDOW (lane no-5h-window, 2026-10-30): a payload without `five_hour` (an Ultra account
-  // the vendor lifted the 5-hour limit from) used to write a 0 % window nobody stated. This tool states nothing
-  // about a window it did not measure — the file's own `fiveHour` (or its «no 5h limit» mark) is kept by the spread
-  // below, and only an enumerating reading (the server's /usage panel) may say the window is gone.
+  // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): `rate_limits` IS the CLI's own rate-limit state, so a render
+  // that states the week and NO `five_hour` enumerated the plan and found no 5-hour window (an Ultra account the
+  // vendor lifted it from). It used to write a 0 % window nobody stated; now it states what it saw — see below.
   const fiveHour = win(rl.five_hour);
+  const absent5h = !fiveHour && !!(rl.seven_day && typeof rl.seven_day === 'object');
   const sevenDay = win(rl.seven_day) || { utilization: 0, status: 'unknown', resetsAt: 0 };
   let prev = null;
   try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch {}
@@ -622,6 +622,19 @@ function writeUsage(p) {
   // would attach somebody else's corroboration to these numbers — the spread
   // preserves what it does not know about, not what it knows it cannot claim.
   delete out.corroborated;
+  // THE TOMBSTONE, IN THE VIEW'S OWN WORDS (lane no-5h-window): this file cannot construct a limit, so it writes the
+  // legacy view's `fiveHourAbsent` (the instant first said — kept from the file when it already says it) and drops
+  // the 5h bucket; the write path's lift reads it back into the plan limit. It writes BEHIND the write path, so a
+  // CHANGE it saw (the file held a 5h bucket; or it said «none» and a 5h window is back) is left as ONE unsaid
+  // marker the server's passive ingest hands to the write path, which says it once and clears it.
+  if (absent5h) {
+    const had = !!(prev && prev.fiveHour && typeof prev.fiveHour === 'object');
+    delete out.fiveHour;
+    out.fiveHourAbsent = (!had && prev && Number(prev.fiveHourAbsent) > 0) ? Number(prev.fiveHourAbsent) : Date.now();
+    if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };
+  } else if (fiveHour && prev && Number(prev.fiveHourAbsent) > 0 && !(prev.fiveHour && typeof prev.fiveHour === 'object')) {
+    out.windowChangeUnsaid = { kind: '5h', change: 'restored', at: Date.now() };
+  }
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
   const tmp = f + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(out));

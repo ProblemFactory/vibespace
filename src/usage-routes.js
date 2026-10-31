@@ -333,6 +333,11 @@ function ingestPassiveUsage() {
     let u = null;
     try { u = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { continue; }
     if (!u || typeof u.fetchedAt !== 'number') continue;
+    // A CHANGE THE SHIPPED STATUSLINE SAW AND LEFT UNSAID (lane no-5h-window): its 5h window gone (or back) — the
+    // write path says it once and clears the marker (a settle write: it measures nothing, moves no `fetchedAt`).
+    if (u.windowChangeUnsaid) {
+      try { const w = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' }); if (w.ok && w.object) u = w.object; } catch { }
+    }
     if (key === '__global__') {
       // Newest wins vs whatever we have (a live global poll never runs now).
       if (!_rateLimitCache || (u.fetchedAt > (_rateLimitCache.fetchedAt || 0))) { _rateLimitCache = u; writeUsageCache(); }

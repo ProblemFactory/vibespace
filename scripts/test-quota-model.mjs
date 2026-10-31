@@ -2354,30 +2354,50 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
       `㉑1j a record that states no 5h lane never carries a SIBLING's 5h bucket onto a file whose plan has none (no false «back») — ${JSON.stringify({ fiveHour: f3b.fiveHour })}`);
   }
 
-  // ── rule 1: the SHIPPED statusline fabricates no 5h window ───────────────────────────────────────────────────
+  // ── rule 1 + 2: the SHIPPED statusline — END TO END for a running session (the main developer's ruling,
+  // 2026-10-31 00:51Z: a long-lived-token member's panel prints a header only, so ITS removal arrives through the
+  // statusline input of a session running on it). A render with the week and no five_hour drops the 5h bucket,
+  // writes the dated `fiveHourAbsent` and leaves ONE unsaid change; the hub's 30-s passive ingest hands the file to
+  // the write path (a settle write), which says it once and clears the marker.
   const { execFileSync } = await import('child_process');
-  const renderNo5h = (toolArgs, d, key) => {
-    const payload = JSON.stringify({ session_id: 'sess-qm21', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: { seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } } });
+  const renderSL = (toolArgs, d, key, rl) => {
+    const payload = JSON.stringify({ session_id: 'sess-qm21', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: rl });
     const f = W.cacheFileFor(d, key); const old = (Date.now() - 60000) / 1000; fs.utimesSync(f, old, old);
     execFileSync(toolArgs[0], toolArgs.slice(1), { input: payload, encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: d, VIBESPACE_ACCOUNT_KEY: key, HOME: d } });
     return readJ(d, key);
   };
+  const RL_WEEK = { seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } };
+  const RL_BOTH = { five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, ...RL_WEEK };
+  // the passive ingest's settle, spelled as src/usage-routes.js ingestPassiveUsage spells it
+  const settle = (d, key, wcm = W) => wcm.writeCacheObject({ cacheDir: d, key, obj: readJ(d, key), familyOf: familyOfScopedBucket, backend: 'claude' });
   const TOOL21 = path.join(ROOT, 'data/bin/vibespace-usage');
-  const sl = (toolArgs) => {
+  const e2e = (toolArgs, wcm = W) => {
     const d = mkd('s'), key = 'sub-n5h-sl';
     seed5h(d, key, { u5: 0.71 });
-    const kept = renderNo5h(toolArgs, d, key);
-    const d2 = mkd('s2');
-    seed5h(d2, key, { u5: 0.71 });
-    panelWrite(d2, key, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
-    const tomb = renderNo5h(toolArgs, d2, key);
-    return { kept, tomb };
+    const rendered = renderSL(toolArgs, d, key, RL_WEEK);
+    const n0 = said.length, got = [];
+    const w1 = settle(d, key, wcm); if (w1.windowChange) got.push(w1.windowChange.change);
+    const settled = readJ(d, key);
+    const w2 = settle(d, key, wcm); if (w2.windowChange) got.push(w2.windowChange.change);
+    const again = renderSL(toolArgs, d, key, RL_WEEK);
+    const w3 = settle(d, key, wcm); if (w3.windowChange) got.push(w3.windowChange.change);
+    const back = renderSL(toolArgs, d, key, RL_BOTH);
+    const w4 = settle(d, key, wcm); if (w4.windowChange) got.push(w4.windowChange.change);
+    return { key, rendered, settled, again, back, backSettled: readJ(d, key), got, saidHere: said.slice(n0) };
   };
-  const SL = sl([TOOL21]);
-  ok(SL.kept.fiveHour && SL.kept.fiveHour.utilization === 0.71 && SL.kept.fiveHour.status !== 'unknown',
-    `㉑1k the statusline tool, fed a payload without five_hour, writes NO fabricated 0 % 'unknown' window — it keeps the file's own — got ${JSON.stringify(SL.kept.fiveHour)}`);
-  ok(SL.tomb.fiveHour === undefined && SL.tomb.fiveHourAbsent > 0 && SL.tomb.sevenDay && SL.tomb.sevenDay.utilization === 0.46 && SINCE(planOf(SL.tomb, 'sub-n5h-sl'), '5h') > 0,
-    '㉑1k …and over a «no 5h limit» file it writes the week and the tombstone survives it (the spread carries it, the lift reads it back)');
+  const E2E = e2e([TOOL21]);
+  ok(E2E.rendered.fiveHour === undefined && E2E.rendered.fiveHourAbsent > 0 && E2E.rendered.sevenDay && E2E.rendered.sevenDay.utilization === 0.46 && SINCE(planOf(E2E.rendered, E2E.key), '5h') > 0,
+    `㉑1k the statusline, fed a render with the week and NO five_hour, drops the 5h bucket (never a fabricated 0 % 'unknown' one) and writes the dated tombstone the lift reads back — got ${JSON.stringify({ fiveHour: E2E.rendered.fiveHour, fiveHourAbsent: E2E.rendered.fiveHourAbsent })}`);
+  ok(E2E.rendered.windowChangeUnsaid && E2E.rendered.windowChangeUnsaid.change === 'removed', '㉑1k …and, as it writes BEHIND the write path, leaves the change it saw (the file held 71 %) as ONE unsaid marker');
+  ok(JSON.stringify(E2E.got.slice(0, 1)) === '["removed"]' && !E2E.settled.windowChangeUnsaid && E2E.saidHere.filter((x) => x.change === 'removed').length === 1,
+    `㉑2f the 30-s passive ingest's settle write says it ONCE and clears the marker — said ${JSON.stringify(E2E.got)}`);
+  ok(!E2E.again.windowChangeUnsaid && E2E.again.fiveHourAbsent === E2E.rendered.fiveHourAbsent && E2E.got.filter((c) => c === 'removed').length === 1,
+    '㉑2f …never per render: the next render keeps the tombstone at the instant it was FIRST said, and leaves nothing to say');
+  ok(E2E.back.fiveHour && E2E.back.windowChangeUnsaid && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
+    '㉑2f a render that states five_hour again brings the window BACK, said the same way (restored) once the ingest settles it');
+  const UR21 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
+  ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestPassiveUsage, 30000\)/.test(UR21),
+    '㉑2f the hub\'s passive ingest (every 30 s) settles a file carrying the marker through the ONE write path');
 
   // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
   const bGuess = ADP.parseLimitBanner("You've reached your usage limit · resets Nov 3");
@@ -2550,8 +2570,20 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   {
     const m = mut21('data/bin/vibespace-usage', [['  const fiveHour = win(rl.five_hour);\n', "  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };\n"]], 't');
     hit21(m, 'the statusline fabricates again');
-    const SLm = sl([process.execPath, m.path]);
-    ok(SLm.kept.fiveHour && SLm.kept.fiveHour.utilization === 0 && SLm.kept.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive)');
+    const X = e2e([process.execPath, m.path]);
+    ok(X.rendered.fiveHour && X.rendered.fiveHour.utilization === 0 && X.rendered.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
+  }
+  {
+    const m = mut21('data/bin/vibespace-usage', [["    if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };\n", '']], 'u');
+    hit21(m, 'the statusline leaves no marker');
+    const X = e2e([process.execPath, m.path]);
+    ok(X.rendered.fiveHourAbsent > 0 && !X.got.includes('removed'), '㉑ CONTROL rule 2: a statusline that lays the tombstone and leaves no marker makes the removal UNSAYABLE — ㉑2f RED there');
+  }
+  {
+    const m = mut21('src/usage-cache-write.js', [[" || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));", ');']], 'h');
+    hit21(m, 'the write path ignores the marker');
+    const X = e2e([TOOL21], require(m.path));
+    ok(!X.got.includes('removed'), '㉑ CONTROL rule 2: a write path that never reads the unsaid marker says nothing at the settle — ㉑2f RED there');
   }
   } catch (e) { ok(false, `㉑ NEGATIVE CONTROLS threw: ${e && e.message}`); }
   if (listen) listen(null);
