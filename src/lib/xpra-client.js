@@ -94,7 +94,7 @@
 //   window, cut at the bottom): `on.constraints` carries the main's hints with the minimum raised to the UNION of every
 //   held window's (P.unionMin — a second top-level or a dialog grows the pane, never cut); a second NORMAL window is
 //   mapped CENTRED over the main (P.placeGuest; the belt keeps it inside as before); `on.front(win|null)` names the FRONT
-//   window (P.frontOf — the topmost non-popup by z) on new / raise / lost / its title; `closeFront()` sends close-window
+//   window (P.frontOf — the topmost non-popup by P.stackRank, the drawing's order) on new / raise / lost / its title; `closeFront()` sends close-window
 //   to it (the window's ✕ when the front is not the main — closeMain stays the app's own close).
 // • A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03 — the owner's YES): with `slots` on (the
 //   view asks for it when it can open satellite windows) every secondary NORMAL window gets a SLOT of the X root to the
@@ -167,9 +167,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   // lane desktop-x-seat-browser r3 (acceptance r2 MAJOR 3): the INPUT seat's reach, as the bridge last said it (null = no input
   // seat) — focus never leaves it (a window that appears is not focused, a press on another's window does not move it); and a
   // button's release goes to the window that got its press (a release never strays — never a button left down in X)
-  // r4 (acceptance r3 MAJOR 1): his reach is drawn ABOVE every other window in the pane (`win.reach`; windowAt follows the drawing)
-  // — an agent's window announced after his (xpra announces oldest first: every reconnect) never covers it; the seat word and his
-  // press on a window of his RAISE it (z to the top + the focus packet to HIS wid), focused already or not
+  // r4 (acceptance r3 MAJOR 1): his reach is drawn ABOVE the others' top-level windows in the pane (`win.reach`; P.stackRank — r5:
+  // never above a popup, see there) — an agent's window announced after his (xpra announces oldest first) never covers it; r5
+  // (acceptance r4 MAJOR A): what is drawn on top is on top IN X before his act lands — the seat word and his press / wheel on a
+  // window of his that another window may cover in X RAISE it there (`raiseInX`: r4's lone focus packet raised nothing)
   let seatWids = null;
   const mayFocus = (wid) => !seatWids || seatWids.has(wid);
   const keyWid = new Map(), buttonWid = new Map();
@@ -224,6 +225,12 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const main = mainWid ? windows.get(mainWid) : null;
     const subject = main || [...windows.values()].filter((w) => w.kind === 'dialog' && !w.meta['transient-for']).sort((a, b) => (b.w * b.h - a.w * a.h) || (a.wid - b.wid))[0] || null;
     return subject && P.fixedSizeOf(P.sizeHintsOf(subject.meta)) ? subject : null;
+  };
+  /** z — the client's model of X's stacking order (a map, a raise): renumbered 1…n before it would pass P.STACK_Z_CAP (the ONE
+   *  rank caps it — never two windows of a tier on one z). */
+  const zNext = () => {
+    if (zTop >= P.STACK_Z_CAP) { let i = 0; for (const w of [...windows.values()].sort((a, b) => a.z - b.z)) { w.z = ++i; emit('window', 'raise', w); } zTop = i; }
+    return ++zTop;
   };
   /** S1c: on.front — the FRONT window (P.frontOf) whenever it, its title or whether it is the main changes. */
   const announceFront = () => {
@@ -390,7 +397,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     }
     let g = { x: p[2], y: p[3], w: Math.max(1, p[4]), h: Math.max(1, p[5]) };
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
-    const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
+    const win = { wid, ...g, meta, kind, title: winTitle(meta), z: zNext(), mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
     windows.set(wid, win);
     if (seatWids) win.reach = seatWids.has(wid); // r4: his reach drawn above the others' (the bridge's word came before the window)
     if (!isMain && kind === 'main' && !watch && slotsOn() && !noSlot.has(wid)) { slotOrder.push(wid); layoutSlots(); } // S2: a second top-level gets its slot
@@ -450,16 +457,33 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const win = windows.get(wid);
     if (!win || !mayFocus(wid)) return; // r3: in the input seat focus never leaves his reach (a window that appears, another's window pressed)
     focusedWid = wid;
-    win.z = ++zTop;
+    win.z = zNext();
     send(P.focusPacket(wid));
     emit('window', 'raise', win);
     announceFront();
   };
-  /** The topmost window under a pane point (popups above dialogs above main; r4: in his input seat his reach above all), or null. */
-  const windowAt = (x, y) => {
-    const rank = (w) => (w.reach ? 3e9 : 0) + (w.kind === 'popup' ? 2e9 : w.kind === 'dialog' ? 1e9 : 0) + w.z;
-    return [...windows.values()].filter((w) => x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h).sort((a, b) => rank(b) - rank(a))[0] || null;
+  /** r5 (acceptance r4 MAJOR A): RAISE a window of his IN X. xpra 6.5.4 raises a window only for a focus it does not hold already
+   *  (x11/server/seamless.py `_focus`: `if self._has_focus == wid: return`) or for a pointer MOVE while another window was raised
+   *  last (`_move_pointer`) — a press where the pointer already is moves nothing. So `focus 0` (xpra's reset_focus: no window,
+   *  nothing in X) then `focus HIS`: xpra raises it and gives it the focus, whatever it held (MEASURED on the display — the X stack
+   *  read before and after: test-browser-x-picture ⑥). */
+  const raiseInX = (wid) => {
+    if (!windows.has(wid) || !mayFocus(wid)) return;
+    send(P.focusPacket(0));
+    focusedWid = 0;
+    focusWindow(wid);
   };
+  /** Can X hold another window over `win` at (x, y) — one mapped or raised after it (z: the order X stacked them; the drawing puts
+   *  his reach above), or one this client never drew? A popup is never raised by a focus (xpra refuses an override-redirect one). */
+  const coveredInX = (win, x, y) => refused.size > 0 || [...windows.values()].some((w) => w !== win && w.kind !== 'popup' && w.z > win.z && x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h);
+  /** In his input seat his act on a window of his lands there in X: raised first when another may cover it, focused when it is not. */
+  const raiseFor = (win, x, y) => {
+    if (!win || win.kind === 'popup') return;
+    if (seatWids && seatWids.has(win.wid) && coveredInX(win, x, y)) raiseInX(win.wid);
+    else if (win.wid !== focusedWid) focusWindow(win.wid);
+  };
+  /** The topmost window under a pane point by THE stack rank (P.stackRank: the view draws it, frontOf names it), or null. */
+  const windowAt = (x, y) => [...windows.values()].filter((w) => x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h).sort((a, b) => P.stackRank(b) - P.stackRank(a))[0] || null;
 
   // ── draws, in order, acked ───────────────────────────────────────────────
   const draw = (p) => {
@@ -532,7 +556,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       case 'window-move-resize': moveResize(p[1], p[2], p[3], p[4], p[5]); return;
       case 'configure-override-redirect': moveResize(p[1], p[2], p[3], p[4], p[5]); return;
       case 'window-resized': moveResize(p[1], null, null, p[2], p[3]); return;
-      case 'raise-window': { const w = windows.get(p[1]); if (w) { w.z = ++zTop; emit('window', 'raise', w); announceFront(); } return; }
+      case 'raise-window': { const w = windows.get(p[1]); if (w) { w.z = zNext(); emit('window', 'raise', w); announceFront(); } return; }
       case 'window-metadata': {
         const win = windows.get(p[1]);
         const meta = p[2] && typeof p[2] === 'object' ? p[2] : {};
@@ -570,7 +594,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         const was = seatWids;
         seatWids = seat === 'input' ? new Set(wids) : null; // r3: focus stays in his reach — the key he types goes to his window
         for (const w of windows.values()) { const r = !!seatWids && seatWids.has(w.wid); if (!!w.reach !== r) { w.reach = r; emit('window', 'raise', w); } } // r4: drawn above the others' (the view re-stacks)
-        if (seatWids && (!was || !seatWids.has(focusedWid))) { const home = seatWids.has(focusedWid) ? focusedWid : wids.find((x) => windows.has(x) && windows.get(x).kind !== 'popup'); if (home) focusWindow(home); } // r4: his seat begins (or focus left his reach) — HIS window raised, xpra told (z + the focus packet)
+        if (seatWids && (!was || !seatWids.has(focusedWid))) { const home = seatWids.has(focusedWid) ? focusedWid : wids.find((x) => windows.has(x) && windows.get(x).kind !== 'popup'); if (home) raiseInX(home); } // r5: his seat begins (or focus left his reach) — HIS window raised IN X (where X stacked it before is unknown)
         emit('seat', { seat, why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, acts: Number(v.acts) || 0, wids });
         return;
       }
@@ -723,7 +747,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   const pointerButton = (x, y, domButton, pressed, mods = {}) => {
     if (viewOnly) return;
     const win = windowAt(x, y), b = P.xButton(domButton);
-    if (pressed && win && win.kind !== 'popup' && (win.wid !== focusedWid || win.reach)) focusWindow(win.wid); // r4: his press raises his window, focused already or not
+    if (pressed) raiseFor(win, x, y); // r5: his press lands in the window drawn under it — raised in X first when another may cover it there
     let at = win; // r3: the release goes to the window that got the press, wherever the pointer is now (X's implicit grab)
     if (pressed) buttonWid.set(b, win ? win.wid : 0); else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }
     send(P.buttonAction(at ? at.wid : 0, b, pressed, P.pointerCoords(x, y, at), P.modifiersOf(mods)));
@@ -732,7 +756,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (viewOnly) return;
     const win = windowAt(x, y);
     const coords = P.pointerCoords(x, y, win), m = P.modifiersOf(mods), wid = win ? win.wid : 0;
-    for (const [button, n] of wheel.feed(deltaX, deltaY, deltaMode)) for (let i = 0; i < n; i++) { send(P.buttonAction(wid, button, true, coords, m)); send(P.buttonAction(wid, button, false, coords, m)); }
+    const steps = wheel.feed(deltaX, deltaY, deltaMode);
+    if (steps.length && win && seatWids && seatWids.has(win.wid) && win.kind !== 'popup' && coveredInX(win, x, y)) raiseInX(win.wid); // r5: his wheel scrolls the window drawn under it
+    for (const [button, n] of steps) for (let i = 0; i < n; i++) { send(P.buttonAction(wid, button, true, coords, m)); send(P.buttonAction(wid, button, false, coords, m)); }
   };
   /** Text from the browser into the app's clipboard; `press` also sends the
    *  app a Ctrl+V after the token has had time to land. */

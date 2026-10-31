@@ -386,10 +386,21 @@ export function placeGuest({ x, y, w, h }, { paneW, paneH }, over = null) {
   const placed = placeInside({ x: Math.floor(o.x + (o.w - w) / 2), y: Math.floor(o.y + (o.h - h) / 2), w, h }, { paneW, paneH });
   return { ...placed, moved: placed.x !== x || placed.y !== y };
 }
-/** The FRONT window: the topmost held window by `z` (a dialog counts — what a desktop's title and ✕ name), or null. */
+/** THE STACK RANK (lane desktop-x-seat-browser r5, acceptance r4 MINOR B + MAJOR A): ONE order of a pane's windows — the view's
+ *  z-index, the client's windowAt and frontOf all read it, never three orderings. Tiers, low to high: a main, a dialog, then (r4
+ *  MAJOR 1) the person's input-seat reach (`win.reach`: his main, then his dialog — an agent's top-level announced after his never
+ *  covers it), then EVERY popup, his or another's, by `z` (r5 MAJOR A: xpra maps an override-redirect window above what is there,
+ *  and drawn under his window an agent's <select> / menu / tooltip took his press in X — above it, his press there is addressed
+ *  to it and refused). `z` (the client's map / raise order, kept ≤ STACK_Z_CAP) orders a tier. */
+export const STACK_Z_CAP = 74999;
+export function stackRank(win) {
+  const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);
+  return tier * (STACK_Z_CAP + 1) + Math.min(Math.max(0, Number(win.z) || 0), STACK_Z_CAP);
+}
+/** The FRONT window: the topmost held window by the stack rank (a dialog counts — what a desktop's title and ✕ name), or null. */
 export function frontOf(windows) {
   let best = null;
-  for (const win of windows || []) if (heldWindow(win) && (!best || win.z > best.z)) best = win;
+  for (const win of windows || []) if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;
   return best;
 }
 

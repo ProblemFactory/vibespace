@@ -487,6 +487,7 @@ function bridgeOf(ctx) {
       lastClose.set(id, { why: String(closedBy || why), code: closeCodeOf(closedBy || why), at: now(), afterS: dur }); // K3: the page words the last close
       log.log?.(`[desktop-stream] ${id}: closed (${closedBy || why}) after ${dur}s, ${down} B to the browser, ${up} B to the server (xpra)${viewerId ? `, viewer ${viewerId}` : ''}${dropped ? `, ${dropped} packet(s) refused (${lastRefusal || 'policy'})` : ''}${netem ? `, netem rtt ${netem.rttMs} ms / ${netem.kbps || '∞'} kbps` : ''}`);
       clearTimeout(quietTimer); quietTimer = null; // r3
+      clearTimeout(askTimer); askTimer = null; // r5: a read deferred for this socket goes with it
       seatRef.forget();
       leave();
     };
@@ -633,6 +634,7 @@ function bridgeOf(ctx) {
           if (wid === d.wid || mineWid(wid, top)) return null; // r4: at a window of his (the focused one — xpra raises nothing) as sent
           synth.push(d.release); return XPRA_READDRESSED;
         }
+        if (type === 'focus' && wid === 0) return null; // r5: `focus 0` — xpra's reset_focus (no window, nothing in X): the first half of the client's raise of HIS window in X
         if (!mineWid(wid, top)) { // identity first: a window not his is refused whatever the point
           if (top == null) ask('not read yet');
           else if (pressed === true) ask(`a press on window ${wid}, not his`); // r4: his window may have been replaced

@@ -80,7 +80,7 @@ import { showToast } from './utils.js';
 import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell.js';
 import { createXpraClient, defaultDecode } from './xpra-client.js';
 import { fitForPin } from '../desktop-pin.js'; // lane e2b (§E2.2): a pinned window's picture — contain-fit, upscaling allowed
-import { minPaneCss, pixelRatioOf, backingSize, fixedSizeOf, sizeHintsOf } from './xpra-proto.js';
+import { minPaneCss, pixelRatioOf, backingSize, fixedSizeOf, sizeHintsOf, stackRank } from './xpra-proto.js';
 import { platformOf, primaryModifierMap, applyModifierMap, modifierKeyOf } from './modifier-map.js'; // lane xpra-mac-modifiers (PURE, one table): the viewer's primary modifier becomes the host's — ⌘ on a Mac is Ctrl in the app
 
 export { streamUrl, copyViaSelection };
@@ -96,9 +96,9 @@ export const workerUrlFor = (id) => `/api/desktop/${encodeURIComponent(id)}/xpra
 /** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
 export const STREAM_KIND = 'xpra';
 export const BACKING_SHRINK_MS = 1000;
-const Z_BASE = { main: 1000, dialog: 200000, popup: 300000 };
-/** lane desktop-x-seat-browser r4: in the person's input seat HIS reach (the client's `win.reach`) is stacked above every other window. */
-const Z_REACH = 400000;
+/** The windows' z-index floor: a window's z-index is Z_FLOOR + P.stackRank — THE order windowAt hits and frontOf names (lane
+ *  desktop-x-seat-browser r5; every window under the fit badge's 400000). */
+const Z_FLOOR = 1000;
 
 /** bytes → a data: URL (PNG); the base64 alphabet is validated on the way OUT
  *  (the string reaches an <img>.src / a cursor url(), never innerHTML). */
@@ -307,7 +307,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     const r = drawRatio;
     w.el.style.left = `${win.x / r}px`; w.el.style.top = `${win.y / r}px`;
     w.el.style.width = `${win.w / r}px`; w.el.style.height = `${win.h / r}px`;
-    w.el.style.zIndex = String((win.reach ? Z_REACH : 0) + (Z_BASE[win.kind] || Z_BASE.main) + Math.min(win.z, 99999));
+    w.el.style.zIndex = String(Z_FLOOR + stackRank(win));
     let bw = backingSize(win.w, r), bh = backingSize(win.h, r);
     if (!shrinkNow && w.r === r && (w.canvas.width > bw || w.canvas.height > bh)) {
       // a shrink keeps the backing for BACKING_SHRINK_MS (see the constant) — the element clips it meanwhile

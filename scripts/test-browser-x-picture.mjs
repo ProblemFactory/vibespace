@@ -23,7 +23,9 @@
 //      a Watch viewer held VIBESPACE_XSEAT_HOLD_MS (5 min) is never dropped by xpra, its door «Browse yourself» opens his own tab ⇒
 //      an INPUT seat (r2): every Chrome window already on the display keeps its geometry, and his click + Escape answer Chrome's
 //      OWN passkey dialog over his page (CDP's own clicks never do — measured beside it); r3: his click on a <select> of his page
-//      opens Chrome's popup (an override-redirect window: no name, no class, no transient-for) and his click there picks an option.
+//      opens Chrome's popup (an override-redirect window: no name, no class, no transient-for) and his click there picks an option;
+//      r5: an agent's window mapped over his resting pointer (on top in X, drawn under his) — his press, no move, is raised in X
+//      first and lands in HIS page (the X stack read before and after, by xwininfo: the raise read off X, never assumed).
 // SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.38.2, Google Chrome, xpra / xauth, or when the server
 // took the driver road. Scratch only (/tmp/vs-xpicture-<pid>): never ~/.agent-browser, never the owner's display or bus,
 // never `close --all`, never the production data/. PNGs: VIBESPACE_XPIC_PNG_DIR (optional) receives the viewer's picture.
@@ -143,6 +145,7 @@ const col = http.createServer((req, res) => {
     res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="bxw realm"', 'Content-Type': 'text/html' }); res.end(pageHtml('401 needs a sign-in')); return; // DARK like the page: the RED control's region must have no white of its own
   }
   if (u.pathname === '/blk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw page')); return; }
+  if (u.pathname === '/ag') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw ag')); return; } // lane desktop-x-seat-browser r5: an agent's window over his
   // lane desktop-x-seat-browser: a page in a passkey ceremony (Chrome's OWN WebAuthn dialog — drawn by Chrome, not the page); its outcome on window.__pk
   if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><select id=sel style="position:absolute;left:60px;top:140px;font-size:28px;width:320px"><option>alpha<option>beta<option>gamma<option>delta</select><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
   res.statusCode = 404; res.end();
@@ -483,6 +486,56 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
     if (opt) await P.clickAt(opt.x, opt.y);
     const pick = await until(async () => { const v = await H.ev(`document.getElementById('sel') && document.getElementById('sel').value`); return v && v !== 'alpha' ? v : null; }, 6000, 150);
     ok(!!pop && !!pick, `r3 MAJOR 1 — HIS <select> in the desktop window: his click opens Chrome's popup (window ${pop && pop.wid}, override-redirect — no name, no class, no transient-for) and his click on an option there picks it (alpha → ${pick})`, JSON.stringify({ geo, selAt, pop, opt, seat: (journal.match(/\[desktop-stream\][^\n]*popup[^\n]*/g) || []).slice(-3) }));
+    // r5 (acceptance r4 MAJOR A — «a real raise, measured»): xpra 6.5.4 raises a window for a focus it does not hold or a pointer MOVE
+    // (x11/server/seamless.py `_focus` / `_move_pointer`); a press where the pointer already rests moves nothing. His pointer rests on
+    // his page in the desktop window; an AGENT's window (the same Chrome, a new window — CDP) is mapped over that point: on top in X,
+    // drawn under his window (his reach). His press there, no move: the client raises HIS in X first (focus 0, then HIS), and the press
+    // lands in HIS page — the X stack read before and after (xwininfo -root -tree: xpra's corrals, topmost first), never assumed.
+    const xauth = path.join(INST, 'data', 'desktop-apps', DS, 'Xauthority');
+    const DDm = require(path.join(INST, 'src/desktop-display.js'));
+    const xstack = async () => { const t = await DDm.windowTree({ display: rec.displaySession.display, authFile: fs.existsSync(xauth) ? xauth : undefined, env }); return t.ok ? t.rows.filter((r) => r.depth === 1).map((r) => { const m = /^Xpra-CorralWindow-(0x[0-9a-fA-F]+)$/.exec(r.name || ''); return m ? parseInt(m[1], 16) : r.id; }) : null; };
+    const viewWins = () => P.ev(`(() => { const w = ${DWQ}; return (w._desktopAppView.windows() || []).map((x) => ({ wid: x.wid, kind: x.kind, title: x.title, x: x.x, y: x.y, w: x.w, h: x.h })); })()`);
+    const me2 = me ? (await viewWins() || []).find((x) => x.wid === me.wid) : null;
+    const g2 = await H.ev('({ dx: (outerWidth - innerWidth) / 2, dy: outerHeight - innerHeight, dpr: devicePixelRatio, w: innerWidth, h: innerHeight })');
+    const page = g2 ? { x: Math.round(Math.max(g2.w * 0.8, g2.w - 120)), y: Math.round(g2.h * 0.5) } : null; // his page's own dark area, right of his <select>
+    const restAt = me2 && page ? await P.ev(`(() => { const w = ${DWQ}; const c = [...w.element.querySelectorAll('.xpra-win[data-wid="${me2.wid}"] canvas')].find((e) => e.getBoundingClientRect().width > 20); if (!c) return null; const r = c.getBoundingClientRect(), k = r.width / ${me2.w}; const x = r.left + (${g2.dx} + ${page.x}) * ${g2.dpr} * k, y = r.top + (${g2.dy} + ${page.y}) * ${g2.dpr} * k, hit = document.elementFromPoint(x, y); return hit && (hit === c || c.parentElement.contains(hit)) ? { x, y } : null; })()`) : null;
+    let raise = { me2, page, restAt };
+    if (restAt) {
+      await P.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: restAt.x, y: restAt.y }); // his pointer comes to rest on his page
+      await sleep(600);
+      const port = Number(fs.readFileSync(path.join(DIR, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || 0;
+      const bv = port ? await (await fetch(`http://127.0.0.1:${port}/json/version`)).json() : null;
+      const aws = bv ? new WebSocket(bv.webSocketDebuggerUrl) : null;
+      if (aws) await new Promise((r, e) => { aws.on('open', r); aws.on('error', e); });
+      let aid = 0; const apend = new Map(); if (aws) aws.on('message', (d) => { const m = JSON.parse(d); if (m.id && apend.has(m.id)) { apend.get(m.id)(m); apend.delete(m.id); } });
+      const acall = (method, params = {}) => new Promise((r) => { const i = ++aid; apend.set(i, r); aws.send(JSON.stringify({ id: i, method, params })); });
+      const known = new Set((await viewWins() || []).map((x) => x.wid));
+      const tid = aws ? (await acall('Target.createTarget', { url: `http://localhost:${CP}/ag`, newWindow: true })).result?.targetId : null;
+      const win = tid ? (await acall('Browser.getWindowForTarget', { targetId: tid })).result : null;
+      // over his resting point, never his window's own bounds (his CDP bounds name HIS window: an identical rect would be ambiguous)
+      if (win) await acall('Browser.setWindowBounds', { windowId: win.windowId, bounds: { left: me2.x + 40, top: me2.y + 40, width: Math.max(400, me2.w - 40), height: Math.max(300, me2.h - 40), windowState: 'normal' } });
+      let agw = await until(async () => { const ws = await viewWins(); return (ws || []).find((x) => !known.has(x.wid) && x.kind !== 'popup' && /bxw ag/.test(String(x.title || ''))) || null; }, 15000, 200);
+      await sleep(1500); // moved over his, drawn, the bridge's re-read done (a new top-level that is not his)
+      if (agw) agw = (await viewWins() || []).find((x) => x.wid === agw.wid) || agw;
+      const A = await agentPage(DIR, '/ag');
+      const arm = `(() => { window.__downs = 0; addEventListener('mousedown', (e) => { if (e.isTrusted) window.__downs++; }, true); return 1; })()`;
+      await H.ev(arm); if (A) await A.ev(arm);
+      const before = await xstack();
+      const at0 = await P.ev(`(() => { const e = document.elementFromPoint(${restAt.x}, ${restAt.y}); const x = e && e.closest('.xpra-win'); return x ? x.dataset.wid : null; })()`); // what the pane DRAWS at his point
+      await P.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: restAt.x, y: restAt.y, button: 'left', clickCount: 1 }); // NO move: the pointer is where it rested
+      await P.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: restAt.x, y: restAt.y, button: 'left', clickCount: 1 });
+      await sleep(1000);
+      const after = await xstack();
+      const hisDowns = await H.ev('window.__downs'), agDowns = A ? await A.ev('window.__downs') : null;
+      const ix = (st, wid) => (st && agw ? st.indexOf(wid) : -1);
+      raise = { his: me2.wid, ag: agw && agw.wid, hisRect: [me2.x, me2.y, me2.w, me2.h], agRect: agw && [agw.x, agw.y, agw.w, agw.h], page, drawnAt: at0, before: before && agw ? { his: ix(before, me2.wid), ag: ix(before, agw.wid) } : null, after: after && agw ? { his: ix(after, me2.wid), ag: ix(after, agw.wid) } : null, hisDowns, agDowns, stackBefore: before && before.slice(0, 6).map((x) => '0x' + x.toString(16)), stackAfter: after && after.slice(0, 6).map((x) => '0x' + x.toString(16)) };
+      if (A) A.close();
+      if (tid) await acall('Target.closeTarget', { targetId: tid });
+      if (aws) aws.close();
+      await until(async () => !((await viewWins()) || []).some((x) => agw && x.wid === agw.wid), 8000, 200);
+    }
+    const r = raise, B = r.before, Af = r.after;
+    ok(!!B && !!Af && B.ag >= 0 && B.his >= 0 && B.ag < B.his && Af.his >= 0 && Af.his < Af.ag && r.hisDowns === 1 && r.agDowns === 0 && String(r.drawnAt) === String(r.his), `r5 MAJOR A — A REAL RAISE, READ OFF X: an agent's window (${r.ag}) mapped over his resting pointer is ON TOP in X (xwininfo, topmost first: ${JSON.stringify(r.stackBefore)}) and drawn UNDER his (the pane's hit: ${r.drawnAt}); his press there with no move raises HIS in X first (after: ${JSON.stringify(r.stackAfter)}) and lands in HIS page (his mousedowns ${r.hisDowns}, the agent page's ${r.agDowns})`, JSON.stringify(r));
   }
   ok(pk0 === 'pending' && pkCdp === 'pending', `MEASURED (the RED control of the raw fallback): the page waits in navigator.credentials.get and five of CDP's own clicks never reach Chrome's dialog (${pk0} → ${pkCdp})`);
   ok(/rejected NotAllowedError/.test(String(pkDesk)), `THE RAW FALLBACK: his click + Escape in the desktop window answer Chrome's OWN passkey dialog (__pk = ${pkDesk})`);
