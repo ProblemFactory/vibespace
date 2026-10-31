@@ -11693,6 +11693,7 @@ export default {
   "Open this browser's display in Desktop to act on Chrome's own window": "在「桌面」打开这个浏览器的显示，就能操作 Chrome 自己的窗口",
   "Open in Desktop": "在桌面中打开",
   "Only your own window takes your clicks and keys here — the agents' windows are view only": "在这里只有你自己的窗口接收点击和按键——agent 的窗口只能看",
+  "Click your window first — another window is over it there, so the scroll would land in that one": "先点一下你的窗口——那里有别的窗口盖着它，滚动会落到那个窗口上",
   "View only — this window's seat could not be read; it is asked again when it reconnects": "只能看——读不到这个窗口的席位；重新连接时会再问一次",
   "View only — your other window holds your seat on this browser": "只能看——你在这个浏览器上的席位在你的另一个窗口里",
   "View only — this is a conversation's temporary browser: only its agent uses it, it cannot be browsed yourself": "只能看——这是某个对话的临时浏览器：只有它的 agent 使用，不能自己浏览",

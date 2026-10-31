@@ -11692,6 +11692,7 @@ export default {
   "Open this browser's display in Desktop to act on Chrome's own window": "「デスクトップ」でこのブラウザーの画面を開くと、Chrome 自身のウィンドウを操作できます",
   "Open in Desktop": "デスクトップで開く",
   "Only your own window takes your clicks and keys here — the agents' windows are view only": "ここでクリックとキー入力を受け取るのは自分のウィンドウだけです——agent のウィンドウは表示のみです",
+  "Click your window first — another window is over it there, so the scroll would land in that one": "先に自分のウィンドウをクリックしてください——そこは別のウィンドウに覆われていて、スクロールはそちらに届きます",
   "View only — this window's seat could not be read; it is asked again when it reconnects": "表示のみ——このウィンドウの席を読み取れませんでした。再接続時にもう一度確認します",
   "View only — your other window holds your seat on this browser": "表示のみ——このブラウザーでのあなたの席は別のウィンドウにあります",
   "View only — this is a conversation's temporary browser: only its agent uses it, it cannot be browsed yourself": "表示のみ——これは会話の一時ブラウザーです。その agent だけが使い、自分では閲覧できません",

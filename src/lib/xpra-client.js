@@ -94,7 +94,7 @@
 //   window, cut at the bottom): `on.constraints` carries the main's hints with the minimum raised to the UNION of every
 //   held window's (P.unionMin — a second top-level or a dialog grows the pane, never cut); a second NORMAL window is
 //   mapped CENTRED over the main (P.placeGuest; the belt keeps it inside as before); `on.front(win|null)` names the FRONT
-//   window (P.frontOf — the topmost non-popup by P.stackRank, the drawing's order) on new / raise / lost / its title; `closeFront()` sends close-window
+//   window (P.frontOf — the held window last mapped or raised, his reach first in his input seat; r6: never the drawing's tiers) on new / raise / lost / its title; `closeFront()` sends close-window
 //   to it (the window's ✕ when the front is not the main — closeMain stays the app's own close).
 // • A WINDOW PER TOP-LEVEL (design 016 S2, lane app-satellite-windows, 2026-10-03 — the owner's YES): with `slots` on (the
 //   view asks for it when it can open satellite windows) every secondary NORMAL window gets a SLOT of the X root to the
@@ -135,6 +135,9 @@ export function defaultDecode(bytes, mime) {
  *   on.fixed(size|null)        {wid, w, h} (device px) — the app FIXED this window's size (min = max); null = no such window
  *   on.front(win|null)         the FRONT window (the topmost non-popup by z) — on a new window, a raise, a loss, its title
  *   on.slot(wid, rect|null)    S2 (`slots` on): a secondary top-level's slot of the root (device px) — gained, moved, lost
+ *   on.refused({act, code})    lane desktop-x-seat-browser r6: his act this client refused itself, nothing sent ('wheel' /
+ *                              'click-first': his wheel over a window of his another may cover in X while another window of
+ *                              his holds his focus)
  * admit(win, {admitted})       lane browser-x-in-window (B2): a client that draws ONE window of a SHARED display (an agent
  *                              browser's live view: its conversation's Chrome window, that window's dialogs and menus) answers
  *                              per announced top-level `{wid, kind, meta, x, y, w, h, transientFor}`; a refused one is never
@@ -170,8 +173,11 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   // r4 (acceptance r3 MAJOR 1): his reach is drawn ABOVE the others' top-level windows in the pane (`win.reach`; P.stackRank — r5:
   // never above a popup, see there) — an agent's window announced after his (xpra announces oldest first) never covers it; r5
   // (acceptance r4 MAJOR A): what is drawn on top is on top IN X before his act lands — the seat word and his press / wheel on a
-  // window of his that another window may cover in X RAISE it there (`raiseInX`: r4's lone focus packet raised nothing)
-  let seatWids = null;
+  // window of his that another window may cover in X RAISE it there (`raiseInX`: r4's lone focus packet raised nothing); r6
+  // (acceptance r5): his WHEEL raises only the window that holds his focus — over another of his, covered, it is refused and said
+  // (`on.refused`), never his focus taken from his own dialog; a seat word that finds no window of his yet OWES the raise to his
+  // first window (`raiseOwed` — on a fresh socket the bridge speaks right after xpra's hello, xpra announces its windows after)
+  let seatWids = null, raiseOwed = false;
   const mayFocus = (wid) => !seatWids || seatWids.has(wid);
   const keyWid = new Map(), buttonWid = new Map();
   let helloTimer = null, pingTimer = null;
@@ -456,6 +462,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   const focusWindow = (wid) => {
     const win = windows.get(wid);
     if (!win || !mayFocus(wid)) return; // r3: in the input seat focus never leaves his reach (a window that appears, another's window pressed)
+    if (raiseOwed && seatWids && win.kind !== 'popup') { raiseOwed = false; send(P.focusPacket(0)); } // r6: the seat word's raise, owed to his first window — focus 0 first, so xpra raises it (raiseInX)
     focusedWid = wid;
     win.z = zNext();
     send(P.focusPacket(wid));
@@ -469,6 +476,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
    *  read before and after: test-browser-x-picture ⑥). */
   const raiseInX = (wid) => {
     if (!windows.has(wid) || !mayFocus(wid)) return;
+    raiseOwed = false;
     send(P.focusPacket(0));
     focusedWid = 0;
     focusWindow(wid);
@@ -594,7 +602,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         const was = seatWids;
         seatWids = seat === 'input' ? new Set(wids) : null; // r3: focus stays in his reach — the key he types goes to his window
         for (const w of windows.values()) { const r = !!seatWids && seatWids.has(w.wid); if (!!w.reach !== r) { w.reach = r; emit('window', 'raise', w); } } // r4: drawn above the others' (the view re-stacks)
-        if (seatWids && (!was || !seatWids.has(focusedWid))) { const home = seatWids.has(focusedWid) ? focusedWid : wids.find((x) => windows.has(x) && windows.get(x).kind !== 'popup'); if (home) raiseInX(home); } // r5: his seat begins (or focus left his reach) — HIS window raised IN X (where X stacked it before is unknown)
+        raiseOwed = false;
+        if (seatWids && (!was || !seatWids.has(focusedWid))) { const home = seatWids.has(focusedWid) ? focusedWid : wids.find((x) => windows.has(x) && windows.get(x).kind !== 'popup'); if (home) raiseInX(home); else raiseOwed = true; } // r5: his seat begins (or focus left his reach) — HIS window raised IN X (where X stacked it before is unknown); r6: none of his announced yet — owed to his first (focusWindow)
         emit('seat', { seat, why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, acts: Number(v.acts) || 0, wids });
         return;
       }
@@ -757,7 +766,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const win = windowAt(x, y);
     const coords = P.pointerCoords(x, y, win), m = P.modifiersOf(mods), wid = win ? win.wid : 0;
     const steps = wheel.feed(deltaX, deltaY, deltaMode);
-    if (steps.length && win && seatWids && seatWids.has(win.wid) && win.kind !== 'popup' && coveredInX(win, x, y)) raiseInX(win.wid); // r5: his wheel scrolls the window drawn under it
+    if (steps.length && win && seatWids && seatWids.has(win.wid) && win.kind !== 'popup' && coveredInX(win, x, y)) { // r5: his wheel scrolls the window drawn under it — raised in X first
+      if (win.wid !== focusedWid) { emit('refused', { act: 'wheel', code: 'click-first' }); return; } // r6 (acceptance r5 MINOR 1): a raise would take his focus from his own window (his file chooser) — refused and said, never sent to the window on top in X
+      raiseInX(win.wid); // his focused window: focus 0 + focus HIS keeps his focus where it is
+    }
     for (const [button, n] of steps) for (let i = 0; i < n; i++) { send(P.buttonAction(wid, button, true, coords, m)); send(P.buttonAction(wid, button, false, coords, m)); }
   };
   /** Text from the browser into the app's clipboard; `press` also sends the

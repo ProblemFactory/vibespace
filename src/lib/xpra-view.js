@@ -96,8 +96,8 @@ export const workerUrlFor = (id) => `/api/desktop/${encodeURIComponent(id)}/xpra
 /** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
 export const STREAM_KIND = 'xpra';
 export const BACKING_SHRINK_MS = 1000;
-/** The windows' z-index floor: a window's z-index is Z_FLOOR + P.stackRank — THE order windowAt hits and frontOf names (lane
- *  desktop-x-seat-browser r5; every window under the fit badge's 400000). */
+/** The windows' z-index floor: a window's z-index is Z_FLOOR + P.stackRank — THE order windowAt hits (lane desktop-x-seat-browser
+ *  r5; every window under the fit badge's 400000; r6: the FRONT window is P.frontOf's own question, never this order). */
 const Z_FLOOR = 1000;
 
 /** bytes → a data: URL (PNG); the base64 alphabet is validated on the way OUT
@@ -150,6 +150,7 @@ export function startingText(ms) {
  *   admit(win, ctx) — lane browser-x-in-window: ONE window of a shared display (xpra-client's `admit`: the others never drawn)
  *   onSeat({seat, why, code, refused, wids}) — lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (a seated
  *                   source's: its seat, why it watches, the last refused act's code and count, an input seat's windows)
+ *   onRefused({act, code}) — r6: his act the CLIENT refused itself, nothing sent ('wheel' / 'click-first')
  *   fixedFollows  — () => true when the window adopts that size (then the picture is never scaled); default true
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
@@ -164,7 +165,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, onSeat = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, onSeat = null, onRefused = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
   /** lane xpra-mac-modifiers: the primary-modifier map of THIS viewer and THIS app's machine, asked per event (the one table). */
@@ -626,6 +627,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         // the cursor image is device px: at a ratio > 1 it is declared at that density (image-set) so it keeps its
         // size on screen — assigned after the plain url(), which stays when a browser rejects the image-set form
         seat: (v) => { try { onSeat?.(v); } catch (e) { log?.warn?.(`[xpra] onSeat threw: ${e && e.message}`); } }, // lane desktop-x-seat-browser r2: the bridge's word
+        refused: (v) => { try { onRefused?.(v); } catch (e) { log?.warn?.(`[xpra] onRefused threw: ${e && e.message}`); } }, // r6: the client's own refusal of his act
         cursor: (cur) => {
           const u = cur ? pngDataUrl(cur.data) : null;
           pane.style.cursor = u ? `url(${u}) ${cur.xhot} ${cur.yhot}, auto` : '';

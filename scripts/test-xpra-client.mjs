@@ -2178,6 +2178,105 @@ console.log('§X lane browser-x-in-window (B2): ONE window of a SHARED display �
   c2.close();
 }
 
+console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 7c154947b): the DRAWN order is not the FRONT — a press into an app\'s main makes it the front and the ✕ asks the app; his wheel never takes his focus from his own dialog');
+{
+  const { outerCloseVerdict } = (await import('node:module')).createRequire(import.meta.url)('../src/desktop-fit.js');
+  // ── PURE: the drawing stacks a dialog above its main (P.stackRank); the front is the window acted on last (P.frontOf) ──
+  const main = { wid: 1, kind: 'main', mapped: true, z: 3 }, nav = { wid: 2, kind: 'dialog', mapped: true, z: 2 }; // Writer pressed after its Navigator (UTILITY ⇒ kind 'dialog') mapped
+  const his = { wid: 0x400003, kind: 'main', reach: true, mapped: true, z: 1 }, ag = { wid: 0x40000f, kind: 'main', mapped: true, z: 5 };
+  const table = [
+    ['stackRank: the Navigator is DRAWN above the main it belongs to, whatever was pressed last', P.stackRank(nav) > P.stackRank(main), true],
+    ['frontOf: a press into the main (raised last) ⇒ the main is the front', P.frontOf([main, nav])?.wid, 1],
+    ['frontOf: a dialog mapped or raised last ⇒ the dialog is the front', P.frontOf([{ ...main, z: 2 }, { ...nav, z: 3 }])?.wid, 2],
+    ['frontOf: in his input seat his reach first — an agent window raised after his never names his Desktop window', P.frontOf([his, ag])?.wid, 0x400003],
+    ['frontOf: outside the seat the last raised (the base\'s rule)', P.frontOf([{ ...his, reach: false }, ag])?.wid, 0x40000f],
+  ];
+  const bad = table.filter(([, got, want]) => !same(got, want));
+  ok(bad.length === 0, `r6 MINOR 2 — PURE: ${table.length} rows — the drawn order ≠ the front`, bad.map(([n, got, want]) => ({ n, got, want })));
+
+  // ── the acceptance's probe: LibreOffice Writer + its Navigator (UTILITY, transient-for the main); he clicks into the document,
+  // then the window's ✕ (desktop-fit's outerCloseVerdict, as desktop-app-window asks it); the app answers with its save dialog ──
+  const writerRun = async (mod) => {
+    FakeWorker.instances.length = 0;
+    let front = null; const titles = [];
+    const label = 'LibreOffice Writer';
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 1200, height: 800 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null,
+      on: { front: (f) => { front = f && f.wid !== c.mainWid ? { wid: f.wid, title: f.title } : null; titles.push(front ? `${label} · ${front.title}` : label); } } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    w.feed(['new-window', 1, 0, 0, 1200, 800, { title: 'Document - Writer' }]);
+    w.feed(['new-window', 2, 900, 100, 250, 400, { title: 'Navigator', 'window-type': ['UTILITY'], 'transient-for': 1 }]);
+    const xClick = () => {
+      const v = outerCloseVerdict({ state: 'ready', perWindow: true, seat: 'active', connected: true, mainWid: c.mainWid, frontWid: front ? front.wid : 0 });
+      const n = w.sent('close-window').length;
+      if (v.act === 'ask-front') c.closeFront(); else if (v.act === 'ask-app') c.closeMain();
+      return { act: v.act, to: w.sent('close-window').slice(n).map((p) => p[1]) };
+    };
+    const out = { atTool: c.frontWid };
+    c.pointerButton(200, 300, 0, true, {}); c.pointerButton(200, 300, 0, false, {}); // he clicks into the document
+    out.atPress = c.frontWid; out.title = titles.at(-1); out.x = xClick();
+    w.feed(['new-window', 3, 300, 200, 400, 300, { title: 'Save Document?', 'window-type': ['DIALOG'], modal: true, 'transient-for': 1 }]); // the app asks: its dialog mapped last
+    out.atSave = c.frontWid; out.title2 = titles.at(-1); out.x2 = xClick();
+    c.close();
+    return out;
+  };
+  const WR = await writerRun(C);
+  ok(WR.atTool === 2 && WR.atPress === 1 && WR.title === 'LibreOffice Writer' && same(WR.x, { act: 'ask-app', to: [1] }), `r6 MINOR 2 — the acceptance's probe: the Navigator is the front as it maps; his click into the document makes the MAIN the front — the title is the app's alone and the ✕ asks the app (closeMain), never closes the Navigator (r5: «Writer · Navigator» for good, close-window to the Navigator)`, WR);
+  ok(WR.atSave === 3 && WR.title2 === 'LibreOffice Writer · Save Document?' && same(WR.x2, { act: 'ask-front', to: [3] }), 'r6 MINOR 2 — a dialog mapped last IS the front: the title names it, the ✕ goes to it', WR);
+
+  // ── the acceptance's probe: HIS main + his own file chooser (transient-for HIS, focused as it maps) + an agent window mapped
+  // later over the bottom-right of HIS; he scrolls his page beside the chooser, where the agent's window covers it in X ──
+  const HIS = 0x400003, MYDLG = 0x600009, AG = 0x40000f, AG2 = 0x400011;
+  const wheelRun = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const said = [];
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 800, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, on: { refused: (v) => said.push(v) } });
+    c.watch = true; c.viewOnly = false; // the view's 'input' mode: Watch's picture, his input sent
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    const pk = (n) => w.all.slice(n).map((p) => (p[0] === 'focus' ? ['focus', p[1]] : p[0] === 'button-action' ? ['button', p[1], p[2], p[3]] : p[0] === 'key-action' ? ['key', p[1], p[3]] : [p[0]]));
+    w.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    w.feed(['new-window', HIS, 100, 50, 500, 400, { title: 'his' }]);
+    w.feed(['vibespace-seat', { seat: 'input', why: '', code: '', refused: 0, acts: 0, wids: [HIS, MYDLG] }]);
+    w.feed(['new-window', MYDLG, 150, 80, 250, 200, { title: 'Open File', 'transient-for': HIS }]);
+    w.feed(['new-window', AG, 420, 300, 300, 250, { title: 'agent' }]);
+    const out = { focused0: c.focusedWid };
+    let n = w.all.length;
+    c.wheel(480, 380, 0, 120, 0, {});
+    out.covered = pk(n); out.focusedAfter = c.focusedWid; out.said = said.slice();
+    n = w.all.length;
+    c.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }); c.keyUp({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} });
+    out.nextKey = pk(n).filter((p) => p[0] === 'key');
+    n = w.all.length; c.wheel(120, 420, 0, 120, 0, {}); out.open = pk(n); // a point of his main nothing covers: the scroll, his focus untouched
+    n = w.all.length; c.pointerButton(480, 380, 0, true, {}); c.pointerButton(480, 380, 0, false, {}); out.press = pk(n); // a press keeps the raise (a press moves focus by nature)
+    n = w.all.length; c.wheel(480, 380, 0, 120, 0, {}); out.focusedWheel = pk(n); // his main focused, raised: the scroll only
+    w.feed(['new-window', AG2, 450, 330, 200, 200, { title: 'agent 2' }]); // another agent window over it
+    n = w.all.length; c.wheel(480, 380, 0, 120, 0, {}); out.focusedRaise = pk(n); out.focusedEnd = c.focusedWid;
+    c.close();
+    return out;
+  };
+  const B = (wid, b) => [['button', wid, b, true], ['button', wid, b, false]], PAIR = [['focus', 0], ['focus', HIS]];
+  const WH = await wheelRun(C);
+  ok(WH.focused0 === MYDLG && same(WH.covered, []) && WH.focusedAfter === MYDLG && same(WH.said, [{ act: 'wheel', code: 'click-first' }]) && same(WH.nextKey, [['key', MYDLG, true], ['key', MYDLG, false]]), 'r6 MINOR 1 — the acceptance\'s probe: his wheel over his main where an agent\'s window covers it in X while HIS FILE CHOOSER holds his focus — REFUSED by the client and said (on.refused «click your window first»): no focus packet, no scroll sent to the window on top in X; his focus stays on his chooser and his next key goes to it (r5: focus 0 + focus HIS, his keys to the main behind his modal)', WH);
+  ok(same(WH.open, B(HIS, 5)), 'r6 MINOR 1 — a point of his main nothing covers: the scroll only, his chooser keeps his focus', WH.open);
+  ok(same(WH.press, [...PAIR, ...B(HIS, 1)]), 'r6 — his PRESS on the covered point keeps the raise (focus 0, then HIS, then the click: a press moves focus by nature)', WH.press);
+  ok(same(WH.focusedWheel, B(HIS, 5)) && same(WH.focusedRaise, [...PAIR, ...B(HIS, 5)]) && WH.focusedEnd === HIS, 'r6 — his wheel over his FOCUSED main: nothing over it ⇒ the scroll only; an agent window mapped over it ⇒ raised first (focus 0 + focus HIS keeps his focus where it is), then the scroll', { focusedWheel: WH.focusedWheel, focusedRaise: WH.focusedRaise });
+
+  // ── MUTANTS: each rule undone in a copy — its leg goes red ──
+  const csrc = read('src/lib/xpra-client.js'), psrc = read('src/lib/xpra-proto.js');
+  const REFUSE = "      if (win.wid !== focusedWid) { emit('refused', { act: 'wheel', code: 'click-first' }); return; }";
+  const FRONT_RANK = 'if (heldWindow(win) && (!best || frontRank(win) > frontRank(best))) best = win;';
+  ok(csrc.split(REFUSE).length === 2 && psrc.split(FRONT_RANK).length === 2, 'r6 mutants: the wheel\'s refusal and the front\'s rank are each spelled once');
+  const MW = await wheelRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(REFUSE, ''), 'wheel-takes-focus')).href));
+  ok(MW.focusedAfter === HIS && !same(MW.covered, []), `MUTANT wheel-takes-focus (r5's wheel: the raise whoever holds his focus) ⇒ the probe's leg goes RED: focus moves to ${MW.focusedAfter.toString(16)}, his next key to ${JSON.stringify(MW.nextKey)}`, MW);
+  const pp = MUTXC.write('src/lib/xpra-proto.js', psrc.replace(FRONT_RANK, 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;'), 'front-by-stack-rank');
+  const MF = await writerRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace("from './xpra-proto.js'", `from ${JSON.stringify(pathToFileURL(pp).href)}`), 'front-by-stack-rank')).href));
+  ok(MF.atPress === 2 && same(MF.x, { act: 'ask-front', to: [2] }), `MUTANT front-by-stack-rank (r5's frontOf: the drawn tiers) ⇒ the Writer leg goes RED: the Navigator stays the front, the ✕ closes it (${JSON.stringify(MF.x)})`, MF);
+}
+
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);

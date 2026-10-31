@@ -491,6 +491,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     before: readyGate, autoReconnect: true,
     onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0, acts: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
     onSeat: (v) => applyBrowserSeat(v), // r2: the bridge's own word to THIS socket (its seat, why, a refused act) — never silent
+    onRefused: (v) => sayClientRefusal(v), // r6: an act the client refused itself (his wheel where a raise would take his focus) — said too
     mayFocus: () => app.wm.activeWindowId === winInfo.id, // lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
   const setAppIcon = (dataUrl) => {
@@ -610,6 +611,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (closed || n !== bseat.asked) return;
     if (!r || r.error || !r.seat) setBrowserSeat('watch', null, { failed: true }); // FAIL 3: an unread seat is WATCH, said — never 'active'
     else setBrowserSeat(r.seat, r.why);
+  };
+  /** r6 (acceptance r5 MINOR 1): his wheel over a window of his that another may cover in X while another window of his holds his
+   *  focus — the client sent nothing (a raise would move his keys off his own dialog): said, paced like the bridge's refusals. */
+  const sayClientRefusal = (v) => {
+    if (!v || v.code !== 'click-first' || !browserDisplay() || bseat.seat !== 'input') return;
+    const now = Date.now();
+    if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Click your window first — another window is over it there, so the scroll would land in that one'), { duration: 3500 }); }
   };
   /** The bridge's word (in-band, this socket's own): the seat, why it watches, a refused act — said once per act. */
   const applyBrowserSeat = (v) => {

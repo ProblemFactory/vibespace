@@ -387,7 +387,8 @@ export function placeGuest({ x, y, w, h }, { paneW, paneH }, over = null) {
   return { ...placed, moved: placed.x !== x || placed.y !== y };
 }
 /** THE STACK RANK (lane desktop-x-seat-browser r5, acceptance r4 MINOR B + MAJOR A): ONE order of a pane's windows — the view's
- *  z-index, the client's windowAt and frontOf all read it, never three orderings. Tiers, low to high: a main, a dialog, then (r4
+ *  z-index and the client's windowAt read it (what is drawn on top is what a press hits; r6: the FRONT is another question —
+ *  frontOf). Tiers, low to high: a main, a dialog, then (r4
  *  MAJOR 1) the person's input-seat reach (`win.reach`: his main, then his dialog — an agent's top-level announced after his never
  *  covers it), then EVERY popup, his or another's, by `z` (r5 MAJOR A: xpra maps an override-redirect window above what is there,
  *  and drawn under his window an agent's <select> / menu / tooltip took his press in X — above it, his press there is addressed
@@ -397,10 +398,16 @@ export function stackRank(win) {
   const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);
   return tier * (STACK_Z_CAP + 1) + Math.min(Math.max(0, Number(win.z) || 0), STACK_Z_CAP);
 }
-/** The FRONT window: the topmost held window by the stack rank (a dialog counts — what a desktop's title and ✕ name), or null. */
+/** The FRONT window — what a desktop's title and its ✕ name: the held window acted on last, or null. THE DRAWN ORDER IS NOT THE
+ *  FRONT (lane desktop-x-seat-browser r6, acceptance r5 MINOR 2: by the stack rank's dialog tier an app's Navigator, Find & Replace
+ *  or floating toolbar stayed the front for good — the title named it after a press into the document, and the ✕ closed it
+ *  instead of asking the app). In his input seat his reach first (`win.reach`: an agent's window announced after his never names
+ *  his Desktop window), then `z` — the last mapped or raised (a press into the main raises it: the main is the front, the ✕ asks
+ *  the app; a dialog is the front when it was mapped or raised last); a popup never. */
+const frontRank = (win) => (win.reach ? STACK_Z_CAP + 1 : 0) + Math.min(Math.max(0, Number(win.z) || 0), STACK_Z_CAP);
 export function frontOf(windows) {
   let best = null;
-  for (const win of windows || []) if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;
+  for (const win of windows || []) if (heldWindow(win) && (!best || frontRank(win) > frontRank(best))) best = win;
   return best;
 }
 

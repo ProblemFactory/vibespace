@@ -23,6 +23,10 @@
 // which xpra delivered to the popup in X); his act on his window is raised IN X first when another window may cover it there
 // (focus 0, then HIS: r4's lone focus packet raised nothing — xpra skips a focus it holds); a read deferred inside the pace is
 // asked at its end (the relaunch) and never after the socket closes.
+// r6 (主开发's acceptance r5 on 7c154947b): a seat word that finds no window of his yet — a FRESH socket: the bridge speaks right
+// after xpra's hello, xpra announces its windows after (by X id) — owes the raise to his first window as it maps; the FRONT is
+// P.frontOf's own question, never the drawing's tiers (his reach first, then the last raised — test-xpra-client §XS, with his
+// wheel's refusal); a wheel the client refuses itself is said in his Desktop window.
 // In-process here, no browser, no display:
 //   §1 PURE: deskSeat / deskSeatWhy / deskDoorAct / deskDoorOf (src/browser-picture.js); xScopeOf over the REAL row path (an
 //      xwininfo tree → parseWininfoTree → seamlessWindows → the keeper's appWindowRow → xWindowOf); the bridge's readers —
@@ -574,8 +578,27 @@ async function clientFacts(root, bust = '') {
     r5 = { seatPair, pressPlain, front, pressRaise, pressAgain, popupOver, wheelRaise: pk(n) };
   }
   try { r5c.close?.(); } catch { }
+  // r6 (acceptance r5, honesty): a FRESH socket in the bridge's order — its word right after xpra's hello, THEN xpra's windows by
+  // X id (the agent's older window first, his newer one after): the seat word finds no window of his — the raise is owed to his
+  const r6c = C.createXpraClient({ url: 'ws://x', workerUrl: 'w.js', screen: { width: 800, height: 600 }, Worker: FakeWorker });
+  r6c.watch = true; r6c.viewOnly = false;
+  r6c.connect();
+  const w6 = await until(() => FakeWorker.last && ![w, wa, w5].includes(FakeWorker.last) && FakeWorker.last.all.length ? FakeWorker.last : null, 2000);
+  let r6 = null;
+  if (w6) {
+    w6.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    const n6 = w6.all.length;
+    w6.feed(['vibespace-seat', { seat: 'input', why: '', code: '', refused: 0, acts: 0, wids: [NEWHIS] }]);
+    w6.feed(['new-window', AGENTS, 90, 40, 400, 300, { title: 'agent' }, {}]);
+    w6.feed(['new-window', NEWHIS, 100, 50, 400, 300, { title: 'his' }, {}]);
+    const atConnect = w6.all.slice(n6).filter((p) => p[0] === 'focus').map((p) => ['focus', p[1]]);
+    const n7 = w6.all.length;
+    r6c.pointerButton(150, 100, 0, true, {}); r6c.pointerButton(150, 100, 0, false, {});
+    r6 = { atConnect, press: w6.all.slice(n7).map((p) => (p[0] === 'focus' ? ['focus', p[1]] : p[0] === 'button-action' ? ['button', p[1], p[2], p[3]] : [p[0], p[1]])) };
+  }
+  try { r6c.close?.(); } catch { }
   try { c.close?.(); } catch { }
-  return { r5, seen, sent: all.map((p) => p[0]), keys: keys(n0, n1), keysC: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'c').map((p) => [p[1], p[3]]), keysL: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'l').map((p) => [p[1], p[3]]), focusLater: all.some((p) => p[0] === 'focus' && p[1] === LATER), btn, maps, seatRaise, pressRaise, reach, activeKeys };
+  return { r5, r6, seen, sent: all.map((p) => p[0]), keys: keys(n0, n1), keysC: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'c').map((p) => [p[1], p[3]]), keysL: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'l').map((p) => [p[1], p[3]]), focusLater: all.some((p) => p[0] === 'focus' && p[1] === LATER), btn, maps, seatRaise, pressRaise, reach, activeKeys };
 }
 /** §3 r5 — THE ONE STACK RANK (src/lib/xpra-proto.js stackRank / frontOf), PURE; → facts */
 function protoFacts(XP) {
@@ -624,7 +647,9 @@ function doorFacts(root) {
     liveDoorRejudged: /const renderMode = \(\) => \{\n    renderDeskDoor\(\);/.test(live) && /scheduleReport\(\); renderDeskDoor\(\);/.test(live) && /renderOwner\(\); renderDeskDoor\(\);/.test(live) && /const renderDialog = \(\) => \{\n    renderDeskDoor\(\);/.test(live),
     themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
     oneRank: /w\.el\.style\.zIndex = String\(Z_FLOOR \+ stackRank\(win\)\);/.test(view) && /import \{[^}]*\bstackRank\b[^}]*\} from '\.\/xpra-proto\.js';/.test(view) && !/Z_REACH|Z_BASE/.test(view)
-      && /\.sort\(\(a, b\) => P\.stackRank\(b\) - P\.stackRank\(a\)\)\[0\] \|\| null;/.test(read(root, 'src/lib/xpra-client.js')) && /\(!best \|\| stackRank\(win\) > stackRank\(best\)\)/.test(read(root, 'src/lib/xpra-proto.js')),
+      && /\.sort\(\(a, b\) => P\.stackRank\(b\) - P\.stackRank\(a\)\)\[0\] \|\| null;/.test(read(root, 'src/lib/xpra-client.js')),
+    clientRefusalSaid: /onRefused: \(v\) => sayClientRefusal\(v\),/.test(dw) && dw.includes("if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Click your window first — another window is over it there, so the scroll would land in that one')")
+      && /refused: \(v\) => \{ try \{ onRefused\?\.\(v\); \}/.test(view) && read(root, 'src/lib/xpra-client.js').includes("emit('refused', { act: 'wheel', code: 'click-first' }); return; }"),
     toastOnActs: /const more = \(Number\(v\.acts\) \|\| 0\) > bseat\.acts;/.test(dw) && /if \(more && bseat\.seat === 'input'\) \{/.test(dw),
     dw, live,
   };
@@ -757,7 +782,9 @@ ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.stat
   ok(!c.error && JSON.stringify(r5.pressRaise) === JSON.stringify([...PAIR, ...B(HIS)]) && JSON.stringify(r5.pressAgain) === JSON.stringify(B(HIS)), "r5 MAJOR A — an agent's window mapped after his raise covers the point (on top in X; drawn under his): his press raises HIS in X first (focus 0, then HIS), then the click — once: the next press is the click only", { pressRaise: r5.pressRaise, pressAgain: r5.pressAgain });
   ok(!c.error && r5.popupOver && r5.popupOver.at === APOP2 && JSON.stringify(r5.popupOver.sent) === JSON.stringify(B(APOP2)), "r5 MAJOR A — an agent's <select> popup over his window (the acceptance's probe: HIS 100,50 400×300, the popup 140,90 120×80, a click at 150,100) stays ABOVE his window: the click is addressed to the popup (the bridge refuses it, his window says so) — never to HIS while X has the popup on top", r5.popupOver);
   ok(!c.error && JSON.stringify(r5.wheelRaise) === JSON.stringify([...PAIR, ...B(HIS, 5)]), "r5 MAJOR A — his wheel over his window where an agent's newer window covers it in X: raised first, then the scroll his", r5.wheelRaise);
-  ok(!c.error && r5.front && r5.front.last === HIS && r5.front.wid === HIS, "r5 MINOR B — the FRONT window is the one drawn on top: after his popup closes, on.front and frontWid name HIS, never the agent's window announced after his (r4: z alone named it — the Desktop window's title, the ✕'s verdict)", r5.front);
+  ok(!c.error && r5.front && r5.front.last === HIS && r5.front.wid === HIS, "r5 MINOR B — in his input seat the FRONT window is his (his reach first): after his popup closes, on.front and frontWid name HIS, never the agent's window announced after his (r4: z alone named it — the Desktop window's title, the ✕'s verdict)", r5.front);
+  const r6 = c.r6 || {};
+  ok(!c.error && JSON.stringify(r6.atConnect) === JSON.stringify([['focus', 0], ['focus', NEWHIS]]) && JSON.stringify(r6.press) === JSON.stringify(B(NEWHIS)), "r6 (acceptance r5, honesty) — a FRESH socket in the bridge's order (its word right after xpra's hello, then xpra's windows by X id: the agent's older one first): the seat word's raise is OWED to his first window — focus 0, then HIS as it maps (r5: a lone `focus HIS`, nothing when xpra held it), the agent's window pays nothing; his press in the overlap is then the click only", r6);
   ok(!c.error && c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])), "r3 MINOR — xpra moved his window: the client maps it where it now draws it (the server's own geometry), so his pointer lands where he points", c.maps);
   ok(!c.error && c.sent.includes('key-action') && c.sent.includes('button-action') && !c.sent.some((x) => /desktop_size|display-configure|configure-display|configure-window/.test(x)) && JSON.stringify(c.maps[0]) === JSON.stringify([HIS, 100, 50, 400, 300]), "Watch's picture with his input (the view's 'input' mode): his key and click are sent, his window mapped where the server has it, a pane resize sends no size", c.sent);
 }
@@ -765,9 +792,9 @@ ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.stat
   const pf = protoFacts(await import(pathToFileURL(path.join(REPO, 'src/lib/xpra-proto.js')).href));
   ok(!pf.error && pf.popupAboveReach === true, "r5 MAJOR A — THE ONE STACK RANK (P.stackRank): every popup above his reach (an agent's over his window too), popups by z among themselves", pf);
   ok(!pf.error && pf.reachAboveAgents === true && pf.outsideSeat === true, "r4 MAJOR 1 kept — his reach (his main, then his dialog) above the agents' top-levels and dialogs; outside the input seat a dialog above a main, z orders a tier");
-  ok(!pf.error && pf.front === HIS, `r5 MINOR B — frontOf names the held window drawn on top (HIS over a later agent window and its dialog; a popup never) — by the rank, never z alone (${pf.front})`);
+  ok(!pf.error && pf.front === HIS, `r5 MINOR B — in his input seat frontOf names his reach first (HIS over a later agent window and its dialog; a popup never) — never z alone (${pf.front}); r6: never the drawing's tiers either (test-xpra-client §XS)`);
   ok(!pf.error && pf.underBadge === true, 'every window under the fit badge (z-index 400000): the rank is capped (STACK_Z_CAP; the client renumbers z before it)');
-  ok(D.oneRank === true, "r5 MINOR B — ONE ordering: the view's z-index is Z_FLOOR + stackRank, windowAt sorts by P.stackRank, frontOf names by it (never three)");
+  ok(D.oneRank === true, "r5 — ONE drawn order: the view's z-index is Z_FLOOR + stackRank and windowAt sorts by P.stackRank (what is drawn on top is what his press hits); r6: the front is frontOf's own question");
 }
 
 // ═══ §4 ═══
@@ -785,6 +812,7 @@ console.log("§5 the window's doors (source pins) and their words");
   ok(D.failedIsWatch, 'FAIL 3 — a failed seat answer is WATCH and SAID («…seat could not be read…»), never active by default');
   ok(D.told, "FAIL 3 — the window takes the bridge's in-band word (xpra-client → xpra-view onSeat → the window)");
   ok(D.toastOnActs, "r3 — the window's one toast is for a refused ACT (his press, his key: `acts`); a quiet refusal is told, never toasted");
+  ok(D.clientRefusalSaid, "r6 MINOR 1 — his wheel the CLIENT refused (a raise would take his focus from his own dialog: nothing sent) reaches his Desktop window (xpra-client on.refused → xpra-view onRefused) and is said, paced like the bridge's refusals");
   ok(D.labelIsAct, "MAJOR B — the door's label IS its act: «Use it here» POSTs the seat, «Browse yourself» / «Open your browsing window» open his own tab (and hold his seat in THIS pane — measured: a synced copy on another client took it); no «Take over» that is no takeover");
   ok(D.doorVerdict, "MAJOR B — the door's act is deskDoorAct's (a conversation's temporary browser: no button, the words say why)");
   ok(D.inputMode, "the view's 'input' mode: Watch's picture (nothing sized), his input sent");
@@ -845,16 +873,17 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     { tag: 'focus-follows-windows', file: XCF, from: 'if (!win || !mayFocus(wid)) return;', to: 'if (!win) return;', client: true, red: (c) => !c.error && (c.focusLater || c.keys.some((k) => k[0] !== HIS)) },
     { tag: 'key-release-never-at-press', file: XCF, from: 'if (seatWids && !seatWids.has(wid)) wid = at;', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.keysL) !== JSON.stringify([[MYDLG, true], [MYDLG, false]]) },
     { tag: 'key-release-at-press', file: XCF, from: 'if (seatWids && !seatWids.has(wid)) wid = at;', to: 'wid = at;', client: true, red: (c) => !c.error && JSON.stringify(c.keysC) !== JSON.stringify([[HIS, true], [MYDLG, false]]) },
-    { tag: 'seat-word-no-raise', file: XCF, from: 'if (home) raiseInX(home); }', to: 'if (home) focusedWid = home; }', client: true, red: (c) => !c.error && (!c.seatRaise || JSON.stringify(c.seatRaise.focus) !== JSON.stringify([0, HIS])) },
-    { tag: 'seat-word-focus-only', file: XCF, from: 'if (home) raiseInX(home); }', to: 'if (home) focusWindow(home); }', client: true, red: (c) => !c.error && !!c.r5 && JSON.stringify(c.r5.seatPair) !== JSON.stringify([['focus', 0], ['focus', HIS]]) },
+    { tag: 'seat-word-no-raise', file: XCF, from: 'if (home) raiseInX(home);', to: 'if (home) focusedWid = home;', client: true, red: (c) => !c.error && (!c.seatRaise || JSON.stringify(c.seatRaise.focus) !== JSON.stringify([0, HIS])) },
+    { tag: 'seat-word-focus-only', file: XCF, from: 'if (home) raiseInX(home);', to: 'if (home) focusWindow(home);', client: true, red: (c) => !c.error && !!c.r5 && JSON.stringify(c.r5.seatPair) !== JSON.stringify([['focus', 0], ['focus', HIS]]) },
     { tag: 'press-focus-only', file: XCF, from: 'coveredInX(win, x, y)) raiseInX(win.wid);\n', to: 'coveredInX(win, x, y)) focusWindow(win.wid);\n', client: true, red: (c) => !c.error && !!c.r5 && !(c.r5.pressRaise || []).some((p) => p[0] === 'focus' && p[1] === 0) },
     { tag: 'press-always-focuses', file: XCF, from: 'else if (win.wid !== focusedWid) focusWindow(win.wid);', to: 'else focusWindow(win.wid);', client: true, red: (c) => !c.error && !!c.r5 && (c.r5.pressPlain || []).some((p) => p[0] === 'focus') },
     { tag: 'press-never-raises', file: XCF, from: 'if (pressed) raiseFor(win, x, y);', to: '', client: true, red: (c) => !c.error && !!c.r5 && !(c.r5.pressRaise || []).some((p) => p[0] === 'focus' && p[1] === HIS) },
-    { tag: 'wheel-no-raise', file: XCF, from: "if (steps.length && win && seatWids && seatWids.has(win.wid) && win.kind !== 'popup' && coveredInX(win, x, y)) raiseInX(win.wid);", to: '', client: true, red: (c) => !c.error && !!c.r5 && !(c.r5.wheelRaise || []).some((p) => p[0] === 'focus') },
+    { tag: 'seat-raise-not-owed', file: XCF, from: 'else raiseOwed = true; }', to: '}', client: true, red: (c) => !c.error && !!c.r6 && JSON.stringify(c.r6.atConnect) !== JSON.stringify([['focus', 0], ['focus', NEWHIS]]) },
+    { tag: 'wheel-no-raise', file: XCF, from: '      raiseInX(win.wid); // his focused window: focus 0 + focus HIS keeps his focus where it is', to: '', client: true, red: (c) => !c.error && !!c.r5 && !(c.r5.wheelRaise || []).some((p) => p[0] === 'focus') },
     { tag: 'windowAt-own-order', file: XCF, from: '.sort((a, b) => P.stackRank(b) - P.stackRank(a))[0] || null;', to: '.sort((a, b) => ((b.reach ? 3e9 : 0) + (b.kind === \'popup\' ? 2e9 : 0) + b.z) - ((a.reach ? 3e9 : 0) + (a.kind === \'popup\' ? 2e9 : 0) + a.z))[0] || null;', client: true, red: (c) => !c.error && !!c.r5 && (!c.r5.popupOver || c.r5.popupOver.at !== APOP2) },
     { tag: 'reach-over-popups', file: 'src/lib/xpra-proto.js', from: "const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);", to: "const tier = (win.reach ? 5 : 0) + (win.kind === 'popup' ? 4 : win.kind === 'dialog' ? 1 : 0);", proto: true, red: (f) => !f.error && f.popupAboveReach === false },
     { tag: 'no-reach-tier', file: 'src/lib/xpra-proto.js', from: "const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);", to: "const tier = win.kind === 'popup' ? 4 : (win.kind === 'dialog' ? 1 : 0);", proto: true, red: (f) => !f.error && f.reachAboveAgents === false },
-    { tag: 'front-by-z', file: 'src/lib/xpra-proto.js', from: 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;', to: 'if (heldWindow(win) && (!best || win.z > best.z)) best = win;', proto: true, red: (f) => !f.error && f.front !== HIS },
+    { tag: 'front-by-z', file: 'src/lib/xpra-proto.js', from: 'if (heldWindow(win) && (!best || frontRank(win) > frontRank(best))) best = win;', to: 'if (heldWindow(win) && (!best || win.z > best.z)) best = win;', proto: true, red: (f) => !f.error && f.front !== HIS },
     { tag: 'view-own-order', file: 'src/lib/xpra-view.js', from: 'w.el.style.zIndex = String(Z_FLOOR + stackRank(win));', to: "w.el.style.zIndex = String((win.reach ? 400000 : 0) + ({ main: 1000, dialog: 200000, popup: 300000 }[win.kind] || 1000) + Math.min(win.z, 99999));", door: true, red: (d) => d.oneRank === false },
     { tag: 'button-release-at-pointer', file: XCF, from: 'else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.btn.slice(-2)) !== JSON.stringify([[HIS, true], [HIS, false]]) },
     { tag: 'no-remap-on-move', file: XCF, from: 'if (moved && watch && !viewOnly && seatWids && seatWids.has(wid) && win.mapped) send(', to: 'if (false) send(', client: true, red: (c) => !c.error && !c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])) },
@@ -864,6 +893,7 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     { tag: 'satellite-not-one-input', file: 'src/lib/keyboard-yield.js', from: '(el.closest(SATELLITE_HOST) || el.closest(INPUT_HOSTS))', to: 'el.closest(INPUT_HOSTS)', sat: true, red: (f) => f.satellite === false },
     { tag: 'door-says-take-over', file: 'src/lib/desktop-app-window.js', from: ": doorAct === 'open' ? t('Open your browsing window') : t('Browse yourself');", to: ": t('Take over');", door: true, red: (d) => d.labelIsAct === false },
     { tag: 'unread-is-active', file: 'src/lib/desktop-app-window.js', from: "browserDisplay() ? bseat.seat || 'watch' :", to: "browserDisplay() && bseat.seat ? bseat.seat :", door: true, red: (d) => d.unknownIsWatch === false },
+    { tag: 'client-refusal-silent', file: 'src/lib/desktop-app-window.js', from: '    onRefused: (v) => sayClientRefusal(v),', to: '   ', door: true, red: (d) => d.clientRefusalSaid === false },
     { tag: 'toast-on-any-refusal', file: 'src/lib/desktop-app-window.js', from: 'const more = (Number(v.acts) || 0) > bseat.acts;', to: 'const more = (Number(v.refused) || 0) > bseat.refused;', door: true, red: (d) => d.toastOnActs === false },
   ];
   for (const m of MUTANTS) {
