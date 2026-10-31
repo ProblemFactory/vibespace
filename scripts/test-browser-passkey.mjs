@@ -20,6 +20,10 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r9 its acceptance r8: the owner's LATEST answer for a site and conversation stands — a grant a waiting registration took
+//       comes back only while no newer answer («no» or «once») exists; a «no» ends a standing grant; the give-back's exits (2)
+//       over after his pairing and (3) no authenticator, each with its own leg (the person's road); a given-back grant keeps its
+//       own clock; a grant is spent once the authenticator is there for it
 //   ⑨r8 its acceptance r7: ONE «Allow once» registration grant releases ONE registration — read, judged and consumed at the
 //       verdict, never in the job queued behind the tab's drain (the probe's two tabs, the same tab's two frames); a ceremony
 //       over before its turn gives the grant back; the slow line names any job (a set-up or a clean-up) — a second tab (T2)
@@ -429,9 +433,9 @@ console.log('⑦ lane passkey-store-core: THE GATE (§2.3, one example per row),
   try { r = realm(); t0 = Date.now(); p = settle(r.nav.get({ publicKey: { challenge: 1 } })); res = await p; } finally { globalThis.setTimeout = realST; }
   const holds = armed.filter((tm) => tm.ms === r.cfg.holdMs);
   ok(res.e === 'NotAllowedError' && Date.now() - t0 >= 100 && holds.length === 1 && holds[0].fired && r.sent.some((x) => x.ev === 'end' && x.outcome === 'error') && r.calls.length === 0, `no verdict in holdMs (the watch's socket went — P0 ④) ⇒ rejected IN-PAGE by the hold timer (${Date.now() - t0} ms), the native get never called`, { armed, sent: r.sent });
-  r = realm(); p = settle(r.nav.get({ publicKey: { challenge: 1, answer: true } })); await tick();
-  for (let i = 0; i < 3; i++) { await new Promise((z) => setTimeout(z, 80)); ctl(r, 'wait', r.sent[0].id); }
-  ok(r.calls.length === 0 && ctl(r, 'release', r.sent[0].id) === 1, 'the ask\'s heartbeat (`wait`) keeps a held ceremony past holdMs');
+  r = realm(); p = settle(r.nav.get({ publicKey: { challenge: 1, answer: true } })); await tick(); const tw = Date.now();
+  for (let i = 0; i < 2; i++) { await new Promise((z) => setTimeout(z, 75)); ctl(r, 'wait', r.sent[0].id); } // r9: 2 beats 75 ms apart (was 3 × 80 — the suite's time): each gap inside holdMs (120), the whole wait past it (asserted, 30 ms to spare)
+  ok(r.calls.length === 0 && Date.now() - tw > r.cfg.holdMs && ctl(r, 'release', r.sent[0].id) === 1, 'the ask\'s heartbeat (`wait`) keeps a held ceremony past holdMs');
   await p;
   r = realm(); const p1 = settle(r.nav.get({ publicKey: { challenge: 1 } })); await tick(); ctl(r, 'release', r.sent[0].id);
   const p2 = settle(r.nav.get({ publicKey: { challenge: 2, answer: true } })); await tick();
@@ -849,11 +853,11 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const X = world2({ holders: 'human', store, print: false });
     await X.opened();
     const atArm = X.calls('WebAuthn.enable').length + X.calls('WebAuthn.addVirtualAuthenticator').length;
-    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await sleep2(20);
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); // (r9: no settle sleep — the pairing and the load come BEFORE the release)
     const during = { ui: X.calls('WebAuthn.enable').map((m) => m.params.enableUI), auth: X.calls('WebAuthn.addVirtualAuthenticator').length, added: X.calls('WebAuthn.addCredential').length, released: released(X) };
-    X.end(1); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0); await sleep2(20);
+    X.end(1); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0 && X.calls('WebAuthn.disable').length > 0); // (r9: the disable waited for as a fact, not 20 ms)
     const after = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, disabled: X.calls('WebAuthn.disable').length, auth: X.w().targets.get('T1').pk.auth || null };
-    X.start(2, 'example.com'); await until2(() => released(X) > 1); await sleep2(20);
+    X.start(2, 'example.com'); await until2(() => released(X) > 1); // (r9: no settle sleep — a pairing would come BEFORE the release)
     const other = { auth: X.calls('WebAuthn.addVirtualAuthenticator').length, released: released(X) };
     ok(atArm === 0 && during.ui.length === 1 && during.ui[0] === true && during.auth === 1 && during.added === 1 && during.released === 1 && after.removed === 1 && after.disabled >= 1 && !after.auth && other.auth === 1 && other.released === 2,
       '⑨r2 MAJOR 1: a vault passkey he CHOSE (a stored key for the site he set to always) ⇒ an authenticator for THAT ceremony only, Chrome\'s UI on (enableUI true), its key loaded, removed when the ceremony ends; a site the vault holds nothing for ⇒ Chrome\'s own window (no authenticator)', { atArm, during, after, other });
@@ -936,7 +940,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const V2 = await view(); await until2(() => V2.got.some((m) => m.type === 'status' && m.state === 'upstream-open')); await sleep2(80);
     const v2 = { hello: V2.got.findIndex((m) => m.type === 'hello'), firstPasskey: V2.got.findIndex((m) => m.type === 'passkey'), facts: pkOf(V2.got).map((m) => m.fact), stale: pkOf(V2.got).some((m) => m.fact) };
     V2.ws.send(JSON.stringify({ type: 'passkey-cancel' }));
-    await until2(() => V2.got.some((m) => m.type === 'passkey-ack')); await sleep2(40);
+    await until2(() => { const i = V2.got.findIndex((m) => m.type === 'passkey-ack'); return i >= 0 && V2.got.slice(i + 1).some((m) => m.type === 'passkey'); }); // (r9: the fact that follows the ack waited for, not 40 ms)
     const ack = V2.got.find((m) => m.type === 'passkey-ack') || null, afterAck = ack ? V2.got.slice(V2.got.indexOf(ack) + 1).filter((m) => m.type === 'passkey') : [];
     ok(v1saw && v2.hello >= 0 && v2.firstPasskey > v2.hello && !v2.stale && v2.facts.length >= 1 && !!ack && ack.ok && ack.n === 0 && ack.ended === true && afterAck.length >= 1 && afterAck.every((m) => m.fact === null),
       '⑨r2 MAJOR 2 (the bridge, loopback): a viewer that joins after the ceremony ended is told the CURRENT fact right after hello — null, so no phantom banner; a Cancel whose wait is gone is answered `ended` and followed by the fact that stands', { v1saw, v2, ack, afterAck });
@@ -1176,12 +1180,12 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     await X.opened();
     const verbN = (v) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === v).length;
     X.say({ ev: 'start', id: 1, kind: 'get', rpId: 'vercel.com', origin: 'https://vercel.com', mediation: 'conditional' }); await until2(() => verbN('pass') > 0); await sleep2(10);
-    X.start(2, 'vercel.com'); await until2(() => released(X) > 0); await sleep2(20);
+    X.start(2, 'vercel.com'); await until2(() => released(X) > 0); // (r9: no settle sleep — the pairing and the load come BEFORE the release)
     const paired = { ui: X.calls('WebAuthn.enable').map((m) => m.params.enableUI), auth: X.calls('WebAuthn.addVirtualAuthenticator').length, added: X.calls('WebAuthn.addCredential').length, pass: verbN('pass') };
     const d0 = verbN('drained');
     X.say({ ev: 'end', id: 1, outcome: 'aborted-by-page', name: 'AbortError' }); await sleep2(40);
     const mid = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, drained: verbN('drained') - d0, auth: !!X.w().targets.get('T1').pk.auth };
-    X.end(2); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0); await sleep2(20);
+    X.end(2); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0 && X.calls('WebAuthn.disable').length > 0 && verbN('drained') - d0 > 0); // (r9: the end's disable and drained waited for, not 20 ms)
     const after = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, disabled: X.calls('WebAuthn.disable').length, drained: verbN('drained') - d0, auth: X.w().targets.get('T1').pk.auth || null };
     ok(paired.pass === 1 && paired.ui.length === 1 && paired.ui[0] === true && paired.auth === 1 && paired.added === 1 && mid.removed === 0 && mid.drained === 0 && mid.auth && after.removed === 1 && after.disabled >= 1 && after.drained === 1 && !after.auth,
       '⑨r4 (nit 7.1) the vault ceremony\'s authenticator leaves ONLY with the ceremony that paired it — his autofill request (passed) ending while his vault sign-in is in flight touches no authenticator and sends no drain; his sign-in\'s own end removes it', { paired, mid, after });
@@ -1579,6 +1583,121 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const said8 = X.world.said.filter((l) => /still running after/.test(l));
     ok(said8.length >= 1 && said8.every((l) => /a passkey sign-in's set-up or clean-up on this tab is still running after 10 ms — the next step on this tab waits for it/.test(l)),
       '⑨r8 the slow line names whatever job is the slow one — a sign-in\'s set-up OR clean-up (here the queued get\'s held load) — and what waits: the next step on the tab (779318821: «clean-up … the next sign-in» for a gate job too)', { preGate, said8 });
+    // ⑨r9 — acceptance r8 of lane passkey-browse-yourself (2f05e5ff7), in ⑨r8's world: every leg below but the kept mirror is RED on 2f05e5ff7 by name
+    console.log('⑨r9 acceptance r8: the owner\'s LATEST answer for a site and conversation stands — a grant a waiting registration took comes back only while no newer answer («no» or «once») exists; a «no» ends a standing grant too');
+    const answer9 = async (choice) => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: CK, rpId: 'example.test', user: 'alice' }); return X.D.answerPasskey(reg.proposal.id, { choice, shown: reg.proposal.shown }).ok; };
+    const fail9 = (id, ctx, two = false) => (two ? say2 : X.say)({ ev: 'end', id, outcome: 'error', name: 'NotAllowedError' }, ctx);
+    say2({ ev: 'end', id: 13, outcome: 'ok' }); // (⑨r8's last registration on T2 done)
+    // the acceptance's shape: #16 takes the grant and waits; #17 on T2 no-grant; a NEW card for the same site and conversation answered «no»; #16's page gives up before its turn
+    const a1 = await grant8();
+    await queue8(14, 30, [[16, 32]]);
+    create8(17, 7, true); await until8(() => gone8(17, 'T2'), 300);
+    const no1 = await answer9('no');
+    fail9(16, 32); await until8(() => false, 1);
+    await settle8([[15, 31]]); fail9(17, 7, true);
+    create8(18, 7, true); await until8(() => gone8(18, 'T2'), 300);
+    const A = { a1, no1, rel16: v8(16, 'release'), ref16: v8(16, 'refuse'), why17: why8(17, 'T2'), rel18: v8(18, 'release', 'T2'), why18: why8(18, 'T2') };
+    ok(a1 && no1 && A.rel16 === 0 && A.ref16 === 0 && A.why17 === 'no-grant' && A.rel18 === 0 && A.why18 === 'no-grant',
+      '⑨r9 MAJOR (the acceptance\'s shape): #16 takes the grant and waits behind the queued get; T2\'s #17 meanwhile no-grant; the owner answers a NEWER card «no»; #16 is over before its turn — its grant is DROPPED, never given back: T2\'s #18 refused no-grant (2f05e5ff7: #18 released — a registration after the owner\'s last answer was No)', A);
+    fail9(18, 7, true);
+    // a «no», then the job that took the grant dies: nothing comes back (the next registration, another frame of T1: no-grant)
+    const b1 = await grant8();
+    await queue8(19, 33, [[21, 35]]);
+    const no2 = await answer9('no');
+    fail9(21, 35); await until8(() => false, 1);
+    await settle8([[20, 34]]);
+    doc6(X, 36, 'F36'); create8(22, 36); await until8(() => gone8(22), 300);
+    const B = { b1, no2, rel21: v8(21, 'release'), ref21: v8(21, 'refuse'), rel22: v8(22, 'release'), why22: why8(22) };
+    ok(b1 && no2 && B.rel21 === 0 && B.ref21 === 0 && B.rel22 === 0 && B.why22 === 'no-grant',
+      '⑨r9 MAJOR (a no, then the job dies): the grant #21 took is over with its page before its turn, after the owner said «no» on a newer card — nothing is given back: the next registration (another frame of T1) refused no-grant (2f05e5ff7: released)', B);
+    fail9(22, 36);
+    // no race at all: a grant still standing, then «no» on a newer card — the no stands
+    const e1 = await grant8(), no3 = await answer9('no');
+    create8(23, 7, true); await until8(() => gone8(23, 'T2'), 300);
+    const E = { e1, no3, rel23: v8(23, 'release', 'T2'), why23: why8(23, 'T2') };
+    ok(e1 && no3 && E.rel23 === 0 && E.why23 === 'no-grant',
+      '⑨r9 MAJOR (no race): «once», then «no» on a newer card for the same site and conversation — the no ends the grant still standing: the next registration refused no-grant (2f05e5ff7: released — a «no» never touched the grant)', E);
+    fail9(23, 7, true);
+    // a newer «once» answered AND SPENT while the old taken grant waits: the old one is dropped (the newer answer stood, and was used)
+    const d1 = await grant8();
+    await queue8(24, 37, [[26, 39]]);
+    const d2 = await grant8();
+    create8(27, 7, true); await until8(() => gone8(27, 'T2'), 300);
+    fail9(26, 39); await until8(() => false, 1);
+    await settle8([[25, 38]]); say2({ ev: 'end', id: 27, outcome: 'ok' });
+    create8(28, 7, true); await until8(() => gone8(28, 'T2'), 300);
+    const Dd = { d1, d2, rel26: v8(26, 'release'), rel27: v8(27, 'release', 'T2'), rel28: v8(28, 'release', 'T2'), why28: why8(28, 'T2') };
+    ok(d1 && d2 && Dd.rel26 === 0 && Dd.rel27 === 1 && Dd.rel28 === 0 && Dd.why28 === 'no-grant',
+      '⑨r9 MAJOR (a newer «once», spent): #26 took the first grant and waits; the owner answers a newer card «once» and T2\'s #27 spends it; #26 is over before its turn — the first grant is dropped: T2\'s #28 refused no-grant (2f05e5ff7: #28 released — the outranked grant came back once the newer one was spent)', Dd);
+    fail9(28, 7, true);
+    // KEPT (the acceptance's (b)): a newer «once» answered while the old taken grant waits, NOT spent — the newer one stands (its own clock), no double
+    const c1 = await grant8();
+    await queue8(29, 40, [[31, 42]]);
+    X.step(5 * 60e3); const c2 = await grant8();
+    fail9(31, 42); await until8(() => false, 1);
+    await settle8([[30, 41]]);
+    X.step(7 * 60e3); // 12 min after the first grant: it would be expired, the newer one is not
+    create8(32, 7, true); await until8(() => gone8(32, 'T2'), 300); say2({ ev: 'end', id: 32, outcome: 'ok' });
+    create8(33, 7, true); await until8(() => gone8(33, 'T2'), 300);
+    const C = { c1, c2, rel31: v8(31, 'release'), rel32: v8(32, 'release', 'T2'), why32: why8(32, 'T2'), rel33: v8(33, 'release', 'T2'), why33: why8(33, 'T2') };
+    ok(c1 && c2 && C.rel31 === 0 && C.rel32 === 1 && !C.why32 && C.rel33 === 0 && C.why33 === 'no-grant',
+      '⑨r9 kept (the mirror): a newer «once» answered while the first taken grant waits, the waiting one over before its turn — the NEWER grant stands (12 min after the first: released, not expired) and buys one registration (the next: no-grant)', C);
+    fail9(33, 7, true);
+    // the give-back keeps the grant's OWN clock: answered at t, taken 9 min later, over before its turn — back as it was, so 11 min after t it is expired (never re-dated)
+    const f1 = await grant8(); X.step(9 * 60e3);
+    await queue8(34, 43, [[36, 45]]);
+    fail9(36, 45); await until8(() => false, 1);
+    await settle8([[35, 44]]);
+    X.step(2 * 60e3);
+    create8(37, 7, true); await until8(() => gone8(37, 'T2'), 300);
+    const Fc = { f1, rel36: v8(36, 'release'), rel37: v8(37, 'release', 'T2'), why37: why8(37, 'T2') };
+    ok(f1 && Fc.rel36 === 0 && Fc.rel37 === 0 && Fc.why37 === 'expired',
+      '⑨r9 (the given-back grant keeps its own clock): answered at t, taken by #36 at t+9 min, #36 over before its turn — back AS IT WAS: T2\'s #37 at t+11 min refused expired (never re-dated at the give-back; never no-grant — it did come back)', Fc);
+    fail9(37, 7, true);
+    // a grant is SPENT once the authenticator is there for it: the page gives up while the job loads (its UV held) — nothing comes back
+    const g7 = await grant8();
+    X.world.hold = new Set(['WebAuthn.setUserVerified']); X.world.held = [];
+    doc6(X, 46, 'F46'); create8(38, 46); await until8(() => X.world.held.length === 1, 300);
+    fail9(38, 46); await until8(() => false, 1);
+    free7(X); await until8(() => !draining7(X), 300); await until8(() => false, 1);
+    create8(39, 7, true); await until8(() => gone8(39, 'T2'), 300);
+    const Gs = { g7, uvHeld: true, rel38: v8(38, 'release'), rel39: v8(39, 'release', 'T2'), why39: why8(39, 'T2') };
+    ok(g7 && Gs.rel39 === 0 && Gs.why39 === 'no-grant',
+      '⑨r9 (a grant is spent once the authenticator is there for it): #38\'s page gives up while its job loads (setUserVerified held) — the grant is NOT given back: T2\'s #39 refused no-grant', Gs);
+    fail9(39, 7, true);
+    X.D.shutdown();
+  }
+  // ⑨r9 MINOR — the give-back's two other exits, on the person's road (his own registration: the vault authenticator paired for it); RED with back() dropped at that exit alone
+  {
+    const X = world2({ holders: 'human', store: VAULT5(), print: false });
+    await X.opened();
+    X.world.chrome = chrome6();
+    const until9 = async (pred, ms = 300) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setImmediate(r)); return pred(); };
+    const grant9 = async () => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: null, rpId: 'example.test', user: 'me' }); return X.D.answerPasskey(reg.proposal.id, { choice: 'once', shown: reg.proposal.shown }).ok; };
+    const create9 = (id) => X.say({ ev: 'start', id, kind: 'create', rpId: 'example.test', origin: 'https://example.test' });
+    const v9 = (id, verb) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === verb && m.params.arguments[2] && m.params.arguments[2].value === id).length;
+    const pairs9 = () => X.calls('WebAuthn.addVirtualAuthenticator').length, idle9 = () => !X.w().targets.get('T1').pk.draining;
+    // exit (2): his page gives up while the vault authenticator is pairing for it (the gate race) — the grant comes back
+    const g1 = await grant9(), p0 = pairs9();
+    create9(1); X.say({ ev: 'end', id: 1, outcome: 'error', name: 'NotAllowedError' });
+    await until9(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0 && idle9());
+    const over = { paired: pairs9() - p0, rel1: v9(1, 'release'), auth: authOf5(X) };
+    create9(2); await until9(() => v9(2, 'release') > 0 && idle9());
+    const E2 = { g1, over, paired: pairs9() - p0, rel2: v9(2, 'release'), by2: rec6(X, 2).createdBy || null };
+    ok(g1 && over.paired === 1 && over.rel1 === 0 && !over.auth && E2.paired === 2 && E2.rel2 === 1 && E2.by2 === 'human',
+      '⑨r9 MINOR (exit 2, over after his pairing): his registration\'s page gives up while the vault authenticator pairs for it — nothing released, the authenticator gone, the grant GIVEN BACK: his next registration pairs the vault again (created by him), never Chrome\'s own window for want of a grant', E2);
+    X.say({ ev: 'end', id: 2, outcome: 'ok' }); await until9(() => idle9() && !authOf5(X));
+    // exit (3): no authenticator (the pairing refused) — Chrome's own window for it, the grant comes back
+    let once = true; X.world.onSend = (m) => { if (once && m.method === 'WebAuthn.addVirtualAuthenticator') { once = false; X.world.chrome.env = false; } };
+    const g2 = await grant9(), p1 = pairs9();
+    create9(3); await until9(() => v9(3, 'release') > 0 && idle9());
+    const none = { tried: pairs9() - p1, rel3: v9(3, 'release'), auth: authOf5(X), by3: rec6(X, 3).createdBy || null };
+    X.say({ ev: 'end', id: 3, outcome: 'error', name: 'NotAllowedError' });
+    create9(4); await until9(() => v9(4, 'release') > 0 && idle9());
+    const E3 = { g2, none, paired: pairs9() - p1, rel4: v9(4, 'release'), by4: rec6(X, 4).createdBy || null };
+    ok(g2 && none.tried === 1 && none.rel3 === 1 && !none.auth && !none.by3 && E3.paired === 2 && E3.rel4 === 1 && E3.by4 === 'human',
+      '⑨r9 MINOR (exit 3, no authenticator): the vault authenticator refused for his registration — released to Chrome\'s own window, the grant GIVEN BACK: his next registration pairs the vault (created by him)', E3);
+    X.say({ ev: 'end', id: 4, outcome: 'ok' });
     X.D.shutdown();
   }
 }

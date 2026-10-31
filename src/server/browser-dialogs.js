@@ -171,6 +171,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const pks = passkeys && typeof passkeys.read === 'function' && typeof passkeys.write === 'function' && passkeys.cipher ? passkeys : null;
   let pkCache = null;
   const pkIds = new Map(), pkAsks = new Map(), pkGrants = new Map();
+  const pkAnswered = new Map(); // r9 (acceptance r8 MAJOR): the owner's LATEST answer to a register card per grant key — the grant itself for «once», a dated mark for «no»; a grant taken by a waiting ceremony comes back only while it is still that answer (back() in pkGateOn)
   // lane passkey-binding-isolated: + the hook's ISOLATED WORLD name + the SECRET CustomEvent channel (128-bit: the page can neither
   // enter the world nor forge a report). Acceptance r2 of lane passkey-browse-yourself: the three names are DERIVED from the
   // browser's devtools id (`…/devtools/browser/<uuid>` — 122 random bits Chrome mints per launch; no page can read it) — a hub that
@@ -1624,7 +1625,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
     const taken = v.consumeGrant ? pkGrants.get(gk) || null : null; if (taken) pkGrants.delete(gk); // r8 (acceptance r7 MAJOR): the one-use registration grant is READ, JUDGED and CONSUMED as one step, here at the verdict — never in the job, which may wait behind the tab's drain while another tab or frame of the conversation reads the same grant (it finds none: no-grant)
-    const back = () => { if (taken && !pkGrants.has(gk)) pkGrants.set(gk, taken); }; // r8: a job that lets its ceremony go WITHOUT the vault (over before its turn, over while the authenticator paired, no authenticator) gives the grant back as it was — its own 10-min clock, never extended; a newer answer at that key wins
+    const back = () => { if (taken && pkAnswered.get(gk) === taken) pkGrants.set(gk, taken); }; // r8: a job that lets its ceremony go WITHOUT the vault (over before its turn, over while the authenticator paired, no authenticator) gives the grant back as it was — its own 10-min clock, never extended. r9 (acceptance r8 MAJOR): only while the owner's LATEST answer at that key is still this grant — a «no» or a newer «once» answered meanwhile (standing or already spent) outranks it, and it is dropped
     await pkDrain(w, e, async () => { // r7: the gate's touch of the authenticator is ONE drain — his pairing (r6: with the gate race's remove), the load, the release; an end that lands meanwhile unloads after it, what it loaded
       if (rec.outcome !== 'pending') return back(); // over before its turn: nothing paired, nothing loaded (r8: its grant back)
       if (person && !e.pk.auth) { // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
@@ -1798,7 +1799,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!choices.includes(choice)) return { ok: false, code: 'bad-request', error: `this card's choices are ${choices.join(' | ')}` };
     pkClose(a, 'answered', choice);
     if (a.card.kind === 'register') {
-      if (choice === 'once') pkGrants.set(a.profileId + ' ' + PS.grantKey(a.card.rpId, a.browserKey || ''), PS.grantOf({ rpId: a.card.rpId, browserKey: a.browserKey, user: a.card.user.name, now: now() }));
+      const gk = a.profileId + ' ' + PS.grantKey(a.card.rpId, a.browserKey || ''), t = now();
+      for (const [k, x] of pkAnswered) if (x.expiresAt <= t) pkAnswered.delete(k); // (an answer past its 10 min outranks only grants that are expired themselves)
+      const last = choice === 'once' ? PS.grantOf({ rpId: a.card.rpId, browserKey: a.browserKey, user: a.card.user.name, now: t }) : { choice, at: t, expiresAt: t + PS.GRANT_MS };
+      if (choice === 'once') pkGrants.set(gk, last); else pkGrants.delete(gk); // r9 (acceptance r8 MAJOR): the owner's LATEST answer for that site and conversation stands — a «no» ends a grant still standing at the key too
+      pkAnswered.set(gk, last);
       return { ok: true, proposal: a.card };
     }
     if (choice === 'always' || choice === 'never') { let s = pkRead(); for (const k of a.card.keys) { const r = PS.profileOf(s, a.profileId).rows.find((x) => x.credentialId.startsWith(k.id)); if (r) s = PS.setPolicy(s, a.profileId, r.credentialId, choice === 'always' ? 'yes' : 'no'); } pkWrite(s); emit({ kind: 'passkeys', profileId: a.profileId }); }
