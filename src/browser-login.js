@@ -56,6 +56,9 @@ const BY = Object.freeze(['owner', 'agent']);
 const SOURCES = Object.freeze(['owner', 'vault-minted', 'agent-typed']);
 const STRENGTHS = Object.freeze(['generated', 'unknown']);
 const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owner-card', 'none']);
+const READABLE_BOUND = 'the site\'s request did not carry the password in a readable form';
+const BODY_LARGE_BOUND = 'the request body was too large to read';
+const OTHER_ORIGIN_PREFIX = 'the credential went to ';
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
 const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live']);
 /** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
@@ -116,6 +119,15 @@ const resourceOk = (r) => GM.resourceShapeOk(DOOR, r);
 function scopeOf(resource) { const r = str(resource); if (r === '*') return 'any-site'; if (/#\*$/.test(r)) return 'any-account'; return resourceOk(r) ? 'this-account' : null; }
 
 // ── the record ─────────────────────────────────────────────────────────────
+function pendingReasonOf(raw) {
+  const s = str(raw).trim();
+  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND) return s;
+  if (s.startsWith(OTHER_ORIGIN_PREFIX)) {
+    const o = originOf(s.slice(OTHER_ORIGIN_PREFIX.length));
+    if (o && s === OTHER_ORIGIN_PREFIX + o) return s;
+  }
+  return null;
+}
 function prevOf(p) {
   if (!p || typeof p !== 'object' || typeof p.password !== 'string' || !p.password) return null;
   return { password: p.password.slice(0, 4096), source: SOURCES.includes(p.source) ? p.source : 'owner', strength: STRENGTHS.includes(p.strength) ? p.strength : 'unknown', replacedAt: num(p.replacedAt) };
@@ -131,7 +143,11 @@ function recordOf(text) {
   if (origins.length) out.origins = [...new Set(origins)];
   if (TOTP_NAME_RE.test(str(r.totpName))) out.totpName = r.totpName;
   if (r.createdIn && typeof r.createdIn === 'object' && str(r.createdIn.conversation)) out.createdIn = { conversation: str(r.createdIn.conversation).slice(0, 200), at: num(r.createdIn.at) };
-  if (r.pending === 'register' || r.pending === 'change') out.pending = r.pending;
+  if (r.pending === 'register' || r.pending === 'change') {
+    out.pending = r.pending;
+    const pr = pendingReasonOf(r.pendingReason);
+    if (pr) out.pendingReason = pr;
+  }
   if (r.lastFilledPassword === 'pending' || r.lastFilledPassword === 'confirmed') out.lastFilledPassword = r.lastFilledPassword;
   const prev = prevOf(r.previous);
   if (prev) out.previous = prev;
@@ -158,7 +174,9 @@ function newRecord({ origin, username, password, totpName = null, source = 'owne
 function changedRecord(rec, password, { now = 0, conversation = null } = {}) {
   const r = recordOf(rec);
   if (!r) return null;
-  return recordOf({ ...r, password, source: 'vault-minted', strength: 'generated', submittedAt: null, pending: 'change', previous: { password: r.password, source: r.source, strength: r.strength, replacedAt: now }, ...(conversation ? { createdIn: r.createdIn || { conversation, at: now } } : {}) });
+  const { pendingReason, ...base } = r;
+  void pendingReason;
+  return recordOf({ ...base, password, source: 'vault-minted', strength: 'generated', submittedAt: null, pending: 'change', previous: { password: r.password, source: r.source, strength: r.strength, replacedAt: now }, ...(conversation ? { createdIn: r.createdIn || { conversation, at: now } } : {}) });
 }
 
 // ── the form ───────────────────────────────────────────────────────────────
@@ -456,26 +474,32 @@ function saveVerdict({ existing = null, password = null, outcome = 'navigated', 
 function nextRecord(v, { existing = null, origin, username, password = null, now = 0, conversation = null } = {}) {
   const rec = existing ? recordOf(existing) : null;
   if (!v || v.state === 'same' || v.state === 'none' || v.state === 'owner-card') return null;
-  if (v.confirm && rec) { const { pending, lastFilledPassword, ...rest } = rec; void pending; void lastFilledPassword; return recordOf({ ...rest, submittedAt: now }); }
+  if (v.confirm && rec) { const { pending, pendingReason, lastFilledPassword, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; return recordOf({ ...rest, submittedAt: now }); }
   if (v.state === 'agent-typed') return newRecord({ origin, username, password, source: 'agent-typed', now, conversation });
-  if (v.state === 'update' && rec && password) return recordOf({ ...rec, password, source: 'agent-typed', strength: 'unknown', submittedAt: now, previous: { password: rec.password, source: rec.source, strength: rec.strength, replacedAt: now } });
+  if (v.state === 'update' && rec && password) { const { pending, pendingReason, lastFilledPassword, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; return recordOf({ ...rest, password, source: 'agent-typed', strength: 'unknown', submittedAt: now, previous: { password: rec.password, source: rec.source, strength: rMapStrength(rec), replacedAt: now } }); }
   return null;
 }
+function rMapStrength(rec) { return rec && STRENGTHS.includes(rec.strength) ? rec.strength : 'unknown'; }
 
 // ── the words ──────────────────────────────────────────────────────────────
 const WHAT = Object.freeze({ username: 'the user name', password: 'the password', 'new-password': 'a new password', otp: 'the two-step code' });
 const listWords = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 /**
  * THE AGENT'S SENTENCE for one `vibespace-browser login` — a refusal (`{ok:false, code, error}`) or the fill's answer
- * (`{ok, mode, origin, user, filled, submitted, receipt, otpMissing, length}`). Origins, the user name and closed words only —
- * never a value (there is none here), never the page's own text. The route hands it through the belt (PT.toAgentText).
+ * (`{ok, mode, origin, user, filled, submitted, submittedReason?, receipt, otpMissing, length}`). Origins, the user name and
+ * closed words only — never a value (there is none here), never the page's own text. The route hands it through the belt (PT.toAgentText).
  */
 function loginText(r) {
   if (!r || typeof r !== 'object') return '';
   if (!r.ok) return str(r.error) || 'the login was not filled';   // the CLI adds the code by name
   const what = listWords((r.filled || []).map((k) => WHAT[k] || k));
   const site = `${str(r.origin)}${r.user ? ` (${r.user})` : ''}`;
-  const tail = r.submitted ? ' and submitted the form' : ' — the form is NOT submitted: press its button (or run the same login with --submit)';
+  const unkWhy = r.submitted === 'unknown' ? (pendingReasonOf(r.submittedReason) || READABLE_BOUND) : null;
+  const tail = r.submitted === 'unknown'
+    ? ` — whether the site took the submission could not be verified (${unkWhy})`
+    : r.submitted
+      ? ' and submitted the form'
+      : ' — the form is NOT submitted: press its button (or run the same login with --submit)';
   const receipt = r.receipt ? ` Receipt ${r.receipt}.` : '';
   const stepWord = r.step && STEPS.includes(r.step) ? ` Step: ${r.step}.` : '';
   const pendWord = r.usedPassword === 'pending' ? ' (filled the pending password — its change has not been confirmed by the site yet)' : '';
@@ -548,9 +572,10 @@ function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
+  READABLE_BOUND, BODY_LARGE_BOUND, OTHER_ORIGIN_PREFIX,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
-  recordOf, textOf, publicOf, newRecord, changedRecord,
+  pendingReasonOf, recordOf, textOf, publicOf, newRecord, changedRecord,
   formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, isSubmitControl, liveFillAllowsVerb, liveFillVerdict, planOf, constraintsFor, roadOf, roadVerdict, fillVerdict, valuesOf,
   generatePassword, patternOf, saveVerdict, nextRecord, loginText, noticeWords,
 };

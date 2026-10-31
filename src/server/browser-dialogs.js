@@ -143,13 +143,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */,
   liveFillMaxMs = 10 * 60 * 1000 /* lane vault-login-chrome r4: ceiling before an un-navigated live-fill fence wipes inputs and lifts */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
-  const SCRUB_JSON_MAX_BYTES = 256 * 1024;
-  const scrubByProfile = new Map();       // profileId → [{label, value, bytes, at}] (survives watch reconnects; cleared once every fence on the profile lifts)
-  const scrubNamesByProfile = new Map();  // profileId → [{name, at}] (persisted through keeper's ONE writer while a fence stands; cleared when unfenced)
+  const SCRUB_JSON_MAX_BYTES = 2 * 1024 * 1024;
+  const scrubByProfile = new Map();       // profileId → [{label, value, bytes, at}] (survives watch reconnects and navigations; cleared when the browser stops)
+  const scrubNamesByProfile = new Map();  // profileId → [{name, at}] (persisted through keeper's ONE writer until the browser stops)
   const scrubCompiledByProfile = new Map(); // profileId → compiled scrubber fn | null (built ONCE per scrub-set change)
   const activeTabByProfile = new Map();   // profileId → Map(parentKey → {tid, at}) (per-tab CLI fence aim)
   const fenceAuditLines = [];             // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
-  let unparseableScrubFrames = 0;         // CDP frames that failed JSON.parse in scrubCdpFrame (passed untouched and counted)
+  let unparseableScrubFrames = 0;         // CDP frames that failed JSON.parse in scrubCdpFrame (scrubbed via fn.spelled and counted)
   let oversizeScrubFrames = 0;            // CDP frames > SCRUB_JSON_MAX_BYTES scrubbed via single-pass spelled masker
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
@@ -400,12 +400,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // verify r1 A7: a main-frame navigation IN FLIGHT (started, not committed) — a timeout then is the network's
       // verify r2 #5: `navFirst` = the first start of a RUN of navigations none of which committed (a page that starts a new
       // one every 20 s is ONE run — a per-start clock never reached the grace: never hung, never told), `navCount` its size
-      case 'Page.frameStartedNavigating': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId && !/samedocument/i.test(String(p.navigationType || ''))) { const t = now(); if (!e.navSince) { e.navFirst = t; e.navCount = 0; } e.navSince = t; e.navCount = (e.navCount || 0) + 1; e.navUrl = String(p.url || ''); startHop(e, t); } return; }
+      case 'Page.frameStartedNavigating': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId && !/samedocument/i.test(String(p.navigationType || ''))) { const t = now(); if (!e.navSince) { e.navFirst = t; e.navCount = 0; } e.navSince = t; e.navCount = (e.navCount || 0) + 1; e.navUrl = String(p.url || ''); e.lastNavStartType = String(p.navigationType || ''); e.lastNavStartAt = t; startHop(e, t); } return; }
       // lane site-reset: the renderer's OWN request (script / meta refresh / reload / a click's link or form) — measured on
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || ''); const st0 = e.hopStart || (e.req && now() - e.req.at <= 2000 ? e.req : null); const hopReason = st0 && st0.reason ? String(st0.reason) : null; if (navUrl) e.url = navUrl; endNav(e); hop(w, e, { url: navUrl }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ onLoginFrameNavigated(w, e, navUrl, hopReason); } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || ''); const navType = String(p.type || ''); const navStartType = e.lastNavStartAt && now() - e.lastNavStartAt <= 5000 ? String(e.lastNavStartType || '') : ''; e.lastNavStartType = ''; const st0 = e.hopStart || (e.req && now() - e.req.at <= 2000 ? e.req : null); const hopReason = st0 && st0.reason ? String(st0.reason) : null; if (navUrl) e.url = navUrl; endNav(e); hop(w, e, { url: navUrl }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ onLoginFrameNavigated(w, e, navUrl, { hopReason, navType, navStartType }); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) { const navUrl = String(p.url || ''); if (navUrl) e.url = navUrl; hop(w, e, { url: navUrl, same: true }); onLoginSameDocNav(w, e, navUrl); }
@@ -2629,6 +2629,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           at: Number(e.liveFill.at) || now(),
           loginId: e.liveFill.loginId || null,
           browserKey: e.liveFill.browserKey || null,
+          ...(Array.isArray(e.liveFill.secretFieldIds) && e.liveFill.secretFieldIds.length ? { secretFieldIds: e.liveFill.secretFieldIds } : {}),
+          ...(Array.isArray(e.liveFill.userFieldIds) && e.liveFill.userFieldIds.length ? { userFieldIds: e.liveFill.userFieldIds } : {}),
         });
       }
     } else if (typeof keeper.loginFenceStateOf === 'function') {
@@ -2657,23 +2659,6 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (ni !== -1) names.splice(ni, 1);
     names.push({ name: lbl, at });
     if (names.length > 32) names.splice(0, names.length - 32);
-    if (persist) syncPersistedLoginFences(pid);
-  }
-  function pruneProfileScrubIfUnfenced(profileId, { persist = true } = {}) {
-    const pid = String(profileId || '');
-    if (!pid) return;
-    const w = watches.get(pid);
-    if (w && w.state === 'open') {
-      for (const e of w.targets.values()) if (e.liveFill) return;
-    } else if (keeper && typeof keeper.loginFenceStateOf === 'function') {
-      try {
-        const st = keeper.loginFenceStateOf(pid);
-        if (st && Array.isArray(st.fences) && st.fences.length > 0) return;
-      } catch { /* */ }
-    }
-    scrubByProfile.delete(pid);
-    scrubNamesByProfile.delete(pid);
-    scrubCompiledByProfile.delete(pid);
     if (persist) syncPersistedLoginFences(pid);
   }
   function hydratePersistedScrubs(profileId) {
@@ -2730,7 +2715,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return fn.spelled(frameStr);
     }
     let parsed;
-    try { parsed = JSON.parse(frameStr); } catch { unparseableScrubFrames++; return frameStr; }
+    try { parsed = JSON.parse(frameStr); } catch { unparseableScrubFrames++; return fn.spelled(frameStr); }
     let changed = false;
     const walk = (node) => {
       if (typeof node === 'string') {
@@ -2799,9 +2784,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     e.liveFill = null;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
     if (lf.ceilingNoticeId) { try { forYou?.resolve?.(lf.ceilingNoticeId); } catch { /* */ } }
+    if ((why === 'ceiling' || why === 'fill-aborted' || why === 'spa-submitted') && e.fillHistory && lf.urlAtFill) {
+      e.fillHistory.delete(stripHash(lf.urlAtFill));
+    }
     if (audit) recordFenceAudit(w.profileId, lf, why);
-    // Rule: once the last read fence on a profile ends (or its ceiling wipe verified empty), the typed secret is dead to the agent — clear the scrub set.
-    pruneProfileScrubIfUnfenced(w.profileId, { persist: false });
+    // Rule (r6 MAJOR A'): the scrub set lives until the browser stops (`clearProfileLoginFencesOnStop`), because Chrome's
+    // back/forward cache and `Network.getRequestPostData` still retain the filled credential after navigation.
     if (persist) syncPersistedLoginFences(w.profileId);
     wakeSubmitWaiters(e);
   }
@@ -2814,7 +2802,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       let wipedEmpty = false;
       try {
         if (w.state === 'open' && !loginSinks(w) && e.sid) {
-          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }).catch(() => null);
+          const fids = [...(lf.secretFieldIds || []), ...(lf.userFieldIds || [])];
+          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId, contextId: lf.isoContextId || 0, fieldIds: fids }).catch(() => null);
           wipedEmpty = Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
         }
       } finally {
@@ -2833,7 +2822,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
     })();
   }
-  function armLiveFillOnTab(w, e, info, { persist = true } = {}) {
+  function armLiveFillOnTab(w, e, info, { persist = true, recordHistory = true } = {}) {
     if (!w || !e) return;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
     const lf = {
@@ -2846,6 +2835,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       at: Number(info.at) || now(),
       navSeq0: Number(info.navSeq0) || 0,
       netMark: Number(info.netMark) || 0,
+      isoContextId: Number(info.isoContextId) || 0,
       credSigs: Array.isArray(info.credSigs) ? info.credSigs : [],
       secretFieldIds: Array.isArray(info.secretFieldIds) ? info.secretFieldIds : [],
       userFieldIds: Array.isArray(info.userFieldIds) ? info.userFieldIds : [],
@@ -2854,6 +2844,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       ceilingNoticeId: null,
     };
     e.liveFill = lf;
+    if (recordHistory && lf.urlAtFill && lf.origin) {
+      if (!e.fillHistory) e.fillHistory = new Map();
+      const uKey = stripHash(lf.urlAtFill);
+      e.fillHistory.delete(uKey);
+      e.fillHistory.set(uKey, {
+        urlAtFill: lf.urlAtFill,
+        origin: lf.origin,
+        loginId: lf.loginId,
+        browserKey: lf.browserKey,
+        mode: lf.mode,
+        credSigs: lf.credSigs,
+        secretFieldIds: lf.secretFieldIds,
+        userFieldIds: lf.userFieldIds,
+      });
+      while (e.fillHistory.size > 8) e.fillHistory.delete(e.fillHistory.keys().next().value);
+    }
     const left = Math.max(0, liveFillMaxMs - (now() - lf.at));
     const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
     if (timer.unref) timer.unref();
@@ -2878,7 +2884,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       hydratePersistedScrubs(w.profileId);
     }
     if (!Array.isArray(st.fences) || !st.fences.length) {
-      pruneProfileScrubIfUnfenced(w.profileId, { persist: true });
+      syncPersistedLoginFences(w.profileId);
       return;
     }
     for (const f of st.fences) {
@@ -2898,7 +2904,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (now() - (Number(f.at) || 0) >= liveFillMaxMs) {
         let wipedEmpty = false;
         if (!loginSinks(w) && e.sid) {
-          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }).catch(() => null);
+          const fids = [...(Array.isArray(f.secretFieldIds) ? f.secretFieldIds : []), ...(Array.isArray(f.userFieldIds) ? f.userFieldIds : [])];
+          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId, fieldIds: fids }).catch(() => null);
           wipedEmpty = Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
         }
         if (wipedEmpty) {
@@ -2915,13 +2922,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
       if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
     }
-    pruneProfileScrubIfUnfenced(w.profileId, { persist: false });
     syncPersistedLoginFences(w.profileId);
   }
   function clearProfileLoginFencesOnStop(pid, w) {
     const active = [];
     if (w) {
       for (const e of w.targets.values()) {
+        if (e.fillHistory) e.fillHistory.clear();
+        e.lastFillSigs = null;
         if (!e.liveFill) continue;
         active.push(e.liveFill);
         if (e.liveFill.ceilingNoticeId) { try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ } }
@@ -3059,7 +3067,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   async function ensureLoginNet(w, e) {
     if (!e || !e.sid) return;
-    if (!e.authNet) e.authNet = { enabled: false, seq: 0, reqs: new Map(), lastDocStatus: 0, lastMutationStatus: 0, credSentSeq: 0, okCredSeq: 0, okPendingSeq: 0, failCredSeq: 0 };
+    if (!e.authNet) e.authNet = { enabled: false, seq: 0, reqs: new Map(), lastDocStatus: 0, lastMutationStatus: 0, writeSentSeq: 0, otherWriteSeq: 0, lastOtherWriteOrigin: null, credSentSeq: 0, credAnyOriginSeq: 0, lastOtherCredOrigin: null, postDataTooLargeSeq: 0, okCredSeq: 0, okPendingSeq: 0, failCredSeq: 0, finishing: new Set() };
     if (e.authNet.enabled) return;
     const nr = await call(w, 'Network.enable', { maxPostDataSize: 65536, maxResourceBufferSize: 65536, maxTotalBufferSize: 262144 }, e.sid, 1500);
     if (nr && !nr.timeout && !nr.error) e.authNet.enabled = true;
@@ -3132,28 +3140,51 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (typeof obj.code === 'number' && obj.code >= 400) return true;
     return false;
   }
-  function markReqCredential(e, rq, bodyText) {
+  function markReqCredential(e, rq, bodyText, watchOrigin = null) {
     if (!e || !rq || !bodyText) return;
     const an = e.authNet;
     if (!an) return;
-    const lfSigs = e.liveFill && Array.isArray(e.liveFill.credSigs) ? e.liveFill.credSigs : [];
+    const lfSigs = e.liveFill && Array.isArray(e.liveFill.credSigs) ? e.liveFill.credSigs : (Array.isArray(e.lastFillSigs) ? e.lastFillSigs : []);
     const pcSigs = e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && Array.isArray(e.pendingLoginConfirm.pendingSigs) ? e.pendingLoginConfirm.pendingSigs : [];
     const cCred = lfSigs.length > 0 && bodyCarriesCredential(bodyText, lfSigs);
     const cPend = pcSigs.length > 0 && bodyCarriesCredential(bodyText, pcSigs);
-    if (cCred && !rq.carriesCred) rq.carriesCred = true;
-    if (cPend && !rq.carriesPending) rq.carriesPending = true;
-    if ((cCred || cPend) && !rq.bumpedSent) {
-      rq.bumpedSent = true;
-      an.seq++;
-      an.credSentSeq = an.seq;
-      wakeSubmitWaiters(e);
+    const wOrig = watchOrigin || loginWatchOriginOf(e);
+    if (wOrig && rq.origin === wOrig) {
+      if (cCred && !rq.carriesCred) rq.carriesCred = true;
+      if (cPend && !rq.carriesPending) rq.carriesPending = true;
+      if ((rq.carriesCred || rq.carriesPending) && !rq.bumpedSent) {
+        rq.bumpedSent = true;
+        an.seq++;
+        an.credSentSeq = an.seq;
+        wakeSubmitWaiters(e);
+      }
+    } else if ((cCred || cPend) && rq.origin) {
+      rq.carriesOtherCred = true;
+      if (!rq.bumpedOtherSent) {
+        rq.bumpedOtherSent = true;
+        an.seq++;
+        an.credAnyOriginSeq = an.seq;
+        an.lastOtherCredOrigin = rq.origin;
+        wakeSubmitWaiters(e);
+      }
     }
+  }
+  function pendingReasonFromNet(an, markSeq) {
+    if (!an) return null;
+    const m = Number(markSeq) || 0;
+    if ((an.failCredSeq || 0) > m) return null;
+    if ((an.credAnyOriginSeq || 0) > m && an.lastOtherCredOrigin) return `${BL().OTHER_ORIGIN_PREFIX}${an.lastOtherCredOrigin}`;
+    if ((an.postDataTooLargeSeq || 0) > m) return BL().BODY_LARGE_BOUND;
+    if ((an.otherWriteSeq || 0) > m && an.lastOtherWriteOrigin) return `${BL().OTHER_ORIGIN_PREFIX}${an.lastOtherWriteOrigin}`;
+    if ((an.writeSentSeq || 0) > m && (an.credSentSeq || 0) <= m) return BL().READABLE_BOUND;
+    return null;
   }
   async function flushPendingAuthPostData(e) {
     const an = e && e.authNet;
-    if (!an || !an.reqs.size) return;
+    if (!an) return;
     const ps = [];
     for (const rq of an.reqs.values()) if (rq && rq.postDataP) ps.push(rq.postDataP);
+    if (an.finishing && an.finishing.size) ps.push(...an.finishing);
     if (ps.length) await Promise.allSettled(ps);
   }
   function confirmPendingLogin(w, e, pc, outcome) {
@@ -3196,6 +3227,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const sLens = ${JSON.stringify(secretLens)};
         const uIds = new Set(${JSON.stringify(userFieldIds)});
         const sIds = new Set(${JSON.stringify(secretFieldIds)});
+        const skipTypes = new Set(['submit', 'button', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
         const byId = window.vsLoginById || null;
         const userEls = new Set();
         const secretEls = new Set();
@@ -3203,6 +3235,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           for (const k of uIds) if (byId[k]) userEls.add(byId[k]);
           for (const k of sIds) if (byId[k]) secretEls.add(byId[k]);
         }
+        try {
+          for (const el of document.querySelectorAll('[data-vs-login-field]')) {
+            const fid = el && el.getAttribute ? el.getAttribute('data-vs-login-field') : '';
+            if (uIds.has(fid)) userEls.add(el);
+            if (sIds.has(fid)) secretEls.add(el);
+          }
+        } catch {}
         const collect = (root, out = [], d = 0) => {
           if (!root || d > 8) return out;
           try {
@@ -3212,12 +3251,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           return out;
         };
         for (const i of collect(document)) {
-          if (!i || i.disabled) continue;
+          if (!i) continue;
+          const tag = String(i.tagName || '').toLowerCase();
+          const t = tag === 'input' ? String(i.type || (i.getAttribute && i.getAttribute('type')) || 'text').toLowerCase().trim() : '';
+          if (tag === 'input' && skipTypes.has(t)) continue;
           const vLen = typeof i.value === 'string' ? i.value.length : 0;
           if (vLen <= 0) continue;
-          if (i.type === "pass" + "word") return true;
+          if (t === "pass" + "word") return true;
           if (secretEls.has(i)) return true;
-          if (!userEls.has(i) && sLens.includes(vLen)) return true;
+          if (!userEls.has(i) && i.value !== i.defaultValue && sLens.includes(vLen)) return true;
         }
         return false;
       })()`;
@@ -3263,21 +3305,44 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           at: now(),
           carriesCred: !!(prev && prev.carriesCred),
           carriesPending: !!(prev && prev.carriesPending),
+          carriesOtherCred: !!(prev && prev.carriesOtherCred),
           bumpedSent: !!(prev && prev.bumpedSent),
+          bumpedOtherSent: !!(prev && prev.bumpedOtherSent),
           postDataP: null,
         };
         an.reqs.set(rid, rq);
         if (an.reqs.size > 64) an.reqs.delete(an.reqs.keys().next().value);
-        if (['POST', 'PUT', 'PATCH'].includes(reqMethod) && reqType !== 'Ping' && watchOrigin && rq.origin === watchOrigin) {
+        if (['POST', 'PUT', 'PATCH'].includes(reqMethod) && reqType !== 'Ping' && watchOrigin) {
+          an.seq++;
+          an.writeSentSeq = an.seq;
+          if (rq.origin && rq.origin !== watchOrigin) {
+            an.otherWriteSeq = an.seq;
+            an.lastOtherWriteOrigin = rq.origin;
+          }
           const inlineBody = extractInlinePostData(p.request);
-          if (inlineBody) {
-            markReqCredential(e, rq, inlineBody);
-          } else if (p.request.hasPostData && e.sid) {
+          if (inlineBody) markReqCredential(e, rq, inlineBody, watchOrigin);
+          const matched = rq.carriesCred || rq.carriesPending || rq.carriesOtherCred;
+          const inlineBytes = inlineBody ? Buffer.byteLength(inlineBody, 'utf8') : 0;
+          if (!matched && inlineBytes >= 65536) {
+            an.seq++;
+            an.postDataTooLargeSeq = an.seq;
+          }
+          if (!matched && (!inlineBody || inlineBytes >= 65536) && p.request.hasPostData && e.sid) {
             rq.postDataP = call(w, 'Network.getRequestPostData', { requestId: rid }, e.sid, 1000).then((r) => {
               const b = r && !r.timeout && !r.error && r.result && typeof r.result.postData === 'string' ? r.result.postData : '';
-              if (b) markReqCredential(e, rq, b);
+              if (b) {
+                markReqCredential(e, rq, b, watchOrigin);
+                if (!rq.carriesCred && !rq.carriesPending && !rq.carriesOtherCred && Buffer.byteLength(b, 'utf8') > 131072) {
+                  an.seq++;
+                  an.postDataTooLargeSeq = an.seq;
+                }
+              } else if (r && r.error && (/no post data/i.test(String(r.error.message || '')) || inlineBytes >= 65536)) {
+                an.seq++;
+                an.postDataTooLargeSeq = an.seq;
+              }
             }).catch(() => {});
           }
+          wakeSubmitWaiters(e);
         }
       }
       return;
@@ -3309,7 +3374,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
       if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.type !== 'Ping' && rq.type !== 'Document' && rq.status >= 200 && rq.status < 300 && watchOrigin && rq.origin === watchOrigin) {
-        (async () => {
+        const finP = (async () => {
           if (rq.postDataP) await rq.postDataP;
           if (!rq.carriesCred && !rq.carriesPending) return;
           let errBody = false;
@@ -3323,7 +3388,6 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (errBody) {
             an.seq++;
             an.failCredSeq = an.seq;
-            wakeSubmitWaiters(e);
             return;
           }
           an.seq++;
@@ -3331,6 +3395,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (rq.carriesPending) an.okPendingSeq = an.seq;
           checkSpaFinish(w, e, { outcome: 'submitted' });
         })();
+        an.finishing.add(finP);
+        finP.finally(() => {
+          an.finishing.delete(finP);
+          wakeSubmitWaiters(e);
+        });
+      } else {
+        wakeSubmitWaiters(e);
       }
       return;
     }
@@ -3338,25 +3409,82 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
       if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.type !== 'Ping' && watchOrigin && rq.origin === watchOrigin && (rq.carriesCred || rq.carriesPending)) {
-        an.seq++; an.failCredSeq = an.seq; wakeSubmitWaiters(e);
+        an.seq++; an.failCredSeq = an.seq;
       }
+      wakeSubmitWaiters(e);
     }
   }
-  function onLoginFrameNavigated(w, e, navUrl) {
+  function onLoginFrameNavigated(w, e, navUrl, navMeta = null) {
     e.navSeq = (e.navSeq || 0) + 1;
-    const navOrigin = e.liveFill || e.pendingLoginConfirm ? BL().originOf(navUrl) : null;
+    const meta = navMeta && typeof navMeta === 'object' ? navMeta : { hopReason: navMeta };
+    const hopReason = meta.hopReason ? String(meta.hopReason) : '';
+    const navType = meta.navType ? String(meta.navType) : '';
+    const navStartType = meta.navStartType ? String(meta.navStartType) : '';
+    const inFlight = allowVerbInFlight(w.profileId) || '';
+    const isReload = /^reload$/i.test(navStartType) || /^reload$/i.test(hopReason) || inFlight === 'reload';
+    const isHistoryRestore = !isReload && (
+      navType === 'BackForwardCacheRestore'
+      || /^(?:history|backforward|restore)/i.test(navStartType)
+      || /back_forward|history/i.test(hopReason)
+      || inFlight === 'back'
+      || inFlight === 'forward'
+    );
+    const needOrigin = Boolean(e.liveFill || e.pendingLoginConfirm || (isHistoryRestore && e.fillHistory && e.fillHistory.size));
+    const navOrigin = needOrigin ? BL().originOf(navUrl) : null;
     if (e.liveFill && navOrigin) clearLiveFillOnTab(w, e, 'navigated', { audit: false });
+    if (isReload && e.fillHistory && navUrl) e.fillHistory.delete(stripHash(navUrl));
+    if (!e.liveFill && isHistoryRestore && navOrigin && e.fillHistory) {
+      const hist = e.fillHistory.get(stripHash(navUrl));
+      if (hist && hist.origin === navOrigin) {
+        armLiveFillOnTab(w, e, { ...hist, isoContextId: 0, at: now(), navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: true, recordHistory: false });
+      }
+    }
     const pc = e.pendingLoginConfirm;
     if (pc && !pc.confirmed) {
       const an = e.authNet || null;
       const sameUrl = stripHash(navUrl) === stripHash(pc.urlAtFill);
       if (agentNavInFlight(w.profileId)) {
         e.pendingLoginConfirm = null;
-      } else {
-        const credOk = !!(an && an.okPendingSeq > pc.netMark && an.okPendingSeq >= (an.failCredSeq || 0));
-        const docOk = !an || !an.lastDocStatus || an.lastDocStatus < 400;
-        if (credOk && navOrigin && docOk && !sameUrl) confirmPendingLogin(w, e, pc, 'navigated');
-        else if (!sameUrl) e.pendingLoginConfirm = null; // left the form without a proven credential write: entry stays pending in the vault
+      } else if (!sameUrl) {
+        const settleJudge = () => {
+          if (pc.confirmed) return;
+          const credOk = !!(an && an.okPendingSeq > pc.netMark && an.okPendingSeq >= (an.failCredSeq || 0));
+          const docOk = !an || !an.lastDocStatus || an.lastDocStatus < 400;
+          if (credOk && navOrigin && docOk) {
+            confirmPendingLogin(w, e, pc, 'navigated');
+          } else {
+            const pWhy = pendingReasonFromNet(an, pc.subMark != null ? pc.subMark : pc.netMark);
+            if (pWhy && logins && typeof logins.notePendingReason === 'function') logins.notePendingReason(pc.name, pWhy);
+            if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+          }
+          wakeSubmitWaiters(e);
+        };
+        const waitInFlightCred = () => new Promise((resolve) => {
+          const check = () => {
+            if (!an) return true;
+            if (an.okPendingSeq > pc.netMark || (an.failCredSeq || 0) > pc.netMark) return true;
+            const busy = (an.finishing && an.finishing.size > 0)
+              || [...an.reqs.values()].some((q) => q && ['POST', 'PUT', 'PATCH'].includes(q.method) && q.type !== 'Ping' && q.origin === pc.origin && (q.carriesPending || q.postDataP));
+            return !busy;
+          };
+          if (check()) { resolve(); return; }
+          if (!e.submitWaiters) e.submitWaiters = new Set();
+          let done = false;
+          const finish = () => { if (done) return; done = true; clearTimeout(tm); if (e.submitWaiters) e.submitWaiters.delete(onW); resolve(); };
+          const onW = () => { if (check()) finish(); };
+          const tm = setTimeout(finish, 150);
+          if (tm.unref) tm.unref();
+          e.submitWaiters.add(onW);
+        });
+        const hasAsync = !!(an && (
+          (an.finishing && an.finishing.size > 0)
+          || [...an.reqs.values()].some((q) => q && (q.postDataP || (['POST', 'PUT', 'PATCH'].includes(q.method) && q.type !== 'Ping' && q.origin === pc.origin && q.carriesPending)))
+        ));
+        if (hasAsync) {
+          waitInFlightCred().then(() => flushPendingAuthPostData(e)).then(settleJudge, settleJudge);
+        } else {
+          settleJudge();
+        }
       }
     }
     wakeSubmitWaiters(e);
@@ -3374,24 +3502,35 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
   }
   function settleAfterSubmit(e, navSeq0, netMark, pc, hadLiveFill = false, budgetMs = 1500) {
+    const mutInFlight = () => Boolean(e.authNet && (
+      [...e.authNet.reqs.values()].some((q) => ['POST', 'PUT', 'PATCH'].includes(q.method) && q.type !== 'Ping')
+      || (e.authNet.finishing && e.authNet.finishing.size > 0)
+    ));
     const doneNow = () => (e.navSeq || 0) > navSeq0 || !!(pc && pc.confirmed) || (hadLiveFill && !e.liveFill) || !!(e.authNet && e.authNet.failCredSeq > netMark);
     if (doneNow()) return Promise.resolve();
     return new Promise((resolve) => {
       if (!e.submitWaiters) e.submitWaiters = new Set();
-      let settled = false, hard = null, idle = null;
+      let settled = false, hard = null, idle = null, postIdle = null;
       const finish = () => {
         if (settled) return;
         settled = true;
         if (hard) clearTimeout(hard);
         if (idle) clearTimeout(idle);
+        if (postIdle) clearTimeout(postIdle);
         if (e.submitWaiters) e.submitWaiters.delete(onWake);
         resolve();
       };
-      const onWake = () => { if (doneNow()) finish(); };
+      const onWake = () => {
+        if (doneNow()) { finish(); return; }
+        if (!e.navSince && !mutInFlight()) {
+          if (postIdle) clearTimeout(postIdle);
+          postIdle = setTimeout(() => { if (!e.navSince && !mutInFlight()) finish(); }, 80);
+          if (postIdle.unref) postIdle.unref();
+        }
+      };
       e.submitWaiters.add(onWake);
       idle = setTimeout(() => {
-        const mutInFlight = e.authNet && [...e.authNet.reqs.values()].some((q) => ['POST', 'PUT', 'PATCH'].includes(q.method) && q.type !== 'Ping');
-        if (!e.navSince && !mutInFlight) finish();
+        if (!e.navSince && !mutInFlight()) finish();
       }, 160);
       if (idle.unref) idle.unref();
       hard = setTimeout(finish, budgetMs);
@@ -3423,13 +3562,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const plan = logins.planFill({ forms, origin, activeTargetId: activeTabOfProfile(pid, browserKey) || null, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
     if (!plan.ok) return plan;
     const e = w.targets.get(String(plan.form.targetId || ''));
-    let r = null, kerr = null, kerrMsg = null, chromeStep = null, navSeq0 = 0, netMark = 0, pc = null, hadLiveFill = false, hasSecret = false, sawChromeSub = false;
+    let r = null, kerr = null, kerrMsg = null, chromeStep = null, navSeq0 = 0, netMark = 0, subNavSeq0 = 0, subNetMark = 0, pc = null, hadLiveFill = false, hasSecret = false, sawChromeSub = false;
     if (!e || !e.sid) kerr = 'not_attached';
     else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
     else if (!loginSinks(w)) {
       await ensureLoginNet(w, e);
       navSeq0 = e.navSeq || 0;
       netMark = (e.authNet && e.authNet.seq) || 0;
+      subNavSeq0 = navSeq0;
+      subNetMark = netMark;
       if (e.authNet) e.authNet.lastDocStatus = 0;
       const credSigs = [], newPwSigs = [], secretFieldIds = [], userFieldIds = [];
       for (const f of (plan.form && plan.form.fields) || []) {
@@ -3451,16 +3592,36 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           }
         }
       }
+      e.lastFillSigs = credSigs;
       if (hasSecret) {
         hadLiveFill = true;
         noteActiveTarget(pid, browserKey, e.targetId);
         armLiveFillOnTab(w, e, { urlAtFill: String(e.url || ''), origin: plan.origin, loginId: plan.name, browserKey: parentKey(browserKey), mode: plan.mode, at: now(), navSeq0, netMark, credSigs, secretFieldIds, userFieldIds });
       }
       if (plan.mode === 'signup' || plan.mode === 'change') {
-        pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
+        pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, subMark: netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
         e.pendingLoginConfirm = pc;
       }
-      const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), browserCall: (m, p) => call(w, m, p, null, 2000), oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn), targetId: e.targetId, trackedUrl: () => e.url, origin: plan.origin, loginId: plan.name, mode: plan.mode, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
+      const cf = await LF().fillVaultLogin({
+        call: (m, p) => call(w, m, p, e.sid),
+        browserCall: (m, p) => call(w, m, p, null, 2000),
+        oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+        targetId: e.targetId,
+        trackedUrl: () => e.url,
+        origin: plan.origin,
+        loginId: plan.name,
+        mode: plan.mode,
+        step: plan.form.step,
+        values: plan.values,
+        form: plan.form,
+        submit: !!submit,
+        onBeforeSubmit: () => {
+          subNavSeq0 = e.navSeq || 0;
+          subNetMark = (e.authNet && e.authNet.seq) || 0;
+          if (pc) pc.subMark = subNetMark;
+        },
+      });
+      if (cf && cf.contextId && e.liveFill) e.liveFill.isoContextId = cf.contextId;
       if (!cf || !cf.ok) {
         kerr = (cf && cf.code) || 'eval_failed';
         kerrMsg = cf && cf.error ? String(cf.error) : null;
@@ -3484,13 +3645,39 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
     if (!loginSinks(w) && submit) {
-      await settleAfterSubmit(e, navSeq0, netMark, pc, hadLiveFill, 1500);
+      await settleAfterSubmit(e, subNavSeq0, subNetMark, pc, hadLiveFill, 1500);
       await flushPendingAuthPostData(e);
     }
-    const subObserved = loginSinks(w) || plan.form.surface
-      ? (!!submit || !!plan.form.surface)
-      : Boolean(submit && (hasSecret ? (e && e.authNet && (e.authNet.credSentSeq || 0) > netMark) : sawChromeSub));
-    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: subObserved, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}), ...(plan.usedPassword ? { usedPassword: plan.usedPassword } : {}) };
+    let subState = false;
+    let subReason = null;
+    if (loginSinks(w) || plan.form.surface) {
+      subState = !!(submit || plan.form.surface);
+    } else if (submit) {
+      if (!hasSecret) {
+        subState = !!sawChromeSub;
+      } else {
+        const an = e && e.authNet;
+        const pWhy = pc && !pc.confirmed && !(an && (an.credSentSeq || 0) > subNetMark && (an.failCredSeq || 0) > subNetMark)
+          ? pendingReasonFromNet(an, subNetMark)
+          : null;
+        const credAny = !!(an && ((an.credSentSeq || 0) > subNetMark || (an.credAnyOriginSeq || 0) > subNetMark));
+        const unloaded = !!(sawChromeSub && (e.navSeq || 0) > subNavSeq0);
+        if (pc && !pc.confirmed && pWhy) {
+          subState = 'unknown';
+          subReason = pWhy;
+        } else if (credAny || unloaded) {
+          subState = true;
+        } else if (sawChromeSub && an && (an.writeSentSeq || 0) > subNetMark) {
+          subState = 'unknown';
+          subReason = pendingReasonFromNet(an, subNetMark) || BL().READABLE_BOUND;
+        }
+      }
+    }
+    if (!loginSinks(w) && submit && pc && !pc.confirmed && logins && typeof logins.notePendingReason === 'function') {
+      const pWhy = pendingReasonFromNet(e && e.authNet, subNetMark);
+      if (pWhy) logins.notePendingReason(pc.name, pWhy);
+    }
+    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: subState, ...(subReason ? { submittedReason: subReason } : {}), receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}), ...(plan.usedPassword ? { usedPassword: plan.usedPassword } : {}) };
   }
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
   function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }

@@ -1864,9 +1864,10 @@ function createMasker(secrets) {
 /** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 const VIEW_TRIGGER_RE = /[=\\&\x1b\r\n]/;
-/** Memoizable text scrubber built ONCE per secret-set change (lane vault-login-chrome r5 MAJOR A: never rebuild formsOf + RegExp per
- *  string node on the event loop). `fn(text)` matches `maskText(text, secrets)` across all spelled + view forms; `fn.spelled(text)`
- *  runs a single C++ RegExp pass over all spelled forms (raw, json, base64, percent, hex, utf16, base32) for oversize frames. */
+/** Memoizable text scrubber built ONCE per secret-set change (lane vault-login-chrome r5 MAJOR A + r6 MINOR E': never rebuild
+ *  formsOf + RegExp per string node on the event loop). `fn(text)` matches `maskText(text, secrets)` across all spelled + view
+ *  forms; `fn.spelled(text)` scrubs unparseable or > 2 MiB frames by skipping purely numeric forms on plain matches (never
+ *  corrupting JSON numbers) while still applying the read views around view-token clusters. */
 function compileTextScrubber(secrets) {
   const table = new Map();
   for (const s of Array.isArray(secrets) ? secrets : []) {
@@ -1876,7 +1877,10 @@ function compileTextScrubber(secrets) {
     for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form });
   }
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
+  const maxFormLen = texts.length ? texts[0].length : 0;
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
+  const nonNumTexts = texts.filter((t) => !/^\d+$/.test(t));
+  const nonNumRe = nonNumTexts.length ? new RegExp(nonNumTexts.map(reEscape).join('|'), 'g') : null;
   const scrub = (raw) => {
     if (!re || typeof raw !== 'string' || !raw) return raw;
     re.lastIndex = 0;
@@ -1913,10 +1917,59 @@ function compileTextScrubber(secrets) {
   };
   scrub.spelled = (raw) => {
     if (!re || typeof raw !== 'string' || !raw) return raw;
-    re.lastIndex = 0;
-    if (!re.test(raw)) return raw;
-    re.lastIndex = 0;
-    return raw.replace(re, (m) => table.get(m).ph);
+    let plainHit = false;
+    if (nonNumRe) { nonNumRe.lastIndex = 0; plainHit = nonNumRe.test(raw); }
+    const hasView = VIEW_TRIGGER_RE.test(raw);
+    if (!plainHit && !hasView) return raw;
+    const L = raw.length, finds = [];
+    if (plainHit && nonNumRe) {
+      nonNumRe.lastIndex = 0;
+      let m;
+      while ((m = nonNumRe.exec(raw)) !== null) {
+        if (m.index >= L) break;
+        const t = table.get(m[0]);
+        finds.push({ a: m.index, b: m.index + m[0].length, ph: t.ph });
+      }
+    }
+    if (hasView && maxFormLen > 0) {
+      for (const vw of VIEWS) {
+        vw.re.lastIndex = 0;
+        let tm, curS = -1, curE = -1;
+        const wins = [];
+        while ((tm = vw.re.exec(raw)) !== null) {
+          const ws = Math.max(0, tm.index - maxFormLen);
+          const we = Math.min(L, tm.index + tm[0].length + maxFormLen);
+          if (curS < 0) { curS = ws; curE = we; }
+          else if (ws <= curE) { if (we > curE) curE = we; }
+          else { wins.push([curS, curE]); curS = ws; curE = we; }
+        }
+        if (curS >= 0) wins.push([curS, curE]);
+        for (const [ws, we] of wins) {
+          const slice = raw.slice(ws, we);
+          const r = readView(vw, slice, slice.length, true);
+          if (!r) continue;
+          re.lastIndex = 0;
+          let m;
+          while ((m = re.exec(r.sk)) !== null) {
+            const s = ws + r.at[m.index];
+            if (s >= L) break;
+            const b = ws + r.to[m.index + m[0].length - 1];
+            if (/^\d+$/.test(raw.slice(s, b))) continue;
+            const t = table.get(m[0]);
+            finds.push({ a: s, b, ph: t.ph });
+          }
+        }
+      }
+    }
+    if (!finds.length) return raw;
+    finds.sort((p, q) => p.a - q.a || p.b - q.b);
+    let out = '', i = 0, lastEnd = -1;
+    for (const m of finds) {
+      if (lastEnd >= 0 && m.a < lastEnd) { if (m.b > lastEnd) { lastEnd = m.b; i = m.b; } continue; }
+      out += raw.slice(i, m.a) + m.ph;
+      lastEnd = m.b; i = m.b;
+    }
+    return out + raw.slice(i);
   };
   return scrub;
 }

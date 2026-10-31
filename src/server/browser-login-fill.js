@@ -28,6 +28,7 @@ const WORLD_NAME = 'vs-login-fill';
 const REDIRECT_SETTLE_TRIES = 3;
 const REDIRECT_SETTLE_MS = 25;
 const MAX_CHILD_FRAMES = 64;
+const lastContextByTarget = new Map(); // targetId|sessionId → last isolated-world contextId for snapshot-aware wipe
 
 /** Read-only DOM inspection inside our isolated world (`window.vsLoginFields` stays private to the isolated world; `.value` is NEVER read). */
 const INSPECT_EXPR = `(() => {
@@ -147,15 +148,41 @@ const RESOLVE_EL_SRC = `
     if (mem && (!mem.getAttribute || mem.getAttribute(ATTR) === fid || mem.getAttribute(ATTR) == null)) return { el: mem };
     return { el: null };
   };
-  const lenOfNode = (node) => {
-    if (!node || node.nodeType !== 1) return 0;
+  const NON_TEXT_INPUT_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
+  const isTextControl = (node) => {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = String(node.tagName || '').toLowerCase();
+    if (tag === 'textarea') return true;
+    if (tag === 'input') {
+      const t = String(node.type || (node.getAttribute && node.getAttribute('type')) || 'text').toLowerCase().trim();
+      return !NON_TEXT_INPUT_TYPES.has(t);
+    }
+    if (node.isContentEditable) return true;
+    const role = node.getAttribute ? String(node.getAttribute('role') || '').toLowerCase().trim() : '';
+    return role === 'textbox';
+  };
+  const valOfNode = (node) => {
+    if (!node || node.nodeType !== 1) return '';
     const p = typeof HTMLTextAreaElement === 'function' && node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : (typeof HTMLInputElement === 'function' && node instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
     const d = p && Object.getOwnPropertyDescriptor(p, 'value');
-    if (d && d.get) { try { return String(d.get.call(node) || '').length; } catch {} }
-    if (typeof node.value === 'string') return node.value.length;
-    if (node.isContentEditable) return String(node.textContent || '').length;
-    return 0;
+    if (d && d.get) { try { return String(d.get.call(node) || ''); } catch {} }
+    if (typeof node.value === 'string') return node.value;
+    if (node.isContentEditable) return String(node.textContent || '');
+    return '';
   };
+  const defValOfNode = (node) => {
+    if (!node || node.nodeType !== 1) return '';
+    const p = typeof HTMLTextAreaElement === 'function' && node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : (typeof HTMLInputElement === 'function' && node instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
+    const d = p && Object.getOwnPropertyDescriptor(p, 'defaultValue');
+    if (d && d.get) { try { return String(d.get.call(node) || ''); } catch {} }
+    if (typeof node.defaultValue === 'string') return node.defaultValue;
+    if (node.getAttribute) {
+      const attr = node.getAttribute('value');
+      if (typeof attr === 'string') return attr;
+    }
+    return '';
+  };
+  const lenOfNode = (node) => valOfNode(node).length;
   const wipeNode = (node) => {
     if (!node || node.nodeType !== 1) return false;
     const p = typeof HTMLTextAreaElement === 'function' && node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : (typeof HTMLInputElement === 'function' && node instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
@@ -246,16 +273,29 @@ function verifyPlanAndArmExpr(fieldIds) {
         readOnly: false,
       });
     }
+    const prevSnap = window.vsLoginSnap;
     const snap = typeof WeakMap === 'function' ? new WeakMap() : null;
     const snapList = [];
     try {
       for (const node of collectControls(document)) {
-        const len = lenOfNode(node);
+        if (!isTextControl(node)) continue;
+        let len = lenOfNode(node);
+        if (prevSnap && prevSnap.wm && prevSnap.wm.has(node)) len = prevSnap.wm.get(node) || 0;
+        else if (prevSnap && Array.isArray(prevSnap.list)) {
+          const hit = prevSnap.list.find((x) => x && x.node === node);
+          if (hit) len = hit.len || 0;
+        }
         if (snap) snap.set(node, len);
         snapList.push({ node, len });
       }
     } catch {}
     window.vsLoginSnap = { wm: snap, list: snapList };
+    const touchedSet = window.vsLoginTouched instanceof Set ? window.vsLoginTouched : new Set();
+    for (const fid of ${JSON.stringify(ids)}) {
+      const got = resolveEl(fid);
+      if (got && got.el) touchedSet.add(got.el);
+    }
+    window.vsLoginTouched = touchedSet;
     const savedFrames = [];
     try {
       for (const fr of document.querySelectorAll('iframe, frame')) {
@@ -336,6 +376,8 @@ function prepareFieldExpr(fieldId, expectedRole) {
     const r = el.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0) || el.disabled || el.readOnly) return { ok: false, code: 'field_hidden' };
     try { if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch {}
+    if (window.vsLoginTouched instanceof Set) window.vsLoginTouched.add(el);
+    else window.vsLoginTouched = new Set([el]);
     el.focus();
     if (document.activeElement !== el) return { ok: false, code: 'focus_stolen' };
     const proto = typeof HTMLTextAreaElement === 'function' && el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : (typeof HTMLInputElement === 'function' && el instanceof HTMLInputElement ? HTMLInputElement.prototype : null);
@@ -409,6 +451,7 @@ function wipeFailedFillExpr(fieldIds) {
     const snap = window.vsLoginSnap;
     try {
       for (const node of collectControls(document)) {
+        if (!isTextControl(node)) continue;
         const curLen = lenOfNode(node);
         if (curLen <= 0) continue;
         let baseLen = 0;
@@ -424,24 +467,54 @@ function wipeFailedFillExpr(fieldIds) {
   })()`;
 }
 
-/** Isolated-world sweep that clears any non-empty input/textarea/contenteditable (including open shadow roots) before lifting an expired read fence. */
-const WIPE_ALL_TYPED_EXPR = `(() => {
-  ${RESOLVE_EL_SRC}
-  let wiped = 0;
-  let remaining = 0;
-  try {
-    const nodes = collectControls(document);
-    for (const node of nodes) {
-      if (node && !node.disabled && lenOfNode(node) > 0 && wipeNode(node)) wiped++;
+/** Isolated-world sweep that clears every text-capable control that received typed text (including disabled inputs, open shadow roots,
+ *  and focus-stolen controls whose length grew since `vsLoginSnap`), while ignoring range/color/default-valued controls (`MAJOR B'`). */
+function wipeTypedExpr(fieldIds) {
+  const ids = Array.isArray(fieldIds) ? fieldIds.map(String).filter(Boolean) : [];
+  return `(() => {
+    ${RESOLVE_EL_SRC}
+    let wiped = 0;
+    let remaining = 0;
+    try {
+      const typedNodes = new Set();
+      for (const fid of ${JSON.stringify(ids)}) {
+        const got = resolveEl(fid);
+        if (got && got.el) typedNodes.add(got.el);
+      }
+      if (window.vsLoginTouched instanceof Set) {
+        for (const el of window.vsLoginTouched) if (el) typedNodes.add(el);
+      }
+      const snap = window.vsLoginSnap || null;
+      for (const node of collectControls(document)) {
+        if (!isTextControl(node)) continue;
+        const curLen = lenOfNode(node);
+        if (curLen <= 0) continue;
+        const domType = String(node.type || (node.getAttribute && node.getAttribute('type')) || '').toLowerCase().trim();
+        if (snap) {
+          let baseLen = null;
+          if (snap.wm && snap.wm.has(node)) baseLen = snap.wm.get(node) || 0;
+          else if (Array.isArray(snap.list)) {
+            const hit = snap.list.find((x) => x && x.node === node);
+            if (hit) baseLen = hit.len || 0;
+          }
+          if (baseLen === null) baseLen = domType === 'password' ? 0 : defValOfNode(node).length;
+          if (curLen > baseLen) typedNodes.add(node);
+        } else if (domType === 'password' || node.isContentEditable || valOfNode(node) !== defValOfNode(node)) {
+          typedNodes.add(node);
+        }
+      }
+      for (const node of typedNodes) {
+        if (node && lenOfNode(node) > 0 && wipeNode(node)) wiped++;
+      }
+      for (const node of typedNodes) {
+        if (node && node.isConnected && lenOfNode(node) > 0) remaining++;
+      }
+    } catch {
+      return { ok: false, wiped, remaining: 1 };
     }
-    for (const node of collectControls(document)) {
-      if (node && !node.disabled && lenOfNode(node) > 0) remaining++;
-    }
-  } catch {
-    return { ok: false, wiped, remaining: 1 };
-  }
-  return { ok: true, wiped, remaining };
-})()`;
+    return { ok: true, wiped, remaining };
+  })()`;
+}
 
 /** Collect visible submit control candidates in the isolated world so `BL.isSubmitControl` classifies them in one place. */
 function collectSubmitExpr(fieldId) {
@@ -731,17 +804,29 @@ async function inspectTabLoginForm({ call, browserCall = null, oopFrames = null,
   return iso.form || null;
 }
 
-/** Wipe any non-empty input/textarea/contenteditable on a tab inside our isolated world (used before lifting a ceiling-expired read fence). */
-async function wipeTabTypedInputs({ call, sessionId = undefined, targetId = null } = {}) {
+/** Wipe every control that received typed text on a tab inside our isolated world (including disabled inputs; ignoring range/color/default-valued inputs). */
+async function wipeTabTypedInputs({ call, sessionId = undefined, targetId = null, contextId = 0, fieldIds = [] } = {}) {
   if (typeof call !== 'function') return { ok: false, wiped: 0, verifiedEmpty: false };
   const send = makeSend(call, null, sessionId);
-  const ftRes = await send('Page.getFrameTree', {});
-  const fid = (ftRes && !ftRes.timeout && !ftRes.error && ftRes.result && ftRes.result.frameTree && ftRes.result.frameTree.frame && ftRes.result.frameTree.frame.id) || '';
-  if (!fid) return { ok: false, wiped: 0, verifiedEmpty: false };
-  const iwRes = await send('Page.createIsolatedWorld', { frameId: String(fid), worldName: WORLD_NAME, grantUniveralAccess: false });
-  const ctxId = iwRes && !iwRes.timeout && !iwRes.error && iwRes.result ? Number(iwRes.result.executionContextId) : 0;
-  if (!Number.isInteger(ctxId) || ctxId <= 0) return { ok: false, wiped: 0, verifiedEmpty: false };
-  const res = await evalInWorld(send, ctxId, WIPE_ALL_TYPED_EXPR);
+  const expr = wipeTypedExpr(fieldIds);
+  const ctxKey = String(targetId || sessionId || '');
+  const savedCtx = Number(contextId) > 0 ? Number(contextId) : (ctxKey && lastContextByTarget.get(ctxKey)) || 0;
+  let res = null;
+  let timedOut = false;
+  if (Number.isInteger(savedCtx) && savedCtx > 0) {
+    const rawRes = await send('Runtime.evaluate', { expression: expr, contextId: savedCtx, returnByValue: true, awaitPromise: false });
+    timedOut = Boolean(rawRes && rawRes.timeout);
+    res = valOf(rawRes);
+  }
+  if ((!res || !res.ok) && !timedOut) {
+    const ftRes = await send('Page.getFrameTree', {});
+    const fid = (ftRes && !ftRes.timeout && !ftRes.error && ftRes.result && ftRes.result.frameTree && ftRes.result.frameTree.frame && ftRes.result.frameTree.frame.id) || '';
+    if (!fid) return { ok: false, wiped: 0, verifiedEmpty: false };
+    const iwRes = await send('Page.createIsolatedWorld', { frameId: String(fid), worldName: WORLD_NAME, grantUniveralAccess: false });
+    const ctxId = iwRes && !iwRes.timeout && !iwRes.error && iwRes.result ? Number(iwRes.result.executionContextId) : 0;
+    if (!Number.isInteger(ctxId) || ctxId <= 0) return { ok: false, wiped: 0, verifiedEmpty: false };
+    res = await evalInWorld(send, ctxId, expr);
+  }
   if (!res || !res.ok) return { ok: false, wiped: 0, verifiedEmpty: false };
   return { ok: true, wiped: Number(res.wiped) || 0, verifiedEmpty: Number(res.remaining) === 0 };
 }
@@ -749,9 +834,9 @@ async function wipeTabTypedInputs({ call, sessionId = undefined, targetId = null
 /**
  * Fill the vault's secret values into a standard Chrome tab over CDP (`Input.insertText` ONLY; isolated-world DOM focus/check;
  * zero secret bytes in `Runtime.evaluate`; no `.value` getter mask so site submit scripts read the real value).
- * Returns `{ ok: true, filled: loginId, step, submitted }` or `{ ok: false, code, error, attemptedInsert? }` — NEVER a secret value.
+ * Returns `{ ok: true, filled: loginId, step, submitted, contextId }` or `{ ok: false, code, error, attemptedInsert?, contextId? }` — NEVER a secret value.
  */
-async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sessionId = undefined, targetId = null, trackedUrl = null, origin = null, loginId = null, mode = 'login', step = null, values = null, secret = null, form = null, submit = false } = {}) {
+async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sessionId = undefined, targetId = null, trackedUrl = null, origin = null, loginId = null, mode = 'login', step = null, values = null, secret = null, form = null, submit = false, onBeforeSubmit = null } = {}) {
   if (typeof call !== 'function') return { ok: false, code: 'not_attached', error: 'no CDP session for this tab' };
   const wantOrigin = BL.originOf(origin || (form && form.pageOrigin));
   if (!wantOrigin || !BL.secureOrigin(wantOrigin)) {
@@ -808,6 +893,12 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
 
   const send = makeSend(call, browserCall, sessionId);
   const ctxId = iso.contextId;
+  const ctxKey = String(iso.targetId || targetId || sessionId || '');
+  if (ctxKey && Number.isInteger(ctxId) && ctxId > 0) {
+    lastContextByTarget.delete(ctxKey);
+    lastContextByTarget.set(ctxKey, ctxId);
+    while (lastContextByTarget.size > 64) lastContextByTarget.delete(lastContextByTarget.keys().next().value);
+  }
   const touched = [];
   let attemptedInsert = false;
   let lastFieldId = null;
@@ -847,7 +938,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
         if (why === 'role_changed' && !attemptedInsert) {
           return { ok: false, code: 'login_form_changed', error: 'a sign-in field changed its role or type before filling — nothing was typed' };
         }
-        return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `could not prepare sign-in field (${why}) — nothing was submitted`, attemptedInsert };
+        return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `could not prepare sign-in field (${why}) — nothing was submitted`, attemptedInsert, contextId: ctxId };
       }
       touched.push(fieldId);
       if (expectedRole !== 'username') attemptedInsert = true;
@@ -856,19 +947,20 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
       val = '';
       if (!ins || ins.timeout || ins.error) {
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
-        return { ok: false, code: 'login_failed', error: 'Chrome rejected typing into the sign-in field — nothing was submitted', attemptedInsert };
+        return { ok: false, code: 'login_failed', error: 'Chrome rejected typing into the sign-in field — nothing was submitted', attemptedInsert, contextId: ctxId };
       }
       const fin = await evalInWorld(send, ctxId, finalizeFieldExpr(fieldId, expectedLen, expectedRole));
       if (!fin || !fin.ok) {
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         const why = (fin && fin.code) || 'field_cleared';
-        return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `sign-in field rejected typed input (${why}) — nothing was submitted`, attemptedInsert };
+        return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `sign-in field rejected typed input (${why}) — nothing was submitted`, attemptedInsert, contextId: ctxId };
       }
       lastFieldId = fieldId;
     }
 
     let submitted = false;
     if (submit && lastFieldId) {
+      if (typeof onBeforeSubmit === 'function') { try { onBeforeSubmit(); } catch {} }
       const subInfo = await evalInWorld(send, ctxId, collectSubmitExpr(lastFieldId));
       const matching = (subInfo && Array.isArray(subInfo.candidates) ? subInfo.candidates : []).filter((c) => BL.isSubmitControl(c, { mode: effectiveMode, inForm: Boolean(c.inForm) }));
       let chosen = null;
@@ -888,7 +980,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
     }
 
     const resolvedStep = step && BL.STEPS.includes(step) ? step : (curForm.step || BL.stepOfForm(curForm) || 'password');
-    return { ok: true, filled: loginId || (curForm && curForm.id) || 'login', step: resolvedStep, submitted };
+    return { ok: true, filled: loginId || (curForm && curForm.id) || 'login', step: resolvedStep, submitted, contextId: ctxId };
   } finally {
     try { await evalInWorld(send, ctxId, RESTORE_FRAMES_EXPR); } catch {}
   }

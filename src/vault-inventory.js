@@ -115,8 +115,9 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
     const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner';
     const p = LOGIN_SOURCES[src];
     const pending = s && (s.pending === 'register' || s.pending === 'change') ? s.pending : null;
+    const pendingReason = pending && typeof s.pendingReason === 'string' && s.pendingReason ? clip(s.pendingReason, 320) : null;
     const detail = pending === 'register' ? PENDING_LOGIN_WORDS.register : pending === 'change' ? PENDING_LOGIN_WORDS.change : p.label;
-    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(pending ? { pending } : {}) };
+    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(pending ? { pending, ...(pendingReason ? { pendingReason } : {}) } : {}) };
   }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
     // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by
@@ -248,6 +249,7 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     hosts: Array.isArray(raw.hosts) ? raw.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [],
     askedBy: raw.askedBy && typeof raw.askedBy === 'object' && raw.askedBy.conv ? { conv: clip(raw.askedBy.conv, 160), name: clip(raw.askedBy.name, 80) } : null,
     pending: raw.pending === 'register' || raw.pending === 'change' ? raw.pending : null,
+    ...(raw.pending === 'register' || raw.pending === 'change' ? (typeof raw.pendingReason === 'string' && raw.pendingReason ? { pendingReason: clip(raw.pendingReason, 320) } : {}) : {}),
   };
 }
 

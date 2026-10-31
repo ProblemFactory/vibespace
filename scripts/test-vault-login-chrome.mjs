@@ -440,17 +440,49 @@ try {
 
       const snapAfter = await run(['snapshot']);
       ok(snapAfter.code === 0 && /Signed in/.test(snapAfter.out), 'after cross-document navigation to /welcome, snapshot is allowed again', snapAfter.out);
-      const scrubGone = await until(() => w.dialogs.hasScrubSecrets(w.prof.id) === false, 2000);
-      ok(Boolean(scrubGone), 'r5 MAJOR A: profile scrub set is cleared as soon as the last liveFill fence ends on the profile');
+      ok(w.dialogs.hasScrubSecrets(w.prof.id) === true, 'r6 MAJOR A\': profile scrub set stays armed across navigation until browser stop');
 
-      // Direct `login --submit --json` road on /one
+      // Direct `login --submit --json` road on /one + r6 MAJOR A' mediated POST-body read & bfcache `back` re-arm
       pages.clear();
       await run(['open', `${SITE}/one`]);
       r = await run(['login', SITE, '--user', USER, '--submit', '--json']);
       const j = (() => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } })();
       const gotOne = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/welcome\b/.test(u.out); }, 4000);
       ok(r.code === 0 && j && j.success && eq(j.data.filled, ['username', 'password']) && j.data.step === 'password' && j.data.submitted === true && /^vr-[0-9a-f]{12}$/.test(j.data.receipt) && gotOne && gotOne.body.username === USER && gotOne.body.password === PW,
         'login --submit --json submits the real username + password to /done/one and returns {filled, step:"password", submitted:true, receipt}', { j, gotOne: gotOne && { user: gotOne.body.username } });
+
+      pages.clear();
+      await run(['open', `${SITE}/one?direct=1`]);
+      const MED_KEY_4 = 'bk-0000f1b4';
+      const mg4 = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: MED_KEY_4, upstream: upUrl1, targetIds: [pageTarget.targetId] });
+      const medRpc4 = await openCdpRpc(mg4.url);
+      const medAtt4 = await medRpc4.call('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: true });
+      const medSid4 = medAtt4.msg.result && medAtt4.msg.result.sessionId;
+      await medRpc4.call('Network.enable', { maxPostDataSize: 65536 }, medSid4);
+      const rDir = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+      await until(() => pages.received().find((x) => x.path === '/done/one-direct'), 4000);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/done\/one-direct\b/.test(u.out); }, 4000);
+      const postEv = medRpc4.events.find((ev) => ev.method === 'Network.requestWillBeSent' && String(ev.params?.request?.url || '').endsWith('/done/one-direct') && ev.params?.request?.method === 'POST');
+      const postReqId = postEv && postEv.params && postEv.params.requestId;
+      const medPostRes = postReqId ? await medRpc4.call('Network.getRequestPostData', { requestId: postReqId }, medSid4) : null;
+      const medPostStr = medPostRes ? medPostRes.raw : '';
+      ok(Boolean(rDir.code === 0 && postReqId && medPostStr.includes(`[vault:${LOGIN_NAME}]`) && !medPostStr.includes(PW) && !JSON.stringify(postEv).includes(PW)),
+        'r6 MAJOR A\' (real Chrome): Network.getRequestPostData on the login POST after navigation is masked by the mediator ([vault:...], 0 secret bytes)',
+        { hasReqId: !!postReqId, masked: medPostStr.includes(`[vault:${LOGIN_NAME}]`), err: medPostRes?.msg?.error });
+
+      const rBack = await run(['back']);
+      await sleep(120);
+      const gvAfterBack = await run(['get', 'value', '#p']);
+      const medEvalAfterBack = await medRpc4.call('Runtime.evaluate', { expression: 'document.querySelector("#p") && document.querySelector("#p").value', returnByValue: true }, medSid4);
+      await medRpc4.close();
+      const rReloadAfterBack = await run(['reload']);
+      ok(rBack.code === 0 && gvAfterBack.code === 1 && /\[login_fill_live\]/.test(gvAfterBack.err) &&
+        !gvAfterBack.out.includes(PW) && !gvAfterBack.err.includes(PW) &&
+        medEvalAfterBack.msg && medEvalAfterBack.msg.error && /login_fill_live/.test(String(medEvalAfterBack.msg.error.message || '')) &&
+        !medEvalAfterBack.raw.includes(PW) && rReloadAfterBack.code === 0,
+        'r6 MAJOR A\' (real Chrome): `back` restoring /one from bfcache re-arms liveFill (`get value #p` and mediated `Runtime.evaluate` refused [login_fill_live], 0 secret bytes), and `reload` clears it',
+        { backCode: rBack.code, gvCode: gvAfterBack.code, medErr: medEvalAfterBack.msg && medEvalAfterBack.msg.error });
     }
 
     console.log('③ Google-like multi-step form (/two → /two/challenge/pwd → /totp): email step → password step → exact TOTP step');
@@ -786,6 +818,91 @@ try {
       ok(rC5.code === 0 && rC5Link.code === 0 && recC5 && recC5.pending === 'register' && w.fy.length === fy7k,
         'r5 MAJOR C.5 (real Chrome): sendBeacon Ping POST + link click stays pending:register (0 notices)',
         { pending: recC5 && recC5.pending, notices: w.fy.length - fy7k });
+
+      // 7l. r6 MAJOR B' (real Chrome): disabled input wiped & counted, while <input type="range"> + <input type="color"> verify empty
+      await run(['open', `${SITE}/disable-widgets`]);
+      const rB6 = await run(['login', SITE, '--user', USER]);
+      const rB6Lock = await run(['click', '#lockBtn']);
+      const upUrlB6 = await upstreamWsUrl();
+      const rawB6 = await openCdpRpc(upUrlB6);
+      const tListB6 = await rawB6.call('Target.getTargets');
+      const tgtB6 = ((tListB6.msg.result && tListB6.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/disable-widgets'));
+      let b6WipeRes = null, b6DomCheck = null;
+      if (tgtB6) {
+        const attB6 = await rawB6.call('Target.attachToTarget', { targetId: tgtB6.targetId, flatten: true });
+        const sidB6 = attB6.msg.result && attB6.msg.result.sessionId;
+        const lfB6 = w.dialogs.liveFillOnTarget(w.prof.id, tgtB6.targetId);
+        const LF = require('../src/server/browser-login-fill.js');
+        const fidsB6 = [...(lfB6?.secretFieldIds || []), ...(lfB6?.userFieldIds || [])];
+        b6WipeRes = await LF.wipeTabTypedInputs({ call: async (m, p) => (await rawB6.call(m, p, sidB6)).msg, targetId: tgtB6.targetId, fieldIds: fidsB6 });
+        const chk = await rawB6.call('Runtime.evaluate', {
+          expression: '({ pwDisabled: document.getElementById("p").disabled, pwLen: document.getElementById("p").value.length, rangeVal: document.getElementById("vol").value, colorVal: document.getElementById("tint").value })',
+          returnByValue: true,
+        }, sidB6);
+        b6DomCheck = chk.msg?.result?.result?.value || null;
+        await rawB6.call('Target.detachFromTarget', { sessionId: sidB6 });
+      }
+      await rawB6.close();
+      await run(['open', `${SITE}/plain`]);
+      ok(rB6.code === 0 && rB6Lock.code === 0 && b6WipeRes && b6WipeRes.ok === true && b6WipeRes.wiped >= 2 && b6WipeRes.verifiedEmpty === true &&
+        b6DomCheck && b6DomCheck.pwDisabled === true && b6DomCheck.pwLen === 0 && b6DomCheck.rangeVal === '50',
+        'r6 MAJOR B\' (real Chrome): wipeTabTypedInputs clears disabled password input (pwLen 0) and reports verifiedEmpty:true alongside <input type="range"> & <input type="color">',
+        { b6WipeRes, b6DomCheck });
+
+      // 7m. r6 MINOR C' (real Chrome): cross-origin form action => submitted:true; hashed SPA => submitted:"unknown"; > 64 KB signup => pendingReason + confirmOwn
+      pages2.clear();
+      await run(['open', `${SITE}/xform?action=${encodeURIComponent(`${SITE2}/done/xform?back=${encodeURIComponent(`${SITE}/welcome`)}`)}`]);
+      const rXform6 = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+      const jXform6 = (() => { try { return JSON.parse(rXform6.out.trim().split('\n').pop()); } catch { return null; } })();
+      const gotXform6 = await until(() => pages2.received().find((x) => x.path === '/done/xform'), 4000);
+
+      pages.clear();
+      await run(['open', `${SITE}/hash-spa`]);
+      const rHash6 = await run(['login', SITE, '--user', USER, '--submit']);
+      const rHash6JsonPass = await (async () => {
+        await run(['open', `${SITE}/hash-spa`]);
+        const rr = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+        try { return JSON.parse(rr.out.trim().split('\n').pop()); } catch { return null; }
+      })();
+      const gotHash6 = await until(() => pages.received().find((x) => x.path === '/done/hash-spa'), 4000);
+
+      pages.clear();
+      await run(['open', `${SITE}/big-signup`]);
+      const rBig6 = await run(['login', SITE, '--new-user', 'big70k@example.test', '--generate', '--submit', '--json']);
+      const jBig6 = (() => { try { return JSON.parse(rBig6.out.trim().split('\n').pop()); } catch { return null; } })();
+      const recBig6 = readLoginRec('big70k@example.test');
+      if (recBig6 && recBig6.password) trackedSecrets.push(recBig6.password);
+      await until(() => pages.received().find((x) => x.path === '/done/big-signup'), 4000);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/welcome\b/.test(u.out); }, 4000);
+      await sleep(150);
+      const rowBig6Before = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#big70k@example.test`);
+      const confBig6 = w.logins.confirmOwn(`web-login:${SITE}#big70k@example.test`, { who: 'owner' });
+      const rowBig6After = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#big70k@example.test`);
+
+      ok(rXform6.code === 0 && jXform6?.data?.submitted === true && gotXform6 && gotXform6.body.password === PW &&
+        rHash6.code === 0 && !/NOT submitted|press its button/.test(rHash6.out) &&
+        rHash6JsonPass?.data?.submitted === 'unknown' && rHash6JsonPass?.data?.submittedReason === 'the site\'s request did not carry the password in a readable form' && !!gotHash6 &&
+        rBig6.code === 0 && jBig6?.data?.submitted === 'unknown' && jBig6?.data?.submittedReason === 'the request body was too large to read' &&
+        rowBig6Before && rowBig6Before.pending === 'register' && rowBig6Before.pendingReason === 'the request body was too large to read' &&
+        confBig6.ok === true && rowBig6After && rowBig6After.pending === null,
+        'r6 MINOR C\' (real Chrome): cross-origin form action => submitted:true; hashed SPA => submitted:"unknown" (no "press its button"); > 64 KB signup => pendingReason "the request body was too large to read" + owner confirmOwn clears pending',
+        { xformSub: jXform6?.data?.submitted, hashSub: rHash6JsonPass?.data, bigSub: jBig6?.data, rowBig6Before, rowBig6After });
+
+      // 7n. r6 MINOR D' (real Chrome): owner re-save (`addOwn`) of a pending entry clears `pending` (`source: 'owner'`)
+      const d6OwnPw = pwOf('d6-chrome-own');
+      trackedSecrets.push(d6OwnPw);
+      const saveOwn6 = w.logins.addOwn({ origin: SITE, username: 'beacon@example.test', password: d6OwnPw }, { who: 'owner' });
+      w.logins.grant(`web-login:${SITE}#beacon@example.test`, 'this-account', 'session:conv-1');
+      const rowD6 = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#beacon@example.test`);
+      pages.clear();
+      await run(['open', `${SITE}/one`]);
+      const rD6Login = await run(['login', SITE, '--user', 'beacon@example.test', '--submit', '--json']);
+      const jD6Login = (() => { try { return JSON.parse(rD6Login.out.trim().split('\n').pop()); } catch { return null; } })();
+      const gotD6 = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+      ok(saveOwn6.ok === true && rowD6 && rowD6.pending === null && rowD6.source === 'owner' &&
+        rD6Login.code === 0 && jD6Login?.data?.usedPassword !== 'pending' && gotD6 && gotD6.body.password === d6OwnPw,
+        'r6 MINOR D\' (real Chrome): owner re-save (`addOwn`) clears pending (source:"owner") and subsequent login fills owner password without pending notice',
+        { rowD6, usedPassword: jD6Login?.data?.usedPassword });
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');
@@ -811,8 +928,8 @@ try {
 
       // RED mutant control: a copy of browser-login-fill.js that includes the secret value in its return object is caught by sweepSurfaces
       const lfSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
-      const lfAnchor = "return { ok: true, filled: loginId || (curForm && curForm.id) || 'login', step: resolvedStep, submitted };";
-      const lfMutSrc = lfSrc.replace(lfAnchor, "return { ok: true, filled: loginId || 'login', leaked: entries.map((x) => x[0]).join(','), step: resolvedStep, submitted };")
+      const lfAnchor = "return { ok: true, filled: loginId || (curForm && curForm.id) || 'login', step: resolvedStep, submitted, contextId: ctxId };";
+      const lfMutSrc = lfSrc.replace(lfAnchor, "return { ok: true, filled: loginId || 'login', leaked: entries.map((x) => x[0]).join(','), step: resolvedStep, submitted, contextId: ctxId };")
         .replace('entries[i][1] = null; // drop reference as soon as read', 'entries[i][0] = val;');
       ok(lfMutSrc !== lfSrc, 'RED mutant anchor found in src/server/browser-login-fill.js');
       const LFm = MUT.load('src/server/browser-login-fill.js', lfMutSrc, 'leakfill');

@@ -273,6 +273,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.post('/api/vault/web-logins', noStoreL(person((req) => {
       const [pw] = take(req, 'loginPassword');
       const b = bodyL(req);
+      if (b.confirm === true && typeof logins.confirmOwn === 'function') return logins.confirmOwn(String(b.name || ''), { who: whoL(req) });
       return logins.addOwn({ origin: b.origin, username: b.username, password: typeof pw === 'string' ? pw : '', totpName: b.totpName || null }, { who: whoL(req) });
     })));
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));

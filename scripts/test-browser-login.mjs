@@ -1097,6 +1097,7 @@ console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict,
 }
 
 // ═══ ⑫ Standard-Chrome r4 adversarial fixup gates (RED by name on 956e39701 for 1/2/3/7/8/9) ═══
+let sharedMakeStubDom = null;
 console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR 6/7/8/9/10)');
 {
   const vm = require('node:vm');
@@ -1117,7 +1118,10 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
         if (spec.placeholder) this.attrs.placeholder = String(spec.placeholder);
         this.type = String(spec.type || this.attrs.type || 'text');
         this.id = String(spec.id || '');
-        this.val = String(spec.value || '');
+        this.val = String(spec.value !== undefined ? spec.value : (this.type === 'range' ? '50' : this.type === 'color' ? '#000000' : ''));
+        this.defaultValue = String(spec.defaultValue !== undefined ? spec.defaultValue : (spec.value !== undefined ? spec.value : ''));
+        if (spec.value !== undefined && this.attrs.value === undefined) this.attrs.value = String(spec.value);
+        this.onSetValue = typeof spec.onSetValue === 'function' ? spec.onSetValue : null;
         this.hidden = !!spec.hidden;
         this.disabled = !!spec.disabled;
         this.readOnly = !!spec.readOnly;
@@ -1142,7 +1146,14 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
     }
     Object.defineProperty(StubInput.prototype, 'value', {
       get() { return this.val; },
-      set(v) { this.val = String(v ?? ''); },
+      set(v) {
+        const s = String(v ?? '');
+        const t = String(this.type || '').toLowerCase();
+        if (t === 'range' && s === '') this.val = '50';
+        else if (t === 'color' && s === '') this.val = '#000000';
+        else this.val = s;
+        if (this.onSetValue) this.onSetValue(s, this);
+      },
       configurable: true,
     });
     class StubTextArea extends StubInput {}
@@ -1222,6 +1233,7 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
     };
     return { StubInput, inputs, frameEls, doc, call, inserted: () => inserted };
   }
+  sharedMakeStubDom = makeStubDom;
 
   // ── (1) MAJOR 1: non-positional per-element mark + role re-verification at fill time ──
   {
@@ -1612,7 +1624,7 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
     return JSON.stringify({ id: 77, result: { nodes, count: 12345678, ...extra } });
   }
 
-  // ── (A) MAJOR A: compiled per-profile scrubber (< 20 ms for 5000 AX nodes), 256 KB bound, and scrub cleared when fence ends ──
+  // ── (A) MAJOR A + r6 A'/E': compiled per-profile scrubber (< 20 ms for 5000 AX nodes), 2 MiB JSON walk bound, and scrub lives until browser stop ──
   {
     const SA = await world({ mode: { standard: true } });
     try {
@@ -1624,6 +1636,7 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
       const rfA = await SA.w.fillLogin(TGT, FILL({ user: 'axuser' }));
       const compact5000 = makeAxFrame(5000, { compact: true, secret: PWA, withSecretKey: true });
       const full5000 = makeAxFrame(5000, { compact: false, secret: PWA });
+      const oversize9000 = makeAxFrame(9000, { compact: false, secret: PWA });
       // Warm V8 JIT once, then measure median of 3 runs
       SA.w.scrubCdpFrame(PID, makeAxFrame(50, { compact: true }));
       const timesCompact = [];
@@ -1639,20 +1652,29 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
       const outFull = SA.w.scrubCdpFrame(PID, full5000);
       const fullMs = performance.now() - tFull0;
       const ov1 = SA.w.loginFenceStats().oversizeScrubFrames || 0;
+      const tOver0 = performance.now();
+      const outOver = SA.w.scrubCdpFrame(PID, oversize9000);
+      const overMs = performance.now() - tOver0;
+      const ov2 = SA.w.loginFenceStats().oversizeScrubFrames || 0;
       const compactParsed = JSON.parse(outCompact);
       const fullParsed = JSON.parse(outFull);
+      const overParsed = JSON.parse(outOver);
       const hadScrubDuringFence = SA.w.hasScrubSecrets(PID);
-      // Ending the last fence on the profile clears the scrub set immediately (the value is dead to the agent once the fence ends)
+      // r6 MAJOR A': navigation lifts the tab fence, while the scrub set lives until the browser stops (`disarm`)
       SA.k.navigate(tid, `${SITE}/after-login`);
-      const scrubCleared = await until(() => SA.w.hasScrubSecrets(PID) === false, 1500);
-      ok(rfA.ok && Buffer.byteLength(compact5000) <= 256 * 1024 && Buffer.byteLength(full5000) > 256 * 1024 &&
-        timesCompact[1] < 20 && fullMs < 20 && ov1 === ov0 + 1 &&
-        !outCompact.includes(PWA) && !outFull.includes(PWA) &&
+      await until(() => SA.w.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1500);
+      const scrubKeptAfterNav = SA.w.hasScrubSecrets(PID);
+      SA.w.disarm(PID, 'the browser stopped');
+      const scrubClearedOnStop = SA.w.hasScrubSecrets(PID) === false;
+      ok(rfA.ok && Buffer.byteLength(full5000) > 256 * 1024 && Buffer.byteLength(full5000) <= 2 * 1024 * 1024 &&
+        Buffer.byteLength(oversize9000) > 2 * 1024 * 1024 &&
+        timesCompact[1] < 20 && fullMs < 20 && overMs < 20 && ov1 === ov0 && ov2 === ov0 + 1 &&
+        !outCompact.includes(PWA) && !outFull.includes(PWA) && !outOver.includes(PWA) &&
         compactParsed.result[`[vault:web-login:${SITE}#axuser]`] === 'key-val' &&
-        compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 &&
-        hadScrubDuringFence === true && Boolean(scrubCleared),
-        `r5 MAJOR A (compiled scrubber + 256 KB bound + fence-end clear): 5000-node AX frames scrub in < 20 ms (<=256KB walk=${timesCompact[1].toFixed(2)}ms, >256KB spelled=${fullMs.toFixed(2)}ms), mask string values & JSON keys, and clear scrub set when fence ends`,
-        { walkMs: timesCompact[1], fullMs, ov0, ov1, hadScrubDuringFence, scrubCleared: !!scrubCleared });
+        compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 && overParsed.result.count === 12345678 &&
+        hadScrubDuringFence === true && scrubKeptAfterNav === true && scrubClearedOnStop === true,
+        `r5/r6 MAJOR A (compiled scrubber + 2 MiB walk bound + browser-stop scrub lifetime): 5000-node AX frames scrub in < 20 ms (compact=${timesCompact[1].toFixed(2)}ms, 1.26MB walk=${fullMs.toFixed(2)}ms, >2MiB spelled=${overMs.toFixed(2)}ms), mask string values & JSON keys, keep scrub across nav, and clear on browser stop`,
+        { walkMs: timesCompact[1], fullMs, overMs, ov0, ov1, ov2, hadScrubDuringFence, scrubKeptAfterNav, scrubClearedOnStop });
 
       // RED A1: per-string VR().maskText rebuild (r4 shape) exceeds the 20 ms budget on the 5000-node frame
       const redA1Src = DSRC0
@@ -1673,14 +1695,17 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
         } finally { await SA1.close(); }
       }
       ok(Boolean(DmA1 && redA1Ms >= 20 && fullMs < 20 && timesCompact[1] < 20),
-        `r5 MAJOR A RED control [r5-a-per-string-masker]: per-string maskText mutant blocks event loop (${redA1Ms.toFixed(1)} ms >= 20 ms) while compiled r5 scrubs in < 20 ms`,
-        { redA1Ms, r5FullMs: fullMs, r5WalkMs: timesCompact[1] });
+        `r5 MAJOR A RED control [r5-a-per-string-masker]: per-string maskText mutant blocks event loop (${redA1Ms.toFixed(1)} ms >= 20 ms) while compiled scrubber runs in < 20 ms`,
+        { redA1Ms, r6FullMs: fullMs, r6WalkMs: timesCompact[1] });
 
-      // RED A2: mutant that never clears the scrub set when the fence ends
-      const redA2Src = DSRC0.replace('function pruneProfileScrubIfUnfenced(profileId, { persist = true } = {}) {', 'function pruneProfileScrubIfUnfenced() { return;');
-      const DmA2 = redA2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA2Src, 'r5-a-never-clear-scrub') : null;
+      // RED A2 (r6 MAJOR A'): mutant that clears the scrub set at fence end leaks the login POST body after navigation
+      const redA2Src = DSRC0.replace(
+        'if (persist) syncPersistedLoginFences(w.profileId);\n    wakeSubmitWaiters(e);',
+        'scrubByProfile.delete(w.profileId); scrubNamesByProfile.delete(w.profileId); scrubCompiledByProfile.delete(w.profileId);\n    if (persist) syncPersistedLoginFences(w.profileId);\n    wakeSubmitWaiters(e);'
+      );
+      const DmA2 = redA2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA2Src, 'r6-a-clear-at-fence-end') : null;
       const SA2 = DmA2 ? await world({ mode: { standard: true }, Dmod: DmA2 }) : null;
-      let redA2Kept = false;
+      let redA2Leaked = false;
       if (SA2) {
         try {
           const tid2 = SA2.k.targets()[0].targetId;
@@ -1690,12 +1715,13 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
           await SA2.w.fillLogin(TGT, FILL({ user: 'axuser' }));
           SA2.k.navigate(tid2, `${SITE}/after-login`);
           await until(() => SA2.w.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1500);
-          redA2Kept = SA2.w.hasScrubSecrets(PID) === true;
+          const postReply = SA2.w.scrubCdpFrame(PID, JSON.stringify({ id: 9, result: { postData: `user=axuser&pass=${PWA}` } }));
+          redA2Leaked = postReply.includes(PWA);
         } finally { await SA2.close(); }
       }
-      ok(Boolean(DmA2 && redA2Kept && scrubCleared),
-        'r5 MAJOR A RED control [r5-a-never-clear-scrub]: mutant without pruneProfileScrubIfUnfenced keeps scrub set alive after fence ends (r5 clears it)',
-        { redA2Kept, r5ScrubCleared: !!scrubCleared });
+      ok(Boolean(DmA2 && redA2Leaked && scrubKeptAfterNav),
+        'r6 MAJOR A\' RED control [r6-a-clear-at-fence-end]: mutant clearing scrub set at fence end leaks login POST body after navigation (r6 keeps scrub until browser stop)',
+        { redA2Leaked, scrubKeptAfterNav });
     } finally { await SA.close(); }
   }
 
@@ -2110,6 +2136,501 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
     ok(Boolean(DmF && redF && redF.afterHiddenFlip.ok === true && realF.afterHiddenFlip.code === 'login_fill_live'),
       'r5 MINOR F RED control [r5-f-visible-pw-only]: mutant ignoring hidden/type-flipped inputs of secret length lifts liveFill with 6-byte secret still in DOM',
       { redAfterHiddenFlip: redF && redF.afterHiddenFlip, realAfterHiddenFlip: realF.afterHiddenFlip.code });
+  }
+}
+
+// ═══ ⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A'/B' + MINOR C'/D'/E' + RED controls A'–E') ═══
+console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MINOR C\'/D\'/E\' + RED controls A\'–E\')');
+{
+  const { WebSocketServer } = require('ws');
+  const LF = require('../src/server/browser-login-fill.js');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const LSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-logins.js'), 'utf8');
+  const VRS0 = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
+
+  // ── (A') MAJOR A': scrub set lives until browser stop (POST body masked after nav) & bfcache restore re-arms liveFill ──
+  {
+    const runBfcacheProbe = async (DmodToUse) => {
+      const SA6 = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = SA6.k.targets()[0].targetId;
+        const fillUrl = SA6.k.targets()[0].url;
+        const PWA6 = pwOf('r6-majA-bf');
+        SA6.logins.addOwn({ origin: SITE, username: 'bfuser', password: PWA6 });
+        SA6.logins.grant(`web-login:${SITE}#bfuser`, 'this-account', 'session:conv-1');
+        SA6.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          navigateOnSubmit: `${SITE}/welcome`,
+          fields: [
+            { fieldId: 'vs-a6-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'vs-a6-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const rf = await SA6.w.fillLogin(TGT, FILL({ user: 'bfuser', submit: true }));
+        await until(() => SA6.w.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1500);
+        const scrubAfterNav = SA6.w.hasScrubSecrets(PID);
+        const postFrameAfterNav = SA6.w.scrubCdpFrame(PID, JSON.stringify({ id: 401, result: { postData: `email=bfuser&password=${encodeURIComponent(PWA6)}&raw=${PWA6}` } }));
+        // Simulate plain `back` restoring the filled login page from Chrome's back/forward cache
+        SA6.k.emitPageEvent(tid, 'Page.frameNavigated', {
+          frame: { id: tid, url: fillUrl, securityOrigin: SITE },
+          type: 'BackForwardCacheRestore',
+        });
+        await sleep(30);
+        const getAfterBack = SA6.w.liveFillVerdictFor(TGT, { verb: 'get', argv: ['value', '#vs-a6-p'] });
+        const medLiveAfterBack = Boolean(SA6.w.liveFillOnTarget(PID, tid));
+        const cliScrubAfterBack = SA6.w.scrubOutput(TGT, { out: `val=${PWA6}`, err: '' });
+        const medScrubAfterBack = SA6.w.scrubCdpFrame(PID, JSON.stringify({ id: 402, result: { value: PWA6 } }));
+        // Reload clears both the re-armed fence and its history entry
+        SA6.w.verbStarted(KEY, { profileId: PID, verb: 'reload' });
+        SA6.k.navigate(tid, fillUrl, { reason: 'reload' });
+        SA6.w.verbEnded(KEY, { profileId: PID });
+        await sleep(30);
+        const getAfterReload = SA6.w.liveFillVerdictFor(TGT, { verb: 'get', argv: ['value', '#vs-a6-p'] });
+        SA6.w.disarm(PID, 'the browser stopped');
+        const scrubAfterStop = SA6.w.hasScrubSecrets(PID);
+        return {
+          ok: rf.ok,
+          scrubAfterNav,
+          postMasked: !postFrameAfterNav.includes(PWA6) && postFrameAfterNav.includes(`[vault:web-login:${SITE}#bfuser]`),
+          getAfterBackCode: getAfterBack.code || null,
+          medLiveAfterBack,
+          cliMaskedAfterBack: !cliScrubAfterBack.out.includes(PWA6) && cliScrubAfterBack.changed === true,
+          medMaskedAfterBack: !medScrubAfterBack.includes(PWA6),
+          getAfterReloadOk: getAfterReload.ok === true,
+          scrubAfterStop,
+        };
+      } finally { await SA6.close(); }
+    };
+
+    const realA6 = await runBfcacheProbe(D);
+    ok(realA6.ok && realA6.scrubAfterNav === true && realA6.postMasked === true &&
+      realA6.getAfterBackCode === 'login_fill_live' && realA6.medLiveAfterBack === true &&
+      realA6.cliMaskedAfterBack === true && realA6.medMaskedAfterBack === true &&
+      realA6.getAfterReloadOk === true && realA6.scrubAfterStop === false,
+      'r6 MAJOR A\' (bfcache back re-arms fence + POST body masked until browser stop): after submit -> /welcome, POST body stays masked, back (BackForwardCacheRestore) refuses get value [login_fill_live] & masks output, reload lifts fence, stop clears scrub',
+      realA6);
+
+    const redA6Src = DSRC0.replace('if (!e.liveFill && isHistoryRestore && navOrigin && e.fillHistory) {', 'if (false) {');
+    const DmA6 = redA6Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA6Src, 'r6-a-no-bfcache-rearm') : null;
+    const redA6 = DmA6 ? await runBfcacheProbe(DmA6) : null;
+    ok(Boolean(DmA6 && redA6 && redA6.getAfterBackCode === null && realA6.getAfterBackCode === 'login_fill_live'),
+      'r6 MAJOR A\' RED control [r6-a-no-bfcache-rearm]: mutant without bfcache history re-arm allows get value after back (r6 refuses login_fill_live)',
+      { redCode: redA6 && redA6.getAfterBackCode, realCode: realA6.getAfterBackCode });
+  }
+
+  // ── (B') MAJOR B': ceiling wipe clears & counts disabled inputs, while range/color/default inputs lift cleanly with 0 notices ──
+  {
+    const runStubDomWatch = async ({ LFmodToUse = LF, disableAfterFill = false, blockDisabledClear = false, withRangeAndColor = false } = {}) => {
+      const PWB6 = pwOf('r6-majB');
+      const spec = [
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        {
+          id: 'p', type: 'password', name: 'password', autocomplete: 'current-password',
+          ...(blockDisabledClear ? { onSetValue(v, self) { if (self.disabled && v === '') self.val = PWB6; } } : {}),
+        },
+        ...(withRangeAndColor ? [
+          { id: 'vol', type: 'range', name: 'vol', value: '50' },
+          { id: 'tint', type: 'color', name: 'tint', value: '#112233' },
+          { id: 'q', type: 'search', name: 'q', placeholder: 'Search', value: '+1 ', onSetValue(v, self) { if (!v) self.val = '+1 '; } },
+        ] : []),
+      ];
+      const dom = sharedMakeStubDom(spec);
+      const tid = 'TAB_R6_B001';
+      const sid = 'SID_R6_B001';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r6b`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let DmodB = D;
+      if (LFmodToUse !== LF) {
+        globalThis.__r6MutLF = LFmodToUse;
+        const dSrcB = DSRC0.replace('const LF = () => LFm || (LFm = require(\'./browser-login-fill.js\'));', 'const LF = () => globalThis.__r6MutLF;');
+        DmodB = MUT.load('src/server/browser-dialogs.js', dSrcB, 'r6-b-dialogs-wrap');
+      }
+      const dbDir = path.join(ROOT, 'wb6-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDir, { recursive: true });
+      const engB = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await engB.setup('vault-r6-b');
+      const grantsB = GS.create({ memory: true });
+      const loginsB = L.create({ vault: engB, grants: () => grantsB });
+      loginsB.addOwn({ origin: SITE, username: 'buser', password: PWB6 });
+      grantsB.set('browser-login', `${SITE}#buser`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const bFy = [];
+      const wB = DmodB.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 60,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: loginsB,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        forYou: { add: (pid, it) => { bFy.push(it.text); return 'bfy-' + bFy.length; }, resolve() {} },
+      });
+      try {
+        await wB.arm(PID, { budgetMs: 3000 });
+        await until(() => wB._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await wB.fillLogin(TGT, FILL({ user: 'buser' }));
+        if (disableAfterFill) { dom.inputs[0].disabled = true; dom.inputs[1].disabled = true; }
+        await sleep(160);
+        const verdict = wB.liveFillVerdictFor(TGT, { verb: 'eval' });
+        return {
+          fillOk: rf.ok,
+          pwValLen: dom.inputs[1].val.length,
+          pwHasSecret: dom.inputs[1].val === PWB6,
+          verdict,
+          notices: bFy.slice(),
+          hasScrub: wB.hasScrubSecrets(PID),
+        };
+      } finally {
+        wB.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        engB.close();
+      }
+    };
+
+    const bDisOk = await runStubDomWatch({ disableAfterFill: true });
+    const bDisBlocked = await runStubDomWatch({ disableAfterFill: true, blockDisabledClear: true });
+    const bWidgets = await runStubDomWatch({ withRangeAndColor: true });
+    ok(bDisOk.fillOk && bDisOk.pwValLen === 0 && bDisOk.pwHasSecret === false && bDisOk.verdict.ok === true && bDisOk.notices.length === 0 &&
+      bDisBlocked.pwHasSecret === true && bDisBlocked.verdict.code === 'login_fill_live' && bDisBlocked.notices.length === 1 &&
+      bWidgets.fillOk && bWidgets.pwValLen === 0 && bWidgets.verdict.ok === true && bWidgets.notices.length === 0,
+      'r6 MAJOR B\' (disabled wipe + range/color/phone ceiling): disabled password input is wiped (len 0) & counted when stuck; page with range + color + +1 phone lifts ceiling with verifiedEmpty:true and 0 notices',
+      { bDisOk, bDisBlocked, bWidgets });
+
+    const redBSrc = LFS0
+      .replace('if (node && lenOfNode(node) > 0 && wipeNode(node)) wiped++;', 'if (node && !node.disabled && lenOfNode(node) > 0 && wipeNode(node)) wiped++;')
+      .replace('for (const node of typedNodes) {\n        if (node && node.isConnected && lenOfNode(node) > 0) remaining++;\n      }', 'for (const node of collectControls(document)) {\n        if (node && !node.disabled && lenOfNode(node) > 0) remaining++;\n      }');
+    const LFmB = redBSrc !== LFS0 ? MUT.load('src/server/browser-login-fill.js', redBSrc, 'r6-b-skip-disabled-and-count-all') : null;
+    const redBDis = LFmB ? await runStubDomWatch({ LFmodToUse: LFmB, disableAfterFill: true }) : null;
+    const redBWidgets = LFmB ? await runStubDomWatch({ LFmodToUse: LFmB, withRangeAndColor: true }) : null;
+    ok(Boolean(LFmB && redBDis && redBDis.pwHasSecret === true && redBDis.verdict.ok === true &&
+      redBWidgets && redBWidgets.verdict.code === 'login_fill_live' && redBWidgets.notices.length === 1),
+      'r6 MAJOR B\' RED control [r6-b-skip-disabled-and-count-all]: mutant skipping disabled inputs & counting all controls leaves secret in disabled field while lifting fence AND traps range/color page with false notice',
+      { redBDis, redBWidgets });
+  }
+
+  // ── (C') MINOR C': three honest `submitted` states (true | 'unknown' + reason | false), > 64 KB bound, and manual Confirm door ──
+  {
+    const SC6 = await world({ mode: { standard: true } });
+    try {
+      const tid = SC6.k.targets()[0].targetId;
+      const PWC6 = pwOf('r6-minC');
+      SC6.logins.addOwn({ origin: SITE, username: 'c6user', password: PWC6 });
+      SC6.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+
+      // (1) Cross-origin form action that navigates ⇒ submitted: true
+      SC6.k.navigate(tid, `${SITE}/login-xform`);
+      await sleep(25);
+      SC6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+        submitUrl: 'https://auth.example.test/session',
+        navigateOnSubmit: `${SITE}/account`,
+        fields: [
+          { fieldId: 'c6-xu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-xp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const rXform = await SC6.w.fillLogin(TGT, FILL({ user: 'c6user', submit: true }));
+      const txtXform = BL.loginText(rXform);
+
+      // (2) SPA client-hashed password ⇒ submitted: 'unknown' + readable-form reason, NO "press its button"
+      SC6.k.navigate(tid, `${SITE}/login-hash`);
+      await sleep(25);
+      SC6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+        submitPostData: JSON.stringify({ user: 'c6user', pwHash: crypto.createHash('sha256').update(PWC6).digest('hex') }),
+        fields: [
+          { fieldId: 'c6-hu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-hp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const rHash = await SC6.w.fillLogin(TGT, FILL({ user: 'c6user', submit: true }));
+      const txtHash = BL.loginText(rHash);
+
+      // (3) Authorization-header empty body ⇒ submitted: 'unknown' + readable-form reason, NO "press its button"
+      SC6.k.navigate(tid, `${SITE}/login-hdr`);
+      await sleep(25);
+      SC6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+        submitPostData: '',
+        fields: [
+          { fieldId: 'c6-au', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-ap', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const rHdr = await SC6.w.fillLogin(TGT, FILL({ user: 'c6user', submit: true }));
+      const txtHdr = BL.loginText(rHdr);
+
+      // (4) > 64 KB signup body ⇒ submitted: 'unknown' ("the request body was too large to read"), row names bound, owner's Confirm clears pending
+      SC6.k.navigate(tid, `${SITE}/signup-big`);
+      await sleep(25);
+      SC6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+        submitPostData: 'pad=' + 'x'.repeat(70000),
+        fields: [
+          { fieldId: 'c6-bu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-bp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rBig = await SC6.w.fillLogin(TGT, FILL({ newUser: 'big67k@example.test', generate: true, submit: true }));
+      const txtBig = BL.loginText(rBig);
+      const bigName = `web-login:${SITE}#big67k@example.test`;
+      const rowBigBefore = SC6.logins.list().entries.find((e) => e.name === bigName);
+      const bigMeta = SC6.eng.secretNames().find((s) => s.name === bigName);
+      const vrowBigBefore = bigMeta ? VI.rowOf('secrets', VI.secretRowOf(bigMeta)) : null;
+      const confRes = typeof SC6.logins.confirmOwn === 'function' ? SC6.logins.confirmOwn(bigName, { who: 'owner' }) : null;
+      const bigGot = SC6.eng.secretGet(bigName);
+      const recBigAfter = bigGot && bigGot.value ? BL.recordOf(bigGot.value.toString('utf8')) : null;
+      const rowBigAfter = SC6.logins.list().entries.find((e) => e.name === bigName);
+
+      // (5) Cross-origin unreadable write on signup ⇒ submitted: 'unknown' ("the credential went to https://api.other.test")
+      SC6.k.navigate(tid, `${SITE}/signup-xapi`);
+      await sleep(25);
+      SC6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+        submitUrl: 'https://api.other.test/v1/register',
+        submitPostData: JSON.stringify({ pwHash: 'opaque' }),
+        fields: [
+          { fieldId: 'c6-ou', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-op', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rOther = await SC6.w.fillLogin(TGT, FILL({ newUser: 'xapi@example.test', generate: true, submit: true }));
+      const rowOther = SC6.logins.list().entries.find((e) => e.name === `web-login:${SITE}#xapi@example.test`);
+
+      ok(rXform.submitted === true && /and submitted the form/.test(txtXform) && !/NOT submitted/.test(txtXform) &&
+        rHash.submitted === 'unknown' && rHash.submittedReason === 'the site\'s request did not carry the password in a readable form' && !/NOT submitted|press its button/.test(txtHash) &&
+        rHdr.submitted === 'unknown' && rHdr.submittedReason === 'the site\'s request did not carry the password in a readable form' && !/NOT submitted|press its button/.test(txtHdr) &&
+        rBig.submitted === 'unknown' && rBig.submittedReason === 'the request body was too large to read' && !/NOT submitted|press its button/.test(txtBig) &&
+        rowBigBefore && rowBigBefore.pending === 'register' && rowBigBefore.pendingReason === 'the request body was too large to read' &&
+        vrowBigBefore && vrowBigBefore.pendingReason === 'the request body was too large to read' &&
+        Boolean(confRes && confRes.ok) && recBigAfter && !recBigAfter.pending && !recBigAfter.pendingReason && rowBigAfter && rowBigAfter.pending === null &&
+        rOther.submitted === 'unknown' && rOther.submittedReason === 'the credential went to https://api.other.test' &&
+        rowOther && rowOther.pendingReason === 'the credential went to https://api.other.test',
+        'r6 MINOR C\' (three submitted states + > 64 KB bound + owner Confirm): xform => submitted:true; hashed/header/>64KB/xapi => submitted:\'unknown\' with exact reason & no "press its button"; Confirm clears pending',
+        { rXform, rHash, rHdr, rBig, rowBigBefore, confRes, rOther });
+
+      const redCSrc = DSRC0.replace(
+        'if (credAny || unloaded) {\n          subState = true;\n        } else if (sawChromeSub && an && (an.writeSentSeq || 0) > subNetMark) {\n          subState = \'unknown\';\n          subReason = pendingReasonFromNet(an, subNetMark) || BL().READABLE_BOUND;\n        }',
+        'subState = Boolean(an && (an.credSentSeq || 0) > subNetMark);'
+      );
+      const DmC6 = redCSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redCSrc, 'r6-c-same-origin-plain-only') : null;
+      const SC6m = DmC6 ? await world({ mode: { standard: true }, Dmod: DmC6 }) : null;
+      let redCXform = null, redCHash = null;
+      if (SC6m) {
+        try {
+          const tidm = SC6m.k.targets()[0].targetId;
+          SC6m.logins.addOwn({ origin: SITE, username: 'c6user', password: PWC6 });
+          SC6m.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+          SC6m.k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE,
+            buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+            submitUrl: 'https://auth.example.test/session',
+            navigateOnSubmit: `${SITE}/account`,
+            fields: [{ fieldId: 'm-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }],
+          }, tidm);
+          redCXform = await SC6m.w.fillLogin(TGT, FILL({ user: 'c6user', submit: true }));
+          SC6m.k.navigate(tidm, `${SITE}/login-hash`);
+          await sleep(25);
+          SC6m.k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE,
+            buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+            submitPostData: '{"pwHash":"1234"}',
+            fields: [{ fieldId: 'm-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }],
+          }, tidm);
+          redCHash = await SC6m.w.fillLogin(TGT, FILL({ user: 'c6user', submit: true }));
+        } finally { await SC6m.close(); }
+      }
+      ok(Boolean(DmC6 && redCXform && redCXform.submitted === false && redCHash && redCHash.submitted === false && rXform.submitted === true && rHash.submitted === 'unknown'),
+        'r6 MINOR C\' RED control [r6-c-same-origin-plain-only]: r5-shaped same-origin-plain-only mutant answers submitted:false ("press its button") on cross-origin form action and hashed SPA',
+        { redCXformSub: redCXform && redCXform.submitted, redCHashSub: redCHash && redCHash.submitted });
+    } finally { await SC6.close(); }
+  }
+
+  // ── (D') MINOR D': owner's re-save (`addOwn` and `answerCard`) clears `pending` and `lastFilledPassword` (`source: 'owner'`) ──
+  {
+    const SD6 = await world({ mode: { standard: true } });
+    try {
+      const tid = SD6.k.targets()[0].targetId;
+      SD6.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+      SD6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'd6-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'd6-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      await SD6.w.fillLogin(TGT, FILL({ newUser: 'd6pend@example.test', generate: true, submit: false }));
+      // Agent fills login once while still pending (stamps lastFilledPassword: 'pending')
+      SD6.k.navigate(tid, `${SITE}/login`);
+      await sleep(25);
+      SD6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'd6-lu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'd6-lp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const beforeSaveFill = await SD6.w.fillLogin(TGT, FILL({ user: 'd6pend@example.test' }));
+      // Owner re-saves in the Vault window (`addOwn`)
+      const ownPw = pwOf('r6-d-own');
+      const saveRes = SD6.logins.addOwn({ origin: SITE, username: 'd6pend@example.test', password: ownPw }, { who: 'owner' });
+      const recAfter = BL.recordOf(SD6.eng.secretGet(`web-login:${SITE}#d6pend@example.test`).value.toString('utf8'));
+      const rowAfter = SD6.logins.list().entries.find((e) => e.name === `web-login:${SITE}#d6pend@example.test`);
+      const boxMeta = SD6.eng.secretNames().find((s) => s.name === `web-login:${SITE}#d6pend@example.test`);
+      SD6.k.navigate(tid, `${SITE}/login2`);
+      await sleep(25);
+      SD6.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        fields: [
+          { fieldId: 'd6-lu2', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'd6-lp2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const afterSaveFill = await SD6.w.fillLogin(TGT, FILL({ user: 'd6pend@example.test' }));
+      ok(beforeSaveFill.usedPassword === 'pending' && saveRes.ok === true &&
+        !recAfter.pending && !recAfter.pendingReason && !recAfter.lastFilledPassword &&
+        recAfter.source === 'owner' && recAfter.by === 'owner' &&
+        rowAfter && rowAfter.pending === null && rowAfter.source === 'owner' &&
+        boxMeta && !boxMeta.pending &&
+        afterSaveFill.ok && afterSaveFill.usedPassword !== 'pending' && !/pending password/.test(BL.loginText(afterSaveFill)),
+        'r6 MINOR D\' (owner save confirms pending login): addOwn clears pending + lastFilledPassword, sets source:\'owner\', and later logins report confirmed password',
+        { recAfter: { pending: recAfter.pending, source: recAfter.source, lastFilledPassword: recAfter.lastFilledPassword }, rowAfter, afterUsed: afterSaveFill.usedPassword });
+
+      const redDSrc = LSRC0.replaceAll(
+        'const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;\n      void pending; void pendingReason; void lastFilledPassword;',
+        'const cleanEx = ex.rec;'
+      );
+      const LmD6 = redDSrc !== LSRC0 ? MUT.load('src/server/browser-logins.js', redDSrc, 'r6-d-spread-keeps-pending') : null;
+      let redDPending = null;
+      if (LmD6) {
+        const logsMut = LmD6.create({ vault: SD6.eng, grants: () => SD6.grants });
+        SD6.k.navigate(tid, `${SITE}/signup-mut`);
+        await sleep(25);
+        SD6.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+          fields: [
+            { fieldId: 'd6-mu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'd6-mp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+          ],
+        }, tid);
+        await SD6.w.fillLogin(TGT, FILL({ newUser: 'd6mut@example.test', generate: true, submit: false }));
+        logsMut.addOwn({ origin: SITE, username: 'd6mut@example.test', password: pwOf('r6-d-mut') });
+        const mg = SD6.eng.secretGet(`web-login:${SITE}#d6mut@example.test`);
+        redDPending = mg && mg.value ? (BL.recordOf(mg.value.toString('utf8')).pending || null) : null;
+      }
+      ok(Boolean(LmD6 && redDPending === 'register' && !recAfter.pending),
+        'r6 MINOR D\' RED control [r6-d-spread-keeps-pending]: mutant spreading ...ex.rec keeps pending:\'register\' after owner re-save (r6 clears it)',
+        { redDPending, realPending: recAfter.pending || null });
+    } finally { await SD6.close(); }
+  }
+
+  // ── (E') MINOR E': 300 KB frame with 8-digit numeric secret + HTML-entity secret parses with numbers intact & entity masked ──
+  {
+    const SE6 = await world({ mode: { standard: true } });
+    try {
+      const NUM_PW = String(40000000 + crypto.randomInt(1000000, 9999999)); // 8-digit all-numeric secret (>= MIN_MASK_BYTES = 8)
+      const ENT_PW = `Ent&Key<${crypto.randomBytes(3).toString('hex')}>`;
+      const ENT_ENCODED = ENT_PW.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      SE6.logins.addOwn({ origin: SITE, username: 'numuser', password: NUM_PW });
+      SE6.logins.addOwn({ origin: SITE, username: 'entuser', password: ENT_PW });
+      SE6.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+      SE6.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'e6-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      await SE6.w.fillLogin(TGT, FILL({ user: 'numuser' }));
+      SE6.k.navigate(SE6.k.targets()[0].targetId, `${SITE}/login2`);
+      await sleep(25);
+      SE6.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'e6-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      await SE6.w.fillLogin(TGT, FILL({ user: 'entuser' }));
+
+      const tsNum = Number(`17619${NUM_PW}123`);
+      const nodeIdNum = Number(NUM_PW);
+      const padNodes = [];
+      for (let i = 0; i < 1100; i++) {
+        padNodes.push({ nodeId: i + 1, ts: tsNum, label: `padding-item-${i}-${'x'.repeat(230)}` });
+      }
+      const frame300k = JSON.stringify({
+        id: 77,
+        result: {
+          ts: tsNum,
+          nodeId: nodeIdNum,
+          pinEcho: `pin=${NUM_PW}`,
+          htmlSnippet: `<div>${ENT_ENCODED}</div>`,
+          nodes: padNodes,
+        },
+      });
+      const out300k = SE6.w.scrubCdpFrame(PID, frame300k);
+      let parsed300k = null;
+      try { parsed300k = JSON.parse(out300k); } catch { parsed300k = null; }
+
+      // Also verify the raw `fn.spelled` fallback directly (unparseable frame with numeric timestamp + HTML-entity secret)
+      const unparseableRaw = `{broken_json,"ts":${tsNum},"html":"${ENT_ENCODED}","numEntity":"&#${NUM_PW.charCodeAt(0)};${NUM_PW.slice(1)}"`;
+      const outUnparseable = SE6.w.scrubCdpFrame(PID, unparseableRaw);
+
+      ok(Buffer.byteLength(frame300k) >= 300 * 1024 && Boolean(parsed300k) &&
+        parsed300k.result.ts === tsNum && parsed300k.result.nodeId === nodeIdNum &&
+        parsed300k.result.pinEcho === `pin=[vault:web-login:${SITE}#numuser]` &&
+        parsed300k.result.htmlSnippet === `<div>[vault:web-login:${SITE}#entuser]</div>` &&
+        !out300k.includes(ENT_ENCODED) && !out300k.includes(`pin=${NUM_PW}`) &&
+        outUnparseable.includes(`"ts":${tsNum}`) && !outUnparseable.includes(ENT_ENCODED) &&
+        !outUnparseable.includes(`&#${NUM_PW.charCodeAt(0)};${NUM_PW.slice(1)}`),
+        'r6 MINOR E\' (300 KB numeric + HTML-entity frame & raw fallback): 300 KB JSON frame parses with numeric timestamp/nodeId intact, masks string & entity secrets, and raw fallback skips plain numeric tokens while applying read views',
+        { bytes: Buffer.byteLength(frame300k), parsedOk: !!parsed300k, tsOk: parsed300k && parsed300k.result.ts === tsNum });
+
+      // RED E': r5's 256 KB raw spelled road without numeric guard or read views corrupts JSON numbers and misses entity secret
+      const redVrSrc = VRS0.replace('let plainHit = false;', 're.lastIndex = 0; return raw.replace(re, (m) => table.get(m).ph); let plainHit = false;');
+      const VRmE = redVrSrc !== VRS0 ? MUT.load('src/vault-run.js', redVrSrc, 'r6-e-vr-raw') : null;
+      let DmE6 = null;
+      if (VRmE) {
+        globalThis.__r6MutVR = VRmE;
+        const redESrc = DSRC0
+          .replace('const SCRUB_JSON_MAX_BYTES = 2 * 1024 * 1024;', 'const SCRUB_JSON_MAX_BYTES = 256 * 1024;')
+          .replace('const VR = () => VRm || (VRm = require(\'../vault-run.js\'));', 'const VR = () => globalThis.__r6MutVR;');
+        DmE6 = redESrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redESrc, 'r6-e-raw-256kb-no-views') : null;
+      }
+      let redEParseFailed = false, redELeakedEntity = false;
+      if (DmE6) {
+        const SE6m = await world({ mode: { standard: true }, Dmod: DmE6 });
+        try {
+          SE6m.logins.addOwn({ origin: SITE, username: 'numuser', password: NUM_PW });
+          SE6m.logins.addOwn({ origin: SITE, username: 'entuser', password: ENT_PW });
+          SE6m.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+          SE6m.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'em-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await SE6m.w.fillLogin(TGT, FILL({ user: 'numuser' }));
+          SE6m.k.navigate(SE6m.k.targets()[0].targetId, `${SITE}/login2`);
+          await sleep(25);
+          SE6m.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'em-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await SE6m.w.fillLogin(TGT, FILL({ user: 'entuser' }));
+          const outMut = SE6m.w.scrubCdpFrame(PID, frame300k);
+          redELeakedEntity = outMut.includes(ENT_ENCODED);
+          try { JSON.parse(outMut); } catch { redEParseFailed = true; }
+        } finally { await SE6m.close(); }
+      }
+      ok(Boolean(DmE6 && redEParseFailed && redELeakedEntity && parsed300k),
+        'r6 MINOR E\' RED control [r6-e-raw-256kb-no-views]: 256 KB raw-regex mutant corrupts JSON numbers (SyntaxError) and leaks HTML-entity-encoded secret',
+        { redEParseFailed, redELeakedEntity });
+    } finally { await SE6.close(); }
   }
 }
 

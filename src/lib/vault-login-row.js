@@ -40,13 +40,31 @@ export function loginExtras(row, data, { refresh, show } = {}) {
   const box = el('div', 'vw-ak vw-login');
   box.dataset.login = row.entry;
   const pending = entry.pending || row.pending || null;
+  const pendingReason = entry.pendingReason || row.pendingReason || null;
+  let confirmB = null;
   if (pending === 'register' || pending === 'change') {
     box.dataset.pending = pending;
     const baseNote = pending === 'register'
       ? t('Registration not yet confirmed by the site — login fills this pending password.')
       : t('Password change not yet confirmed — login fills the pending password (previous password kept in reserve).');
+    const reasonWords = pendingReason === 'the request body was too large to read'
+      ? t('Why not auto-confirmed: the request body was too large to read (> 64 KB) — confirm here if the site accepted it.')
+      : pendingReason === 'the site\'s request did not carry the password in a readable form'
+        ? t('Why not auto-confirmed: the site\'s request did not carry the password in a readable form — confirm here if the site accepted it.')
+        : typeof pendingReason === 'string' && pendingReason.startsWith('the credential went to ')
+          ? t('Why not auto-confirmed: the credential went to {origin} — confirm here if the site accepted it.', { origin: pendingReason.slice('the credential went to '.length) })
+          : '';
     const filledNote = entry.lastFilledPassword === 'pending' ? ` · ${t('Last login filled the pending password.')}` : '';
-    box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + filledNote));
+    box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + (reasonWords ? ` ${reasonWords}` : '') + filledNote));
+    confirmB = el('button', 'vw-btn vw-login-confirm', t('Confirm'));
+    confirmB.type = 'button';
+    confirmB.title = t('Confirm in the vault that the site accepted this password');
+    confirmB.onclick = async () => {
+      const r = await post('/api/vault/web-logins', { confirm: true, name: entry.name });
+      if (!r || !r.ok) showToast(failWords(r), { type: 'error' });
+      else showToast(t('Confirmed the login in the vault'));
+      refresh?.();
+    };
   }
   const chips = el('div', 'vw-ak-grants');
   const grants = (entry.grants || []).filter((g) => !g.unknown);
@@ -68,7 +86,7 @@ export function loginExtras(row, data, { refresh, show } = {}) {
   useB.type = 'button';
   useB.title = t('Let the custom browser kernel fill this login for a conversation, a task group or everyone — they never see the password');
   useB.onclick = () => showLoginGrantPicker(entry, data, { refresh });
-  return { box, doors: [useB] };
+  return { box, doors: [...(confirmB ? [confirmB] : []), useB] };
 }
 
 /** 用于…: the scope (this account / any account on this site / any site) and who — checked = granted at that scope. */

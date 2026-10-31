@@ -14,7 +14,10 @@ const page = (title, body, script = '') => `<!doctype html><html><head><meta cha
 const post = `function post(path, body) { return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }`;
 
 const PAGES = {
-  '/one': () => page('Sign in — one step', `<form id="f" method="post" action="/done/one"><label>User <input id="u" name="username" autocomplete="username"></label><label>Password <input id="p" type="password" name="password" autocomplete="current-password" minlength="4"></label><label><input type="checkbox" id="rem" name="remember" value="yes" style="display:inline-block;width:auto"> Remember</label><select id="role" name="role"><option value="user">User</option><option value="admin">Admin</option></select><button type="submit">Sign in</button></form>`),
+  '/one': (url) => {
+    const act = url && url.searchParams && url.searchParams.get('direct') ? '/done/one-direct' : '/done/one';
+    return page('Sign in — one step', `<form id="f" method="post" action="${act}"><label>User <input id="u" name="username" autocomplete="username"></label><label>Password <input id="p" type="password" name="password" autocomplete="current-password" minlength="4"></label><label><input type="checkbox" id="rem" name="remember" value="yes" style="display:inline-block;width:auto"> Remember</label><select id="role" name="role"><option value="user">User</option><option value="admin">Admin</option></select><button type="submit">Sign in</button></form>`);
+  },
   '/two': () => page('Sign in – Google-like', `<div id="vid"><h1>Sign in</h1><input type="email" id="identifierId" name="identifier" autocomplete="username" aria-label="Email or phone" spellcheck="false"><div role="button" class="btn" id="idNext" tabindex="0">Next</div><div id="iderr" hidden>Enter an email or phone number</div></div>
 <div id="vpw" hidden><h1>Welcome</h1><div id="who"></div><input type="password" name="Passwd" aria-label="Enter your password" autocomplete="current-password"><div role="button" class="btn" id="pwNext" tabindex="0">Next</div><div id="pwerr" hidden>Enter a password</div></div>`,
   `${VALUE_TRACKER}${post}
@@ -196,6 +199,32 @@ t.addEventListener('input', () => { if (t.value) post('/seen/iframe-thief', { le
     const src = url.searchParams.get('src') || 'about:blank';
     return page('Sign in — with ad frame', `<form id="f" method="post" action="/done/one"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form><iframe id="ad" src=${JSON.stringify(src)} width="300" height="120"></iframe>`);
   },
+  '/disable-widgets': () => page('Sign in — disabled & widgets', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><input id="vol" type="range" value="50"><input id="tint" type="color" value="#112233"><button type="button" id="lockBtn">Submitting</button></form>`,
+    `document.getElementById('lockBtn').addEventListener('click', () => { document.getElementById('u').disabled = true; document.getElementById('p').disabled = true; });`),
+  '/xform': (url) => {
+    const act = url.searchParams.get('action') || '/done/one';
+    return page('Sign in — cross-origin action', `<form id="f" method="post" action=${JSON.stringify(act)}><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`);
+  },
+  '/hash-spa': () => page('Sign in — client hashed', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button><div id="st"></div></form>`,
+    `${post}
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = document.getElementById('u').value;
+  const p = document.getElementById('p').value;
+  let h = 2166136261;
+  for (let i = 0; i < p.length; i++) { h ^= p.charCodeAt(i); h = Math.imul(h, 16777619); }
+  await post('/done/hash-spa', { username: u, pwHash: 'fnv1a:' + (h >>> 0).toString(16) + ':' + p.length });
+  document.getElementById('st').textContent = 'Hashed sent';
+});`),
+  '/big-signup': () => page('Create account — large payload', `<form id="f"><input id="su" name="email" type="email" autocomplete="email"><input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12"><button type="submit">Create account</button></form>`,
+    `document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('su').value;
+  const pw = document.getElementById('sp1').value;
+  const pad = 'x'.repeat(70000);
+  await fetch('/done/big-signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad, email, pwLen: pw.length }) });
+  location.href = '/welcome';
+});`),
 };
 
 export function startLoginPages() {
@@ -203,11 +232,18 @@ export function startLoginPages() {
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     if (req.method === 'POST') {
-      let b = ''; req.on('data', (d) => { b += d; if (b.length > 65536) req.destroy(); });
+      let b = ''; req.on('data', (d) => { b += d; if (b.length > 262144) req.destroy(); });
       req.on('end', () => {
-        let body = {}; try { body = /json/.test(String(req.headers['content-type'])) ? JSON.parse(b || '{}') : Object.fromEntries(new URLSearchParams(b)); } catch { body = { raw: b }; }
+        let body = {};
+        if (url.pathname === '/done/big-signup') {
+          try { const j = JSON.parse(b || '{}'); body = { email: j.email, pwLen: j.pwLen, bytes: Buffer.byteLength(b) }; } catch { body = { bytes: Buffer.byteLength(b) }; }
+        } else {
+          try { body = /json/.test(String(req.headers['content-type'])) ? JSON.parse(b || '{}') : Object.fromEntries(new URLSearchParams(b)); } catch { body = { raw: b }; }
+        }
         got.push({ path: url.pathname, body, at: Date.now() });
         if (url.pathname === '/done/one') { res.writeHead(303, { location: '/welcome' }); return res.end(); }
+        if (url.pathname === '/done/one-direct') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(page('Welcome', '<h1>Signed in</h1>')); }
+        if (url.pathname === '/done/xform') { res.writeHead(303, { location: url.searchParams.get('back') || '/welcome' }); return res.end(); }
         if (url.pathname === '/done/signup-check' && body && body.email === 'reject@example.test') {
           res.writeHead(400, { 'content-type': 'application/json' });
           return res.end('{"ok":false,"error":"taken"}');
