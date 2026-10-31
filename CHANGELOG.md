@@ -4,6 +4,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.365 — 2026-10-30
 
+### Added
+- A background job can now use a key its agent saved in your vault: handed over at each start, never in its logs or command line; a locked vault makes it wait.
+
 ### Changed
 - A vault command card now also shows a long working folder, program path or secret reference whole under Technical details.
 
