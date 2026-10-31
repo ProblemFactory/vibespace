@@ -9981,6 +9981,8 @@ export default {
   "Only the conversations it opens": "この鍵が開いた会話だけ", // lane key-instance-scope: a grant's reach
   "The conversations of its Task Groups": "所属タスクグループの会話", // lane key-instance-scope: a grant's reach
   "The whole VibeSpace": "VibeSpace 全体", // lane key-instance-scope: a grant's reach
+  // lane needs-card-tail r12: the attention dock's Always names the reach it carries
+  "Always · {reach}": "常に · {reach}",
   "This key may act on every conversation here, including yours": "このキーは、あなた自身の会話を含め、ここにあるすべての会話を操作できます", // lane key-instance-scope: a grant's reach
   "Rename, end or archive the conversations of: {groups}": "次のタスクグループの会話を改名・終了・アーカイブできます：{groups}", // lane key-instance-scope: a grant's reach
   "Rename, end or archive only the conversations it opens with this key (and itself)": "このキーで自分が開いた会話（と自分自身）だけを改名・終了・アーカイブできます", // lane key-instance-scope: a grant's reach

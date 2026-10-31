@@ -183,7 +183,12 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
 // radios with one name and no form are ONE group: the copy drawn last took the check, so the card showed none and its Allow
 // sent no reach): THE PICK IS THE ITEM'S — kept here, one per item, never read off a copy in the DOM (the panel's answer
 // asks reachPickOf); every drawn copy's group is its OWN (`-<n>`, a sequence) and is drawn from the pick; a press on any copy
-// writes it (pickReach) and every copy on the page follows; the attention dock draws no pick at all (ctx.noPick)
+// writes it (pickReach) and every copy on the page follows; the attention dock draws no pick at all (ctx.noPick);
+// r12 (the r11 acceptance — the dock drew no pick yet its Allow / Always sent the item's pick, made on another copy: a «整个
+// VibeSpace» read in the tray and left there became an instance-wide grant from a strip that showed no reach): A PRESS POINT
+// NEVER SENDS A SCOPE IT DOES NOT SHOW — a copy that draws no pick SAYS the pick its answers carry, one line beside them
+// (scopeHtml: «Reach <the pick>», the label dim, 整个 VibeSpace red-tinted) and its Always names it (dockAlwaysWord); a pick
+// made on any copy rewords it at once (pickReach) — the words and the answer read the ONE pick (reachPickOf)
 const REACH_PICKS = new Map(); // item id → the owner's pick ('opened' | 'groups' | 'instance'); an item no longer open is dropped (forgetReachPicks)
 let reachSeq = 0;
 export const reachPickOf = (id) => REACH_PICKS.get(String(id)) || 'opened';
@@ -195,11 +200,23 @@ export function pickReach(id, value) {
   REACH_PICKS.set(String(id), value);
   if (typeof document === 'undefined') return;
   for (const r of document.querySelectorAll('.ut-ak-reach input[type="radio"]')) if (r.closest('.ut-item')?.dataset.id === String(id)) r.checked = r.value === value;
+  for (const s of document.querySelectorAll('.ut-ak-scope')) { // r12: a copy with no pick says the new one before any press
+    const row = s.closest('.ut-item');
+    if (row?.dataset.id !== String(id)) continue;
+    const w = s.querySelector('.ut-ak-scope-word');
+    s.dataset.reach = value;
+    if (w) { w.className = `ut-ak-scope-word ut-ak-reach-${value}`; w.textContent = reachWord(value); }
+    const al = row.querySelector('.ut-hub-always');
+    if (al) al.textContent = dockAlwaysWord(value, tr);
+  }
 }
 export function forgetReachPicks(open) {
   const keep = (open || []).map((i) => i && String(i.id));
   for (const id of [...REACH_PICKS.keys()]) if (!keep.includes(id)) REACH_PICKS.delete(id);
 }
+/** r12: what a copy with no pick says its answers carry — the item's pick, by THE reach words (automation-reach.js). */
+const scopeHtml = (pick, t) => `<div class="ut-ak-scope" data-reach="${pick}"><span class="ut-ak-reach-lbl">${escHtml(t('Reach'))}</span> <span class="ut-ak-scope-word ut-ak-reach-${pick}">${escHtml(reachWord(pick))}</span></div>`;
+const dockAlwaysWord = (pick, t) => t('Always · {reach}', { reach: reachWord(pick) });
 const reachPickHtml = (i, t) => {
   const groups = String(i.action.groups || '').split(' ').filter(Boolean);   // the caller's Task Group ids (space-joined by the engine)
   const name = `ut-ak-reach-${String(i.id || i.action.askId || '')}-${++reachSeq}`; // r11: this copy's own group
@@ -213,8 +230,8 @@ const hubAskHtml = (i, t, detail, noPick = false) => (i && i.action && HELD_ASKS
   : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
     + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
-    + (drawsPick(i) && !noPick ? reachPickHtml(i, t) : '') // r11: the dock draws no pick (one form per item)
-    + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
+    + (drawsPick(i) ? (noPick ? scopeHtml(reachPickOf(i.id), t) : reachPickHtml(i, t)) : '') // r11: the dock draws no pick (one form per item); r12: it SAYS the pick
+    + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(noPick && a === 'always' && drawsPick(i) ? dockAlwaysWord(reachPickOf(i.id), t) : hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 
 /** THE RUN CARD (lane wake-approve-card r7 — the owner: «这个卡片的可读性很差»): `item.facts` worded through THE model

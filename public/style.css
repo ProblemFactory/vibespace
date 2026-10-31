@@ -5268,6 +5268,12 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .chat-attn-dock .cad-rows .ut-body > .ut-text { flex: 1 1 0; min-height: 44px; line-height: 44px; font-size: 16px !important; }
   .chat-attn-dock .cad-rows .ut-body > .ut-actions { flex: 1 1 100%; display: flex; gap: 6px; }
   .chat-attn-dock .cad-rows .ut-opt { padding: 0 14px; font-size: 15px !important; }
+  /* r12: the reach the answers carry reads at 16 px on its own line; the answers stay ONE row (the card's shape) — Allow once and
+     Deny keep their words on one line, the Always takes the rest and wraps its words (a long reach in them) */
+  .chat-attn-dock .cad-rows .ut-body > .ut-ak-scope { flex: 1 1 100%; font-size: 16px !important; line-height: 24px; white-space: normal; }
+  .chat-attn-dock .cad-rows .ut-body > .ut-exit-answer { flex: 1 1 100%; gap: 6px; }
+  .chat-attn-dock .cad-rows .ut-exit-answer > .ut-act { flex: none; white-space: nowrap; }
+  .chat-attn-dock .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; white-space: normal; line-height: 1.2; padding: 4px 8px; }
   .chat-attn-dock textarea { font-size: 16px !important; }
 }
 /* ── end of the touch scale (lane foryou-honest) ── */

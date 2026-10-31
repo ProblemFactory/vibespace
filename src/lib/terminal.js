@@ -443,7 +443,7 @@ class TerminalSession {
       this._setBell(true);
     });
     // Clear bell + waiting on focus
-    winInfo.element.addEventListener('mousedown', () => { this._setBell(false); this._setWaiting(false); });
+    winInfo.element.addEventListener('mousedown', () => { this._setBell(false); this._setWaiting(false, { seen: true }); });
 
     // Drop file from file explorer → type absolute path into terminal
     container.addEventListener('dragover', (e) => { e.preventDefault(); container.classList.add('drop-target'); });
@@ -1021,8 +1021,15 @@ class TerminalSession {
     }
   }
 
-  _setWaiting(on) {
-    this.winInfo.element.classList.toggle('window-waiting', on);
+  /** THE waiting blink. IT HAS REASONS, and the set is the WINDOW's (lane needs-card-tail r12 — the r11 acceptance: only the
+   *  chat view recorded one, so an ask answered elsewhere ended a terminal's «finished», and the CLI working again ended an
+   *  unanswered ask's flash; user-todos-panel.js THE ANNOUNCE adds / drops 'ask'): idle adds 'turn'; working again drops
+   *  'turn' — the blink goes only when no reason stands; `seen` (a press in the window, focus) acknowledges them all. */
+  _setWaiting(on, { seen = false } = {}) {
+    const el = this.winInfo.element, why = this.winInfo._waitWhy || (this.winInfo._waitWhy = new Set());
+    if (!el.classList.contains('window-waiting')) why.clear(); // a reason outlives no blink (a tab switch cleared it)
+    if (on) why.add('turn'); else if (seen) why.clear(); else why.delete('turn');
+    el.classList.toggle('window-waiting', on || why.size > 0);
     if (this.winInfo._notifyChanged) this.winInfo._notifyChanged(); // update taskbar
   }
 
@@ -1060,7 +1067,7 @@ class TerminalSession {
     this._exitOverlayEl = ov;
   }
 
-  focus() { if (!keyboardOwned()) this.terminal.focus(); this._setBell(false); this._setWaiting(false); } // lane J r2: a driven live view owns the keyboard — never steal it into a shell
+  focus() { if (!keyboardOwned()) this.terminal.focus(); this._setBell(false); this._setWaiting(false, { seen: true }); } // lane J r2: a driven live view owns the keyboard — never steal it into a shell
   dispose() {
     if (this._fitTimer) { clearTimeout(this._fitTimer); this._fitTimer = null; }
     if (this._fontPollTimer) { clearInterval(this._fontPollTimer); this._fontPollTimer = null; }

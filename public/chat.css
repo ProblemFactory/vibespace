@@ -695,7 +695,7 @@
 .cad-rows .ut-item > .ut-dot { display: none; }
 .cad-rows .ut-item > .ut-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; min-width: 0; }
 /* the strip shows the question and what answers it — the rest (the detail fold, notes, attachments, the reach pick) is the card's */
-.cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-opts, .ut-reply, .ut-secret) { display: none !important; }
+.cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-ak-scope, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-opts, .ut-reply, .ut-secret) { display: none !important; }
 /* an app install's card: its answers only (Install / Not now, the progress with Open / Try again) — the rest is the card's */
 .cad-rows .ut-body > .ut-app-card { display: contents; }
 .cad-rows .ut-app-card > :not(.ut-exit-answer, .ut-app-progress) { display: none !important; }
@@ -708,6 +708,9 @@
 .cad-rows .ut-act { width: auto; min-width: 26px; height: 26px; padding: 0 6px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
 .cad-rows .ut-body > :is(.ut-exit-cmd, .ut-proposal-plan) { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-body > :is(.ut-exit-answer, .ut-reconnect-row) { order: 5; flex: none; margin: 0; display: inline-flex; gap: 4px; }
+/* r12: the reach an automation answer carries, SAID beside the answers (user-todos-row.js scopeHtml — the strip draws no pick;
+   a press point never sends a scope it does not show); 整个 VibeSpace red-tinted (style.css .ut-ak-reach-instance) */
+.cad-rows .ut-body > .ut-ak-scope { order: 5; flex: none; margin: 0; font-size: 12px; line-height: 26px; color: var(--text-secondary); white-space: nowrap; }
 .cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
 .cad-rows .ut-opt { flex: none; min-height: 24px; box-sizing: border-box; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-body > :is(.ut-reply, .ut-secret) { order: 7; flex: 1 1 100%; }

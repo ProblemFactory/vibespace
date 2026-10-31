@@ -65,7 +65,7 @@ import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
-import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -92,8 +92,9 @@ function wroteAny(recs) {
 /** A card's question line — what a pointer open holds (round 4, #1); the card itself when it has none. */
 const lineOf = (c) => (c && c.querySelector(':scope > .cn-rows > .ut-item .ut-text')) || c;
 
-/** The newest of `entries` ({item}) by its filing time (a tie: the later in the list). */
-const newestOf = (entries) => entries.reduce((a, e) => (!a || (Number(e.item.createdAt) || 0) >= (Number(a.item.createdAt) || 0) ? e : a), null);
+/** The newest of `entries` ({item}) — THE one order (PURE newestFirst: a same-ms tie by id; r12 — the r11 acceptance: a tie
+ *  went to the later in the list, so a same-ms batch unfolded one twin in the flow while the strip and the stack showed another). */
+const newestOf = (entries) => entries.reduce((a, e) => (!a || newestFirst(e.item, a.item) < 0 ? e : a), null);
 
 /** A FILING, not an item (r4): the store re-files a resolved ask under the SAME id with a new createdAt (user-todos.js «REOPENS
  *  the same item») — what a read proved about the old filing says nothing about the new one. */

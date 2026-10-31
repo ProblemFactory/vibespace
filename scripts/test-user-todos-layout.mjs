@@ -1798,5 +1798,69 @@ console.log('㉘ THE ANNOUNCE IS THE TOAST, GROWN (lane needs-card-tail r11 — 
   }
 }
 
+console.log('㉙ A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT SHOW (lane needs-card-tail r12 — the r11 acceptance) — the strip draws no pick yet SAYS the reach its answers carry; a pick made elsewhere rewords it before any press');
+{
+  // the r11 acceptance's shape: the owner presses «The whole VibeSpace» in the tray to read it, closes the tray unanswered; later
+  // only the strip shows the ask and its «Always for this conversation» sent reach 'instance' — the strip showed no reach at all.
+  // THE REAL row (renderRow / pickReach / reachFor) under the minimal DOM; the strip's copy is ctx.noPick (the panel's dockCtx)
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  let live = []; // the copies on the page pickReach rewords (a fake scope line per copy)
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: (sel) => (sel === '.ut-ak-scope' ? live : []), getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const AR = await import(pathToFileURL(path.join(ROOT, 'src/lib/automation-reach.js')).href);
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', nameFor: () => 'S', replyState: () => ({ show: false }), mini: true };
+    const item = { id: 'ut-r12reach01', sessionKey: 'claude:c0ffee', status: 'open', kind: 'action', origin: 'vault', urgency: 'urgent', createdAt: Date.now() - 2000, text: 'reach wants to use the automation key K1 (conversations.open)', detail: 'first use', action: { type: 'automation-ask', askId: 'r'.repeat(32), groups: 'grp-1 grp-2', keyId: 'k1', verb: 'conversations.open' } };
+    const strip = () => R.renderRow({ item }, { ...ctx, noPick: true }).innerHTML, card = () => R.renderRow({ item }, { ...ctx, noPick: false }).innerHTML;
+    const said = (html) => ({ radios: (html.match(/type="radio"/g) || []).length, reach: (html.match(/<div class="ut-ak-scope" data-reach="(\w+)">/) || [])[1] || null, word: (html.match(/<span class="ut-ak-scope-word ut-ak-reach-\w+">([^<]*)<\/span>/) || [])[1] || null, always: (html.match(/class="[^"]*ut-hub-always" data-answer="always">([^<]*)</) || [])[1] || null });
+    const rows = AR.REACH_CHOICES.map((k) => { R.pickReach(item.id, k); const s = said(strip()); return { pick: k, ...s, sends: R.reachFor(item), wordOk: s.word === AR.reachWord(k), alwaysOk: !!s.always && s.always.includes(AR.reachWord(k)) }; });
+    ok(rows.every((r) => r.radios === 0 && r.reach === r.pick && r.sends === r.pick && r.wordOk && r.alwaysOk), `RED-able (r12 — 9f8b8d846: the strip said no reach yet sent the pick): for EACH pick the strip draws no radio, SAYS the reach («${rows.map((r) => r.word).join('» / «')}») and its Always names it — and that is the reach its answer sends (reachFor)`, rows);
+    R.pickReach(item.id, 'instance'); R.forgetReachPicks([item]); // the owner's shape: the tray's «The whole VibeSpace», the tray closed, a broadcast with the item still open
+    const own = said(strip());
+    ok(own.reach === 'instance' && R.reachFor(item) === 'instance' && own.word === AR.reachWord('instance') && /ut-ak-scope-word ut-ak-reach-instance/.test(strip()), `the owner's shape: a «The whole VibeSpace» read in the tray and left — the strip says «${own.word}» (red-tinted, ut-ak-reach-instance) and «${own.always}»; never 'instance' from a strip that said «${AR.reachWord('opened')}»`, own);
+    // live: a pick made on ANOTHER copy rewords every strip copy of that item at once (no broadcast between) — and only that item's
+    const mkCopy = (id, k) => { const word = { className: `ut-ak-scope-word ut-ak-reach-${k}`, textContent: AR.reachWord(k) }, al = { textContent: 'x' }, row = { dataset: { id }, querySelector: (q) => (q === '.ut-hub-always' ? al : null) }; return { dataset: { reach: k }, closest: () => row, querySelector: (q) => (q === '.ut-ak-scope-word' ? word : null), word, al }; };
+    const mine = mkCopy(item.id, 'instance'), other = mkCopy('ut-other', 'instance'); live = [mine, other];
+    R.pickReach(item.id, 'groups');
+    ok(mine.dataset.reach === 'groups' && mine.word.textContent === AR.reachWord('groups') && /ut-ak-reach-groups/.test(mine.word.className) && mine.al.textContent.includes(AR.reachWord('groups')) && other.dataset.reach === 'instance' && other.al.textContent === 'x' && R.reachFor(item) === 'groups',
+      `RED-able (r12): a pick made elsewhere rewords the strip BEFORE any press — «${mine.word.textContent}», «${mine.al.textContent}» (another item's strip untouched)`, { mine: { reach: mine.dataset.reach, word: mine.word.textContent, always: mine.al.textContent }, other: other.dataset.reach });
+    live = [];
+    const c = said(card());
+    ok(c.radios === 3 && c.reach === null && c.always === 'Always for this conversation', 'the card (and the tray, the phone) keeps its pick — three radios, its words unchanged; only a copy with no pick says the reach', c);
+    const CC = fs.readFileSync(path.join(ROOT, 'public/chat.css'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+    const shown = (/\.cad-rows \.ut-item > \.ut-body > :not\(([^)]+)\) \{ display: none !important; \}/.exec(CC) || [, ''])[1].split(',').map((x) => x.trim());
+    ok(shown.includes('.ut-ak-scope') && /\.cad-rows \.ut-body > \.ut-ak-scope \{ order: 5;/.test(CC) && /\.chat-attn-dock \.cad-rows \.ut-body > \.ut-ak-scope \{ flex: 1 1 100%; font-size: 16px !important;/.test(ST), 'the strip SHOWS the line (its whitelist), beside the answers; on the phone 16 px on its own line (the 44 px answers one row, the Always wrapping its words)', shown);
+  } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+}
+
+console.log('㉚ THE BLINK\'S REASONS ARE THE WINDOW\'S (lane needs-card-tail r12 — the r11 acceptance\'s judge item) — a TERMINAL window: an ask answered elsewhere never ends its «finished», the CLI working again never ends an unanswered ask\'s flash');
+{
+  // THE REAL terminal.js _setWaiting and THE REAL announce annFlash / annSeen (user-todos-panel.js, sliced, over stubs) on one window
+  const TERM = fs.readFileSync(path.join(ROOT, 'src/lib/terminal.js'), 'utf8'), P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  const m0 = TERM.indexOf('  _setWaiting(on'), m1 = TERM.indexOf('\n  }\n', m0) + 4;
+  const a0 = P.indexOf('  const annSeen = (w, { answered = false } = {}) => {'), a1 = P.indexOf('  const annCard = (it) => {');
+  const mos = [], fire = () => { for (const o of [...mos]) if (o.on) queueMicrotask(o.cb); };
+  class MO { constructor(cb) { this.cb = cb; this.on = false; mos.push(this); } observe() { this.on = true; } disconnect() { this.on = false; } }
+  const cls = new Set(), W = { id: 'w1', type: 'terminal', _notifyChanged() {}, element: { classList: { add: (...c) => { c.forEach((x) => cls.add(x)); fire(); }, remove: (...c) => { c.forEach((x) => cls.delete(x)); fire(); }, toggle: (c, on) => { if (on) cls.add(c); else cls.delete(c); fire(); return cls.has(c); }, contains: (c) => cls.has(c) } } };
+  let term = null, ann = null;
+  try { term = new Function('return ({\n' + TERM.slice(m0, m1) + '});')(); } catch (e) { ok(false, 'terminal.js _setWaiting reads as one method', String(e)); }
+  try { ann = new Function('scope', 'with (scope) { ' + P.slice(a0, a1) + ' return { annSeen, annFlash }; }')(new Proxy({ app: { wm: { windows: new Map([['w1', W]]) } }, keysForWin: () => ['claude:t1'], document: { hasFocus: () => false, hidden: false }, MutationObserver: MO }, { has: (o, k) => k in o })); } catch (e) { ok(false, 'the announce\'s annFlash / annSeen read as one block', String(e)); }
+  if (term && ann) {
+    const tick = () => new Promise((r) => setTimeout(r, 0)), blink = () => cls.has('window-waiting'), why = () => [...(W._waitWhy || [])].sort().join() || '-';
+    const T = { idle: () => term._setWaiting.call({ winInfo: W }, true), busy: () => term._setWaiting.call({ winInfo: W }, false), seen: () => term._setWaiting.call({ winInfo: W }, false, { seen: true }) };
+    const reset = async () => { T.seen(); cls.clear(); W._waitWhy?.clear(); await tick(); ann.annSeen(W); await tick(); };
+    const run = async (steps) => { await reset(); for (const s of steps) { if (s === 'ask') ann.annFlash({ id: 'ut-t1', sessionKey: 'claude:t1' }); else if (s === 'answered') ann.annSeen(W, { answered: true }); else T[s](); await tick(); } return { blink: blink(), why: why() }; };
+    const a = await run(['ask', 'idle', 'answered']), b = await run(['ask', 'idle', 'busy']), c = await run(['ask', 'idle', 'seen']), d1 = await run(['idle']), d = await run(['idle', 'busy']), e = await run(['ask', 'answered']);
+    ok(a.blink && a.why === 'turn', `RED-able (r12 — 9f8b8d846: the terminal recorded no reason, the answer took the blink): an ask, then the terminal's turn finished, then the ask answered elsewhere ⇒ the blink STAYS (reasons ${a.why})`, a);
+    ok(b.blink && b.why === 'ask', `RED-able (r12 — 9f8b8d846: the CLI's next spinner cleared it): an ask, the turn finished, the CLI working again ⇒ the ask's blink stays until it is seen or answered (reasons ${b.why})`, b);
+    ok(!c.blink && c.why === '-' && d1.blink && !d.blink && !e.blink, 'the window SEEN (a press in it, focus) acknowledges every reason; with no ask the terminal\'s own blink is unchanged (idle blinks, working again clears it); an ask alone answered elsewhere ends its blink', { c, d1, d, e });
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

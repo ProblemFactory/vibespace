@@ -9982,6 +9982,8 @@ export default {
   "Only the conversations it opens": "只有它开的会话", // lane key-instance-scope: a grant's reach
   "The conversations of its Task Groups": "这些岗位的会话", // lane key-instance-scope: a grant's reach
   "The whole VibeSpace": "整个 VibeSpace", // lane key-instance-scope: a grant's reach
+  // lane needs-card-tail r12: the attention dock's Always names the reach it carries
+  "Always · {reach}": "一直 · {reach}",
   "This key may act on every conversation here, including yours": "这把 key 可以对这里的每一个会话动手，包括你自己的", // lane key-instance-scope: a grant's reach
   "Rename, end or archive the conversations of: {groups}": "可以改名、结束或归档这些岗位的会话：{groups}", // lane key-instance-scope: a grant's reach
   "Rename, end or archive only the conversations it opens with this key (and itself)": "只能改名、结束或归档它用这把 key 开的会话（以及它自己）", // lane key-instance-scope: a grant's reach

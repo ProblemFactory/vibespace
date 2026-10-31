@@ -165,6 +165,14 @@ console.log('⑤b THE ATTENTION DOCK\'s actions — every chat row stands in the
   ok(c0.hs.length >= 4 && c0.hidden.length === 0, `every container the row draws a verb in is SHOWN by the strip (${c0.hs.join(', ')})`, c0);
   { const planted = ROWSRC + "\nconst plantedHtml = (i, t) => `<div class=\"ut-new-answer\"><button type=\"button\" class=\"ut-act\">x</button></div>`;\n"; const c1 = census(planted, CSS); ok(c1.hidden.length === 1 && c1.hidden[0] === 'ut-new-answer', 'RED: a new answer container the row learns (planted) is named — the strip would hide its verbs', c1.hidden); }
   { const c2 = census(ROWSRC, CSS.replace('.ut-exit-answer, .ut-reconnect-row, .ut-app-card, ', '')); ok(c2.hidden.includes('ut-exit-answer'), 'RED: the strip\'s whitelist without the answer row (Allow / Deny / Approve) names it', c2.hidden); }
+  // r12 (the r11 acceptance — the strip drew no reach pick yet its Allow / Always sent the pick made on another copy): A PRESS POINT
+  // NEVER SENDS A SCOPE IT DOES NOT SHOW — every row whose answer carries a reach (the row module's drawsPick) stands in the strip
+  // (a chat row) and the strip SHOWS the line that says it (scopeHtml's ut-ak-scope)
+  const reachRows = (src) => [...src.matchAll(/const drawsPick = \(i\) => !!\(i && i\.action && i\.action\.type === '([\w-]+)'/g)].map((m) => m[1]);
+  const scopeShown = (src, css) => { const said = (/const scopeHtml = [^\n]*<div class="([\w-]+)"/.exec(src) || [])[1] || null; return { said, shown: !!said && shownOf(css).body.includes(said) }; };
+  const rr = reachRows(ROWSRC), sc = scopeShown(ROWSRC, CSS);
+  ok(rr.length === 1 && rr.every((ty) => FA.ROWS.some((r) => r.type === ty && r.chat)) && sc.shown, `RED-able (r12 — 9f8b8d846: no such line): every row whose answer carries a reach (${rr.join(', ')}) stands in the strip, and the strip SHOWS the line that says the reach (${sc.said})`, { rr, sc });
+  { const c3 = scopeShown(ROWSRC, CSS.replace('.ut-ak-scope, ', '')); ok(!!c3.said && !c3.shown, 'RED: the strip\'s whitelist without the reach line names it — the strip would answer with a reach it hides', c3); }
 }
 
 // ── ⑤c ────────────────────────────────────────────────────────────────────────────────────────────────────────────────

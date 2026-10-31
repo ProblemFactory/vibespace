@@ -663,7 +663,7 @@ export function installUserTodos(app) {
   // defers to any [data-popover]).
   let mini = null; // {pop, winId, keys, layout, rows, dot, name, empty} while open
   const miniCtx = { ...rowCtx, mini: true };
-  const dockCtx = { ...miniCtx, noPick: true }; // lane needs-card-tail r11: the attention dock — the summary + the plain buttons, never a pick (one form per item)
+  const dockCtx = { ...miniCtx, noPick: true }; // lane needs-card-tail r11: the attention dock — the summary + the plain buttons, never a pick (one form per item); r12: it SAYS the pick its answers carry
   /** The item keys a window answers for: the live payload's own sessionKey for
    *  its webui id, the openSpec's key (a view-only window of a stopped
    *  conversation has only that), and `webui:<id>` (an item filed before the CLI
@@ -1112,7 +1112,8 @@ export function installUserTodos(app) {
     if (exitBtn) {
       // lane-pairing ⑥: an exit's "ask me" answered where it appears (Allow / Deny)
       // lane key-instance-scope: an automation card's answer carries the REACH the owner picked (absent = opened) — r11: THE
-      // ITEM'S pick (user-todos-row.js reachFor), never read off this copy: the card, the dock, the tray and the phone send one
+      // ITEM'S pick (user-todos-row.js reachFor), never read off this copy: the card, the dock, the tray and the phone send one;
+      // r12: a copy with no pick (the dock) shows these same words beside its answers — a press point never sends a scope it does not show
       const rec = todos.open.find((i) => i.id === id), reach = reachFor(rec);
       exitBtn.disabled = true;
       Promise.resolve(model.runAction(rec, exitBtn.dataset.answer, reach ? { reach } : {})).finally(() => { exitBtn.disabled = false; });
@@ -1291,8 +1292,9 @@ export function installUserTodos(app) {
   //     tab, a hidden desktop's tab), never a second mechanism — until it is SEEN: the blink's own clear (the window touched or
   //     focused — chat-view _clearWaiting, a tab activated) or the item answered. THE BLINK HAS REASONS (r11 — r10 decided once
   //     whose blink it was, so an answer elsewhere cleared a turn's «finished» that came AFTER): `w._waitWhy` — 'turn' (chat-view's
-  //     turn_complete), 'ask' (this), 'other' (a blink standing before with no reason told); an answer drops 'ask' and the blink
-  //     goes only when no reason is left; seeing the window acknowledges them all;
+  //     turn_complete; r12: a terminal window's idle too — the set is the window's), 'ask' (this), 'other' (a blink standing
+  //     before with no reason told); an answer drops 'ask' and the blink goes only when no reason is left; seeing the window
+  //     acknowledges them all;
   //     `window-announce` beside it fills the window's strip count (the attention dock) while an unseen item stands;
   //  ② a CARD in ONE stack at the For-you button (under the phone's top bar there) — a transient, non-blocking toast, NOT a
   //     popover (r11: r10's createPopover made it a [data-popover] — it took the first Esc, the phone's back press and the
@@ -1375,7 +1377,7 @@ export function installUserTodos(app) {
       if (w.element.classList.contains('window-active') && document.hasFocus() && !document.hidden) continue; // in front of the owner: seen
       if (!w._annIds) {
         w._annIds = new Set();
-        const why = w._waitWhy || (w._waitWhy = new Set()); // THE BLINK'S REASONS (r11; chat-view's turn_complete adds 'turn')
+        const why = w._waitWhy || (w._waitWhy = new Set()); // THE BLINK'S REASONS (r11; chat-view's turn_complete and terminal.js _setWaiting add 'turn')
         if (!w.element.classList.contains('window-waiting')) why.clear(); // a reason outlives no blink (a tab switch cleared it)
         else if (!why.size) why.add('other'); // a blink standing with no reason told (another writer's) — never ended by an answer
         // SEEN = the waiting blink's own clear (the window touched or focused, a tab activated) — read off the element itself
