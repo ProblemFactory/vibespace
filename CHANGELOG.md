@@ -19,6 +19,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Deliver on held messages now counts only what it sent; anything it could not send stays on the card, to deliver again or discard.
 - A restart in the middle of Deliver on held messages now reopens the same card with what was not sent, instead of a second card beside it.
 - A stopped job now counts as cut short only a process killed without its time to stop, not one that got the stop signal while time was left.
+- After Claude Code updated to 2.1.314, the accounts you sign in with a long-lived token are back in the pool.
 
 ### Removed
 - Background jobs no longer read secrets from a plain file (nothing used it) — a job's secret comes from the vault.
