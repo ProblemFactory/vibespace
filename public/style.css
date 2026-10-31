@@ -8922,6 +8922,8 @@ button.vw-chip { cursor: pointer; }
 .vw-use-expired { opacity: 0.6; text-decoration: line-through; }
 .vw-use-legacy { border-color: var(--warn-text); }   /* r3 (MAJOR 1): a carried wildcard open to any program — marked, its words say it */
 .vw-use-legacy .vw-use-words { color: var(--warn-text); }
+.vw-use-scope { overflow-wrap: anywhere; }   /* lane vault-standing-request r4: ONE scope and its own end («a.example · 30 d»); a long one wraps inside a phone's chip */
+.vw-use-scope-ended { opacity: 0.6; text-decoration: line-through; }   /* r4: a scope past its end (its member's other scopes may live on) */
 .vw-use-except { color: var(--text-dim); }
 .vw-use-paused { opacity: 0.5; }
 .vw-use-paused-note { color: var(--text-dim); font-size: max(0.85em, 12px); margin-top: 2px; }   /* round 3 (MINOR): never shrink the note below a readable floor on a narrow phone */

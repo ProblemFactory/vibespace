@@ -143,6 +143,8 @@ const WORDS = Object.freeze({
   ask_expired: 'the user did not answer within 60 s — nothing ran; tell them in the chat, then run it again',
   ask_unfiled: 'the question could not be put in front of the user (For you refused it) — nothing ran; resolve your open For-you items first',
   ask_changed: 'the request changed after it was shown — nothing ran; run it again',
+  ask_redrawn: 'what the card writes changed after it was shown — nothing was written; it is drawn again with the new words for the user to answer',   // lane vault-standing-request r4 (B)
+  restore_failed: 'the write failed partway and what it had written could not be put back on every entry — nothing ran; the user should check «Who may use it…» on the entry',   // r4 (C)
   caller_gone: 'the call went away while it waited — nothing ran',
   too_many_runs: 'too many runs at once — wait for one to end',
   spawn_failed: 'the program could not be started',

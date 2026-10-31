@@ -123,10 +123,12 @@ scope — is then quiet for 10 minutes: `request_quiet`; ask once after it, with
 entry's own row: it has no end and a lock does not end it (a locked vault runs nothing; once unlocked, your runs go on with
 no card); they see it on the row — «agent 申请 · 11:46» — and ✕ takes it back. The same scope is asked once while open
 (`request_pending`); one you already hold answers that you hold it (`already: 'timed'` + its end when what you hold is
-time-limited). A grant never widens another: a standing grant REPLACES a time-limited (or ended) grant you hold on that
-entry, and a card's «Always» (30 days) replaces a grant with another end — each holds only what was asked for then, and the
-user's card says what it replaces (two grants with no end add up). `list` and `uses` show it «standing · <scope> · since
-<when>». A run outside the scope (another host, another script, another program) still shows its card — and that card's
+time-limited). Each host and each command you hold carries ITS OWN end: a standing grant or a card's «Always» (30 days)
+adds the host or command it names and never touches the others; it replaces only the SAME host or command when you hold it
+with another end (or its grant ended) — and the user's card says so. If what a card would write changed after the user saw
+it, their answer writes nothing: the card is drawn again with the new words (`ask_redrawn`) and they answer again. `list`
+and `uses` show it «standing · <scope> · since <when>», each host and command with its own end («hosts a.example (until …),
+b.example»). A run outside the scope (another host, another script, another program) still shows its card — and that card's
 **«Always (this command)»** (offered where VibeSpace cannot read the destination) writes the same kind of grant from the
 user's side.
 

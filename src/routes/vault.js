@@ -37,6 +37,7 @@ const STATUS = Object.freeze({
   bad_args: 400, not_granted: 403, not_running: 409, failed: 500,
   // lane vault-run-door: the switch and the run card's answer (people's doors)
   entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
+  ask_redrawn: 409, restore_failed: 500,   // lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
   always_not_offered: 400, conversation_gone: 410,
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
@@ -85,6 +86,8 @@ const WORDS = Object.freeze({
   entry_unknown: 'that stored value is not there any more',
   ask_settled: 'already answered', ask_unknown: 'that request is gone', ask_expired: 'too late — it was refused after 60 s',
   ask_changed: 'the request changed after it was shown — nothing ran', bad_answer: 'the answer is once, always or deny (always: 8h, 30d or forever)',
+  ask_redrawn: 'what this card writes changed since it was shown — nothing was written; it is drawn again with the new words: read it and answer again',   // lane vault-standing-request r4 (B)
+  restore_failed: 'the write failed partway and what it had written could not be put back on every entry — check «Who may use it…» on its row',   // r4 (C)
   always_not_offered: '«always» is not offered for this command', conversation_gone: 'the conversation that asked has ended — nothing to run it for',
   failed: 'the vault door failed — nothing changed',
   bad_scope: 'this session has no conversation to own a vault entry',

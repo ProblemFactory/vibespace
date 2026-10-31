@@ -775,9 +775,11 @@ function runCardOf(item, { t = fmt } = {}) {
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
   const cmdA = a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
-  const rp = cmdA && cmdA.replaces && typeof cmdA.replaces === 'object' && Number(cmdA.replaces.until) > 0 ? cmdA.replaces : null;   // r2 (JUDGE 4): «Always (this command)» beside a TIMED grant makes it permanent — said beside the button
-  const rpA = !cmdA && a.offered === true && a.replaces && typeof a.replaces === 'object' && str(a.replaces.scope) ? a.replaces : null;   // r3b: the hosts «Always» REPLACES this conversation's grant (or, timed, one with no end) — said beside it
-  const hint = rpA ? [{ text: Number(rpA.until) > 0 ? t(rpA.expired === true ? REPLACES_ENDED_WORDS : REPLACES_WORDS, { scope: str(rpA.scope), when: clockWords(rpA.until) }) : t(REPLACES_STANDING_WORDS, { scope: str(rpA.scope), days: Number(rpA.days) > 0 ? Number(rpA.days) : 30 }) }] : cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...(rp ? [{ text: ` ${t(rp.expired === true ? REPLACES_ENDED_WORDS : REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) })}` }] : [])] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
+  // lane vault-standing-request r4 (B): the scopes of its OWN this «Always» REPLACES, on every entry (vault-run-door changeFactsOf) — said
+  // beside the button; none ⇒ it only adds (no line)
+  const chs = (x) => (x && Array.isArray(x.changes) ? x.changes.filter((c) => c && typeof c === 'object' && str(c.scope)) : []);
+  const chA = !cmdA && a.offered === true ? chs(a) : [], chC = cmdA ? chs(cmdA) : [];
+  const hint = chA.length ? [{ text: chA.map((c) => changeWords(c, t)).join(' ') }] : cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...chC.map((c) => ({ text: ` ${changeWords(c, t)}` }))] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
@@ -839,9 +841,21 @@ function runCardOf(item, { t = fmt } = {}) {
  *  box (it asks for a grant; nothing runs). null = no facts this client reads (a plain request, an older record): the prose. */
 const STANDING_LABEL = Object.freeze({ secret: i18nKey('Secret'), purpose: i18nKey('Purpose'), hosts: i18nKey('Hosts'), command: i18nKey('Command'), program: i18nKey('Runs'), until: i18nKey('Until'), switch: i18nKey('Also') });
 const STANDING_COMMAND_WORDS = i18nKey('VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.');
-const REPLACES_WORDS = i18nKey('This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names.');   // = vault-run-door REPLACES_LINE (r3: a standing write REPLACES — it never widens)
-const REPLACES_STANDING_WORDS = i18nKey('«Always» replaces the grant with no end this conversation holds on it ({scope}): that grant ends, and the new one holds only this run\'s hosts, for {days} days.');   // = vault-run-door REPLACES_STANDING_LINE (r3b)
-const REPLACES_ENDED_WORDS = i18nKey('This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.');   // = vault-run-door REPLACES_ENDED_LINE (r3, MAJOR 2: an expired grant is never revived)
+// lane vault-standing-request r4 (THE ROOT MODEL): a write touches only the scopes it names — the card says each scope of its OWN it
+// replaces (= vault-run-door REPLACES_LINE / REPLACES_NOEND_LINE / REPLACES_ENDED_LINE / ON_ENTRY_LINE / END_*)
+const REPLACES_WORDS = i18nKey('This conversation holds {scope} until {when} — this replaces that grant: {scope} is then held {end}.');
+const REPLACES_NOEND_WORDS = i18nKey('This conversation holds {scope} with no end — this replaces that grant: {scope} is then held {end}.');
+const REPLACES_ENDED_WORDS = i18nKey('This conversation\'s grant for {scope} ended {when} — it stays ended; this grants {scope} anew, {end}.');
+const ON_ENTRY_WORDS = i18nKey('On «{entry}»: {line}');
+const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
+/** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */
+function changeWords(c, t = fmt) {
+  const s = (x) => (typeof x === 'string' ? x : '');
+  const e = c.end && typeof c.end === 'object' ? c.end : {};
+  const end = e.none === true ? t(END_NONE_WORDS) : Number(e.hours) > 0 ? t(END_HOURS_WORDS, { n: Number(e.hours) }) : t(END_DAYS_WORDS, { n: Number(e.days) > 0 ? Number(e.days) : 30 });
+  const line = c.expired === true ? t(REPLACES_ENDED_WORDS, { scope: s(c.scope), when: clockWords(c.until), end }) : Number(c.until) > 0 ? t(REPLACES_WORDS, { scope: s(c.scope), when: clockWords(c.until), end }) : t(REPLACES_NOEND_WORDS, { scope: s(c.scope), end });
+  return s(c.entry) ? t(ON_ENTRY_WORDS, { entry: s(c.entry), line }) : line;
+}
 const STANDING_SWITCH_WORDS = i18nKey('Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');   // = vault-run-door STANDING_SWITCH_LINE
 const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.');
 function standingCardOf(item, { t = fmt } = {}) {
@@ -852,13 +866,13 @@ function standingCardOf(item, { t = fmt } = {}) {
   const hosts = (Array.isArray(f.hosts) ? f.hosts : []).filter((h) => h && typeof h === 'object' && str(h.host));
   const c = f.command && typeof f.command === 'object' && str(f.command.program) ? f.command : null;
   const pre = c && Array.isArray(c.pre) ? c.pre.filter((w) => typeof w === 'string' && w) : [];
-  const rp = f.replaces && typeof f.replaces === 'object' && Number(f.replaces.until) > 0 ? f.replaces : null;
+  const chs = (Array.isArray(f.changes) ? f.changes : []).filter((x) => x && typeof x === 'object' && str(x.scope));   // r4 (B): the scopes of its own this Allow replaces
   const rows = [
     { key: 'secret', lines: [[{ text: secret }]] },
     ...(str(f.purpose) ? [{ key: 'purpose', lines: [[{ text: str(f.purpose) }]] }] : []),
     ...(hosts.length ? [{ key: 'hosts', lines: hosts.map((h) => [{ mono: str(h.host) }, ...(str(h.tool) ? [{ text: ' ' }, { aside: t('(via {tool})', { tool: str(h.tool) }) }] : [])]) }] : []),
     ...(c ? [{ key: 'command', lines: [[{ mono: str(c.words) }], [{ text: t(STANDING_COMMAND_WORDS) }]] }, { key: 'program', lines: [[{ mono: str(c.program) }]] }] : []),
-    { key: 'until', lines: [[{ text: t('until you revoke it') }], ...(rp ? [[{ text: t(rp.expired === true ? REPLACES_ENDED_WORDS : REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) }) }]] : [])], warn: !!rp },
+    { key: 'until', lines: [[{ text: t('until you revoke it') }], ...chs.map((c) => [{ text: changeWords(c, t) }])], warn: chs.length > 0 },
     ...(f.switchOn === true ? [{ key: 'switch', lines: [[{ text: t(STANDING_SWITCH_WORDS) }]], warn: true }] : []),
   ].map((r) => ({ key: r.key, label: t(STANDING_LABEL[r.key]), lines: r.lines, warn: !!r.warn }));
   const fold = [

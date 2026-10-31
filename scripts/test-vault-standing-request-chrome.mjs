@@ -17,7 +17,9 @@
 //      the member (chip + ✕, no «谁可以用…»); ✕ takes it back
 //   ⑦ (r3, MAJOR 1) A LEGACY WILDCARD: the 2.369.363/.364 carry's members (a wildcard host, NO tool — written into the hub's data/
 //      under its own vault mark while it is stopped) ⇒ after the restart's unlock the aws one names its tool «（经由 aws）», the one
-//      no tool row names is marked «（旧版通配：任何工具）» on its chip, and ONE For-you notice tells the owner (desktop + phone)
+//      no tool row names is marked «（旧版通配：任何工具）» on its chip, and ONE For-you notice tells the owner (desktop + phone);
+//      r4 (THE ROOT MODEL): EACH scope says its own end on the chip — «a.example · 30 天», «b.example · 无限期», the legacy
+//      wildcard «… · 20 天» — and at 390 px every chip stays inside the screen
 //   r2 (主开发's visual read): the standing card = label rows (密钥 = the NAME, 用途, 命令 / 主机, 运行, 期限 …) + ONE 技术细节 fold —
 //      the vault:// reference only there, as code, never a link (desktop and phone)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
@@ -176,7 +178,7 @@ try {
   console.log('③ THE VAULT ROW — the chip says the command and who asked; 「谁可以用…」 explains 主机 and «让 agent 自己申请»');
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); if (!c) return null; c.scrollIntoView({ block: 'center' }); return c.textContent; })()`, { timeout: 15000 });
-  check(`the chip: «Transcriber · 命令 ${PYN} transcribe.py · 已用 2 次 · agent 申请 · HH:MM ✕» (the real program; the source and its time last)`, new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 已用 2 次 · agent 申请 · \\d\\d:\\d\\d✕$`).test(String(chip)), chip);
+  check(`the chip: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 2 次 · agent 申请 · HH:MM ✕» (the real program and ITS OWN end — r4; the source and its time last)`, new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期 · 已用 2 次 · agent 申请 · \\d\\d:\\d\\d✕$`).test(String(chip)), chip);
   await sleep(300);
   await A.shot('vsr-2-vault-row-desktop.png');
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (b) b.click(); return !!b; })()`);
@@ -205,7 +207,7 @@ try {
   const rb = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'upload.py'], TOKEN, { timeout: 70000 });
   check('that run went, and the next one of it runs with no card', ra.code === 0 && rb.code === 0 && /uploaded key set/.test(rb.out) && (await openOf('vault-run-ask')).length === 0, { ra: ra.out.slice(0, 200), rb: rb.out.slice(0, 200) });
   const chip2 = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /upload\\.py/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the chip now names both commands and the latest source «卡片上的总是»', new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py, ${reEsc(PYN)} upload\\.py · 已用 \\d+ 次 · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(String(chip2)), chip2);
+  check('the chip now names both commands, EACH with its own end (r4), and the latest source «卡片上的总是»', new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期, 命令 ${reEsc(PYN)} upload\\.py · 无限期 · 已用 \\d+ 次 · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(String(chip2)), chip2);
 
   console.log('⑤ THE PHONE (390 px) — a standing card and the Vault row');
   await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -247,7 +249,7 @@ try {
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const OWN_ROW = `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && String(r.dataset.id || '').startsWith('secrets:agent:') && String(r.dataset.id).includes('/tts-own#'))`;
   const own = await A.until(`(() => { const r = ${OWN_ROW}; const c = r && r.querySelector('.vw-use-chip'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const g = r.querySelector('.vw-use-grant'); return { chip: c.textContent, x: !!c.querySelector('.vw-use-x'), add: !!(g && !g.hidden && g.getBoundingClientRect().width > 0) }; })()`, { timeout: 15000 });
-  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and no «谁可以用…» (only its conversation may use it)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && !own.add, own);
+  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 无限期 · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and no «谁可以用…» (only its conversation may use it)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 无限期(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && !own.add, own);
   await sleep(300);
   await A.shot('vsr-7-own-entry-row-desktop.png');
   await A.evalJs(`(() => { const r = ${OWN_ROW}; const x = r && r.querySelector('.vw-use-chip .vw-use-x'); if (x) x.click(); return !!x; })()`);
@@ -269,9 +271,15 @@ try {
     const lname = 'secret:' + crypto.randomBytes(5).toString('hex');
     hv.secretPut(lname, ['cloud', 'key', crypto.randomBytes(6).toString('hex')].join('-'), { prov: 'owner', label: 'Cloud deploy key', kind: 'api-key', hosts: [] });
     const lid = `secrets:${lname}#secret`;
-    const mac = (key, name, hosts) => hv.macOf('vault-use', JSON.stringify([lid, `conversation:${key}`, hosts.slice().sort(), null, null, name, [], 0]));
-    const w = GS.create({ dataDir }).set('vault-use', lid, { to: [{ kind: 'conversation', key: 'cid-older-1', name: 'Deployer', hosts: ['*.amazonaws.com'], mac: mac('cid-older-1', 'Deployer', ['*.amazonaws.com']) }, { kind: 'conversation', key: 'cid-older-2', name: 'Publisher', hosts: ['*.legacy.example'], mac: mac('cid-older-2', 'Publisher', ['*.legacy.example']) }], except: [] }, 'migration');
-    check('(the setup) two members as the 2.369.363/.364 carry stored them — a wildcard host, no tool', !!(w && w.ok), w);
+    const U = require(path.join(wt, 'src/vault-use-grant.js'));
+    const marked = (e) => ({ ...e, mac: hv.macOf('vault-use', U.canonOf(lid, e, [], 0)) });   // the writer's canon (a one-end member's is the 2.369.363/.364 bytes verbatim)
+    const T = Date.now();
+    const w = GS.create({ dataDir }).set('vault-use', lid, { to: [
+      marked({ kind: 'conversation', key: 'cid-older-1', name: 'Deployer', hosts: ['*.amazonaws.com'] }),
+      marked({ kind: 'conversation', key: 'cid-older-2', name: 'Publisher', hosts: ['*.legacy.example'], until: T + 20 * 86400e3 }),   // r4: a carried legacy wildcard with an end — 20 days
+      marked({ kind: 'conversation', key: 'cid-older-3', name: 'Mixer', scopes: [{ host: 'a.example', until: T + 30 * 86400e3, source: 'card', at: T }, { host: 'b.example', source: 'owner', at: T }] }),   // r4: two hosts, EACH its own end
+    ], except: [] }, 'migration');
+    check('(the setup) two members as the 2.369.363/.364 carry stored them — a wildcard host, no tool (one with 20 days) — and r4: a member whose two hosts carry their OWN ends (a.example 30 days, b.example none)', !!(w && w.ok), w);
     globalThis.__LID = lid;
     hv.lock('test');
   }
@@ -286,10 +294,12 @@ try {
   const on = await A.api('POST', '/api/vault/runnable', { id: globalThis.__LID, on: true }, { 'X-Vault-Page': page4 || '' });
   check('unlocked; the entry switched on (its chips are live, not paused)', ul.status === 200 && on.status === 200 && on.json.ok, { ul: ul.json, on: on.json });
   const LEG_ROW = LIST_ROW('Cloud deploy key');
-  const legacyRow = async () => { await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return A.until(`(() => { const r = ${LEG_ROW}; const cs = r ? [...r.querySelectorAll('.vw-use-chip')] : []; if (cs.length < 2) return null; r.scrollIntoView({ block: 'center' }); return cs.map((c) => ({ text: c.textContent, legacy: c.classList.contains('vw-use-legacy'), title: c.title, x: !!c.querySelector('.vw-use-x') })); })()`, { timeout: 15000 }); };
+  const legacyRow = async () => { await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return A.until(`(() => { const r = ${LEG_ROW}; const cs = r ? [...r.querySelectorAll('.vw-use-chip')] : []; if (cs.length < 3) return null; r.scrollIntoView({ block: 'center' }); const vw = document.documentElement.clientWidth; return cs.map((c) => ({ text: c.textContent, legacy: c.classList.contains('vw-use-legacy'), title: c.title, x: !!c.querySelector('.vw-use-x'), scopes: [...c.querySelectorAll('.vw-use-scope')].map((s) => s.textContent), right: c.getBoundingClientRect().right, vw })); })()`, { timeout: 15000 }); };
   const chips = await legacyRow();
   const aws = chips && chips.find((c) => /^Deployer/.test(c.text)), old = chips && chips.find((c) => /^Publisher/.test(c.text));
   check('the aws member now names its tool «（经由 aws）» (the unlock\'s wildcard carry); the one no tool row names says «（旧版通配：任何工具）» on a marked chip, its title says how to set the tool, its ✕ is there', !!(aws && /（经由 aws）/.test(aws.text) && !aws.legacy && old && /\*\.legacy\.example 下的每个主机（旧版通配：任何工具）/.test(old.text) && old.legacy && /ANY program|任何程序/.test(old.title) && old.x), chips);
+  const mix = chips && chips.find((c) => /^Mixer/.test(c.text));
+  check('r4: EACH scope says its own end on the chip — «a.example · 30 天», «b.example · 无限期»; the legacy wildcard «…（旧版通配：任何工具） · 20 天»', !!(mix && mix.scopes.length === 2 && /^a\.example · (29|30) 天$/.test(mix.scopes[0]) && mix.scopes[1] === 'b.example · 无限期' && old && old.scopes.length === 1 && /（旧版通配：任何工具） · (19|20) 天$/.test(old.scopes[0])), { mix, old });
   const notes = ((await todo()).open || []).filter((i) => /An older «Always» lets any program reach a wildcard host/.test(i.text));
   check('ONE For-you notice tells the owner — it names *.legacy.example and the entry', notes.length === 1 && /\*\.legacy\.example \(Cloud deploy key\)/.test(notes[0].detail), notes.map((i) => i.detail));
   await sleep(300);
@@ -300,7 +310,7 @@ try {
   await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
   if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
   const pchips = await legacyRow();
-  check('the phone (390 px) draws the same marked chip', !!(pchips && pchips.some((c) => c.legacy && /旧版通配/.test(c.text))), pchips);
+  check('the phone (390 px) draws the same marked chip — and r4: every chip with its per-scope ends stays inside the screen', !!(pchips && pchips.some((c) => c.legacy && /旧版通配/.test(c.text)) && pchips.some((c) => /^Mixer/.test(c.text) && c.scopes.length === 2) && pchips.every((c) => c.right <= c.vw + 1)), pchips);
   await sleep(300);
   await A.shot('vsr-9-legacy-chip-phone.png');
   await A.cdp('Emulation.clearDeviceMetricsOverride', {});

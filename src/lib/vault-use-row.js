@@ -31,13 +31,17 @@ const oneHostWord = (h, entryHosts, tool = null, legacy = false) => {
   if (String(h).startsWith('*.')) { const base = String(h).slice(2); const w = MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); return tool ? t('{hostword} (via {tool})', { hostword: w, tool }) : legacy ? t('{hostword} (legacy wildcard: any tool)', { hostword: w }) : w; }   // round 4 (item 3): a wildcard carries the ONE CLI that minted it — shown per host; r3 (MAJOR 1): a carried one with no tool says so
   return h;
 };
-const hostsWord = (hosts, entryHosts, toolFor = null, legacy = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h], Array.isArray(legacy) && legacy.includes(h))).join(', ');
 // lane vault-standing-request: a member's COMMAND SHAPES («the command python3 transcribe.py») and who wrote it, when
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const preOf = (c) => (c && Array.isArray(c.pre) ? c.pre.filter((w) => typeof w === 'string' && w) : []);   // r2: the options / subcommand it pins before the script
 const commandWord = (c) => (c && c.program ? [baseOf(c.program), ...preOf(c), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
 const commandTitle = (c) => [c.program, ...preOf(c), c.arg].filter((x) => x != null && x !== '').join(' ');
 const clockOf = (ms) => { try { return new Date(ms).toTimeString().slice(0, 5); } catch { return ''; } };
+// lane vault-standing-request r4 (THE ROOT MODEL): each scope says ITS OWN end — «a.example · 30 d», «b.example · no end»,
+// «… (legacy wildcard: any tool) · 20 d», «… · expired» — a grant no longer has one end
+const leftWord = (s) => { if (s.expired) return t('expired'); if (!(Number(s.until) > 0)) return t('no end'); const ms = Number(s.until) - Date.now(); return ms >= 86400e3 ? t('{n} d', { n: Math.round(ms / 86400e3) }) : ms >= 3600e3 ? t('{n} h', { n: Math.round(ms / 3600e3) }) : t('{n} min', { n: Math.max(1, Math.ceil(ms / 60e3)) }); };
+const scopesOfM = (m) => (Array.isArray(m.scopes) && m.scopes.length ? m.scopes : [...(m.hosts || []).map((h) => ({ kind: 'host', host: h, until: m.until, expired: m.expired, tool: m.toolFor && m.toolFor[h], legacy: Array.isArray(m.legacy) && m.legacy.includes(h) })), ...(m.commands || []).map((c) => ({ kind: 'command', command: c, until: m.until, expired: m.expired }))]);   // an older hub's row: each scope with the member's end
+const scopeWord = (s, entryHosts) => (s.kind === 'command' ? t('the command {command}', { command: commandWord(s.command) }) : oneHostWord(s.host, entryHosts, s.tool, !!s.legacy));
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? t('«Always» on a card') : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };
 
 /** A member's name: its stored name, the live roster's, else its id (never markup — textContent only). */
@@ -81,13 +85,16 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
         const cmds = Array.isArray(m.commands) ? m.commands : [];
-        const bits = [nameOf(m, app), ...((m.hosts || []).length ? [hostsWord(m.hosts, u.entryHosts, m.toolFor, legacyW)] : []), ...(cmds.length ? [t('the command {command}', { command: cmds.map(commandWord).join(', ') })] : [])];
+        const sc = scopesOfM(m);
+        const words = el('span', 'vw-use-words');
+        words.append(document.createTextNode(`${nameOf(m, app)} · `));
+        sc.forEach((s, k) => { if (k) words.append(document.createTextNode(', ')); const w = el('span', `vw-use-scope${s.expired ? ' vw-use-scope-ended' : ''}`, `${scopeWord(s, u.entryHosts)} · ${leftWord(s)}`); w.title = s.expired ? t('ended {when}', { when: dateOf(s.until) }) : Number(s.until) > 0 ? t('until {when}', { when: dateOf(s.until) }) : t('no end'); words.append(w); });   // r4: EACH scope with its own end
+        const bits = [];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
-        if (m.expired) bits.push(t('expired'));
-        else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
         if (pausedM) bits.push(t('paused by you'));
         if (sourceWord(m)) bits.push(sourceWord(m));   // lane vault-standing-request: who wrote it and when — last, its time beside it
-        chip.append(el('span', 'vw-use-words', bits.join(' · ')));
+        if (bits.length) words.append(document.createTextNode(` · ${bits.join(' · ')}`));
+        chip.append(words);
         chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}${legacyW.length ? '\n' + t('Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.') : ''}`;   // lane vault-standing-request: the whole program + script paths
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
           const rs = el('button', 'vw-ak-x vw-use-resume', '↻');
@@ -206,14 +213,19 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
       if (!h.length && !cmds.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
-      const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), ...(h.length ? { hosts: h } : {}), ...(cmds.length ? { commands: cmds.map((c) => ({ program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null })) } : {}), ...(was && was.source ? { source: was.source, ...(Number(was.at) > 0 ? { at: was.at } : {}) } : {}) };
-      // lane vault-use-grants round 5 (MAJOR item 4): carry the per-host tool scope back — a wildcard host (`*.amazonaws.com`)
-      // keeps the CLI that minted it, so a whole-row Save never silently re-scopes it to every tool. The store refuses a
-      // wildcard host with no tool by name (`tool_required`).
-      if (was && was.toolFor && typeof was.toolFor === 'object' && Object.keys(was.toolFor).length) m.toolFor = was.toolFor;
-      if (endId === 'keep') { if (was && was.until) m.until = was.until; }
-      else if (endMs) m.until = Date.now() + endMs;
-      to.push(m);
+      // lane vault-standing-request r4 (THE ROOT MODEL): the Save writes SCOPES, each with its own end — «As each has it now»
+      // keeps every scope's own end (a host typed new takes the member's EARLIEST live end, none only when every live scope has
+      // none); another choice gives every scope of the member that end. lane vault-use-grants round 5 (MAJOR item 4): each
+      // wildcard host keeps the CLI that minted it (the store refuses a wildcard with no tool by name — `tool_required`).
+      const wasSc = was ? scopesOfM(was) : [];
+      const cmdKey = (c) => JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null]);
+      const liveEnds = wasSc.filter((s) => !s.expired), keepNew = liveEnds.length && liveEnds.every((s) => Number(s.until) > 0) ? Math.min(...liveEnds.map((s) => Number(s.until))) : null;
+      const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? Date.now() + endMs : null);
+      const scopes = [
+        ...h.map((host) => { const s0 = wasSc.find((s) => s.kind === 'host' && s.host === host); const until = endFor(s0); const tool = (s0 && s0.tool) || (was && was.toolFor && was.toolFor[host]) || null; return { host, ...(until ? { until } : {}), ...(tool ? { tool } : {}) }; }),
+        ...cmds.map((c) => { const s0 = wasSc.find((s) => s.kind === 'command' && cmdKey(s.command) === cmdKey(c)); const until = endFor(s0); return { command: { program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null }, ...(until ? { until } : {}) }; }),   // lane vault-standing-request: a member's command shapes ride the Save unchanged
+      ];
+      to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes });
     }
     const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except }, revealLeftMs() ? revealHeaders() : {});
     let r = await send();

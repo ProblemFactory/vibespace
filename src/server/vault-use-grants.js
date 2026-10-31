@@ -9,9 +9,12 @@
  *     WIDENS (a new member, a new host, a later end, an exception taken away) needs the page's 验证是你 window — `reauthed`
  *     (the second password again, as «Usable by agent runs» and a request's grant do: a click alone is a header a local
  *     process can forge on a hub with no sign-in) — `reveal_needs_password`; a pure narrowing is a click;
- *   · `addMember(id, principal, {hosts, until})` — ONE member added or WIDENED (hosts ∪, the later end): the run card's
- *     «Always» (the press already passed 验证是你), the request box's default (the conversation that asked × the hosts it
- *     named — the owner typed the value for it), the carry of the old «always» rows;
+ *   · `addMember(id, principal, {hosts, until})` — ONE member's SCOPES written (lane vault-standing-request r4, THE ROOT
+ *     MODEL: each host / command a scope with ITS OWN end — a scope it names is ADDED, or REPLACED when it is there with
+ *     another end or has ended; no other scope is touched; `changes` says which): the run card's «Always» (the press already
+ *     passed 验证是你), an agent's standing request the owner allowed, the carry of the old «always» rows;
+ *   · `snapshotRow(id)` / `restoreRow(id, snap)` (r4, C) — the run door's ALL-OR-NOTHING: the row as it was (verified),
+ *     written back RAW (no row rules — it restores what WAS, lawful when written; re-marked at a new generation);
  *   · `revoke(id, principalKey)` — ONE member out (the chip's ✕, a click); `drop(id)` — the entry deleted: its row goes.
  *   · `verdictFor(id, facts, run)` — the run door's question before it draws a card (src/server/vault-run-door.js);
  *   · `publicFor(id, counts)` — the row as the window draws it: each member's id, hosts, end, «used N× by M conversations».
@@ -54,15 +57,16 @@ function widens(was, next) {
   for (const e of next.to || []) {
     const o = byKey.get(GM.principalKey(e));
     if (!o) return true;
-    if ((e.hosts || []).some((h) => !(o.hosts || []).includes(h))) return true;
-    const oc = new Set((o.commands || []).map((c) => GM.commandKeyOf(c)));   // lane vault-standing-request: a command it could not run before widens too
-    if ((e.commands || []).some((c) => !oc.has(GM.commandKeyOf(c)))) return true;
-    const oe = Number(o.until) > 0 ? Number(o.until) : null, ne = Number(e.until) > 0 ? Number(e.until) : null;
-    if (oe != null && (ne == null || ne > oe)) return true;
-    // lane vault-use-grants round 5 (MAJOR item 4): a wildcard's minting TOOL dropped or changed widens who may use it (one
-    // CLI's `*.amazonaws.com` becoming every CLI's) ⇒ 验证是你. (A wildcard with NO tool at all is refused by name in setRow.)
-    const ot = o.toolFor && typeof o.toolFor === 'object' ? o.toolFor : {}, nt = e.toolFor && typeof e.toolFor === 'object' ? e.toolFor : {};
-    for (const h of e.hosts || []) if (String(h).startsWith('*.') && ot[h] && (!nt[h] || nt[h] !== ot[h])) return true;
+    // r4: PER SCOPE — a host or a command it did not hold, or a later (or no) end on one it held, widens
+    const os = new Map(U.scopesOf(o).map((s) => [`${s.kind}\n${s.key}`, s]));
+    for (const s of U.scopesOf(e)) {
+      const p = os.get(`${s.kind}\n${s.key}`);
+      if (!p) return true;
+      if (p.until != null && (s.until == null || s.until > p.until)) return true;
+      // lane vault-use-grants round 5 (MAJOR item 4): a wildcard's minting TOOL dropped or changed widens who may use it (one
+      // CLI's `*.amazonaws.com` becoming every CLI's) ⇒ 验证是你. (A wildcard with NO tool at all is refused by name in setRow.)
+      if (s.kind === 'host' && String(s.host).startsWith('*.') && p.tool && s.tool !== p.tool) return true;
+    }
   }
   const nx = new Set((next.except || []).map(GM.principalKey));
   return (w.except || []).some((x) => !nx.has(GM.principalKey(x)));
@@ -113,14 +117,15 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
 
   // lane vault-standing-request: a member's COMMANDS and its SOURCE (+ its `at`) are under the mac too — appended ONLY when the
   // member has them, so every member written before keeps the very canon (and mac) it was stamped with.
-  const canonExtra = (e) => { const cs = Array.isArray(e.commands) ? e.commands.map((c) => GM.commandKeyOf(c)).sort() : []; return cs.length || e.source ? [{ c: cs, s: e.source || null, a: e.source && Number(e.at) > 0 ? Math.floor(Number(e.at)) : null }] : []; };
-  const canonMember = (id, e, xc, gen) => JSON.stringify([String(id), GM.principalKey(GM.bareOf(e)) || '', (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, Number(e.until) > 0 ? Math.floor(Number(e.until)) : null, typeof e.name === 'string' ? e.name : null, Array.isArray(xc) ? xc : [], Number(gen) || 0, ...canonExtra(e)]);
+  // r4: THE CANON is PURE now (U.canonOf — over what a member MEANS: a one-end member and the scoped member it reshapes to are
+  // the same bytes, so the per-scope migration keeps every mark; scopes with their own ends use the per-scope canon).
+  const canonMember = (id, e, xc, gen) => U.canonOf(id, e, xc, gen);
   const macFor = (id, e, xc, gen) => { try { return vault && typeof vault.macOf === 'function' ? vault.macOf('vault-use', canonMember(id, e, xc, gen)) : null; } catch { return null; } };
   // re-stamp every member over the WHOLE row (except + gen changed); a locked vault yields no mac (but a locked write is
   // refused before this). round 5 (MINOR, item 6): the mac is computed over the member AS THE STORE WILL KEEP IT — each is run
   // through the store's ONE normaliser (GM.normEntry: cleanName on the name, normalised hosts/toolFor) FIRST, so a trailing
   // space or a control character in a conversation's name never leaves the stored (cleaned) member failing its own mac.
-  const stamp = (id, to, except, gen) => { const xc = exceptCanon(except); return (Array.isArray(to) ? to : []).map((e0) => { const { mac, ...bare } = e0; const e = GM.normEntry(bare, U.DOOR) || bare; const m = macFor(id, e, xc, gen); return m ? { ...e, mac: m } : e; }); };
+  const stamp = (id, to, except, gen) => { const xc = exceptCanon(except); return (Array.isArray(to) ? to : []).map((e0) => { const { mac, ...bare } = e0; const sc = U.scopedMember(bare); const e = (sc && GM.normEntry(sc, U.DOOR)) || GM.normEntry(bare, U.DOOR) || bare; const m = macFor(id, e, xc, gen); return m ? { ...e, mac: m } : e; }); };   // r4: every member the ONE writer writes is in the per-scope shape (its meaning unchanged)
   const verifyMember = (id, e, xc, gen) => { const want = macFor(id, e, xc, gen); const got = e && typeof e.mac === 'string' && /^[0-9a-f]{64}$/.test(e.mac) ? e.mac : null; if (!want || !got) return false; try { return crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')); } catch { return false; } };
   const verifiedRow = (row) => {
     if (!row) return row;
@@ -156,8 +161,8 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  anyone). `legacy` (the carry only): the write may itself carry a wildcard whose CLI nobody can name, as a legacy member. */
   function rowRules(id, { to = [], except = [] } = {}, { was = null, legacy = false } = {}) {
     // lane vault-standing-request: a member names hosts, commands or both — an empty list is the field left out (never «any»)
-    to = (Array.isArray(to) ? to : []).map((e) => { if (!e || typeof e !== 'object') return e; const x = { ...e }; for (const f of ['hosts', 'commands']) if (Array.isArray(x[f]) && !x[f].length) delete x[f]; return x; });
-    for (const e of to) if (!GM.hostListOf(e && e.hosts) && !GM.commandListOf(e && e.commands)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
+    to = (Array.isArray(to) ? to : []).map((e) => { if (!e || typeof e !== 'object') return e; const x = { ...e }; for (const f of ['hosts', 'commands', 'scopes']) if (Array.isArray(x[f]) && !x[f].length) delete x[f]; return x; });
+    for (const e of to) if (!(e && Array.isArray(e.scopes) ? GM.scopeListOf(e.scopes) : (GM.hostListOf(e && e.hosts) || GM.commandListOf(e && e.commands)))) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });   // r4: a member names scopes (hosts, commands — or `scopes`, each its own end)
     const v = GM.validateWrite(U.DOOR, String(id), { to, except });
     if (!v.ok) return named(v.code, { error: v.error });
     // lane vault-use-grants round 5 (MAJOR item 4): a wildcard host MUST carry the tool that minted it — a whole-row Save that
@@ -165,7 +170,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // silently re-scoping `*.amazonaws.com` from aws to every tool.
     const held = new Set();   // r3: the stored row's own toolless wildcards — principal × host, as they were before this write
     for (const e of (was && Array.isArray(was.to) ? was.to : [])) for (const h of U.legacyWildOf(e)) held.add(`${GM.principalKey(GM.bareOf(e))}\n${h}`);
-    for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !U.toolOfHost(e, h) && !legacy && !held.has(`${GM.principalKey(GM.bareOf(e))}\n${h}`)) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
+    for (const e of v.row.to) for (const s of U.scopesOf(e)) if (s.kind === 'host' && String(s.host).startsWith('*.') && !s.tool && !legacy && !held.has(`${GM.principalKey(GM.bareOf(e))}\n${s.host}`)) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: s.host });   // r4: per host scope
     return { ok: true, row: v.row };
   }
   /** THE PICKER's save — the whole row. */
@@ -175,10 +180,16 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const was = rowOf(id);
     const v = rowRules(id, { to, except }, { was: verifiedRow(was) });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
     if (!v.ok) return v;
-    if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
-    // lane vault-standing-request: a member this Save ADDS is the owner's («你设置的», now); one already there keeps its source
-    const before = new Set(((was && GM.publicRow(was).to) || []).map((e) => GM.principalKey(e)));
-    const rowTo = v.row.to.map((e) => (before.has(GM.principalKey(e)) ? e : { ...e, source: e.source || 'owner', at: Number(e.at) > 0 ? e.at : now() }));
+    // lane vault-standing-request r4: the Save in the per-scope shape — a scope this Save ADDS or whose end / tool it CHANGES is
+    // the owner's («你设置的», now); a scope it keeps as it was keeps its writer and time (a page's own `source` is never read)
+    const wasV = verifiedRow(was);
+    const before = new Map((((wasV && GM.publicRow(wasV).to) || [])).map((e) => [GM.principalKey(e), new Map(U.scopesOf(e).map((s) => [`${s.kind}\n${s.key}`, s]))]));
+    const rowTo = v.row.to.map((e) => {
+      const o = before.get(GM.principalKey(e)) || new Map();
+      const sc = U.scopesOf(e).map((s) => { const p = o.get(`${s.kind}\n${s.key}`); return p && p.until === s.until && (p.tool || null) === (s.tool || null) ? { ...s, source: p.source, at: p.at } : { ...s, source: 'owner', at: now() }; });
+      return U.scopedMember(e, sc);
+    });
+    if (widens(was, { to: rowTo, except: v.row.except }) && !reauthed) return named('reveal_needs_password');
     const g = store();
     const gen = nextGen();
     const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
@@ -191,7 +202,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
-    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration' });   // r3 (MAJOR 2): `now` — an expired member is never merged; r3b: a member with another end is REPLACED (exactly the asked scope and end) — the carry alone adds with the earlier end
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration' });   // r4: per scope — a scope it names is added, or replaced when there with another end / ended; nothing else moves (the carry: the EARLIER end)
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was, legacy: legacy && by === 'migration' });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads; r3: judged on what THIS write brings
     if (!v.ok) return v;
@@ -199,7 +210,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const gen = nextGen();
     const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added, ...(plan.replaced ? { replaced: plan.replaced } : {}) });
+    return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added, changes: plan.changes });
   }
   /** r2 (MAJOR 1): THE QUESTION BEFORE A STANDING REQUEST'S CARD — would addMember write this member? (the plan + the row
    *  rules, nothing written) → { ok: true } | the named refusal the Allow would meet. */
@@ -210,7 +221,30 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now() });
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was });   // r3: THIS member, the row as it becomes through it — never another member's legacy wildcard
-    return v.ok ? { ok: true, ...(plan.replaced ? { replaced: plan.replaced } : {}) } : v;
+    return v.ok ? { ok: true, changes: plan.changes } : v;   // r4 (B): what the write WOULD change — the door's card words, drawn and compared at the press
+  }
+  /** r4 (C — the acceptance P4: the all-or-nothing restore went through setRow, judged against the row as the partial write
+   *  left it, so a replaced legacy wildcard could not be put back and the refused press left its write): the row AS IT IS
+   *  (its verified members, its exceptions) — what restoreRow puts back. → { ok: true, row: {to, except} | null } | vault_locked. */
+  function snapshotRow(id) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');
+    const r = verifiedRow(rowOf(id));
+    return { ok: true, row: r ? { to: (r.to || []).map((e) => JSON.parse(JSON.stringify(e))), except: (r.except || []).map((x) => ({ ...x })) } : null };
+  }
+  /** r4 (C): THE RESTORE — a snapshot written back RAW: no row rules, no widening check (it restores what WAS, lawful when it
+   *  was written), every member re-marked at a NEW generation (the partial write's row can never be replayed over it); a row
+   *  that was not there is removed. → { ok: true, restored: true } | a named refusal (the caller stops by name). */
+  function restoreRow(id, snap, { by = 'user' } = {}) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');
+    const row = snap && snap.row ? snap.row : null;
+    const to = row && Array.isArray(row.to) ? row.to : [], except = row && Array.isArray(row.except) ? row.except : [];
+    const g = store();
+    const gen = nextGen();
+    const w = to.length || except.length ? g.set(U.DOOR, String(id), { to: stamp(id, to, except, gen), except }, by) : rowOf(id) ? g.remove(U.DOOR, String(id), by) : { ok: true };
+    if (w && w.ok) commitGen(id, gen);
+    return landed(w, { restored: true });
   }
   /** ONE member out (a click: a narrowing). */
   function revoke(id, principalKey, { by = 'user' } = {}) {
@@ -258,7 +292,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
       const id = raw && raw.resource;
       if (!okId(id)) continue;
       const was = verifiedRow(raw);
-      const plan = U.withWildTools(was, toolOfWild);
+      const plan = U.withWildTools(was, toolOfWild, { now: now() });   // r4 (D): `legacy` names only a LIVE wildcard scope
       if (!plan.ok) continue;
       for (const l of plan.legacy) legacy.push({ resource: String(id), ...l });
       if (!plan.healed.length) continue;
@@ -287,11 +321,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const out = [];
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
-      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, toolFor: v.member.toolFor || null, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until });   // lane vault-standing-request: the scope + who wrote it + since when
+      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, toolFor: v.member.toolFor || null, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until, scopes: v.member.scopes.filter((s) => !s.expired) });   // lane vault-standing-request: the scope + who wrote it + since when; r4: the LIVE scopes, each its own end
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, revoke, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

@@ -223,7 +223,7 @@ async function usesCmd() {
   console.log('grants (this conversation):');
   if (!d.grants || !d.grants.length) console.log('  none');
   for (const g of d.grants || []) console.log(`  ${g.entry}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}`);
-  for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
+  for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until && !perScope(s) ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
   for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}${q.standing ? ` (standing · ${standingScope(q)})` : ''}  for: ${q.purpose || '-'}`);
@@ -233,7 +233,10 @@ async function usesCmd() {
   for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.grant ? `  by grant · standing ${u.grant}` : ''}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
 }
 /** lane vault-standing-request: a standing grant's scope in words — «hosts a, b» / «the command python3 transcribe.py». */
-const standingScope = (s) => [...(s.hosts && s.hosts.length ? [`hosts ${s.hosts.join(', ')}`] : []), ...(s.commands && s.commands.length ? [`the command ${s.commands.join(', ')}`] : s.command ? [`the command ${s.command}`] : [])].join(' + ') || '-';
+// lane vault-standing-request r4: each scope with ITS OWN end (a grant no longer has one end) — «hosts a.example (until …), b.example»
+const perScope = (s) => Array.isArray(s.scopes) && s.scopes.length > 0;
+const scopeEnd = (x) => (x.until ? ` (until ${whenAt(x.until)})` : '');
+const standingScope = (s) => perScope(s) ? [...(s.scopes.some((x) => x.kind === 'host') ? [`hosts ${s.scopes.filter((x) => x.kind === 'host').map((x) => x.scope + scopeEnd(x)).join(', ')}`] : []), ...(s.scopes.some((x) => x.kind === 'command') ? [`the command ${s.scopes.filter((x) => x.kind === 'command').map((x) => x.scope + scopeEnd(x)).join(', ')}`] : [])].join(' + ') : [...(s.hosts && s.hosts.length ? [`hosts ${s.hosts.join(', ')}`] : []), ...(s.commands && s.commands.length ? [`the command ${s.commands.join(', ')}`] : s.command ? [`the command ${s.command}`] : [])].join(' + ') || '-';
 
 async function runCmd(rest) {
   // the hub parses the words (the CLI ships to other hosts — one spelling of the flags, src/vault-run.js parseRunArgs)
@@ -371,7 +374,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
     return;
   }
   if (cmd === 'uses') return usesCmd();

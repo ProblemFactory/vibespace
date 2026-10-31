@@ -2709,6 +2709,44 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(resC?.status === 'failed' && String(resC?.error).includes(TOKN) && /the grants store refused it/.test(tC) && /rearmed .*FAILED: the grants store refused it/.test(diag.join('\n')) && visible(TOKN, tC + '\n' + diag.join('\n')) === 0 && saidC.some((l) => l.includes(TOKN)),
       'the grants rearm that fails: 0 chars of the token in its `migration-failed:` toast and its ⚙ Diagnostics line; the journal keeps it whole', { status: resC?.status, toast: !!tC, diag: diag.length, visible: visible(TOKN, tC + diag.join('')), journal: saidC.filter((l) => l.includes(TOKN)).length });
   }
+  // lane vault-standing-request r4 (THE ROOT MODEL — 主开发: «a MIGRATION of existing members from one-end to per-scope ends
+  // through the shared runner — ledger-keyed, idempotent, a notice if any row cannot be mapped»)
+  console.log('2026-10-vault-use-per-scope-ends — a vault-use member\'s scopes carry their own ends; the mark carries over (no vault at boot)');
+  {
+    const ID = '2026-10-vault-use-per-scope-ends';
+    try {
+      const VE = require('../src/server/vault-engine.js'), GS = require('../src/server/grants-store.js'), UG = require('../src/server/vault-use-grants.js'), U = require('../src/vault-use-grant.js');
+      const root = path.join(tmp, 'vault-per-scope'), dataDir = path.join(root, 'data');
+      fs.mkdirSync(dataDir, { recursive: true });
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false, bcast: () => {} });
+      await vault.setup(['per', 'scope', 'mig', crypto.randomBytes(4).toString('hex')].join('-'));
+      const T0 = Date.now(), END = T0 + 30 * 86400e3;
+      const RES = 'secrets:secret:abcdef1234#secret', RES2 = 'secrets:secret:bcdef12345#secret';
+      const g = GS.create({ dataDir });
+      const marked = (res, e) => ({ ...e, mac: vault.macOf('vault-use', U.canonOf(res, e, [], 0)) });   // the r3b writer's canon (U.canonOf of a one-end member is it verbatim)
+      const a = { kind: 'conversation', key: 'cid-a', name: 'A', hosts: ['a.example', '*.amazonaws.com'], toolFor: { '*.amazonaws.com': 'aws' }, commands: [{ program: '/usr/bin/python3', pre: [], arg: '/w/job.py', sha: 'c'.repeat(64), psha: null }], until: END, source: 'card', at: T0 };
+      const b = { kind: 'conversation', key: 'cid-b', name: 'B', hosts: ['*.legacy.example'], tool: 'curl' };   // a legacy single `tool`: its mark would move — kept as it is
+      g.set('vault-use', RES, { to: [marked(RES, a)], except: [] }, 'test');
+      g.set('vault-use', RES2, { to: [marked(RES2, b)], except: [] }, 'test');
+      const ug0 = UG.create({ grants: () => g, vault, dataDir, log: () => { } });
+      const before = JSON.stringify(ug0.publicFor(RES).to.map((m) => [m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
+      const notices = [];
+      const mm = () => create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: (k, t) => notices.push([k, t]), grants: g });
+      const res = mm().runLocalMigrations().find((r) => r.id === ID);
+      const stored = g.rowsFor('vault-use', RES)[0].to[0], stored2 = g.rowsFor('vault-use', RES2)[0].to[0];
+      const ug = UG.create({ grants: () => g, vault, dataDir, log: () => { } });
+      const pub = ug.publicFor(RES).to, after = JSON.stringify(pub.map((m) => [m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
+      ok(res && res.status === 'ran' && res.report.reshaped === 1 && Array.isArray(stored.scopes) && stored.scopes.length === 3 && stored.scopes.every((s) => s.until === END) && stored.hosts === undefined && stored.until === undefined && stored.mac === marked(RES, a).mac && pub.length === 1 && after === before, 'a one-end member is RESHAPED to its scopes — each with the member\'s end, tool and writer — its mark kept AS IT WAS and still VERIFIED by the writer (the vault reads it held, its hosts, tool, end and command unchanged): no vault at boot', { res: res && res.report, stored, before, after });
+      ok(Array.isArray(stored2.hosts) && stored2.scopes === undefined && stored2.tool === 'curl' && ug.publicFor(RES2).to.length === 1 && res.report.kept === 1 && notices.filter(([k]) => k === 'vault-use-per-scope-kept').length === 1 && /1 grant\(s\) could not be given per-host ends/.test((notices.find(([k]) => k === 'vault-use-per-scope-kept') || [])[1] || ''), 'a member that CANNOT be mapped (a legacy single tool — its mark would move) is left as it is, still read as before, and named in ONE notice', { stored2, notices });
+      const again = mm().runLocalMigrations().find((r) => r.id === ID);
+      const rerun = mm().MIGRATIONS.find((m) => m.id === ID).run();
+      ok(again.status === 'already' && rerun.reshaped === 0 && rerun.kept === 1 && JSON.stringify(g.rowsFor('vault-use', RES)[0].to[0]) === JSON.stringify(stored), 'LEDGER-KEYED + IDEMPOTENT: a second boot says already, and the run itself finds nothing left to reshape (the row byte for byte)', { again: again.status, rerun });
+      const broken = path.join(tmp, 'vault-per-scope-broken'); fs.mkdirSync(path.join(broken, 'data'), { recursive: true });
+      fs.writeFileSync(path.join(broken, 'data', 'grants.json'), '{ not json');
+      const rb = create({ rootDir: broken, homeDir: scratchHomeDir, serverNotice: () => { }, grants: GS.create({ dataDir: path.join(broken, 'data') }) }).runLocalMigrations().find((r) => r.id === ID);
+      ok(rb && rb.status === 'failed' && /could not be read/.test(rb.error) && !JSON.parse(fs.readFileSync(path.join(broken, 'data', 'migrations.json'), 'utf8')).applied[ID], 'an UNREADABLE grants store fails the run BY NAME — not recorded, retried on the next boot (never «nothing to reshape»)', rb);
+    } catch (e) { ok(false, `${ID} threw on this tree (the migration it asks for is missing): ${(e && e.message) || e}`); }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

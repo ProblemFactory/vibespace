@@ -8,7 +8,12 @@
  *   · `hosts` — the destinations the use may reach: host names / addresses, or `@entry` («the hosts the entry was stored
  *     for»: an owner-filled request's named hosts — resolved at USE time, so a re-labelled entry is read as it is now);
  *     NEVER «any host» (no wildcard is a value of the field) — a use whose destination cannot be told is never admitted;
- *   · `until` — an optional end (ms); past it the entry admits nothing (the card asks again, the window says «expired»);
+ *   · `until` — an optional end (ms); past it the scope admits nothing (the card asks again, the window says «expired»);
+ *   · r4 (lane vault-standing-request, THE ROOT MODEL — 主开发: «a member's scopes carry THEIR OWN ENDS … never one end per
+ *     member»): a member is stored as its `scopes` — each host `{host, until?, tool?, source?, at?}` and each command
+ *     `{command, until?, source?, at?}` with ITS OWN end, tool and writer (src/grant-model.js scopeListOf). A member stored
+ *     before r4 (`hosts` + `toolFor` + `commands` + ONE `until`) is read as each of its scopes with that end (`scopesOf` — the
+ *     ONE reader); the migration `2026-10-vault-use-per-scope-ends` reshapes it where its canon (the mark) is unchanged;
  *   · `commands` (lane vault-standing-request, the owner 2026-10-30 「能不能让 agent 自行申请权限 … 常驻的，跟我配"谁可以用"等效的权限」)
  *     — the COMMAND SHAPES the member may run where the hub cannot read the destination (an interpreter and its script, a
  *     program outside the tool table): `{program, arg, sha, psha}` (src/grant-model.js commandListOf) — the program's real path,
@@ -33,9 +38,9 @@
  *   covers only itself).
  * THE ID `grantIdOf(resource, principalKey)` = `vg-` + 8 hex (FNV-1a over the two) — what the run line, the use line, the
  * card and the window name; the same member of the same entry keeps its id across widenings.
- * THE PLANS (the writer applies them): `withMember` (add or WIDEN one member: hosts ∪, the later end, out of `except`;
- * lane vault-standing-request r3/r3b: a write never WIDENS a member — it adds to it only when both have the same end (none),
- * otherwise it REPLACES it with exactly the asked scope and end; never into an expired member),
+ * THE PLANS (the writer applies them): `withMember` (lane vault-standing-request r4: a write ADDS the scopes it names with
+ * the end it names, REPLACES only the SAME scope when its end differs or has passed — `changes` says which, the card says it —
+ * and never touches another scope; out of `except`),
  * `withoutMember` (revoke one), `alwaysCarry` (data/vault-run.json's «always» rows, the shape keys of 2.369.359 and
  * before, as members — the hosts read off the shape key; a row with no host cannot be carried and is counted),
  * `withWildTools` (r3: a carried wildcard with no tool gets the CLI the tool table names for it, else stays LEGACY).
@@ -84,7 +89,7 @@ const coversForTool = (g, h, hostTool, runTool) => hostCovers(g, h) && (!String(
 /** The CLI a member's grant-host `g` is scoped to (round 4, item 3): its PER-HOST `toolFor` entry, or a legacy single `tool`
  *  (old grants) applied to a wildcard. null ⇒ not tool-scoped. The scope is per host — a later «Always» from another CLI
  *  adds its own host rows and never rewrites this one's tool. */
-const toolOfHost = (member, g) => (member && member.toolFor && member.toolFor[g]) || (member && member.tool && String(g).startsWith('*.') ? String(member.tool).toLowerCase() : null);
+const toolOfHost = (member, g) => { if (member && Array.isArray(member.scopes)) { const s = member.scopes.find((x) => x && x.host === g); return s && s.tool ? String(s.tool).toLowerCase() : null; } return (member && member.toolFor && member.toolFor[g]) || (member && member.tool && String(g).startsWith('*.') ? String(member.tool).toLowerCase() : null); };   // r4: a scoped member's tool is its host scope's
 /** A run's hosts in the one spelling (lower case, no trailing dot, no IPv6 brackets) — what the shape says (src/vault-run.js). */
 const runHostsOf = (hosts) => [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => String(h == null ? '' : h).trim().toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1')).filter(Boolean))];
 /** An entry's hosts as they stand at use time: `@entry` → the entry's own hosts (GM.hostListOf's spelling). */
@@ -94,34 +99,99 @@ function effectiveHosts(list, entryHosts = []) {
   for (const h of Array.isArray(list) ? list : []) for (const x of h === ENTRY_HOSTS ? own : [h]) if (!out.includes(x)) out.push(x);
   return out;
 }
-/** The run hosts a member (or a bare hosts array) does NOT cover — [] when it covers every one. Each grant-host's wildcard
- *  is scoped to the CLI that minted it (round 4, item 3: PER HOST — `toolOfHost`), a concrete host to any. */
-const missingHosts = (entry, run, runTool = null, entryHosts = []) => {
-  const member = Array.isArray(entry) ? null : (entry || null);
-  const list = Array.isArray(entry) ? entry : effectiveHosts(entry && entry.hosts, entryHosts);
-  return runHostsOf(run).filter((h) => !(list || []).some((g) => coversForTool(g, h, member ? toolOfHost(member, g) : null, runTool)));
+const endOf = (x) => (Number(x) > 0 ? Math.floor(Number(x)) : null);
+const isWild = (h) => String(h).startsWith('*.');
+const liveScope = (s, now) => !(s && s.until != null && s.until <= now);
+// ── THE SCOPES (lane vault-standing-request r4, THE ROOT MODEL — 主开发: «four rounds have moved the member-write rule
+// between merge and replace and each form loses something … a member's scopes carry THEIR OWN ENDS») ──
+/** THE ONE READER of a member's scopes → [{kind: 'host', key, host, until, tool, source, at} | {kind: 'command', key,
+ *  command, until, tool: null, source, at}] (`key` = the scope's identity: its host token, or GM.commandKeyOf). A member
+ *  stored in the r4 shape is its `scopes`; one stored before r4 (one end per member: `hosts` + `toolFor` + `commands` +
+ *  `until`) is read as each of its scopes with the member's end and writer — what it always meant. Every reader below and in
+ *  the ORCH reads a member through THIS (never `e.hosts` / `e.until`). */
+function scopesOf(e) {
+  if (!e || typeof e !== 'object') return [];
+  if (Array.isArray(e.scopes)) {
+    return e.scopes.filter((s) => s && typeof s === 'object').map((s) => (s.command
+      ? { kind: 'command', key: GM.commandKeyOf(s.command), command: s.command, until: endOf(s.until), tool: null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) }
+      : { kind: 'host', key: String(s.host), host: String(s.host), until: endOf(s.until), tool: s.tool ? String(s.tool).toLowerCase() : null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) }));
+  }
+  const until = endOf(e.until), source = SOURCES.includes(e.source) ? e.source : null, at = endOf(e.at);
+  const hs = (Array.isArray(e.hosts) ? e.hosts : []).map((h) => ({ kind: 'host', key: String(h), host: String(h), until, tool: toolOfHost(e, h), source, at }));
+  const cs = [];
+  for (const c of Array.isArray(e.commands) ? e.commands : []) { const n = GM.commandListOf([c]); if (n) cs.push({ kind: 'command', key: GM.commandKeyOf(n[0]), command: n[0], until, tool: null, source, at }); }
+  return [...hs, ...cs];
+}
+/** A scope as the store keeps it (GM.scopeListOf's closed keys; no end = no `until`). */
+const storedScope = (s) => (s.kind === 'command'
+  ? { command: s.command, ...(s.until ? { until: s.until } : {}), ...(s.source ? { source: s.source } : {}), ...(s.at ? { at: s.at } : {}) }
+  : { host: s.host, ...(s.until ? { until: s.until } : {}), ...(s.tool ? { tool: s.tool } : {}), ...(s.source ? { source: s.source } : {}), ...(s.at ? { at: s.at } : {}) });
+/** A member in the r4 shape: its principal, its name (and GM's `by`), its scopes — every one-end field dropped; `mac` kept
+ *  (the canon below is over what a member MEANS, so a reshape keeps it). */
+function scopedMember(e, scopes = scopesOf(e)) {
+  const b = GM.bareOf(e);
+  if (!b) return null;
+  return { ...b, ...(typeof e.name === 'string' && e.name ? { name: e.name } : {}), ...(typeof e.by === 'string' && e.by ? { by: e.by } : {}), scopes: scopes.map(storedScope), ...(typeof e.mac === 'string' ? { mac: e.mac } : {}) };
+}
+/** Derived views a page / the CLI / a test read off the scopes (all — live or ended): the hosts, the per-host tools, the
+ *  command tokens. `span` = until when ANY of `list` is usable: null when one has no end, else the latest end. */
+const hostsOfScopes = (list) => list.filter((s) => s.kind === 'host').map((s) => s.host);
+const commandsOfScopes = (list) => list.filter((s) => s.kind === 'command').map((s) => s.command);
+const toolForOfScopes = (list) => { const m = {}; for (const s of list) if (s.kind === 'host' && s.tool) m[s.host] = s.tool; return Object.keys(m).length ? m : null; };
+const spanOf = (list) => (!list.length ? null : list.some((s) => s.until == null) ? null : Math.max(...list.map((s) => s.until)));
+const latestOf = (list) => list.reduce((a, s) => (s.at && (!a || s.at > a.at) ? s : a), null);
+/** THE CANON the vault's mark (the ORCH's mac) is made over (moved here from the ORCH in r4: PURE). It is over what a member
+ *  MEANS: a member stored before r4 → the r3b canon verbatim; a scoped member whose scopes share ONE end and ONE writer (what
+ *  a one-end member is) → the SAME bytes, so the migration that reshapes a one-end member keeps its mac (it needs no vault —
+ *  a boot is locked); scopes with their own ends / writers → the per-scope canon (`vault-use-v2`: every scope's identity, end,
+ *  tool, writer and time). */
+function canonOf(id, e, xc, gen) {
+  const pk = GM.principalKey(GM.bareOf(e)) || '', name = typeof (e && e.name) === 'string' ? e.name : null, x = Array.isArray(xc) ? xc : [], g = Number(gen) || 0;
+  if (!Array.isArray(e && e.scopes)) {
+    const cs = Array.isArray(e.commands) ? e.commands.map((c) => GM.commandKeyOf(c)).sort() : [];
+    const extra = cs.length || e.source ? [{ c: cs, s: e.source || null, a: e.source && Number(e.at) > 0 ? Math.floor(Number(e.at)) : null }] : [];
+    return JSON.stringify([String(id), pk, (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, endOf(e.until), name, x, g, ...extra]);
+  }
+  const sc = scopesOf(e), u = sc[0] || null;
+  if (u && sc.every((s) => s.until === u.until && s.source === u.source && (!u.source || s.at === u.at))) {
+    const tf = sc.filter((s) => s.kind === 'host' && s.tool).map((s) => [s.host, s.tool]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const cs = sc.filter((s) => s.kind === 'command').map((s) => s.key).sort();
+    const extra = cs.length || u.source ? [{ c: cs, s: u.source || null, a: u.source && u.at ? u.at : null }] : [];
+    return JSON.stringify([String(id), pk, hostsOfScopes(sc).slice().sort(), tf.length ? tf : null, u.until, name, x, g, ...extra]);
+  }
+  return JSON.stringify(['vault-use-v2', String(id), pk, name, x, g, sc.map((s) => JSON.stringify([s.kind === 'host' ? 'h' : 'c', s.key, s.until, s.tool, s.source, s.at])).sort()]);
+}
+const live = (e, now) => scopesOf(e).some((s) => liveScope(s, now));
+/** lane vault-standing-request: do these scopes hold the run's EXACT command token? (null token ⇒ never) */
+const commandIn = (list, command) => { if (!command) return false; const c = GM.commandListOf([command]); if (!c) return false; const k = GM.commandKeyOf(c[0]); return list.some((s) => s.kind === 'command' && s.key === k); };
+const commandHeld = (e, command) => commandIn(scopesOf(e), command);
+/** The run hosts a list of host scopes does NOT cover — [] when it covers every one (r4: each scope's wildcard is scoped to ITS
+ *  tool — round 4 item 3, per host; a concrete host to any tool). */
+const missingIn = (list, run, runTool, entryHosts) => runHostsOf(run).filter((h) => !list.some((s) => s.kind === 'host' && (s.host === ENTRY_HOSTS ? effectiveHosts([ENTRY_HOSTS], entryHosts) : [s.host]).some((g) => coversForTool(g, h, s.tool, runTool))));
+const memberOf = (hit, entryHosts, now = 0) => {
+  if (!hit) return null;
+  const all = scopesOf(hit.entry), ls = all.filter((s) => liveScope(s, now)), shown = ls.length ? ls : all, last = latestOf(shown);
+  return { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hostsOfScopes(shown), entryHosts), declared: hostsOfScopes(shown), commands: commandsOfScopes(shown), scopes: all.map((s) => ({ ...s, expired: !liveScope(s, now) })), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(shown), until: spanOf(shown) };
 };
-const live = (e, now) => !(e && Number(e.until) > 0 && Number(e.until) <= now);
-/** lane vault-standing-request: does member `e` hold the run's EXACT command token? (null token ⇒ never) */
-const commandHeld = (e, command) => { if (!command || !e || !Array.isArray(e.commands)) return false; const c = GM.commandListOf([command]); if (!c) return false; const k = GM.commandKeyOf(c[0]); return e.commands.some((x) => { const n = GM.commandListOf([x]); return !!n && GM.commandKeyOf(n[0]) === k; }); };
-const memberOf = (hit, entryHosts) => (hit ? { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hit.entry.hosts, entryHosts), declared: (hit.entry.hosts || []).slice(), commands: Array.isArray(hit.entry.commands) ? hit.entry.commands.slice() : [], source: hit.entry.source || null, at: Number(hit.entry.at) > 0 ? Number(hit.entry.at) : null, tool: hit.entry.tool || null, toolFor: hit.entry.toolFor || null, until: Number(hit.entry.until) > 0 ? Number(hit.entry.until) : null } : null);
 
 /** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, tool, command, now } —
- *  `command` (lane vault-standing-request) = the run's command token when its destination cannot be read (else null). */
+ *  `command` (lane vault-standing-request) = the run's command token when its destination cannot be read (else null).
+ *  r4: judged on the LIVE scopes only — a scope past its end admits nothing, whatever its member's other scopes hold. */
 function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], tool = null, command = null, now = 0 } = {}) {
   const v = GM.admits(rows, facts);
   if (!v.ok) return { ok: false, code: v.code, ...(v.entry ? { except: GM.principalKey(v.entry) } : {}) };
   const alive = v.hits.filter((h) => live(h.entry, now));
-  if (!alive.length) return { ok: false, code: 'expired', expired: memberOf(v.hits[0], entryHosts) };
+  if (!alive.length) return { ok: false, code: 'expired', expired: memberOf(v.hits[0], entryHosts, now) };
   const run = runHostsOf(hosts);
   let best = null, bestMissing = null;
   for (const h of alive) {   // admits' hits: the most specific first (its own › a group's › everyone)
-    const miss = missingHosts(h.entry, run, tool, entryHosts);
-    if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts), scope: 'hosts' };
-    if (destinationKnown !== true && commandHeld(h.entry, command)) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts), scope: 'command' };   // lane vault-standing-request: the EXACT command the owner trusted — only where the hub cannot read the destination (a known destination is judged by its hosts)
+    const ls = scopesOf(h.entry).filter((s) => liveScope(s, now));
+    const miss = missingIn(ls, run, tool, entryHosts);
+    if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(hostsOfScopes(ls), entryHosts), scope: 'hosts' };
+    if (destinationKnown !== true && commandIn(ls, command)) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(hostsOfScopes(ls), entryHosts), scope: 'command' };   // lane vault-standing-request: the EXACT command the owner trusted — only where the hub cannot read the destination (a known destination is judged by its hosts)
     if (!best || miss.length < bestMissing.length) { best = h; bestMissing = miss; }
   }
-  const member = memberOf(best, entryHosts);
+  const member = memberOf(best, entryHosts, now);
   if (destinationKnown !== true || !run.length) return { ok: false, code: 'destination_unknown', member };
   return { ok: false, code: 'outside_hosts', member, missing: bestMissing };
 }
@@ -130,17 +200,22 @@ const holds = (verdict) => !!(verdict && (verdict.ok || verdict.member));
 
 // ── THE PLANS (src/server/vault-use-grants.js writes them through the ONE writer) ──
 const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except: [] }; return p.unknown ? null : { to: p.to || [], except: p.except || [] }; };
-/** Add ONE member, or add to it — or REPLACE it: `principal` (a bare principal), `hosts` (a list of host tokens), `until`
- *  (ms | null = no end). lane vault-standing-request r3b (主开发: «a write replaces or adds a member with exactly the asked
- *  scope and end; it never merges hosts or drops an end into an existing member»): a member already there whose end is the
- *  write's own (both none) keeps its entry and gains the new hosts / commands (∪ — nothing's end moves); one whose end
- *  DIFFERS (8 h vs 30 days vs none) or has passed is REPLACED by exactly the asked scope and end (`replaced` names what went:
- *  its hosts, commands, end, whether it had expired — the cards say it). `carry` (the migration only): ∪ with the EARLIER
- *  end, never a later one. The member leaves `except`. → { ok: true, to, except, widened, added } | { ok: false, code } (`unknown_shape`:
- *  the row cannot be read — nothing is read wider; `bad_principal`; `hosts_required`; `too_many_hosts`).
- *  lane vault-standing-request: `commands` (command tokens) widen the member the same way (∪, ≤ GM.COMMANDS_MAX —
- *  `too_many_commands`); a member gets hosts, commands or both (neither ⇒ `hosts_required`; a bad token ⇒
- *  `command_unreadable`). `source` + `at` say who wrote it — set when the member is added or widened. */
+/** r4 (THE ROOT MODEL): ONE member's SCOPES written — `principal` (a bare principal), `hosts` (host tokens) and/or `commands`
+ *  (command tokens), each written as a scope with THIS write's end `until` (ms | null = none), `tool` (the CLI a wildcard it
+ *  names is scoped to), `source` + `at` (who, when). Per asked scope, against the member as it is (`now` decides what has ended):
+ *    · absent                                   ⇒ ADDED, with this end;
+ *    · present, live, the same end (and tool)   ⇒ SAME — nothing moves;
+ *    · present with ANOTHER end, or past its end ⇒ REPLACED — exactly this scope, now with this end (`changes.replaced` names
+ *      it: the scope, its old end, whether it had ended) — an ended scope is never revived or merged into: the write is a new
+ *      grant of that scope, and the card that asked for it said so (the door compares the card's words with these AT THE PRESS);
+ *    · a wildcard the member holds for ANOTHER tool is kept as it is (round 4: a later «Always» never re-scopes its tool).
+ *  NO OTHER SCOPE IS TOUCHED — not its hosts, not its end. `carry` (the migration only): a present scope takes the EARLIER of
+ *  the two ends, never a later one (an ended one stays ended). Over GM.HOSTS_MAX host scopes the member's oldest ENDED host
+ *  scopes go first (`changes.pruned`), then `too_many_hosts`; over COMMANDS_MAX command scopes `too_many_commands`. The member
+ *  leaves `except`; it is written in the r4 shape (a one-end member is read as its scopes and written back scoped).
+ *  → { ok: true, to, except, widened, added, changes: {added: [scope], replaced: [{scope, was, until, expired}], same:
+ *    [scope], kept: [scope], pruned: [scope]} } (a `scope` = {kind, key, host | command}) | { ok: false, code } (`unknown_shape`,
+ *    `bad_principal`, `hosts_required`, `command_unreadable`, `too_many_hosts`, `too_many_commands`). */
 function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, carry = false } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
@@ -152,54 +227,52 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   const hostsGiven = Array.isArray(hosts) && hosts.length > 0;
   const add = hostsGiven ? GM.hostListOf(hosts) : [];
   if (!add || (!add.length && !cmds)) return { ok: false, code: 'hosts_required' };
-  const src = SOURCES.includes(source) ? source : null, stampAt = Number(at) > 0 ? Math.floor(Number(at)) : null;
-  const stampOf = (e) => { if (src) e.source = src; if (src && stampAt) e.at = stampAt; return e; };
-  const end = Number(until) > 0 ? Math.floor(Number(until)) : null;
+  const src = SOURCES.includes(source) ? source : null, stampAt = endOf(at);
+  const end = endOf(until);
   const tl = tool ? String(tool).toLowerCase() : null;   // round 4 (item 3): the CLI a wildcard THIS «Always» mints is scoped to — PER HOST
   const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
-  const to = cur.to.slice();
-  let widened = false;
-  // r3 (MAJOR 2 — the acceptance: an EXPIRED 8-hour member on old.example came back PERMANENT, its hosts included, after a
-  // standing Allow merged into it) + r3b (a card's timed «Always» onto a LIVE member made its hosts outlive their end): a write
-  // never revives, outlives or shortens a member's own end —
-  //   · an EXPIRED member (its end ≤ `now`) is never merged by ANY write: the write REPLACES it (its scope stays ended);
-  //   · a member whose end is NOT the write's (live 8 h under a 30-day or a no-end write; a no-end member under a timed one) is
-  //     REPLACED — the new member holds ONLY the asked scope, until the asked end (the cards said so: the door's endedOf);
-  //   · the same end (both none) adds — what the two would be as two members.
-  //   `replaced` names what went (its hosts, commands, end, whether it had expired) for the card's words and the audit line.
-  const wasEnd0 = i >= 0 && Number(cur.to[i].until) > 0 ? Number(cur.to[i].until) : null;
-  const gone = wasEnd0 != null && Number(now) > 0 && wasEnd0 <= Number(now);
-  const replaced = i >= 0 && (gone || (!carry && wasEnd0 !== end)) ? { hosts: (cur.to[i].hosts || []).slice(), commands: Array.isArray(cur.to[i].commands) ? cur.to[i].commands.slice() : [], until: wasEnd0, expired: gone } : null;
-  if (i >= 0 && !replaced) {
-    const was = to[i], merged = [...(was.hosts || [])];
-    // round 4 (item 3): the tool is PER HOST. Carry the member's existing per-host scopes forward (migrating a legacy single
-    // `tool` onto its wildcard rows), then scope ONLY the hosts THIS «Always» adds — an existing row's tool is never rewritten.
-    const toolFor = { ...(was.toolFor || {}) };
-    if (was.tool) for (const h of (was.hosts || [])) if (String(h).startsWith('*.') && !(h in toolFor)) toolFor[h] = String(was.tool).toLowerCase();
-    for (const h of add) if (!merged.includes(h)) { merged.push(h); widened = true; if (tl && String(h).startsWith('*.')) toolFor[h] = tl; }
-    if (merged.length > GM.HOSTS_MAX) return { ok: false, code: 'too_many_hosts' };
-    const wasCmds = Array.isArray(was.commands) ? (GM.commandListOf(was.commands) || []) : [], mergedCmds = wasCmds.slice();
-    for (const c of cmds || []) if (!mergedCmds.some((x) => GM.commandKeyOf(x) === GM.commandKeyOf(c))) { mergedCmds.push(c); widened = true; }
-    if (mergedCmds.length > GM.COMMANDS_MAX) return { ok: false, code: 'too_many_commands' };
-    const wasEnd = Number(was.until) > 0 ? Number(was.until) : null;
-    const nextEnd = !carry ? wasEnd : wasEnd == null ? end : end == null ? wasEnd : Math.min(wasEnd, end);   // r3b: the same end (a carry: the EARLIER one — never a later end)
-    if (nextEnd !== wasEnd) widened = true;
-    const next = { ...was, ...(merged.length ? { hosts: merged } : {}) };
-    if (!merged.length) delete next.hosts;   // a commands-only member keeps no empty hosts list
-    if (mergedCmds.length) next.commands = mergedCmds; else delete next.commands;
-    if (nextEnd == null) delete next.until; else next.until = nextEnd;
-    delete next.tool;   // replaced by the per-host `toolFor`
-    if (Object.keys(toolFor).length) next.toolFor = toolFor; else delete next.toolFor;
-    to[i] = widened ? stampOf(next) : next;
-  } else {
-    const e = { ...b, ...(principal.name ? { name: String(principal.name) } : {}), ...(add.length ? { hosts: add } : {}), ...(cmds ? { commands: cmds } : {}) };
-    if (end != null) e.until = end;
-    const toolFor = {};
-    if (tl) for (const h of add) if (String(h).startsWith('*.')) toolFor[h] = tl;   // only a WILDCARD carries a tool; a plain host is tool-agnostic
-    if (Object.keys(toolFor).length) e.toolFor = toolFor;
-    if (i >= 0) { to[i] = stampOf(e); widened = true; } else to.push(stampOf(e));   // r3: a replaced member keeps its place (its id is the principal's)
+  const was = i >= 0 ? cur.to[i] : null;
+  const next = was ? scopesOf(was).map((s) => ({ ...s })) : [];
+  const asked = [...add.map((h) => ({ kind: 'host', key: h, host: h, until: end, tool: tl && isWild(h) ? tl : null, source: src, at: src ? stampAt : null })), ...(cmds || []).map((c) => ({ kind: 'command', key: GM.commandKeyOf(c), command: c, until: end, tool: null, source: src, at: src ? stampAt : null }))];
+  const nowN = Number(now) > 0 ? Number(now) : 0;
+  const gone = (s) => s.until != null && nowN > 0 && s.until <= nowN;
+  const scopeWord = (s) => (s.kind === 'host' ? { kind: 'host', key: s.key, host: s.host } : { kind: 'command', key: s.key, command: s.command });
+  const changes = { added: [], replaced: [], same: [], kept: [], pruned: [] };
+  for (const s of asked) {
+    const j = next.findIndex((x) => x.kind === s.kind && x.key === s.key);
+    if (j < 0) { next.push(s); changes.added.push({ ...scopeWord(s), until: s.until }); continue; }
+    const w = next[j];
+    if (s.kind === 'host' && isWild(s.host) && w.tool && s.tool && w.tool !== s.tool) { changes.kept.push(scopeWord(w)); continue; }   // round 4: a wildcard held for another CLI keeps its tool
+    if (carry) {
+      const e2 = w.until == null ? s.until : s.until == null ? w.until : Math.min(w.until, s.until);   // the EARLIER end — never a later one
+      if (e2 === w.until && (w.tool || !s.tool)) { changes.same.push(scopeWord(w)); continue; }
+      next[j] = { ...w, until: e2, tool: w.tool || s.tool };
+      changes.replaced.push({ ...scopeWord(w), was: w.until, until: e2, expired: gone(w) });
+      continue;
+    }
+    if (!gone(w) && w.until === s.until && (s.kind !== 'host' || !isWild(s.host) || (w.tool || null) === (s.tool || null))) { changes.same.push(scopeWord(w)); continue; }   // the same end (a wildcard: and the same tool) — nothing moves
+    next[j] = s;
+    changes.replaced.push({ ...scopeWord(w), was: w.until, until: s.until, expired: gone(w) });
   }
-  return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened, added: i < 0, ...(replaced ? { replaced } : {}) };
+  // the limits count what the member holds: an ENDED host scope beyond them goes first (oldest end first) — it admits nothing
+  let nHosts = next.filter((s) => s.kind === 'host').length;
+  if (nHosts > GM.HOSTS_MAX) {
+    const askedKeys = new Set(asked.map((s) => `${s.kind}\n${s.key}`));
+    const ended = next.filter((s) => s.kind === 'host' && gone(s) && !askedKeys.has(`host\n${s.key}`)).sort((a, b2) => a.until - b2.until);
+    for (const s of ended) { if (nHosts <= GM.HOSTS_MAX) break; next.splice(next.indexOf(s), 1); changes.pruned.push({ ...scopeWord(s), was: s.until }); nHosts--; }
+  }
+  if (nHosts > GM.HOSTS_MAX) return { ok: false, code: 'too_many_hosts' };
+  if (next.filter((s) => s.kind === 'command').length > GM.COMMANDS_MAX) return { ok: false, code: 'too_many_commands' };
+  const moved = changes.added.length + changes.replaced.length + changes.pruned.length > 0;
+  const to = cur.to.slice();
+  if (was) {
+    const m = scopedMember({ ...was, ...(principal.name && !was.name ? { name: String(principal.name) } : {}) }, next);
+    delete m.mac;
+    to[i] = m;   // r3: the member keeps its place (its id is the principal's)
+  } else {
+    to.push({ ...b, ...(principal.name ? { name: String(principal.name) } : {}), scopes: next.map(storedScope) });
+  }
+  return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened: moved, added: i < 0, changes };
 }
 /** Revoke ONE member (`principalKey`) — its exceptions stay with the row. → { ok, to, except, removed } | unknown_shape. */
 function withoutMember(row, principalKey) {
@@ -210,27 +283,48 @@ function withoutMember(row, principalKey) {
 }
 /** r3 (MAJOR 1 — the acceptance: the 2.369.363/.364 carry wrote legacy aws «always» rows as `*.amazonaws.com` members with NO
  *  tool, and r2's row rules then refused every OTHER conversation's write on that entry): A LEGACY WILDCARD IS A MIGRATION
- *  FACT. Each member's wildcard host with no tool gets the CLI the tool table names for it (`toolOfWild(h)` — aws for
+ *  FACT. Each wildcard host SCOPE with no tool gets the CLI the tool table names for it (`toolOfWild(h)` — aws for
  *  `*.amazonaws.com`: the only road a wildcard ever entered a shape); one the table cannot name stays as it is, a LEGACY
- *  wildcard (any tool) — the Vault row names it (publicGrants `legacy`), the owner is told once. → { ok, to, except, healed:
+ *  wildcard (any tool) — the Vault row names it (publicGrants `legacy`), the owner is told once. r4 (D): `legacy` lists only a
+ *  LIVE scope (`now`) — an ended one admits nothing and is never told as «any program». → { ok, to, except, healed:
  *  [{principal, host, tool}], legacy: [{principal, host}] } | unknown_shape. */
-function withWildTools(row, toolOfWild) {
+function withWildTools(row, toolOfWild, { now = 0 } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const healed = [], legacy = [];
   const to = cur.to.map((e) => {
-    const add = {};
-    for (const h of e.hosts || []) {
-      if (!String(h).startsWith('*.') || toolOfHost(e, h)) continue;
-      const t = typeof toolOfWild === 'function' ? toolOfWild(h) : null;
-      if (t) { add[h] = String(t).toLowerCase(); healed.push({ principal: GM.principalKey(e), host: h, tool: add[h] }); } else legacy.push({ principal: GM.principalKey(e), host: h });
-    }
-    return Object.keys(add).length ? { ...e, toolFor: { ...(e.toolFor || {}), ...add } } : e;
+    let changed = false;
+    const sc = scopesOf(e).map((s) => {
+      if (s.kind !== 'host' || !isWild(s.host) || s.tool) return s;
+      const t = typeof toolOfWild === 'function' ? toolOfWild(s.host) : null;
+      if (t) { changed = true; healed.push({ principal: GM.principalKey(e), host: s.host, tool: String(t).toLowerCase() }); return { ...s, tool: String(t).toLowerCase() }; }
+      if (liveScope(s, Number(now) || 0)) legacy.push({ principal: GM.principalKey(e), host: s.host });
+      return s;
+    });
+    if (!changed) return e;
+    const m = scopedMember(e, sc); delete m.mac; return m;
   });
   return { ok: true, to, except: cur.except, healed, legacy };
 }
-/** A member's wildcard hosts that carry NO tool (a legacy carried member — any tool): what its chip names. */
-const legacyWildOf = (e) => (e && Array.isArray(e.hosts) ? e.hosts.filter((h) => String(h).startsWith('*.') && !toolOfHost(e, h)) : []);
+/** A member's wildcard host scopes that carry NO tool (a legacy carried member — any tool): what its chip names. */
+const legacyWildOf = (e) => scopesOf(e).filter((s) => s.kind === 'host' && isWild(s.host) && !s.tool).map((s) => s.host);
+/** r4 (E — the migration `2026-10-vault-use-per-scope-ends`, src/server/migrations.js): a stored row's ONE-END members in the
+ *  r4 shape — each reshaped ONLY where its canon is unchanged (canonOf: the same bytes ⇒ its mac carries over, no vault); a
+ *  member that cannot be (a canon that would move — a legacy single `tool`, a tool for a host it does not hold) is left as it
+ *  is (read as before) and named. → { ok, to, except, mapped, unmapped: [principal] } | unknown_shape. */
+function scopedRowOf(row) {
+  const cur = rowLists(row);
+  if (!cur) return { ok: false, code: 'unknown_shape' };
+  let mapped = 0; const unmapped = [];
+  const to = cur.to.map((e) => {
+    if (Array.isArray(e.scopes)) return e;
+    const s = scopedMember(e);
+    const n = s && GM.normEntry(s, DOOR);
+    if (n && canonOf('-', n, [], 0) === canonOf('-', e, [], 0)) { mapped++; return n; }
+    unmapped.push(GM.principalKey(e)); return e;
+  });
+  return { ok: true, to, except: cur.except, mapped, unmapped };
+}
 /** THE CARRY of data/vault-run.json's «always» rows (each `{conv, key: <shape key>, until, entries}` — a command SHAPE a
  *  conversation was let run without asking) into members: per entry of the row, the conversation × the shape key's HOSTS
  *  (src/vault-run.js shapeKeyOf: `<v>:[tool, sub, flags, args, hosts, …]`) × the row's end. An expired row, or one whose
@@ -256,13 +350,21 @@ function alwaysCarry(always, { now = 0, resourceOf = (id) => id, toolOfWild = nu
 }
 
 // ── WHAT A PAGE SEES (the Vault window's «谁可以用» chips) ──
-/** A row's members as the window draws them: [{id, kind, key|id, name, hosts (declared), until, expired}] + except. */
+/** A row's members as the window draws them: [{id, kind, key|id, name, scopes: [{kind, host | command, until, expired, tool,
+ *  legacy, source, at}] (r4: EACH scope with its own end — the chip says each), and the derived views: hosts, commands,
+ *  toolFor (all scopes), legacy (its wildcard scopes with no tool), until (until when any scope is usable — null when one has
+ *  no end), expired (no scope is), source + at (the latest writer)}] + except. */
 function publicGrants(row, { now = 0 } = {}) {
   const p = row ? GM.publicRow(row) : null;
   if (!p) return { to: [], except: [] };
   if (p.unknown) return { unknown: true, why: p.why, to: [], except: [] };
   return {
-    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), commands: Array.isArray(e.commands) ? e.commands.slice() : [], source: e.source || null, at: Number(e.at) > 0 ? Number(e.at) : null, tool: e.tool || null, toolFor: e.toolFor || null, legacy: legacyWildOf(e), until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),   // r3: `legacy` — its wildcard hosts with no tool (any tool)
+    to: (p.to || []).map((e) => {
+      const all = scopesOf(e), ls = all.filter((s) => liveScope(s, now)), last = latestOf(all);
+      const { scopes: _s, hosts: _h, commands: _c, toolFor: _t, tool: _tl, until: _u, source: _src, at: _at, ...rest } = e;
+      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length,
+        scopes: all.map((s) => ({ kind: s.kind, ...(s.kind === 'host' ? { host: s.host } : { command: s.command }), until: s.until, expired: !liveScope(s, now), tool: s.tool, legacy: s.kind === 'host' && isWild(s.host) && !s.tool, source: s.source, at: s.at })) };   // r3: `legacy` — its wildcard hosts with no tool (any tool)
+    }),
     except: p.except || [],
   };
 }
@@ -287,4 +389,4 @@ function standingLines(verdicts, { always = false } = {}) {
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const commandWords = (c) => (c && c.program ? [baseOf(c.program), ...(Array.isArray(c.pre) ? c.pre : []), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');   // r2: + the options it pins before the script
 
-module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines };
+module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines, scopesOf, scopedMember, scopedRowOf, canonOf, spanOf };

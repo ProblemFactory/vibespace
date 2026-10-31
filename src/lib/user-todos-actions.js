@@ -435,7 +435,7 @@ export function inboxModel(app) {
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
-        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
+        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : code === 'ask_redrawn' ? t('What this card writes changed since you saw it — read it again and answer again') : (r && r.error) || t('server unreachable'), { type: 'error' });   // lane vault-standing-request r4 (B): the card is drawn again in place
       return false;
     }
     if (rec && rec.action && rec.action.type === 'vault-grant-ask') {
@@ -449,7 +449,7 @@ export function inboxModel(app) {
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
-        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
+        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : code === 'ask_redrawn' ? t('What this card writes changed since you saw it — read it again and answer again') : (r && r.error) || t('server unreachable'), { type: 'error' });   // r4 (B)
       return false;
     }
     if (rec && rec.action && rec.action.type === 'secret-request') {

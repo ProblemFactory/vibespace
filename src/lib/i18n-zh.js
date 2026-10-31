@@ -11630,9 +11630,16 @@ export default {
   "(via {tool})": "（经由 {tool}）", // lane vault-standing-request r2
   "{who} asks for a standing grant on “{secret}”": "{who} 请求常驻使用「{secret}」", // lane vault-standing-request r2
   "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace 看不到它把密钥发往哪里——「允许」表示你信任这条命令本身；换了程序或脚本会再问。", // lane vault-standing-request r2
-  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names.": "这会替换这个对话在它上面已有的限时授权（{scope}，到 {when}）：你允许后那个授权就结束，新的授权只包括这张卡片写明的内容。", // lane vault-standing-request r3b
-  "«Always» replaces the grant with no end this conversation holds on it ({scope}): that grant ends, and the new one holds only this run's hosts, for {days} days.": "「总是」会替换这个对话在它上面没有期限的授权（{scope}）：那个授权结束，新的授权只包括这次运行的主机，为期 {days} 天。", // lane vault-standing-request r3b
-  "This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.": "这会替换这个对话在它上面已经结束的授权（{scope}，结束于 {when}）：它保持结束，新的授权只包括这张卡片写明的内容。", // lane vault-standing-request r3
+  "This conversation holds {scope} until {when} — this replaces that grant: {scope} is then held {end}.": "这个对话持有 {scope}，到 {when} — 这会替换那个授权：之后 {scope} {end}。", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "This conversation holds {scope} with no end — this replaces that grant: {scope} is then held {end}.": "这个对话持有 {scope}，不设期限 — 这会替换那个授权：之后 {scope} {end}。", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "This conversation's grant for {scope} ended {when} — it stays ended; this grants {scope} anew, {end}.": "这个对话对 {scope} 的授权已于 {when} 结束 — 它保持结束；这次重新授权 {scope}，{end}。", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "On «{entry}»: {line}": "在「{entry}」上：{line}", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "for {n} days": "为期 {n} 天", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "for {n} hours": "为期 {n} 小时", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "with no end": "不设期限", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "no end": "无限期", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "ended {when}": "已于 {when} 结束", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "What this card writes changed since you saw it — read it again and answer again": "这张卡片要写入的内容在你看到之后变了 — 请重新阅读后再回答", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
   "{hostword} (via {tool})": "{hostword}（经由 {tool}）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
   "{hostword} (legacy wildcard: any tool)": "{hostword}（旧版通配：任何工具）", // lane vault-standing-request r3
   "Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.": "从旧版本带过来的：这个通配主机对任何程序都开放。收回它（✕），在它的工具下一次运行时按「总是」——新的授权会写明它的工具。", // lane vault-standing-request r3

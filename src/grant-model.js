@@ -106,7 +106,7 @@ const ENTRY_FIELDS = Object.freeze({
   'channel-api': Object.freeze({ tier: Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']), perDay: 'count' }),
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
-  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac', commands: 'commands', source: Object.freeze(['owner', 'request', 'card']) }),   // lane vault-standing-request: `commands` = the COMMAND SHAPES a member may run (a program whose destination the hub cannot read — the owner trusts the command itself), `source` = who wrote the member last (the owner's row, an agent's standing request he allowed, a card's «Always»)   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
+  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac', commands: 'commands', source: Object.freeze(['owner', 'request', 'card']), scopes: 'scopes' }),   // lane vault-standing-request r4 (THE ROOT MODEL): `scopes` = the member's SCOPES, each with ITS OWN end / tool / writer (scopeListOf) — a member is ONE shape: `scopes`, or the one-end fields before it (read as each scope with the member's end)   // lane vault-standing-request: `commands` = the COMMAND SHAPES a member may run (a program whose destination the hub cannot read — the owner trusts the command itself), `source` = who wrote the member last (the owner's row, an agent's standing request he allowed, a card's «Always»)   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
   'vault-job': Object.freeze({ jobs: 'jobs' }),   // lane vault-job-road: the job ids the member's approval names (src/vault-job.js approvedBy)
 });
 /** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
@@ -178,6 +178,43 @@ function commandListOf(v) {
   for (const x of v) { const c = commandTokenOk(x); if (!c) return null; const k = commandKeyOf(c); if (!seen.has(k)) { seen.add(k); out.push(c); } }
   return out;
 }
+/** lane vault-standing-request r4 (THE ROOT MODEL — 主开发: «a member's scopes carry THEIR OWN ENDS … never one end per
+ *  member»): a vault-use member's `scopes` → its normal list | null. Each scope is a HOST `{host, until?, tool?, source?, at?}`
+ *  (a host token as `hosts` takes it; `tool` the CLI a wildcard is scoped to) or a COMMAND `{command: <token>, until?,
+ *  source?, at?}` (a token as `commands` takes it) — closed keys, `until` an instant in ms (none = no end), `source` who wrote
+ *  that scope ('owner' | 'request' | 'card'), `at` when. ≤ HOSTS_MAX host scopes and ≤ COMMANDS_MAX command scopes, never
+ *  none; a host or a command named twice is refused (a scope has ONE end — never two read as one). */
+const SCOPE_SOURCES = Object.freeze(['owner', 'request', 'card']);
+const TOOL_RE = /^[a-z0-9][a-z0-9.+-]{0,39}$/;
+function scopeListOf(v) {
+  if (!Array.isArray(v) || !v.length || v.length > HOSTS_MAX + COMMANDS_MAX) return null;
+  const out = [], hostsSeen = new Set(), cmdsSeen = new Set();
+  for (const s of v) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    const isHost = s.host !== undefined, isCmd = s.command !== undefined;
+    if (isHost === isCmd) return null;
+    if (Object.keys(s).some((k) => !(isHost ? ['host', 'until', 'tool', 'source', 'at'] : ['command', 'until', 'source', 'at']).includes(k))) return null;
+    const o = {};
+    if (isHost) {
+      const h = hostTokenOk(String(s.host == null ? '' : s.host).trim().toLowerCase());
+      if (!h || hostsSeen.has(h)) return null;
+      hostsSeen.add(h); o.host = h;
+      if (s.tool != null) { const t = String(s.tool).toLowerCase(); if (!TOOL_RE.test(t) || h === '@entry') return null; o.tool = t; }
+    } else {
+      const c = commandTokenOk(s.command);
+      if (!c) return null;
+      const k = commandKeyOf(c);
+      if (cmdsSeen.has(k)) return null;
+      cmdsSeen.add(k); o.command = c;
+    }
+    if (s.until != null) { const n = Math.floor(Number(s.until)); if (!(n > 0) || n > 8.64e15) return null; o.until = n; }
+    if (s.source != null) { if (!SCOPE_SOURCES.includes(s.source)) return null; o.source = s.source; }
+    if (s.at != null) { const n = Math.floor(Number(s.at)); if (!(n > 0) || n > 8.64e15) return null; o.at = n; }
+    out.push(o);
+  }
+  if (hostsSeen.size > HOSTS_MAX || cmdsSeen.size > COMMANDS_MAX) return null;
+  return out;
+}
 /** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |
  *  null when it is not a non-empty list of host tokens (the entry is then refused at a write, dropped at a read). */
 function hostListOf(v) {
@@ -227,6 +264,7 @@ function normEntry(e, door) {
     if (allowed === 'jobs') { const v = e[f]; if (!Array.isArray(v) || !v.length || v.length > JOBS_MAX || !v.every((x) => JOB_ID_RE.test(String(x)))) return null; out[f] = [...new Set(v.map(String))]; continue; }   // lane vault-job-road
     if (allowed === 'hosts') { const h = hostListOf(e[f]); if (!h) return null; out[f] = h; continue; }   // lane vault-use-grants
     if (allowed === 'commands') { const c = commandListOf(e[f]); if (!c) return null; out[f] = c; continue; }   // lane vault-standing-request
+    if (allowed === 'scopes') { const s = scopeListOf(e[f]); if (!s) return null; out[f] = s; continue; }   // lane vault-standing-request r4: per-scope ends
     if (allowed === 'tool') { const t = String(e[f]).toLowerCase(); if (!/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(t)) return null; out[f] = t; continue; }   // lane vault-use-grants round 3: the CLI a wildcard default is granted to
     if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
     if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
@@ -234,6 +272,9 @@ function normEntry(e, door) {
     if (!allowed.includes(e[f])) return null;
     out[f] = e[f];
   }
+  // lane vault-standing-request r4: a vault-use member is ONE shape — `scopes` (each its own end), or the one-end fields it
+  // replaces. Both at once is refused at a write and dropped at a read (never one read as the other: narrowing, never wider)
+  if (door === 'vault-use' && out.scopes && ['hosts', 'commands', 'until', 'tool', 'toolFor', 'source'].some((f) => out[f] !== undefined)) return null;
   return out;
 }
 /** An `except` entry: a conversation or a Task Group — never everyone, never annotated beyond a display name. */
@@ -732,7 +773,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
-  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf,
+  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,

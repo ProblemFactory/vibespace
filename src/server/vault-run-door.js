@@ -191,7 +191,7 @@ const STATUS = Object.freeze({
   env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
-  ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
+  ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
@@ -913,13 +913,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
       const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
       const pv = (owns(ref) && row.provenance) || {};
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
 
   // ── THE CARD (exit-proxy's ask: one per conversation × shape, 60 s, the item and the ask ONE state) ──
   const pairOf = (conv, key) => `${conv}\n${key}`;
+  /** r4: a held member's LIVE scopes as the CLI says them — each with its own end (`vibespace-vault list` / `uses`). */
+  const scopesWordsOf = (list) => (Array.isArray(list) ? list : []).map((s) => ({ kind: s.kind, scope: s.kind === 'host' ? s.host : VUG.commandWords(s.command), until: Number(s.until) > 0 ? new Date(Number(s.until)).toISOString() : null }));
   /** `fact` (lane wake-approve-card r3): the PERSON's mark — the answer came through THE person verdict (src/routes/vault.js
    *  `person`), so the item's record says «allowed by you · 09:41» (resolvedFact {decidedBy: 'person', decidedAt}). */
   function settle(q, outcome, why = outcome, fact = null) {
@@ -947,27 +949,35 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
     const d0 = load();
     const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
-    const rowSnap = new Map();   // entry id → its whole prior row { to, except } (the members the act may widen or add)
-    for (const id of ids) { try { const p = useGrants.publicFor(id); rowSnap.set(id, { to: (p && p.to) || [], except: (p && p.except) || [] }); } catch { rowSnap.set(id, { to: [], except: [] }); } }
-    const touched = [], made = []; let failCode = null;
+    // r4 (C — the acceptance P4: the restore went through setRow, judged against the row the partial write had left, so a
+    // replaced legacy wildcard could not be put back and its {ok:false} was never read — a REFUSED press left a no-end grant
+    // written): each entry's row AS IT IS (useGrants.snapshotRow — its verified members, its exceptions), put back RAW on a
+    // partial failure (restoreRow: no row rules — it restores what WAS); every restore's answer read, one that fails stops the
+    // press BY NAME (`restore_failed`), never a silent half-write
+    const rowSnap = new Map();
+    for (const id of ids) { let s = null; try { s = useGrants.snapshotRow(id); } catch { s = null; } if (!s || !s.ok) return { ok: false, code: (s && s.code) || 'failed' }; rowSnap.set(id, s); }
+    const touched = [], made = [], changes = []; let failCode = null;
     for (const id of ids) {
       touched.push(id);
       const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
       if (!sr.ok) { failCode = sr.code; break; }
       const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
       if (!w.ok) { failCode = w.code; break; }
-      made.push(w.grant);
+      made.push(w.grant); changes.push({ id, ...(w.changes || {}) });
       resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
     }
     if (failCode) {
-      for (const id of touched) { const s = rowSnap.get(id); if (s && rawSetRow) { try { rawSetRow(id, { to: s.to, except: s.except }, { by: String(by).slice(0, 40), reauthed: true }); } catch { } } }   // every row back to its prior members — a narrowing, so it never needs 验证是你; the raw writer, so the restore does not RESUME
-      try { save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch { }   // every switch + every press marker back to its prior state
+      const failed = [];
+      for (const id of touched) { let r = null; try { r = useGrants.restoreRow(id, rowSnap.get(id), { by: String(by).slice(0, 40) }); } catch (e) { r = { ok: false, code: 'not_written', error: e.message }; } if (!r || !r.ok) failed.push({ entry: id, code: (r && r.code) || 'not_written' }); }   // every row back to what it WAS, raw (never resumes a member)
+      let sw = null; try { sw = save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch (e) { sw = { ok: false, code: 'not_written' }; }   // every switch + every press marker back to its prior state
+      if (!sw || !sw.ok) failed.push({ entry: 'switches', code: (sw && sw.code) || 'not_written' });
       try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
+      if (failed.length) { log(`[vault-run] a press failed (${failCode}) and ${failed.length} of what it wrote could not be put back: ${failed.map((f) => `${f.entry}: ${f.code}`).join(', ')}`); audit('vault-restore-failed', { by: String(by).slice(0, 40), cause: failCode, failed }); return { ok: false, code: 'restore_failed', cause: failCode, failed }; }
       return { ok: false, code: failCode };
     }
-    return { ok: true, grants: made };
+    return { ok: true, grants: made, changes };
   }
-  function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null, command = null }) {
+  function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null, command = null, plan = null }) {
     const pair = pairOf(caller.conversationId, key);
     if (byPair.has(pair) && asks.has(byPair.get(pair))) return Promise.resolve({ outcome: 'pending', askId: byPair.get(pair) });
     if (signal && signal.aborted) return Promise.resolve({ outcome: 'gone', askId: null });
@@ -977,7 +987,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const tpls = (run.files || []).filter((f) => f.template != null && typeof f.text === 'string');   // round 17 (item 1): the template(s) the card renders IN FULL — their hash + byte count ride the «always» row for lane vault-use-grants (matching stays byte-exact via the shape key, which carries the template text)
       const templateHash = tpls.length ? crypto.createHash('sha256').update(JSON.stringify(tpls.map((f) => [f.name, f.text]))).digest('hex') : null;
       const templateBytes = tpls.length ? tpls.reduce((n, f) => n + Buffer.byteLength(f.text, 'utf8'), 0) : null;
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, exactKey, exactParts, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes, hosts: VR.destinationsOf(shape).hosts.slice(), tool: shape.name || null, command: command || null };   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS — round 2 BLOCKER); tool: round 3 (item 5) scopes a wildcard default to its CLI
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, exactKey, exactParts, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes, hosts: VR.destinationsOf(shape).hosts.slice(), tool: shape.name || null, command: command || null, plan, facts };   // r4 (B): `plan` = the card's words around its change lines + their signature (the press compares), `facts` what it drew   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS — round 2 BLOCKER); tool: round 3 (item 5) scopes a wildcard default to its CLI
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -1033,11 +1043,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // round 7/9 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries — judged first, snapshot, restore on a
       // partial failure (standOpen). lane vault-standing-request: «Always (this command)» writes the COMMAND SHAPE (no host can
       // be read) with no end; either way the member says it came from a card.
-      const so = standOpen(q.entries, { kind: 'conversation', key: q.conv, name: q.who }, byCommand ? { commands: [q.command], until: null, source: 'card' } : { hosts: q.hosts, until, tool: q.tool, source: 'card' }, by);   // r3/r3b: a member whose end is not this one's is REPLACED (the card said so)
+      const write = byCommand ? { commands: [q.command], until: null, source: 'card' } : { hosts: q.hosts, until, tool: q.tool, source: 'card' };
+      // r4 (B — the acceptance P1: two live cards drawn while nothing was held, both «Always» ⇒ the second replaced the first
+      // unnamed): THE CARD SAYS WHAT THE ROW WILL BE, AT THE PRESS — this very write's change NOW (every entry) against the words
+      // the card was drawn with; another ⇒ nothing is written, the card is drawn again and the owner answers again
+      if (q.plan) { const nowChanges = changesOf(q.conv, q.entries, write); if (changeSigOf(nowChanges) !== q.plan.sig) return redrawRun(q, nowChanges, byCommand ? null : ms == null ? null : ms); }
+      const so = standOpen(q.entries, { kind: 'conversation', key: q.conv, name: q.who }, write, by);   // r4: each scope it names is added, or replaced when held with another end / ended (the card said so) — no other scope moves
       if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
-      if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code }; }
+      if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       const madeGrants = so.grants;
-      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl: byCommand ? 'forever' : ttl, until, grants: madeGrants, ...(byCommand ? { command: VUG.commandWords(q.command) } : { hosts: q.hosts }) });
+      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl: byCommand ? 'forever' : ttl, until, grants: madeGrants, ...(byCommand ? { command: VUG.commandWords(q.command) } : { hosts: q.hosts }), changes: auditChangesOf(so.changes) });   // r4 (D): what it added, replaced and ended
     } else if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
       // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
@@ -1279,32 +1294,85 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  back. Deny quiets the same ask 10 minutes; the same (conversation, entry, scope) is asked once while open.
    *  → Promise<{ ok, askId } | { ok, already: 'standing' } | a named refusal>. */
   const splitCommand = (s) => { const out = []; let cur = '', q = null, any = false; for (const ch of String(s)) { if (q) { if (ch === q) q = null; else cur += ch; continue; } if (ch === '"' || ch === "'") { q = ch; any = true; continue; } if (ch === '\\') return null; if (/\s/.test(ch)) { if (cur || any) out.push(cur); cur = ''; any = false; continue; } cur += ch; } if (q) return null; if (cur || any) out.push(cur); return out; };
-  // r2 (JUDGE 4 — reproduced: probe P2): ONE member keeps ONE end, and a standing grant has none. r3 (MAJOR 2 — the acceptance:
-  // an EXPIRED 8-hour member came back permanent, its hosts included, and neither card said so): a standing write NEVER widens —
-  // it REPLACES this conversation's member that has an end (vault-use-grant withMember `standing`: the new member holds only the
-  // asked scope; a live one ends, an expired one stays ended), and both cards say what it replaces, ONLY when it replaces.
-  // → { until, words, expired } | null (no member with an end). r3b: `any` — a member with NO end too (until null): a card's
-  // timed «Always» replaces it, its «No end» adds to it (the hosts card says both).
-  function endedOf(conv, ids, { any = false } = {}) {
-    if (!useGrants || !conv) return null;
-    const key = GM.principalKey({ kind: 'conversation', key: String(conv) });
-    let best = null;
-    const rank = (x) => (x.until == null ? Infinity : x.until);
+  // r4 (THE ROOT MODEL, B — 主开发: «THE CARD SAYS WHAT THE ROW WILL BE, AT THE PRESS»; the r3 acceptance: the replace words
+  // were computed when the card was FILED while the write decided at the PRESS, so a grant written between the two was replaced
+  // unnamed — P1, P2 — and a run over several entries named ONE replaced grant — P3). A write touches only the scopes it names
+  // (vault-use-grant withMember), so all a card must say about this conversation's grants is a scope of ITS OWN that the write
+  // REPLACES (held with another end, or ended). `changesOf` asks the ONE writer what the write WOULD change on EVERY entry
+  // (judgeMember: nothing written); the card draws its words from it and keeps their signature; the press asks again with the
+  // very write it makes — another signature ⇒ nothing is written, the card is drawn again with the words of now (redrawRun /
+  // redrawRequest: `ask_redrawn`) and the owner answers again (what you approve is what runs).
+  // → [{id, kind, key, scope, was, expired}] (one per replaced scope, every entry).
+  function changesOf(conv, ids, write) {
+    if (!useGrants || !conv || !write) return [];
+    const principal = { kind: 'conversation', key: String(conv) };
+    const out = [];
     for (const id of ids) {
-      try {
-        const m = ((useGrants.publicFor(id) || {}).to || []).find((x) => x && x.principal === key && (any || Number(x.until) > 0));
-        const words = m && [...(m.hosts || []), ...(m.commands || []).map((c) => VUG.commandWords(c))].join(', ');
-        const r = m && { until: Number(m.until) > 0 ? Number(m.until) : null, words: words || '-', expired: Number(m.until) > 0 && Number(m.until) <= now() };
-        if (r && (!best || rank(r) < rank(best))) best = r;
-      } catch { /* unreadable: no member to name */ }
+      let j = null;
+      try { j = useGrants.judgeMember(id, principal, write); } catch { j = null; }
+      if (!j || !j.ok || !j.changes) continue;   // a write the writer refuses: the press meets the same refusal by name
+      for (const r of j.changes.replaced || []) out.push({ id, kind: r.kind, key: r.key, scope: r.kind === 'host' ? r.host : VUG.commandWords(r.command), was: r.was == null ? null : r.was, expired: !!r.expired });
     }
-    return best;
+    return out.sort((x, y) => (`${x.id}\n${x.key}` < `${y.id}\n${y.key}` ? -1 : 1));
   }
-  const REPLACES_LINE = 'This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names.';
-  const REPLACES_ENDED_LINE = 'This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.';
-  const REPLACES_STANDING_LINE = '«Always» replaces the grant with no end this conversation holds on it ({scope}): that grant ends, and the new one holds only this run\'s hosts, for {days} days.';
-  const ALWAYS_DAYS = Math.round((VR.ALWAYS_TTLS[VR.ALWAYS_DEFAULT] || 30 * 86400e3) / 86400e3);   // the card's «Always» = its default TTL (30 days)
-  const replacesLine = (r) => (r.until == null ? { key: REPLACES_STANDING_LINE, params: { scope: r.words, days: ALWAYS_DAYS } } : { key: r.expired ? REPLACES_ENDED_LINE : REPLACES_LINE, params: { scope: r.words, when: new Date(r.until).toISOString() } });
+  const changeSigOf = (list) => JSON.stringify((list || []).map((c) => [c.id, c.kind, c.key, c.was, !!c.expired]));
+  /** r4 (D): the audit line's record of what a write DID (standOpen's per-entry `changes` from the ONE writer): per entry, the
+   *  scopes it added (+ their end), replaced (+ the old end, the new end, whether the old one had ended) and pruned — scope
+   *  words, never a value. */
+  const scopeWordOf = (s) => (s.kind === 'host' ? s.host : VUG.commandWords(s.command));
+  const isoOrNull = (t) => (Number(t) > 0 ? new Date(Number(t)).toISOString() : null);
+  const auditChangesOf = (list) => (Array.isArray(list) ? list : []).map((c) => ({ entry: c.id, added: (c.added || []).map((s) => ({ scope: scopeWordOf(s), until: isoOrNull(s.until) })), replaced: (c.replaced || []).map((s) => ({ scope: scopeWordOf(s), was: isoOrNull(s.was), until: isoOrNull(s.until), ...(s.expired ? { ended: true } : {}) })), ...(c.pruned && c.pruned.length ? { pruned: c.pruned.map((s) => ({ scope: scopeWordOf(s), was: isoOrNull(s.was) })) } : {}) }));
+  const REPLACES_LINE = 'This conversation holds {scope} until {when} — this replaces that grant: {scope} is then held {end}.';
+  const REPLACES_NOEND_LINE = 'This conversation holds {scope} with no end — this replaces that grant: {scope} is then held {end}.';
+  const REPLACES_ENDED_LINE = 'This conversation\'s grant for {scope} ended {when} — it stays ended; this grants {scope} anew, {end}.';
+  const ON_ENTRY_LINE = 'On «{entry}»: {line}';
+  const END_DAYS = 'for {n} days', END_HOURS = 'for {n} hours', END_NONE = 'with no end';
+  const endLineOf = (ms) => (ms == null ? { key: END_NONE } : ms % 86400e3 === 0 ? { key: END_DAYS, params: { n: ms / 86400e3 } } : { key: END_HOURS, params: { n: Math.round(ms / 3600e3) } });
+  const entryNameOf = (id) => { try { const ref = VI.parseRef(id), row = ref && rowOf(ref); return String((row && row.label) || (ref && ref.entry) || id).slice(0, 120); } catch { return String(id); } };
+  /** THE CARD'S LINES of `list` (changesOf) for a write whose end is `ms` (null = none): one per replaced scope, «On «entry»:»
+   *  before each when the card names several entries. → [{key, params}] */
+  function changeLines(list, ms, { many = false } = {}) {
+    const end = fill(endLineOf(ms));
+    return (list || []).map((c) => {
+      const l = c.expired ? { key: REPLACES_ENDED_LINE, params: { scope: c.scope, when: new Date(c.was).toISOString(), end } } : c.was == null ? { key: REPLACES_NOEND_LINE, params: { scope: c.scope, end } } : { key: REPLACES_LINE, params: { scope: c.scope, when: new Date(c.was).toISOString(), end } };
+      return many ? { key: ON_ENTRY_LINE, params: { entry: entryNameOf(c.id), line: fill(l) } } : l;
+    });
+  }
+  /** The same changes as the card's FACTS (foryou-actions words them in the viewer's language). */
+  const changeFactsOf = (list, ms, { many = false } = {}) => (list || []).map((c) => ({ scope: c.scope, kind: c.kind, until: c.was, ...(c.expired ? { expired: true } : {}), ...(many ? { entry: entryNameOf(c.id) } : {}), end: ms == null ? { none: true } : ms % 86400e3 === 0 ? { days: ms / 86400e3 } : { hours: Math.round(ms / 3600e3) } }));
+  /** r4 (B): the run card re-drawn in place with the words of NOW — its detail (the head and tail it was drawn with, the change
+   *  lines between) and its facts, on the open item and the ask alike (THE BELT then reads the same text). → the press's answer. */
+  function redrawRun(q, list, ms) {
+    const lines = changeLines(list, ms, { many: q.plan.many }).map(fill);
+    const detail = [...q.plan.head, ...lines, ...q.plan.tail].join('\n');
+    if (detail.length > DETAIL_MAX) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+    const facts = q.facts ? JSON.parse(JSON.stringify(q.facts)) : null;
+    if (facts && facts.always) {
+      const cf = changeFactsOf(list, ms, { many: q.plan.many });
+      const at = q.command && !q.always ? facts.always.command : facts.always;
+      if (at && typeof at === 'object') { if (cf.length) at.changes = cf; else delete at.changes; }
+    }
+    if (q.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
+      try { userTodos.reshapeItems((it) => { if (it.id !== q.todoId || it.status !== 'open' || !it.action || it.action.type !== ACTION_TYPE || it.action.askId !== q.askId) return false; it.detail = detail; if (facts) it.facts = facts; delete it.judged; return true; }); } catch { }
+    }
+    q.detail = detail; q.facts = facts; q.plan.sig = changeSigOf(list);
+    log(`${q.who}: the run card for \`${q.head}\` was drawn again — what its «Always» writes changed since it was shown`);
+    return { ok: false, code: 'ask_redrawn' };
+  }
+  /** r4 (B): a standing request's card re-drawn in place the same way (its lines, its i18n lines, its facts). */
+  function redrawRequest(q, list) {
+    q.changes = list;
+    const lines = standingWords(q);
+    const detail = lines.map(fill).join('\n');
+    if (detail.length > DETAIL_MAX) { settleRequest(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+    const facts = standingFactsOf(q);
+    if (q.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
+      try { userTodos.reshapeItems((it) => { if (it.id !== q.todoId || it.status !== 'open' || !it.action || it.action.type !== REQUEST_TYPE || it.action.askId !== q.askId) return false; it.detail = detail; it.i18n = { ...(it.i18n || {}), detail: lines }; it.facts = facts; delete it.judged; return true; }); } catch { }
+    }
+    q.detail = detail; q.changeSig = changeSigOf(list);
+    log(`${q.who}: the standing request card for ${q.ref} was drawn again — what its Allow writes changed since it was shown`);
+    return { ok: false, code: 'ask_redrawn' };
+  }
   const STANDING_SWITCH_LINE = 'Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.';
   const hostWord = (h, tool) => (String(h).startsWith('*.') && tool ? `${h} (via ${tool})` : h);
   const standingWords = (r) => [
@@ -1312,7 +1380,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
     ...(r.hosts.length ? [{ key: 'For commands to {hosts} — the hosts a command may connect to.', params: { hosts: r.hosts.map((h) => hostWord(h, r.tool)).join(', ') } }] : []),
     ...(r.command ? [{ key: 'For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.', params: { command: r.commandWords } }, { key: 'It runs: {program} {arg}', params: { program: [r.command.program, ...(r.command.pre || [])].join(' '), arg: r.command.arg == null ? '' : r.command.arg } }] : []),   // the real paths on their own line (a path the card links never runs into a sentence)
-    ...(r.replaces ? [replacesLine(r.replaces)] : []),   // r2 (JUDGE 4): never a silent extension; r3 (MAJOR 2): a replacement, said only when it replaces
+    ...changeLines(r.changes || [], null),   // r4 (B): a scope of its own this Allow REPLACES (held with an end, or ended) — said, and compared again at the press
     ...(r.switchOn ? [{ key: STANDING_SWITCH_LINE }] : []),   // r2 (MINOR 5): the Allow flips a closed entry's switch — the card says so, as the run card's «Always» does
     { key: 'Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.' },
   ];
@@ -1324,7 +1392,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     v: 1, kind: 'standing', who: r.who, secret: r.label, purpose: r.purpose, ref: r.ref,
     hosts: r.hosts.map((h) => ({ host: h, ...(String(h).startsWith('*.') && r.tool ? { tool: r.tool } : {}) })),
     command: r.command ? { words: r.commandWords, program: r.command.program, pre: (r.command.pre || []).slice(), script: r.command.arg } : null,
-    switchOn: !!r.switchOn, replaces: r.replaces ? { until: r.replaces.until, scope: r.replaces.words, ...(r.replaces.expired ? { expired: true } : {}) } : null,
+    switchOn: !!r.switchOn, changes: changeFactsOf(r.changes || [], null),   // r4 (B): one per scope this Allow replaces
   });
   /** r2 (MAJOR 2): why a --command is not pinned, in words the agent can act on (VR.pinOf's `why`). */
   const pinWords = (name, p) => (p.why === 'inline' ? `«${p.word}» carries inline code or names a module — inline code / module runs cannot be pinned to a shape: write the code to a file and run that (--command "${name} <that file>")`
@@ -1390,7 +1458,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const d0 = load();
       const h = useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] }).find((x) => x.id === ref.id);
       const covers = h && gh.every((x) => (h.hosts || []).includes(x) && (!String(x).startsWith('*.') || ((h.toolFor || {})[x] || null) === tl)) && (!token || (h.commands || []).some((c) => GM.commandKeyOf(c) === GM.commandKeyOf(token)));
-      if (covers && d0 && memberUsable(d0, ref.id, h.grant)) return h.until ? { ok: true, already: 'timed', ref: ref.ref, grant: h.grant, until: new Date(h.until).toISOString() } : { ok: true, already: 'standing', ref: ref.ref, grant: h.grant };
+      const ends = covers ? [...gh.map((x) => (h.scopes || []).find((s) => s.kind === 'host' && s.host === x)), ...(token ? [(h.scopes || []).find((s) => s.kind === 'command' && s.key === GM.commandKeyOf(token))] : [])].filter(Boolean).map((s) => s.until).filter((u) => u != null) : [];   // r4: the asked scopes' OWN ends
+      if (covers && d0 && memberUsable(d0, ref.id, h.grant)) return ends.length ? { ok: true, already: 'timed', ref: ref.ref, grant: h.grant, until: new Date(Math.min(...ends)).toISOString() } : { ok: true, already: 'standing', ref: ref.ref, grant: h.grant };
     } catch { /* unreadable: ask */ }
     const up = reqByPair.get(pair);
     if (up && requests.has(up)) return named('request_pending', { ref: ref.ref });
@@ -1402,7 +1471,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const askId = randomBytes(16).toString('hex');
     const d1 = load();
     const q = { askId, pair, quietPair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null, standing: true, hosts: gh, tool: tl, command: token, commandWords: typed,
-      replaces: endedOf(caller.conversationId, [ref.id]), switchOn: !(d1 && !d1.refused && d1.runnable.has(ref.id)) };
+      changes: changesOf(caller.conversationId, [ref.id], grant), switchOn: !(d1 && !d1.refused && d1.runnable.has(ref.id)) };
+    q.changeSig = changeSigOf(q.changes);   // r4 (B): what the card said it writes — the press compares the words of then with these
     const lines = standingWords(q);
     q.detail = lines.map(fill).join('\n');
     if (q.detail.length > DETAIL_MAX) return named('card_too_long');
@@ -1455,10 +1525,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (q.standing) {
       // lane vault-standing-request: THE OWNER'S ROW — the very vault-use member «谁可以用…» writes (this conversation × the hosts /
       // the command shape, no end, source 'request'), the switch opened in the same act (a press: only this member resumed)
-      const so = standOpen([q.id], { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, commands: q.command ? [q.command] : null, until: null, tool: q.tool || null, source: 'request' }, said.by);   // r2: a wildcard carries its tool (the row rules judged it before the card); r3: it replaces a member with an end (the card said so)
+      const grant = { hosts: q.hosts, commands: q.command ? [q.command] : null, until: null, tool: q.tool || null, source: 'request' };   // r2: a wildcard carries its tool (the row rules judged it before the card)
+      // r4 (B — the acceptance P2: a standing card filed while nothing was held, a 30-day «Always» landed, the Allow then dropped
+      // it unnamed): THE CARD SAYS WHAT THE ROW WILL BE, AT THE PRESS — the change this very write makes NOW against the words
+      // the card was drawn with; another ⇒ nothing is written, the card is drawn again with the words of now
+      const nowChanges = changesOf(q.conv, [q.id], grant);
+      if (changeSigOf(nowChanges) !== q.changeSig) return redrawRequest(q, nowChanges);
+      const so = standOpen([q.id], { kind: 'conversation', key: q.conv, name: q.who }, grant, said.by);
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
-      if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code }; }
-      audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), ...(q.replaces ? { replaced: { scope: q.replaces.words, until: q.replaces.until, expired: !!q.replaces.expired } } : {}) });
+      if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
+      audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
     }
@@ -1499,7 +1575,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const uf = useFacts(caller) || {}, d = load();
       const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
       return useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] })
-        .map((h) => ({ entry: refOfId(h.id), grant: h.grant, hosts: h.hosts || [], commands: (h.commands || []).map((c) => VUG.commandWords(c)), source: h.source || null, since: h.at ? new Date(h.at).toISOString() : null, until: h.until ? new Date(h.until).toISOString() : null, paused: !(d && memberUsable(d, h.id, h.grant)) }))
+        .map((h) => ({ entry: refOfId(h.id), grant: h.grant, hosts: h.hosts || [], commands: (h.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(h.scopes), source: h.source || null, since: h.at ? new Date(h.at).toISOString() : null, until: h.until ? new Date(h.until).toISOString() : null, paused: !(d && memberUsable(d, h.id, h.grant)) }))
         .filter((x) => x.entry);
     } catch { return []; }
   }
@@ -1884,16 +1960,21 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // round 18/19 (item 2 + item 5): a template over the card render bound ⇒ card_too_long — but ONLY here, where a card is DRAWN (an owner entry needing approval). An own-entry run or a remembered pass returned verdict.ok above and never reached this bound (base ran an own 7 KB body by:own; daade1a7 refused it with words about an approval that never happens on that road).
         if (shape.cardTooLong) { const c = shape.cardTooLong; return named('card_too_long', { template: c.name, words: `this run needs your approval, and the template ${c.name} (@${c.template}) is ${c.bytes} bytes — longer than ${VR.TEMPLATE_CARD_MAX} bytes, so the card cannot show it in full and you would be approving a run you cannot read; shorten the template (or pass its bytes a smaller way) — nothing ran` }); }
         if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
-        const timed = cmdToken && !shape.always ? endedOf(caller.conversationId, spec.refs.map((r) => r.id)) : null;   // r2 (JUDGE 4) / r3 (MAJOR 2): «Always (this command)» REPLACES a member with an end — the card says so
-        const heldA = useGrants && shape.always ? endedOf(caller.conversationId, spec.refs.map((r) => r.id), { any: true }) : null;   // r3b: the hosts «Always» REPLACES a live member with an end (or, timed, one with none) — the card says so
-        const shown = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : []), ...(timed ? [fill(replacesLine(timed))] : []), ...(heldA ? [fill(replacesLine(heldA))] : []), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes].join('\n');   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)
+        // r4 (B): what this card's «Always» WOULD change of this conversation's own scopes, on EVERY entry (the run card's default
+        // end — the press asks again with the end it writes, and a card whose words no longer hold is drawn again)
+        const ids = spec.refs.map((r) => r.id), many = ids.length > 1;
+        const planMs = shape.always ? (VR.ALWAYS_TTLS[VR.ALWAYS_DEFAULT] == null ? null : VR.ALWAYS_TTLS[VR.ALWAYS_DEFAULT]) : null;
+        const planWrite = useGrants && shape.always ? { hosts: dest.hosts, until: planMs == null ? null : now() + planMs, tool: shape.name || null, source: 'card' } : useGrants && cmdToken ? { commands: [cmdToken], until: null, source: 'card' } : null;
+        const plan0 = planWrite ? changesOf(caller.conversationId, ids, planWrite) : [];
+        const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
+        const trail = [...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
+        const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
         if (shown.length > DETAIL_MAX) return named('card_too_long');
         // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
         const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own'), ...(cmdToken && !shape.always ? { command: VUG.commandWords(cmdToken) } : {}) });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
-        if (timed && facts.always && facts.always.command) facts.always.command.replaces = { until: timed.until, scope: timed.words, ...(timed.expired ? { expired: true } : {}) };
-        if (heldA && facts.always) facts.always.replaces = { until: heldA.until, scope: heldA.words, ...(heldA.expired ? { expired: true } : {}), ...(heldA.until == null ? { days: ALWAYS_DAYS } : {}) };   // r3b: the words beside the hosts «Always» (foryou-actions runCardOf)   // r2 (JUDGE 4): the hint beside «Always (this command)» says it
+        if (plan0.length && facts.always) { const at = shape.always ? facts.always : facts.always.command; if (at && typeof at === 'object') at.changes = changeFactsOf(plan0, planMs, { many }); }   // r4 (B): the words beside «Always» / «Always (this command)» (foryou-actions runCardOf)
         if (whyAgain) facts.whyAgain = whyAgain;   // round 25 (minor 6b): the ONE dimension this near-identical rerun differs from the last late-allowed command — a CODE (VR.WHY_AGAIN) the client renders («与上次放行的命令不同：参数顺序 / 多了一个空格 / 文件夹不同 / 环境变量 X 变了»)
-        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always'), command: cmdToken && !shape.always ? cmdToken : null });
+        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always'), command: cmdToken && !shape.always ? cmdToken : null, plan: planWrite ? { head: lead, tail: trail, sig: changeSigOf(plan0), many } : null });
         asked = a.outcome; askId = a.askId;
         if (asked === 'pending') { note('ask_pending', { ...head, askId }); return withRecipe(named('ask_pending'), recipe); }
         const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];

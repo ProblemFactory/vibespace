@@ -752,6 +752,29 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-10-vault-use-per-scope-ends',
+      note: "A GRANT'S SCOPES CARRY THEIR OWN ENDS (lane vault-standing-request r4 — 主开发: «a member's scopes carry THEIR OWN ENDS … never one end per member»): a vault-use member (who may use a stored secret with no card, for which hosts, until when) had ONE end for all its hosts and commands, so a later write had either to merge (another host took that end, or lost its own) or to replace (the hosts the owner had given were lost). Each member is now stored as its SCOPES — each host and each command its own end, tool and writer (src/vault-use-grant.js) — and a write touches only the scopes it names. Every member stored before is reshaped to the same scopes with the same end — what it always meant: the vault's mark is over that meaning (canonOf), so the reshaped member verifies as it did and no vault is needed (a boot is locked). A member whose mark would move (a legacy single tool, a tool for a host it does not hold) is left as it is and still read as before; a row this release cannot read is left untouched; either is named in ONE notice. An unreadable grants store fails the run by name (retried next boot). A second run finds nothing to reshape.",
+      run() {
+        const g = grantsStoreOf();
+        if (g && typeof g.health === 'function' && !g.health().readable) throw new Error('data/grants.json could not be read — retried on the next boot');
+        const U = require('../vault-use-grant.js');
+        const rep = { rows: 0, members: 0, reshaped: 0, kept: 0, unreadable: 0 };
+        for (const raw of g.rowsOfDoor('vault-use')) {
+          rep.rows++;
+          const plan = U.scopedRowOf(raw);
+          if (!plan.ok) { rep.unreadable++; continue; }
+          rep.members += plan.to.length; rep.kept += plan.unmapped.length;
+          if (!plan.mapped) continue;
+          const w = g.set('vault-use', raw.resource, { to: plan.to, except: plan.except }, 'migration');
+          if (!(w && w.ok)) throw new Error(`a grant row could not be written (${(w && w.code) || 'not_written'}) — retried on the next boot`);
+          rep.reshaped += plan.mapped;
+        }
+        if (rep.kept || rep.unreadable) serverNotice?.('vault-use-per-scope-kept', `Vault grants: ${rep.kept} grant(s) could not be given per-host ends${rep.unreadable ? ` and ${rep.unreadable} grant row(s) could not be read` : ''} — they are kept as they were and still work as before (one end for all their hosts). To give each host its own end, take the grant back (✕) in the Vault window and grant it again.`, { level: 'warn' });
+        console.log('[migrate] vault-use-per-scope-ends:', JSON.stringify(rep));
+        return rep;
+      },
+    },
+    {
       id: '2026-10-closed-access-pointers-hidden',
       note: "A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance rounds 3 → 4 — 主开发): an access request's For-you item (its pointer to the Reach dialog) the PERSON closed before round 3 — ✓ Mark done / ✕ Dismiss / «Mark all seen», recorded resolvedBy 'user' — while its request stands OPEN lost its ↺ in round 3 and was never brought back (round 3's resurface brings back only a HIDDEN pointer), so the owner never saw it again and the agent's re-ask was told «already open». Each such record (an open-channel item whose id an OPEN access request holds, closed by 'user') becomes what round 3 writes for that close — status 'dismissed', resolvedBy 'hidden' («hidden — nothing was decided»; its resolvedAt kept) — THROUGH the live inbox store (flushed before the ledger row); then the engine's resurface (the boot reconcile's — it ran before this run) brings it back to For you now, and the re-ask brings it back from here on. Which requests are open is the CHANNELS ENGINE's to say (its index holds them): without one while a channels data dir exists the run FAILS by name (retried on a boot that has one); no channels data = nothing to do. A second run finds nothing (each such record is hidden or open again).",
       run() {
