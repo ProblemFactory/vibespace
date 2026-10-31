@@ -38,6 +38,9 @@
 //      the card refuses «Always» for (read by the real shape reader); no end ⇒ dropped (fail closed); past its end ⇒ expired;
 //      除了 first; the narrowest scope named (hosts › command › window); its own canon tag; spanOf / the views; the writer's rule;
 //      the ORCH: written by addMember only, a Save never mints one (window_card_only)
+//   ㊴ ROUND 9 (lane vault-standing-request — 主开发's acceptance of r8, MAJOR A): a 除了 list is never dropped by a prune or a
+//      removal — an except-only row is stored and read; the last member's ✕ / its window's ✕ / the hour-end prune keep it; only
+//      the owner's Save takes an exception away (a widening — 验证是你)
 // Run: node scripts/test-vault-use-grants.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1263,6 +1266,41 @@ console.log('㊳ ROUND 7 (lane vault-standing-request — the owner 2026-10-31 �
   const mint = w.useGrants.setRow(RES, { to: [{ kind: 'conversation', key: 'cid-x', name: 'X', scopes: [{ kind: 'window', until: Date.now() + WIN }] }], except: [] }, { reauthed: true });
   const held = w.useGrants.heldBy(F);
   ok(add.ok && vf.ok && vf.scope === 'window' && mint.code === 'window_card_only' && held.length === 1 && held[0].scopes.some((s) => s.kind === 'window'), 'the ONE writer: addMember({window}) writes it (the card\'s road) and the verdict admits a shell by it; a Save that MINTS one is refused window_card_only; heldBy (`list`) names it', { add, vf: vf.scope, mint: mint.code, held });
+}
+
+console.log('㊴ ROUND 9 (lane vault-standing-request — 主开发\'s acceptance of r8, MAJOR A) — A 除了 LIST IS NEVER DROPPED by a prune or a removal: an except-only row is a stored row; only the owner\'s Save takes an exception away');
+{
+  const C = { kind: 'conversation', key: 'cid-left-out' }, D = { kind: 'conversation', key: 'cid-d' };
+  const exC = (r) => !!(r && (r.except || []).some((x) => x.key === 'cid-left-out'));
+  // PURE: the last member out — its ✕ (withoutMember) or its window's ✕ (withoutWindow) — leaves the row's except as it is
+  const row = { door: 'vault-use', resource: RES, to: [{ ...D, scopes: [{ kind: 'window', until: NOW + 3600e3, source: 'card', at: NOW }] }], except: [C] };
+  const wm = U.withoutMember(row, 'conversation:cid-d', { now: NOW }), ww = U.withoutWindow(row, 'conversation:cid-d', { now: NOW });
+  const ended = { ...row, to: [{ ...D, scopes: [{ kind: 'window', until: NOW - 1, source: 'card', at: NOW - 3600e3 }] }, { kind: 'everyone', scopes: [{ host: 'x.example' }] }] };
+  const wm2 = U.withoutMember(ended, 'everyone', { now: NOW });
+  ok(wm.ok && wm.to.length === 0 && exC(wm) && ww.ok && ww.memberGone === true && ww.to.length === 0 && exC(ww) && wm2.ok && wm2.to.length === 0 && exC(wm2), 'PURE: the LAST member out — its ✕ (withoutMember), its window\'s ✕ (withoutWindow), or another member\'s ✕ that prunes the last one\'s ENDED window — leaves the row\'s 除了 as it is (r8 / the base: `except: to.length ? cur.except : []`)', { wm, ww, wm2 });
+  // ORCH: the ONE writer on its own clock (the hour moved by hand)
+  const w = await world();
+  let at = Date.now();
+  const ug = UG.create({ grants: () => w.grants, vault: w.vault, dataDir: w.dataDir, now: () => at, log: () => {} });
+  const e = entryOf(w);
+  const rowNow = () => w.grants.rowsFor('vault-use', e.id)[0] || null;
+  const s0 = ug.setRow(e.id, { to: [], except: [C] }, { reauthed: true });
+  const p0 = ug.publicFor(e.id);
+  const vC = ug.verdictFor(e.id, { conversationKeys: ['cid-left-out'] }, { hosts: ['x.example'], destinationKnown: true }), vO = ug.verdictFor(e.id, { conversationKeys: ['cid-other'] }, { hosts: ['x.example'], destinationKnown: true });
+  ok(s0.ok && !!rowNow() && (p0.to || []).length === 0 && exC(p0) && vC.code === 'excepted' && vO.code === 'not_granted', 'an except-only row {to: [], except: [C]} is a STORED row: the window reads it (no member, 除了 C); C is excepted, another conversation not granted', { s0, p0, vC: vC.code, vO: vO.code });
+  const s1 = ug.setRow(e.id, { to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: at + 30 * 86400e3 }] }], except: [C] }, { reauthed: true });
+  const aD = ug.addMember(e.id, { ...D, name: 'Dee' }, { window: at + 3600e3, source: 'card' });
+  const rv = ug.revoke(e.id, 'everyone');
+  at += 61 * 60e3;
+  const pr = typeof ug.pruneWindows === 'function' ? ug.pruneWindows(e.id) : null;
+  ok(s1.ok && aD.ok && rv.ok && pr && pr.ok && pr.swept === 1 && rowNow() && rowNow().to.length === 0 && exC(rowNow()) && ug.verdictFor(e.id, { conversationKeys: ['cid-left-out'] }, { hosts: ['x.example'], destinationKnown: true }).code === 'excepted', 'the probe\'s A on the ONE writer: All agents · x.example except C, D\'s window, the owner ✕\'s All agents, the hour ends — pruneWindows keeps {to: [], except: [C]} (r8 removed the row)', { pr, row: rowNow() && { to: rowNow().to.length, except: rowNow().except } });
+  const aD2 = ug.addMember(e.id, { ...D, name: 'Dee' }, { hosts: ['y.example'], until: at + 86400e3, source: 'card' });
+  const rv2 = ug.revoke(e.id, 'conversation:cid-d');
+  ok(aD2.ok && rv2.ok && rv2.removed && rowNow() && rowNow().to.length === 0 && exC(rowNow()), 'the LAST member\'s ✕ (revoke) keeps the 除了 too — the row stays, except-only', { rv2, row: rowNow() && { to: rowNow().to.length, except: rowNow().except } });
+  const n1 = ug.setRow(e.id, { to: [], except: [] }, { reauthed: false });
+  const still = !!rowNow() && exC(rowNow());
+  const n2 = ug.setRow(e.id, { to: [], except: [] }, { reauthed: true });
+  ok(n1.code === 'reveal_needs_password' && still && n2.ok && !rowNow(), 'only the owner\'s own Save takes the exception away — a widening: refused reveal_needs_password without 验证是你 (the row kept); with it, the row goes', { n1: n1.code, still, n2: n2.ok, row: rowNow() });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

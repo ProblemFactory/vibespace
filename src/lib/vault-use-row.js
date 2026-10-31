@@ -55,8 +55,12 @@ const windowWords = (s) => `${t('any destination')} · ${s.expired ? t('expired'
  *  new to the row) there is no «now» to keep, so a new scope takes the picker's default (30 days — what the dialog offers a new
  *  grant), said before Save. Any other choice gives every scope that end. r8 (主开发's acceptance of r7, MINOR 4): the Save
  *  sends NO window — the hub carries the member's LIVE one as it is (a dialog opened before the window's ✕ never sends a
- *  taken-back one back, an ended one is never re-sent); `kept` = the live window the preview says is kept.
- *  → { scopes, fresh: [index of each new scope], kept: [{kind: 'window', until}] } */
+ *  taken-back one back, an ended one is never re-sent); `kept` = the live window the preview says is kept. r9 (主开发's
+ *  acceptance of r8, MINOR C): a member the Save names nothing for whose only scope is a 1-hour window that has ENDED (the hub
+ *  had not swept it yet — a restart or a lock inside the hour drops the hour-end prune) is `pruned`: sent with no scope, the
+ *  hub prunes it (one it still holds LIVE it keeps) — never a refusal; `refused` = nothing to send and no window (the dialog
+ *  names that member).
+ *  → { scopes, fresh: [index of each new scope], kept: [{kind: 'window', until}], pruned, refused } */
 const KEEP_DEFAULT = '30d';
 export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now() } = {}) {
   const wasSc = was ? scopesOfM(was) : [];
@@ -80,7 +84,8 @@ export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep'
   // r7: a WINDOW scope is the card's — the dialog never makes or moves one (the hub refuses it `window_card_only`). r8: nor
   // sends one — the hub keeps the member's LIVE window as it is; the preview names it «(kept)»
   const kept = wasSc.filter((s) => s.kind === 'window' && !ended(s)).map((s) => ({ kind: 'window', until: Number(s.until) }));
-  return { scopes, fresh, kept };
+  const empty = !scopes.length && !kept.length, pruned = empty && wasSc.some((s) => s.kind === 'window');   // r9 (MINOR C)
+  return { scopes, fresh, kept, pruned, refused: empty && !pruned };
 }
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? (m.sourceKind === 'window' ? t('«Allow for 1 hour» on a card') : t('«Always» on a card')) : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };   // r8: a window press is never called «Always»
 
@@ -124,9 +129,10 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
     const paused = live.length && !!((r && r.run && r.run.paused) || u.unverified);   // round 2 MAJOR: the entry was turned OFF — its grants are kept but suspended; round 6 (MINOR item 6): a locked vault cannot verify — the chips are greyed, listed «unverified», never as held grants
-    if (live.length) {
+    const exceptOnly = !live.length && (u.except || []).length > 0;   // r9 (MAJOR A): an except-only row — its 除了 is kept for the next grant (a prune or a ✕ never drops it)
+    if (live.length || exceptOnly) {
       const chips = el('div', `vw-ak-grants vw-use-chips${paused ? ' vw-use-paused' : ''}`);
-      chips.append(el('span', 'vw-ak-to vw-use-to', t('Used with no card by:')));
+      chips.append(el('span', 'vw-ak-to vw-use-to', exceptOnly ? t('Used with no card by: nobody') : t('Used with no card by:')));
       for (const m of live) {
         const pausedM = !!m.paused;   // round 7 (MAJOR item 2): the entry is ON by another conversation's PRESS and THIS member was never resumed — the owner's pause stands (the ↻ un-pauses it). No date: the inverted model keeps no per-member pause time, so none can go stale.
         const legacyW = Array.isArray(m.legacy) ? m.legacy : [];   // r3 (MAJOR 1): a wildcard carried from an older version with no tool — open to ANY program until the owner re-mints it
@@ -159,7 +165,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       }
       for (const x of u.except || []) chips.append(el('span', 'vw-ak-chip vw-use-chip vw-use-except', t('except {name}', { name: nameOf(x, app) })));
       host.append(chips);
-      if (u.unverified) host.append(el('div', 'vw-use-paused-note', t('Unverified until you unlock the vault — not in use until then.')));
+      if (u.unverified && live.length) host.append(el('div', 'vw-use-paused-note', t('Unverified until you unlock the vault — not in use until then.')));
       else if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));
@@ -262,17 +268,20 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except());
     const had = new Map(members.map((m) => [m.principal, m]));
     const keyOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
-    const to = [], fresh = [], kept = [];
+    const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {
       const was = had.get(keyOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
       const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });   // r8: no window in it — the hub keeps the live one (`kept`)
-      if (!h.length && !cmds.length && !plan.kept.length) return { error: t('Name the hosts it may be used for — a host name or address each (never «any host»)') };
+      // r9 (主开发's acceptance of r8, MINOR C): a member whose only scope is an ENDED 1-hour window the hub has not swept yet is
+      // sent with none (`plan.pruned` — the hub prunes it); never a refusal for a scope the hub failed to sweep. A refusal that
+      // remains names the member.
+      if (plan.refused) return { error: t('Name the hosts {name} may use it for — a host name or address each (never «any host»)', { name: nameOf({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}) }, app) }) };
       to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes: plan.scopes });
-      fresh.push(plan.fresh); kept.push(plan.kept);
+      fresh.push(plan.fresh); kept.push(plan.kept); gone.push(!!plan.pruned);
     }
-    return { to, fresh, kept, pick };
+    return { to, fresh, kept, gone, pick };
   };
   const drawPreview = () => {
     let plan = null; try { plan = planOf(); } catch { plan = null; }
@@ -283,6 +292,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     plan.to.forEach((m, k) => {
       const line = el('div', 'vw-use-preview-line');
       line.append(document.createTextNode(`${nameOf(m, app)} · `));
+      if (plan.gone[k]) line.append(el('span', 'vw-use-scope', t('the 1-hour approval ended — Save removes it')));   // r9 (MINOR C)
       [...m.scopes, ...plan.kept[k]].forEach((s, i) => {
         if (i) line.append(document.createTextNode(', '));
         if (s.kind === 'window') { line.append(el('span', 'vw-use-scope vw-use-scope-window', `${windowWords({ until: s.until, expired: false })} ${t('(kept)')}`)); return; }   // r7: the card's window, kept as it is (r8: the hub keeps it — the Save never sends it)
@@ -309,7 +319,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       if (!q || !q.ok) { err.textContent = revealWords(q || {}); return false; }
     }
     if (r && r.ok) { showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); close(); refresh?.(); return true; }
-    err.textContent = r && r.code === 'hosts_required' ? t('Name the hosts it may be used for — a host name or address each (never «any host»)') : r && r.code === 'tool_required' ? t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
+    const named = r && r.principal ? to.find((m) => (m.kind === 'everyone' ? 'everyone' : m.kind === 'group' ? `group:${m.id}` : `conversation:${m.key}`) === r.principal) : null;   // r9 (MINOR C): the hub's refusal names the member
+    err.textContent = r && r.code === 'hosts_required' ? (named ? t('Name the hosts {name} may use it for — a host name or address each (never «any host»)', { name: nameOf(named, app) }) : t('Name the hosts it may be used for — a host name or address each (never «any host»)')) : r && r.code === 'tool_required' ? t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
     return false;
   }
   save.onclick = () => { doSave(); };

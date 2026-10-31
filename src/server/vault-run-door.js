@@ -1099,6 +1099,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  first: the card's change signature for THIS write against the one it was drawn with — another ⇒ nothing is written, the
    *  card is drawn again. The record carries `windowFor: '1h'` + `until` (its tail: «allowed this conversation for 1 hour ·
    *  until HH:MM · take it back in the Vault window»).
+   *  r9 (主开发's acceptance of r8, MAJOR B): THE PRESS WRITES NOTHING BUT THE WINDOW — no `seen` mark, no host pass (run()
+   *  keeps the card's away hosts for THIS run only on a window press), no template memory: every later run inside the hour
+   *  is a window use (one notice), and its end asks again.
    *  r8 (主开发's acceptance of r7): the press writes NO `seen` mark (MAJOR 1 — on a local instance it let the approved command
    *  run by 'seen' with no notice, and with no card after the hour until the lock: the window IS the memory, its end the law);
    *  the record names the conversation and the entries (`principal`, `entries` — a ✕ in the Vault window tells it); the row's
@@ -1142,6 +1145,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const r = scope === 'window' ? useGrants.revokeWindow(String(id), pk, { by }) : useGrants.revoke(String(id), pk, { by });
     const until = r && r.ok ? Number(scope === 'window' ? r.until : r.window) : 0;
     return until > 0 ? { ...r, told: windowTakenBack(pk, until) } : r;
+  }
+  /** r9 (主开发's acceptance of r8, MINOR D): THE OWNER'S SAVE of «谁可以用…» (src/routes/vault.js) through the ONE writer — a
+   *  member it leaves out that held a LIVE window takes that window back, and the press's record is told as on both ✕ roads
+   *  («… · revoked HH:MM»). → the writer's answer (+ `told`). */
+  function saveRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
+    if (!useGrants) return { ok: false, code: 'no_use_grants' };
+    const r = useGrants.setRow(String(id), { to, except }, { by, reauthed });
+    let told = 0;
+    if (r && r.ok) for (const g of r.windowsGone || []) told += windowTakenBack(String(g.principal), Number(g.until));
+    return told ? { ...r, told } : r;
   }
   function windowTakenBack(pk, until) {
     if (!userTodos || typeof userTodos.resolvedOf !== 'function' || typeof userTodos.noteFact !== 'function') return 0;
@@ -2138,7 +2151,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (outcome) { note(outcome, { ...head, askId }); return ['ask_expired', 'ask_unfiled'].includes(outcome) ? withRecipe(named(outcome), recipe) : named(outcome); }   // lane vault-standing-request: a card nobody answered in time names the standing road
         // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
         const answered = (verdict.away || []).map((x) => ({ id: x.id, host: x.pass }));   // THIS 允许 — for this run, whatever is kept
-        for (const x of verdict.away || []) if (x.keep) hostPasses.set(`${scope}\n${x.id}\n${x.pass}`, { scope, id: x.id, host: x.pass, at: now() });   // lane vault-agent-own: ONCE per host (or, on a local instance, where the destination cannot be told, per command shape) — the 允许 is that pass for that entry; a cluster keeps no shape pass (round 2)
+        if (!a.window) for (const x of verdict.away || []) if (x.keep) hostPasses.set(`${scope}\n${x.id}\n${x.pass}`, { scope, id: x.id, host: x.pass, at: now() });   // lane vault-agent-own: ONCE per host (or, on a local instance, where the destination cannot be told, per command shape) — the 允许 is that pass for that entry; a cluster keeps no shape pass (round 2)   // r9 (MAJOR B): NOT on an «Allow for 1 hour» press — it writes nothing but the window (a host pass let that host run by 'own' with no notice, and with no card after the hour, until the lock)
         const d2 = load();
         const refused2 = !!(d2 && d2.refused);   // vault-use-grants round 3: a store that failed its mark meanwhile pauses every switch
         const again = spec.refs.map((r) => { const row = rowOf(r), e0 = entries.find((e) => e.id === r.id); const sw2 = !refused2 && !!(row && d2 && d2.runnable.has(r.id)); return { ...e0, exists: !!row, open: !!(row && (sw2 || grantOf(scope, r.id))) }; });   // vault-use-grants round 4 (MAJOR item 4): after the answer, open only when the switch is ON (the allow-list) or the once-grant
@@ -2346,7 +2359,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { run, answer, takeBack, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce };
 }

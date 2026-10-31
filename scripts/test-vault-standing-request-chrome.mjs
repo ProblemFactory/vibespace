@@ -32,6 +32,10 @@
 //      source «卡片上的「允许 1 小时」»; the WINDOW's own ✕ — the chip keeps its other scopes, the record says «已于 HH:MM 撤销», the
 //      next run asks (vsr-23); a conversation the owner EXCEPTED (除了) gets no «允许 1 小时» and the card says why (vsr-24);
 //      vsr-17 shot with no toast over the pane, the window maximized (the hint inside it)
+//      r9 (主开发's acceptance of r8): the owner ✕'s the «All agents» member — the row KEEPS its 除了 («无需卡片即可使用：没有人 ·
+//      除了 Transcriber», vsr-25); the agent's OWN value sent to h2.example: after «允许 1 小时» the next h2.example run is a window
+//      use with its notice (r8's host pass ran it silently); a member whose only scope is a window the PAGE sees ended (its clock
+//      moved past the end — the hub had not swept it): the dialog says «1 小时授权已结束 — 保存时移除» and its Save lands (vsr-26)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -499,9 +503,56 @@ try {
   await closeTray();
   if (xc) await A.api('POST', `/api/vault/run/asks/${xc.action.askId}`, { answer: 'deny' });
   await exP;
+  // r9 (MAJOR A): the owner ✕'s the «All agents» member — the row KEEPS its 除了 (an except-only row; r8 dropped the exception
+  // with the last member, so the next grant would have admitted the conversation the owner excluded)
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  const allX = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => !x.classList.contains('vw-use-except') && /^所有 agent/.test(x.textContent)); const x = c && c.querySelector('.vw-use-x'); if (!x) return null; x.click(); return true; })()`, { timeout: 15000 });
+  const exOnly = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; if (!r) return null; const live = [...r.querySelectorAll('.vw-use-chip')].filter((x) => !x.classList.contains('vw-use-except')); const ex = [...r.querySelectorAll('.vw-use-except')].map((x) => x.textContent); const to = r.querySelector('.vw-use-to'); if (live.length || !ex.length) return null; const c = r.querySelector('.vw-use-chips'); if (c) c.scrollIntoView({ block: 'center' }); return { to: to ? to.textContent : null, ex }; })()`, { timeout: 10000 });
+  check('(r9, MAJOR A) the owner ✕\'s the «All agents» member: the row KEEPS its 除了 — the Vault row says «无需卡片即可使用：没有人» and «除了 Transcriber»', !!allX && !!exOnly && exOnly.to === '无需卡片即可使用：没有人' && exOnly.ex.some((x) => /^除了 Transcriber/.test(x)), { allX, exOnly });
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
+  await A.shot('vsr-25-except-only-row-desktop.png');
   const pageB = await reveal();
   const back = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], page: pageB }, { 'X-Vault-Page': pageB || '' });   // the row as it was — an exception taken away is a WIDENING (验证是你)
   check('(r8, 除了) a conversation the owner excepted from the entry\'s «All agents» grant: its card offers 允许一次 · 拒绝 only and says «不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。»', !!(ex && ex.status === 200 && ex.json.ok && PKEY && xc && xc.action.window === undefined && xr && xr.buttons.join('|') === '允许一次|拒绝' && xr.off.includes('不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。') && back.json && back.json.ok), { ex: ex && ex.json, action: xc && xc.action, xr, back: back && back.json });
+  // r9 (MAJOR B): the press writes ONLY the window — the agent's OWN value (minted for api.tts.example) sent by curl to
+  // h2.example: after «允许 1 小时» the next h2.example run is a WINDOW use with its notice (r8 kept a host pass — by own, silent)
+  const H2 = (p) => ['run', '--env', `T=${OWN}`, '--', 'curl', '-s', '-m', '2', `https://h2.example/${p}`];
+  const hP = cli('vibespace-vault', H2('v1'), TOKEN, { timeout: 70000 });
+  let hc = null;
+  for (let i = 0; i < 60 && !hc; i++) { hc = (await openOf('vault-run-ask')).find((x) => /h2\.example\/v1/.test(String(x.detail))) || null; if (!hc) await sleep(200); }
+  const pageH = await reveal();
+  const ha = hc && hc.action.window === true ? await A.api('POST', `/api/vault/run/asks/${hc.action.askId}`, { answer: 'window' }, { 'X-Vault-Page': pageH || '' }) : (hc ? await A.api('POST', `/api/vault/run/asks/${hc.action.askId}`, { answer: 'deny' }) : null);
+  await hP;
+  await B.evalJs(`window.__toasts.length = 0; true`);
+  const nH = await countItems();
+  const h2b = await cli('vibespace-vault', H2('v2'), TOKEN, { timeout: 70000 });
+  const toastH = await B.until(`(window.__toasts || []).find((t) => /在你的 1 小时授权下用了/.test(t.text) && /h2\\.example/.test(t.text)) || null`, { timeout: 10000 });
+  const nH2 = await countItems();
+  check('(r9, MAJOR B) the agent\'s OWN value sent by curl to h2.example (minted for api.tts.example): «允许 1 小时» on its card; the next h2.example run inside the hour is a WINDOW use — no card, nothing filed, its notice «Transcriber 在你的 1 小时授权下用了… → h2.example»', !!hc && hc.action.window === true && !!ha && ha.json && ha.json.ok && ha.json.outcome === 'window' && !!toastH && /^Transcriber 在你的 1 小时授权下用了/.test(toastH.text) && nH2 === nH, { action: hc && hc.action, ha: ha && ha.json, toastH, n: [nH, nH2], out: h2b.out.slice(0, 160) });
+  // r9 (MINOR C): a member whose only scope is a 1-hour window that ENDED unswept — the dialog's Save is never refused for it.
+  // The hub's clock cannot move here: the PAGE's clock is moved past the window's end (what a page sees of a window the hub
+  // had not swept — a restart or a lock inside the hour); the hub, whose window is still live, keeps it
+  const cP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'bash', '-c', 'curl -s -m 2 -H "X: $T" https://c.example/v1/x || true'], TOKEN, { timeout: 70000 });
+  let cc = null;
+  for (let i = 0; i < 60 && !cc; i++) { cc = (await openOf('vault-run-ask')).find((x) => /c\.example\/v1/.test(String(x.detail))) || null; if (!cc) await sleep(200); }
+  const pageC = await reveal();
+  const ca = cc && await A.api('POST', `/api/vault/run/asks/${cc.action.askId}`, { answer: 'window' }, { 'X-Vault-Page': pageC || '' });
+  await cP;
+  await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 61 * 60e3; return true; })()`);
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  const cOpen = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b || !r.querySelector('.vw-use-chip')) return null; b.click(); return true; })()`, { timeout: 15000 });
+  const cdlg = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); const h = d && d.querySelector('.vw-use-hosts'); const p = d && d.querySelector('.vw-use-preview'); if (!h || !p || p.hidden) return null; p.scrollIntoView({ block: 'center' }); return { hosts: h.value, preview: p.textContent }; })()`, { timeout: 10000 });
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
+  await A.shot('vsr-26-hour-ended-save-dialog-desktop.png');
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.vw-use-save'); if (b) b.click(); return !!b; })()`);
+  const cres = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return { closed: true }; const e = d.querySelector('.vault-secret-error'); return e && e.textContent ? { closed: false, error: e.textContent } : null; })()`, { timeout: 10000 });
+  await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.btn-cancel'); if (b) b.click(); return true; })()`);
+  check('(r9, MINOR C) Transcriber\'s only scope is a 1-hour window the page sees ENDED (the hub had not swept it): the dialog, hosts left empty, says «Transcriber · 1 小时授权已结束 — 保存时移除» and its Save LANDS — never «请写明可用于哪些主机…»', !!ca && ca.json && ca.json.ok && !!cOpen && !!cdlg && cdlg.hosts === '' && /Transcriber · 1 小时授权已结束 — 保存时移除/.test(String(cdlg.preview)) && !!cres && cres.closed === true, { ca: ca && ca.json, cdlg, cres });
+  // the windows taken back (the legs below expect cards)
+  const OWNID = await A.evalJs(`(() => { const r = [...document.querySelectorAll('.vw-list .vw-row')].find((x) => x.isConnected && String(x.dataset.id || '').startsWith('secrets:agent:') && String(x.dataset.id).includes('/tts-own#')); return r ? r.dataset.id : null; })()`);
+  for (const id of [EID, OWNID]) if (id) await A.api('POST', '/api/vault/use-grants/revoke', { id, principal: `conversation:${PKEY}` });
   try { await B.cdp('Page.close'); } catch { }
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tB.id}`); } catch { }
 

@@ -47,8 +47,17 @@
  *   Ⓡ (MINOR 6) a run whose entries a hosts scope and a window admit: the notice names only the window's entry;
  *   Ⓢ (MINOR 7, PURE) the Vault chip: a live window has its own ✕, an ended one is drawn as the other ended scopes (its «ended
  *     HH:MM» title, no warning accent), the member's source says «“Allow for 1 hour” on a card».
+ * ROUND 9 (主开发's acceptance of r8 df027a971), on both door kinds:
+ *   Ⓣ (MAJOR A) a 除了 list outlives the hour — the hour-end prune, the window's ✕ and the member's ✕ keep the row's except
+ *     (an except-only row `{to: [], except: [...]}` is kept, the Vault window reads it; the probe's three shapes);
+ *   Ⓤ (MAJOR B) the press writes ONLY the window — no host pass: the agent's own value (minted for h1) sent to h2 is a window use
+ *     inside the hour (by grant, one notice) and asks after it; h3 never pressed the same; h1 by own (controls);
+ *   Ⓥ (MINOR C) a Save over a window that ENDED unswept is not refused (that member sent with no scope, the hub prunes it) — a
+ *     refusal that remains names the member;
+ *   Ⓦ (MINOR D) a Save that leaves out a member holding a LIVE window tells the press's record («revoked HH:MM»); a Save that
+ *     keeps it tells nothing (control).
  * RED control: r7's legs over 8e771b675 (r6 — no window) fail BY NAME; r8's over e19220cc7 (r7) fail BY NAME — Ⓜ on the LOCAL
- * door (a leg that throws is a failed leg, never a crash). Mutants: r8/mutants8.py (the report).
+ * door; r9's over df027a971 (r8) BY NAME (a leg that throws is a failed leg, never a crash). Mutants: r8/mutants8.py, r9/mutants9.py (the report).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -535,6 +544,110 @@ for (const K of ['local', 'cluster']) {
     const n = w.notices[0], p = n && n.i18n && n.i18n.params;
     ok(!!(k.a && k.a.ok && win.a && win.a.ok && both.r.ok && !both.card && w.notices.length === 1 && p && p.entry === 'Upload key' && p.where === 'api.tts.example' && !/TTS API key/.test(n.text)), 'Ⓡ a run whose «TTS API key» its hosts scope admits and whose «Upload key» its window admits: ONE notice, naming only «Upload key» (the receipts and the notice agree)', { r: both.r && { ok: both.r.ok, by: both.r.by, code: both.r.code }, notices: w.notices.map((x) => x.text) });
   });
+  console.log('Ⓣ (r9, MAJOR A) A 除了 LIST OUTLIVES THE HOUR — the prune, the window\'s ✕ and the member\'s ✕ keep the row\'s except');
+  await leg('Ⓣ except kept', async () => {
+    const C = 'cid-left-out', D = 'cid-d', MONTH = 30 * 86400e3;
+    const exKept = (r) => !!(r && (r.except || []).some((x) => x.key === C));
+    const shape = (r) => r && { to: (r.to || []).map((m) => m.key || m.kind), except: (r.except || []).map((x) => x.key) };
+    // (A) the probe: to [All agents · x.example] except [C]; D presses the window; the owner ✕'s All agents; the hour ends
+    const w = await world();
+    const put = w.useGrants.setRow(w.e.id, { to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: w.now() + MONTH }] }], except: [{ kind: 'conversation', key: C }] }, { reauthed: true });
+    const d = await runAnswered(w, SHELL(w.e.ref), { answer: 'window', caller: w.caller(D, 'Dee') });
+    const x = w.door.takeBack({ id: w.e.id, principal: 'everyone' });
+    const mid = rowOf(w);
+    w.clock.at = w.now() + 61 * MIN;
+    const pr = typeof w.useGrants.pruneWindows === 'function' ? w.useGrants.pruneWindows(w.e.id) : null;
+    const after = rowOf(w);
+    ok(!!(put.ok && d.a && d.a.ok && x && x.ok && mid && mid.to.length === 1 && mid.to[0].key === D && exKept(mid) && pr && pr.ok && pr.swept === 1 && after && after.to.length === 0 && exKept(after)), 'Ⓣa (the probe\'s A) All agents excepting C, D\'s 1-hour press, the owner ✕\'s All agents, the hour ends: the prune sweeps D\'s ended window and KEEPS the row\'s 除了 — an except-only row {to: [], except: [C]} (r8 wrote {to: [], except: []})', { put: put.ok, a: d.a, mid: shape(mid), pr, after: shape(after) });
+    const pub = w.useGrants.publicFor(w.e.id);
+    const again = w.useGrants.setRow(w.e.id, { to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: w.now() + MONTH }] }], except: pub.except || [] }, { reauthed: true });
+    const c = await runAnswered(w, CURL(w.e.ref, 'x.example'), { caller: w.caller(C, 'Left out') });
+    ok(!!((pub.to || []).length === 0 && (pub.except || []).some((x) => x.key === C) && again.ok && c.card && exKept(rowOf(w))), 'Ⓣb the Vault window reads it (no member, «除了 Left out»); the owner\'s next «All agents» Save carries the 除了 the dialog shows — the conversation the owner excluded still draws its card', { pub: { to: (pub.to || []).length, except: (pub.except || []).map((x) => x.key) }, again: again.ok, card: !!c.card, by: c.r && c.r.by });
+    // (B) the probe: an except-only row the owner saved, another conversation's window, the hour ends
+    const w2 = await world();
+    const p2 = w2.useGrants.setRow(w2.e.id, { to: [], except: [{ kind: 'conversation', key: C }] }, { reauthed: true });
+    const d2 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window', caller: w2.caller(D, 'Dee') });
+    w2.clock.at = w2.now() + 61 * MIN;
+    const pr2 = typeof w2.useGrants.pruneWindows === 'function' ? w2.useGrants.pruneWindows(w2.e.id) : null;
+    ok(!!(p2.ok && d2.a && d2.a.ok && pr2 && pr2.swept === 1 && rowOf(w2) && rowOf(w2).to.length === 0 && exKept(rowOf(w2))), 'Ⓣc (the probe\'s B) an except-only row, another conversation\'s 1-hour press, the hour ends: the prune keeps the row and its 除了 (r8 deleted the row)', { p2: p2.ok, a: d2.a, pr2, row: shape(rowOf(w2)) });
+    // the window's own ✕ and the member's ✕ on the row's LAST member
+    const tw = w2.door.takeBack({ id: w2.e.id, principal: `conversation:${D}`, scope: 'window' });
+    const d3 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window', caller: w2.caller(D, 'Dee') });
+    const tw3 = w2.door.takeBack({ id: w2.e.id, principal: `conversation:${D}`, scope: 'window' });
+    const r3 = rowOf(w2);
+    const d4 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window', caller: w2.caller(D, 'Dee') });
+    const tm = w2.door.takeBack({ id: w2.e.id, principal: `conversation:${D}` });
+    const r4 = rowOf(w2);
+    ok(!!(tw && tw.ok && d3.a && d3.a.ok && tw3 && tw3.ok && tw3.memberGone === true && r3 && r3.to.length === 0 && exKept(r3) && d4.a && d4.a.ok && tm && tm.ok && tm.removed && r4 && r4.to.length === 0 && exKept(r4)), 'Ⓣd the window\'s own ✕ and the member\'s ✕ on the row\'s LAST member keep its 除了 (withoutWindow / withoutMember — r8 dropped it with the member)', { tw3, r3: shape(r3), tm, r4: shape(r4) });
+    // (C) the probe: a Task Group member + D's window that ENDED unpruned, except [C]; the owner ✕'s the group
+    const w5 = await world();
+    w5.useGrants.setRow(w5.e.id, { to: [{ kind: 'group', id: 'g-team', name: 'Team', scopes: [{ host: 'x.example', until: w5.now() + MONTH }] }], except: [{ kind: 'conversation', key: C }] }, { reauthed: true });
+    const d5 = await runAnswered(w5, SHELL(w5.e.ref), { answer: 'window', caller: w5.caller(D, 'Dee') });
+    w5.clock.at = w5.now() + 61 * MIN;
+    const tg = w5.door.takeBack({ id: w5.e.id, principal: 'group:g-team' });
+    ok(!!(d5.a && d5.a.ok && tg && tg.ok && tg.removed && rowOf(w5) && rowOf(w5).to.length === 0 && exKept(rowOf(w5))), 'Ⓣe (the probe\'s C) a Task Group and D\'s ended (unpruned) window, except [C]; the owner ✕\'s the group: D\'s ended window is pruned with it and the 除了 stays', { tg, row: shape(rowOf(w5)) });
+  });
+
+  console.log('Ⓤ (r9, MAJOR B) THE PRESS WRITES ONLY THE WINDOW — no host pass: the agent\'s own value sent to another host is a window use inside the hour, a card after it');
+  await leg('Ⓤ no host pass', async () => {
+    const w = await world();
+    const mint = w.vault.agentMint(`agent:${CID}/tok`, { length: 32, forHost: 'h1.example', actor: 'Narrator' });
+    const p = await runAnswered(w, CURL(mint && mint.ref, 'h2.example'), { answer: 'window' });
+    const T = w.now();
+    ok(!!(mint && mint.ref && p.drawn && p.drawn.action.window === true && p.a && p.a.ok && p.r.ok), 'Ⓤa the agent\'s OWN value (minted for h1.example) sent by curl to h2.example draws its card with «Allow for 1 hour»; the press lets that run go', { mint: !!(mint && mint.ref), action: p.drawn && p.drawn.action, a: p.a, r: p.r && { ok: p.r.ok, by: p.r.by, code: p.r.code } });
+    w.clock.at = T + 10 * MIN;
+    const i0 = itemsOf(w);
+    const n0 = w.notices.length, h2 = await runAnswered(w, CURL(mint && mint.ref, 'h2.example')), n2 = w.notices.length;
+    const last2 = w.notices[w.notices.length - 1];
+    ok(!!(h2.r.ok && !h2.card && h2.r.by === 'grant' && n2 === n0 + 1 && last2 && last2.i18n && last2.i18n.params.where === 'h2.example'), 'Ⓤb h2.example again at +10 min is a WINDOW use — by grant, no card, ONE notice naming h2.example (r8 kept a host pass: by own, no notice)', { r: h2.r && { ok: h2.r.ok, by: h2.r.by, code: h2.r.code }, card: !!h2.card, notices: w.notices.slice(n0).map((n) => n.i18n && n.i18n.params) });
+    const h3 = await runAnswered(w, CURL(mint && mint.ref, 'h3.example')), n3 = w.notices.length;
+    const h1 = await runAnswered(w, CURL(mint && mint.ref, 'h1.example')), n1 = w.notices.length;
+    ok(!!(h3.r.ok && !h3.card && h3.r.by === 'grant' && n3 === n2 + 1 && h1.r.ok && !h1.card && h1.r.by === 'own' && n1 === n3 && itemsOf(w) === i0), 'Ⓤc (controls) h3.example — never pressed — is a window use too (by grant, one notice); h1.example, the host it was minted for, runs by own with no notice; nothing filed in For you', { h3: h3.r && { ok: h3.r.ok, by: h3.r.by }, h1: h1.r && { ok: h1.r.ok, by: h1.r.by }, notices: [n2, n3, n1], items: [i0, itemsOf(w)] });
+    w.clock.at = T + 66 * MIN;
+    const late2 = await runAnswered(w, CURL(mint && mint.ref, 'h2.example')), late3 = await runAnswered(w, CURL(mint && mint.ref, 'h3.example'));
+    ok(!!(late2.card && late3.card && w.notices.length === n1), 'Ⓤd at +66 min h2.example asks again — its card (r8 ran it by own, silently, until the lock); h3.example asks too; no notice', { h2: !!late2.card, by2: late2.r && late2.r.by, h3: !!late3.card, notices: w.notices.length - n1 });
+  });
+
+  console.log('Ⓥ (r9, MINOR C) A SAVE OVER AN ENDED WINDOW THE HUB HAD NOT SWEPT — saved, the window gone; a refusal names the member');
+  await leg('Ⓥ save over an ended window', async () => {
+    const w = await world();
+    const k = await runAnswered(w, CURL(w.e.ref, 'api.tts.example'), { answer: 'always', caller: w.caller('cid-e', 'Eve') });   // another member: a hosts scope
+    const win = await runAnswered(w, SHELL(w.e.ref), { answer: 'window' });   // Narrator: the window only
+    w.clock.at = w.now() + 61 * MIN;   // the hour ended — and no prune ran (a restart or a lock inside the hour drops its timer)
+    const held = windowsOf(memberRaw(w));
+    const pub = w.useGrants.publicFor(w.e.id);
+    // the dialog's Save with the hosts field EMPTY («each keeps its own»): each member planned as planOf plans it
+    const plans = (pub.to || []).map((m) => ({ m, plan: VUR && VUR.saveScopesOf ? VUR.saveScopesOf({ was: m, hosts: m.hosts || [], cmds: m.commands || [], endId: 'keep', now: w.now() }) : null }));
+    const pn = plans.find((x) => x.m.key === CID), pe = plans.find((x) => x.m.key === 'cid-e');
+    const refused = plans.some((x) => !x.plan || x.plan.refused);
+    const save = refused ? { ok: false, code: 'the dialog refused it' } : w.useGrants.setRow(w.e.id, { to: plans.map((x) => ({ kind: x.m.kind, key: x.m.key, name: x.m.name, scopes: x.plan.scopes })), except: [] }, { reauthed: false });
+    ok(!!(k.a && k.a.ok && win.a && win.a.ok && held.length === 1 && pn && pn.plan && pn.plan.pruned === true && pn.plan.refused === false && pn.plan.scopes.length === 0 && pe && pe.plan && pe.plan.refused === false && save.ok && !memberRaw(w) && memberRaw(w, w.e.id, 'cid-e')), 'Ⓥa a member whose only scope is a 1-hour window that ENDED unswept: the owner\'s Save of the row (hosts left empty) is not refused — that member is sent with no scope (`pruned`), the hub prunes it: saved, the ended window gone, the other member kept as it was (a narrowing — no 验证是你)', { held: held.length, pn: pn && pn.plan, pe: pe && pe.plan && { refused: pe.plan.refused }, save });
+    const nothing = VUR && VUR.saveScopesOf ? VUR.saveScopesOf({ was: null, hosts: [], cmds: [], endId: 'keep', now: w.now() }) : null;
+    const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
+    const KEY = 'Name the hosts {name} may use it for — a host name or address each (never «any host»)';
+    ok(!!(nothing && nothing.refused === true && nothing.pruned === false && /if \(plan\.refused\) return \{ error: t\('Name the hosts \{name\} may use it for/.test(src) && /^请写明 \{name\} 可用于哪些主机/.test(String(ZH[KEY]))), 'Ⓥb a member with nothing to send and no window is still refused — and the refusal NAMES it («请写明 {name} 可用于哪些主机…», the hub\'s `principal` too)', { nothing, zh: ZH[KEY] });
+  });
+
+  console.log('Ⓦ (r9, MINOR D) A SAVE THAT LEAVES OUT A MEMBER HOLDING A LIVE WINDOW TELLS THE PRESS\'S RECORD');
+  await leg('Ⓦ save tells the record', async () => {
+    const w = await world();
+    const k = await runAnswered(w, CURL(w.e.ref, 'api.tts.example'), { answer: 'always', caller: w.caller('cid-e', 'Eve') });
+    const win = await runAnswered(w, SHELL(w.e.ref), { answer: 'window' });
+    w.clock.at += 4 * MIN;
+    const T = w.now();
+    const saveVia = (ww, row) => (typeof ww.door.saveRow === 'function' ? ww.door.saveRow(ww.e.id, row, { reauthed: false }) : ww.useGrants.setRow(ww.e.id, row, { reauthed: false }));   // the route's road (src/routes/vault.js)
+    const eveOf = (ww) => { const m = (ww.useGrants.publicFor(ww.e.id).to || []).find((x) => x.key === 'cid-e'); const plan = VUR.saveScopesOf({ was: m, hosts: m.hosts || [], cmds: m.commands || [], endId: 'keep', now: ww.now() }); return { kind: 'conversation', key: 'cid-e', name: 'Eve', scopes: plan.scopes }; };
+    const save = saveVia(w, { to: [eveOf(w)], except: [] });
+    const rec = win.card && recordOf(w, win.card.action.askId), st = rec && FA.decidedStamp(rec, { t: tZH, now: T + MIN });
+    const route = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
+    ok(!!(k.a && k.a.ok && win.a && win.a.ok && save.ok && !memberRaw(w) && rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && st.text === `已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销` && /run\.saveRow\(String\(b\.id/.test(route)), `Ⓦa the owner's Save that leaves out the member holding a LIVE window (the Save route → the door's saveRow): the window goes and the press's record says «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销» — as both ✕ roads do`, { save, fact: rec && rec.resolvedFact, stamp: st && st.text });
+    const w2 = await world();
+    await runAnswered(w2, CURL(w2.e.ref, 'api.tts.example'), { answer: 'always', caller: w2.caller('cid-e', 'Eve') });
+    const win2 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window' });
+    const keep = saveVia(w2, { to: [eveOf(w2), { kind: 'conversation', key: CID, name: 'Narrator', scopes: [] }], except: [] });   // the dialog's member with its live window (sent with no scope — the hub keeps it)
+    const rec2 = win2.card && recordOf(w2, win2.card.action.askId);
+    ok(!!(keep.ok && windowsOf(memberRaw(w2)).length === 1 && rec2 && rec2.resolvedFact && !rec2.resolvedFact.endedAt), 'Ⓦb (control) a Save that keeps that member: its live window rides it, the record says nothing new', { keep, fact: rec2 && rec2.resolvedFact });
+  });
 }
 
 console.log('Ⓢ (r8, MINOR 7) THE VAULT CHIP — a live window has its own ✕; an ended one is drawn as the others; the source says the hour');
@@ -558,6 +671,13 @@ await leg('Ⓢ the chip', async () => {
     const espan = gone.els.find((e) => e.tagName === 'SPAN' && /\bvw-use-scope\b/.test(e.className) && /any destination/.test(e.textContent));
     const ex2 = gone.els.find((e) => e.tagName === 'BUTTON' && /\bvw-use-window-x\b/.test(e.className));
     ok(!!(espan && /\bvw-use-scope-ended\b/.test(espan.className) && !/\bvw-use-scope-window\b/.test(espan.className) && espan.title === `ended ${hhmm(until)}` && !ex2), `Ⓢc an ENDED window is drawn as the other ended scopes — line-through, NO warning accent, its title «ended ${hhmm(until)}» (never «✕ takes it back now»), no ✕ of its own`, espan && { cls: espan.className, title: espan.title, text: espan.textContent, x: !!ex2 });
+    // r9 (MAJOR A): an except-only row (a prune or a ✕ left no member) is DRAWN — the owner sees the 除了 the next grant carries
+    const w9 = await world();
+    const s9 = w9.useGrants.setRow(w9.e.id, { to: [], except: [{ kind: 'conversation', key: 'cid-left-out', name: 'Left out' }] }, { reauthed: true });
+    const ex9 = VUR && typeof VUR.useExtras === 'function' ? VUR.useExtras({ id: w9.e.id, label: 'TTS API key', run: { use: { ...w9.useGrants.publicFor(w9.e.id), entryHosts: [], used: { uses: 0, convs: 0 } } } }) : null;
+    const els9 = ex9 ? walk(ex9.box) : [];
+    const to9 = els9.find((e) => /\bvw-use-to\b/.test(e.className)), xs9 = els9.filter((e) => /\bvw-use-except\b/.test(e.className));
+    ok(!!(s9 && s9.ok && to9 && to9.textContent === 'Used with no card by: nobody' && xs9.length === 1 && /^except /.test(xs9[0].textContent)), 'Ⓢd (r9, MAJOR A) an except-only row is drawn: «Used with no card by: nobody» and its «except …» chip (r8 drew nothing — the 除了 out of sight)', { s9: s9 && s9.ok, to: to9 && to9.textContent, except: xs9.map((e) => e.textContent) });
   });
 });
 

@@ -11666,4 +11666,8 @@ export default {
   "«Allow for 1 hour» on a card": "カードの「1 時間許可」", // lane vault-standing-request r8 («Allow for 1 hour»)
   "Take back the 1-hour approval only — the other scopes stay": "1 時間の承認だけを取り消す — ほかの範囲は残ります", // lane vault-standing-request r8 («Allow for 1 hour»)
   "The 1-hour approval is taken back — the next run asks you": "1 時間の承認を取り消しました — 次の実行ではまた確認します", // lane vault-standing-request r8 («Allow for 1 hour»)
+  // lane vault-standing-request r9 («Allow for 1 hour») — on plain lines: scripts/i18n-extract.mjs ENTRY_RE reads no entry with a trailing comment
+  "Used with no card by: nobody": "カードなしで使用：なし",
+  "the 1-hour approval ended — Save removes it": "1 時間の承認は終了 — 保存で削除します",
+  "Name the hosts {name} may use it for — a host name or address each (never «any host»)": "{name} が使えるホストを指定してください——ホスト名かアドレスを 1 つずつ（「任意のホスト」は不可）",
 };

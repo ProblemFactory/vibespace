@@ -441,7 +441,8 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
  * ends it) — once / 8h need this page's 验证是你 window like the switch (a grant opens an entry), deny is a click.
  * lane vault-use-grants: A PERSON edits who may use an entry with NO card — POST /api/vault/use-grants {id, to, except, page}
  * (the whole vault-use row: each `to` member its `hosts` and optional `until`; a widening needs this page's 验证是你 window,
- * reveal_needs_password otherwise) · POST /api/vault/use-grants/revoke {id, principal, scope?} (one member out — a click; r8:
+ * reveal_needs_password otherwise; r9: through the door's saveRow — a LIVE 1-hour window the Save leaves out tells its press's
+ * record) · POST /api/vault/use-grants/revoke {id, principal, scope?} (one member out — a click; r8:
  * `scope: 'window'` takes back only its 1-hour window, and the press's record is told — the door's takeBack) · R4: POST
  * /api/vault/use-policy {id, text, page} (the entry's policy for the decision-API judge; a non-empty one needs the window) ·
  * POST /api/vault/use-policy/revoke {id} (the judge's approvals of this entry ask again next time — a click).
@@ -521,7 +522,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: (b.answer === 'always' || b.answer === 'window') && reauthedOf(req, page), by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»
   // lane vault-use-grants: «谁可以用…» — the entry's vault-use row (给谁 / 除了, each member its hosts and its end): a save that WIDENS
   // (a new member, a new host, a later end, an exception taken away) needs THIS page's 验证是你 window; a narrowing and ✕ are clicks
-  app.post('/api/vault/use-grants', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.setRow(String(b.id || ''), { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [] }, { by: 'user', reauthed: reauthedOf(req, page) }); }));
+  app.post('/api/vault/use-grants', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; const row = { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [] }, o = { by: 'user', reauthed: reauthedOf(req, page) }; return typeof run.saveRow === 'function' ? run.saveRow(String(b.id || ''), row, o) : ug.setRow(String(b.id || ''), row, o); }));   // r9 (MINOR D): through the door — a live 1-hour window the Save takes away tells its record
   // lane vault-use-grants (R4): the entry's POLICY for the decision-API judge (default off) — setting one needs 验证是你 (it lets
   // the judge approve uses); clearing it and 「Revoke」 (the judge's approvals ask again next time) are clicks
   app.post('/api/vault/use-policy', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setPolicy({ id: String(b.id || ''), text: typeof b.text === 'string' ? b.text : '', reauthed: reauthedOf(req, page), by: 'user' }); }));

@@ -221,11 +221,15 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
       return U.scopedMember(e, sc);
     });
     if (widens(was, { to: rowTo, except: v.row.except }) && !reauthed) return named('reveal_needs_password');
+    // r9 (主开发's acceptance of r8, MINOR D): a Save that leaves out a member holding a LIVE window takes the window back — named
+    // here (`windowsGone`), so the door tells the press's record as both ✕ roads do
+    const keptW = new Set(rowTo.filter((e) => U.scopesOf(e).some((s) => s.kind === 'window' && s.until > t0)).map((e) => GM.principalKey(e)));
+    const windowsGone = [...heldW].flatMap(([pk, ws]) => (keptW.has(pk) ? [] : ws.filter((h) => h.until > t0).map((h) => ({ principal: pk, until: h.until }))));
     const g = store();
     const gen = nextGen();
     const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { id: String(id), members: v.row.to.length });
+    return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}) });
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
@@ -309,7 +313,8 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     return landed(w, { removed: true, until: plan.until, memberGone: plan.memberGone, grant: U.grantIdOf(String(id), String(principalKey || '')) });
   }
   /** r8 (the r7 acceptance MINOR 5): THE HOUR-END PRUNE (the run door arms it at a window's end): the row's ENDED windows out —
-   *  a write only when there is one (a locked vault writes nothing: the next write of the row prunes them). → { ok, swept } */
+   *  a write only when there is one (a locked vault writes nothing: the next write of the row prunes them). r9 (MAJOR A): the
+   *  row's 除了 list stays — a row left with no member is kept as an except-only row. → { ok, swept } */
   function pruneWindows(id, { by = 'system' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
@@ -317,7 +322,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!was) return { ok: true, swept: 0 };
     const sw = U.withoutEndedWindows(was.to || [], now());
     if (!sw.swept.length) return { ok: true, swept: 0 };
-    const except = sw.to.length ? (was.except || []) : [];
+    const except = was.except || [];   // r9 (MAJOR A): the 除了 list is never pruned with the last window — an except-only row is kept
     const g = store();
     const gen = nextGen();
     const w = sw.to.length || except.length ? g.set(U.DOOR, String(id), { to: stamp(id, sw.to, except, gen), except }, by) : g.remove(U.DOOR, String(id), by);

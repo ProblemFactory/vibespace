@@ -40,6 +40,9 @@
  *     ENDED window is pruned at the next write of its row (a member left with none goes — `withoutEndedWindows`), so the
  *     .366 reader, which drops a whole member that holds any `kind` scope, loses at most the members holding a LIVE window
  *     on a rollback (kb-design-lessons: the rollback note); `withoutWindow` takes back only the window (its chip's ✕).
+ *     r9 (主开发's acceptance of r8, MAJOR A): A 除了 LIST IS NEVER DROPPED by a prune or a removal — a row left with no member
+ *     keeps its `except` (an except-only row `{to: [], except: [...]}` is a stored row the Vault window draws «除了 …»);
+ *     only the owner's own Save takes an exception away, and that is a widening (验证是你).
  *
  * THE VERDICT `useVerdict(rows, facts, run)` — membership is the MODEL's (`GM.admits`: 给谁 / 除了, a Task Group's members
  * read at use time, every refusal by name); this file only reads the admitting entries' own settings:
@@ -337,7 +340,8 @@ function withoutEndedWindows(to, now) {
   }
   return { to: out, swept, dropped };
 }
-/** Revoke ONE member (`principalKey`) — its exceptions stay with the row. r8: every other member's ended windows are pruned,
+/** Revoke ONE member (`principalKey`) — its exceptions stay with the row (r9: ALWAYS — the last member's ✕ too: an
+ *  except-only row is kept). r8: every other member's ended windows are pruned,
  *  and `window` = the end of the LIVE window the member held (null: none) — its record is told it was taken back.
  *  → { ok, to, except, removed, window } | unknown_shape. */
 function withoutMember(row, principalKey, { now = 0 } = {}) {
@@ -346,7 +350,7 @@ function withoutMember(row, principalKey, { now = 0 } = {}) {
   const was = cur.to.find((e) => GM.principalKey(e) === String(principalKey || ''));
   const w = was ? scopesOf(was).find((s) => s.kind === 'window' && liveScope(s, Number(now) || 0)) : null;
   const to = withoutEndedWindows(cur.to.filter((e) => GM.principalKey(e) !== String(principalKey || '')), now).to;
-  return { ok: true, to, except: to.length ? cur.except : [], removed: !!was, window: w && Number(now) > 0 && w.until > Number(now) ? w.until : null };
+  return { ok: true, to, except: cur.except, removed: !!was, window: w && Number(now) > 0 && w.until > Number(now) ? w.until : null };   // r9 (MAJOR A): the 除了 list stays, member or none
 }
 /** r8 (the r7 acceptance MINOR 4 — «nothing ends just the window early»): TAKE BACK ONE MEMBER'S WINDOW only — its host and
  *  command scopes stay as they are (their own ends); a member that held nothing else goes; every other member's ended
@@ -363,7 +367,7 @@ function withoutWindow(row, principalKey, { now = 0 } = {}) {
   let self = null;
   if (rest.length) { self = scopedMember(cur.to[i], rest); delete self.mac; }
   const to = cur.to.map((e, k) => (k === i ? self : kept.get(GM.principalKey(e)) || null)).filter(Boolean);   // the order kept
-  return { ok: true, to, except: to.length ? cur.except : [], removed: true, until: w.until, memberGone: !self };
+  return { ok: true, to, except: cur.except, removed: true, until: w.until, memberGone: !self };   // r9 (MAJOR A): the 除了 list stays, member or none
 }
 /** r3 (MAJOR 1 — the acceptance: the 2.369.363/.364 carry wrote legacy aws «always» rows as `*.amazonaws.com` members with NO
  *  tool, and r2's row rules then refused every OTHER conversation's write on that entry): A LEGACY WILDCARD IS A MIGRATION

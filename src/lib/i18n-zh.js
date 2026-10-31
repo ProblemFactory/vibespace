@@ -11667,4 +11667,8 @@ export default {
   "«Allow for 1 hour» on a card": "卡片上的「允许 1 小时」", // lane vault-standing-request r8 («Allow for 1 hour»)
   "Take back the 1-hour approval only — the other scopes stay": "只收回 1 小时授权 — 其他范围保留", // lane vault-standing-request r8 («Allow for 1 hour»)
   "The 1-hour approval is taken back — the next run asks you": "已收回 1 小时授权 — 下次运行会再问你", // lane vault-standing-request r8 («Allow for 1 hour»)
+  // lane vault-standing-request r9 («Allow for 1 hour») — on plain lines: scripts/i18n-extract.mjs ENTRY_RE reads no entry with a trailing comment
+  "Used with no card by: nobody": "无需卡片即可使用：没有人",
+  "the 1-hour approval ended — Save removes it": "1 小时授权已结束 — 保存时移除",
+  "Name the hosts {name} may use it for — a host name or address each (never «any host»)": "请写明 {name} 可用于哪些主机——每个写一个主机名或地址（不能是「任意主机」）",
 };
