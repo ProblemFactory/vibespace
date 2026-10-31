@@ -22,7 +22,8 @@
 //   ⑥ (lane desktop-x-seat-browser) ONE PERSON, ONE SEAT: the desktop window on the browser's display says Watch (who + the way),
 //      a Watch viewer held VIBESPACE_XSEAT_HOLD_MS (5 min) is never dropped by xpra, its door «Browse yourself» opens his own tab ⇒
 //      an INPUT seat (r2): every Chrome window already on the display keeps its geometry, and his click + Escape answer Chrome's
-//      OWN passkey dialog over his page (CDP's own clicks never do — measured beside it).
+//      OWN passkey dialog over his page (CDP's own clicks never do — measured beside it); r3: his click on a <select> of his page
+//      opens Chrome's popup (an override-redirect window: no name, no class, no transient-for) and his click there picks an option.
 // SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.38.2, Google Chrome, xpra / xauth, or when the server
 // took the driver road. Scratch only (/tmp/vs-xpicture-<pid>): never ~/.agent-browser, never the owner's display or bus,
 // never `close --all`, never the production data/. PNGs: VIBESPACE_XPIC_PNG_DIR (optional) receives the viewer's picture.
@@ -143,7 +144,7 @@ const col = http.createServer((req, res) => {
   }
   if (u.pathname === '/blk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw page')); return; }
   // lane desktop-x-seat-browser: a page in a passkey ceremony (Chrome's OWN WebAuthn dialog — drawn by Chrome, not the page); its outcome on window.__pk
-  if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
+  if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(pageHtml('bxw pk', `<button id=pkb style="position:absolute;left:60px;top:20px">passkey</button><select id=sel style="position:absolute;left:60px;top:140px;font-size:28px;width:320px"><option>alpha<option>beta<option>gamma<option>delta</select><script>window.__pk='idle';document.getElementById('pkb').addEventListener('click',()=>{window.__pk='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:location.hostname,userVerification:'preferred',timeout:600000}}).then((c)=>{window.__pk='got '+(c&&c.type);},(e)=>{window.__pk='rejected '+(e&&e.name);});});</script>`)); return; }
   res.statusCode = 404; res.end();
 });
 const CP = await freePort(); await new Promise((r) => col.listen(CP, '127.0.0.1', r));
@@ -469,6 +470,18 @@ console.log('— ⑥ one person, one seat: the desktop window on the browser dis
     if (at) { await P.clickAt(at.x, at.y); await sleep(500); await P.key('Escape', { code: 'Escape', vk: 27 }); }
     pkDesk = await until(async () => { const v = await H.ev('window.__pk'); return /rejected/.test(String(v)) ? v : null; }, 8000, 100) || (await H.ev('window.__pk'));
     ok(!!his && !!at, `his Chrome window (${his && his.wid}) is in the desktop picture and takes a real click there`, JSON.stringify({ his, at }));
+    // r3 (acceptance r2 MAJOR 1 — his OWN menus): the <select> on his page, clicked in the desktop window, opens Chrome's popup — an
+    // override-redirect window with no name, no class, no transient-for (MEASURED) that the bridge knows is his because it OPENED
+    // right after his own press on his window — and his click on an option there picks it
+    const me = await until(async () => { const ws = await P.ev(`(() => { const w = ${DWQ}; return w._desktopAppView.windows(); })()`); return (ws || []).find((x) => his && x.wid === his.wid) || null; }, 5000, 200);
+    const geo = await H.ev(`(() => { const s = document.getElementById('sel'); if (!s) return null; const r = s.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, dx: (outerWidth - innerWidth) / 2, dy: outerHeight - innerHeight, dpr: devicePixelRatio, v: s.value }; })()`);
+    const selAt = me && geo ? await P.ev(`(() => { const c = [...document.querySelectorAll('.xpra-win[data-wid="${me.wid}"] canvas')].find((e) => e.getBoundingClientRect().width > 20); if (!c) return null; const r = c.getBoundingClientRect(), k = r.width / ${me.w}; return { x: r.left + (${geo.dx} + ${geo.x}) * ${geo.dpr} * k, y: r.top + (${geo.dy} + ${geo.y}) * ${geo.dpr} * k }; })()`) : null;
+    if (selAt) await P.clickAt(selAt.x, selAt.y);
+    const pop = await until(async () => { const ws = await P.ev(`(() => { const w = ${DWQ}; return w._desktopAppView.windows(); })()`); return (ws || []).find((x) => x.kind === 'popup' && x.w > 20 && x.h > 20) || null; }, 8000, 200);
+    const opt = pop ? await P.ev(`(() => { const c = [...document.querySelectorAll('.xpra-win[data-wid="${pop.wid}"] canvas')].find((e) => e.getBoundingClientRect().width > 10); if (!c) return null; const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.8 }; })()`) : null;
+    if (opt) await P.clickAt(opt.x, opt.y);
+    const pick = await until(async () => { const v = await H.ev(`document.getElementById('sel') && document.getElementById('sel').value`); return v && v !== 'alpha' ? v : null; }, 6000, 150);
+    ok(!!pop && !!pick, `r3 MAJOR 1 — HIS <select> in the desktop window: his click opens Chrome's popup (window ${pop && pop.wid}, override-redirect — no name, no class, no transient-for) and his click on an option there picks it (alpha → ${pick})`, JSON.stringify({ geo, selAt, pop, opt, seat: (journal.match(/\[desktop-stream\][^\n]*popup[^\n]*/g) || []).slice(-3) }));
   }
   ok(pk0 === 'pending' && pkCdp === 'pending', `MEASURED (the RED control of the raw fallback): the page waits in navigator.credentials.get and five of CDP's own clicks never reach Chrome's dialog (${pk0} → ${pkCdp})`);
   ok(/rejected NotAllowedError/.test(String(pkDesk)), `THE RAW FALLBACK: his click + Escape in the desktop window answer Chrome's OWN passkey dialog (__pk = ${pkDesk})`);

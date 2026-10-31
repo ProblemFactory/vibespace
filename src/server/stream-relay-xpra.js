@@ -9,6 +9,7 @@
  * A relay row: { STREAM_KIND, serverName, maxMessageBytes, netem, bridgeOf(ctx) → (a) => void }, where `a` =
  * { ws, id, port, viewerId, netem, req }.
  */
+const zlib = require('zlib'); // r3: a brotli-compressed window announcement (xpra's second compressor) is read on its way down
 
 const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;
 
@@ -83,17 +84,43 @@ const XPRA_LIFECYCLE_TYPES = Object.freeze(new Set(['shutdown-server', 'exit-ser
  *  and window geometry, then fitted, slotted and belted every Chrome window of the display, the agents' included): THE PERSON'S
  *  INPUT SEAT ('input') is NOT the whole client. What it may send beyond a watcher's packets: its keymap (his keys need it —
  *  held while he watched, replayed first), the clipboard (his paste), and the input packets the shipped client sends, each
- *  ADDRESSED to a window of its reach (`scope`: his window, Chrome's dialogs over it, the menus inside it) — the packet type →
- *  the index of its pointer position (root coordinates — xpra moves the X pointer THERE: a press outside the windows read is
- *  refused too) or null. Never a display size, a window geometry, a close, an unmap, a command, any other input shape. */
+ *  ADDRESSED to a window of its reach (r3: by the window's IDENTITY — his window, its transients, the popups his own acts open;
+ *  see XPRA_POPUP_OPEN_MS) — the packet type → the index of its pointer position (root coordinates — xpra moves the X pointer
+ *  THERE: a point outside his windows is refused too) or null. Never a display size, a window geometry, a close, an unmap, a
+ *  command, any other input shape; a map-window only with the server's own geometry (r3 — xpra applies a map-window's geometry
+ *  from its ui driver, and his key or click makes him that). */
 const XPRA_CLIPBOARD_TYPES = Object.freeze(new Set(['clipboard-token', 'clipboard-contents']));
 const XPRA_SCOPED_INPUT = Object.freeze({ 'key-action': null, focus: null, 'button-action': 4, 'pointer-position': 2 });
 /** The packet the bridge TELLS a seated socket (never silent — acceptance r1 FAIL 3): its seat, why it watches, the last refusal's
  *  code and count, the windows an input seat reaches — `['vibespace-seat', {seat, why, code, refused, wids}]` (src/lib/xpra-client.js
  *  hands it to the view; an xpra server never sees it). */
 const XPRA_SEAT_PACKET = 'vibespace-seat';
-/** A miss (a window opened since the last read, a press outside the windows read) asks the reach again at most this often per socket. */
+/** His window not told yet (the keeper's read of it) is asked for at most this often per socket. */
 const XPRA_SCOPE_ASK_MS = 1000;
+/** lane desktop-x-seat-browser r3 (acceptance r2 MAJOR 1 + 2 — MEASURED 2026-10-31, Google Chrome 154 on a scratch X display: a
+ *  <select>'s popup and the page's context menu are OVERRIDE-REDIRECT windows of type MENU with NO WM_TRANSIENT_FOR, no WM_CLASS
+ *  and an empty name — nothing in X names the window they belong to, and the display's tree carries neither the override-redirect
+ *  flag nor a transient, so seamlessWindows rightly drops them as nameless; Chrome's passkey dialog is drawn INSIDE the browser
+ *  window — no window of its own). THE INPUT SEAT'S REACH is read where it is ORDERED: xpra's own window announcements on this
+ *  socket (new-window / new-override-redirect with their metadata's `override-redirect` and `transient-for`, the moves, the
+ *  losses — every desktop socket receives them) beside his acts on this socket: HIS window (the keeper's: his CDP bounds told
+ *  on the display), a managed window whose transient-for chain reaches it (a GTK file chooser — measured: transient-for its
+ *  browser window), and an override-redirect window that OPENS within XPRA_POPUP_OPEN_MS after his own press or key on a window
+ *  of his (or his pointer in a popup of his: a submenu) touching the window he acted on (within XPRA_POPUP_GAP_PX) — never a
+ *  window because it lies inside his rect (an agent's popup over his window, his window cascaded over an agent's: not his). */
+const XPRA_POPUP_OPEN_MS = 1500;
+const XPRA_POPUP_GAP_PX = 8;
+/** r3 (acceptance r2 MAJOR 2 — the law: never silent): a refusal that is no act of his (a pointer passing over another window,
+ *  the client's own focus of a window it drew, a release of nothing he pressed) is TOLD too — coalesced to one word per
+ *  XPRA_TELL_QUIET_MS; a refused ACT (a press, a key) is told at once and counted apart (`acts` — the window's one toast). */
+const XPRA_TELL_QUIET_MS = 250;
+const XPRA_QUIET_CODES = Object.freeze(new Set(['pointer-outside', 'focus-elsewhere', 'readdressed']));
+/** r3: the strip's mark for a release the client addressed to another window — replaced by the press's own release, never a refusal. */
+const XPRA_READDRESSED = 'readdressed';
+/** xpra's window announcements the bridge READS on their way down (r3) — a compressed one is inflated (lz4 / brotli), bounded by
+ *  XPRA_WINDOW_PACKET_MAX; raw chunks and larger packets pass unread. */
+const XPRA_WINDOW_TYPES = Object.freeze(new Set(['new-window', 'new-override-redirect', 'window-create', 'lost-window', 'window-move-resize', 'configure-override-redirect', 'window-resized', 'window-metadata']));
+const XPRA_WINDOW_PACKET_MAX = 64 * 1024;
 const XPRA_HEADER = 8;
 const XPRA_FLAGS_ENCODER = 0x1 | 0x4 | 0x10; // rencode | yaml | rencodeplus; 0 = bencode
 /** The first element of a rencode/rencodeplus/bencode LIST — the packet type
@@ -115,6 +142,7 @@ function rencodePlus(v) {
       if (x >= -32768 && x < 32768) { const b = Buffer.alloc(3); b[0] = 63; b.writeInt16BE(x, 1); out.push(b); return; }
       const b = Buffer.alloc(5); b[0] = 64; b.writeInt32BE(x, 1); out.push(b); return;
     }
+    if (typeof x === 'boolean') { out.push(Buffer.from([x ? 67 : 68])); return; } // r3: CHR_TRUE / CHR_FALSE
     if (x && typeof x === 'object') { const ks = Object.keys(x); out.push(Buffer.from([ks.length < 25 ? 102 + ks.length : 60])); for (const k of ks) { put(k); put(x[k]); } if (ks.length >= 25) out.push(Buffer.from([127])); return; }
     throw new Error(`rencodePlus: cannot write ${typeof x}`);
   };
@@ -167,9 +195,11 @@ function xpraStrings(payload, max = 4) {
   return out;
 }
 /** lane desktop-x-seat-browser r2: the first `n` elements of a rencode / rencodeplus LIST (strings, ints, bools, None, nested
- *  lists and dicts — the shapes the input packets carry), or null when these bytes are not that (bencode, a float, a byte string
- *  over the bound, a truncated list): an unreadable packet is never "his window". Never a full decoder: it stops at element n. */
-function xpraFields(payload, n, maxBytes = 4096) {
+ *  lists and dicts — the shapes the input packets carry; r3: floats and long ints too — xpra's window metadata), or null when these
+ *  bytes are not that (bencode, a truncated list, a byte string over the bound): an unreadable packet is never "his window".
+ *  `spans` (r3) collects each top element's [start, end) — the bridge flips a press's own `pressed` byte into its release. Never a
+ *  full decoder: it stops at element n; a byte string reads as null. */
+function xpraFields(payload, n, maxBytes = 4096, spans = null) {
   if (!payload || payload.length < 2 || payload.length > maxBytes) return null;
   let i = 0;
   const str = (len) => { if (i + len > payload.length) throw new Error('short'); const s = payload.toString('utf8', i, i + len); i += len; return s; };
@@ -186,6 +216,9 @@ function xpraFields(payload, n, maxBytes = 4096) {
       case 63: { if (i + 2 > payload.length) throw new Error('short'); const v = payload.readInt16BE(i); i += 2; return v; }
       case 64: { if (i + 4 > payload.length) throw new Error('short'); const v = payload.readInt32BE(i); i += 4; return v; }
       case 65: { if (i + 8 > payload.length) throw new Error('short'); const v = Number(payload.readBigInt64BE(i)); i += 8; return v; }
+      case 66: { if (i + 4 > payload.length) throw new Error('short'); const v = payload.readFloatBE(i); i += 4; return v; } // CHR_FLOAT32
+      case 44: { if (i + 8 > payload.length) throw new Error('short'); const v = payload.readDoubleBE(i); i += 8; return v; } // CHR_FLOAT64
+      case 61: { const j = payload.indexOf(127, i); if (j < 0 || j - i > 40) throw new Error('short'); const v = Number(payload.toString('latin1', i, j)); i = j + 1; return v; } // CHR_INT: decimal digits … CHR_TERM
       case 67: return true;
       case 68: return false;
       case 69: return null;
@@ -208,9 +241,75 @@ function xpraFields(payload, n, maxBytes = 4096) {
     const fixed = b0 >= 192 ? b0 - 192 : b0 === 59 ? Infinity : -1;
     if (fixed < 0) return null;
     const out = [];
-    while (out.length < n && out.length < fixed && i < payload.length && !(fixed === Infinity && payload[i] === 127)) out.push(one(1));
+    while (out.length < n && out.length < fixed && i < payload.length && !(fixed === Infinity && payload[i] === 127)) { const at = i; out.push(one(1)); if (spans) spans.push([at, i]); }
     return out;
   } catch { return null; }
+}
+/** r3: xpra's lz4 packet body — a 4-byte LITTLE-endian decompressed size, then ONE lz4 block (xpra/net/lz4; measured: xpra's own
+ *  compress of 600 bytes starts 58 02 00 00). → the bytes, or null (over `max`, a malformed block). */
+function lz4Inflate(src, max = XPRA_WINDOW_PACKET_MAX) {
+  if (!src || src.length < 5) return null;
+  const size = src.readUInt32LE(0);
+  if (size > max) return null;
+  const out = Buffer.alloc(size);
+  let i = 4, o = 0;
+  const more = () => { let n = 0, b; do { if (i >= src.length) throw new Error('short'); b = src[i++]; n += b; } while (b === 255); return n; };
+  try {
+    while (i < src.length) {
+      const token = src[i++];
+      let lit = token >> 4;
+      if (lit === 15) lit += more();
+      if (i + lit > src.length || o + lit > size) return null;
+      src.copy(out, o, i, i + lit); i += lit; o += lit;
+      if (i >= src.length) break; // the last sequence carries literals only
+      if (i + 2 > src.length) return null;
+      const off = src[i] | (src[i + 1] << 8); i += 2;
+      if (!off || off > o) return null;
+      let len = (token & 15) + 4;
+      if ((token & 15) === 15) len += more();
+      if (o + len > size) return null;
+      for (let k = 0; k < len; k++, o++) out[o] = out[o - off]; // an overlapping match copies byte by byte
+    }
+  } catch { return null; }
+  return o === size ? out : null;
+}
+/** r3: one main packet's body as rencode bytes — as sent, or inflated by its header's level byte (lz4 0x10 / brotli 0x40), bounded. */
+function xpraBody(level, payload, max = XPRA_WINDOW_PACKET_MAX) {
+  if (!level) return payload;
+  if (level & 0x10) return lz4Inflate(payload, max);
+  if (level & 0x40) { try { return zlib.brotliDecompressSync(payload, { maxOutputLength: max }); } catch { return null; } }
+  return null;
+}
+/** r3: THE WAY DOWN, READ — a stateful framer over xpra's own bytes to ONE socket: every complete main packet that is a window
+ *  announcement (XPRA_WINDOW_TYPES) goes to `onWindow(fields)` (xpraFields, 8 elements); raw chunks and packets over
+ *  XPRA_WINDOW_PACKET_MAX are skipped unread (never copied); bytes that are not xpra's framing (a bare `disconnect` line) end the
+ *  reading for good. Nothing is changed: the bytes go down as they came. */
+function xpraWindowWatch(onWindow) {
+  let head = null, hdr = null, skip = 0, body = null, got = 0, dead = false;
+  const read = (h, p) => {
+    const enc = h.flags & XPRA_FLAGS_ENCODER;
+    if (enc !== 0x1 && enc !== 0x10) return;
+    const b = xpraBody(h.level, p);
+    const type = b ? xpraPacketType(b) : null;
+    if (!type || !XPRA_WINDOW_TYPES.has(type)) return;
+    const f = xpraFields(b, 8, XPRA_WINDOW_PACKET_MAX);
+    if (f) onWindow(f);
+  };
+  return (chunk) => {
+    if (dead || !chunk) return;
+    let i = 0;
+    while (i < chunk.length) {
+      if (skip) { const n = Math.min(skip, chunk.length - i); skip -= n; i += n; continue; }
+      if (body) { const n = Math.min(body.length - got, chunk.length - i); chunk.copy(body, got, i, i + n); got += n; i += n; if (got === body.length) { const b = body; body = null; read(hdr, b); } continue; }
+      const part = chunk.subarray(i, i + XPRA_HEADER - (head ? head.length : 0)); i += part.length;
+      head = head ? Buffer.concat([head, part]) : Buffer.from(part);
+      if (head.length < XPRA_HEADER) break;
+      if (head[0] !== 0x50) { dead = true; return; }
+      hdr = { flags: head[1], level: head[2], index: head[3], size: head.readUInt32BE(4) }; head = null;
+      if (hdr.index !== 0 || hdr.size > XPRA_WINDOW_PACKET_MAX) skip = hdr.size;
+      else if (hdr.size) { body = Buffer.alloc(hdr.size); got = 0; }
+    }
+  };
 }
 /**
  * A stateful classifier over ONE client's xpra bytes. `feed(buf)` returns how
@@ -308,7 +407,7 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
       if (pin) pinCut++;
       const sizing = geometry && type !== null && (XPRA_GEOMETRY_TYPES.has(type) || XPRA_DISPLAY_TYPES.has(type));
       if (scope && !life && !pin) { // r2: the input seat — a watcher's packets, its keymap, and what its scope admits
-        const why = type !== null && (XPRA_WATCH_TYPES.has(type) || XPRA_KEYMAP_TYPES.has(type)) ? null : scope(type, payload);
+        const why = type !== null && type !== 'map-window' && (XPRA_WATCH_TYPES.has(type) || XPRA_KEYMAP_TYPES.has(type)) ? null : scope(type, payload, u); // r3: a map-window is judged (its geometry the server's own)
         if (why) { dropped++; codes[why] = (codes[why] || 0) + 1; } else { keep.push(u); if (input) kept++; }
         return;
       }
@@ -382,6 +481,7 @@ function bridgeOf(ctx) {
       const dur = Math.round((now() - openedAt) / 1000);
       lastClose.set(id, { why: String(closedBy || why), code: closeCodeOf(closedBy || why), at: now(), afterS: dur }); // K3: the page words the last close
       log.log?.(`[desktop-stream] ${id}: closed (${closedBy || why}) after ${dur}s, ${down} B to the browser, ${up} B to the server (xpra)${viewerId ? `, viewer ${viewerId}` : ''}${dropped ? `, ${dropped} packet(s) refused (${lastRefusal || 'policy'})` : ''}${netem ? `, netem rtt ${netem.rttMs} ms / ${netem.kbps || '∞'} kbps` : ''}`);
+      clearTimeout(quietTimer); quietTimer = null; // r3
       seatRef.forget();
       leave();
     };
@@ -425,6 +525,7 @@ function bridgeOf(ctx) {
         if (buf.length >= XPRA_HEADER + 2 && buf[0] === 0x50 && buf[2] === 0 && buf[3] === 0) { const words = xpraStrings(buf.subarray(XPRA_HEADER)); if (words[0] === 'disconnect') closedBy = closedBy || `the xpra server disconnected: ${words.slice(1).join(' / ') || 'no reason given'}`; }
         else if (buf.length >= 11 && buf.length <= 512 && buf.subarray(0, 11).toString('latin1') === 'disconnect ') closedBy = closedBy || `the xpra server disconnected: ${buf.toString('utf8', 11).replace(/[\r\n\0]+/g, ' ').trim().slice(0, 200)}`;
         if (pinSent && buf.length >= XPRA_HEADER + 2 && buf.length < 4096 && buf[2] === 0 && xpraPacketType(buf.subarray(XPRA_HEADER)) === 'desktop_size') { assertPin('xpra answered'); const p = pinOfNow(); if (p) { try { onDesktopSize?.(id, p.w, p.h, viewerId); } catch { /* the keeper's belt still runs */ } } } // r3: xpra moved the root — ask again; the keeper re-fits the main window (an app may re-grow itself)
+        if (readsWindows) watchDown(buf); // lane desktop-x-seat-browser r3: xpra's window announcements, read on their way (his reach is told BEFORE the window reaches the client)
         if (q) q.down.send(buf.length, () => sendDown(buf)); else sendDown(buf);
         if (first) { if (q) q.down.send(0, tellSeat); else tellSeat(); } // r2: after xpra's own first word (its hello), the socket hears its seat
       });
@@ -445,46 +546,119 @@ function bridgeOf(ctx) {
       leaveOnCut(seatRef);
     };
     // ── lane desktop-x-seat-browser r2: THE INPUT SEAT (MAJOR A) and THE WORD TO THIS SOCKET (FAIL 3 — never silent) ──
-    let lastAsk = -Infinity, told = null, refusedN = 0, refusedCode = null;
+    // r3 (acceptance r2 MAJOR 1 + 2 + 3): its reach is by WINDOW IDENTITY — HIS window (the keeper's), its transients and the popups
+    // his own acts open (xpra's announcements on this socket, `book`; see XPRA_POPUP_OPEN_MS); a point only tells his windows apart
+    let lastAsk = -Infinity, told = null, refusedN = 0, actsN = 0, refusedCode = null, lastTellAt = -Infinity, quietTimer = null;
     const ask = (why) => { const t = now(); if (t - lastAsk < XPRA_SCOPE_ASK_MS) return; lastAsk = t; askSeatScope(id, why); };
-    const inside = (rects, x, y) => rects.some((r) => x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h);
-    /** The input seat's verdict on one packet: null = it reaches xpra, else the refusal's code (counted, told). */
+    const book = new Map(); // wid → { x, y, w, h, or, tf, owner, at } — every window xpra announced to THIS socket, kept current
+    let act = null; // his last act that may open a popup: { at, wid }
+    const downs = new Map(); // 'k:<keyname>' / 'b:<button>' → { wid, release } — what his seat pressed: its release ALWAYS reaches xpra
+    const synth = []; // releases re-addressed to the window that got the press (a release the client sent elsewhere)
+    const readsWindows = seatWhy(id, seatRef.seat) !== undefined; // a seated source (a browser's display) reads its windows
+    const num = (v) => (Number.isFinite(v) ? v : 0);
+    const topOf = () => { const sc = seatScope(id); if (!sc) return null; if (Number.isInteger(sc.wid)) return sc.wid; const w = sc.wids && [...sc.wids][0]; return Number.isInteger(w) ? w : null; };
+    /** Is `wid` his: his window, or a window whose transient-for (managed) / opening act (a popup) leads to it. */
+    const mineWid = (wid, top = topOf(), d = 0) => {
+      if (!Number.isInteger(wid) || top == null || d > 6) return false;
+      if (wid === top) return true;
+      const e = book.get(wid);
+      const up = e ? (e.or ? e.owner : e.tf) : 0;
+      return !!up && up !== wid && mineWid(up, top, d + 1);
+    };
+    const mineAll = (top = topOf()) => { if (top == null) return []; const out = [top]; for (const w of book.keys()) if (w !== top && mineWid(w, top)) out.push(w); return out; };
+    const rectOf = (wid) => { const e = book.get(wid); if (e) return e; const sc = seatScope(id); return (sc && Array.isArray(sc.rects) && sc.rects.find((r) => r.wid === wid)) || null; };
+    const inRect = (r, x, y) => !!r && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+    const touches = (a, b, gap) => !!a && !!b && b.x < a.x + a.w + gap && b.x + b.w > a.x - gap && b.y < a.y + a.h + gap && b.y + b.h > a.y - gap;
+    /** A popup opening now is HIS when it follows his act on a window of his closely enough, touching that window. */
+    const popupOwner = (e, t) => (act && t - act.at <= XPRA_POPUP_OPEN_MS && seatState(id, seatRef.seat) === 'input' && mineWid(act.wid) && touches(rectOf(act.wid), e, XPRA_POPUP_GAP_PX) ? act.wid : 0);
+    const watchDown = xpraWindowWatch((f) => {
+      const type = f[0], wid = f[1];
+      if (!Number.isInteger(wid)) return;
+      const t = now();
+      if (type === 'new-window' || type === 'new-override-redirect' || type === 'window-create') {
+        const meta = f[6] && typeof f[6] === 'object' && !Array.isArray(f[6]) ? f[6] : {};
+        const e = { x: num(f[2]), y: num(f[3]), w: num(f[4]), h: num(f[5]), or: type === 'new-override-redirect' || meta['override-redirect'] === true, tf: Number.isInteger(meta['transient-for']) ? meta['transient-for'] : 0, owner: 0, at: t };
+        if (e.or) e.owner = popupOwner(e, t);
+        book.set(wid, e);
+        if (e.owner) log.log?.(`[desktop-stream] ${id}: popup ${wid} opened ${t - act.at} ms after his act on window ${act.wid} — it is his${viewerId ? ` (viewer ${viewerId})` : ''}`);
+      } else if (type === 'lost-window') { if (!book.delete(wid)) return; }
+      else {
+        const e = book.get(wid);
+        if (!e) return;
+        if (type === 'window-move-resize' || type === 'configure-override-redirect') Object.assign(e, { x: num(f[2]), y: num(f[3]), w: num(f[4]), h: num(f[5]) });
+        else if (type === 'window-resized') Object.assign(e, { w: num(f[2]), h: num(f[3]) });
+        else if (type === 'window-metadata' && f[2] && typeof f[2] === 'object' && Object.hasOwn(f[2], 'transient-for')) e.tf = Number.isInteger(f[2]['transient-for']) ? f[2]['transient-for'] : 0;
+        else return;
+      }
+      tellSeat(); // his reach changed? (the word is said only when it did) — before this window reaches the client
+    });
+    /** The input seat's verdict on one packet: null = it reaches xpra, else the refusal's code (counted, told). `judge.loud` = the
+     *  refused ACTS (a press, a key down) of this pass — the window's toast; every other refusal is told quietly. */
     const scopeVerdict = () => {
-      const sc = seatScope(id);
-      return (type, payload) => {
+      const top = topOf();
+      const judge = (type, payload, unit) => {
         if (type === null) return 'input-only'; // unreadable bytes never act
         if (XPRA_CLIPBOARD_TYPES.has(type)) return null; // his paste (the X clipboard; the key that pastes is scoped below)
+        if (type === 'map-window') { const f = xpraFields(payload, 6), e = f && book.get(f[1]); return e && !e.or && (f[2] !== e.x || f[3] !== e.y || f[4] !== e.w || f[5] !== e.h) ? 'input-only' : null; } // r3: the server's own geometry only
         if (!Object.hasOwn(XPRA_SCOPED_INPUT, type)) return 'input-only'; // a display size, a geometry, a close, an unmap, a command…
         const at = XPRA_SCOPED_INPUT[type];
-        const f = xpraFields(payload, at == null ? 2 : at + 1);
+        const spans = [];
+        const f = xpraFields(payload, at == null ? 4 : at + 1, 4096, spans);
         const wid = f && Number.isInteger(f[1]) ? f[1] : null;
-        const press = type === 'key-action' || (type === 'button-action' && !(f && f[3] === false)); // his ACT; a pointer passing by, a release, the client's own focus of a window it drew are not
-        const quiet = type === 'focus' ? 'focus-elsewhere' : 'pointer-outside';
-        if (wid === null || !sc || !sc.wids.has(wid)) { if (!sc) ask('not read yet'); else if (wid && !sc.known.has(wid)) ask(`window ${wid} opened since`); return press ? 'not-your-window' : quiet; } // nobody's act: counted in the close line, never a told refusal
+        const pressed = (type === 'key-action' || type === 'button-action') && f && typeof f[3] === 'boolean' ? f[3] : null;
+        const key = pressed === null ? null : `${type === 'key-action' ? 'k' : 'b'}:${f[2]}`;
+        // MINOR (r2's) + MAJOR 3: a RELEASE of what his seat pressed always reaches xpra — at the window that got the press
+        if (pressed === false && downs.has(key)) {
+          const d = downs.get(key); downs.delete(key);
+          if (wid === d.wid) return null;
+          synth.push(d.release); return XPRA_READDRESSED;
+        }
+        if (!mineWid(wid, top)) { // identity first: a window not his is refused whatever the point
+          if (top == null) ask('not read yet');
+          if (pressed === true) { judge.loud++; return 'not-your-window'; }
+          return type === 'focus' ? 'focus-elsewhere' : type === 'key-action' ? 'not-your-window' : 'pointer-outside';
+        }
         if (at != null) {
           const c = f[at];
           if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return 'input-only';
-          if (sc.rects.length && !inside(sc.rects, c[0], c[1])) { if (!press) return quiet; ask('a press outside his windows'); return 'not-your-window'; } // xpra moves the pointer to these root coordinates
+          if (!mineAll(top).some((w) => inRect(rectOf(w), c[0], c[1]))) { if (pressed === true) { judge.loud++; return 'not-your-window'; } return 'pointer-outside'; } // xpra moves the pointer to these root coordinates
         }
+        if (pressed === true && key) { // its release, ready: the press's own bytes with `pressed` flipped (CHR_TRUE 67 → CHR_FALSE 68)
+          const off = unit && spans[3] ? unit.length - payload.length + spans[3][0] : -1;
+          if (off >= 0 && unit[off] === 67) { const r = Buffer.from(unit); r[off] = 68; downs.set(key, { wid, release: r }); }
+        }
+        if (pressed !== null || (type === 'pointer-position' && book.get(wid) && book.get(wid).or)) act = { at: now(), wid }; // a popup may follow (a submenu: his pointer in a popup of his)
         return null;
       };
+      judge.loud = 0;
+      return judge;
     };
-    /** Tell this socket its seat — at every change (the seat, why, the windows it reaches) and at every refused ACT (a press, a
-     *  key, a geometry — its code and count; a pointer merely passing over another window, a release, the client's own focus of
-     *  a window it drew are counted in the close line, never told). Only a SEATED source's sockets hear it, after xpra's own first word. */
+    /** Tell this socket its seat — at every change (the seat, why, the windows it reaches) and at every refusal (r3: never silent —
+     *  its code and counts: `refused` every refused packet, `acts` the refused presses / keys). Only a SEATED source's sockets hear it,
+     *  after xpra's own first word. */
     const tellSeat = () => {
+      clearTimeout(quietTimer); quietTimer = null;
       if (!answered || ws.readyState !== 1 || cutDone) return;
       const s = seatState(id, seatRef.seat);
       const why = seatWhy(id, seatRef.seat);
       if (why === undefined || s === 'blocked' || s === 'free') return;
-      const sc = s === 'input' ? seatScope(id) : null;
-      const wids = sc ? [...sc.wids] : [];
+      const wids = s === 'input' ? mineAll() : [];
       const sig = `${s}|${why || ''}|${wids.join(',')}`;
       if (told && told.sig === sig && told.refused === refusedN) return;
-      told = { sig, refused: refusedN };
-      sendDown(rencodePlus([XPRA_SEAT_PACKET, { seat: s, why: why || '', code: refusedCode || '', refused: refusedN, wids }]));
+      told = { sig, refused: refusedN }; lastTellAt = now();
+      sendDown(rencodePlus([XPRA_SEAT_PACKET, { seat: s, why: why || '', code: refusedCode || '', refused: refusedN, acts: actsN, wids }]));
     };
-    const noteRefused = (codes) => { for (const [c, n] of Object.entries(codes || {})) { lastRefusal = c; if (c !== 'pointer-outside' && c !== 'focus-elsewhere') { refusedN += n; refusedCode = c; } } };
+    /** A refusal that is no act of his: told too, at most once per XPRA_TELL_QUIET_MS (the latest counts). */
+    const tellQuiet = () => { if (quietTimer) return; const wait = lastTellAt + XPRA_TELL_QUIET_MS - now(); if (wait <= 0) tellSeat(); else quietTimer = setTimeout(tellSeat, wait); };
+    const noteRefused = (codes) => { let loudCode = null; for (const [c, n] of Object.entries(codes || {})) { if (c === XPRA_READDRESSED) continue; lastRefusal = c; refusedN += n; refusedCode = c; if (c === 'not-your-window') loudCode = c; } if (loudCode) refusedCode = loudCode; };
+    /** r3 (MAJOR 3): his seat ended (watch, another pane, his browsing over) or the socket went with a key or a button down — each is
+     *  released in X at the window that got it (the press's own bytes, flipped): a key is never left down. */
+    const releaseDowns = (why) => {
+      if (!downs.size || !upstream) return;
+      const out = [...downs.values()].map((d) => d.release); downs.clear();
+      relayUp(Buffer.concat(out));
+      log.log?.(`[desktop-stream] ${id}: ${out.length} key(s) / button(s) his seat held released at their window (${why})${viewerId ? `, viewer ${viewerId}` : ''}`);
+    };
     /** watch → INPUT with the upstream open: the keymap held while it watched reaches xpra NOW; its display size / geometry never. */
     const replayInput = () => { const r = sieve.strip(Buffer.alloc(0), false, { pinned: pinnedNow(), scope: () => 'input-only' }); if (r.relay) { relayUp(r.relay); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} holds his INPUT seat — the keymap it sent while watching reaches xpra now (its display size and window geometry never: only the live view's ruling pane sizes a Chrome window)`); } };
     /** watch → active with the upstream open: the keymap / display size / geometry held while refused go out NOW (the app re-fits to this pane). */
@@ -493,6 +667,7 @@ function bridgeOf(ctx) {
       if (ws.readyState !== 1 || cutDone) return;
       if (resolveTargetSafe(id) === null) { closedBy = closedBy || 'the app session ended'; try { ws.close(ENDED_CLOSE, 'the app session ended'); } catch { /* closing */ } return; }
       const s = seatState(id, seatRef.seat);
+      if (s !== 'input') releaseDowns(`its seat is ${s} now`); // r3: before anything else this socket's seat now means
       if (s === 'blocked') { if (upstream) cut(why); return; }
       if (!upstream) openUpstream(why === 'refresh' ? 'this viewer is active now' : why);
       else if (s === 'active') replayHeld();
@@ -519,14 +694,16 @@ function bridgeOf(ctx) {
       }
       let allow = true, sizes = false;
       if (s === 'input') { // lane desktop-x-seat-browser r2: the person's INPUT seat — scoped to his window, never the client's geometry
-        const r = sieve.strip(buf, false, { pinned: pinnedNow(), scope: scopeVerdict() });
-        if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; noteRefused(r.codes); }
+        const judge = scopeVerdict();
+        const r = sieve.strip(buf, false, { pinned: pinnedNow(), scope: judge });
+        if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; const coded = Object.values(r.codes).reduce((n, k) => n + k, 0); if (r.dropped > coded) r.codes[r.lifecycle ? 'server-lifecycle' : 'input-only'] = r.dropped - coded; noteRefused(r.codes); actsN += judge.loud; } // r3: a cut the scope never saw (a lifecycle packet, a pinned size) is told too
         if (r.oversize && !oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'xpra'); }
         if (r.replayed) log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} may type now — the keymap it sent while watching reaches xpra first`);
         if (r.lifecycle) { stats.lifecycle += r.lifecycle; log.warn?.(`[desktop-stream] ${id}: ${r.lifecycle} server-lifecycle packet(s) (shutdown-server / exit-server) from ${viewerId ? `viewer ${viewerId}` : 'a viewer'} dropped — the keeper owns the xpra server's lifecycle`); }
         if (r.relay) relayUp(r.relay);
+        if (synth.length) relayUp(Buffer.concat(synth.splice(0))); // r3: a release the client addressed elsewhere — at the press's window
         if (r.relay || pinSent) assertPin(pinSent ? 'the pin changed' : 'after the hello');
-        if (r.dropped) tellSeat();
+        if (r.dropped > (r.codes[XPRA_READDRESSED] || 0)) { if (Object.keys(r.codes).some((c) => !XPRA_QUIET_CODES.has(c))) tellSeat(); else tellQuiet(); } // r3: every refusal is told — a pointer passing by quietly
         if (!r.kept) return;
         const t = now();
         if (t - lastInputReport >= INPUT_REPORT_MS) { lastInputReport = t; try { onInput(id, viewerId); } catch { /* keeper is optional here */ } }
@@ -542,7 +719,7 @@ function bridgeOf(ctx) {
       // Its keymap, display-size and (x5) configure-window packets are cut and the last of each HELD for its takeover
       // (r7 / r8 / x5: shared state). shutdown-server / exit-server are cut from EVERY viewer: the server's lifecycle is the keeper's.
       const r = sieve.strip(buf, allow, { pinned: pinnedNow(), geometry: sizes });
-      if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; if (!allow && r.acts) { refusedN += r.acts; refusedCode = lastRefusal; tellSeat(); } }
+      if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; if (!allow) { refusedN += r.dropped; actsN += r.acts; refusedCode = lastRefusal; if (r.acts) tellSeat(); else tellQuiet(); } } // r3: a pointer passing by is told too (quietly)
       if (r.oversize && !oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'xpra'); }
       if (r.replayed) log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} may type now — the ${r.replayedKinds.join(' and the ')} it sent while refused ${r.replayed > 1 ? 'reach' : 'reaches'} xpra first`);
       if (r.lifecycle) { stats.lifecycle += r.lifecycle; if (allow) lastRefusal = 'server lifecycle'; log.warn?.(`[desktop-stream] ${id}: ${r.lifecycle} server-lifecycle packet(s) (shutdown-server / exit-server) from ${viewerId ? `viewer ${viewerId}` : 'a viewer'} dropped — the keeper owns the xpra server's lifecycle`); }
@@ -552,10 +729,10 @@ function bridgeOf(ctx) {
       const t = now();
       if (t - lastInputReport >= INPUT_REPORT_MS) { lastInputReport = t; try { onInput(id, viewerId); } catch { /* keeper is optional here */ } }
     });
-    ws.on('close', (code, reason) => { finish(`the browser closed, code ${code}${reason && reason.length ? ' ' + String(reason).slice(0, 60) : ''}`); try { upstream?.close(); } catch { /* gone */ } try { upstream?.terminate(); } catch { /* gone */ } });
+    ws.on('close', (code, reason) => { releaseDowns('the socket closed'); finish(`the browser closed, code ${code}${reason && reason.length ? ' ' + String(reason).slice(0, 60) : ''}`); try { upstream?.close(); } catch { /* gone */ } try { upstream?.terminate(); } catch { /* gone */ } });
     ws.on('error', (e) => { closedBy = closedBy || wsOversize(e, id, viewerId, 'xpra') || `browser socket error ${(e && e.code) || ''}`.trim(); try { upstream?.terminate(); } catch { /* gone */ } });
   }
   return (a) => bridgeXpra(a.ws, a.id, a.port, a.viewerId, a.netem, a.req);
 }
 
-module.exports = { rencodePlus, xpraFields, XPRA_SCOPED_INPUT, XPRA_CLIPBOARD_TYPES, XPRA_SEAT_PACKET, pinDesktopPacket, STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };
+module.exports = { rencodePlus, xpraFields, lz4Inflate, xpraBody, xpraWindowWatch, XPRA_WINDOW_TYPES, XPRA_POPUP_OPEN_MS, XPRA_POPUP_GAP_PX, XPRA_TELL_QUIET_MS, XPRA_SCOPED_INPUT, XPRA_CLIPBOARD_TYPES, XPRA_SEAT_PACKET, pinDesktopPacket, STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };

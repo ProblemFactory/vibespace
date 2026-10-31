@@ -1771,7 +1771,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const r = await display.enumerateWindows({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv });
     if (!r.ok) return r;
     const rows = M.capsOf(rec, backends).perWindow ? display.seamlessWindows(r.windows) : r.windows.filter((w) => w.mapped !== false && w.w > 1 && w.h > 1);
-    return { ok: true, why: null, windows: rows.map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth, ...(w.frame ? { frame: w.frame } : {}) })) }; // depth 1 = a top-level (P8-2 x4); frame = its xpra corral
+    return { ok: true, why: null, windows: rows.map(display.appWindowRow) }; // depth 1 = a top-level (P8-2 x4); frame = its xpra corral
   }
   /** Where this machine's xpra ships its html5 client (null = no xpra, or a
    *  build without the www tree) — the hosted-client route's root. */

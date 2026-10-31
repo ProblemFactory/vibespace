@@ -489,7 +489,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
-    onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
+    onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0, acts: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
     onSeat: (v) => applyBrowserSeat(v), // r2: the bridge's own word to THIS socket (its seat, why, a refused act) — never silent
     mayFocus: () => app.wm.activeWindowId === winInfo.id, // lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
@@ -592,7 +592,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   // prompt, a print dialog — included; never a size, never an agent's window); else 'watch', SAID over the picture with who
   // uses it and the way, the door's label IS its act (deskDoorAct): Browse yourself (his own tab — browse-yourself's road;
   // none on a conversation's temporary browser, said why) or, his other pane holding the seat, Use it here.
-  const bseat = { seat: null, why: null, asked: 0, failed: false, refused: 0 };
+  const bseat = { seat: null, why: null, asked: 0, failed: false, refused: 0, acts: 0 };
   const browserDisplay = () => !!rec && rec.kind === 'display-for-browser' && !!rec.forBrowser;
   const xDoor = document.createElement('div'); xDoor.className = 'desktop-app-xseat'; xDoor.style.display = 'none'; xDoor.setAttribute('role', 'status');
   const xDoorText = document.createElement('span'); xDoorText.className = 'desktop-app-xseat-text';
@@ -615,10 +615,10 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const applyBrowserSeat = (v) => {
     if (!v || !browserDisplay()) return;
     bseat.asked++; // a GET still in flight is older than this word
-    const more = (Number(v.refused) || 0) > bseat.refused;
-    bseat.refused = Number(v.refused) || 0;
+    const more = (Number(v.acts) || 0) > bseat.acts; // r3: a refused ACT (his press, his key) — a pointer passing by is told too, never toasted
+    bseat.refused = Number(v.refused) || 0; bseat.acts = Number(v.acts) || 0;
     setBrowserSeat(v.seat, v.why || null);
-    if (more && v.code === 'not-your-window' && bseat.seat === 'input') {
+    if (more && bseat.seat === 'input') {
       const now = Date.now();
       if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Only your own window takes your clicks and keys here — the agents\' windows are view only'), { duration: 3500 }); }
     }

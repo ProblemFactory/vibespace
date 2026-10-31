@@ -29,7 +29,8 @@
  * deskSeat — lane desktop-x-seat-browser (ONE PERSON, ONE SEAT): the seat of a socket on a browser display that carries no
  *   ticket (the desktop window's own view of the display) — the person browsing that browser himself holds it; r2: an INPUT
  *   seat (`input`: his keys and pointer on HIS window only — never a display size, a window geometry or a close), ONE socket
- *   of his at a time (the newest pane — `elected`); deskSeatWhy names a watch; xScopeOf = the windows that seat reaches.
+ *   of his at a time (the newest pane — `elected`); deskSeatWhy names a watch; xScopeOf = that seat's root, his window (r3: its
+ *   transients and the popups his acts open are the bridge's, read from xpra's announcements in order).
  * deskDoorOf / DESK_DOOR_WORDS — THE RAW FALLBACK's one line in the live view: Chrome's own window holds the page, open the
  *   browser's display in Desktop to act on it.
  */
@@ -142,8 +143,8 @@ const X_TICKET_RE = /^xt-[0-9a-f]{36}$/;
  *  has its HUMAN holder (browse yourself: he is one more holder) AND it is his ELECTED socket (`elected`: the newest of his panes
  *  on that display, or the one he chose with «Use it here» — one person, one seat), else 'watch'. An INPUT seat is never the
  *  whole xpra client (acceptance r1, MAJOR A — measured: an 'active' desktop socket replayed its display size and window
- *  geometry and fitted, slotted and belted the agents' Chrome windows): his keys, pointer and paste reach HIS window, Chrome's
- *  dialogs over it and the menus inside it (xScopeOf) — nothing else, never a display size, a window geometry or a close; only
+ *  geometry and fitted, slotted and belted the agents' Chrome windows): his keys, pointer and paste reach HIS window, its
+ *  transients and the popups his own acts open (xScopeOf + the bridge) — nothing else, never a display size, a window geometry or a close; only
  *  the live view's ruling pane sizes a Chrome window. A ticket-shaped id never falls here: the relay's verdict is its only one. */
 function deskSeat({ viewerId = null, person = false, human = false, elected = true } = {}) {
   if (!viewerId || X_TICKET_RE.test(String(viewerId))) return 'watch';
@@ -158,27 +159,18 @@ function deskSeatWhy({ viewerId = null, person = false, human = false, elected =
   if (!human) return 'not-browsing';
   return elected ? null : 'other-window';
 }
-const inRect = (p, r) => !!r && p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h;
-/** THE INPUT SEAT'S REACH over the display's rows: HIS window (`wid`), Chrome's dialog windows over it (dialogsOver) and the
- *  nameless menus that opened inside it (an override-redirect row whose top-left is inside his window — the live view's
- *  admitX rule) — never another browser window of the profile. `known` = every row id read (a window opened since is asked
- *  for, never guessed). → { wids: number[], rects: [{wid,x,y,w,h}], known: number[] } (empty when his window is not told). */
-function xScopeOf(wid, rows = [], { profileDir = null } = {}) {
+/** THE INPUT SEAT'S ROOT over the display's rows: HIS window (`wid` — the keeper's xWindowFor: his CDP bounds told on the display)
+ *  and its rect. r3 (acceptance r2 MAJOR 1 + 2): nothing else is judged from these rows — a geometry rule cannot tell whose a
+ *  window is (MEASURED: Chrome's <select> popup and context menu carry no WM_TRANSIENT_FOR, no class, no name — the very rows
+ *  seamlessWindows drops; an agent's file chooser cascaded over his window holds its centre inside his rect). His transients and
+ *  the popups his own acts open are the BRIDGE's, from xpra's own announcements in order (stream-relay-xpra.js
+ *  XPRA_POPUP_OPEN_MS). `known` = every row id read. → { wid, wids: [wid], rects: [{wid,x,y,w,h}], known } (empty when untold). */
+function xScopeOf(wid, rows = []) {
   const all = Array.isArray(rows) ? rows : [];
   const known = all.map((r) => Number(r && r.id)).filter(Number.isFinite);
   const me = wid == null ? null : all.find((r) => r && Number(r.id) === Number(wid)) || null;
-  if (!me) return { wids: [], rects: [], known };
-  const rect = (r) => ({ wid: Number(r.id), x: num(r.x), y: num(r.y), w: num(r.w), h: num(r.h) });
-  const mine = rect(me);
-  const out = [mine];
-  for (const d of dialogsOver(wid, all, { profileDir })) out.push({ wid: d.wid, x: d.x, y: d.y, w: d.w, h: d.h });
-  for (const r of all) {
-    if (!r || out.some((o) => o.wid === Number(r.id)) || isBrowserRow(r, profileDir) || r.frame != null || num(r.depth) > 1) continue; // a top-level only
-    const title = typeof r.title === 'string' ? r.title : (typeof r.name === 'string' ? r.name : '');
-    if (title.trim() || r.cls || r.instance || !(num(r.w) > 1 && num(r.h) > 1)) continue; // a menu: nameless, classless, unmanaged
-    if (inRect({ x: num(r.x), y: num(r.y) }, mine)) out.push(rect(r));
-  }
-  return { wids: out.map((o) => o.wid), rects: out, known };
+  if (!me) return { wid: null, wids: [], rects: [], known };
+  return { wid: Number(me.id), wids: [Number(me.id)], rects: [{ wid: Number(me.id), x: num(me.x), y: num(me.y), w: num(me.w), h: num(me.h) }], known };
 }
 /** MAJOR B (acceptance r1): the Watch door's ONE act IS its label — browse-yourself's own road and its first refusal: his own
  *  tab in this browser ('browse' — «Browse yourself»; 'open' — «Open your browsing window» while he already browses it from

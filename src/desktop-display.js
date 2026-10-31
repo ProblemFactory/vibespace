@@ -671,6 +671,11 @@ function xpraWwwDir({ binPath = null, env = process.env } = {}) {
 function seamlessWindows(rows) {
   return (rows || []).filter((w) => w && !(typeof w.name === 'string' && /^Xpra(-CorralWindow-|$)/.test(w.name)) && w.w > 1 && w.h > 1 && (w.cls || w.instance || w.name));
 }
+/** One display row as the desktop keeper's `windows(id)` answers it (lane desktop-x-seat-browser r3: ONE mapping — the keeper's
+ *  route and the suites that drive the real row path read the same): depth 1 = a top-level (P8-2 x4); frame = its xpra corral. */
+function appWindowRow(w) {
+  return { id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth, ...(w.frame ? { frame: w.frame } : {}) };
+}
 
 /** A light window manager when one is present (xfwm4 preferred, else
  *  openbox); resolves { name, child } or null. Bare X otherwise — the app
@@ -1488,7 +1493,7 @@ module.exports = {
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts, rdpTrustRun,
-  XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
+  XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows, appWindowRow,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, setDisplaySize, applyWindowPlan, xpraVersion, installFacts, installState,

@@ -1384,10 +1384,10 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (xTickets.has(String(ticket || ''))) return null;
     return PIC.deskSeatWhy({ viewerId: ticket, person, human: humanHolds(profileId), elected });
   }
-  // ── r2 (MAJOR A): THE INPUT SEAT'S REACH — his window, its dialogs and menus (the keeper's xScopeFor), per browser, CACHED: the
-  // bridge asks per packet (sync); a miss on a window opened since, a press outside the windows read, his holding beginning ask
-  // the keeper again (one read at a time); an answer that changed re-seats that display (its sockets are told the new reach) ──
-  const xScopes = new Map(); // profileId → { scope: {wids:Set, rects, known:Set} | null, asking: bool, again: bool, at }
+  // ── r2 (MAJOR A): THE INPUT SEAT'S REACH — r3: its ROOT, his window (the keeper's xScopeFor; his transients and the popups his
+  // acts open are the bridge's, from xpra's announcements), per browser, CACHED: the bridge asks per packet (sync); his window
+  // not told yet or his holding beginning ask the keeper again (one read at a time); an answer that changed re-seats that display ──
+  const xScopes = new Map(); // profileId → { scope: {wid, wids:Set, rects, known:Set} | null, asking: bool, again: bool, at }
   const sameScope = (a, b) => !!a && !!b && a.wids.size === b.wids.size && [...a.wids].every((w) => b.wids.has(w)) && JSON.stringify(a.rects) === JSON.stringify(b.rects);
   /** The reach of `profileId`'s human holder now: {wids, rects, known} (Sets of numbers) or null (not read yet / nobody browses). */
   function xScope(profileId) {
@@ -1407,10 +1407,10 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!h || !h.browserKey) { const had = !!e.scope; e.scope = null; if (had) noteHumanSeat(pid); return; }
     e.asking = true;
     Promise.resolve().then(() => keeper.xScopeFor(pid, { browserKey: h.browserKey })).then((r) => {
-      const next = r && Array.isArray(r.wids) && r.wids.length ? { wids: new Set(r.wids.map(Number)), rects: (r.rects || []).map((x) => ({ wid: Number(x.wid), x: Number(x.x), y: Number(x.y), w: Number(x.w), h: Number(x.h) })), known: new Set((r.known || []).map(Number)) } : null;
+      const next = r && Array.isArray(r.wids) && r.wids.length ? { wid: Number.isInteger(Number(r.wid)) && r.wid != null ? Number(r.wid) : Number(r.wids[0]), wids: new Set(r.wids.map(Number)), rects: (r.rects || []).map((x) => ({ wid: Number(x.wid), x: Number(x.x), y: Number(x.y), w: Number(x.w), h: Number(x.h) })), known: new Set((r.known || []).map(Number)) } : null;
       const changed = !(next ? sameScope(e.scope, next) : !e.scope);
       e.scope = next; e.at = now();
-      if (changed) { log.log?.(`[browser-live] ${pid}: his desktop input seat reaches ${next ? `window(s) ${[...next.wids].join(', ')}` : 'no window (his window could not be told on the display)'} (${why})`); noteHumanSeat(pid); }
+      if (changed) { log.log?.(`[browser-live] ${pid}: his desktop input seat reaches ${next ? `his window ${next.wid} (its transients and the popups his acts open follow it in the bridge)` : 'no window (his window could not be told on the display)'} (${why})`); noteHumanSeat(pid); }
     }, (err) => { log.warn?.(`[browser-live] ${pid}: his window's reach could not be read (${why}) — ${err && err.message}`); }).finally(() => {
       e.asking = false;
       if (e.again) { e.again = false; askXScope(pid, 'asked again'); }

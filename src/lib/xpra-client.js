@@ -164,6 +164,12 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   let lastFixed; // the fixed window's size last announced, 'WxH' | null (undefined = never)
   let lastFront; // the front window last announced, 'wid/main/title' | null (undefined = never)
   let mainWid = 0, focusedWid = 0, zTop = 0;
+  // lane desktop-x-seat-browser r3 (acceptance r2 MAJOR 3): the INPUT seat's reach, as the bridge last said it (null = no input
+  // seat) — focus never leaves it (a window that appears is not focused, a press on another's window does not move it); and a
+  // key's / a button's release goes to the window that got its press (a release never strays — never a key left down in X)
+  let seatWids = null;
+  const mayFocus = (wid) => !seatWids || seatWids.has(wid);
+  const keyWid = new Map(), buttonWid = new Map();
   let helloTimer = null, pingTimer = null;
   let lastPaste = null, lastReceived = null, viewOnly = false;
   let watch = false, dormant = false; // x5 (see the header)
@@ -428,15 +434,17 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   const moveResize = (wid, x, y, w, h) => {
     const win = windows.get(wid);
     if (!win) return;
+    const moved = x != null && (win.x !== x || win.y !== y);
     if (x != null) { win.x = x; win.y = y; }
     win.w = Math.max(1, w); win.h = Math.max(1, h);
     emit('window', 'geometry', win);
+    if (moved && watch && !viewOnly && seatWids && seatWids.has(wid) && win.mapped) send(P.mapWindow(wid, { x: win.x, y: win.y, w: win.w, h: win.h })); // r3: his input seat — xpra re-reads where this client draws his moved window (its own geometry: nothing sized), so his pointer lands where he points
     if (slotRects.has(wid) && !slotPanes.has(wid)) { syncDisplay(); beltOthers('slot resized'); } // S2: a slot follows its own window until a satellite holds it
     belt(win, 'server geometry'); // the app moved/resized itself (or X snapped our fit): back to the fit, bounded
   };
   const focusWindow = (wid) => {
     const win = windows.get(wid);
-    if (!win) return;
+    if (!win || !mayFocus(wid)) return; // r3: in the input seat focus never leaves his reach (a window that appears, another's window pressed)
     focusedWid = wid;
     win.z = ++zTop;
     send(P.focusPacket(wid));
@@ -553,7 +561,13 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         return;
       }
       case 'clipboard-request': { const reqId = p[1], selection = P.bytesToString(p[2]); send(lastPaste != null ? P.clipboardContents(reqId, selection, lastPaste) : P.clipboardNone(reqId, selection)); return; }
-      case 'vibespace-seat': { const v = p[1] && typeof p[1] === 'object' ? p[1] : {}; emit('seat', { seat: P.bytesToString(v.seat || ''), why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, wids: Array.isArray(v.wids) ? v.wids.map(Number) : [] }); return; } // lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (never xpra's)
+      case 'vibespace-seat': { // lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (never xpra's)
+        const v = p[1] && typeof p[1] === 'object' ? p[1] : {}, seat = P.bytesToString(v.seat || ''), wids = Array.isArray(v.wids) ? v.wids.map(Number) : [];
+        seatWids = seat === 'input' ? new Set(wids) : null; // r3: focus stays in his reach — the key he types goes to his window
+        if (seatWids && !seatWids.has(focusedWid)) { const w = wids.find((x) => windows.has(x)); if (w) focusedWid = w; } // no packet: xpra focuses it at his first key
+        emit('seat', { seat, why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, acts: Number(v.acts) || 0, wids });
+        return;
+      }
       case 'ping_echo': case 'setting-change': case 'encodings': case 'bell': case 'notify_show': case 'notify_close': case 'info-response':
       case 'initiate-moveresize': case 'window-initiate-moveresize': moveResizeAsked(p); return;
       case 'new-tray': case 'send-file': case 'open-url': case 'pointer-position': case 'set-clipboard-enabled':
@@ -684,7 +698,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     return n;
   }
   /** A key's packet, or — while a text batch waits — its place in the line behind it. */
-  const keyOut = (k, pressed) => { if (held) held.push(() => send(P.keyAction(focusedWid, k, pressed))); else send(P.keyAction(focusedWid, k, pressed)); };
+  const keyOut = (k, pressed) => { if (held) held.push(() => send(keyAt(k, pressed))); else send(keyAt(k, pressed)); };
+  /** r3: a press goes to the focused window; its release to the window that got the press (focus may have moved meanwhile). */
+  const keyAt = (k, pressed) => { let wid = focusedWid; if (pressed) keyWid.set(k.keyname, wid); else if (keyWid.has(k.keyname)) { wid = keyWid.get(k.keyname); keyWid.delete(k.keyname); } return P.keyAction(wid, k, pressed); };
   const pointerMove = (x, y, mods = {}) => {
     if (viewOnly) return;
     const win = windowAt(x, y);
@@ -692,9 +708,11 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   };
   const pointerButton = (x, y, domButton, pressed, mods = {}) => {
     if (viewOnly) return;
-    const win = windowAt(x, y);
+    const win = windowAt(x, y), b = P.xButton(domButton);
     if (pressed && win && win.wid !== focusedWid && win.kind !== 'popup') focusWindow(win.wid);
-    send(P.buttonAction(win ? win.wid : 0, P.xButton(domButton), pressed, P.pointerCoords(x, y, win), P.modifiersOf(mods)));
+    let at = win; // r3: the release goes to the window that got the press, wherever the pointer is now (X's implicit grab)
+    if (pressed) buttonWid.set(b, win ? win.wid : 0); else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }
+    send(P.buttonAction(at ? at.wid : 0, b, pressed, P.pointerCoords(x, y, at), P.modifiersOf(mods)));
   };
   const wheelAt = (x, y, deltaX, deltaY, deltaMode = 0, mods = {}) => {
     if (viewOnly) return;

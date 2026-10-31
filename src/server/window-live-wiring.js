@@ -39,7 +39,7 @@
  * missing dependency of its OWN (a programming error).
  */
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, browserStream = null, log = console } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, browserStream = null, log = console, now = Date.now } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
   const DV = require('../desktop-viewers.js');
   let streamRef = null;
@@ -60,9 +60,13 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   // r2 (acceptance FAIL 1 — measured: two panes + another client, three 'active' sockets at once): his panes are ELECTED — the
   // NEWEST pane wins (a pane reconnecting through a new socket keeps its place; within a pane its newest socket), «Use it here»
   // (`takeSeat`) makes a pane the newest; the others watch and are TOLD 'other-window'. A move re-seats the display at once.
+  // r3 (acceptance r2 minor): a pane's place is the PANE's, not its socket's — kept PANE_GRACE_MS after its last socket closed, so
+  // a reconnect (its old socket closing first) or an xpra restart (every socket at once) never undoes «Use it here».
   const PIC = require('../browser-picture.js');
-  const xPersons = new Map(); // display session id → { seq, panes: Map(pane → order), sockets: Map(viewerId → { pane, seq }) }
-  const personsOf = (id) => { let e = xPersons.get(id); if (!e) { e = { seq: 0, panes: new Map(), sockets: new Map() }; xPersons.set(id, e); } return e; };
+  const PANE_GRACE_MS = 10 * 60 * 1000;
+  const xPersons = new Map(); // display session id → { seq, panes: Map(pane → order), gone: Map(pane → when its last socket closed), sockets: Map(viewerId → { pane, seq }) }
+  const personsOf = (id) => { let e = xPersons.get(id); if (!e) { e = { seq: 0, panes: new Map(), gone: new Map(), sockets: new Map() }; xPersons.set(id, e); } return e; };
+  const forgetGone = (e, t = now()) => { for (const [p, at] of e.gone) if (t - at > PANE_GRACE_MS) { e.gone.delete(p); e.panes.delete(p); } };
   /** The elected socket of a display: the newest pane's newest socket (null when no person's socket is open). */
   const electedOf = (id) => {
     const e = xPersons.get(id);
@@ -90,7 +94,7 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   const own = (id) => src(id).personal;
   const governed = (id) => !own(id) && !src(id).seat && typeof keeper.viewerJoined === 'function'; // lane browser-x-in-window: a seated source is never the election's
   const stream = require('./desktop-stream.js').create({
-    auth, onInput: (id) => { src(id).onInput?.(id); },
+    auth, now, onInput: (id) => { src(id).onInput?.(id); }, // r3: one clock (a suite's — the bridge's popup window, the pane grace)
     onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4 (a machine desktop never asks — its view runs resizeSession off): the client asked the display to follow its pane ⇒ the keeper fits the app to it
     resolveTarget: (id) => src(id).target(id),
     upstreamWhy: sources.some((s) => s.upstreamWhy) ? (id) => src(id).upstreamWhy?.(id) ?? null : null, // design 014 D1: "<machine> went offline"
@@ -103,7 +107,8 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
         if (src(id).seat) {
           if (!person || !viewerId || PIC.X_TICKET_RE.test(String(viewerId))) return; // a live view's ticket is the relay's seat, never his pane
           const e = personsOf(id), p = String(pane || viewerId);
-          if (!e.panes.has(p)) e.panes.set(p, ++e.seq); // a NEW pane is the newest; a pane reconnecting keeps its place
+          forgetGone(e); e.gone.delete(p);
+          if (!e.panes.has(p)) e.panes.set(p, ++e.seq); // a NEW pane is the newest; a pane reconnecting keeps its place (r3: within its grace)
           e.sockets.set(String(viewerId), { pane: p, seq: ++e.seq });
           try { streamRef?.refresh(id); } catch (err) { log.warn?.(`[window] ${id}: re-seat failed — ${err && err.message}`); } // his other panes are told at once
           return;
@@ -114,8 +119,8 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
         const e = xPersons.get(id);
         if (e && e.sockets.has(String(viewerId))) {
           const { pane } = e.sockets.get(String(viewerId)); e.sockets.delete(String(viewerId));
-          if (![...e.sockets.values()].some((s) => s.pane === pane)) e.panes.delete(pane);
-          if (!e.sockets.size) xPersons.delete(id);
+          if (![...e.sockets.values()].some((s) => s.pane === pane)) e.gone.set(pane, now()); // r3: its place is kept for its return
+          forgetGone(e); if (!e.sockets.size && !e.panes.size) xPersons.delete(id);
           try { streamRef?.refresh(id); } catch (err) { log.warn?.(`[window] ${id}: re-seat failed — ${err && err.message}`); } // the next newest pane takes the seat
         }
         if (governed(id)) keeper.viewerLeft(id, viewerId);
