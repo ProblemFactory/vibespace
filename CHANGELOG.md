@@ -18,6 +18,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a rule edit leaves out only some conversations of a held-messages card, only theirs are dropped; the card stays open and says how many.
 - Deliver on held messages now counts only what it sent; anything it could not send stays on the card, to deliver again or discard.
 - A restart in the middle of Deliver on held messages now reopens the same card with what was not sent, instead of a second card beside it.
+- A stopped job now counts as cut short only a process killed without its time to stop, not one that got the stop signal while time was left.
 
 ### Removed
 - Background jobs no longer read secrets from a plain file (nothing used it) — a job's secret comes from the vault.
