@@ -2276,7 +2276,7 @@ class JobManager {
           }
         }
         this._fireCron(job, isCatchUp ? 'boot' : 'cron');
-        job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now());
+        job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now(), undefined, job.nextFireAt); // lane int361: the slot it fired for — a fall-back's repeated time never fires twice
         if (job.schedule.at) { job.state = 'done'; }
         this._touch(job);
       } catch (e) { this.d.log(`[jobs] cron fire failed for ${job.id}:`, e.message); }
@@ -2408,7 +2408,7 @@ class JobManager {
     this.jobs.set(job.id, job);
     if (job.kind !== 'cron') {
       try { this._spawn(job, 'manual'); } catch (e) { job.state = 'failed'; this._touch(job); return { error: `spawn failed: ${e.message}`, job: this.snapshot(job, { author: true }) }; }
-    } else { job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); }
+    } else { job.nextFireAt = M.nextFire(job.schedule, now(), undefined, null); this._touch(job); } // a fresh schedule: no fire to remember (lane int361)
     this._save();
     const vaultWait = this._cronVaultWait(job); // lane vault-job-road r2: its fires would wait — said at once, beside «scheduled»
     if (vaultWait) return { job: this.snapshot(job, { author: true }), renamed, vaultWait };
@@ -2452,7 +2452,7 @@ class JobManager {
     if (job.kind === 'cron') {
       const vet = M.vetSpec(job); // B-f8c7: a cron spawns only at its next fire — reviving one the vet refuses answers NOW
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
-      job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save();
+      job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now(), undefined, null); this._touch(job); this._save(); // lane int361: from now, no fire to remember
       const vaultWait = this._cronVaultWait(job); // round 2: its fires would wait — said, never a bare «ok»
       return { ok: true, ...(vaultWait ? { vaultWait } : {}) }; }
     // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you

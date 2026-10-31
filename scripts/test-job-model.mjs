@@ -178,15 +178,16 @@ const nf = M.nextFire({ cron: '0 3 * * *' }, base);
 ok(nf > base && nf - base <= 24 * 3600e3 + 60e3, 'daily cron next-fire lands within 24h (a pinned clock: Aug 17 05:00 PDT)');
 const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDate() === 18, 'daily cron fires at 03:00 local (Aug 18)');
 // ── schedules across daylight saving (America/Los_Angeles 2026: spring-forward Mar 8 02:00 PST → 03:00 PDT; fall-back Nov 1
-// 02:00 PDT → 01:00 PST). RED on c0faf8120 (the product): the jump leg (it skipped the day), strictly-after and the repeated-hour
-// storm; the rest pin what it already did.
+// 02:00 PDT → 01:00 PST). RED on c0faf8120 (the product): the jump leg (it skipped the day), strictly-after, the repeated-hour
+// legs (a past fire, then a fire at every tick); the rest pin what it already did.
 {
   const T = (iso) => Date.parse(iso); const iso = (t) => new Date(t).toISOString();
   const nx = (cron, from) => M.nextFire({ cron }, T(from));
-  // jobs.js _cronTick, 30 s ticks: nextFireAt = nextFire(schedule, now()) at create / start / resume and after every fire
-  const fires = (cron, from, to) => {
-    const out = []; let next = M.nextFire({ cron }, from);
-    for (let t = from; t <= to && next != null; t += 30e3) { if (t < next) continue; out.push(t); next = M.nextFire({ cron }, t); }
+  // jobs.js _cronTick, 30 s ticks: nextFireAt = nextFire(schedule, now(), _, null) at create / start / resume, and after every
+  // fire nextFire(schedule, now(), _, the slot it fired for) — `last` seeds a schedule that already fired (a running one)
+  const fires = (cron, from, to, last = null) => {
+    const out = []; let next = M.nextFire({ cron }, from, undefined, last);
+    for (let t = from; t <= to && next != null; t += 30e3) { if (t < next) continue; out.push(t); next = M.nextFire({ cron }, t, undefined, next); }
     return out;
   };
   ok(nx('0 3 * * *', '2026-10-31T10:00:00-07:00') === T('2026-11-01T03:00:00-08:00') && nx('0 3 * * *', '2026-10-31T03:00:00-07:00') === T('2026-10-31T03:00:00-07:00') + 25 * 3600e3,
@@ -210,16 +211,46 @@ const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDa
   const back = [];
   for (const cron of ['30 1 * * *', '59 1 * * *', '*/15 * * * *', '0 * * * *', '0 3 * * *', '30 2 * * *'])
     for (const [a, b] of [['2026-11-01T06:00:00Z', '2026-11-01T12:00:00Z'], ['2026-03-08T08:00:00Z', '2026-03-08T12:00:00Z']])
-      for (let x = T(a); x <= T(b); x += 60e3) { const n = M.nextFire({ cron }, x); if (!(n > x)) back.push(`${cron} @${iso(x)} ⇒ ${n == null ? n : iso(n)}`); }
-  ok(back.length === 0, 'nextFire is strictly after its now at every minute across both DST edges (6 crons)', back.length + ': ' + back.slice(0, 3).join(' · '));
+      for (let x = T(a); x <= T(b); x += 60e3)
+        for (const last of [undefined, null, x - 3600e3]) { const n = M.nextFire({ cron }, x, undefined, last); if (!(n > x)) back.push(`${cron} @${iso(x)} last ${last} ⇒ ${n == null ? n : iso(n)}`); }
+  ok(back.length === 0, 'nextFire is strictly after its now at every minute across both DST edges (6 crons × lastFireAt omitted / null / an hour back)', back.length + ': ' + back.slice(0, 3).join(' · '));
+  // the integrator's ruling (10-31, acceptance of d69617894): a repeated time fires in the SECOND pass iff the schedule did not
+  // fire it in the first — jobs.js hands the slot it fired for after a fire, null at create / start / resume
+  ok(M.nextFire({ cron: '30 1 * * *' }, T('2026-11-01T01:10:00-08:00'), undefined, null) === T('2026-11-01T01:30:00-08:00'),
+    'fall-back: 30 1 * * * created at 01:10 PST (its 01:30 still ahead on the wall clock) fires at 01:30 PST that day — never pushed to the next');
+  ok(M.nextFire({ cron: '30 1 * * *' }, T('2026-11-01T01:30:20-07:00'), undefined, T('2026-11-01T01:30:00-07:00')) === T('2026-11-02T01:30:00-08:00'),
+    'fall-back: fired at 01:30 PDT, then the tick ⇒ the next day (01:30 PST is not a second fire)');
+  ok(M.nextFire({ cron: '59 1 * * *' }, T('2026-11-01T01:00:10-08:00'), undefined, T('2026-11-01T01:59:00-07:00')) === T('2026-11-02T01:59:00-08:00'),
+    'fall-back: fired at 01:59 PDT, a tick at 01:00 PST ⇒ NOT 01:59 PST again — the next day');
+  ok(M.nextFire({ cron: '30 1 * * *' }, T('2026-11-01T01:10:00-08:00'), undefined, null) === T('2026-11-01T01:30:00-08:00')
+    && fires('30 1 * * *', T('2026-11-01T01:10:00-08:00'), T('2026-11-02T10:00:00-08:00')).map(iso).join() === '2026-11-01T09:30:00.000Z,2026-11-02T09:30:00.000Z',
+    'fall-back: paused before 01:30 PDT, resumed at 01:10 PST ⇒ 01:30 PST, then Nov 2 01:30 — one fire a day');
+  ok(M.nextFire({ cron: '30 1 * * *' }, T('2026-11-01T01:10:00-08:00')) === T('2026-11-02T01:30:00-08:00'),
+    'fall-back: a caller that does not say lastFireAt keeps the first pass only (conservative: never a second fire)');
+  const run15 = fires('*/15 * * * *', T('2026-11-01T00:40:00-07:00'), T('2026-11-01T02:20:00-08:00'), T('2026-11-01T00:30:00-07:00'));
+  ok(run15.map(iso).join() === ['07:45', '08:00', '08:15', '08:30', '08:45', '10:00', '10:15'].map((h) => `2026-11-01T${h}:00.000Z`).join(),
+    'fall-back: a RUNNING */15 fires each wall time once — 01:45 PDT ⇒ 02:00 PST (the repeated pass already ran; a literal «skip only the same first pass» would fire 01:00 twice)', run15.map(iso).join(' '));
+  const new15 = fires('*/15 * * * *', T('2026-11-01T01:20:00-08:00'), T('2026-11-01T02:20:00-08:00'));
+  ok(new15.map(iso).join() === ['09:30', '09:45', '10:00', '10:15'].map((h) => `2026-11-01T${h}:00.000Z`).join(),
+    'fall-back: */15 created at 01:20 PST fires 01:30, 01:45, 02:00 PST — its second-pass times still ahead fire', new15.map(iso).join(' '));
   const storm = [];
   for (let s = T('2026-11-01T01:00:00-08:00'); s < T('2026-11-01T02:00:00-08:00'); s += 60e3)
-    for (const cron of ['30 1 * * *', '45 1 * * *', '*/15 * * * *']) {
+    for (const [cron, at] of [['30 1 * * *', '01:30'], ['45 1 * * *', '01:45'], ['*/15 * * * *', null]]) {
       const f = fires(cron, s, T('2026-11-01T04:00:00-08:00'));
-      if (cron === '*/15 * * * *' ? f.some((t, i) => i && t - f[i - 1] < 15 * 60e3) : f.length) storm.push(`${cron} from ${iso(s)}: ${f.length} fire(s)`);
+      const want = at && (s < T(`2026-11-01T${at}:00-08:00`) ? [T(`2026-11-01T${at}:00-08:00`)] : []);
+      if (at ? f.join() !== want.join() : f.some((t, i) => i && t - f[i - 1] < 15 * 60e3)) storm.push(`${cron} from ${iso(s)}: ${f.length} fire(s)`);
     }
-  ok(storm.length === 0, 'a cron created, started or resumed inside the repeated hour (01:00–01:59 PST) never fires at every tick: its 01:30 / 01:45 already ran (no fire before 04:00 PST), */15 stays 15 min apart',
+  ok(storm.length === 0, 'a cron created, started or resumed inside the repeated hour (01:00–01:59 PST) never fires at every tick: its 01:30 / 01:45 fires ONCE at the second pass while still ahead (none after), */15 stays 15 min apart',
     storm.length + ': ' + storm.slice(0, 3).join(' · '));
+  // the wiring: jobs.js hands nextFire what it knows — the slot it fired for after a fire, null at create / start / resume; only
+  // the legacy recompute (a record with no nextFireAt) says nothing (first pass only)
+  const jsrc = fs.readFileSync(path.join(__dirname_jm, '..', 'src', 'jobs.js'), 'utf-8');
+  const calls = (jsrc.match(/M\.nextFire\([^;]*?\)(?=;| :)/g) || []).map((c) => c.replace(/\s+/g, ' '));
+  const want = { 'M.nextFire(job.schedule, now(), undefined, job.nextFireAt)': 1, 'M.nextFire(job.schedule, now(), undefined, null)': 2, 'M.nextFire(job.schedule, now())': 1 };
+  const got = {}; for (const c of calls) got[c] = (got[c] || 0) + 1;
+  const norm = (o) => JSON.stringify(Object.entries(o).sort());
+  ok(norm(got) === norm(want),
+    'jobs.js: after a fire nextFire gets the slot it fired for, create / start / resume null, the legacy recompute nothing', JSON.stringify(got));
 }
 ok(M.nextFire({ at: Date.now() - 1000 }, Date.now()) === null, 'passed {at} never fires (missed handling is the engine)');
 const e1 = M.nextFire({ everyMs: 30 * 60e3, jitterPct: 20 }, 1000, 0.5);
