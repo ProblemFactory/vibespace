@@ -706,13 +706,13 @@
    are on its card, and no «Always»; every warning row and the «asked again» line always drawn (short by construction —
    foryou-actions runStripOf). THE DEADLINE LAW: the clock everywhere — beside the meta */
 .cad-rows .ut-body > .ut-run { display: contents; }
-.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-answer) { display: none !important; }
+.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-run-answer) { display: none !important; } /* the .367 seam 6: what a writing answer writes stays */
 .cad-rows .ut-run > .ut-run-cmd { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-run > .ut-run-answer { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .cad-rows .ut-run > .ut-run-gist { order: 4; flex: 1 1 100%; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
 .cad-rows .ut-run-gist > * { min-width: 0; margin: 0; font-size: inherit; }
 .cad-rows .ut-run-gist .ut-run-lbl { margin-inline-end: 0.3em; }
-.cad-rows .ut-run-answer > .ut-run-hint { display: none; }
+.cad-rows .ut-run-answer > .ut-run-hint:not(.ut-run-hint-window) { display: none; } /* the .367 seam 6: «Allow for 1 hour»'s own words stay */
 /* r15 (the r14 acceptance: a LATE run's sentence, one line and no ellipsis, ran past a 700 px window's edge): the clock's line
    is a whole line of its own when it must be, and wraps inside it — at every width (r12b: nothing past a window's edge) */
 .cad-rows .ut-body > .ut-deadline { order: 2; flex: 0 1 auto; min-width: 0; margin: 0; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
