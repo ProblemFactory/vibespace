@@ -2035,10 +2035,18 @@ async function liveFillRefusal(res, k, f, profileId, req, verb) {
   const batchVerbs = rawBatch ? (rawBatch.length > 256 ? ['__overflow__'] : rawBatch.map((x) => String(x || ''))) : null;
   const rawArgv = Array.isArray(req.body?.argv) ? req.body.argv : null;
   const argv = rawArgv ? rawArgv.slice(0, 64).map((x) => String(x || '')) : null;
-  const lv = D.liveFillVerdictFor(t, { verb, argv, batchVerbs });
+  const targetId = typeof req.body?.targetId === 'string' && req.body.targetId.trim() ? req.body.targetId.trim().slice(0, 64) : null;
+  if (req.body?.fenceCheckOnly === true && targetId && targetId !== '__unknown__' && typeof D.noteActiveTab === 'function') {
+    try { D.noteActiveTab(t, targetId); } catch { /* optional */ }
+  }
+  const lv = D.liveFillVerdictFor(t, { verb, argv, batchVerbs, targetId });
   if (lv && !lv.ok) {
     const BL = require('../browser-login.js'), PT = require('../peer-text.js');
     res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code, ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) });
+    return true;
+  }
+  if (req.body?.fenceCheckOnly === true) {
+    res.json({ ok: true });
     return true;
   }
   return false;
@@ -2099,7 +2107,9 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
     const scrubOut = !!(arm && typeof D.hasScrubSecrets === 'function' && D.hasScrubSecrets(t.profileId));
-    return { ...(scrubOut ? { scrubOutput: true } : {}), dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
+    const fencedTabs = arm && verb && typeof D.fencedTargetsFor === 'function' ? D.fencedTargetsFor(t) : [];
+    const checkActiveTabFence = !!(fencedTabs.length && !require('../browser-login.js').liveFillVerdict({ verb, origin: fencedTabs[0].origin }).ok);
+    return { ...(scrubOut ? { scrubOutput: true } : {}), ...(checkActiveTabFence ? { checkActiveTabFence: true } : {}), dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -2201,7 +2211,7 @@ router.post('/api/agent/browser/login', async (req, res) => {
     const text = require('../peer-text.js').toAgentText(BL.loginText(r), { max: BL.TEXT_MAX });
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'login', dialog: { type: 'login', message: r.origin } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
-    if (r.step) { const j0 = res.json.bind(res); res.json = (b) => j0(b && typeof b === 'object' ? { ...b, step: r.step } : b); }
+    if (r.step || r.usedPassword) { const j0 = res.json.bind(res); res.json = (b) => j0(b && typeof b === 'object' ? { ...b, ...(r.step ? { step: r.step } : {}), ...(r.usedPassword ? { usedPassword: r.usedPassword } : {}) } : b); }
     res.json({ ok: true, mode: r.mode, origin: r.origin, user: r.user, filled: r.filled, submitted: !!r.submitted, receipt: r.receipt || null, text });
   } catch (e) { fail(res, e); }
 });

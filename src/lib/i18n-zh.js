@@ -11733,4 +11733,13 @@ export default {
   "(too long to show here — the hosts are on its card)": "（这里放不下 — 主机在它的卡片里）",
   "(too long to show here — the hosts, and «Always», are on its card)": "（这里放不下 — 主机和「总是允许」都在它的卡片里）",
   "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you": "提问早于本对话现存的记录 — 聊天里没有它的卡片；输入框上方的等待栏只有「允许一次」和「拒绝」—「总是允许」和它发往的主机在「待你处理」里它的卡片上",
+  "Registration not yet confirmed by the site · password made by the vault, never shown": "站点尚未确认注册 · 密码由保险库生成，从未显示",
+  "Password change not yet confirmed · login fills the pending password": "密码修改尚未被站点确认 · 登录时填写待确认的新密码",
+  "Registration not yet confirmed by the site": "站点尚未确认注册",
+  "Password change not yet confirmed": "密码修改尚未确认",
+  "Registration not yet confirmed by the site — login fills this pending password.": "站点尚未确认这次注册 — 再次登录会填写这个待确认密码。",
+  "Password change not yet confirmed — login fills the pending password (previous password kept in reserve).": "密码修改尚未被站点确认 — 再次登录会填写待确认的新密码（旧密码保留在记录中备用）。",
+  "Last login filled the pending password.": "上次登录填写的是待确认密码。",
+  "a filled password could not be cleared on {tab} — reload it": "无法清除 {tab} 里已填入的密码 — 请刷新该标签页",
+  "Open the browser live view or reload that tab so the typed credential leaves the page.": "请打开浏览器实时视图或刷新该标签页，让已填入的凭据离开页面。",
 };

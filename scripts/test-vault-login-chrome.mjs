@@ -61,9 +61,10 @@ const BASE_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && k !== 'DBUS_SESSION_BUS_ADDRESS')
 );
 const ROOT = scratch('vlogin-chrome');
+const SOCK_ROOT = fs.mkdtempSync('/tmp/vl-');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 let cleaned = false;
-const cleanup = () => { if (cleaned) return; cleaned = true; try { endRootedProcesses(ROOT); } catch { } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
+const cleanup = () => { if (cleaned) return; cleaned = true; try { endRootedProcesses(ROOT); } catch { } try { endRootedProcesses(SOCK_ROOT); } catch { } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } try { fs.rmSync(SOCK_ROOT, { recursive: true, force: true }); } catch { } };
 process.on('exit', cleanup);
 for (const sg of ['SIGINT', 'SIGTERM']) process.on(sg, () => { cleanup(); process.exit(130); });
 
@@ -146,7 +147,7 @@ const pages2 = await startLoginPages();
 
 async function world(tag, { Dmod = D } = {}) {
   const W = path.join(ROOT, tag);
-  const KH = path.join(W, 'h'), KXD = path.join(W, 'x'), VD = path.join(W, 'vault');
+  const KH = path.join(W, 'h'), KXD = path.join(SOCK_ROOT, tag.slice(0, 2)), VD = path.join(W, 'vault');
   for (const d of [path.join(KH, '.agent-browser'), KXD, VD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }), { mode: 0o600 });
   const hostBrowsers = path.join(process.env.HOME || '/root', '.agent-browser', 'browsers');
@@ -166,7 +167,7 @@ async function world(tag, { Dmod = D } = {}) {
     log: { log: (l) => logs.push(String(l)), warn: (l) => logs.push(String(l)), error: (l) => logs.push(String(l)) },
     install: false, tickMs: 3600e3,
   });
-  const prof = kk.createProfile({ label: 'Login ' + tag }, { owner: { kind: 'instance', id: null } });
+  const prof = kk.createProfile({ label: 'Login ' + tag, sharing: 'instance' }, { owner: { kind: 'instance', id: null } });
   const eng = VE.create({ dataDir: VD, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false });
   const VPW = ['vault', crypto.randomBytes(4).toString('hex'), 'pass'].join('-');
   await eng.setup(VPW);
@@ -220,7 +221,7 @@ async function world(tag, { Dmod = D } = {}) {
     srv.closeAllConnections?.();
     await new Promise((r) => srv.close(() => r()));
   };
-  return { W, KEY, mediator, kk, prof, eng, grants, totp, logins, dialogs, cli, logs, traced, audited, vaultAuditRaw, vaultAudit, close };
+  return { W, KEY, mediator, kk, prof, eng, grants, totp, logins, fy, dialogs, cli, logs, traced, audited, vaultAuditRaw, vaultAudit, close };
 }
 
 try {
@@ -276,14 +277,27 @@ try {
       ok(r.code === 1 && /\[login_not_granted\]/.test(r.err), 'before grant ⇒ exit 1 [login_not_granted]', r);
       ok(w.logins.grant(LOGIN_NAME, 'this-account', 'session:conv-1').ok, 'owner granted the login to this conversation');
 
-      // Plant B3 pre-fill input capture + cross-navigation window.name + console.log BEFORE filling
-      const pre = await run(['eval', "window.__b3 = ''; document.querySelector('#p').addEventListener('input', (e) => { window.__b3 = e.target.value; window.name = 'stash:' + e.target.value; console.log('cstash:' + e.target.value); }); 'armed'"]);
+      // Plant B3 pre-fill input capture + same-origin localStorage + console.log BEFORE filling (cleaned up before fence lifts)
+      const pre = await run(['eval', "window.__b3 = ''; document.querySelector('#p').addEventListener('input', (e) => { window.__b3 = e.target.value; localStorage.setItem('vs_b3', e.target.value); console.log('cstash:' + e.target.value); }); 'armed'"]);
       ok(pre.code === 0, 'pre-fill input listener planted before login fill', pre);
 
       pages.clear();
       r = await run(['login']);
       ok(r.code === 0 && /Filled the user name and the password/.test(r.out) && /NOT submitted/.test(r.out) && /Step: password\./.test(r.out) && /Receipt vr-[0-9a-f]{12}\./.test(r.out) && pages.received().length === 0,
         'login without --submit fills username + password (Step: password) and does NOT submit the form', r);
+
+      // r5 MAJOR A: 5000-node AX frame scrubs in < 20 ms without blocking the hub's event loop while fence is active
+      {
+        const { performance } = require('node:perf_hooks');
+        const axNodes = Array.from({ length: 5000 }, (_, i) => ({ id: String(i), r: 't', n: i === 4999 ? `lbl:${PW}` : `item-${i}` }));
+        const axFrame = JSON.stringify({ id: 501, result: { nodes: axNodes } });
+        w.dialogs.scrubCdpFrame(w.prof.id, JSON.stringify({ id: 1, result: { nodes: [] } }));
+        const tAx0 = performance.now();
+        const axOut = w.dialogs.scrubCdpFrame(w.prof.id, axFrame);
+        const axMs = performance.now() - tAx0;
+        ok(axMs < 20 && !axOut.includes(PW) && axOut.includes(`[vault:${LOGIN_NAME}]`) && w.dialogs.hasScrubSecrets(w.prof.id) === true,
+          `r5 MAJOR A: 5000-node AX frame scrubs in ${axMs.toFixed(2)} ms (< 20 ms) while liveFill is active`, { axMs });
+      }
 
       // Layer 1 (CLI): every reading / scripting / capture / bypass road is refused [login_fill_live] while filled
       const snap = await run(['snapshot']);
@@ -333,7 +347,8 @@ try {
       }
       await rawUp.close();
       ok(!!pageTarget && rawSnapHasPw === true, 'RED control (real Chrome): unmediated DOMSnapshot.captureSnapshot on live-filled tab returns the password in strings');
-      const mg = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: w.KEY, upstream: upUrl1, targetIds: [pageTarget.targetId] });
+      const MED_KEY_1 = 'bk-0000f1b1', MED_KEY_2 = 'bk-0000f1b2', MED_KEY_3 = 'bk-0000f1b3';
+      const mg = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: MED_KEY_1, upstream: upUrl1, targetIds: [pageTarget.targetId] });
       const medRpc = await openCdpRpc(mg.url);
       const medAtt = await medRpc.call('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: true });
       const medSid = medAtt.msg.result && medAtt.msg.result.sessionId;
@@ -351,24 +366,82 @@ try {
         ok(!!(mr.msg.error && /login_fill_live/.test(mr.msg.error.message)) && !mr.raw.includes(PW),
           `mediated CDP census fence refuses ${m} with login_fill_live while filled secret is live`, mr.msg);
       }
+      await medRpc.close();
 
-      // Allowed verb (`click`) submits the form → 303 redirect to /welcome lifts liveFill, and Layer 2 scrubs stashed secret
-      const clickSub = await run(['click', 'button[type=submit]']);
+      // Layer 2 scrubber (CLI + cdp-mediator WS) on an unfenced second tab WHILE Tab 1's liveFill is active, plus r5 MINOR E check
+      const tn2 = await run(['tab', 'new', `${SITE}/plain`]);
+      const rawUp2 = await openCdpRpc(upUrl1);
+      const tList2 = await rawUp2.call('Target.getTargets');
+      const plainTarget = ((tList2.msg.result && tList2.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').startsWith(`${SITE}/plain`));
+      let medTab2Ok = false;
+      if (plainTarget) {
+        const mg2 = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: MED_KEY_2, upstream: upUrl1, targetIds: [plainTarget.targetId] });
+        const medRpc2 = await openCdpRpc(mg2.url);
+        const att2 = await medRpc2.call('Target.attachToTarget', { targetId: plainTarget.targetId, flatten: true });
+        const sid2 = att2.msg.result && att2.msg.result.sessionId;
+        const mr2 = await medRpc2.call('Runtime.evaluate', { expression: "'stash:' + (localStorage.getItem('vs_b3') || '')", returnByValue: true }, sid2);
+        medTab2Ok = Boolean(!mr2.msg.error && mr2.raw.includes(`[vault:${LOGIN_NAME}]`) && !mr2.raw.includes(PW));
+        await medRpc2.close();
+      }
+      const cliTab2 = await run(['eval', "(() => { const v = localStorage.getItem('vs_b3') || ''; localStorage.removeItem('vs_b3'); return 'stash:' + v; })()"]);
+      ok(tn2.code === 0 && cliTab2.code === 0 && cliTab2.out.includes(`[vault:${LOGIN_NAME}]`) && !cliTab2.out.includes(PW) && !cliTab2.err.includes(PW),
+        'Layer 2 scrubber (CLI): unfenced second tab eval while Tab 1 fence is live replaces stashed secret with [vault:web-login:...]', cliTab2);
+      ok(medTab2Ok,
+        'Layer 2 scrubber (cdp-mediator WS): upstream frame on unfenced second tab while Tab 1 fence is live is scrubbed to [vault:web-login:...]');
+      const swBack = await run(['tab', pageTarget.targetId]);
+      const clPlain = plainTarget ? await run(['tab', 'close', plainTarget.targetId]) : { code: 0 };
+      // Also open an opener-less tab while a verb is in flight (`r5 MINOR E` exact shape) and verify Tab 1 stays fenced
+      w.dialogs.verbStarted(w.KEY, { profileId: w.prof.id, verb: 'wait' });
+      const opLess = await rawUp2.call('Target.createTarget', { url: `${SITE}/plain` });
+      await sleep(80);
+      w.dialogs.verbEnded(w.KEY, { profileId: w.prof.id });
+      const opLessTid = opLess.msg.result && opLess.msg.result.targetId;
+      const tab1StillFenced = await run(['eval', 'document.querySelector("#p").value']);
+      if (opLessTid) await rawUp2.call('Target.closeTarget', { targetId: opLessTid });
+      await rawUp2.close();
+      ok(swBack.code === 0 && clPlain.code === 0 && tab1StillFenced.code === 1 && /\[login_fill_live\]/.test(tab1StillFenced.err) && !tab1StillFenced.out.includes(PW) && !tab1StillFenced.err.includes(PW),
+        'r5 MINOR E: switching/closing tabs and an opener-less tab appearing mid-verb never unfence live-filled Tab 1', { swCode: swBack.code, clCode: clPlain.code, code: tab1StillFenced.code, err: tab1StillFenced.err });
+
+      // r5 MINOR G: drive REAL agent-browser through cdp-mediator (mg3.url) during live fill (`check`, `select`, `click` succeed; `eval` refused)
+      const mg3 = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: MED_KEY_3, upstream: upUrl1, targetIds: [pageTarget.targetId] });
+      const medHome = path.join(w.W, 'med-home'), medXdg = path.join(w.W, 'med-xdg');
+      fs.mkdirSync(medHome, { recursive: true });
+      fs.mkdirSync(medXdg, { recursive: true, mode: 0o700 });
+      const medAbEnv = {
+        ...BASE_ENV, HOME: medHome, XDG_RUNTIME_DIR: medXdg,
+        AGENT_BROWSER_SESSION: 'med-r5', AGENT_BROWSER_NAMESPACE: 'medr5',
+        AGENT_BROWSER_CDP: mg3.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: '1500',
+      };
+      const runMedAb = (verb, args) => new Promise((resolve) => {
+        if (verb) w.dialogs.verbStarted(MED_KEY_3, { profileId: w.prof.id, verb });
+        const c = spawn(REAL_AB, args, { env: medAbEnv, cwd: w.W });
+        let out = '', err = '';
+        c.stdout.on('data', (d) => { out += d; });
+        c.stderr.on('data', (d) => { err += d; });
+        const t = setTimeout(() => c.kill('SIGKILL'), 20000);
+        c.on('exit', (code) => {
+          clearTimeout(t);
+          if (verb) w.dialogs.verbEnded(MED_KEY_3, { profileId: w.prof.id });
+          cliTranscripts.push(`med-ab ${args.join(' ')}\nOUT:${out}\nERR:${err}`);
+          resolve({ code, out, err });
+        });
+      });
+      const medCheck = await runMedAb('check', ['check', '#rem']);
+      const medEval = await runMedAb('eval', ['eval', 'document.querySelector("#p").value']);
+      const medSelect = await runMedAb('select', ['select', '#role', 'admin']);
+      const clickSub = await runMedAb('click', ['click', 'button[type=submit]']);
       const gotClick = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
       await until(async () => { const u = await w.cli(['get', 'url']); return /\/welcome\b/.test(u.out); }, 4000);
-      ok(clickSub.code === 0 && gotClick && gotClick.body.username === USER && gotClick.body.password === PW,
-        'allowed verb `click` submits the unmasked real password to /done/one and navigates to /welcome', { clickCode: clickSub.code, gotClick: gotClick && { user: gotClick.body.username } });
+      ok(medEval.code !== 0 && /login_fill_live/.test(medEval.out + medEval.err) && !medEval.out.includes(PW) && !medEval.err.includes(PW) &&
+        medCheck.code === 0 && medSelect.code === 0 && clickSub.code === 0 &&
+        gotClick && gotClick.body.username === USER && gotClick.body.password === PW && gotClick.body.remember === 'yes' && gotClick.body.role === 'admin',
+        'r5 MINOR G: real agent-browser through cdp-mediator during liveFill refuses `eval` [login_fill_live] and allows `check`, `select`, and `click` (submitting real form to /welcome)',
+        { medEvalCode: medEval.code, medCheckCode: medCheck.code, medSelectCode: medSelect.code, clickCode: clickSub.code, gotRole: gotClick && gotClick.body.role, medCheckErr: medCheck.err.slice(0, 180) });
 
       const snapAfter = await run(['snapshot']);
       ok(snapAfter.code === 0 && /Signed in/.test(snapAfter.out), 'after cross-document navigation to /welcome, snapshot is allowed again', snapAfter.out);
-      const winNameAfter = await run(['eval', 'window.name']);
-      ok(winNameAfter.code === 0 && winNameAfter.out.includes(`[vault:${LOGIN_NAME}]`) && !winNameAfter.out.includes(PW) && !winNameAfter.err.includes(PW),
-        'Layer 2 scrubber: post-navigation `eval window.name` replaces stashed password with [vault:web-login:...]', winNameAfter);
-      const medAfter = await medRpc.call('Runtime.evaluate', { expression: 'window.name', returnByValue: true }, medSid);
-      ok(!medAfter.msg.error && medAfter.raw.includes(`[vault:${LOGIN_NAME}]`) && !medAfter.raw.includes(PW),
-        'Layer 2 scrubber (cdp-mediator WS): upstream frame carrying stashed password in window.name is scrubbed to [vault:web-login:...]', medAfter.msg);
-      await medRpc.close();
-      await run(['eval', "window.name = ''; 'cleared'"]);
+      const scrubGone = await until(() => w.dialogs.hasScrubSecrets(w.prof.id) === false, 2000);
+      ok(Boolean(scrubGone), 'r5 MAJOR A: profile scrub set is cleared as soon as the last liveFill fence ends on the profile');
 
       // Direct `login --submit --json` road on /one
       pages.clear();
@@ -436,7 +509,7 @@ try {
         const r = await run(['login', '--submit', '--json']);
         const j = (() => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } })();
         const rec = await until(() => pages.received().find((x) => x.path === donePath), 4000);
-        ok(r.code === 0 && j && j.success && j.data.submitted === true && rec && rec.body.username === USER && rec.body.password === PW,
+        ok(r.code === 0 && j && j.success && j.data && j.data.submitted === true && rec && rec.body.username === USER && rec.body.password === PW,
           `${label}: submits the real unmasked credentials`, { route, submitted: j && j.data.submitted });
       }
 
@@ -485,6 +558,24 @@ try {
       const rSameFrame = await run(['login']);
       ok(rSrcdoc.code === 1 && /\[login_in_frame\]/.test(rSrcdoc.err) && /inside a frame/.test(rSrcdoc.err) && rSameFrame.code === 1 && /\[login_in_frame\]/.test(rSameFrame.err),
         'about:srcdoc and same-origin framed login forms refuse [login_in_frame] ("inside a frame"), never [login_no_form]', { rSrcdoc: rSrcdoc.err, rSameFrame: rSameFrame.err });
+
+      // r5 MAJOR B (real Chrome two-tab frame isolation): Tab 1 has /one top-level form, Tab 2 embeds same-origin newsletter email iframe; switching to Tab 1 and running `login` (no origin) fills & submits Tab 1!
+      pages.clear();
+      await run(['open', `${SITE}/one`]);
+      await run(['tab', 'new', `${SITE}/iframe-host?src=${encodeURIComponent(`${SITE}/embed-email`)}`]);
+      await sleep(250);
+      const rawUp5 = await openCdpRpc(await upstreamWsUrl());
+      const tList5 = await rawUp5.call('Target.getTargets');
+      await rawUp5.close();
+      const tInfos5 = (tList5.msg.result && tList5.msg.result.targetInfos) || [];
+      const t5One = tInfos5.find((t) => t.type === 'page' && String(t.url || '').startsWith(`${SITE}/one`));
+      const t5Emb = tInfos5.find((t) => t.type === 'page' && String(t.url || '').includes('/iframe-host'));
+      const sw5 = t5One ? await run(['tab', t5One.targetId]) : { code: 1 };
+      const rTwoTabB = await run(['login', '--user', USER, '--submit']);
+      const gotTwoTabB = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+      if (t5Emb) await run(['tab', 'close', t5Emb.targetId]);
+      ok(sw5.code === 0 && rTwoTabB.code === 0 && gotTwoTabB && gotTwoTabB.body.username === USER && gotTwoTabB.body.password === PW,
+        'r5 MAJOR B (real Chrome two tabs): newsletter email iframe on Tab 2 never shadows or refuses active Tab 1 plain login', { swCode: sw5.code, code: rTwoTabB.code, err: rTwoTabB.err });
     }
 
     console.log('⑥ Fail-closed Input.insertText & 0 secrets in Debugger.getScriptSource (/clear-trap & /focus-trap)');
@@ -616,6 +707,85 @@ try {
       const snapSpaOk = await until(async () => { const s = await run(['snapshot']); return s.code === 0 && /Signed in SPA/.test(s.out) ? s : null; }, 4000);
       ok(rSpaLogin.code === 0 && !!snapSpaOk,
         'r4 MINOR 7: SPA login (200 POST + unmounted password input + pushState) lifts liveFill so snapshot succeeds', { code: rSpaLogin.code, lifted: !!snapSpaOk });
+
+      // 7g. r5 MAJOR C (Break 4): 200 {ok:false,error} where site JS clears password + pushState + later cross-doc nav ⇒ stays pending, 0 notices
+      pages.clear();
+      const fy7g = w.fy.length;
+      await run(['open', `${SITE}/signup-check?jsonerr=1&clearerr=1`]);
+      const rC1 = await run(['login', SITE, '--new-user', 'jsonerr-clear@example.test', '--generate', '--submit']);
+      await until(() => pages.received().find((x) => x.path === '/done/signup-check' && x.body.email === 'jsonerr-clear@example.test'), 4000);
+      await sleep(250);
+      await run(['open', `${SITE}/plain`]);
+      await sleep(200);
+      const recC1 = readLoginRec('jsonerr-clear@example.test');
+      ok(rC1.code === 0 && recC1 && recC1.pending === 'register' && recC1.submittedAt === null && w.fy.length === fy7g,
+        'r5 MAJOR C.1 (real Chrome): 200 {error} that clears password fields + pushState + later navigation stays pending:register (0 notices)',
+        { pending: recC1 && recC1.pending, notices: w.fy.length - fy7g });
+
+      // 7h. r5 MAJOR C (Break 5): same-origin email-availability POST 200 (fired by fill's `change` event) + plain link click ⇒ stays pending, 0 notices
+      pages.clear();
+      const fy7h = w.fy.length;
+      await run(['open', `${SITE}/signup-check?emailcheck=1`]);
+      const rC2 = await run(['login', SITE, '--new-user', 'emailavail@example.test', '--generate']);
+      const gotEmailAvail = await until(() => pages.received().find((x) => x.path === '/seen/email-avail' && x.body.email === 'emailavail@example.test'), 4000);
+      const rC2Link = await run(['click', '#termsLink']);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/plain\b/.test(u.out); }, 4000);
+      await sleep(200);
+      const recC2 = readLoginRec('emailavail@example.test');
+      ok(rC2.code === 0 && !!gotEmailAvail && rC2Link.code === 0 && recC2 && recC2.pending === 'register' && w.fy.length === fy7h,
+        'r5 MAJOR C.2 (real Chrome): same-origin email-availability POST 200 + plain link click stays pending:register (0 notices)',
+        { gotEmailAvail: !!gotEmailAvail, pending: recC2 && recC2.pending, notices: w.fy.length - fy7h });
+
+      // 7i. r5 MAJOR C (required checkbox): --submit blocked by required #tos checkbox (0 signup POSTs) ⇒ submitted:false + later nav stays pending
+      pages.clear();
+      const fy7i = w.fy.length;
+      await run(['open', `${SITE}/signup-check?reqcheck=1`]);
+      const rC3 = await run(['login', SITE, '--new-user', 'reqblock@example.test', '--generate', '--submit', '--json']);
+      const jC3 = (() => { try { return JSON.parse(rC3.out.trim().split('\n').pop()); } catch { return null; } })();
+      const c3Posts = pages.received().filter((x) => x.path === '/done/signup-check');
+      await run(['open', `${SITE}/plain`]);
+      await sleep(200);
+      const recC3 = readLoginRec('reqblock@example.test');
+      ok(rC3.code === 0 && jC3 && jC3.success && jC3.data.submitted === false && c3Posts.length === 0 && recC3 && recC3.pending === 'register' && w.fy.length === fy7i,
+        'r5 MAJOR C.3 (real Chrome): --submit blocked by required checkbox reports submitted:false (0 POSTs) and stays pending:register on later nav',
+        { submitted: jC3 && jC3.data.submitted, posts: c3Posts.length, pending: recC3 && recC3.pending, notices: w.fy.length - fy7i });
+
+      // 7j. r5 MAJOR C (change-password 200 {error} + clear) + pending provenance + second login usedPassword:'pending'
+      pages.clear();
+      const fy7j = w.fy.length;
+      const chgOldPw = pwOf('chg-own');
+      trackedSecrets.push(chgOldPw);
+      w.logins.addOwn({ origin: SITE, username: 'chgowner@example.test', password: chgOldPw });
+      w.logins.grant(`web-login:${SITE}#chgowner@example.test`, 'this-account', 'session:conv-1');
+      await run(['open', `${SITE}/change-pw?jsonerr=1`]);
+      const rC4 = await run(['login', SITE, '--user', 'chgowner@example.test', '--generate', '--submit']);
+      await until(() => pages.received().find((x) => x.path === '/done/change-pw'), 4000);
+      await sleep(250);
+      const recC4 = readLoginRec('chgowner@example.test');
+      const rowC4 = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#chgowner@example.test`);
+      pages.clear();
+      await run(['open', `${SITE}/one`]);
+      const rC4Second = await run(['login', SITE, '--user', 'chgowner@example.test', '--submit', '--json']);
+      const jC4Second = (() => { try { return JSON.parse(rC4Second.out.trim().split('\n').pop()); } catch { return null; } })();
+      const gotC4Second = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+      ok(rC4.code === 0 && recC4 && recC4.pending === 'change' && recC4.previous && recC4.previous.password === chgOldPw && w.fy.length === fy7j &&
+        rowC4 && rowC4.pending === 'change' && rowC4.source === 'owner' &&
+        rC4Second.code === 0 && jC4Second && jC4Second.data.usedPassword === 'pending' && gotC4Second && gotC4Second.body.password === recC4.password,
+        'r5 MAJOR C.4 + pending change (real Chrome): change-password 200 {error} + cleared fields stays pending:change (source:"owner", 0 notices); second login reports & types pending password',
+        { pending: recC4 && recC4.pending, rowSource: rowC4 && rowC4.source, usedPassword: jC4Second && jC4Second.data.usedPassword });
+
+      // 7k. r5 MAJOR C (sendBeacon Ping control): sendBeacon POST + plain link click stays pending, 0 notices
+      pages.clear();
+      const fy7k = w.fy.length;
+      await run(['open', `${SITE}/signup-check?beacon=1`]);
+      const rC5 = await run(['login', SITE, '--new-user', 'beacon@example.test', '--generate']);
+      const rC5Link = await run(['click', '#termsLink']);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/plain\b/.test(u.out); }, 4000);
+      await sleep(200);
+      const recC5 = readLoginRec('beacon@example.test');
+      ok(rC5.code === 0 && rC5Link.code === 0 && recC5 && recC5.pending === 'register' && w.fy.length === fy7k,
+        'r5 MAJOR C.5 (real Chrome): sendBeacon Ping POST + link click stays pending:register (0 notices)',
+        { pending: recC5 && recC5.pending, notices: w.fy.length - fy7k });
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');

@@ -93,7 +93,7 @@ const showHelp = (row) => (row.store === 'automation'
   ? t('Show the key\'s value — only to hand it to an outside system; agents inside use it by grant and never need to see it')
   : isTotp(row) ? t('Show the seed and its settings as an otpauth link — the second password is asked once; the code itself needs none')   // the owner's amendment to q-047 ①: the seed behind 验证是你
   : t('Show this value — the second password is asked once, then values stay visible for 5 minutes'));
-const stateWord = (c) => (c.id === 'expired' ? t('Expired') : c.id === 'expires' ? t('Expires in {n} days', { n: c.days }) : t('Rotate suggested'));
+const stateWord = (c) => (c.id === 'expired' ? t('Expired') : c.id === 'expires' ? t('Expires in {n} days', { n: c.days }) : c.id === 'pending-register' ? t('Registration not yet confirmed by the site') : c.id === 'pending-change' ? t('Password change not yet confirmed') : t('Rotate suggested'));
 const isTotp = (row) => row.kind === 'totp' || !!(row.doors && row.doors.code);
 const isLogin = (row) => row.kind === 'login' && !!(row.doors && row.doors.login);   // lane browser-login
 const SORT_CHOICES = [['used', () => t('Recently used')], ['name', () => t('Name')], ['kind', () => t('Kind')], ['created', () => t('Newest')]];   // design q-047 §3.2: 最近使用 first

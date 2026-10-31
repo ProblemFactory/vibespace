@@ -132,6 +132,7 @@ function recordOf(text) {
   if (TOTP_NAME_RE.test(str(r.totpName))) out.totpName = r.totpName;
   if (r.createdIn && typeof r.createdIn === 'object' && str(r.createdIn.conversation)) out.createdIn = { conversation: str(r.createdIn.conversation).slice(0, 200), at: num(r.createdIn.at) };
   if (r.pending === 'register' || r.pending === 'change') out.pending = r.pending;
+  if (r.lastFilledPassword === 'pending' || r.lastFilledPassword === 'confirmed') out.lastFilledPassword = r.lastFilledPassword;
   const prev = prevOf(r.previous);
   if (prev) out.previous = prev;
   return out;
@@ -322,7 +323,7 @@ function grantWords(code, origin) {
  * `entries` = `[{origin, user}]` (the vault's names); `grantRows(resource)` = the grants store's rows of that resource;
  * `facts` = the caller's (GM.admits'); `vaultState` = the engine's.
  */
-function fillVerdict({ forms = [], origin = null, user = null, newUser = null, generate = false, entries = [], grantRows = () => [], facts = {}, vaultState = 'locked', owners = [] } = {}) {
+function fillVerdict({ forms = [], origin = null, user = null, newUser = null, generate = false, entries = [], grantRows = () => [], facts = {}, vaultState = 'locked', owners = [], activeTargetId = null } = {}) {
   const mode = newUser !== null && newUser !== undefined && newUser !== '' ? 'signup' : generate ? 'change' : 'login';
   const want = mode === 'login' ? 'login' : 'new';
   const asked = origin !== null && origin !== undefined && origin !== '' ? originOf(origin) : null;
@@ -330,11 +331,23 @@ function fillVerdict({ forms = [], origin = null, user = null, newUser = null, g
   const list = (Array.isArray(forms) ? forms : []).filter(Boolean);
   const mine = list.filter((f) => usable(f, want) && !f.proxy);
   if (!mine.length) return no('login_no_form', list.some((f) => f.proxy) ? 'the sign-in on your tab is a proxy\'s, not a website\'s — no saved login answers it' : want === 'new' ? 'no form with a new-password field is on your tab — open the site\'s sign-up (or change-password) page first' : 'no login form is on your tab — open the site\'s sign-in page first');
-  const form = asked ? mine.filter((f) => f.pageOrigin === asked).pop() || null : mine[mine.length - 1];
-  if (!form) return no('login_phishing', `the login form on your tab belongs to ${mine[mine.length - 1].pageOrigin || 'a page with no origin'}, not to ${asked} — a login is filled only on its own site`);
-  if (!form.pageOrigin || form.frameOrigin !== form.pageOrigin) return no('login_phishing', `the form sits in a frame of ${form.frameOrigin || 'a page with no origin'} inside ${form.pageOrigin || 'a page with no origin'} — a login is filled only where the page and its frame are the site itself`);
+  const isTopForm = (f) => !f.inFrame && Boolean(f.pageOrigin) && f.frameOrigin === f.pageOrigin;
+  const actTid = activeTargetId ? str(activeTargetId) : null;
+  const sameTab = (f, tid) => Boolean(tid && f && f.targetId && str(f.targetId).toUpperCase() === tid.toUpperCase());
+  const tabWord = (f) => (f && f.targetId ? ` (tab ${str(f.targetId).slice(0, 8)})` : '');
+  const pick = (arr) => (arr.length ? arr[arr.length - 1] : null);
+  const pool = asked ? mine.filter((f) => f.pageOrigin === asked) : mine;
+  const actTop = actTid ? pool.filter((f) => sameTab(f, actTid) && isTopForm(f)) : [];
+  const actAny = actTid ? pool.filter((f) => sameTab(f, actTid)) : [];
+  const anyTop = pool.filter(isTopForm);
+  const form = pick(actTop) || (actTid ? pick(actAny) || pick(anyTop) : pick(anyTop)) || pick(pool);
+  if (!form) {
+    const refForm = (actTid && pick(mine.filter((f) => sameTab(f, actTid)))) || pick(mine.filter(isTopForm)) || mine[mine.length - 1];
+    return no('login_phishing', `the login form on your tab${tabWord(refForm)} belongs to ${refForm.pageOrigin || 'a page with no origin'}, not to ${asked} — a login is filled only on its own site`);
+  }
+  if (!form.pageOrigin || form.frameOrigin !== form.pageOrigin) return no('login_phishing', `the form${tabWord(form)} sits in a frame of ${form.frameOrigin || 'a page with no origin'} inside ${form.pageOrigin || 'a page with no origin'} — a login is filled only where the page and its frame are the site itself`);
   if (!secureOrigin(form.pageOrigin)) return no('login_phishing', `${form.pageOrigin} is not https — a login is filled over https only (plain http on this machine's localhost alone)`);
-  if (form.inFrame) return no('login_in_frame', `the sign-in form is inside a frame on ${form.pageOrigin} — open that frame's address directly or sign in in the live view`);
+  if (form.inFrame) return no('login_in_frame', `the sign-in form${tabWord(form)} is inside a frame on ${form.pageOrigin} — open that frame's address directly or sign in in the live view`);
   const o = form.pageOrigin;
   const here = (Array.isArray(entries) ? entries : []).filter((e) => e && e.origin === o);
   let u;
@@ -443,7 +456,7 @@ function saveVerdict({ existing = null, password = null, outcome = 'navigated', 
 function nextRecord(v, { existing = null, origin, username, password = null, now = 0, conversation = null } = {}) {
   const rec = existing ? recordOf(existing) : null;
   if (!v || v.state === 'same' || v.state === 'none' || v.state === 'owner-card') return null;
-  if (v.confirm && rec) { const { pending, ...rest } = rec; void pending; return recordOf({ ...rest, submittedAt: now }); }
+  if (v.confirm && rec) { const { pending, lastFilledPassword, ...rest } = rec; void pending; void lastFilledPassword; return recordOf({ ...rest, submittedAt: now }); }
   if (v.state === 'agent-typed') return newRecord({ origin, username, password, source: 'agent-typed', now, conversation });
   if (v.state === 'update' && rec && password) return recordOf({ ...rec, password, source: 'agent-typed', strength: 'unknown', submittedAt: now, previous: { password: rec.password, source: rec.source, strength: rec.strength, replacedAt: now } });
   return null;
@@ -465,10 +478,11 @@ function loginText(r) {
   const tail = r.submitted ? ' and submitted the form' : ' — the form is NOT submitted: press its button (or run the same login with --submit)';
   const receipt = r.receipt ? ` Receipt ${r.receipt}.` : '';
   const stepWord = r.step && STEPS.includes(r.step) ? ` Step: ${r.step}.` : '';
+  const pendWord = r.usedPassword === 'pending' ? ' (filled the pending password — its change has not been confirmed by the site yet)' : '';
   const otp = r.otpMissing ? ' The page also asks for a two-step code the vault holds none for — the owner can pair one with this login in the Vault window.' : '';
   if (r.mode === 'signup') return `Filled ${what} on ${site}: the vault made a ${r.length || GENERATED_LEN}-character password for the new account and keeps it — you never see it${tail}. When the page takes the form the vault saves this login automatically and tells the owner.${stepWord}${receipt}`;
   if (r.mode === 'change') return `Filled ${what} on ${site}: the vault made a new ${r.length || GENERATED_LEN}-character password and keeps the old one for one revision — you never see either${tail}.${stepWord}${receipt}`;
-  return `Filled ${what} on ${site} from the vault — you never see the values${tail}.${otp}${stepWord}${receipt}`;
+  return `Filled ${what}${pendWord} on ${site} from the vault — you never see the values${tail}.${otp}${stepWord}${receipt}`;
 }
 /** THE OWNER'S NOTICE after a save (For you, informational — never an approval): i18n keys + params, the English words. */
 const NOTICE = Object.freeze({
@@ -511,7 +525,7 @@ function isSubmitControl(raw, { mode = 'login', inForm = false } = {}) {
   if (mode === 'change' && SUBMIT_CHANGE_RE.test(words)) return true;
   return false;
 }
-const SCRIPT_WAIT_FLAG_RE = /^--(?:fn|function|js)(?:=|$)/;
+const SCRIPT_WAIT_FLAG_RE = /^--(?:fn|function|js|eval)(?:=|$)/;
 function hasScriptWaitFlag(argv) {
   return Array.isArray(argv) && argv.some((a) => SCRIPT_WAIT_FLAG_RE.test(str(a).trim()));
 }

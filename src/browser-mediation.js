@@ -230,10 +230,21 @@ const LIVE_FILL_VERB_METHODS = Object.freeze({
   window: new Set(NAV_HANDSHAKE_METHODS),
 });
 const NAV_META_EXPRS = new Set(['location.href', 'document.title', '1', 'JSON.stringify([window.innerWidth,window.innerHeight])']);
-const EVAL_SECRET_READ_RE = /\.\s*value\b|\[\s*['"`]value['"`]\s*\]|\b(?:FormData|cookie|localStorage|sessionStorage|indexedDB|innerHTML|outerHTML|textContent|innerText|fetch|XMLHttpRequest|sendBeacon|WebSocket|BroadcastChannel|eval|Function)\b|\bwindow\s*\.\s*name\b/;
+const EVAL_SECRET_READ_RE = /\.\s*value\b|[A-Za-z0-9_$)\]]\s*\[|\b(?:FormData|cookie|localStorage|sessionStorage|indexedDB|innerHTML|outerHTML|textContent|innerText|fetch|XMLHttpRequest|sendBeacon|WebSocket|BroadcastChannel|eval|Function)\b|\bwindow\s*\.\s*name\b/;
 const QS_HANDLE_EXPR_RE = /^document\.querySelector\((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\)$/;
 const SCROLL_EXPR_RE = /^window\.scroll(?:By|To)\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$/;
-const LOCATOR_IIFE_RE = /^\(\(\)\s*=>\s*\{\s*const el = document\.querySelector\((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\);/;
+const LOCATOR_IIFE_HEAD_RE = /^\(\(\)\s*=>\s*\{\s*const el = document\.querySelector\((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\);\s*/;
+const BLOCKER_AT_BODY_NORM = "const blockerAt = (doc, el, x, y) => { let d = doc, lx = x, ly = y; let hit = d.elementFromPoint(lx, ly); while (hit && (hit.tagName === 'IFRAME' || hit.tagName === 'FRAME') && hit.contentDocument && hit !== el) { const r = hit.getBoundingClientRect(); lx -= r.x + hit.clientLeft; ly -= r.y + hit.clientTop; d = hit.contentDocument; hit = d.elementFromPoint(lx, ly); } if (!hit || hit === el) return null; const up = (n) => n.parentNode || n.host || (n.getRootNode && n.getRootNode().host) || null; for (let n = hit; n; n = up(n)) { if (n === el) return null; } for (let n = el; n; n = up(n)) { if (n === hit) return null; } const hitLabel = hit.closest ? hit.closest('label') : null; if (hitLabel && (hitLabel.control === el || hitLabel.contains(el))) return null; const elLabel = el.closest ? el.closest('label') : null; if (elLabel && elLabel.contains(hit)) return null; let desc = hit.tagName.toLowerCase(); if (hit.id) desc += '#' + hit.id; else if (typeof hit.className === 'string' && hit.className.trim()) desc += '.' + hit.className.trim().split(/\\s+/).slice(0, 2).join('.'); if (!hit.id && hit.closest) { const anchored = hit.closest('[id]'); if (anchored && anchored !== hit) desc += ' inside ' + anchored.tagName.toLowerCase() + '#' + anchored.id; } return desc; };";
+const LOCATOR_IIFE_TAIL_NORM = `if (!el) return null; const inView = (r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight) && r.left < (window.innerWidth || document.documentElement.clientWidth); let rect = el.getBoundingClientRect(); if (!inView(rect)) { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); rect = el.getBoundingClientRect(); } const x = rect.x + rect.width / 2; const y = rect.y + rect.height / 2; ${BLOCKER_AT_BODY_NORM} return { x: x, y: y, blocker: blockerAt(document, el, x, y) }; })()`;
+const BLOCKER_CALL_FN_NORM = `function(x, y) { let topDoc = this.ownerDocument || document; while (topDoc.defaultView && topDoc.defaultView.frameElement) { topDoc = topDoc.defaultView.frameElement.ownerDocument; } ${BLOCKER_AT_BODY_NORM} return blockerAt(topDoc, this, x, y); }`;
+const CHECKED_CALL_FN_NORM = "function() { var el = this; var tag = el.tagName && el.tagName.toUpperCase(); if (tag === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) { return el.checked; } var role = el.getAttribute && el.getAttribute('role'); var ariaCheckedRoles = ['checkbox','radio','switch','menuitemcheckbox','menuitemradio','option','treeitem']; if (role && ariaCheckedRoles.indexOf(role) !== -1) { return el.getAttribute('aria-checked') === 'true'; } var label = el; if (tag !== 'LABEL') { label = el.closest && el.closest('label'); } if (label && label.tagName && label.tagName.toUpperCase() === 'LABEL' && label.control) { var ctrl = label.control; if (ctrl.type === 'checkbox' || ctrl.type === 'radio') { return ctrl.checked; } } var input = el.querySelector && el.querySelector('input[type=\"checkbox\"], input[type=\"radio\"]'); if (input) return input.checked; return false; }";
+const SELECT_CALL_FN_NORM = "function(vals) { const normalize = (value) => String(value ?? '') .replace(/[\\u200B\\u200C\\u200D\\u2060\\uFEFF]/g, '') .replace(/\\s+/g, ' ') .trim(); const options = Array.from(this.options); const wanted = new Set(); for (const value of vals) { let matches = options.filter((opt) => value === opt.value || value === opt.label.trim() || value === opt.textContent.trim() ); if (matches.length === 0) { const normalizedValue = normalize(value); matches = options.filter((opt) => normalize(opt.label) === normalizedValue ); if (matches.length > 1) { return { error: 'Multiple options matched ' + JSON.stringify(value) + ' after whitespace normalization' }; } } if (matches.length === 0) { const available = options.map(o => o.value + ' (\"' + normalize(o.label) + '\")').join(', '); return { error: 'No option matched ' + JSON.stringify(vals) + '. Available options: ' + available }; } for (const opt of matches) wanted.add(opt); } if (wanted.size === 0) { const available = options.map(o => o.value + ' (\"' + normalize(o.label) + '\")').join(', '); return { error: 'No option matched ' + JSON.stringify(vals) + '. Available options: ' + available }; } for (const opt of options) opt.selected = wanted.has(opt); this.dispatchEvent(new Event('change', { bubbles: true })); return { matched: wanted.size }; }";
+const SCROLL_CALL_FNS_NORM = new Set([
+  'function() { this.focus(); }',
+  "function() { this.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); }",
+  'function() { if (this.scrollIntoViewIfNeeded) this.scrollIntoViewIfNeeded(); else this.scrollIntoView(); }',
+]);
+const normVerbJs = (s) => String(s || '').replace(/\/\/[^\r\n]*/g, '').replace(/\s+/g, ' ').trim();
 const NAV_META_VERBS = new Set(['open', 'goto', 'navigate', 'back', 'forward', 'reload', 'tab', 'window', 'size', 'wait']);
 const LOCATOR_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'check', 'uncheck', 'select', 'scrollintoview', 'wait']);
 const CALL_FN_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'check', 'uncheck', 'select', 'scrollintoview']);
@@ -241,21 +252,26 @@ function isAllowedVerbScript(verb, method, params) {
   if (!verb || !params || typeof params !== 'object') return false;
   if (method === 'Runtime.evaluate') {
     const expr = typeof params.expression === 'string' ? params.expression.trim() : '';
-    if (!expr || expr.length > 4096 || EVAL_SECRET_READ_RE.test(expr)) return false;
+    const exprNoStr = expr.replace(/(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '""');
+    if (!expr || expr.length > 4096 || EVAL_SECRET_READ_RE.test(exprNoStr)) return false;
     if (NAV_META_VERBS.has(verb) && NAV_META_EXPRS.has(expr)) return true;
     if (verb === 'scroll' && SCROLL_EXPR_RE.test(expr)) return true;
     if (LOCATOR_VERBS.has(verb) && !params.returnByValue && QS_HANDLE_EXPR_RE.test(expr)) return true;
-    if (LOCATOR_VERBS.has(verb) && LOCATOR_IIFE_RE.test(expr) && expr.includes('getBoundingClientRect()')) return true;
+    if (LOCATOR_VERBS.has(verb)) {
+      const m = LOCATOR_IIFE_HEAD_RE.exec(expr);
+      if (m && normVerbJs(expr.slice(m[0].length)) === LOCATOR_IIFE_TAIL_NORM) return true;
+    }
     return false;
   }
   if (method === 'Runtime.callFunctionOn') {
     if (!CALL_FN_VERBS.has(verb)) return false;
     const fn = typeof params.functionDeclaration === 'string' ? params.functionDeclaration.trim() : '';
     if (!fn || fn.length > 4096) return false;
-    if (/^function\s*\(\)\s*\{\s*this\.focus\(\);\s*\}$/.test(fn)) return true;
-    if (fn.includes('const blockerAt = (doc, el, x, y) =>') && !EVAL_SECRET_READ_RE.test(fn)) return true;
-    if ((verb === 'check' || verb === 'uncheck') && fn.includes("el.type === 'checkbox' || el.type === 'radio'") && !EVAL_SECRET_READ_RE.test(fn)) return true;
-    if (verb === 'select' && fn.includes('const options = Array.from(this.options);') && !/\b(?:FormData|cookie|localStorage|sessionStorage|fetch|XMLHttpRequest|sendBeacon|WebSocket)\b/.test(fn)) return true;
+    const norm = normVerbJs(fn);
+    if (SCROLL_CALL_FNS_NORM.has(norm)) return true;
+    if (norm === BLOCKER_CALL_FN_NORM) return true;
+    if ((verb === 'check' || verb === 'uncheck') && norm === CHECKED_CALL_FN_NORM) return true;
+    if (verb === 'select' && norm === SELECT_CALL_FN_NORM) return true;
     return false;
   }
   return false;
@@ -648,7 +664,7 @@ module.exports = {
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
-  LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, liveFillCdpVerdict, // lane vault-login-chrome r3+r4: census-class CDP fence while a vault secret stands filled in the tab
+  LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, isAllowedVerbScript, liveFillCdpVerdict, // lane vault-login-chrome r3+r4+r5: census-class CDP fence while a vault secret stands filled in the tab
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)
   INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)

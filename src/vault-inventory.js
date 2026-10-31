@@ -92,6 +92,10 @@ const LOGIN_SOURCES = Object.freeze({
   'vault-minted': { origin: 'mint', label: i18nKey('Registered by an agent · its password made by the vault, never shown'), sawPlaintext: false },
   'agent-typed': { origin: 'put', label: i18nKey('Typed by an agent itself · strength unknown — the agent knows it'), sawPlaintext: true },
 });
+const PENDING_LOGIN_WORDS = Object.freeze({
+  register: i18nKey('Registration not yet confirmed by the site · password made by the vault, never shown'),
+  change: i18nKey('Password change not yet confirmed · login fills the pending password'),
+});
 const TOTP_TYPED = i18nKey('Added by an agent itself — the agent saw the seed');   // lane vault-agent-own: `vibespace-vault totp add`
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
@@ -107,7 +111,13 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
   // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
   const wl = WEB_LOGIN_RE.exec(name);
-  if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}) }; }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
+  if (wl) {
+    const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner';
+    const p = LOGIN_SOURCES[src];
+    const pending = s && (s.pending === 'register' || s.pending === 'change') ? s.pending : null;
+    const detail = pending === 'register' ? PENDING_LOGIN_WORDS.register : pending === 'change' ? PENDING_LOGIN_WORDS.change : p.label;
+    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(pending ? { pending } : {}) };
+  }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
     // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by
     // <the conversation>» and the hosts the request named (the search finds it by either; a vault-use grant's `@entry`)
@@ -237,6 +247,7 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     // lane vault-use-grants: the hosts a request named and the conversation that asked (names — never a value)
     hosts: Array.isArray(raw.hosts) ? raw.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [],
     askedBy: raw.askedBy && typeof raw.askedBy === 'object' && raw.askedBy.conv ? { conv: clip(raw.askedBy.conv, 160), name: clip(raw.askedBy.name, 80) } : null,
+    pending: raw.pending === 'register' || raw.pending === 'change' ? raw.pending : null,
   };
 }
 
@@ -355,6 +366,8 @@ function stateChipsOf(row, now = 0) {
     else if (exp - now <= EXPIRY_WARN_MS) out.push({ id: 'expires', days: Math.max(1, Math.ceil((exp - now) / 86400e3)) });
   }
   if (provenanceOf(row) === 'agent-put') out.push({ id: 'rotate' });
+  if (row.pending === 'register') out.push({ id: 'pending-register' });
+  else if (row.pending === 'change') out.push({ id: 'pending-change' });
   return out;
 }
 

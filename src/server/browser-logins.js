@@ -50,11 +50,20 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
   const vstate = () => { try { return vault.state(); } catch { return 'locked'; } };
   const say = (m) => { try { log(m); } catch { /* the journal's own failure */ } };
 
-  /** The vault's web-login NAMES → [{name, origin, user, at, source, actor}] (no entry is opened). */
+  /** The vault's web-login NAMES → [{name, origin, user, at, source, actor, owner, pending, lastFilledPassword?}] (no entry is opened). */
   function names() {
     let list = []; try { list = typeof vault.secretNames === 'function' ? vault.secretNames() || [] : []; } catch { list = []; }
     const out = [];
-    for (const s of list) { const p = s && BL.parseName(s.name); if (p) out.push({ name: s.name, origin: p.origin, user: p.user, at: Number(s.at) || null, source: BL.SOURCES.includes(s.kind) ? s.kind : 'owner', actor: s.actor || null, owner: s.owner || null }); }   // owner: lane vault-agent-own
+    for (const s of list) {
+      const p = s && BL.parseName(s.name);
+      if (p) out.push({
+        name: s.name, origin: p.origin, user: p.user, at: Number(s.at) || null,
+        source: BL.SOURCES.includes(s.kind) ? s.kind : 'owner',
+        actor: s.actor || null, owner: s.owner || null,
+        pending: s.pending === 'register' || s.pending === 'change' ? s.pending : null,
+        ...(s.lastFilledPassword === 'pending' || s.lastFilledPassword === 'confirmed' ? { lastFilledPassword: s.lastFilledPassword } : {}),
+      });
+    }   // owner: lane vault-agent-own
     return out;
   }
   /** ONE entry opened → {ok, rec} | {ok:true, rec:null} (none) | a named refusal. The value's Buffer is zeroed at once. */
@@ -67,11 +76,13 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return rec ? { ok: true, rec } : named('unreadable', 'the entry is not a web-login record');
   }
   /** THE ONE WRITER of a web-login entry: the record sealed under its name (the engine's secretPut — provenance as its `kind`,
-   *  the conversation as its `actor`: words a person reads, never a value). */
+   *  the conversation as its `actor`: words a person reads, never a value). A pending change keeps the existing provenance
+   *  (`rec.previous.source`) until the site confirms the new password, so the owner's own login is never relabelled «vault-minted». */
   function writeEntry(name, rec, { actor = null, owner = null } = {}) {
     if (!BL.isEntryName(name)) return named('bad-name', 'not a web-login entry');
     let text; try { text = BL.textOf(rec); } catch (e) { return named('bad-record', e && e.message); }
-    const r = vault.secretPut(name, text, { kind: rec.source, actor: actor ? str(actor).slice(0, 128) : null, owner: owner ? str(owner).slice(0, 128) : null });
+    const pendKind = rec.pending === 'change' && rec.previous && BL.SOURCES.includes(rec.previous.source) ? { kind: rec.previous.source } : {};
+    const r = vault.secretPut(name, text, { kind: rec.source, ...pendKind, actor: actor ? str(actor).slice(0, 128) : null, owner: owner ? str(owner).slice(0, 128) : null, pending: rec.pending === 'register' || rec.pending === 'change' ? rec.pending : null, lastFilledPassword: rec.lastFilledPassword === 'pending' || rec.lastFilledPassword === 'confirmed' ? rec.lastFilledPassword : null });
     if (!r || !r.ok) { const c = str(r && r.code); return named(/vault_locked|vault_not_set_up/.test(c) ? 'vault_locked' : 'not_written', c || 'not written'); }
     return { ok: true };
   }
@@ -82,11 +93,12 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
 
   /**
    * THE FILL'S PLAN for one `vibespace-browser login`: → `{ok:true, mode, origin, user, name, form, values, filled, length?,
-   * otpMissing}` (the watch fills `values`, then calls noteFill) | a named refusal. `forms` = the tab's (oldest first),
+   * otpMissing, usedPassword?}` (the watch fills `values`, then calls noteFill) | a named refusal. `forms` = the tab's (oldest first),
    * `facts` = the caller's (GM.admits'), `conv` / `actor` = the conversation (its id / its name — the use line, the notice).
    */
-  function planFill({ forms = [], origin = null, user = null, newUser = null, generate = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
-    const v = BL.fillVerdict({ forms, origin, user, newUser, generate, entries: names(), grantRows: rowsOf, facts, vaultState: vstate(), owners });
+  function planFill({ forms = [], origin = null, user = null, newUser = null, generate = false, facts = {}, conv = null, actor = null, owners = [], activeTargetId = null } = {}) {
+    const curNames = names();
+    const v = BL.fillVerdict({ forms, origin, user, newUser, generate, entries: curNames, grantRows: rowsOf, facts, vaultState: vstate(), owners, activeTargetId });
     if (!v.ok) {
       if (v.code === 'vault_locked') blocked(actor, origin || (forms[forms.length - 1] || {}).pageOrigin || '');
       if (v.code === 'login_not_granted' && v.name) use(v.name, { conv, actor, outcome: 'not_granted', purpose: purposeOf(v.mode, v.origin) });   // a bearer's refused use is a line too (the use law)
@@ -102,8 +114,12 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
         if (o.rec.totpName && typeof totpCode === 'function') { let c = null; try { c = totpCode(o.rec.totpName, { conv, ...(v.grant && v.grant.via === 'own' ? { owners } : {}) }); } catch { c = null; } if (c && c.ok && c.code) otp = String(c.code); else otpMissing = true; }   // an OWN fill (no grant) gets only a code the caller owns too (the review)
         else otpMissing = true;
       }
+      // Rule: a second login on an entry with a pending registration or change fills the pending password (since the site may
+      // already have accepted it), and the sealed record + audit line + response record which password was typed.
+      const usedPassword = o.rec.pending ? 'pending' : 'confirmed';
+      const purpose = o.rec.pending ? `${base.purpose} (pending password)` : base.purpose;
       const { values, filled } = BL.valuesOf(v, { username: o.rec.username, password: o.rec.password, otp });
-      return { ...base, values, filled, otpMissing };
+      return { ...base, purpose, values, filled, otpMissing, usedPassword };
     }
     const g = BL.generatePassword(v.constraints, randomBytes);
     if (!g.ok) return g;
@@ -116,15 +132,28 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     }
     const o = open(v.name);
     if (!o.ok || !o.rec) return named(o.code === 'vault_locked' ? 'vault_locked' : 'login_no_entry', `the login for ${v.user} on ${v.origin} could not be read — nothing was changed`);
+    const meta = curNames.find((x) => x.name === v.name) || null;
     const next = BL.changedRecord(o.rec, g.password, { now: now(), conversation: actor || conv });
-    const w = writeEntry(v.name, next, { actor: actor || conv });
+    const w = writeEntry(v.name, next, { actor: (meta && meta.actor) || actor || conv, owner: (meta && meta.owner) || null });
     if (!w.ok) return named(w.code === 'vault_locked' ? 'vault_locked' : 'not_written', `the new password could not be saved (${w.error}) — nothing was filled`);
     const { values, filled } = BL.valuesOf(v, { username: o.rec.username, password: o.rec.password, newPassword: g.password });
     return { ...base, values, filled, length: g.length };
   }
   /** The fill landed (or the kernel refused it): ONE use line through the engine's ONE writer → {receipt}. A signup / change
-   *  the kernel refused leaves its sealed entry (pending — never lost; the next submission or the owner decides). */
-  function noteFill(plan, { conv = null, actor = null, outcome = 'ok' } = {}) { return use(plan.name, { conv, actor, outcome, purpose: plan.purpose }); }
+   *  the kernel refused leaves its sealed entry (pending — never lost; the next submission or the owner decides). A login fill
+   *  that typed a pending password stamps `lastFilledPassword: 'pending'` onto the sealed record so the record says which was typed. */
+  function noteFill(plan, { conv = null, actor = null, outcome = 'ok' } = {}) {
+    if (outcome === 'ok' && plan && plan.mode === 'login' && plan.usedPassword === 'pending' && vstate() === 'unlocked') {
+      try {
+        const meta = names().find((x) => x.name === plan.name) || null;
+        const o = open(plan.name);
+        if (o.ok && o.rec && o.rec.pending && o.rec.lastFilledPassword !== 'pending') {
+          writeEntry(plan.name, BL.recordOf({ ...o.rec, lastFilledPassword: 'pending' }), { actor: (meta && meta.actor) || actor || conv, owner: (meta && meta.owner) || null });
+        }
+      } catch { /* best-effort record stamp */ }
+    }
+    return use(plan.name, { conv, actor, outcome, purpose: plan.purpose });
+  }
 
   function notice(state, { origin, username, conversation, profileId }) {
     const w = BL.noticeWords(state, { origin, username, conversation });
@@ -158,7 +187,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     }
     const next = BL.nextRecord(v, { existing: ex.rec, origin: o, username, password, now: now(), conversation: convName || conv });
     if (!next) return { state: v.state, name: n, ...(v.why ? { why: v.why } : {}) };
-    const w = writeEntry(n, next, { actor: convName || conv });
+    const meta = names().find((x) => x.name === n) || null;
+    const w = writeEntry(n, next, { actor: convName || conv || (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) { say(`[browser-login] ${n}: the submission was not saved — ${w.error}`); return { state: 'none', name: n, why: w.code }; }
     const fy = notice(v.state, { origin: o, username: next.username, conversation: convName || '', profileId });
     return { state: v.state, name: n, ...(v.confirm ? { confirm: true } : {}), notice: fy };

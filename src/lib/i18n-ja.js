@@ -11732,4 +11732,13 @@ export default {
   "(too long to show here — the hosts are on its card)": "（ここには収まりません — 送信先のホストはカードにあります）",
   "(too long to show here — the hosts, and «Always», are on its card)": "（ここには収まりません — 送信先のホストと「常に許可」はカードにあります）",
   "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and the hosts it sends to are on its card in For you": "この会話の記録が残る前に尋ねられたもの — チャットにカードはありません。入力欄の上の待機バーには「1 回だけ許可」と「拒否」だけがあります — 「常に許可」と送信先のホストは「あなた宛て」のカードにあります",
+  "Registration not yet confirmed by the site · password made by the vault, never shown": "サイトによる登録確認が未完了 · パスワードは保管庫が生成（非表示）",
+  "Password change not yet confirmed · login fills the pending password": "パスワード変更が未確認 · ログイン時は未確認の新パスワードを入力します",
+  "Registration not yet confirmed by the site": "サイトによる登録確認が未完了",
+  "Password change not yet confirmed": "パスワード変更が未確認",
+  "Registration not yet confirmed by the site — login fills this pending password.": "サイトによる登録確認が未完了です — 再ログイン時はこの未確認パスワードを入力します。",
+  "Password change not yet confirmed — login fills the pending password (previous password kept in reserve).": "パスワード変更がまだ確認されていません — 再ログイン時は未確認の新パスワードを入力します（前のパスワードも控えとして保持されています）。",
+  "Last login filled the pending password.": "前回のログインでは未確認パスワードを入力しました。",
+  "a filled password could not be cleared on {tab} — reload it": "{tab} に入力されたパスワードを消去できませんでした — 再読み込みしてください",
+  "Open the browser live view or reload that tab so the typed credential leaves the page.": "ブラウザのライブビューを開くかタブを再読み込みして、入力済みの認証情報をページから消去してください。",
 };

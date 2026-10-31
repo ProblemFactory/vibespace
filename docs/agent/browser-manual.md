@@ -392,7 +392,9 @@ tabs remain readable (`tab new` / `tab <id>`).
 
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
   your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
-  The answer names what was filled (and on multi-step forms `step: email | password | totp`) and a receipt. Refusals by name:
+  The answer names what was filled (and on multi-step forms `step: email | password | totp`; `submitted: true` only when a
+  submission request was observed; `usedPassword: 'pending'` if a site's password change is still unconfirmed, since no CLI
+  verb lists web logins) and a receipt. Refusals by name:
   `login_no_form` (open the sign-in page first), `login_in_frame` (the sign-in form is inside a frame — open that frame's
   address directly or ask the user to sign in in the live view), `login_form_changed` (the form's fields changed before
   filling — nothing was typed; re-read the page and run `login` again), `login_fill_live` (submit the form or reload first),

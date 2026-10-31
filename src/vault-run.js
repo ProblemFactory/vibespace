@@ -1863,6 +1863,63 @@ function createMasker(secrets) {
 }
 /** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
+const VIEW_TRIGGER_RE = /[=\\&\x1b\r\n]/;
+/** Memoizable text scrubber built ONCE per secret-set change (lane vault-login-chrome r5 MAJOR A: never rebuild formsOf + RegExp per
+ *  string node on the event loop). `fn(text)` matches `maskText(text, secrets)` across all spelled + view forms; `fn.spelled(text)`
+ *  runs a single C++ RegExp pass over all spelled forms (raw, json, base64, percent, hex, utf16, base32) for oversize frames. */
+function compileTextScrubber(secrets) {
+  const table = new Map();
+  for (const s of Array.isArray(secrets) ? secrets : []) {
+    const v = String(s && s.value != null ? s.value : '');
+    if (bytesOf(v) < MIN_MASK_BYTES) continue;
+    const ph = placeholderOf(s.ref && typeof s.ref === 'object' ? s.ref : s.label != null ? { label: s.label } : parseRef(String(s.ref)) || String(s.ref));
+    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form });
+  }
+  const texts = [...table.keys()].sort((a, b) => b.length - a.length);
+  const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
+  const scrub = (raw) => {
+    if (!re || typeof raw !== 'string' || !raw) return raw;
+    re.lastIndex = 0;
+    const plainHit = re.test(raw);
+    const hasView = VIEW_TRIGGER_RE.test(raw);
+    if (!plainHit && !hasView) return raw;
+    const L = raw.length, finds = [];
+    const look = (sk, r) => {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(sk)) !== null) {
+        const s = r ? r.at[m.index] : m.index;
+        if (s >= L) break;
+        const t = table.get(m[0]);
+        finds.push({ a: s, b: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph });
+      }
+    };
+    if (plainHit) look(raw, null);
+    if (hasView) {
+      for (const vw of VIEWS) {
+        const r = readView(vw, raw, L, true);
+        if (r) look(r.sk, r);
+      }
+    }
+    if (!finds.length) return raw;
+    finds.sort((p, q) => p.a - q.a || p.b - q.b);
+    let out = '', i = 0, lastEnd = -1;
+    for (const m of finds) {
+      if (lastEnd >= 0 && m.a < lastEnd) { if (m.b > lastEnd) { lastEnd = m.b; i = m.b; } continue; }
+      out += raw.slice(i, m.a) + m.ph;
+      lastEnd = m.b; i = m.b;
+    }
+    return out + raw.slice(i);
+  };
+  scrub.spelled = (raw) => {
+    if (!re || typeof raw !== 'string' || !raw) return raw;
+    re.lastIndex = 0;
+    if (!re.test(raw)) return raw;
+    re.lastIndex = 0;
+    return raw.replace(re, (m) => table.get(m).ph);
+  };
+  return scrub;
+}
 
 module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, urlHostsBad, parseCfgLine, cfgRouteHosts, repoHostOf, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
@@ -1871,5 +1928,5 @@ module.exports = {
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, PIN_ENV, pinOf, wildcardToolOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
-  FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
+  FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText, compileTextScrubber,
 };

@@ -310,7 +310,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, pending = null, lastFilledPassword: filledWhich = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
@@ -328,6 +328,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       if (askedBy && typeof askedBy === 'object' && askedBy.conv) box.askedBy = { conv: String(askedBy.conv).slice(0, 160), name: String(askedBy.name || '').slice(0, 80) };
       if (owner) box.owner = String(owner).slice(0, 128);       // lane vault-agent-own: the conversation that stored it (its durable id — an id, never a value): its own to use
       if (forHost) box.forHost = String(forHost).slice(0, 200); // lane vault-agent-own: a mint's `--for <host/service>` — the host it may go to without asking
+      if (pending === 'register' || pending === 'change') box.pending = pending;
+      if (filledWhich === 'pending' || filledWhich === 'confirmed') box.lastFilledPassword = filledWhich;
       const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
       return { ok: true };
@@ -363,7 +365,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}), ...(b.pending === 'register' || b.pending === 'change' ? { pending: b.pending } : {}), ...(b.lastFilledPassword === 'pending' || b.lastFilledPassword === 'confirmed' ? { lastFilledPassword: b.lastFilledPassword } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source) and `pending` state, never a value
   /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
   function secretDrop(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };

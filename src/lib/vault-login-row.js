@@ -39,6 +39,15 @@ export function loginExtras(row, data, { refresh, show } = {}) {
   if (show) show.title = t('Shows the password — after the second password. An agent never sees it: the custom browser kernel fills it');
   const box = el('div', 'vw-ak vw-login');
   box.dataset.login = row.entry;
+  const pending = entry.pending || row.pending || null;
+  if (pending === 'register' || pending === 'change') {
+    box.dataset.pending = pending;
+    const baseNote = pending === 'register'
+      ? t('Registration not yet confirmed by the site — login fills this pending password.')
+      : t('Password change not yet confirmed — login fills the pending password (previous password kept in reserve).');
+    const filledNote = entry.lastFilledPassword === 'pending' ? ` · ${t('Last login filled the pending password.')}` : '';
+    box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + filledNote));
+  }
   const chips = el('div', 'vw-ak-grants');
   const grants = (entry.grants || []).filter((g) => !g.unknown);
   if (grants.length) {

@@ -177,6 +177,18 @@ const RESOLVE_EL_SRC = `
     }
     return false;
   };
+  const collectControls = (root, out = [], depth = 0) => {
+    if (!root || depth > 8) return out;
+    try {
+      for (const node of root.querySelectorAll('input, textarea, [contenteditable], [role="textbox"]')) {
+        out.push(node);
+      }
+      for (const host of root.querySelectorAll('*')) {
+        if (host && host.shadowRoot) collectControls(host.shadowRoot, out, depth + 1);
+      }
+    } catch {}
+    return out;
+  };
 `;
 
 /** Before typing the FIRST character: verify every planned field still exists with its current DOM descriptor, snapshot
@@ -237,7 +249,7 @@ function verifyPlanAndArmExpr(fieldIds) {
     const snap = typeof WeakMap === 'function' ? new WeakMap() : null;
     const snapList = [];
     try {
-      for (const node of document.querySelectorAll('input, textarea, [contenteditable], [role="textbox"]')) {
+      for (const node of collectControls(document)) {
         const len = lenOfNode(node);
         if (snap) snap.set(node, len);
         snapList.push({ node, len });
@@ -396,7 +408,7 @@ function wipeFailedFillExpr(fieldIds) {
     if (document.activeElement) wipeNode(document.activeElement);
     const snap = window.vsLoginSnap;
     try {
-      for (const node of document.querySelectorAll('input, textarea, [contenteditable], [role="textbox"]')) {
+      for (const node of collectControls(document)) {
         const curLen = lenOfNode(node);
         if (curLen <= 0) continue;
         let baseLen = 0;
@@ -412,16 +424,23 @@ function wipeFailedFillExpr(fieldIds) {
   })()`;
 }
 
-/** Isolated-world sweep that clears any non-empty input/textarea/contenteditable on a tab before lifting an expired read fence. */
+/** Isolated-world sweep that clears any non-empty input/textarea/contenteditable (including open shadow roots) before lifting an expired read fence. */
 const WIPE_ALL_TYPED_EXPR = `(() => {
   ${RESOLVE_EL_SRC}
   let wiped = 0;
+  let remaining = 0;
   try {
-    for (const node of document.querySelectorAll('input, textarea, [contenteditable], [role="textbox"]')) {
-      if (lenOfNode(node) > 0 && wipeNode(node)) wiped++;
+    const nodes = collectControls(document);
+    for (const node of nodes) {
+      if (node && !node.disabled && lenOfNode(node) > 0 && wipeNode(node)) wiped++;
     }
-  } catch {}
-  return { ok: true, wiped };
+    for (const node of collectControls(document)) {
+      if (node && !node.disabled && lenOfNode(node) > 0) remaining++;
+    }
+  } catch {
+    return { ok: false, wiped, remaining: 1 };
+  }
+  return { ok: true, wiped, remaining };
 })()`;
 
 /** Collect visible submit control candidates in the isolated world so `BL.isSubmitControl` classifies them in one place. */
@@ -714,16 +733,17 @@ async function inspectTabLoginForm({ call, browserCall = null, oopFrames = null,
 
 /** Wipe any non-empty input/textarea/contenteditable on a tab inside our isolated world (used before lifting a ceiling-expired read fence). */
 async function wipeTabTypedInputs({ call, sessionId = undefined, targetId = null } = {}) {
-  if (typeof call !== 'function') return { ok: false, wiped: 0 };
+  if (typeof call !== 'function') return { ok: false, wiped: 0, verifiedEmpty: false };
   const send = makeSend(call, null, sessionId);
   const ftRes = await send('Page.getFrameTree', {});
-  const fid = (ftRes && !ftRes.timeout && !ftRes.error && ftRes.result && ftRes.result.frameTree && ftRes.result.frameTree.frame && ftRes.result.frameTree.frame.id) || (targetId ? String(targetId) : '');
-  if (!fid) return { ok: false, wiped: 0 };
+  const fid = (ftRes && !ftRes.timeout && !ftRes.error && ftRes.result && ftRes.result.frameTree && ftRes.result.frameTree.frame && ftRes.result.frameTree.frame.id) || '';
+  if (!fid) return { ok: false, wiped: 0, verifiedEmpty: false };
   const iwRes = await send('Page.createIsolatedWorld', { frameId: String(fid), worldName: WORLD_NAME, grantUniveralAccess: false });
   const ctxId = iwRes && !iwRes.timeout && !iwRes.error && iwRes.result ? Number(iwRes.result.executionContextId) : 0;
-  if (!Number.isInteger(ctxId) || ctxId <= 0) return { ok: false, wiped: 0 };
+  if (!Number.isInteger(ctxId) || ctxId <= 0) return { ok: false, wiped: 0, verifiedEmpty: false };
   const res = await evalInWorld(send, ctxId, WIPE_ALL_TYPED_EXPR);
-  return res && res.ok ? { ok: true, wiped: Number(res.wiped) || 0 } : { ok: false, wiped: 0 };
+  if (!res || !res.ok) return { ok: false, wiped: 0, verifiedEmpty: false };
+  return { ok: true, wiped: Number(res.wiped) || 0, verifiedEmpty: Number(res.remaining) === 0 };
 }
 
 /**
@@ -802,7 +822,14 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
     for (const desc of ver.fields) {
       const wantRole = desc && plannedRoles[desc.fieldId];
       if (!roleMatchesPlan(wantRole, desc, { hasPassword: pwPlan })) {
-        return { ok: false, code: 'login_form_changed', error: 'a sign-in field changed its role or type before filling — nothing was typed' };
+        const plainPw = (wantRole === 'password' || wantRole === 'new-password') && desc && String(desc.domType || desc.type || '').toLowerCase() === 'text';
+        return {
+          ok: false,
+          code: 'login_form_changed',
+          error: plainPw
+            ? 'the password field is revealed as plain text (type="text") — hide the password on the page or reload it, then run login again'
+            : 'a sign-in field changed its role or type before filling — nothing was typed',
+        };
       }
     }
     if (ver.framesArmed > 0) await sleepMs(15);

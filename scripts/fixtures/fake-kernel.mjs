@@ -84,6 +84,9 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const submitted = [];        // lane engine-distribution: every credentialSubmitted sent: {surfaceId, hasPassword} — never a value
   const isoWorlds = new Map(); // lane vault-login-chrome r3: contextId → {frameId, worldName}
   let stdPage = null;          // optional simulated standard-Chrome login page state for fast-tier tests
+  const stdPages = new Map();  // optional per-target standard-Chrome login page state (targetId → spec)
+  const spOf = (x) => (x && stdPages.get(x.targetId)) || stdPage;
+  const publicSp = (sp) => { if (!sp) return null; const { _lastTyped, ...rest } = sp; void _lastTyped; return rest; };
   const feats = () => [...(Array.isArray(mode.features) ? mode.features : FEATURES)];
   const calls = [];
   let heard = 0; // lane vault-login-chrome r2c: the sequence number of the last call heard (mark())
@@ -262,12 +265,23 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       case 'Target.detachFromTarget': { const sid = p.sessionId || m.sessionId; const x = targets.get((sessions.get(sid) || {}).targetId); if (x) x.sessions.delete(sid); sessions.delete(sid); return {}; }
       case 'Target.closeTarget': { const x = targets.get(p.targetId); if (!x) return { success: false }; targets.delete(x.targetId); for (const s of [...surfaces.values()]) if (s.targetId === x.targetId) surfaces.delete(s.surfaceId); all({ method: 'Target.targetDestroyed', params: { targetId: x.targetId } }); return { success: true }; }
       case 'Page.enable': if (ss) ss.page = true; if (t && mode.holdEnable && mode.holdEnable.has(t.targetId)) return { __noreply: true }; return {};
-      case 'Page.getFrameTree': { const x = t || [...targets.values()][0]; const fr = frameOf(x); if (stdPage && stdPage.securityOrigin) fr.securityOrigin = stdPage.securityOrigin; else if (mode.standard && x && x.url) fr.securityOrigin = originOfUrl(x.url) || 'null'; return { frameTree: { frame: fr, ...(stdPage && Array.isArray(stdPage.childFrames) ? { childFrames: stdPage.childFrames } : {}) } }; }
+      case 'Page.getFrameTree': { const x = t || [...targets.values()][0]; const sp = spOf(x); if (sp && sp.swallowFrameTree) return { __noreply: true }; const fr = frameOf(x); if (sp && sp.securityOrigin) fr.securityOrigin = sp.securityOrigin; else if (mode.standard && x && x.url) fr.securityOrigin = originOfUrl(x.url) || 'null'; return { frameTree: { frame: fr, ...(sp && Array.isArray(sp.childFrames) ? { childFrames: sp.childFrames } : {}) } }; }
       case 'Page.createIsolatedWorld': { const ctxId = 100 + (++sseq); isoWorlds.set(ctxId, { frameId: String(p.frameId || (t && t.targetId) || ''), worldName: String(p.worldName || ''), grantUniveralAccess: !!p.grantUniveralAccess }); return { executionContextId: ctxId }; }
       case 'Input.insertText': {
-        if (stdPage && stdPage.failInsertText) return { __error: { code: -32000, message: 'insertText failed' } };
-        if (stdPage) { stdPage.inserted = (stdPage.inserted || 0) + 1; stdPage.insertedLens = [...(stdPage.insertedLens || []), String(p.text || '').length]; }
+        const sp = spOf(t);
+        if (sp && sp.failInsertText) return { __error: { code: -32000, message: 'insertText failed' } };
+        if (sp) { sp.inserted = (sp.inserted || 0) + 1; sp.insertedLens = [...(sp.insertedLens || []), String(p.text || '').length]; sp._lastTyped = [...(sp._lastTyped || []), String(p.text || '')]; }
         return {};
+      }
+      case 'Network.getRequestPostData': {
+        const sp = spOf(t);
+        const d = sp && sp.postDataByReq && sp.postDataByReq[p.requestId];
+        return typeof d === 'string' ? { postData: d } : { __error: { code: -32000, message: 'No post data available' } };
+      }
+      case 'Network.getResponseBody': {
+        const sp = spOf(t);
+        const b = sp && sp.responseBodyByReq && Object.prototype.hasOwnProperty.call(sp.responseBodyByReq, p.requestId) ? sp.responseBodyByReq[p.requestId] : null;
+        return typeof b === 'string' ? { body: b, base64Encoded: false } : b && typeof b === 'object' ? { body: String(b.body || ''), base64Encoded: !!b.base64Encoded } : { body: '', base64Encoded: false };
       }
       case 'Page.navigate': if (t) {
         t.url = String(p.url || 'about:blank'); t.title = t.url;
@@ -285,12 +299,14 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       case 'Runtime.enable': if (t) setTimeout(() => ev('Runtime.executionContextCreated', { context: { id: 1, origin: '', name: '', uniqueId: 'U' + t.targetId, auxData: { isDefault: true, type: 'default', frameId: t.targetId } } }), 1); return {};
       case 'Runtime.evaluate': {
         const ex = String(p.expression || '');
-        if (stdPage && Number.isInteger(p.contextId) && isoWorlds.has(p.contextId)) {
+        const spRoot = spOf(t);
+        if (spRoot && Number.isInteger(p.contextId) && isoWorlds.has(p.contextId)) {
           const iw = isoWorlds.get(p.contextId);
-          const subSpec = stdPage.subFrames && iw && stdPage.subFrames[iw.frameId] ? stdPage.subFrames[iw.frameId] : null;
-          const sp = subSpec || stdPage;
+          const subSpec = spRoot.subFrames && iw && spRoot.subFrames[iw.frameId] ? spRoot.subFrames[iw.frameId] : null;
+          const sp = subSpec || spRoot;
           if (ex.includes('isoOrigin')) return { result: { type: 'object', value: { ok: true, isoOrigin: sp.isoOrigin || originOfUrl(t && t.url) || '', isoHref: sp.isoHref || (t && t.url) || '', actionOrigin: sp.actionOrigin !== undefined ? sp.actionOrigin : (originOfUrl(t && t.url) || null), hasFrameEls: !!sp.hasFrameEls, fields: sp.fields || [] } } };
           if (ex.includes('window.vsLoginSnap =')) {
+            sp._lastTyped = [];
             const curFields = sp.fillFields || sp.fields || [];
             const idsMatch = /for \(const fid of (\[[^\]]*\])\)/.exec(ex);
             const wantIds = idsMatch ? JSON.parse(idsMatch[1]) : [];
@@ -315,12 +331,49 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
           if (ex.includes('window.vsLoginBtns = null') || ex.includes('window.__vsBtns = null')) {
             const bm = /btnMap\[("vs-b-\d+")\]/.exec(ex);
             sp.clickedBtn = bm ? JSON.parse(bm[1]) : null;
-            if (sp.navigateOnSubmit && t) setTimeout(() => { t.url = sp.navigateOnSubmit; t.title = t.url; loaded(t); }, 5);
-            return { result: { type: 'object', value: sp.needEnter ? { ok: true, submitted: false, needEnter: true } : { ok: true, submitted: true, via: sp.clickedBtn ? 'button' : 'form' } } };
+            if (!sp.blockSubmit && !sp.noAutoSubmitNet && t) {
+              const subReqId = `sub-req-${++sseq}`;
+              const postData = sp.submitPostData !== undefined ? String(sp.submitPostData) : (sp._lastTyped || []).map((v, i) => `f${i}=${encodeURIComponent(v)}`).join('&');
+              t._pendingSubReqId = subReqId;
+              onTarget(t.targetId, (sid, s) => send(s.ws, { method: 'Network.requestWillBeSent', params: { requestId: subReqId, frameId: t.targetId, type: 'Document', request: { method: 'POST', url: sp.submitUrl || t.url, postData, hasPostData: postData.length > 0 } }, sessionId: sid }));
+            }
+            if (sp.navigateOnSubmit && t) setTimeout(() => {
+              const subReqId = t._pendingSubReqId || `sub-req-${++sseq}`;
+              t._pendingSubReqId = null;
+              t.url = sp.navigateOnSubmit; t.title = t.url;
+              if (!sp.blockSubmit) onTarget(t.targetId, (sid, s) => send(s.ws, { method: 'Network.responseReceived', params: { requestId: subReqId, frameId: t.targetId, type: 'Document', response: { url: t.url, status: Number(sp.submitStatus) || 200 } }, sessionId: sid }));
+              loaded(t);
+            }, 5);
+            return { result: { type: 'object', value: sp.needEnter ? { ok: true, submitted: false, needEnter: true } : { ok: true, submitted: !sp.blockSubmit, via: sp.clickedBtn ? 'button' : 'form' } } };
           }
           if (ex.includes('for (const id of')) { sp.wiped = (sp.wiped || 0) + 1; return { result: { type: 'boolean', value: true } }; }
-          if (ex.includes('let wiped = 0;')) { sp.ceilingWiped = (sp.ceilingWiped || 0) + 1; return { result: { type: 'object', value: { ok: true, wiped: 1 } } }; }
-          if (ex.includes('"pass" + "word"')) return { result: { type: 'boolean', value: !!sp.passwordStillFilled } };
+          if (ex.includes('let wiped = 0;')) {
+            if (sp.swallowWipe) return { __noreply: true };
+            sp.ceilingWiped = (sp.ceilingWiped || 0) + 1;
+            if (sp.failWipe) return { result: { type: 'object', value: { ok: true, wiped: 0, remaining: 1 } } };
+            return { result: { type: 'object', value: { ok: true, wiped: 1, remaining: 0 } } };
+          }
+          if (ex.includes('"pass" + "word"')) {
+            if (Array.isArray(sp.domInputs)) {
+              const slm = /const sLens = (\[[^\]]*\])/.exec(ex);
+              const uim = /const uIds = new Set\((\[[^\]]*\])\)/.exec(ex);
+              const sim = /const sIds = new Set\((\[[^\]]*\])\)/.exec(ex);
+              const sLens = slm ? JSON.parse(slm[1]) : [];
+              const uIds = new Set(uim ? JSON.parse(uim[1]) : []);
+              const sIds = new Set(sim ? JSON.parse(sim[1]) : []);
+              const held = sp.domInputs.some((inp) => {
+                if (!inp || inp.disabled) return false;
+                const vLen = Number(inp.valueLen) || 0;
+                if (vLen <= 0) return false;
+                if (inp.type === 'password') return true;
+                if (inp.fieldId && sIds.has(inp.fieldId)) return true;
+                if (!(inp.fieldId && uIds.has(inp.fieldId)) && sLens.includes(vLen)) return true;
+                return false;
+              });
+              return { result: { type: 'boolean', value: held } };
+            }
+            return { result: { type: 'boolean', value: !!sp.passwordStillFilled } };
+          }
         }
         return { result: { type: 'string', value: t ? (/title/.test(ex) ? t.title : t.url) : '' } };
       }
@@ -373,9 +426,34 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
-    setStandardPage: (spec) => { stdPage = spec ? { ...spec } : null; return stdPage; }, standardPage: () => (stdPage ? { ...stdPage } : null), isoWorlds: () => [...isoWorlds.entries()],
+    setStandardPage: (spec, targetId = null) => {
+      if (targetId) {
+        if (spec) stdPages.set(String(targetId), { ...spec });
+        else stdPages.delete(String(targetId));
+        return publicSp(stdPages.get(String(targetId)));
+      }
+      stdPage = spec ? { ...spec } : null;
+      stdPages.clear();
+      return publicSp(stdPage);
+    },
+    standardPage: (targetId = null) => publicSp(targetId ? (stdPages.get(String(targetId)) || stdPage) : stdPage),
+    setResponseBody: (tid, reqId, body) => { const sp = spOf(tid ? targets.get(String(tid)) : null) || stdPage; if (!sp) return false; sp.responseBodyByReq = { ...(sp.responseBodyByReq || {}), [String(reqId)]: body }; return true; },
+    setRequestPostData: (tid, reqId, body) => { const sp = spOf(tid ? targets.get(String(tid)) : null) || stdPage; if (!sp) return false; sp.postDataByReq = { ...(sp.postDataByReq || {}), [String(reqId)]: body }; return true; },
+    isoWorlds: () => [...isoWorlds.entries()],
     emitPageEvent: (tid, method, params = {}) => { const x = targets.get(tid); if (!x) return false; onTarget(x.targetId, (sid, s) => send(s.ws, { method, params, sessionId: sid })); return true; },
-    navigate: (tid, url, opts = {}) => { const x = targets.get(tid); if (!x) return false; if (opts && opts.reason) onTarget(x.targetId, (sid, s) => send(s.ws, { method: 'Page.frameRequestedNavigation', params: { frameId: x.targetId, reason: String(opts.reason), url: String(url) }, sessionId: sid })); x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
+    navigate: (tid, url, opts = {}) => {
+      const x = targets.get(tid);
+      if (!x) return false;
+      if (opts && opts.reason) onTarget(x.targetId, (sid, s) => send(s.ws, { method: 'Page.frameRequestedNavigation', params: { frameId: x.targetId, reason: String(opts.reason), url: String(url) }, sessionId: sid }));
+      const pendingSub = x._pendingSubReqId || null;
+      x._pendingSubReqId = null;
+      x.url = String(url); x.title = x.url;
+      if (pendingSub && !(opts && opts.reason === 'anchorClick')) {
+        onTarget(x.targetId, (sid, s) => send(s.ws, { method: 'Network.responseReceived', params: { requestId: pendingSub, frameId: x.targetId, type: 'Document', response: { url: x.url, status: Number(opts && opts.status) || 200 } }, sessionId: sid }));
+      }
+      loaded(x);
+      return true;
+    }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } } };
 }
 

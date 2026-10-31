@@ -1440,7 +1440,7 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
 
       // Proven SPA submit (200 same-origin POST + empty/unmounted password input) lifts liveFill on Tab 1
       if (typeof S7.k.emitPageEvent === 'function') {
-        S7.k.emitPageEvent(tid1, 'Network.requestWillBeSent', { requestId: 'rq-spa', request: { method: 'POST', url: `${SITE}/api/login` }, type: 'Fetch' });
+        S7.k.emitPageEvent(tid1, 'Network.requestWillBeSent', { requestId: 'rq-spa', request: { method: 'POST', url: `${SITE}/api/login`, postData: `password=${encodeURIComponent(PW7)}` }, type: 'Fetch' });
         S7.k.emitPageEvent(tid1, 'Network.responseReceived', { requestId: 'rq-spa', type: 'Fetch', response: { status: 200 } });
         S7.k.emitPageEvent(tid1, 'Network.loadingFinished', { requestId: 'rq-spa' });
       }
@@ -1578,6 +1578,538 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
     ok(BL.REFUSALS.includes('login_in_frame') && srcdocVerdict.code === 'login_in_frame' && /inside a frame/.test(srcdocVerdict.error || '') && tenthVerdict.code === 'login_phishing' && Boolean(skewForm && skewForm.pageOrigin === SITE),
       'r4 MINOR 10 (framed forms + 302 skew): about:srcdoc/same-origin frame refuses login_in_frame ("inside a frame"), 10th cross-origin child frame refuses login_phishing, and transient 302 targetInfo skew settles within bounded retry',
       { srcdocVerdict, tenthVerdict, skewOk: !!skewForm });
+  }
+}
+
+// ═══ ⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR D/E/F + Vault pending/provenance + RED controls A–F) ═══
+console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR D/E/F + RED controls A–F)');
+{
+  const { performance } = require('node:perf_hooks');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const BLSRC0 = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf8');
+  // 6-byte runtime secret (< MIN_MASK_BYTES = 8, so Layer 2 never masks it; Layer 1 fence alone protects it)
+  const pw6Of = () => 'Z' + crypto.randomBytes(2).toString('hex') + '!';
+
+  function makeAxFrame(nodeCount, { compact = false, secret = '', withSecretKey = false } = {}) {
+    const nodes = [];
+    for (let i = 0; i < nodeCount; i++) {
+      if (compact) {
+        nodes.push({ id: String(i), r: 't', n: i === nodeCount - 1 && secret ? `lbl:${secret}` : `item-${i}` });
+      } else {
+        nodes.push({
+          nodeId: String(1000 + i),
+          ignored: false,
+          role: { type: 'role', value: i % 3 === 0 ? 'button' : 'StaticText' },
+          name: { type: 'computedString', value: i === nodeCount - 1 && secret ? `echo:${secret}` : `Label text for node ${i}` },
+          description: { type: 'computedString', value: '' },
+          value: { type: 'computedString', value: '' },
+          childIds: [],
+          backendDOMNodeId: 2000 + i,
+        });
+      }
+    }
+    const extra = withSecretKey && secret ? { [secret]: 'key-val' } : {};
+    return JSON.stringify({ id: 77, result: { nodes, count: 12345678, ...extra } });
+  }
+
+  // ── (A) MAJOR A: compiled per-profile scrubber (< 20 ms for 5000 AX nodes), 256 KB bound, and scrub cleared when fence ends ──
+  {
+    const SA = await world({ mode: { standard: true } });
+    try {
+      const tid = SA.k.targets()[0].targetId;
+      const PWA = pwOf('r5-majA');
+      SA.logins.addOwn({ origin: SITE, username: 'axuser', password: PWA });
+      SA.logins.grant(`web-login:${SITE}#axuser`, 'this-account', 'session:conv-1');
+      SA.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-a-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      const rfA = await SA.w.fillLogin(TGT, FILL({ user: 'axuser' }));
+      const compact5000 = makeAxFrame(5000, { compact: true, secret: PWA, withSecretKey: true });
+      const full5000 = makeAxFrame(5000, { compact: false, secret: PWA });
+      // Warm V8 JIT once, then measure median of 3 runs
+      SA.w.scrubCdpFrame(PID, makeAxFrame(50, { compact: true }));
+      const timesCompact = [];
+      let outCompact = '';
+      for (let r = 0; r < 3; r++) {
+        const t0 = performance.now();
+        outCompact = SA.w.scrubCdpFrame(PID, compact5000);
+        timesCompact.push(performance.now() - t0);
+      }
+      timesCompact.sort((a, b) => a - b);
+      const ov0 = SA.w.loginFenceStats().oversizeScrubFrames || 0;
+      const tFull0 = performance.now();
+      const outFull = SA.w.scrubCdpFrame(PID, full5000);
+      const fullMs = performance.now() - tFull0;
+      const ov1 = SA.w.loginFenceStats().oversizeScrubFrames || 0;
+      const compactParsed = JSON.parse(outCompact);
+      const fullParsed = JSON.parse(outFull);
+      const hadScrubDuringFence = SA.w.hasScrubSecrets(PID);
+      // Ending the last fence on the profile clears the scrub set immediately (the value is dead to the agent once the fence ends)
+      SA.k.navigate(tid, `${SITE}/after-login`);
+      const scrubCleared = await until(() => SA.w.hasScrubSecrets(PID) === false, 1500);
+      ok(rfA.ok && Buffer.byteLength(compact5000) <= 256 * 1024 && Buffer.byteLength(full5000) > 256 * 1024 &&
+        timesCompact[1] < 20 && fullMs < 20 && ov1 === ov0 + 1 &&
+        !outCompact.includes(PWA) && !outFull.includes(PWA) &&
+        compactParsed.result[`[vault:web-login:${SITE}#axuser]`] === 'key-val' &&
+        compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 &&
+        hadScrubDuringFence === true && Boolean(scrubCleared),
+        `r5 MAJOR A (compiled scrubber + 256 KB bound + fence-end clear): 5000-node AX frames scrub in < 20 ms (<=256KB walk=${timesCompact[1].toFixed(2)}ms, >256KB spelled=${fullMs.toFixed(2)}ms), mask string values & JSON keys, and clear scrub set when fence ends`,
+        { walkMs: timesCompact[1], fullMs, ov0, ov1, hadScrubDuringFence, scrubCleared: !!scrubCleared });
+
+      // RED A1: per-string VR().maskText rebuild (r4 shape) exceeds the 20 ms budget on the 5000-node frame
+      const redA1Src = DSRC0
+        .replace('if (Buffer.byteLength(frameStr, \'utf8\') > SCRUB_JSON_MAX_BYTES) {', 'if (false) {')
+        .replace('const s = fn(node);', 'const s = VR().maskText(node, [...(scrubByProfile.get(pid) || [])].map((b) => ({ label: b.label, value: b.value })));');
+      const DmA1 = redA1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA1Src, 'r5-a-per-string-masker') : null;
+      const SA1 = DmA1 ? await world({ mode: { standard: true }, Dmod: DmA1 }) : null;
+      let redA1Ms = -1;
+      if (SA1) {
+        try {
+          SA1.logins.addOwn({ origin: SITE, username: 'axuser', password: PWA });
+          SA1.logins.grant(`web-login:${SITE}#axuser`, 'this-account', 'session:conv-1');
+          SA1.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-a1-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await SA1.w.fillLogin(TGT, FILL({ user: 'axuser' }));
+          const t0 = performance.now();
+          SA1.w.scrubCdpFrame(PID, full5000);
+          redA1Ms = performance.now() - t0;
+        } finally { await SA1.close(); }
+      }
+      ok(Boolean(DmA1 && redA1Ms >= 20 && fullMs < 20 && timesCompact[1] < 20),
+        `r5 MAJOR A RED control [r5-a-per-string-masker]: per-string maskText mutant blocks event loop (${redA1Ms.toFixed(1)} ms >= 20 ms) while compiled r5 scrubs in < 20 ms`,
+        { redA1Ms, r5FullMs: fullMs, r5WalkMs: timesCompact[1] });
+
+      // RED A2: mutant that never clears the scrub set when the fence ends
+      const redA2Src = DSRC0.replace('function pruneProfileScrubIfUnfenced(profileId, { persist = true } = {}) {', 'function pruneProfileScrubIfUnfenced() { return;');
+      const DmA2 = redA2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA2Src, 'r5-a-never-clear-scrub') : null;
+      const SA2 = DmA2 ? await world({ mode: { standard: true }, Dmod: DmA2 }) : null;
+      let redA2Kept = false;
+      if (SA2) {
+        try {
+          const tid2 = SA2.k.targets()[0].targetId;
+          SA2.logins.addOwn({ origin: SITE, username: 'axuser', password: PWA });
+          SA2.logins.grant(`web-login:${SITE}#axuser`, 'this-account', 'session:conv-1');
+          SA2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-a2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await SA2.w.fillLogin(TGT, FILL({ user: 'axuser' }));
+          SA2.k.navigate(tid2, `${SITE}/after-login`);
+          await until(() => SA2.w.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1500);
+          redA2Kept = SA2.w.hasScrubSecrets(PID) === true;
+        } finally { await SA2.close(); }
+      }
+      ok(Boolean(DmA2 && redA2Kept && scrubCleared),
+        'r5 MAJOR A RED control [r5-a-never-clear-scrub]: mutant without pruneProfileScrubIfUnfenced keeps scrub set alive after fence ends (r5 clears it)',
+        { redA2Kept, r5ScrubCleared: !!scrubCleared });
+    } finally { await SA.close(); }
+  }
+
+  // ── (B) MAJOR B: frame-held fields on ANOTHER tab never shadow or refuse the active tab's top-level sign-in form ──
+  {
+    const SB = await world({ mode: { standard: true } });
+    try {
+      const tidA = SB.k.targets()[0].targetId;
+      const tidB = SB.k.addTarget(`${SITE}/article`);
+      const tidC = SB.k.addTarget(`${SITE2}/blog`);
+      await until(() => SB.w._watches.get(PID)?.targets.has(tidB) && SB.w._watches.get(PID)?.targets.has(tidC), 1500);
+      const PWB = pwOf('r5-majB');
+      SB.logins.addOwn({ origin: SITE, username: 'taba', password: PWB });
+      SB.logins.grant(`web-login:${SITE}#taba`, 'this-account', 'session:conv-1');
+      // Tab A: plain top-level username + password form on SITE/login
+      SB.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        fields: [
+          { fieldId: 'vs-ba-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'vs-ba-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tidA);
+      // Tab B (later in Map order, SAME site): no top-level fields, same-origin /embed/newsletter iframe with an email input
+      SB.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, fields: [],
+        childFrames: [{ frame: { id: 'SUB_NEWS_B', url: `${SITE}/embed/newsletter`, securityOrigin: SITE } }],
+        subFrames: { SUB_NEWS_B: { isoOrigin: SITE, isoHref: `${SITE}/embed/newsletter`, fields: [{ fieldId: 'vs-bb-e', tag: 'input', domType: 'email', type: 'email', autocomplete: 'email', visible: true }] } },
+      }, tidB);
+      // Tab C (later in Map order, OTHER site): cross-origin widget iframe with an email input
+      SB.k.setStandardPage({
+        securityOrigin: SITE2, isoOrigin: SITE2, fields: [],
+        childFrames: [{ frame: { id: 'SUB_CHAT_C', url: 'https://chat-widget.example.test/box', securityOrigin: 'https://chat-widget.example.test' } }],
+        subFrames: { SUB_CHAT_C: { isoOrigin: 'https://chat-widget.example.test', isoHref: 'https://chat-widget.example.test/box', fields: [{ fieldId: 'vs-bc-e', tag: 'input', domType: 'email', type: 'email', autocomplete: 'email', visible: true }] } },
+      }, tidC);
+      SB.w.noteActiveTab(TGT, tidA);
+      const rfNoOrigin = await SB.w.fillLogin(TGT, FILL());
+      SB.k.navigate(tidA, `${SITE}/login`);
+      await sleep(30);
+      const rfWithOrigin = await SB.w.fillLogin(TGT, FILL({ origin: SITE }));
+      // Refusal on a framed tab names the tab (`(tab <id[0..8]>)`)
+      const fB = BL.classifyChromeForm({ targetId: tidB, pageOrigin: SITE, frameOrigin: SITE, inFrame: true, fields: [{ fieldId: 'e1', tag: 'input', domType: 'email', type: 'email', visible: true }] }, { now: 20 });
+      const fC = BL.classifyChromeForm({ targetId: tidC, pageOrigin: SITE2, frameOrigin: 'https://chat-widget.example.test', inFrame: false, fields: [{ fieldId: 'e2', tag: 'input', domType: 'email', type: 'email', visible: true }] }, { now: 30 });
+      const vRefB = BL.fillVerdict({ forms: [fB], activeTargetId: tidB, entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' });
+      const vRefC = BL.fillVerdict({ forms: [fC], activeTargetId: tidC, entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' });
+      ok(rfNoOrigin.ok === true && rfWithOrigin.ok === true && SB.k.standardPage(tidA).inserted === 4 &&
+        vRefB.code === 'login_in_frame' && vRefB.error.includes(`(tab ${tidB.slice(0, 8)})`) &&
+        vRefC.code === 'login_phishing' && vRefC.error.includes(`(tab ${tidC.slice(0, 8)})`),
+        'r5 MAJOR B (two-tab frame isolation + tab-named refusal): active Tab A fills (both no-origin and named-origin) despite later Tab B same-origin iframe & Tab C cross-origin iframe; refusals name the tab',
+        { rfNoOrigin, rfWithOrigin, insertedA: SB.k.standardPage(tidA).inserted, vRefB, vRefC });
+
+      // RED B: r4's last-form-wins rule (`const form = pick(pool);`) refuses login_phishing / login_in_frame on the same forms
+      const redBSrc = BLSRC0.replace(
+        'const form = pick(actTop) || (actTid ? pick(actAny) || pick(anyTop) : pick(anyTop)) || pick(pool);',
+        'const form = pick(pool);'
+      );
+      const BLmB = redBSrc !== BLSRC0 ? MUT.load('src/browser-login.js', redBSrc, 'r5-b-last-form-wins') : null;
+      const fA = BL.classifyChromeForm({ targetId: tidA, pageOrigin: SITE, frameOrigin: SITE, fields: [{ fieldId: 'u', tag: 'input', domType: 'email', type: 'email', visible: true }, { fieldId: 'p', tag: 'input', domType: 'password', type: 'password', visible: true }] }, { now: 10 });
+      const realVB = BL.fillVerdict({ forms: [fA, fB, fC], activeTargetId: tidA, entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' });
+      const redVB1 = BLmB ? BLmB.fillVerdict({ forms: [fA, fB], activeTargetId: tidA, entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' }) : null;
+      const redVB2 = BLmB ? BLmB.fillVerdict({ forms: [fA, fC], activeTargetId: tidA, entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' }) : null;
+      ok(Boolean(BLmB && realVB.ok === true && realVB.form.targetId === tidA && redVB1 && redVB1.code === 'login_in_frame' && redVB2 && redVB2.code === 'login_phishing'),
+        'r5 MAJOR B RED control [r5-b-last-form-wins]: last-form-wins mutant refuses login_in_frame / login_phishing where r5 fills active Tab A',
+        { realVB: realVB.ok, redVB1: redVB1 && redVB1.code, redVB2: redVB2 && redVB2.code });
+    } finally { await SB.close(); }
+  }
+
+  // ── (C) MAJOR C: credential-carrying write + non-error body confirmation law (all 4 false confirmations + sendBeacon + getRequestPostData) ──
+  {
+    const SC = await world({ mode: { standard: true } });
+    try {
+      const tid = SC.k.targets()[0].targetId;
+      SC.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+
+      // (c1) 200 {"ok":false,"error":"taken"} where site JS clears password + pushState + later cross-doc nav ⇒ stays pending, 0 notices
+      SC.k.navigate(tid, `${SITE}/signup1`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, passwordStillFilled: false,
+        fields: [
+          { fieldId: 'c1-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c1-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const n0 = SC.fy.length;
+      const rc1 = await SC.w.fillLogin(TGT, FILL({ newUser: 'c1err@example.test', generate: true, submit: true }));
+      const pwC1 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c1err@example.test`).value.toString('utf8')).password;
+      SC.k.setResponseBody(tid, 'rq-c1', JSON.stringify({ ok: false, error: 'email_taken' }));
+      SC.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-c1', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/signup`, postData: JSON.stringify({ email: 'c1err@example.test', password: pwC1 }) } });
+      SC.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-c1', type: 'Fetch', response: { status: 200, url: `${SITE}/api/signup` } });
+      SC.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-c1' });
+      SC.k.emitPageEvent(tid, 'Page.navigatedWithinDocument', { frameId: tid, url: `${SITE}/signup1?step=err` });
+      await sleep(140);
+      SC.k.navigate(tid, `${SITE}/help`);
+      await sleep(80);
+      const recC1 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c1err@example.test`).value.toString('utf8'));
+      ok(rc1.ok && recC1.pending === 'register' && SC.fy.length === n0,
+        'r5 MAJOR C.1 (200 {error} + cleared password + pushState + later nav): stays pending:register with 0 notices',
+        { pending: recC1.pending, notices: SC.fy.length - n0 });
+
+      // (c2) same-origin email-availability POST 200 (carrying email, NOT password) + plain link click ⇒ stays pending, 0 notices
+      SC.k.navigate(tid, `${SITE}/signup2`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'c2-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rc2 = await SC.w.fillLogin(TGT, FILL({ newUser: 'c2avail@example.test', generate: true, submit: false }));
+      SC.k.setResponseBody(tid, 'rq-c2', JSON.stringify({ available: true }));
+      SC.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-c2', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/email-check`, postData: JSON.stringify({ email: 'c2avail@example.test' }) } });
+      SC.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-c2', type: 'Fetch', response: { status: 200, url: `${SITE}/api/email-check` } });
+      SC.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-c2' });
+      await sleep(80);
+      SC.k.navigate(tid, `${SITE}/privacy`, { reason: 'anchorClick' });
+      await sleep(80);
+      const recC2 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c2avail@example.test`).value.toString('utf8'));
+      ok(rc2.ok && recC2.pending === 'register' && SC.fy.length === n0,
+        'r5 MAJOR C.2 (same-origin email-availability POST 200 + link click): non-credential write never arms nav confirmation (0 notices)',
+        { pending: recC2.pending, notices: SC.fy.length - n0 });
+
+      // (c3) --submit blocked by required checkbox (0 POSTs) ⇒ submitted:false, then tab navigates elsewhere ⇒ stays pending, 0 notices
+      SC.k.navigate(tid, `${SITE}/signup3`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, blockSubmit: true, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'c3-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c3-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rc3 = await SC.w.fillLogin(TGT, FILL({ newUser: 'c3blocked@example.test', generate: true, submit: true }));
+      SC.k.navigate(tid, `${SITE}/pricing`);
+      await sleep(80);
+      const recC3 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c3blocked@example.test`).value.toString('utf8'));
+      ok(rc3.ok && rc3.submitted === false && recC3.pending === 'register' && SC.fy.length === n0,
+        'r5 MAJOR C.3 (--submit blocked by required checkbox, 0 POSTs): agent told submitted:false and later nav keeps pending:register (0 notices)',
+        { submitted: rc3.submitted, pending: recC3.pending, notices: SC.fy.length - n0 });
+
+      // (c4) change-password form: 200 {success:false, errors:[...]} that clears fields ⇒ stays pending:change, keeps owner provenance, 0 notices
+      const oldPwC4 = pwOf('r5-c4-old');
+      SC.logins.addOwn({ origin: SITE, username: 'c4owner@example.test', password: oldPwC4 });
+      SC.logins.grant(`web-login:${SITE}#c4owner@example.test`, 'this-account', 'session:conv-1');
+      SC.k.navigate(tid, `${SITE}/settings/password`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, passwordStillFilled: false,
+        fields: [
+          { fieldId: 'c4-cur', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          { fieldId: 'c4-new', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rc4 = await SC.w.fillLogin(TGT, FILL({ user: 'c4owner@example.test', generate: true, submit: true }));
+      const recC4Before = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c4owner@example.test`).value.toString('utf8'));
+      SC.k.setResponseBody(tid, 'rq-c4', JSON.stringify({ success: false, errors: ['incorrect_current_password'] }));
+      SC.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-c4', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/password`, postData: JSON.stringify({ current: oldPwC4, next: recC4Before.password }) } });
+      SC.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-c4', type: 'Fetch', response: { status: 200, url: `${SITE}/api/password` } });
+      SC.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-c4' });
+      await sleep(140);
+      const recC4 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c4owner@example.test`).value.toString('utf8'));
+      const rowC4 = SC.logins.list().entries.find((r) => r.name === `web-login:${SITE}#c4owner@example.test`);
+      const vrowC4 = VI.rowOf('secrets', VI.secretRowOf(SC.eng.secretNames().find((s) => s.name === `web-login:${SITE}#c4owner@example.test`)));
+      // Also verify second `login` on pending change types pending password, says so in loginText, and stamps lastFilledPassword:'pending'
+      SC.k.navigate(tid, `${SITE}/login`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'c4-lu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c4-lp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ],
+      }, tid);
+      const rc4Login = await SC.w.fillLogin(TGT, FILL({ user: 'c4owner@example.test' }));
+      const recC4AfterFill = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c4owner@example.test`).value.toString('utf8'));
+      const rowC4AfterFill = SC.logins.list().entries.find((r) => r.name === `web-login:${SITE}#c4owner@example.test`);
+      ok(rc4.ok && recC4.pending === 'change' && recC4.previous && recC4.previous.password === oldPwC4 && SC.fy.length === n0 &&
+        rowC4 && rowC4.pending === 'change' && rowC4.source === 'owner' &&
+        vrowC4 && vrowC4.pending === 'change' && VI.stateChipsOf(vrowC4).some((c) => c.id === 'pending-change') &&
+        rc4Login.ok && rc4Login.usedPassword === 'pending' && /pending password/.test(BL.loginText(rc4Login)) &&
+        recC4AfterFill.lastFilledPassword === 'pending' && rowC4AfterFill.lastFilledPassword === 'pending',
+        'r5 MAJOR C.4 + Vault pending/provenance: change-password 200 {success:false} stays pending:change (0 notices), preserves owner source + pending-change chip, and second login reports & stamps usedPassword:pending',
+        { pending: recC4.pending, rowC4, usedPassword: rc4Login.usedPassword, lastFilled: rowC4AfterFill && rowC4AfterFill.lastFilledPassword });
+
+      // (c5) sendBeacon (type: 'Ping') + link click control ⇒ stays pending, 0 notices; (c6) positive getRequestPostData 200 {"ok":true} ⇒ confirms!
+      SC.k.navigate(tid, `${SITE}/signup5`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false,
+        fields: [
+          { fieldId: 'c5-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c5-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rc5 = await SC.w.fillLogin(TGT, FILL({ newUser: 'c5beacon@example.test', generate: true, submit: false }));
+      const pwC5 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c5beacon@example.test`).value.toString('utf8')).password;
+      SC.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-ping', type: 'Ping', request: { method: 'POST', url: `${SITE}/beacon`, postData: pwC5 } });
+      SC.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-ping', type: 'Ping', response: { status: 204, url: `${SITE}/beacon` } });
+      SC.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-ping' });
+      await sleep(80);
+      SC.k.navigate(tid, `${SITE}/about`, { reason: 'anchorClick' });
+      await sleep(80);
+      const recC5 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c5beacon@example.test`).value.toString('utf8'));
+
+      // (c6) Positive control via Network.getRequestPostData (hasPostData:true, no inline postData) + 200 {"ok":true} + cleared password ⇒ confirms!
+      SC.k.navigate(tid, `${SITE}/signup6`);
+      await sleep(25);
+      SC.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false,
+        fields: [
+          { fieldId: 'c6-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'c6-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      const rc6 = await SC.w.fillLogin(TGT, FILL({ newUser: 'c6ok@example.test', generate: true, submit: false }));
+      const pwC6 = BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c6ok@example.test`).value.toString('utf8')).password;
+      SC.k.setRequestPostData(tid, 'rq-c6', new URLSearchParams({ user: 'c6ok@example.test', pass: pwC6 }).toString());
+      SC.k.setResponseBody(tid, 'rq-c6', JSON.stringify({ ok: true, userId: 'u-6' }));
+      SC.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-c6', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/signup`, hasPostData: true } });
+      SC.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-c6', type: 'Fetch', response: { status: 200, url: `${SITE}/api/signup` } });
+      SC.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-c6' });
+      const confirmedC6 = await until(() => !BL.recordOf(SC.eng.secretGet(`web-login:${SITE}#c6ok@example.test`).value.toString('utf8')).pending, 1500);
+      ok(rc5.ok && recC5.pending === 'register' && rc6.ok && Boolean(confirmedC6) && SC.fy.length === n0 + 1,
+        'r5 MAJOR C.5/C.6 (sendBeacon Ping ignored; getRequestPostData credential write + non-error 200 confirms): beacon stays pending while genuine credential POST confirms',
+        { beaconPending: recC5.pending, confirmedC6: !!confirmedC6, totalNotices: SC.fy.length - n0 });
+
+      // RED C: mutant where any 2xx POST counts as credential write and JSON {error} bodies are not rejected
+      const redCSrc = DSRC0
+        .replace('if (cPend && !rq.carriesPending) rq.carriesPending = true;', 'rq.carriesPending = true;')
+        .replace('function isJsonErrorBody(raw) {', 'function isJsonErrorBody() { return false;')
+        .replace('if (rtype === \'Ping\') return;', '');
+      const DmC = redCSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redCSrc, 'r5-c-any-2xx-confirms') : null;
+      const SCm = DmC ? await world({ mode: { standard: true }, Dmod: DmC }) : null;
+      let redC1Confirmed = false, redC2Confirmed = false;
+      if (SCm) {
+        try {
+          const tidm = SCm.k.targets()[0].targetId;
+          SCm.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+          SCm.k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, passwordStillFilled: false,
+            fields: [
+              { fieldId: 'cm1-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+              { fieldId: 'cm1-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+            ],
+          }, tidm);
+          await SCm.w.fillLogin(TGT, FILL({ newUser: 'cm1@example.test', generate: true, submit: true }));
+          const pwm1 = BL.recordOf(SCm.eng.secretGet(`web-login:${SITE}#cm1@example.test`).value.toString('utf8')).password;
+          SCm.k.setResponseBody(tidm, 'rq-cm1', JSON.stringify({ ok: false, error: 'taken' }));
+          SCm.k.emitPageEvent(tidm, 'Network.requestWillBeSent', { requestId: 'rq-cm1', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/signup`, postData: JSON.stringify({ password: pwm1 }) } });
+          SCm.k.emitPageEvent(tidm, 'Network.responseReceived', { requestId: 'rq-cm1', type: 'Fetch', response: { status: 200, url: `${SITE}/api/signup` } });
+          SCm.k.emitPageEvent(tidm, 'Network.loadingFinished', { requestId: 'rq-cm1' });
+          redC1Confirmed = Boolean(await until(() => !BL.recordOf(SCm.eng.secretGet(`web-login:${SITE}#cm1@example.test`).value.toString('utf8')).pending, 800));
+
+          SCm.k.navigate(tidm, `${SITE}/signup2`);
+          await sleep(25);
+          SCm.k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+            fields: [
+              { fieldId: 'cm2-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+              { fieldId: 'cm2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+            ],
+          }, tidm);
+          await SCm.w.fillLogin(TGT, FILL({ newUser: 'cm2@example.test', generate: true, submit: false }));
+          SCm.k.emitPageEvent(tidm, 'Network.requestWillBeSent', { requestId: 'rq-cm2', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/email-check`, postData: '{"email":"cm2@example.test"}' } });
+          SCm.k.emitPageEvent(tidm, 'Network.responseReceived', { requestId: 'rq-cm2', type: 'Fetch', response: { status: 200, url: `${SITE}/api/email-check` } });
+          SCm.k.emitPageEvent(tidm, 'Network.loadingFinished', { requestId: 'rq-cm2' });
+          await sleep(40);
+          SCm.k.navigate(tidm, `${SITE}/terms`, { reason: 'anchorClick' });
+          redC2Confirmed = Boolean(await until(() => !BL.recordOf(SCm.eng.secretGet(`web-login:${SITE}#cm2@example.test`).value.toString('utf8')).pending, 800));
+        } finally { await SCm.close(); }
+      }
+      ok(Boolean(DmC && redC1Confirmed && redC2Confirmed && recC1.pending === 'register' && recC2.pending === 'register'),
+        'r5 MAJOR C RED control [r5-c-any-2xx-confirms]: mutant without credential-signature & JSON-error checks falsely confirms both 200 {error} and email-check + link click',
+        { redC1Confirmed, redC2Confirmed });
+    } finally { await SC.close(); }
+  }
+
+  // ── (D) MINOR D: 10-min ceiling keeps fence & files For-you reload notice when wipe frame is unanswered or non-empty (6-byte password) ──
+  {
+    const runCeilingSwallow = async (DmodToUse) => {
+      const dd = path.join(ROOT, 'wd-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dd, { recursive: true });
+      const engD = VE.create({ dataDir: dd, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await engD.setup('vault-r5-d');
+      const grantsD = GS.create({ memory: true });
+      const loginsD = L.create({ vault: engD, grants: () => grantsD });
+      const pw6 = pw6Of();
+      loginsD.addOwn({ origin: SITE, username: 'shortd', password: pw6 });
+      grantsD.set('browser-login', `${SITE}#shortd`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const kD = await startFakeKernel({ firstUrl: `${SITE}/login`, mode: { standard: true } });
+      kD.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, swallowWipe: true,
+        fields: [{ fieldId: 'vs-d-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }],
+      });
+      const dFy = [];
+      const wD = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: kD.wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 50,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: loginsD,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        forYou: { add: (pid, it) => { dFy.push({ pid, it }); return 'dfy-' + dFy.length; }, resolve() {} },
+      });
+      try {
+        await wD.arm(PID, { budgetMs: 3000 });
+        await wD.fillLogin(TGT, FILL({ user: 'shortd' }));
+        const shortUnmasked = wD.scrubText(PID, `leak:${pw6}`) === `leak:${pw6}`;
+        // Wait past liveFillMaxMs (50 ms) + wipe call timeout (1500 ms) so the unanswered wipe settles
+        await until(() => dFy.length > 0 || wD.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 2200);
+        const verdictAfter = wD.liveFillVerdictFor(TGT, { verb: 'eval' });
+        return { pwBytes: pw6.length, shortUnmasked, verdictAfter, notices: dFy.map((x) => x.it.text) };
+      } finally { wD.shutdown(); await kD.close(); engD.close(); }
+    };
+
+    const realD = await runCeilingSwallow(D);
+    const redDSrc = DSRC0.replace('if (wipedEmpty) {', 'if (true) {');
+    const DmD = redDSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redDSrc, 'r5-d-unconditional-ceiling-lift') : null;
+    const redD = DmD ? await runCeilingSwallow(DmD) : null;
+    ok(realD.pwBytes === 6 && realD.shortUnmasked === true && realD.verdictAfter.code === 'login_fill_live' &&
+      realD.notices.length === 1 && /a filled password could not be cleared on .* — reload it/.test(realD.notices[0]),
+      'r5 MINOR D (ceiling fail-closed on 6-byte password): swallowed wipe frame keeps login_fill_live and files For-you reload notice',
+      realD);
+    ok(Boolean(DmD && redD && redD.verdictAfter.ok === true && realD.verdictAfter.code === 'login_fill_live'),
+      'r5 MINOR D RED control [r5-d-unconditional-ceiling-lift]: mutant that ignores wipe outcome lifts liveFill on unanswered wipe (r5 stays fenced)',
+      { redVerdict: redD && redD.verdictAfter, realCode: realD.verdictAfter.code });
+  }
+
+  // ── (E) MINOR E: opener-less new tab appearing during `wait` never unfences a filled tab (6-byte password) ──
+  {
+    const runOpenerlessTabProbe = async (DmodToUse) => {
+      const SE = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tidA = SE.k.targets()[0].targetId;
+        const pw6 = pw6Of();
+        SE.logins.addOwn({ origin: SITE, username: 'shorte', password: pw6 });
+        SE.logins.grant(`web-login:${SITE}#shorte`, 'this-account', 'session:conv-1');
+        SE.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-e-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] }, tidA);
+        await SE.w.fillLogin(TGT, FILL({ user: 'shorte' }));
+        SE.w.verbStarted(KEY, { profileId: PID, verb: 'wait' });
+        const tidB = SE.k.addTarget(`${SITE2}/newtab`);
+        await until(() => SE.w._watches.get(PID)?.targets.get(tidB)?.enabled, 1500);
+        SE.w.verbEnded(KEY, { profileId: PID });
+        const evalDefault = SE.w.liveFillVerdictFor(TGT, { verb: 'eval' });
+        const evalExplicitA = SE.w.liveFillVerdictFor(TGT, { verb: 'eval', targetId: tidA });
+        const evalExplicitB = SE.w.liveFillVerdictFor(TGT, { verb: 'eval', targetId: tidB });
+        const evalUnknownSym = SE.w.liveFillVerdictFor(TGT, { verb: 'eval', targetId: 'tab-unknown-symbolic' });
+        return { evalDefault, evalExplicitA, evalExplicitB, evalUnknownSym };
+      } finally { await SE.close(); }
+    };
+
+    const realE = await runOpenerlessTabProbe(D);
+    const redESrc = DSRC0.replace(
+      'w.targets.set(tid, e);',
+      'w.targets.set(tid, e); if (e.seenAt && e.owner && !e.opener) noteActiveTarget(w.profileId, e.owner, tid);'
+    );
+    const DmE = redESrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redESrc, 'r5-e-track-steals-active-tab') : null;
+    const redE = DmE ? await runOpenerlessTabProbe(DmE) : null;
+    ok(realE.evalDefault.code === 'login_fill_live' && realE.evalExplicitA.code === 'login_fill_live' &&
+      realE.evalExplicitB.ok === true && realE.evalUnknownSym.code === 'login_fill_live',
+      'r5 MINOR E (target-scoped CLI fence): opener-less tab born during wait never unfences Tab A; explicit Tab B passes while Tab A and unknown target IDs fail closed',
+      realE);
+    ok(Boolean(DmE && redE && redE.evalDefault.ok === true && realE.evalDefault.code === 'login_fill_live'),
+      'r5 MINOR E RED control [r5-e-track-steals-active-tab]: mutant with noteActiveTarget in track() unfences Tab A when opener-less Tab B appears during wait',
+      { redDefault: redE && redE.evalDefault, realDefault: realE.evalDefault.code });
+  }
+
+  // ── (F) MINOR F: SPA finish requires credential-carrying write AND counts hidden / Show-password type=text inputs (6-byte password) ──
+  {
+    const runSpaHiddenFlipProbe = async (DmodToUse) => {
+      const SF = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = SF.k.targets()[0].targetId;
+        const pw6 = pw6Of();
+        SF.logins.addOwn({ origin: SITE, username: 'shortf@example.test', password: pw6 });
+        SF.logins.grant(`web-login:${SITE}#shortf@example.test`, 'this-account', 'session:conv-1');
+        SF.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false,
+          // Simulate a Show-password toggle (type="text") or hidden wizard panel input still holding the 6-byte password
+          domInputs: [
+            { fieldId: 'vs-f-u', type: 'email', valueLen: 'shortf@example.test'.length, hidden: false },
+            { fieldId: 'vs-f-flipped', type: 'text', valueLen: pw6.length, hidden: true },
+          ],
+          fields: [
+            { fieldId: 'vs-f-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'vs-f-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        await SF.w.fillLogin(TGT, FILL({ user: 'shortf@example.test' }));
+        // 1. Same-origin 2xx analytics POST without credential never lifts even if domInputs were empty
+        SF.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-f-beacon', type: 'Fetch', request: { method: 'POST', url: `${SITE}/collect`, postData: 'ev=pageview' } });
+        SF.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-f-beacon', type: 'Fetch', response: { status: 204, url: `${SITE}/collect` } });
+        SF.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-f-beacon' });
+        await sleep(100);
+        const afterBeacon = SF.w.liveFillVerdictFor(TGT, { verb: 'eval' });
+        // 2. Credential-carrying 200 POST while Show-password / hidden input still holds 6-byte value
+        SF.k.setResponseBody(tid, 'rq-f-cred', JSON.stringify({ step: 2, ok: true }));
+        SF.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-f-cred', type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/step1`, postData: `pw=${encodeURIComponent(pw6)}` } });
+        SF.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-f-cred', type: 'Fetch', response: { status: 200, url: `${SITE}/api/step1` } });
+        SF.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-f-cred' });
+        await sleep(130);
+        const afterHiddenFlip = SF.w.liveFillVerdictFor(TGT, { verb: 'eval' });
+        return { afterBeacon, afterHiddenFlip };
+      } finally { await SF.close(); }
+    };
+
+    const realF = await runSpaHiddenFlipProbe(D);
+    const redFSrc = DSRC0.replace('const sLens = ${JSON.stringify(secretLens)};', 'const sLens = [];');
+    const DmF = redFSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redFSrc, 'r5-f-visible-pw-only') : null;
+    const redF = DmF ? await runSpaHiddenFlipProbe(DmF) : null;
+    ok(realF.afterBeacon.code === 'login_fill_live' && realF.afterHiddenFlip.code === 'login_fill_live',
+      'r5 MINOR F (SPA finish credential-write + hidden/type=text probe): neither analytics POST nor credential POST with hidden/Show-password input holding 6-byte secret lifts liveFill',
+      realF);
+    ok(Boolean(DmF && redF && redF.afterHiddenFlip.ok === true && realF.afterHiddenFlip.code === 'login_fill_live'),
+      'r5 MINOR F RED control [r5-f-visible-pw-only]: mutant ignoring hidden/type-flipped inputs of secret length lifts liveFill with 6-byte secret still in DOM',
+      { redAfterHiddenFlip: redF && redF.afterHiddenFlip, realAfterHiddenFlip: realF.afterHiddenFlip.code });
   }
 }
 

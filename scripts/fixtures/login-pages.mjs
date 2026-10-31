@@ -14,7 +14,7 @@ const page = (title, body, script = '') => `<!doctype html><html><head><meta cha
 const post = `function post(path, body) { return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }`;
 
 const PAGES = {
-  '/one': () => page('Sign in — one step', `<form id="f" method="post" action="/done/one"><label>User <input id="u" name="username" autocomplete="username"></label><label>Password <input id="p" type="password" name="password" autocomplete="current-password" minlength="4"></label><button type="submit">Sign in</button></form>`),
+  '/one': () => page('Sign in — one step', `<form id="f" method="post" action="/done/one"><label>User <input id="u" name="username" autocomplete="username"></label><label>Password <input id="p" type="password" name="password" autocomplete="current-password" minlength="4"></label><label><input type="checkbox" id="rem" name="remember" value="yes" style="display:inline-block;width:auto"> Remember</label><select id="role" name="role"><option value="user">User</option><option value="admin">Admin</option></select><button type="submit">Sign in</button></form>`),
   '/two': () => page('Sign in – Google-like', `<div id="vid"><h1>Sign in</h1><input type="email" id="identifierId" name="identifier" autocomplete="username" aria-label="Email or phone" spellcheck="false"><div role="button" class="btn" id="idNext" tabindex="0">Next</div><div id="iderr" hidden>Enter an email or phone number</div></div>
 <div id="vpw" hidden><h1>Welcome</h1><div id="who"></div><input type="password" name="Passwd" aria-label="Enter your password" autocomplete="current-password"><div role="button" class="btn" id="pwNext" tabindex="0">Next</div><div id="pwerr" hidden>Enter a password</div></div>`,
   `${VALUE_TRACKER}${post}
@@ -95,15 +95,22 @@ document.getElementById('signupLink').addEventListener('click', () => post('/tra
 document.getElementById('realGo').addEventListener('click', () => {
   post('/done/btn-traps', { username: u.value, password: p.value, pwType: p.type }).then(() => { location.href = '/welcome'; });
 });`),
-  '/signup-check': () => page('Create account', `<form id="f">
+  '/signup-check': (url) => {
+    const reqCheck = url.searchParams.get('reqcheck') === '1';
+    const emailCheck = url.searchParams.get('emailcheck') === '1';
+    const beacon = url.searchParams.get('beacon') === '1';
+    return page('Create account', `<form id="f">
   <input id="su" name="email" type="email" autocomplete="email" placeholder="Email">
   <input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12" placeholder="New password">
   <input id="sp2" name="confirm" type="password" autocomplete="new-password" minlength="12" placeholder="Confirm password">
+  ${reqCheck ? '<label><input type="checkbox" id="tos" name="tos" required style="display:inline-block;width:auto"> Agree</label>' : ''}
   <button type="submit">Create account</button>
   <a id="termsLink" href="/plain">Terms</a>
   <div id="err" hidden></div>
 </form>`,
-    `${post}
+      `${post}
+${emailCheck ? `document.getElementById('su').addEventListener('change', (e) => { post('/seen/email-avail', { email: e.target.value }); });` : ''}
+${beacon ? `document.getElementById('sp2').addEventListener('change', () => { try { navigator.sendBeacon('/seen/beacon', 'ping=1'); } catch {} });` : ''}
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = document.getElementById('su').value;
@@ -124,7 +131,12 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   if (!r.ok || (data && data.ok === false)) {
     document.getElementById('err').hidden = false;
     document.getElementById('err').textContent = 'Taken';
-    if (new URLSearchParams(location.search).get('jsonerr') === '1') history.pushState({}, '', '/signup-check?err=taken');
+    const sp = new URLSearchParams(location.search);
+    if (sp.get('clearerr') === '1') {
+      document.getElementById('sp1').value = '';
+      document.getElementById('sp2').value = '';
+    }
+    if (sp.get('jsonerr') === '1') history.pushState({}, '', '/signup-check?err=taken');
     return;
   }
   if (new URLSearchParams(location.search).get('spa') === '1') {
@@ -132,7 +144,38 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   } else {
     location.href = '/welcome';
   }
-});`),
+});`);
+  },
+  '/change-pw': (url) => {
+    const mode = url.searchParams.get('jsonerr') === '1' ? 'jsonerr' : 'ok';
+    return page('Change password', `<form id="cf">
+  <input id="cpOld" name="current" type="password" autocomplete="current-password" placeholder="Current password">
+  <input id="cpNew" name="next" type="password" autocomplete="new-password" minlength="12" placeholder="New password">
+  <button type="submit">Update password</button>
+  <div id="cerr" hidden></div>
+</form>`,
+      `document.getElementById('cf').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const current = document.getElementById('cpOld').value;
+  const next = document.getElementById('cpNew').value;
+  const r = await fetch('/done/change-pw?mode=' + ${JSON.stringify(mode)}, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ current, next }),
+  });
+  let data = null;
+  try { data = await r.json(); } catch { data = null; }
+  if (!r.ok || (data && (data.ok === false || data.error))) {
+    document.getElementById('cpOld').value = '';
+    document.getElementById('cpNew').value = '';
+    document.getElementById('cerr').hidden = false;
+    history.pushState({}, '', '/change-pw?err=1');
+    return;
+  }
+  location.href = '/welcome';
+});`);
+  },
+  '/embed-email': () => page('Newsletter Widget', `<form id="nlf"><input id="nl" type="email" autocomplete="email" placeholder="Newsletter email"></form>`),
   '/srcdoc-login': () => page('Framed login', `<h1>Portal</h1><iframe id="sd" srcdoc="<form><input name='username' autocomplete='username'><input type='password' name='password' autocomplete='current-password'><button type='submit'>Sign in</button></form>" width="420" height="220"></iframe>`),
   '/spa-login': () => page('SPA Sign in', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
     `${post}
@@ -169,9 +212,13 @@ export function startLoginPages() {
           res.writeHead(400, { 'content-type': 'application/json' });
           return res.end('{"ok":false,"error":"taken"}');
         }
-        if (url.pathname === '/done/signup-check' && body && body.email === 'jsonerr@example.test') {
+        if (url.pathname === '/done/signup-check' && body && (body.email === 'jsonerr@example.test' || String(body.email || '').startsWith('jsonerr-'))) {
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end('{"ok":false,"error":"taken"}');
+        }
+        if (url.pathname === '/done/change-pw' && url.searchParams.get('mode') === 'jsonerr') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end('{"ok":false,"error":"bad_current"}');
         }
         res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
       });

@@ -143,11 +143,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */,
   liveFillMaxMs = 10 * 60 * 1000 /* lane vault-login-chrome r4: ceiling before an un-navigated live-fill fence wipes inputs and lifts */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
-  const scrubByProfile = new Map();      // profileId → [{label, value, bytes, at}] (survives watch reconnects; cleared when browser stops)
-  const scrubNamesByProfile = new Map(); // profileId → [{name, at}] (persisted through keeper's ONE writer; re-hydrated from vault on restart)
-  const activeTabByProfile = new Map();  // profileId → Map(parentKey → targetId) (per-tab CLI fence aim)
-  const fenceAuditLines = [];            // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
-  let unparseableScrubFrames = 0;        // CDP frames that failed JSON.parse in scrubCdpFrame (passed untouched and counted)
+  const SCRUB_JSON_MAX_BYTES = 256 * 1024;
+  const scrubByProfile = new Map();       // profileId → [{label, value, bytes, at}] (survives watch reconnects; cleared once every fence on the profile lifts)
+  const scrubNamesByProfile = new Map();  // profileId → [{name, at}] (persisted through keeper's ONE writer while a fence stands; cleared when unfenced)
+  const scrubCompiledByProfile = new Map(); // profileId → compiled scrubber fn | null (built ONCE per scrub-set change)
+  const activeTabByProfile = new Map();   // profileId → Map(parentKey → {tid, at}) (per-tab CLI fence aim)
+  const fenceAuditLines = [];             // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
+  let unparseableScrubFrames = 0;         // CDP frames that failed JSON.parse in scrubCdpFrame (passed untouched and counted)
+  let oversizeScrubFrames = 0;            // CDP frames > SCRUB_JSON_MAX_BYTES scrubbed via single-pass spelled masker
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
   const told = new Map();          // browserKey → Set(answered id) — a note is told once
@@ -324,7 +327,6 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // runs: before, a stranger's popup born during A's verb was A's — A's verb was cut with the stranger's addresses and A's
     // `stop` stopped the stranger's page (the kill + credential shape: that popup carried the stranger's session)
     if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : createdOwner(w);
-    if (e.seenAt && e.owner && !e.opener) noteActiveTarget(w.profileId, e.owner, tid);
     // verify r3 #2: the witness is WRITTEN on the lease record (the keeper's registry is on disk) — a VibeSpace restart read it
     // back through `tabsOf`; before, in memory per watch, the restart made the conversation's own tab nobody's again
     if (e.owner && keeper && typeof keeper.noteOwnTab === 'function') { try { keeper.noteOwnTab(w.profileId, e.owner, tid); } catch (err) { say('note-tab:' + (err && err.message), `${w.profileId}: a witnessed tab was not recorded on its lease — ${err && err.message}`); } }
@@ -2520,38 +2522,59 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const stripHash = (u) => String(u || '').split('#')[0];
   function resolveKnownTargetId(w, rawTid) {
     if (!rawTid) return null;
-    const s = String(rawTid).slice(0, 64);
+    const s = String(rawTid).trim().slice(0, 64);
+    if (!s) return null;
     if (!w) return s;
     if (w.targets.has(s)) return s;
     const up = s.toUpperCase();
     for (const k of w.targets.keys()) if (k.toUpperCase() === up) return k;
-    return s;
+    if (/^[0-9A-F]{4,}$/i.test(s)) {
+      const hits = [];
+      for (const k of w.targets.keys()) if (k.toUpperCase().startsWith(up)) hits.push(k);
+      if (hits.length === 1) return hits[0];
+    }
+    return null;
   }
   function noteActiveTarget(profileId, browserKey = null, targetId = null) {
     const pid = String(profileId || '');
     if (!pid || !targetId) return;
     const w = watches.get(pid);
-    const tid = resolveKnownTargetId(w, targetId);
+    const tid = w ? resolveKnownTargetId(w, targetId) : String(targetId).trim().slice(0, 64);
     if (!tid) return;
     let m = activeTabByProfile.get(pid);
     if (!m) { m = new Map(); activeTabByProfile.set(pid, m); }
-    m.set(parentKey(browserKey) || '*', tid);
+    m.set(parentKey(browserKey) || '*', { tid, at: now() });
   }
   function noteActiveTab(target, targetId) {
     if (!target || !target.profileId || !targetId) return;
     noteActiveTarget(target.profileId, target.browserKey, targetId);
   }
-  function activeTabOfProfile(profileId, browserKey = null) {
+  function activeTabEntryOfProfile(profileId, browserKey = null) {
     const m = activeTabByProfile.get(String(profileId || ''));
     if (!m) return null;
     const bk = parentKey(browserKey);
-    return (bk && m.get(bk)) || m.get('*') || null;
+    const v = bk ? m.get(bk) : m.get('*');
+    return v && v.tid ? v : null;
+  }
+  function activeTabOfProfile(profileId, browserKey = null) {
+    const v = activeTabEntryOfProfile(profileId, browserKey);
+    return v ? v.tid : null;
   }
   function dropActiveTarget(profileId, targetId) {
     const m = activeTabByProfile.get(String(profileId || ''));
     if (!m || !targetId) return;
     const up = String(targetId).toUpperCase();
-    for (const [k, v] of [...m.entries()]) if (String(v).toUpperCase() === up) m.delete(k);
+    for (const [k, v] of [...m.entries()]) if (v && String(v.tid || '').toUpperCase() === up) m.delete(k);
+  }
+  function extractArgvTab(argv) {
+    if (!Array.isArray(argv)) return null;
+    for (let i = 0; i < argv.length; i++) {
+      const a = String(argv[i] || '');
+      if ((a === '--tab' || a === '--target') && argv[i + 1] && !String(argv[i + 1]).startsWith('-')) return String(argv[i + 1]).slice(0, 64);
+      const eq = /^--(?:tab|target)=(.+)$/.exec(a);
+      if (eq && eq[1]) return eq[1].slice(0, 64);
+    }
+    return null;
   }
   function allowVerbInFlight(profileId, browserKey = null) {
     const pid = String(profileId || '');
@@ -2627,12 +2650,30 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (idx !== -1) list.splice(idx, 1);
     list.push({ label: lbl, value: val, bytes, at });
     if (list.length > 32) list.splice(0, list.length - 32);
+    scrubCompiledByProfile.delete(pid);
     let names = scrubNamesByProfile.get(pid);
     if (!names) { names = []; scrubNamesByProfile.set(pid, names); }
     const ni = names.findIndex((x) => x.name === lbl);
     if (ni !== -1) names.splice(ni, 1);
     names.push({ name: lbl, at });
     if (names.length > 32) names.splice(0, names.length - 32);
+    if (persist) syncPersistedLoginFences(pid);
+  }
+  function pruneProfileScrubIfUnfenced(profileId, { persist = true } = {}) {
+    const pid = String(profileId || '');
+    if (!pid) return;
+    const w = watches.get(pid);
+    if (w && w.state === 'open') {
+      for (const e of w.targets.values()) if (e.liveFill) return;
+    } else if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+      try {
+        const st = keeper.loginFenceStateOf(pid);
+        if (st && Array.isArray(st.fences) && st.fences.length > 0) return;
+      } catch { /* */ }
+    }
+    scrubByProfile.delete(pid);
+    scrubNamesByProfile.delete(pid);
+    scrubCompiledByProfile.delete(pid);
     if (persist) syncPersistedLoginFences(pid);
   }
   function hydratePersistedScrubs(profileId) {
@@ -2658,27 +2699,42 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     return !!(list && list.length > 0);
   }
-  function scrubText(profileId, text) {
-    if (typeof text !== 'string' || !text) return text;
+  function scrubberForProfile(profileId) {
     const pid = String(profileId || '');
-    if (!hasScrubSecrets(pid)) return text;
+    if (!hasScrubSecrets(pid)) {
+      scrubCompiledByProfile.delete(pid);
+      return null;
+    }
+    if (scrubCompiledByProfile.has(pid)) return scrubCompiledByProfile.get(pid);
     const list = scrubByProfile.get(pid);
-    if (!list || !list.length) return text;
     const minB = VR().MIN_MASK_BYTES || 8;
     const pairs = [];
-    for (const b of list) if (b.bytes >= minB) pairs.push({ label: b.label, value: b.value });
-    return pairs.length ? VR().maskText(text, pairs) : text;
+    for (const b of list || []) if (b.bytes >= minB) pairs.push({ label: b.label, value: b.value });
+    const fn = pairs.length ? VR().compileTextScrubber(pairs) : null;
+    scrubCompiledByProfile.set(pid, fn);
+    return fn;
+  }
+  function scrubText(profileId, text) {
+    if (typeof text !== 'string' || !text) return text;
+    const fn = scrubberForProfile(profileId);
+    return fn ? fn(text) : text;
   }
   function scrubCdpFrame(profileId, frameStr) {
     if (typeof frameStr !== 'string' || !frameStr) return frameStr;
     const pid = String(profileId || '');
-    if (!hasScrubSecrets(pid)) return frameStr;
+    const fn = scrubberForProfile(pid);
+    if (!fn) return frameStr;
+    if (Buffer.byteLength(frameStr, 'utf8') > SCRUB_JSON_MAX_BYTES) {
+      oversizeScrubFrames++;
+      say('scrub-oversize:' + pid, `${pid}: CDP frame over ${SCRUB_JSON_MAX_BYTES} bytes scrubbed with single-pass spelled masker`);
+      return fn.spelled(frameStr);
+    }
     let parsed;
     try { parsed = JSON.parse(frameStr); } catch { unparseableScrubFrames++; return frameStr; }
     let changed = false;
     const walk = (node) => {
       if (typeof node === 'string') {
-        const s = scrubText(pid, node);
+        const s = fn(node);
         if (s !== node) changed = true;
         return s;
       }
@@ -2696,12 +2752,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const keys = Object.keys(node);
         for (let i = 0; i < keys.length; i++) {
           const k = keys[i];
+          const nk = fn(k);
           const next = walk(node[k]);
-          if (out) out[k] = next;
-          else if (next !== node[k]) {
+          if (out) {
+            if (nk !== k) changed = true;
+            out[nk] = next;
+          } else if (nk !== k || next !== node[k]) {
+            changed = true;
             out = {};
             for (let j = 0; j < i; j++) out[keys[j]] = node[keys[j]];
-            out[k] = next;
+            out[nk] = next;
           }
         }
         return out || node;
@@ -2720,12 +2780,28 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const err = e0 ? scrubText(pid, e0) : '';
     return { out, err, changed: out !== o0 || err !== e0 };
   }
+  function fileCeilingWipeNotice(w, e, lf) {
+    if (!lf || lf.ceilingNoticed || !forYou || typeof forYou.add !== 'function') return;
+    lf.ceilingNoticed = true;
+    const origin = lf.origin || BL().originOf(e && e.url) || '';
+    const tidShort = String((e && e.targetId) || lf.targetId || 'tab').slice(0, 8);
+    const tabLabel = origin ? `${origin} (tab ${tidShort})` : `tab ${tidShort}`;
+    const textKey = 'a filled password could not be cleared on {tab} — reload it';
+    const text = `a filled password could not be cleared on ${tabLabel} — reload it`;
+    const detail = 'Open the browser live view or reload that tab so the typed credential leaves the page.';
+    try {
+      lf.ceilingNoticeId = forYou.add(w.profileId, { origin: 'browser', kind: 'notice', urgency: 'normal', text, detail, i18n: { text: { key: textKey, params: { tab: tabLabel } }, detail: [{ key: detail }] } }) || null;
+    } catch { /* optional */ }
+  }
   function clearLiveFillOnTab(w, e, why, { audit = false, persist = true } = {}) {
     if (!e || !e.liveFill) return;
     const lf = e.liveFill;
     e.liveFill = null;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+    if (lf.ceilingNoticeId) { try { forYou?.resolve?.(lf.ceilingNoticeId); } catch { /* */ } }
     if (audit) recordFenceAudit(w.profileId, lf, why);
+    // Rule: once the last read fence on a profile ends (or its ceiling wipe verified empty), the typed secret is dead to the agent — clear the scrub set.
+    pruneProfileScrubIfUnfenced(w.profileId, { persist: false });
     if (persist) syncPersistedLoginFences(w.profileId);
     wakeSubmitWaiters(e);
   }
@@ -2735,12 +2811,25 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     lf.wiping = true;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
     (async () => {
+      let wipedEmpty = false;
       try {
-        if (w.state === 'open' && !w.kernel && e.sid) {
-          await settle(LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }));
+        if (w.state === 'open' && !loginSinks(w) && e.sid) {
+          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }).catch(() => null);
+          wipedEmpty = Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
         }
       } finally {
-        if (e.liveFill === lf) clearLiveFillOnTab(w, e, 'ceiling', { audit: true, persist: true });
+        if (e.liveFill === lf) {
+          lf.wiping = false;
+          if (wipedEmpty) {
+            clearLiveFillOnTab(w, e, 'ceiling', { audit: true, persist: true });
+          } else {
+            fileCeilingWipeNotice(w, e, lf);
+            const retryMs = Math.max(1000, Math.min(liveFillMaxMs, 30000));
+            const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, retryMs);
+            if (timer.unref) timer.unref();
+            e.liveFillTimer = timer;
+          }
+        }
       }
     })();
   }
@@ -2757,7 +2846,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       at: Number(info.at) || now(),
       navSeq0: Number(info.navSeq0) || 0,
       netMark: Number(info.netMark) || 0,
+      credSigs: Array.isArray(info.credSigs) ? info.credSigs : [],
+      secretFieldIds: Array.isArray(info.secretFieldIds) ? info.secretFieldIds : [],
+      userFieldIds: Array.isArray(info.userFieldIds) ? info.userFieldIds : [],
       wiping: false,
+      ceilingNoticed: false,
+      ceilingNoticeId: null,
     };
     e.liveFill = lf;
     const left = Math.max(0, liveFillMaxMs - (now() - lf.at));
@@ -2765,6 +2859,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (timer.unref) timer.unref();
     e.liveFillTimer = timer;
     if (persist) syncPersistedLoginFences(w.profileId);
+  }
+  function credSigOf(sv) {
+    if (typeof sv !== 'string' || !sv) return null;
+    return { len: sv.length, sha256: crypto.createHash('sha256').update(sv, 'utf8').digest('hex') };
   }
   async function rearmLoginFences(w) {
     if (!w || !keeper || typeof keeper.loginFenceStateOf !== 'function') return;
@@ -2779,22 +2877,45 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       hydratePersistedScrubs(w.profileId);
     }
-    if (!Array.isArray(st.fences) || !st.fences.length) return;
+    if (!Array.isArray(st.fences) || !st.fences.length) {
+      pruneProfileScrubIfUnfenced(w.profileId, { persist: true });
+      return;
+    }
     for (const f of st.fences) {
       if (!f || !f.targetId || !f.origin) continue;
       const tid = resolveKnownTargetId(w, f.targetId);
       const e = tid ? w.targets.get(tid) : null;
       if (!e) { recordFenceAudit(w.profileId, f, 'target-gone'); continue; }
       if (stripHash(e.url) !== stripHash(f.urlAtFill)) { recordFenceAudit(w.profileId, f, 'url-changed'); continue; }
+      let hydratedSigs = [];
+      if (f.loginId && logins && typeof logins.scrubSecretsOf === 'function') {
+        try {
+          const vals = logins.scrubSecretsOf(f.loginId);
+          const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
+          hydratedSigs = arr.map(credSigOf).filter(Boolean);
+        } catch { hydratedSigs = []; }
+      }
       if (now() - (Number(f.at) || 0) >= liveFillMaxMs) {
-        if (!w.kernel && e.sid) await settle(LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }));
-        recordFenceAudit(w.profileId, f, 'ceiling');
+        let wipedEmpty = false;
+        if (!loginSinks(w) && e.sid) {
+          const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), targetId: e.targetId }).catch(() => null);
+          wipedEmpty = Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
+        }
+        if (wipedEmpty) {
+          recordFenceAudit(w.profileId, f, 'ceiling');
+          continue;
+        }
+        await ensureLoginNet(w, e);
+        armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
+        fileCeilingWipeNotice(w, e, e.liveFill);
+        if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
         continue;
       }
       await ensureLoginNet(w, e);
-      armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
+      armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
       if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
     }
+    pruneProfileScrubIfUnfenced(w.profileId, { persist: false });
     syncPersistedLoginFences(w.profileId);
   }
   function clearProfileLoginFencesOnStop(pid, w) {
@@ -2803,6 +2924,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       for (const e of w.targets.values()) {
         if (!e.liveFill) continue;
         active.push(e.liveFill);
+        if (e.liveFill.ceilingNoticeId) { try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ } }
         if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
         e.liveFill = null;
       }
@@ -2812,22 +2934,34 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const f of active) recordFenceAudit(pid, f, 'browser-stop');
     scrubByProfile.delete(pid);
     scrubNamesByProfile.delete(pid);
+    scrubCompiledByProfile.delete(pid);
     activeTabByProfile.delete(pid);
     if (keeper && typeof keeper.saveLoginFenceState === 'function') {
       try { keeper.saveLoginFenceState(pid, { fences: [], scrubs: [] }); } catch { /* optional */ }
     }
   }
-  function movedOnFromFill(w, scope, e) {
-    const since = Number(e && e.liveFill && e.liveFill.at) || 0;
-    for (const x of w.targets.values()) {
-      if (x === e || !inScope(scope, x.targetId)) continue;
-      if ((x.seenAt || 0) > since || (x.agentHopAt || 0) > since) return true;
+  function fencedTargetsFor(target) {
+    const pid = String((target && target.profileId) || '');
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open') {
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        const fences = st && Array.isArray(st.fences) ? st.fences : [];
+        return fences.filter((f) => f && f.targetId && f.origin).map((f) => ({ targetId: String(f.targetId), origin: String(f.origin) }));
+      }
+      return [];
     }
-    return false;
+    const scope = scopeFor(target);
+    const out = [];
+    for (const e of w.targets.values()) {
+      if (e.liveFill && inScope(scope, e.targetId)) out.push({ targetId: e.targetId, origin: e.liveFill.origin });
+    }
+    return out;
   }
   function liveFillVerdictFor(target, { verb = '', argv = null, batchVerbs = null, targetId = null } = {}) {
     const pid = String((target && target.profileId) || '');
     const w = watches.get(pid);
+    const explicitTarget = targetId || extractArgvTab(argv);
     if (!w || w.state !== 'open') {
       if (keeper && typeof keeper.loginFenceStateOf === 'function') {
         let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
@@ -2835,33 +2969,43 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (fences.length) {
           const bk = parentKey(target && target.browserKey);
           const act = activeTabOfProfile(pid, bk);
-          const wantTid = targetId ? String(targetId).toUpperCase() : (act ? String(act).toUpperCase() : null);
-          const pf = fences.find((f) => wantTid ? String(f.targetId || '').toUpperCase() === wantTid : (!f.browserKey || !bk || parentKey(f.browserKey) === bk));
+          const wantTid = explicitTarget ? String(explicitTarget).toUpperCase() : (act ? String(act).toUpperCase() : null);
+          const pf = wantTid && wantTid !== '__UNKNOWN__'
+            ? fences.find((f) => String(f.targetId || '').toUpperCase() === wantTid || (wantTid.length >= 4 && String(f.targetId || '').toUpperCase().startsWith(wantTid)))
+            : fences.find((f) => !f.browserKey || !bk || parentKey(f.browserKey) === bk);
           if (pf) return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: pf.origin });
         }
       }
       return { ok: true };
     }
-    let any = false;
-    for (const e of w.targets.values()) if (e.liveFill) { any = true; break; }
-    if (!any) return { ok: true };
+    let maxFillAt = 0, any = false;
     const scope = scopeFor(target);
+    for (const e of w.targets.values()) {
+      if (!e.liveFill) continue;
+      any = true;
+      if (inScope(scope, e.targetId) && (e.liveFill.at || 0) > maxFillAt) maxFillAt = e.liveFill.at || 0;
+    }
+    if (!any) return { ok: true };
     const batchSwitchesTab = verb === 'batch' && Array.isArray(batchVerbs) && batchVerbs.some((v) => String(v || '').trim().split(/\s+/)[0] === 'tab');
     let cands = null;
-    if (targetId) {
-      const tid = resolveKnownTargetId(w, targetId);
-      const e = tid ? w.targets.get(tid) : null;
-      cands = e && inScope(scope, e.targetId) ? [e] : [];
+    if (explicitTarget) {
+      const tid = resolveKnownTargetId(w, explicitTarget);
+      if (tid) {
+        const e = w.targets.get(tid);
+        cands = e && inScope(scope, e.targetId) ? [e] : [];
+      }
     } else if (!batchSwitchesTab) {
-      const actTid = activeTabOfProfile(pid, target && target.browserKey);
-      const actE = actTid ? w.targets.get(actTid) : null;
-      if (actE && inScope(scope, actE.targetId)) cands = [actE];
+      const actEntry = activeTabEntryOfProfile(pid, target && target.browserKey);
+      const actE = actEntry && actEntry.tid ? w.targets.get(actEntry.tid) : null;
+      if (actE && inScope(scope, actE.targetId) && (actE.liveFill || (actEntry.at || 0) >= maxFillAt)) {
+        cands = [actE];
+      }
     }
-    if (!cands) cands = [...w.targets.values()].filter((e) => e.liveFill && inScope(scope, e.targetId) && !movedOnFromFill(w, scope, e));
+    if (!cands) cands = [...w.targets.values()].filter((e) => e.liveFill && inScope(scope, e.targetId));
     const t = now();
     for (const e of cands) {
       if (!e || !e.liveFill) continue;
-      if (t - (Number(e.liveFill.at) || 0) >= liveFillMaxMs) expireLiveFillCeiling(w, e);
+      if (t - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed) expireLiveFillCeiling(w, e);
       if (e.liveFill) return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: e.liveFill.origin });
     }
     return { ok: true };
@@ -2885,7 +3029,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     const check = (e) => {
       if (!e || !e.liveFill) return null;
-      if (now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs) expireLiveFillCeiling(w, e);
+      if (now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed) expireLiveFillCeiling(w, e);
       return e.liveFill || null;
     };
     if (targetId) {
@@ -2915,10 +3059,102 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   async function ensureLoginNet(w, e) {
     if (!e || !e.sid) return;
-    if (!e.authNet) e.authNet = { enabled: false, seq: 0, reqs: new Map(), lastDocStatus: 0, lastMutationStatus: 0, okMutationSeq: 0, failMutationSeq: 0 };
+    if (!e.authNet) e.authNet = { enabled: false, seq: 0, reqs: new Map(), lastDocStatus: 0, lastMutationStatus: 0, credSentSeq: 0, okCredSeq: 0, okPendingSeq: 0, failCredSeq: 0 };
     if (e.authNet.enabled) return;
-    const nr = await call(w, 'Network.enable', { maxPostDataSize: 0, maxResourceBufferSize: 0, maxTotalBufferSize: 0 }, e.sid, 1500);
+    const nr = await call(w, 'Network.enable', { maxPostDataSize: 65536, maxResourceBufferSize: 65536, maxTotalBufferSize: 262144 }, e.sid, 1500);
     if (nr && !nr.timeout && !nr.error) e.authNet.enabled = true;
+  }
+  function extractInlinePostData(req) {
+    if (!req || typeof req !== 'object') return '';
+    if (typeof req.postData === 'string' && req.postData) return req.postData;
+    if (Array.isArray(req.postDataEntries) && req.postDataEntries.length) {
+      try {
+        return req.postDataEntries.map((x) => (x && typeof x.bytes === 'string' ? Buffer.from(x.bytes, 'base64').toString('utf8') : '')).join('');
+      } catch { return ''; }
+    }
+    return '';
+  }
+  function bodyCarriesCredential(bodyText, sigs) {
+    if (typeof bodyText !== 'string' || !bodyText || !Array.isArray(sigs) || !sigs.length) return false;
+    const capped = bodyText.length > 131072 ? bodyText.slice(0, 131072) : bodyText;
+    const matchOne = (s) => {
+      if (typeof s !== 'string' || !s) return false;
+      for (const sg of sigs) {
+        if (sg && s.length === sg.len && crypto.createHash('sha256').update(s, 'utf8').digest('hex') === sg.sha256) return true;
+      }
+      return false;
+    };
+    if (matchOne(capped) || matchOne(capped.trim())) return true;
+    const trimmed = capped.trimStart();
+    if (trimmed[0] === '{' || trimmed[0] === '[' || trimmed[0] === '"') {
+      try {
+        const j = JSON.parse(trimmed);
+        const stack = [j];
+        let seen = 0;
+        while (stack.length && seen++ < 256) {
+          const cur = stack.pop();
+          if (typeof cur === 'string') { if (matchOne(cur)) return true; }
+          else if (Array.isArray(cur)) { for (const x of cur) stack.push(x); }
+          else if (cur && typeof cur === 'object') { for (const k of Object.keys(cur)) stack.push(cur[k]); }
+        }
+      } catch { /* not JSON */ }
+    }
+    if (capped.includes('Content-Disposition:')) {
+      const parts = capped.split(/\r?\n--[^\r\n]+/);
+      for (const pt of parts) {
+        const idx = pt.indexOf('\r\n\r\n');
+        const idxLf = idx === -1 ? pt.indexOf('\n\n') : -1;
+        const body = idx !== -1 ? pt.slice(idx + 4).replace(/\r\n$/, '') : (idxLf !== -1 ? pt.slice(idxLf + 2).replace(/\n$/, '') : '');
+        if (body && matchOne(body)) return true;
+      }
+    }
+    if (capped.includes('=')) {
+      try {
+        const sp = new URLSearchParams(capped);
+        for (const [, v] of sp) if (matchOne(v)) return true;
+      } catch { /* */ }
+    }
+    return false;
+  }
+  function isJsonErrorBody(raw) {
+    if (typeof raw !== 'string') return false;
+    const s = raw.trim();
+    if (!s || (s[0] !== '{' && s[0] !== '[')) return false;
+    let obj;
+    try { obj = JSON.parse(s); } catch { return false; }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+    if (obj.ok === false || obj.success === false || obj.authenticated === false || obj.valid === false) return true;
+    if (obj.error !== undefined && obj.error !== null && obj.error !== false && obj.error !== '') return true;
+    if (Array.isArray(obj.errors) && obj.errors.length > 0) return true;
+    if (obj.errors && typeof obj.errors === 'object' && !Array.isArray(obj.errors) && Object.keys(obj.errors).length > 0) return true;
+    if (typeof obj.status === 'number' && obj.status >= 400) return true;
+    if (typeof obj.status === 'string' && /^(?:error|fail|failed|invalid|denied|rejected)$/i.test(obj.status.trim())) return true;
+    if (typeof obj.code === 'number' && obj.code >= 400) return true;
+    return false;
+  }
+  function markReqCredential(e, rq, bodyText) {
+    if (!e || !rq || !bodyText) return;
+    const an = e.authNet;
+    if (!an) return;
+    const lfSigs = e.liveFill && Array.isArray(e.liveFill.credSigs) ? e.liveFill.credSigs : [];
+    const pcSigs = e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && Array.isArray(e.pendingLoginConfirm.pendingSigs) ? e.pendingLoginConfirm.pendingSigs : [];
+    const cCred = lfSigs.length > 0 && bodyCarriesCredential(bodyText, lfSigs);
+    const cPend = pcSigs.length > 0 && bodyCarriesCredential(bodyText, pcSigs);
+    if (cCred && !rq.carriesCred) rq.carriesCred = true;
+    if (cPend && !rq.carriesPending) rq.carriesPending = true;
+    if ((cCred || cPend) && !rq.bumpedSent) {
+      rq.bumpedSent = true;
+      an.seq++;
+      an.credSentSeq = an.seq;
+      wakeSubmitWaiters(e);
+    }
+  }
+  async function flushPendingAuthPostData(e) {
+    const an = e && e.authNet;
+    if (!an || !an.reqs.size) return;
+    const ps = [];
+    for (const rq of an.reqs.values()) if (rq && rq.postDataP) ps.push(rq.postDataP);
+    if (ps.length) await Promise.allSettled(ps);
   }
   function confirmPendingLogin(w, e, pc, outcome) {
     if (!pc || pc.confirmed || !logins) return;
@@ -2941,16 +3177,50 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const lf = e.liveFill || null;
       if (!pc && !lf) return;
       const an = e.authNet;
-      if (!an || an.failMutationSeq > an.okMutationSeq) return;
-      const pcReady = !!(pc && an.okMutationSeq > pc.netMark);
-      const lfReady = !!(lf && an.okMutationSeq > (lf.netMark || 0));
+      if (!an) return;
+      const pcReady = !!(pc && an.okPendingSeq > pc.netMark && an.okPendingSeq >= (an.failCredSeq || 0));
+      const lfReady = !!(lf && an.okCredSeq > (lf.netMark || 0) && an.okCredSeq >= (an.failCredSeq || 0));
       if (!pcReady && !lfReady) return;
       const ft = await call(w, 'Page.getFrameTree', {}, e.sid, 1000);
       const fid = (ft && !ft.timeout && !ft.error && ft.result && ft.result.frameTree && ft.result.frameTree.frame && ft.result.frameTree.frame.id) || e.targetId;
       const iw = await call(w, 'Page.createIsolatedWorld', { frameId: fid, worldName: 'vs-login-confirm', grantUniveralAccess: false }, e.sid, 1000);
       const ctxId = iw && !iw.timeout && !iw.error && iw.result ? Number(iw.result.executionContextId) : 0;
       if (!Number.isInteger(ctxId) || ctxId <= 0) return;
-      const probeExpr = 'Array.from(document.querySelectorAll("input")).some((i) => i.type === "pass" + "word" && !i.disabled && !i.hidden && i.getBoundingClientRect().width > 0 && i.value.length > 0)';
+      const secretLens = [...new Set([
+        ...((lf && Array.isArray(lf.credSigs) ? lf.credSigs : []).map((s) => Number(s && s.len) || 0)),
+        ...((pc && Array.isArray(pc.pendingSigs) ? pc.pendingSigs : []).map((s) => Number(s && s.len) || 0)),
+      ].filter((n) => n > 0))];
+      const userFieldIds = lf && Array.isArray(lf.userFieldIds) ? lf.userFieldIds : [];
+      const secretFieldIds = lf && Array.isArray(lf.secretFieldIds) ? lf.secretFieldIds : [];
+      const probeExpr = `(() => {
+        const sLens = ${JSON.stringify(secretLens)};
+        const uIds = new Set(${JSON.stringify(userFieldIds)});
+        const sIds = new Set(${JSON.stringify(secretFieldIds)});
+        const byId = window.vsLoginById || null;
+        const userEls = new Set();
+        const secretEls = new Set();
+        if (byId && typeof byId === 'object') {
+          for (const k of uIds) if (byId[k]) userEls.add(byId[k]);
+          for (const k of sIds) if (byId[k]) secretEls.add(byId[k]);
+        }
+        const collect = (root, out = [], d = 0) => {
+          if (!root || d > 8) return out;
+          try {
+            for (const el of root.querySelectorAll('input, textarea')) out.push(el);
+            for (const h of root.querySelectorAll('*')) if (h && h.shadowRoot) collect(h.shadowRoot, out, d + 1);
+          } catch {}
+          return out;
+        };
+        for (const i of collect(document)) {
+          if (!i || i.disabled) continue;
+          const vLen = typeof i.value === 'string' ? i.value.length : 0;
+          if (vLen <= 0) continue;
+          if (i.type === "pass" + "word") return true;
+          if (secretEls.has(i)) return true;
+          if (!userEls.has(i) && sLens.includes(vLen)) return true;
+        }
+        return false;
+      })()`;
       const pr = await call(w, 'Runtime.evaluate', { expression: probeExpr, contextId: ctxId, returnByValue: true }, e.sid, 1000);
       const stillFilled = pr && !pr.timeout && !pr.error && pr.result && pr.result.result ? pr.result.result.value : true;
       if (stillFilled !== false) return;
@@ -2972,17 +3242,43 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const watchOrigin = loginWatchOriginOf(e);
     if (method === 'Network.requestWillBeSent') {
       const prev = rid ? an.reqs.get(rid) : null;
-      if (prev && p.redirectResponse && ['POST', 'PUT', 'PATCH'].includes(prev.method)) {
+      if (prev && p.redirectResponse && ['POST', 'PUT', 'PATCH'].includes(prev.method) && prev.type !== 'Ping') {
         const rs = Number(p.redirectResponse.status) || 0;
-        if (watchOrigin && prev.origin === watchOrigin && rs >= 200 && rs < 400) {
-          an.seq++; an.lastMutationStatus = rs; an.okMutationSeq = an.seq;
+        if (watchOrigin && prev.origin === watchOrigin && rs >= 200 && rs < 400 && (prev.carriesCred || prev.carriesPending)) {
+          an.seq++; an.lastMutationStatus = rs;
+          if (prev.carriesCred) an.okCredSeq = an.seq;
+          if (prev.carriesPending) an.okPendingSeq = an.seq;
         }
       }
       if (rid && p.request) {
         const reqMethod = String(p.request.method || 'GET').toUpperCase();
         const url = String(p.request.url || '');
-        an.reqs.set(rid, { method: reqMethod, origin: BL().originOf(url), url, type: String(p.type || ''), status: 0, at: now() });
+        const reqType = String(p.type || (prev && prev.type) || '');
+        const rq = {
+          method: reqMethod,
+          origin: BL().originOf(url),
+          url,
+          type: reqType,
+          status: 0,
+          at: now(),
+          carriesCred: !!(prev && prev.carriesCred),
+          carriesPending: !!(prev && prev.carriesPending),
+          bumpedSent: !!(prev && prev.bumpedSent),
+          postDataP: null,
+        };
+        an.reqs.set(rid, rq);
         if (an.reqs.size > 64) an.reqs.delete(an.reqs.keys().next().value);
+        if (['POST', 'PUT', 'PATCH'].includes(reqMethod) && reqType !== 'Ping' && watchOrigin && rq.origin === watchOrigin) {
+          const inlineBody = extractInlinePostData(p.request);
+          if (inlineBody) {
+            markReqCredential(e, rq, inlineBody);
+          } else if (p.request.hasPostData && e.sid) {
+            rq.postDataP = call(w, 'Network.getRequestPostData', { requestId: rid }, e.sid, 1000).then((r) => {
+              const b = r && !r.timeout && !r.error && r.result && typeof r.result.postData === 'string' ? r.result.postData : '';
+              if (b) markReqCredential(e, rq, b);
+            }).catch(() => {});
+          }
+        }
       }
       return;
     }
@@ -2991,12 +3287,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const status = Number(p.response && p.response.status) || 0;
       const type = String(p.type || (rq && rq.type) || '');
       if (type === 'Document' && (!p.frameId || String(p.frameId) === e.targetId)) an.lastDocStatus = status;
-      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method)) {
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.type !== 'Ping') {
         rq.status = status;
+        rq.type = type || rq.type;
         if (watchOrigin && rq.origin === watchOrigin) {
-          an.seq++; an.lastMutationStatus = status;
-          if (status >= 200 && status < 400) an.okMutationSeq = an.seq;
-          else if (status >= 400) { an.failMutationSeq = an.seq; wakeSubmitWaiters(e); }
+          an.lastMutationStatus = status;
+          if (type === 'Document' && status >= 200 && status < 400 && (rq.carriesCred || rq.carriesPending)) {
+            an.seq++;
+            if (rq.carriesCred) an.okCredSeq = an.seq;
+            if (rq.carriesPending) an.okPendingSeq = an.seq;
+          } else if (status >= 400 && (rq.carriesCred || rq.carriesPending)) {
+            an.seq++;
+            an.failCredSeq = an.seq;
+            wakeSubmitWaiters(e);
+          }
         }
       }
       return;
@@ -3004,36 +3308,56 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (method === 'Network.loadingFinished') {
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
-      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.status >= 200 && rq.status < 300) {
-        if (watchOrigin && rq.origin === watchOrigin) checkSpaFinish(w, e, { outcome: 'submitted' });
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.type !== 'Ping' && rq.type !== 'Document' && rq.status >= 200 && rq.status < 300 && watchOrigin && rq.origin === watchOrigin) {
+        (async () => {
+          if (rq.postDataP) await rq.postDataP;
+          if (!rq.carriesCred && !rq.carriesPending) return;
+          let errBody = false;
+          if (w.state === 'open' && e.sid) {
+            const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
+            if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
+              const rawBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
+              errBody = isJsonErrorBody(rawBody);
+            }
+          }
+          if (errBody) {
+            an.seq++;
+            an.failCredSeq = an.seq;
+            wakeSubmitWaiters(e);
+            return;
+          }
+          an.seq++;
+          if (rq.carriesCred) an.okCredSeq = an.seq;
+          if (rq.carriesPending) an.okPendingSeq = an.seq;
+          checkSpaFinish(w, e, { outcome: 'submitted' });
+        })();
       }
       return;
     }
     if (method === 'Network.loadingFailed') {
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
-      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && watchOrigin && rq.origin === watchOrigin) {
-        an.seq++; an.failMutationSeq = an.seq; wakeSubmitWaiters(e);
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.type !== 'Ping' && watchOrigin && rq.origin === watchOrigin && (rq.carriesCred || rq.carriesPending)) {
+        an.seq++; an.failCredSeq = an.seq; wakeSubmitWaiters(e);
       }
     }
   }
-  function onLoginFrameNavigated(w, e, navUrl, hopReason = null) {
+  function onLoginFrameNavigated(w, e, navUrl) {
     e.navSeq = (e.navSeq || 0) + 1;
     const navOrigin = e.liveFill || e.pendingLoginConfirm ? BL().originOf(navUrl) : null;
     if (e.liveFill && navOrigin) clearLiveFillOnTab(w, e, 'navigated', { audit: false });
     const pc = e.pendingLoginConfirm;
     if (pc && !pc.confirmed) {
       const an = e.authNet || null;
-      const mutOk = !!(an && an.okMutationSeq > pc.netMark && an.okMutationSeq >= (an.failMutationSeq || 0));
-      const mutFailed = !!(an && an.failMutationSeq > pc.netMark && an.failMutationSeq > (an.okMutationSeq || 0));
-      const docOk = !an || !an.lastDocStatus || an.lastDocStatus < 400;
       const sameUrl = stripHash(navUrl) === stripHash(pc.urlAtFill);
-      const actVerb = allowVerbInFlight(w.profileId);
-      const formSubNav = (hopReason === 'formSubmissionPost' || hopReason === 'formSubmissionGet')
-        && (pc.submitAsked || ['click', 'dblclick', 'press', 'keyboard'].includes(actVerb || ''));
-      const hasSubmissionEvidence = mutOk || ((pc.submitAsked || formSubNav) && !sameUrl);
-      if (hasSubmissionEvidence && navOrigin && docOk && !mutFailed) confirmPendingLogin(w, e, pc, 'navigated');
-      else if (!sameUrl || agentNavInFlight(w.profileId)) e.pendingLoginConfirm = null; // left the form without submitting: entry stays pending in the vault
+      if (agentNavInFlight(w.profileId)) {
+        e.pendingLoginConfirm = null;
+      } else {
+        const credOk = !!(an && an.okPendingSeq > pc.netMark && an.okPendingSeq >= (an.failCredSeq || 0));
+        const docOk = !an || !an.lastDocStatus || an.lastDocStatus < 400;
+        if (credOk && navOrigin && docOk && !sameUrl) confirmPendingLogin(w, e, pc, 'navigated');
+        else if (!sameUrl) e.pendingLoginConfirm = null; // left the form without a proven credential write: entry stays pending in the vault
+      }
     }
     wakeSubmitWaiters(e);
   }
@@ -3042,14 +3366,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const pc = e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed ? e.pendingLoginConfirm : null;
     const lf = e.liveFill || null;
     if (!pc && !lf) return;
-    const mark = pc ? pc.netMark : (lf ? lf.netMark || 0 : 0);
     const urlRef = pc ? pc.urlAtFill : (lf ? lf.urlAtFill : '');
-    if (an && an.okMutationSeq > mark && an.okMutationSeq >= (an.failMutationSeq || 0) && stripHash(navUrl) !== stripHash(urlRef)) {
+    const ready = (pc && an && an.okPendingSeq > pc.netMark && an.okPendingSeq >= (an.failCredSeq || 0))
+      || (lf && an && an.okCredSeq > (lf.netMark || 0) && an.okCredSeq >= (an.failCredSeq || 0));
+    if (ready && stripHash(navUrl) !== stripHash(urlRef)) {
       checkSpaFinish(w, e, { outcome: 'navigated' });
     }
   }
   function settleAfterSubmit(e, navSeq0, netMark, pc, hadLiveFill = false, budgetMs = 1500) {
-    const doneNow = () => (e.navSeq || 0) > navSeq0 || !!(pc && pc.confirmed) || (hadLiveFill && !e.liveFill) || !!(e.authNet && e.authNet.failMutationSeq > netMark);
+    const doneNow = () => (e.navSeq || 0) > navSeq0 || !!(pc && pc.confirmed) || (hadLiveFill && !e.liveFill) || !!(e.authNet && e.authNet.failCredSeq > netMark);
     if (doneNow()) return Promise.resolve();
     return new Promise((resolve) => {
       if (!e.submitWaiters) e.submitWaiters = new Set();
@@ -3065,7 +3390,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const onWake = () => { if (doneNow()) finish(); };
       e.submitWaiters.add(onWake);
       idle = setTimeout(() => {
-        const mutInFlight = e.authNet && [...e.authNet.reqs.values()].some((q) => ['POST', 'PUT', 'PATCH'].includes(q.method));
+        const mutInFlight = e.authNet && [...e.authNet.reqs.values()].some((q) => ['POST', 'PUT', 'PATCH'].includes(q.method) && q.type !== 'Ping');
         if (!e.navSince && !mutInFlight) finish();
       }, 160);
       if (idle.unref) idle.unref();
@@ -3095,10 +3420,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
     }
     forms.sort((a, b) => (a.at || 0) - (b.at || 0));
-    const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
+    const plan = logins.planFill({ forms, origin, activeTargetId: activeTabOfProfile(pid, browserKey) || null, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
     if (!plan.ok) return plan;
     const e = w.targets.get(String(plan.form.targetId || ''));
-    let r = null, kerr = null, kerrMsg = null, chromeStep = null, navSeq0 = 0, netMark = 0, pc = null, hadLiveFill = false;
+    let r = null, kerr = null, kerrMsg = null, chromeStep = null, navSeq0 = 0, netMark = 0, pc = null, hadLiveFill = false, hasSecret = false, sawChromeSub = false;
     if (!e || !e.sid) kerr = 'not_attached';
     else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
     else if (!loginSinks(w)) {
@@ -3106,20 +3431,33 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       navSeq0 = e.navSeq || 0;
       netMark = (e.authNet && e.authNet.seq) || 0;
       if (e.authNet) e.authNet.lastDocStatus = 0;
-      let hasSecret = false;
+      const credSigs = [], newPwSigs = [], secretFieldIds = [], userFieldIds = [];
       for (const f of (plan.form && plan.form.fields) || []) {
-        if (!f || f.type === 'username') continue;
+        if (!f) continue;
         const fid = f.fieldId || f.id;
+        if (f.type === 'username') {
+          if (fid && plan.values && typeof plan.values[fid] === 'string' && plan.values[fid]) userFieldIds.push(fid);
+          continue;
+        }
         const sv = fid && plan.values && typeof plan.values[fid] === 'string' ? plan.values[fid] : '';
-        if (sv) { recordScrubSecret(pid, plan.name, sv); hasSecret = true; }
+        if (sv) {
+          recordScrubSecret(pid, plan.name, sv);
+          hasSecret = true;
+          secretFieldIds.push(fid);
+          const sg = credSigOf(sv);
+          if (sg) {
+            credSigs.push(sg);
+            if (f.type === 'new-password') newPwSigs.push(sg);
+          }
+        }
       }
       if (hasSecret) {
         hadLiveFill = true;
         noteActiveTarget(pid, browserKey, e.targetId);
-        armLiveFillOnTab(w, e, { urlAtFill: String(e.url || ''), origin: plan.origin, loginId: plan.name, browserKey: parentKey(browserKey), mode: plan.mode, at: now(), navSeq0, netMark });
+        armLiveFillOnTab(w, e, { urlAtFill: String(e.url || ''), origin: plan.origin, loginId: plan.name, browserKey: parentKey(browserKey), mode: plan.mode, at: now(), navSeq0, netMark, credSigs, secretFieldIds, userFieldIds });
       }
       if (plan.mode === 'signup' || plan.mode === 'change') {
-        pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, submitAsked: !!submit, confirmed: false };
+        pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
         e.pendingLoginConfirm = pc;
       }
       const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), browserCall: (m, p) => call(w, m, p, null, 2000), oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn), targetId: e.targetId, trackedUrl: () => e.url, origin: plan.origin, loginId: plan.name, mode: plan.mode, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
@@ -3128,7 +3466,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         kerrMsg = cf && cf.error ? String(cf.error) : null;
         if (!cf || !cf.attemptedInsert) clearLiveFillOnTab(w, e, 'fill-aborted', { audit: false });
         if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
-      } else chromeStep = cf.step || plan.form.step || null;
+      } else {
+        chromeStep = cf.step || plan.form.step || null;
+        sawChromeSub = !!cf.submitted;
+      }
     } else {
       r = await call(w, 'VibeSpace.fillCredential', { surfaceId: plan.form.id, values: plan.values, expectedOrigin: plan.origin, submit: !!submit }, e.sid);
       kerr = !r || r.timeout ? 'timeout' : r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(stale_origin|invalid_values|no_such_surface|eval_failed)\b/) || [])[1] || 'eval_failed') : r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
@@ -3142,12 +3483,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return { ok: false, code: phish ? 'login_phishing' : 'login_failed', error: phish ? `the page is no longer ${plan.origin} (checked again before filling) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
     }
     if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
-    if (!w.kernel && submit) await settleAfterSubmit(e, navSeq0, netMark, pc, hadLiveFill, 1500);
-    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
+    if (!loginSinks(w) && submit) {
+      await settleAfterSubmit(e, navSeq0, netMark, pc, hadLiveFill, 1500);
+      await flushPendingAuthPostData(e);
+    }
+    const subObserved = loginSinks(w) || plan.form.surface
+      ? (!!submit || !!plan.form.surface)
+      : Boolean(submit && (hasSecret ? (e && e.authNet && (e.authNet.credSentSeq || 0) > netMark) : sawChromeSub));
+    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: subObserved, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}), ...(plan.usedPassword ? { usedPassword: plan.usedPassword } : {}) };
   }
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
   function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }
-  function loginFenceStats() { return { unparseableScrubFrames, fenceAuditLines: [...fenceAuditLines] }; }
+  function loginFenceStats() { return { unparseableScrubFrames, oversizeScrubFrames, fenceAuditLines: [...fenceAuditLines] }; }
 
   // the keeper's own lease seam: a browser that starts again or stops starts a fresh watch and a fresh verdict
   let unsubLease = null, unsubVaultOpen = null;
@@ -3185,7 +3532,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
-    fillLogin, loginForms, liveFillVerdictFor, liveFillOnTarget, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, // lane browser-login + vault-login-chrome r3/r4
+    fillLogin, loginForms, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, // lane browser-login + vault-login-chrome r3..r5
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
     shutdown: () => { for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } try { unsubVaultOpen?.(); } catch { /* */ } }, _watches: watches };
 }
