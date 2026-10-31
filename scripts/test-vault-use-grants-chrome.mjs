@@ -204,7 +204,9 @@ try {
   const r1 = await runP;
   check('`vibespace-vault run … curl http://HOST_ALWAYS/…` ⇒ ran by:always, the real curl reached the stub, no secret in its output', r1.code === 0 && r1.out.includes('VUG-STUB-REACHED') && !r1.out.includes(VALUE), r1.out);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^Home network/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the row\'s chip arrives: «Home network · HOST_ALWAYS · until …» (the 30-day «Always») (+ ✕)', new RegExp('^Home network · ' + rx(HOST_ALWAYS) + ' · (used \\d+×|until .+)✕$').test(String(chip)), chip);
+  // int367 (the .367 train): lane vault-standing-request r4 gave each scope its own end and the chip its source + time
+  // (src/lib/vault-use-row.js: name · host + its end · used N× · paused · who wrote it · when) — the pin follows the shipped chip
+  check('the row\'s chip arrives: «Home network · HOST_ALWAYS · 30 d · «Always» on a card · <time>» (the 30-day «Always») (+ ✕)', new RegExp('^Home network · ' + rx(HOST_ALWAYS) + ' · (\\d+ d|until .+)( · used \\d+×)? · «Always» on a card · \\d{1,2}:\\d{2}✕$').test(String(chip)), chip);
   // round 7 (MINOR): the ↻ un-pause is a LIVE control inside a greyed paused chip — the CSS dims only .vw-use-words, so the
   // ↻ renders at full opacity (a greyed control is the one the owner banned). Inject the real class structure and read the
   // COMPUTED opacity of each: the ↻ must be 1 while the words are 0.55 (the dimming is on a sibling, not an ancestor).
@@ -217,7 +219,7 @@ try {
   const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-s', `http://${HOST_THIRD}/collect`], TOKEN, { timeout: 70000 });
   let card = null;
   for (let i = 0; i < 60 && !card; i++) { card = (await cards())[0] || null; if (!card) await sleep(200); }
-  check('a run to HOST_THIRD files its card, naming the standing approval (HOST_ALWAYS) and what is outside it', !!card && new RegExp('A standing approval exists for this conversation \\(vg-[0-9a-f]{8}: ' + rx(HOST_ALWAYS) + '\\) — this run is outside it: ' + rx(HOST_THIRD) + '\\.').test(card.detail) && new RegExp('«Always» widens it to ' + rx(HOST_THIRD)).test(card.detail), card && card.detail);
+  check('a run to HOST_THIRD files its card, naming the standing approval (HOST_ALWAYS) and what is outside it', !!card && new RegExp('A standing approval exists for this conversation \\(vg-[0-9a-f]{8}: ' + rx(HOST_ALWAYS) + '\\) — this run is outside it: ' + rx(HOST_THIRD) + '\\.').test(card.detail) && new RegExp('«Always» = a standing approval: this conversation may use this secret for ' + rx(HOST_THIRD) + ' without asking').test(card.detail), card && card.detail); // int367: the card's «Always» line as lane vault-standing-request words it
   if (card) {
     await A.realClick('#taskbar-user-todos');
     await A.until(visible('#user-todos-popup .ut-item'), { timeout: 8000 });
