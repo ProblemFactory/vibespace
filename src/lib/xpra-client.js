@@ -166,7 +166,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   let mainWid = 0, focusedWid = 0, zTop = 0;
   // lane desktop-x-seat-browser r3 (acceptance r2 MAJOR 3): the INPUT seat's reach, as the bridge last said it (null = no input
   // seat) — focus never leaves it (a window that appears is not focused, a press on another's window does not move it); and a
-  // key's / a button's release goes to the window that got its press (a release never strays — never a key left down in X)
+  // button's release goes to the window that got its press (a release never strays — never a button left down in X)
+  // r4 (acceptance r3 MAJOR 1): his reach is drawn ABOVE every other window in the pane (`win.reach`; windowAt follows the drawing)
+  // — an agent's window announced after his (xpra announces oldest first: every reconnect) never covers it; the seat word and his
+  // press on a window of his RAISE it (z to the top + the focus packet to HIS wid), focused already or not
   let seatWids = null;
   const mayFocus = (wid) => !seatWids || seatWids.has(wid);
   const keyWid = new Map(), buttonWid = new Map();
@@ -389,6 +392,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
     const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
     windows.set(wid, win);
+    if (seatWids) win.reach = seatWids.has(wid); // r4: his reach drawn above the others' (the bridge's word came before the window)
     if (!isMain && kind === 'main' && !watch && slotsOn() && !noSlot.has(wid)) { slotOrder.push(wid); layoutSlots(); } // S2: a second top-level gets its slot
     // LANE D (a) F3 — THE MAIN IS NAMED BEFORE IT IS FITTED: `on.main` carries its metadata (a CSD app's
     // `decorations: 0` folds the window's bars — the pane GROWS) and the view answers with resize() INSIDE that call,
@@ -451,9 +455,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     emit('window', 'raise', win);
     announceFront();
   };
-  /** The topmost window under a pane point (popups above dialogs above main), or null. */
+  /** The topmost window under a pane point (popups above dialogs above main; r4: in his input seat his reach above all), or null. */
   const windowAt = (x, y) => {
-    const rank = (w) => (w.kind === 'popup' ? 2e9 : w.kind === 'dialog' ? 1e9 : 0) + w.z;
+    const rank = (w) => (w.reach ? 3e9 : 0) + (w.kind === 'popup' ? 2e9 : w.kind === 'dialog' ? 1e9 : 0) + w.z;
     return [...windows.values()].filter((w) => x >= w.x && y >= w.y && x < w.x + w.w && y < w.y + w.h).sort((a, b) => rank(b) - rank(a))[0] || null;
   };
 
@@ -563,8 +567,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       case 'clipboard-request': { const reqId = p[1], selection = P.bytesToString(p[2]); send(lastPaste != null ? P.clipboardContents(reqId, selection, lastPaste) : P.clipboardNone(reqId, selection)); return; }
       case 'vibespace-seat': { // lane desktop-x-seat-browser r2: the BRIDGE's word to this socket (never xpra's)
         const v = p[1] && typeof p[1] === 'object' ? p[1] : {}, seat = P.bytesToString(v.seat || ''), wids = Array.isArray(v.wids) ? v.wids.map(Number) : [];
+        const was = seatWids;
         seatWids = seat === 'input' ? new Set(wids) : null; // r3: focus stays in his reach — the key he types goes to his window
-        if (seatWids && !seatWids.has(focusedWid)) { const w = wids.find((x) => windows.has(x)); if (w) focusedWid = w; } // no packet: xpra focuses it at his first key
+        for (const w of windows.values()) { const r = !!seatWids && seatWids.has(w.wid); if (!!w.reach !== r) { w.reach = r; emit('window', 'raise', w); } } // r4: drawn above the others' (the view re-stacks)
+        if (seatWids && (!was || !seatWids.has(focusedWid))) { const home = seatWids.has(focusedWid) ? focusedWid : wids.find((x) => windows.has(x) && windows.get(x).kind !== 'popup'); if (home) focusWindow(home); } // r4: his seat begins (or focus left his reach) — HIS window raised, xpra told (z + the focus packet)
         emit('seat', { seat, why: P.bytesToString(v.why || ''), code: P.bytesToString(v.code || ''), refused: Number(v.refused) || 0, acts: Number(v.acts) || 0, wids });
         return;
       }
@@ -699,8 +705,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   }
   /** A key's packet, or — while a text batch waits — its place in the line behind it. */
   const keyOut = (k, pressed) => { if (held) held.push(() => send(keyAt(k, pressed))); else send(keyAt(k, pressed)); };
-  /** r3: a press goes to the focused window; its release to the window that got the press (focus may have moved meanwhile). */
-  const keyAt = (k, pressed) => { let wid = focusedWid; if (pressed) keyWid.set(k.keyname, wid); else if (keyWid.has(k.keyname)) { wid = keyWid.get(k.keyname); keyWid.delete(k.keyname); } return P.keyAction(wid, k, pressed); };
+  /** A key goes to the focused window — its release too: xpra 6.5.4 focuses AND RAISES the window a key-action names unless it has
+   *  the focus already, so a release at the focused window raises nothing (r4, acceptance r3 MINOR: r3's release at the press's
+   *  window raised the main window over the dialog that had just opened). Only in his input seat, with no window of his focused
+   *  (his dialog gone before the bridge's word), the release goes to the window that got the press — never a key left down. */
+  const keyAt = (k, pressed) => {
+    let wid = focusedWid;
+    if (pressed) { if (seatWids) keyWid.set(k.keyname, wid); else keyWid.delete(k.keyname); }
+    else if (keyWid.has(k.keyname)) { const at = keyWid.get(k.keyname); keyWid.delete(k.keyname); if (seatWids && !seatWids.has(wid)) wid = at; }
+    return P.keyAction(wid, k, pressed);
+  };
   const pointerMove = (x, y, mods = {}) => {
     if (viewOnly) return;
     const win = windowAt(x, y);
@@ -709,7 +723,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   const pointerButton = (x, y, domButton, pressed, mods = {}) => {
     if (viewOnly) return;
     const win = windowAt(x, y), b = P.xButton(domButton);
-    if (pressed && win && win.wid !== focusedWid && win.kind !== 'popup') focusWindow(win.wid);
+    if (pressed && win && win.kind !== 'popup' && (win.wid !== focusedWid || win.reach)) focusWindow(win.wid); // r4: his press raises his window, focused already or not
     let at = win; // r3: the release goes to the window that got the press, wherever the pointer is now (X's implicit grab)
     if (pressed) buttonWid.set(b, win ? win.wid : 0); else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }
     send(P.buttonAction(at ? at.wid : 0, b, pressed, P.pointerCoords(x, y, at), P.modifiersOf(mods)));

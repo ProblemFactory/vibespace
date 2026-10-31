@@ -13,6 +13,11 @@
 // no class, no name, MEASURED — never reached him; MAJOR 2: an agent's file chooser cascaded over his window was admitted by its
 // centre); every refusal is told (quietly when it is no act of his); focus never leaves his reach and a key / button is released
 // where it was pressed (MAJOR 3); a pane's place survives its reconnect, a drag's release always lands, his moved window is his.
+// r4 (主开发's acceptance r3 on 91487da3c): his reach is drawn above every other window and his press / the seat word RAISE his
+// window (MAJOR 1: an agent's window announced after his covered it for good); the bridge reads his window AGAIN when it may have
+// been replaced — a new top-level, his window lost, his press on another (MAJOR 2: a Chrome relaunch left all his input refused);
+// a key's release goes to the focused window (xpra raises the window a key names), his pointer resting on his window opens his
+// tooltip, a popup that does not touch the window he acted on is not his.
 // In-process here, no browser, no display:
 //   §1 PURE: deskSeat / deskSeatWhy / deskDoorAct / deskDoorOf (src/browser-picture.js); xScopeOf over the REAL row path (an
 //      xwininfo tree → parseWininfoTree → seamlessWindows → the keeper's appWindowRow → xWindowOf); the bridge's readers —
@@ -57,7 +62,10 @@ const PERSON = 'wl-' + HEX(32), PERSON2 = 'wl-' + HEX(32, 3), OTHER = 'wl-' + HE
 // 10 px — heavy ⑥'s own geometry), the agent's file chooser (transient-for the agent's window, its centre inside his rect), his own
 // file chooser, the <select> popup his click opens, a submenu of it, an agent's popup over his window
 const HIS = 0x400003, AGENTS = 0x40000b, DLG = 0x600006, MYDLG = 0x600009, MENU = 0x400010, SUB = 0x400011, APOP = 0x400012, LATER = 0x40000d;
-const GEOM = { [HIS]: [100, 50, 400, 300], [AGENTS]: [90, 40, 400, 300], [DLG]: [200, 150, 200, 150], [MYDLG]: [220, 160, 200, 150], [MENU]: [150, 100, 120, 80], [SUB]: [270, 100, 100, 60], [APOP]: [120, 70, 100, 80] };
+// r4: his tooltip (near his resting pointer), one far from it, a popup that does not touch his window; his window REPLACED (a
+// Chrome relaunch: a new X window at his place), then his tab in yet another; an agent's window announced after the seat word
+const TIP = 0x400013, TIPFAR = 0x400014, FAR = 0x400015, NEWHIS = 0x400030, NEWHIS2 = 0x400031, AG2 = 0x40000f;
+const GEOM = { [HIS]: [100, 50, 400, 300], [AGENTS]: [90, 40, 400, 300], [DLG]: [200, 150, 200, 150], [MYDLG]: [220, 160, 200, 150], [MENU]: [150, 100, 120, 80], [SUB]: [270, 100, 100, 60], [APOP]: [120, 70, 100, 80], [TIP]: [300, 222, 120, 24], [TIPFAR]: [380, 300, 100, 24], [FAR]: [720, 500, 100, 80], [NEWHIS]: [100, 50, 400, 300], [NEWHIS2]: [100, 50, 400, 300] };
 const PROFILE_DIR = '/p/bp-x1';
 /** xwininfo -root -tree of that display, topmost first (the shapes MEASURED 2026-10-31 on Chrome 154 + xpra 6.5.4: a managed window
  *  inside its Xpra-CorralWindow; a <select> popup a nameless, classless top-level — `(has no name): ()`). `extra` = rows on top. */
@@ -80,6 +88,8 @@ ${extra}     0x200010 "Xpra-CorralWindow-0x400003": ()  400x300+100+50  +100+50
      0x200004 (has no name): ()  1x1+0+0  +0+0
 `;
 const MENU_ROW = '     0x400010 (has no name): ()  120x80+150+100  +150+100\n';
+/** r4: the same display with HIS window replaced by `wid` (a relaunched Chrome's window at his place), or gone (`wid` null). */
+const TREE_AS = (wid) => (wid ? TREE().replaceAll('0x400003', '0x' + wid.toString(16)) : TREE().replace(/ {5}0x200010 "Xpra-CorralWindow-0x400003".*\n.*\n.*\n/, ''));
 /** HIS window's announcement as xpra sends it to a client (the shape src/lib/xpra-client.js reads: [type, wid, x, y, w, h, metadata,
  *  client properties]) — 499 bytes, over xpra's MIN_COMPRESS_SIZE 378, so xpra sends it lz4-compressed: LZ4_HIS is xpra's OWN
  *  compressor's output (python3 -c "from xpra.net.lz4.lz4 import compress; …", xpra 6.5.4, acceleration 4) of exactly these bytes. */
@@ -138,7 +148,7 @@ function load(root) {
 const rowsOf = (DD, text) => DD.seamlessWindows(DD.parseWininfoTree(text)).map(typeof DD.appWindowRow === 'function' ? DD.appWindowRow : (w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth, ...(w.frame ? { frame: w.frame } : {}) }));
 /** The keeper's xScopeFor over those rows (browser-keeper.js: xWindowFor — his CDP bounds matched — then PIC.xScopeOf); only the
  *  CDP read and the row read are this fake's. */
-const keeperScope = (PIC, rows) => { const xw = PIC.xWindowOf({ bounds: { left: 100, top: 50, width: 400, height: 300 }, rows, profileDir: PROFILE_DIR }); return xw.wid == null ? { wid: null, why: xw.why, wids: [], rects: [], known: [] } : { wid: xw.wid, why: xw.why, ...PIC.xScopeOf(xw.wid, rows, { profileDir: PROFILE_DIR }) }; };
+const keeperScope = (PIC, rows) => { const xw = PIC.xWindowOf({ bounds: { left: 100, top: 50, width: 400, height: 300 }, rows, profileDir: PROFILE_DIR }); const wid = typeof PIC.xSeatRootOf === 'function' ? PIC.xSeatRootOf(xw) : xw.wid; return wid == null ? { wid: null, why: xw.why, wids: [], rects: [], known: [] } : { wid, why: xw.why, ...PIC.xScopeOf(wid, rows, { profileDir: PROFILE_DIR }) }; }; // r4: the root only when his bounds TELL it
 
 /** §1 — PURE deskSeat over its table; → { ok, rows } */
 function pureTable(PIC) {
@@ -166,6 +176,8 @@ async function scene(root, tag, need = null) {
   const ups = [];
   const NEW = (wid, meta = {}, type = 'new-window') => enc([type, wid, ...GEOM[wid], meta, {}]);
   const OR = (wid) => NEW(wid, { 'override-redirect': true, 'window-type': ['MENU'] }, 'new-override-redirect'); // MEASURED: a <select> popup = override-redirect, type MENU, nothing else
+  const TIPOR = (wid) => NEW(wid, { 'override-redirect': true, 'window-type': ['TOOLTIP'] }, 'new-override-redirect'); // r4: a tooltip (Chrome's: override-redirect)
+  const HISMETA = { title: 'his page - Google Chrome', 'class-instance': ['google-chrome (/p/bp-x1)', 'Google-chrome'], 'window-type': ['NORMAL'] };
   const lz4His = () => { const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h[2] = 0x11; h.writeUInt32BE(LZ4_HIS.length, 4); return Buffer.concat([h, LZ4_HIS]); }; // level byte 0x10 | 1: lz4
   const up = new WebSocketServer({ port: upPort, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r));
   up.on('connection', (ws) => {
@@ -271,6 +283,11 @@ async function scene(root, tag, need = null) {
     await ann(P, NEW(MYDLG, { title: 'Open File', 'transient-for': HIS, modal: true, 'window-type': ['DIALOG'] }));
     const g3 = await after(P, CLICK(MYDLG, 300, 230), RELEASE(MYDLG, 300, 230), KEY(MYDLG), KEY(MYDLG, false));
     out.transientMine = clicks(g3, MYDLG) === 2 && typed(g3, MYDLG);
+    // r4 MINOR: a key pressed on his window, released while his dialog has the focus — the release goes AS SENT (the focused window:
+    // xpra raises nothing for it), never re-addressed to the press's window (xpra would raise his window over his dialog)
+    const g3b = (await after(P, KEY(HIS), KEY(MYDLG, false))).filter((x) => x.type === 'key-action');
+    out.releaseInReach = g3b.length === 2 && g3b[1].wid === MYDLG && g3b[1].pressed === false;
+    out.releaseInReachGot = g3b;
     out.toldTransient = !!(P.last() && P.last().wids.includes(MYDLG) && P.last().wids.includes(MENU));
     // …it closes (xpra's lost-window): it leaves his reach (his popup stays open — its submenu comes below)
     await ann(P, enc(['lost-window', MYDLG]));
@@ -316,12 +333,54 @@ async function scene(root, tag, need = null) {
     out.agentPopupCut = (await after(P, CLICK(APOP, 150, 100))).length === 0;
     // …a SUBMENU: his pointer resting in his popup (no press for a while — the act that opens it), then xpra announces a popup
     // touching it — his
-    await after(P, POINT(MENU, 260, 120));
+    await after(P, POINT(MENU, 160, 170)); // in his popup, far from where its submenu opens (r4: beyond his hover's reach — the popup rule alone)
     await ann(P, OR(SUB));
     out.submenuMine = clicks(await after(P, CLICK(SUB, 300, 120), RELEASE(SUB, 300, 120)), SUB) === 2;
     tree = TREE();
     await ann(P, enc(['lost-window', MENU]), enc(['lost-window', SUB]), enc(['lost-window', APOP]));
     out.toldClosed = !!(P.last() && JSON.stringify(P.last().wids) === JSON.stringify([HIS]));
+    const OPEN_MS = L.XR.XPRA_POPUP_OPEN_MS || 1500, ASK_MS = L.XR.XPRA_SCOPE_ASK_MS || 1000;
+    // ── r4 MINOR: his pointer RESTING on his window (no press for a while) — the tooltip that opens under it is his ──
+    clock.skew += OPEN_MS + 150;
+    await after(P, POINT(HIS, 300, 200));
+    await ann(P, TIPOR(TIP));
+    out.hoverTipMine = clicks(await after(P, POINT(TIP, 310, 230), CLICK(TIP, 310, 230), RELEASE(TIP, 310, 230)), TIP) === 2;
+    // …bounded: a popup over his window far from his resting pointer is not his
+    clock.skew += OPEN_MS + 150;
+    await after(P, POINT(HIS, 120, 60));
+    await ann(P, TIPOR(TIPFAR));
+    out.hoverFarCut = (await after(P, CLICK(TIPFAR, 400, 310))).length === 0;
+    // ── r4 MINOR (the rule's other half): a popup opening right after his press but NOT touching his window — not his ──
+    clock.skew += OPEN_MS + 150;
+    await after(P, CLICK(HIS, 150, 80), RELEASE(HIS, 150, 80));
+    await ann(P, OR(FAR));
+    out.farPopupCut = (await after(P, CLICK(FAR, 730, 510))).length === 0;
+    await ann(P, enc(['lost-window', TIP]), enc(['lost-window', TIPFAR]), enc(['lost-window', FAR]));
+    // ── r4 MAJOR 2: his window REPLACED while his browsing goes on (a Chrome relaunch, a crash restored): it closes — ONE read, his
+    // reach is empty, told; the new one is announced — ONE read, it is his, told before he acts; his input lands in it ──
+    const wordIs = (want) => until(() => (P.last() && JSON.stringify(P.last().wids) === JSON.stringify(want) ? P.last() : null), 800);
+    clock.skew += ASK_MS + 100;
+    tree = TREE_AS(null);
+    await ann(P, enc(['lost-window', HIS]));
+    out.rereadOnLost = !!(await wordIs([]));
+    clock.skew += ASK_MS + 100;
+    tree = TREE_AS(NEWHIS);
+    await ann(P, NEW(NEWHIS, HISMETA));
+    out.rereadOnNew = !!(await wordIs([NEWHIS])) && clicks(await after(P, CLICK(NEWHIS, 150, 80), RELEASE(NEWHIS, 150, 80)), NEWHIS) === 2;
+    // …his tab moved into another window the display already showed (no announcement of his): his press there is refused, the
+    // bridge reads again (≤ 1 per second), and his next press lands
+    clock.skew += ASK_MS + 100;
+    await ann(P, NEW(NEWHIS2, HISMETA)); // read at once: not his yet (his tab is still in NEWHIS)
+    await until(() => false, 50);
+    tree = TREE_AS(NEWHIS2);
+    clock.skew += ASK_MS + 100;
+    const p1 = await after(P, CLICK(NEWHIS2, 150, 80), RELEASE(NEWHIS2, 150, 80));
+    out.rereadOnPress = clicks(p1, NEWHIS2) === 0 && !!(await wordIs([NEWHIS2])) && clicks(await after(P, CLICK(NEWHIS2, 150, 80), RELEASE(NEWHIS2, 150, 80)), NEWHIS2) === 2;
+    // his window back where the scene began (xpra announces it; his reach follows)
+    clock.skew += ASK_MS + 100;
+    tree = TREE();
+    await ann(P, enc(['lost-window', NEWHIS]), enc(['lost-window', NEWHIS2]), lz4His());
+    out.rereadBack = !!(await wordIs([HIS]));
     // ── MAJOR 3 (the bridge's half): a key he holds when his seat moves is RELEASED in X, at the window that got it ──
     await after(P, KEY(HIS));
     const kk = P.up.pk.length;
@@ -394,9 +453,17 @@ async function clientFacts(root, bust = '') {
   // his window, then an agent's — announced BEFORE the seat word (the client focused the last one: no reach known yet)
   w.feed(['new-window', HIS, 100, 50, 400, 300, { title: 'his' }, {}]);
   w.feed(['new-window', AGENTS, 90, 40, 400, 300, { title: 'agent' }, {}]);
+  const nw = w.all.length;
   w.feed(['vibespace-seat', { seat: 'input', why: '', code: 'not-your-window', refused: 2, acts: 1, wids: [HIS] }]);
   await sleep(0);
-  const n0 = w.all.length;
+  // r4 MAJOR 1: the seat word RAISES his window — xpra told (the focus packet), drawn above the agent's announced after his
+  const wHis = c.windows.get(HIS), wAg = c.windows.get(AGENTS), at0 = c.windowAt(150, 100);
+  const seatRaise = { focus: w.all.slice(nw).some((p) => p[0] === 'focus' && p[1] === HIS), above: !!wHis && !!wAg && wHis.z > wAg.z, at: at0 ? at0.wid : 0 };
+  // …his press in the OVERLAP (focused already) raises it again, xpra told, the click his
+  let n0 = w.all.length;
+  c.pointerButton(150, 100, 0, true, {}); c.pointerButton(150, 100, 0, false, {});
+  const pressRaise = w.all.slice(n0).map((p) => (p[0] === 'focus' ? ['focus', p[1]] : p[0] === 'button-action' ? ['button', p[1], p[3]] : [p[0]]));
+  n0 = w.all.length;
   c.keyDown(A); // his first key: HIS window (the seat word brought focus home)
   w.feed(['new-window', LATER, 600, 40, 400, 300, { title: 'another agent' }, {}]); // MAJOR 3: another conversation's window appears mid-typing
   c.keyUp(A); c.keyDown(B); c.keyUp(B);
@@ -404,10 +471,15 @@ async function clientFacts(root, bust = '') {
   // his own file chooser joins his reach (focused when it appears); a key held while focus moves is released where it was pressed
   w.feed(['vibespace-seat', { seat: 'input', why: '', code: '', refused: 2, acts: 1, wids: [HIS, MYDLG] }]);
   w.feed(['new-window', MYDLG, 220, 160, 200, 150, { title: 'Open File', 'transient-for': HIS }, {}]);
-  c.pointerButton(495, 200, 0, true, {}); c.pointerButton(495, 200, 0, false, {}); // back to HIS (a point of his the agent's window does not cover)
+  w.feed(['new-window', AG2, 110, 60, 400, 300, { title: 'agent 2' }, {}]); // r4: another agent window, announced AFTER the seat word, over his
+  const at2 = c.windowAt(150, 100), reach = { his: !!(c.windows.get(HIS) || {}).reach, ag2: !!(c.windows.get(AG2) || {}).reach, at: at2 ? at2.wid : 0 };
+  c.pointerButton(150, 100, 0, true, {}); c.pointerButton(150, 100, 0, false, {}); // back to HIS — a point the agents' windows cover too
   c.keyDown(K);
   c.pointerButton(300, 230, 0, true, {}); c.pointerButton(300, 230, 0, false, {}); // focus → his dialog
   c.keyUp(K);
+  // r4: his dialog gone before the bridge's word (no window of his focused): a key held there is released at the window of its press
+  const L2 = { key: 'l', code: 'KeyL', keyCode: 76, mods: {} };
+  c.keyDown(L2); w.feed(['lost-window', MYDLG]); c.keyUp(L2);
   // a drag from his window that ends over the agent's: the release goes to his window (X's implicit grab)
   c.pointerButton(495, 200, 0, true, {}); c.pointerButton(95, 45, 0, false, {});
   // xpra moved his window: the client says where it draws it now (the server's own geometry — nothing sized)
@@ -416,8 +488,25 @@ async function clientFacts(root, bust = '') {
   const all = w.all.slice(n0), keys = (from, to) => w.all.slice(from, to).filter((p) => p[0] === 'key-action').map((p) => [p[1], p[2], p[3]]);
   const btn = all.filter((p) => p[0] === 'button-action').map((p) => [p[1], p[3]]);
   const maps = w.all.filter((p) => p[0] === 'map-window').map((p) => p.slice(1, 6));
+  // r4 MINOR: OUTSIDE the input seat (an app's own desktop window: active) a key's release goes to the focused window — the app's
+  // dialog that opened while Ctrl was down — never back to the main window (xpra would raise the main over the dialog)
+  const active = C.createXpraClient({ url: 'ws://x', workerUrl: 'w.js', screen: { width: 800, height: 600 }, Worker: FakeWorker });
+  active.connect();
+  const wa = await until(() => FakeWorker.last && FakeWorker.last !== w && FakeWorker.last.all.length ? FakeWorker.last : null, 2000);
+  let activeKeys = null;
+  if (wa) {
+    wa.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    wa.feed(['new-window', 100, 0, 0, 800, 600, { title: 'app' }, {}]);
+    const ctrl = { key: 'Control', code: 'ControlLeft', keyCode: 17, mods: { ctrl: true } }, o = { key: 'o', code: 'KeyO', keyCode: 79, mods: { ctrl: true } };
+    const k0 = wa.all.length;
+    active.keyDown(ctrl); active.keyDown(o); active.keyUp(o);
+    wa.feed(['new-window', 101, 200, 150, 300, 200, { title: 'Open', 'transient-for': 100 }, {}]);
+    active.keyUp(ctrl);
+    activeKeys = wa.all.slice(k0).filter((p) => p[0] === 'key-action').map((p) => [p[1], p[3]]);
+  }
+  try { active.close?.(); } catch { }
   try { c.close?.(); } catch { }
-  return { seen, sent: all.map((p) => p[0]), keys: keys(n0, n1), keysC: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'c').map((p) => [p[1], p[3]]), focusLater: all.some((p) => p[0] === 'focus' && p[1] === LATER), btn, maps };
+  return { seen, sent: all.map((p) => p[0]), keys: keys(n0, n1), keysC: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'c').map((p) => [p[1], p[3]]), keysL: w.all.slice(n1).filter((p) => p[0] === 'key-action' && p[2] === 'l').map((p) => [p[1], p[3]]), focusLater: all.some((p) => p[0] === 'focus' && p[1] === LATER), btn, maps, seatRaise, pressRaise, reach, activeKeys };
 }
 /** §4 — sameInput over a fake satellite (a pane, its stage + canvas, its IME) and a main picture shell; → facts */
 async function satelliteFacts(root) {
@@ -451,6 +540,7 @@ function doorFacts(root) {
     liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: st\.fact && st\.fact\.stuck, human: !!H \}\)/.test(live),
     liveDoorRejudged: /const renderMode = \(\) => \{\n    renderDeskDoor\(\);/.test(live) && /scheduleReport\(\); renderDeskDoor\(\);/.test(live) && /renderOwner\(\); renderDeskDoor\(\);/.test(live) && /const renderDialog = \(\) => \{\n    renderDeskDoor\(\);/.test(live),
     themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
+    reachDrawn: /w\.el\.style\.zIndex = String\(\(win\.reach \? Z_REACH : 0\) \+ \(Z_BASE\[win\.kind\] \|\| Z_BASE\.main\) \+ Math\.min\(win\.z, 99999\)\);/.test(view) && /const Z_REACH = (\d+);/.test(view) && Number(/const Z_REACH = (\d+);/.exec(view)[1]) >= 300000 + 99999,
     toastOnActs: /const more = \(Number\(v\.acts\) \|\| 0\) > bseat\.acts;/.test(dw) && /if \(more && bseat\.seat === 'input'\) \{/.test(dw),
     dw, live,
   };
@@ -470,6 +560,7 @@ const W0 = load(REPO);
   const sc = keeperScope(PIC, rows);
   ok(sc.wid === HIS && JSON.stringify(sc.wids) === JSON.stringify([HIS]) && sc.rects.length === 1 && sc.rects[0].x === 100, "xScopeOf over the real path: HIS window (his CDP bounds told) and only it — never the agent's file chooser cascaded over it (its centre inside his rect: r2's dialogsOver took it)", sc);
   ok(keeperScope(PIC, rows.filter((r) => r.id !== HIS && r.id !== AGENTS)).wids.length === 0 && PIC.xScopeOf(null, rows).wids.length === 0, 'xScopeOf: his window not on the display (or untold) ⇒ it reaches nothing');
+  { const left = rows.filter((r) => r.id !== HIS), xw = PIC.xWindowOf({ bounds: { left: 100, top: 50, width: 400, height: 300 }, rows: left, profileDir: PROFILE_DIR }); ok(typeof PIC.xSeatRootOf === 'function' && xw.why === 'only-window' && keeperScope(PIC, left).wids.length === 0 && PIC.xSeatRootOf({ wid: HIS, why: 'bounds' }) === HIS, "r4 MAJOR 2 — his window closed, an agent's window left in his browser (xWindowOf: 'only-window'): his seat reaches NOTHING — its root only where his CDP bounds tell it (xSeatRootOf), never handed the agent's window", { why: xw.why, scope: keeperScope(PIC, left) }); }
   const act = typeof PIC.deskDoorAct === 'function' ? PIC.deskDoorAct : () => ({ act: 'missing' });
   ok(act({ profile: null }).act === null && act({ profile: null }).code === 'not_attachable' && act({ profile: { id: 'bp-1', ephemeral: true } }).act === null && act({ profile: { id: 'bp-1' } }).act === 'browse' && act({ profile: { id: 'bp-1' }, human: true }).act === 'open', "deskDoorAct: browse-yourself's road (browse / open his window) — none on a conversation's temporary browser (not_attachable, said)");
 }
@@ -525,6 +616,7 @@ ok(S.toldInput === true, `he is told his INPUT seat and the windows it reaches: 
 ok(S.personTypes === true, 'his key, his click on HIS window, his paste reach xpra — ONE PERSON, ONE SEAT');
 ok(S.menuMine === true && S.toldMenu === true, "r3 MAJOR 1 — the <select> popup HIS click opened (xpra's new-override-redirect right after his act; the tree's nameless row seamlessWindows drops) is his: his pointer and click on it reach xpra, he is told it");
 ok(S.transientMine === true && S.toldTransient === true, "r3 — HIS file chooser (xpra's transient-for = his window) takes his clicks and keys, told");
+ok(S.releaseInReach === true, "r4 MINOR — a key pressed on his window and released while his dialog has the focus: the release goes as sent (the focused window — xpra raises nothing for it), never re-addressed to his window over his dialog", S.releaseInReachGot);
 ok(S.toldLost === true, "…it closes (xpra's lost-window): it leaves his reach, told");
 ok(S.cascadeDialogCut === true && S.toldCascade === true, "r3 MAJOR 2 — WINDOW IDENTITY FIRST: the AGENT's file chooser cascaded over his window (transient-for the agent's; its centre inside his rect) takes nothing of his — cut, told 'not-your-window' (an act: the toast)");
 ok(S.otherWidCut === true && S.toldNotYours === true, "MAJOR A — a key, a click addressed to an AGENT's window are cut, told 'not-your-window'");
@@ -537,6 +629,13 @@ ok(S.releaseOutside === true && S.releaseReaddressed === true, "r3 MINOR — a d
 ok(S.movedStillMine === true, "r3 MINOR — his window moved (xpra's window-move-resize): his first press at its new place reaches xpra — no stale rect, no read after a miss");
 ok(S.agentPopupCut === true, "r3 MAJOR 2 — an agent's popup over his window, opened with no act of his: never his (a window is not his because it lies inside his rect)");
 ok(S.submenuMine === true && S.toldClosed === true, "r3 MAJOR 1 — a submenu (a popup opening as his pointer rests in his popup, touching it — no press for a while) is his too; his popups closed, his reach is his window again");
+ok(S.hoverTipMine === true, "r4 MINOR — his pointer RESTING on his window (no press for a while): the tooltip that opens under it is his — his pointer and click on it reach xpra");
+ok(S.hoverFarCut === true, "r4 MINOR — bounded: a popup over his window far from his resting pointer (> XPRA_HOVER_REACH_PX) is not his — cut");
+ok(S.farPopupCut === true, "r4 MINOR — a popup opening right after his press but NOT touching the window he pressed: not his — cut (the rule's «touches» half)");
+ok(S.rereadOnLost === true, "r4 MAJOR 2 — his window closes (xpra's lost-window) while his browsing goes on: the bridge reads his window again — his reach is empty, told");
+ok(S.rereadOnNew === true, "r4 MAJOR 2 — a new top-level announced (his Chrome relaunched at his place): ONE read, it is his, told before he acts — his click lands in it");
+ok(S.rereadOnPress === true, "r4 MAJOR 2 — his tab in another window the display already showed: his press there is refused, the bridge reads again, his next press lands");
+ok(S.rereadBack === true, "r4 — his window announced again: his reach follows it");
 ok(S.noStuckKey === true, 'r3 MAJOR 3 — a key he holds when his seat moves to another pane is RELEASED in X at the window that got it — never left down');
 ok(S.agentCut === true, 'an AGENT\'s token on the same display never types (its verbs are its own)');
 ok(S.ticketCut === true, 'a ticket-shaped id never falls to the person rule (the live-view relay\'s ticket verdict is the only one for it)');
@@ -557,8 +656,13 @@ ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.stat
   const c = await clientFacts(REPO);
   ok(!c.error && c.seen.length >= 1 && c.seen[0].seat === 'input' && c.seen[0].code === 'not-your-window' && c.seen[0].refused === 2 && c.seen[0].acts === 1 && JSON.stringify(c.seen[0].wids) === JSON.stringify([HIS]), "the client hands the bridge's word to the view (on.seat): seat, code, counts (every refusal, the acts), windows", c.seen);
   ok(!c.error && JSON.stringify(c.keys) === JSON.stringify([[HIS, 'a', true], [HIS, 'a', false], [HIS, 'b', true], [HIS, 'b', false]]) && !c.focusLater, "r3 MAJOR 3 — focus stays in his reach: the seat word brings it home (another's window announced last), a window that appears mid-typing takes nothing — his keys land in his window", c.keys);
-  ok(!c.error && JSON.stringify(c.keysC) === JSON.stringify([[HIS, true], [HIS, false]]), "r3 MAJOR 3 — a key held while focus moves (to his own dialog) is released at the window that got its press", c.keysC);
-  ok(!c.error && JSON.stringify(c.btn.slice(-2)) === JSON.stringify([[HIS, true], [HIS, false]]), "r3 MINOR — a drag from his window that ends over the agent's: the client addresses the release to his window (X's implicit grab)", c.btn);
+  ok(!c.error && c.seatRaise && c.seatRaise.focus === true && c.seatRaise.above === true && c.seatRaise.at === HIS, "r4 MAJOR 1 — the seat word RAISES his window: the focus packet to HIS, his window above the agent's announced after it, a point they share is his", c.seatRaise);
+  ok(!c.error && JSON.stringify(c.pressRaise) === JSON.stringify([['focus', HIS], ['button', HIS, true], ['button', HIS, false]]), "r4 MAJOR 1 — his press in the overlap, his window focused already: raised again (the focus packet to HIS — xpra raises it in X), the click his", c.pressRaise);
+  ok(!c.error && c.reach && c.reach.his === true && c.reach.ag2 === false && c.reach.at === HIS && JSON.stringify(c.btn.slice(0, 2)) === JSON.stringify([[HIS, true], [HIS, false]]), "r4 MAJOR 1 — an agent's window announced AFTER the seat word, over his: his reach stays above it (drawn and addressed) — his click in the overlap is his", { reach: c.reach, btn: c.btn });
+  ok(!c.error && JSON.stringify(c.keysC) === JSON.stringify([[HIS, true], [MYDLG, false]]), "r4 MINOR — a key held while focus moves to his own dialog is released at the FOCUSED window (xpra raises nothing — r3's release at the press's window raised his window over his dialog)", c.keysC);
+  ok(!c.error && JSON.stringify(c.keysL) === JSON.stringify([[MYDLG, true], [MYDLG, false]]), "r4 — in his input seat with no window of his focused (his dialog gone before the bridge's word): a held key's release goes to the window of its press", c.keysL);
+  ok(!c.error && JSON.stringify(c.activeKeys) === JSON.stringify([[100, true], [100, true], [100, false], [101, false]]), "r4 MINOR — outside the input seat (an app's desktop window): Ctrl released after the app's dialog opened goes to the focused dialog, never back to the main window", c.activeKeys);
+  ok(!c.error && JSON.stringify(c.btn.slice(-2)) === JSON.stringify([[HIS, true], [HIS, false]]), "r3 MINOR — a drag from his window that ends over the agents': the client addresses the release to his window (X's implicit grab)", c.btn);
   ok(!c.error && c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])), "r3 MINOR — xpra moved his window: the client maps it where it now draws it (the server's own geometry), so his pointer lands where he points", c.maps);
   ok(!c.error && c.sent.includes('key-action') && c.sent.includes('button-action') && !c.sent.some((x) => /desktop_size|display-configure|configure-display|configure-window/.test(x)) && JSON.stringify(c.maps[0]) === JSON.stringify([HIS, 100, 50, 400, 300]), "Watch's picture with his input (the view's 'input' mode): his key and click are sent, his window mapped where the server has it, a pane resize sends no size", c.sent);
 }
@@ -582,6 +686,7 @@ const D = doorFacts(REPO);
   ok(D.labelIsAct, "MAJOR B — the door's label IS its act: «Use it here» POSTs the seat, «Browse yourself» / «Open your browsing window» open his own tab (and hold his seat in THIS pane — measured: a synced copy on another client took it); no «Take over» that is no takeover");
   ok(D.doorVerdict, "MAJOR B — the door's act is deskDoorAct's (a conversation's temporary browser: no button, the words say why)");
   ok(D.inputMode, "the view's 'input' mode: Watch's picture (nothing sized), his input sent");
+  ok(D.reachDrawn, "r4 MAJOR 1 — the view stacks his reach (the client's win.reach) above every window of the others, popups included");
   ok(D.liveDoorHuman && D.liveDoorRejudged, "the live view's raw-fallback door: only in his browse-yourself window, judged again at every fact, X mount / unmount, mode and digest change");
   ok(D.themeShadow, 'the Watch door strip\'s shadow is the theme\'s (--shadow-window), never a literal colour');
   const zh = read(REPO, 'src/lib/i18n-zh.js'), ja = read(REPO, 'src/lib/i18n-ja.js');
@@ -603,13 +708,14 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
   const XRF = 'src/server/stream-relay-xpra.js', XCF = 'src/lib/xpra-client.js';
   const MUTANTS = [
     { tag: 'no-holder-rule', need: 'watchCut', file: 'src/browser-picture.js', from: "return person && human && elected ? 'input' : 'watch';", to: "return person && elected ? 'input' : 'watch';", red: (s) => s.watchCut === false },
+    { tag: 'seat-root-only-window', file: 'src/browser-picture.js', from: "return xw && xw.why === 'bounds' && xw.wid != null", to: 'return xw && xw.wid != null', pure: true, red: (P) => P.xSeatRootOf({ wid: AGENTS, why: 'only-window' }) !== null },
     { tag: 'ticket-falls-through', file: 'src/browser-picture.js', from: "if (!viewerId || X_TICKET_RE.test(String(viewerId))) return 'watch';", to: "if (!viewerId) return 'watch';", pure: true, red: (P) => P.deskSeat({ viewerId: TICKET, person: true, human: true }) !== 'watch' },
     { tag: 'ticket-elected', need: 'toldInput', file: 'src/server/window-live-wiring.js', from: ' || PIC.X_TICKET_RE.test(String(viewerId))) return;', to: ') return;', red: (s) => s.toldInput === false },
     { tag: 'every-socket-a-person', need: 'agentCut', file: 'src/server/desktop-stream.js', from: "person: !bearerOf(req) });", to: 'person: true });', red: (s) => s.agentCut === false },
     { tag: 'wiring-ignores-person', need: 'agentCut', file: 'src/server/window-live-wiring.js', from: 'if (!person || !viewerId || PIC.X_TICKET_RE', to: 'if (!viewerId || PIC.X_TICKET_RE', red: (s) => s.agentCut === false },
     { tag: 'no-reseat-at-holding', need: 'heldReplay', file: 'src/server/browser-stream.js', from: "if (ev && (ev.kind === 'human-start' || ev.kind === 'human-end') && ev.profileId) { noteHumanSeat(ev.profileId); askXScope(ev.profileId, ev.kind); }", to: '', red: (s) => s.heldReplay === false },
     { tag: 'replay-geometry', need: 'geometryNeverReplayed', file: XRF, from: "else if (s === 'input') replayInput();", to: "else if (s === 'input') replayHeld();", red: (s) => s.geometryNeverReplayed === false },
-    { tag: 'popup-never-his', need: 'menuMine', file: XRF, from: 'if (e.or) e.owner = popupOwner(e, t);', to: '', red: (s) => s.menuMine === false },
+    { tag: 'popup-never-his', need: 'menuMine', file: XRF, from: 'if (a) e.owner = a.wid;', to: '', red: (s) => s.menuMine === false },
     { tag: 'submenu-not-an-act', need: 'submenuMine', file: XRF, from: "(type === 'pointer-position' && book.get(wid) && book.get(wid).or)", to: 'false', red: (s) => s.submenuMine === false },
     { tag: 'transient-ignored', need: 'transientMine', file: XRF, from: 'const up = e ? (e.or ? e.owner : e.tf) : 0;', to: 'const up = e ? (e.or ? e.owner : 0) : 0;', red: (s) => s.transientMine === false },
     { tag: 'geometry-not-identity', need: 'cascadeDialogCut', file: XRF, from: 'if (!mineWid(wid, top)) { // identity first', to: 'if (false) { // identity first', red: (s) => s.cascadeDialogCut === false },
@@ -618,6 +724,13 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     { tag: 'geometry-passes', need: 'geometryCut', file: XRF, from: "if (!Object.hasOwn(XPRA_SCOPED_INPUT, type)) return 'input-only';", to: 'if (!Object.hasOwn(XPRA_SCOPED_INPUT, type)) return null;', red: (s) => s.geometryCut === false },
     { tag: 'lifecycle-silent', need: 'lifecycleTold', file: XRF, from: "if (r.dropped > coded) r.codes[r.lifecycle ? 'server-lifecycle' : 'input-only'] = r.dropped - coded;", to: '', red: (s) => s.lifecycleTold === false },
     { tag: 'map-geometry-passes', need: 'mapGeometryCut', file: XRF, from: "type !== null && type !== 'map-window' && (XPRA_WATCH_TYPES", to: 'type !== null && (XPRA_WATCH_TYPES', red: (s) => s.mapGeometryCut === false },
+    { tag: 'release-readdressed-in-reach', need: 'releaseInReach', file: XRF, from: 'if (wid === d.wid || mineWid(wid, top)) return null;', to: 'if (wid === d.wid) return null;', red: (s) => s.releaseInReach === false },
+    { tag: 'hover-not-an-act', need: 'hoverTipMine', file: XRF, from: "else if (type === 'pointer-position') hover = {", to: 'else if (false) hover = {', red: (s) => s.hoverTipMine === false },
+    { tag: 'hover-unbounded', need: 'hoverFarCut', file: XRF, from: ' && touches({ x: hover.x, y: hover.y, w: 1, h: 1 }, e, XPRA_HOVER_REACH_PX)) return hover;', to: ') return hover;', red: (s) => s.hoverFarCut === false },
+    { tag: 'popup-touch-ignored', need: 'farPopupCut', file: XRF, from: 'mineWid(act.wid) && touches(rectOf(act.wid), e, XPRA_POPUP_GAP_PX)) return act;', to: 'mineWid(act.wid)) return act;', red: (s) => s.farPopupCut === false },
+    { tag: 'no-reread-on-lost', need: 'rereadOnLost', file: XRF, from: "if (wid === topOf() && seatState(id, seatRef.seat) === 'input') ask(", to: 'if (false) ask(', red: (s) => s.rereadOnLost === false },
+    { tag: 'no-reread-on-new', need: 'rereadOnNew', file: XRF, from: "else if (!e.or && !e.tf && seatState(id, seatRef.seat) === 'input' && !mineWid(wid)) ask(", to: 'else if (false) ask(', red: (s) => s.rereadOnNew === false },
+    { tag: 'no-reread-on-press', need: 'rereadOnPress', file: XRF, from: "else if (pressed === true) ask(`a press on window ${wid}, not his`);", to: '', red: (s) => s.rereadOnPress === false },
     { tag: 'release-dropped', need: 'releaseOutside', file: XRF, from: 'if (pressed === false && downs.has(key)) {', to: 'if (false) {', red: (s) => s.releaseOutside === false },
     { tag: 'rects-stale', need: 'movedStillMine', file: XRF, from: "if (type === 'window-move-resize' || type === 'configure-override-redirect') Object.assign(e,", to: 'if (false) Object.assign(e,', red: (s) => s.movedStillMine === false },
     { tag: 'popup-by-geometry', need: 'agentPopupCut', file: XRF, from: 'act && t - act.at <= XPRA_POPUP_OPEN_MS && ', to: 'act && ', red: (s) => s.agentPopupCut === false },
@@ -627,7 +740,11 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     { tag: 'take-ignored', need: 'takeHere', file: 'src/server/window-live-wiring.js', from: 'e.panes.set(s.pane, ++e.seq); s.seq = ++e.seq;', to: 's.seq = ++e.seq;', red: (s) => s.takeHere === false },
     { tag: 'pane-forgotten', need: 'reconnectKeeps', file: 'src/server/window-live-wiring.js', from: 'e.gone.set(pane, now()); // r3', to: 'e.panes.delete(pane); // r3', red: (s) => s.reconnectKeeps === false },
     { tag: 'focus-follows-windows', file: XCF, from: 'if (!win || !mayFocus(wid)) return;', to: 'if (!win) return;', client: true, red: (c) => !c.error && (c.focusLater || c.keys.some((k) => k[0] !== HIS)) },
-    { tag: 'key-release-at-focus', file: XCF, from: 'else if (keyWid.has(k.keyname)) { wid = keyWid.get(k.keyname); keyWid.delete(k.keyname); }', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.keysC) !== JSON.stringify([[HIS, true], [HIS, false]]) },
+    { tag: 'key-release-never-at-press', file: XCF, from: 'if (seatWids && !seatWids.has(wid)) wid = at;', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.keysL) !== JSON.stringify([[MYDLG, true], [MYDLG, false]]) },
+    { tag: 'key-release-at-press', file: XCF, from: 'if (seatWids && !seatWids.has(wid)) wid = at;', to: 'wid = at;', client: true, red: (c) => !c.error && JSON.stringify(c.keysC) !== JSON.stringify([[HIS, true], [MYDLG, false]]) },
+    { tag: 'seat-word-no-raise', file: XCF, from: 'if (home) focusWindow(home); }', to: 'if (home) focusedWid = home; }', client: true, red: (c) => !c.error && (!c.seatRaise || c.seatRaise.focus !== true) },
+    { tag: 'press-never-raises', file: XCF, from: "(win.wid !== focusedWid || win.reach)) focusWindow(win.wid);", to: 'win.wid !== focusedWid) focusWindow(win.wid);', client: true, red: (c) => !c.error && JSON.stringify(c.pressRaise) !== JSON.stringify([['focus', HIS], ['button', HIS, true], ['button', HIS, false]]) },
+    { tag: 'no-reach-layer', file: XCF, from: 'const rank = (w) => (w.reach ? 3e9 : 0) + ', to: 'const rank = (w) => ', client: true, red: (c) => !c.error && (!c.reach || c.reach.at !== HIS) },
     { tag: 'button-release-at-pointer', file: XCF, from: 'else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.btn.slice(-2)) !== JSON.stringify([[HIS, true], [HIS, false]]) },
     { tag: 'no-remap-on-move', file: XCF, from: 'if (moved && watch && !viewOnly && seatWids && seatWids.has(wid) && win.mapped) send(', to: 'if (false) send(', client: true, red: (c) => !c.error && !c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])) },
     { tag: 'door-on-any-prompt', file: 'src/browser-picture.js', from: "(stuck.state === 'prompt' && !!stuck.prompt && stuck.prompt.native === true)", to: "(stuck.state === 'prompt')", pure: true, red: (P) => P.deskDoorOf({ source: { source: 'x', displaySession: 'da-x1' }, stuck: { state: 'prompt', prompt: { type: 'file' } }, human: true }) === 'da-x1' },

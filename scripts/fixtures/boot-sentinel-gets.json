@@ -175,6 +175,7 @@
   "/api/designs",
   "/api/desktop/apps",
   "/api/desktop/apps/:id",
+  "/api/desktop/apps/:id/browser-seat",
   "/api/desktop/apps/:id/lease",
   "/api/desktop/apps/:id/notifications",
   "/api/desktop/apps/:id/reach",

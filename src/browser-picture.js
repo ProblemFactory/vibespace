@@ -159,6 +159,12 @@ function deskSeatWhy({ viewerId = null, person = false, human = false, elected =
   if (!human) return 'not-browsing';
   return elected ? null : 'other-window';
 }
+/** r4 (acceptance r3 MAJOR 2 — his window is read AGAIN when it may have been replaced): the seat's root is the window xWindowOf
+ *  TOLD by his CDP bounds (`bounds` — measured: CDP bounds ARE the X geometry), never the profile's only window (`only-window`: his
+ *  window closed and an agent's left in that browser would be handed to him); → wid | null (his reach is empty until it is told). */
+function xSeatRootOf(xw) {
+  return xw && xw.why === 'bounds' && xw.wid != null && Number.isInteger(Number(xw.wid)) ? Number(xw.wid) : null;
+}
 /** THE INPUT SEAT'S ROOT over the display's rows: HIS window (`wid` — the keeper's xWindowFor: his CDP bounds told on the display)
  *  and its rect. r3 (acceptance r2 MAJOR 1 + 2): nothing else is judged from these rows — a geometry rule cannot tell whose a
  *  window is (MEASURED: Chrome's <select> popup and context menu carry no WM_TRANSIENT_FOR, no class, no name — the very rows
@@ -198,5 +204,5 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
-  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xScopeOf, deskDoorAct, deskDoorOf,
+  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf,
 };

@@ -97,6 +97,8 @@ export const workerUrlFor = (id) => `/api/desktop/${encodeURIComponent(id)}/xpra
 export const STREAM_KIND = 'xpra';
 export const BACKING_SHRINK_MS = 1000;
 const Z_BASE = { main: 1000, dialog: 200000, popup: 300000 };
+/** lane desktop-x-seat-browser r4: in the person's input seat HIS reach (the client's `win.reach`) is stacked above every other window. */
+const Z_REACH = 400000;
 
 /** bytes → a data: URL (PNG); the base64 alphabet is validated on the way OUT
  *  (the string reaches an <img>.src / a cursor url(), never innerHTML). */
@@ -305,7 +307,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     const r = drawRatio;
     w.el.style.left = `${win.x / r}px`; w.el.style.top = `${win.y / r}px`;
     w.el.style.width = `${win.w / r}px`; w.el.style.height = `${win.h / r}px`;
-    w.el.style.zIndex = String((Z_BASE[win.kind] || Z_BASE.main) + Math.min(win.z, 99999));
+    w.el.style.zIndex = String((win.reach ? Z_REACH : 0) + (Z_BASE[win.kind] || Z_BASE.main) + Math.min(win.z, 99999));
     let bw = backingSize(win.w, r), bh = backingSize(win.h, r);
     if (!shrinkNow && w.r === r && (w.canvas.width > bw || w.canvas.height > bh)) {
       // a shrink keeps the backing for BACKING_SHRINK_MS (see the constant) — the element clips it meanwhile

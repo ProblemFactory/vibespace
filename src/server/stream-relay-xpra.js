@@ -95,7 +95,9 @@ const XPRA_SCOPED_INPUT = Object.freeze({ 'key-action': null, focus: null, 'butt
  *  code and count, the windows an input seat reaches — `['vibespace-seat', {seat, why, code, refused, wids}]` (src/lib/xpra-client.js
  *  hands it to the view; an xpra server never sees it). */
 const XPRA_SEAT_PACKET = 'vibespace-seat';
-/** His window not told yet (the keeper's read of it) is asked for at most this often per socket. */
+/** His window (the keeper's read of it) is asked for at most this often per socket — not told yet, or (r4, acceptance r3 MAJOR 2)
+ *  maybe REPLACED: a new top-level announced, his window lost, his press on a window not his / outside his windows (a Chrome
+ *  relaunch, a crash restored — his browsing goes on in a new window); an ask inside the pace goes when the pace allows. */
 const XPRA_SCOPE_ASK_MS = 1000;
 /** lane desktop-x-seat-browser r3 (acceptance r2 MAJOR 1 + 2 — MEASURED 2026-10-31, Google Chrome 154 on a scratch X display: a
  *  <select>'s popup and the page's context menu are OVERRIDE-REDIRECT windows of type MENU with NO WM_TRANSIENT_FOR, no WM_CLASS
@@ -107,9 +109,12 @@ const XPRA_SCOPE_ASK_MS = 1000;
  *  on the display), a managed window whose transient-for chain reaches it (a GTK file chooser — measured: transient-for its
  *  browser window), and an override-redirect window that OPENS within XPRA_POPUP_OPEN_MS after his own press or key on a window
  *  of his (or his pointer in a popup of his: a submenu) touching the window he acted on (within XPRA_POPUP_GAP_PX) — never a
- *  window because it lies inside his rect (an agent's popup over his window, his window cascaded over an agent's: not his). */
+ *  window because it lies inside his rect (an agent's popup over his window, his window cascaded over an agent's: not his).
+ *  r4 (acceptance r3 MINOR): his pointer RESTING on a window of his opens popups too (a tooltip, a hover card) — one that opens
+ *  within XPRA_POPUP_OPEN_MS of his pointer's last move there, touching that window AND within XPRA_HOVER_REACH_PX of the point. */
 const XPRA_POPUP_OPEN_MS = 1500;
 const XPRA_POPUP_GAP_PX = 8;
+const XPRA_HOVER_REACH_PX = 48;
 /** r3 (acceptance r2 MAJOR 2 — the law: never silent): a refusal that is no act of his (a pointer passing over another window,
  *  the client's own focus of a window it drew, a release of nothing he pressed) is TOLD too — coalesced to one word per
  *  XPRA_TELL_QUIET_MS; a refused ACT (a press, a key) is told at once and counted apart (`acts` — the window's one toast). */
@@ -548,10 +553,17 @@ function bridgeOf(ctx) {
     // ── lane desktop-x-seat-browser r2: THE INPUT SEAT (MAJOR A) and THE WORD TO THIS SOCKET (FAIL 3 — never silent) ──
     // r3 (acceptance r2 MAJOR 1 + 2 + 3): its reach is by WINDOW IDENTITY — HIS window (the keeper's), its transients and the popups
     // his own acts open (xpra's announcements on this socket, `book`; see XPRA_POPUP_OPEN_MS); a point only tells his windows apart
-    let lastAsk = -Infinity, told = null, refusedN = 0, actsN = 0, refusedCode = null, lastTellAt = -Infinity, quietTimer = null;
-    const ask = (why) => { const t = now(); if (t - lastAsk < XPRA_SCOPE_ASK_MS) return; lastAsk = t; askSeatScope(id, why); };
+    let lastAsk = -Infinity, askTimer = null, askWhy = '', told = null, refusedN = 0, actsN = 0, refusedCode = null, lastTellAt = -Infinity, quietTimer = null;
+    /** Read his window again (see XPRA_SCOPE_ASK_MS): at once when the pace allows, else once when it does (the latest why). */
+    const ask = (why) => {
+      askWhy = why;
+      const wait = lastAsk + XPRA_SCOPE_ASK_MS - now();
+      if (wait <= 0) { clearTimeout(askTimer); askTimer = null; lastAsk = now(); askSeatScope(id, why); return; }
+      if (!askTimer) askTimer = setTimeout(() => { askTimer = null; if (ws.readyState === 1 && !cutDone) ask(askWhy); }, wait);
+    };
     const book = new Map(); // wid → { x, y, w, h, or, tf, owner, at } — every window xpra announced to THIS socket, kept current
     let act = null; // his last act that may open a popup: { at, wid }
+    let hover = null; // r4: his pointer's last move on a window of his: { at, wid, x, y } (a tooltip, a hover card may follow)
     const downs = new Map(); // 'k:<keyname>' / 'b:<button>' → { wid, release } — what his seat pressed: its release ALWAYS reaches xpra
     const synth = []; // releases re-addressed to the window that got the press (a release the client sent elsewhere)
     const readsWindows = seatWhy(id, seatRef.seat) !== undefined; // a seated source (a browser's display) reads its windows
@@ -569,8 +581,14 @@ function bridgeOf(ctx) {
     const rectOf = (wid) => { const e = book.get(wid); if (e) return e; const sc = seatScope(id); return (sc && Array.isArray(sc.rects) && sc.rects.find((r) => r.wid === wid)) || null; };
     const inRect = (r, x, y) => !!r && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
     const touches = (a, b, gap) => !!a && !!b && b.x < a.x + a.w + gap && b.x + b.w > a.x - gap && b.y < a.y + a.h + gap && b.y + b.h > a.y - gap;
-    /** A popup opening now is HIS when it follows his act on a window of his closely enough, touching that window. */
-    const popupOwner = (e, t) => (act && t - act.at <= XPRA_POPUP_OPEN_MS && seatState(id, seatRef.seat) === 'input' && mineWid(act.wid) && touches(rectOf(act.wid), e, XPRA_POPUP_GAP_PX) ? act.wid : 0);
+    /** A popup opening now is HIS when it follows his act on a window of his closely enough, touching that window — or (r4) his
+     *  pointer resting on it, near the point; → the act it follows, or null. */
+    const popupAct = (e, t) => {
+      if (seatState(id, seatRef.seat) !== 'input') return null;
+      if (act && t - act.at <= XPRA_POPUP_OPEN_MS && mineWid(act.wid) && touches(rectOf(act.wid), e, XPRA_POPUP_GAP_PX)) return act;
+      if (hover && t - hover.at <= XPRA_POPUP_OPEN_MS && mineWid(hover.wid) && touches(rectOf(hover.wid), e, XPRA_POPUP_GAP_PX) && touches({ x: hover.x, y: hover.y, w: 1, h: 1 }, e, XPRA_HOVER_REACH_PX)) return hover;
+      return null;
+    };
     const watchDown = xpraWindowWatch((f) => {
       const type = f[0], wid = f[1];
       if (!Number.isInteger(wid)) return;
@@ -578,10 +596,12 @@ function bridgeOf(ctx) {
       if (type === 'new-window' || type === 'new-override-redirect' || type === 'window-create') {
         const meta = f[6] && typeof f[6] === 'object' && !Array.isArray(f[6]) ? f[6] : {};
         const e = { x: num(f[2]), y: num(f[3]), w: num(f[4]), h: num(f[5]), or: type === 'new-override-redirect' || meta['override-redirect'] === true, tf: Number.isInteger(meta['transient-for']) ? meta['transient-for'] : 0, owner: 0, at: t };
-        if (e.or) e.owner = popupOwner(e, t);
+        const a = e.or ? popupAct(e, t) : null;
+        if (a) e.owner = a.wid;
         book.set(wid, e);
-        if (e.owner) log.log?.(`[desktop-stream] ${id}: popup ${wid} opened ${t - act.at} ms after his act on window ${act.wid} — it is his${viewerId ? ` (viewer ${viewerId})` : ''}`);
-      } else if (type === 'lost-window') { if (!book.delete(wid)) return; }
+        if (a) log.log?.(`[desktop-stream] ${id}: popup ${wid} opened ${t - a.at} ms after his ${a === hover ? 'pointer rested on' : 'act on'} window ${a.wid} — it is his${viewerId ? ` (viewer ${viewerId})` : ''}`);
+        else if (!e.or && !e.tf && seatState(id, seatRef.seat) === 'input' && !mineWid(wid)) ask(`window ${wid} opened`); // r4: a new top-level may be HIS (his Chrome relaunched, restored)
+      } else if (type === 'lost-window') { if (!book.delete(wid)) return; if (wid === topOf() && seatState(id, seatRef.seat) === 'input') ask(`his window ${wid} closed`); } // r4: his browsing may go on in a new one
       else {
         const e = book.get(wid);
         if (!e) return;
@@ -610,24 +630,26 @@ function bridgeOf(ctx) {
         // MINOR (r2's) + MAJOR 3: a RELEASE of what his seat pressed always reaches xpra — at the window that got the press
         if (pressed === false && downs.has(key)) {
           const d = downs.get(key); downs.delete(key);
-          if (wid === d.wid) return null;
+          if (wid === d.wid || mineWid(wid, top)) return null; // r4: at a window of his (the focused one — xpra raises nothing) as sent
           synth.push(d.release); return XPRA_READDRESSED;
         }
         if (!mineWid(wid, top)) { // identity first: a window not his is refused whatever the point
           if (top == null) ask('not read yet');
+          else if (pressed === true) ask(`a press on window ${wid}, not his`); // r4: his window may have been replaced
           if (pressed === true) { judge.loud++; return 'not-your-window'; }
           return type === 'focus' ? 'focus-elsewhere' : type === 'key-action' ? 'not-your-window' : 'pointer-outside';
         }
         if (at != null) {
           const c = f[at];
           if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return 'input-only';
-          if (!mineAll(top).some((w) => inRect(rectOf(w), c[0], c[1]))) { if (pressed === true) { judge.loud++; return 'not-your-window'; } return 'pointer-outside'; } // xpra moves the pointer to these root coordinates
+          if (!mineAll(top).some((w) => inRect(rectOf(w), c[0], c[1]))) { if (pressed === true) { judge.loud++; ask('a press outside his windows'); return 'not-your-window'; } return 'pointer-outside'; } // xpra moves the pointer to these root coordinates
         }
         if (pressed === true && key) { // its release, ready: the press's own bytes with `pressed` flipped (CHR_TRUE 67 → CHR_FALSE 68)
           const off = unit && spans[3] ? unit.length - payload.length + spans[3][0] : -1;
           if (off >= 0 && unit[off] === 67) { const r = Buffer.from(unit); r[off] = 68; downs.set(key, { wid, release: r }); }
         }
         if (pressed !== null || (type === 'pointer-position' && book.get(wid) && book.get(wid).or)) act = { at: now(), wid }; // a popup may follow (a submenu: his pointer in a popup of his)
+        else if (type === 'pointer-position') hover = { at: now(), wid, x: f[at][0], y: f[at][1] }; // r4: his pointer on his window — a tooltip may follow
         return null;
       };
       judge.loud = 0;
@@ -735,4 +757,4 @@ function bridgeOf(ctx) {
   return (a) => bridgeXpra(a.ws, a.id, a.port, a.viewerId, a.netem, a.req);
 }
 
-module.exports = { rencodePlus, xpraFields, lz4Inflate, xpraBody, xpraWindowWatch, XPRA_WINDOW_TYPES, XPRA_POPUP_OPEN_MS, XPRA_POPUP_GAP_PX, XPRA_TELL_QUIET_MS, XPRA_SCOPED_INPUT, XPRA_CLIPBOARD_TYPES, XPRA_SEAT_PACKET, pinDesktopPacket, STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };
+module.exports = { rencodePlus, xpraFields, lz4Inflate, xpraBody, xpraWindowWatch, XPRA_WINDOW_TYPES, XPRA_POPUP_OPEN_MS, XPRA_POPUP_GAP_PX, XPRA_HOVER_REACH_PX, XPRA_SCOPE_ASK_MS, XPRA_TELL_QUIET_MS, XPRA_SCOPED_INPUT, XPRA_CLIPBOARD_TYPES, XPRA_SEAT_PACKET, pinDesktopPacket, STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };

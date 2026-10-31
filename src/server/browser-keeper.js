@@ -4427,12 +4427,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** lane desktop-x-seat-browser r2 (MAJOR A): THE PERSON'S INPUT SEAT'S ROOT on a browser display — HIS window (his holder
    *  key's: the window of his own tab; PURE PIC.xScopeOf over the display's rows, read FRESH). r3: its transients and the popups
-   *  his acts open are the desktop bridge's (xpra's own announcements, in order — no row says whose a menu is). {wids: [], …} untold. */
+   *  his acts open are the desktop bridge's (xpra's own announcements, in order — no row says whose a menu is). {wids: [], …} untold.
+   *  r4: his window only when his bounds TELL it (PIC.xSeatRootOf) — never the profile's only window. */
   async function xScopeFor(profileId, { browserKey = null } = {}) {
     const xw = await xWindowFor(profileId, { browserKey });
-    if (xw.wid == null) return { wid: null, why: xw.why, wids: [], rects: [], known: [] };
+    const wid = PIC.xSeatRootOf(xw);
+    if (wid == null) return { wid: null, why: xw.why, wids: [], rects: [], known: [] };
     const p = profile(String(profileId));
-    return { wid: xw.wid, why: xw.why, ...PIC.xScopeOf(xw.wid, await xRowsOf(xw.source.displaySession, { fresh: true }), { profileDir: p && p.dir }) };
+    return { wid, why: xw.why, ...PIC.xScopeOf(wid, await xRowsOf(xw.source.displaySession, { fresh: true }), { profileDir: p && p.dir }) };
   }
   async function stop(profileId, { why = 'user' } = {}) {
     ensureLoaded();
