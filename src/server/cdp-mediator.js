@@ -72,7 +72,8 @@ const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting
 function create({ log = console, now = Date.now } = {}) {
   const grants = new Map();   // token → grant
   const byKey = new Map();    // grantKey → token
-  let server = null, wss = null, port = null, listening = null, closed = false;
+  let server = null, wss = null, port = null, listening = null, closed = false, loginFence = null;
+  function setLoginFence(f) { loginFence = f && typeof f === 'object' ? f : null; }
 
   const view = (g) => M.grantView(g);
   function mintToken() { for (;;) { const t = crypto.randomBytes(24).toString('base64url'); if (M.isToken(t) && !grants.has(t)) return t; } }
@@ -200,6 +201,23 @@ function create({ log = console, now = Date.now } = {}) {
         if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
+      if (loginFence && !credit) {
+        const sid = msg.sessionId == null || msg.sessionId === '' ? null : String(msg.sessionId);
+        const tid = p.kind === 'page' ? p.targetId : (sid ? g.scope.sessions.get(sid) || null : null);
+        let lf = tid && typeof loginFence.liveFillTarget === 'function' ? loginFence.liveFillTarget(g.profileId, tid) : null;
+        if (!lf && !tid && g.scope && g.scope.targets && typeof loginFence.liveFillTarget === 'function') {
+          for (const st of g.scope.targets) { lf = loginFence.liveFillTarget(g.profileId, st); if (lf) break; }
+        }
+        if (lf) {
+          const allowVerb = typeof loginFence.allowVerbInFlight === 'function' ? !!loginFence.allowVerbInFlight(g.profileId, g.browserKey) : false;
+          const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb });
+          if (lfv.refuse) {
+            g.refusals = (g.refusals || 0) + 1;
+            try { ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
+            return;
+          }
+        }
+      }
       if (credit) {
         conn.credits = conn.credits || new Map(); conn.credits.set(msg.id, credit);
         // verify r3: a SPENT credit waits for the browser's own answer — measured: a mouse dispatch on a HIDDEN tab never
@@ -214,6 +232,7 @@ function create({ log = console, now = Date.now } = {}) {
       if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
       try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
     });
+    const sendClient = (str) => { ws.send(loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str); };
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
@@ -233,13 +252,13 @@ function create({ log = console, now = Date.now } = {}) {
         // verify r6: a SUCCESS reply means the call had reached Chrome and TOOK EFFECT (a fill's insertText, a click): the takeover's
         // record counts it as `landed` so the agent is told "cut short — but this reached the page" rather than a plain "cut"
         if (pend.aborted) { const rec = g.lastInterrupt && pend.interruptAt === g.lastInterrupt.at ? g.lastInterrupt : null; if (rec && !msg.error) { rec.landed = (rec.landed || 0) + 1; if (!rec.landedMethods.includes(pend.method)) rec.landedMethods.push(pend.method); } return; }
-        try { for (const ev of out.emit) ws.send(JSON.stringify(ev)); ws.send(JSON.stringify(out.reply)); } catch { /* gone */ }
+        try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendClient(JSON.stringify(out.reply)); } catch { /* gone */ }
         return;
       }
       if (msg.id != null) return; // a reply to nothing we forwarded
       const ev = M.filterEvent(msg, g.scope);
       if (!ev) { g.dropped = (g.dropped || 0) + 1; return; }
-      try { ws.send(ev === msg ? String(data) : JSON.stringify(ev)); } catch { /* gone */ }
+      try { sendClient(ev === msg ? String(data) : JSON.stringify(ev)); } catch { /* gone */ }
     });
     ws.on('close', () => closeBoth(1000, ''));
     ws.on('error', () => closeBoth(1011, 'client error'));
@@ -417,7 +436,7 @@ function create({ log = console, now = Date.now } = {}) {
     for (const conn of g.conns) for (const p of conn.pending.values()) if (p && p.aborted && p.interruptAt === g.lastInterrupt.at) unsettled++;
     return { ...g.lastInterrupt, methods: [...g.lastInterrupt.methods], landedMethods: [...(g.lastInterrupt.landedMethods || [])], terminateAnswers: [...g.lastInterrupt.terminateAnswers], unsettled };
   }
-  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
+  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, setLoginFence, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
 module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE };

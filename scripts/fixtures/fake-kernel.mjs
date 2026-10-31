@@ -82,6 +82,8 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const forms = new Map();     // lane browser-login: surfaceId → the form as detected (+ what the page holds typed: never exposed)
   const filled = [];           // every fillCredential the kernel took: {surfaceId, count, expectedOrigin, submit} — never a value
   const submitted = [];        // lane engine-distribution: every credentialSubmitted sent: {surfaceId, hasPassword} — never a value
+  const isoWorlds = new Map(); // lane vault-login-chrome r3: contextId → {frameId, worldName}
+  let stdPage = null;          // optional simulated standard-Chrome login page state for fast-tier tests
   const feats = () => [...(Array.isArray(mode.features) ? mode.features : FEATURES)];
   const calls = [];
   let heard = 0; // lane vault-login-chrome r2c: the sequence number of the last call heard (mark())
@@ -260,7 +262,13 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       case 'Target.detachFromTarget': { const sid = p.sessionId || m.sessionId; const x = targets.get((sessions.get(sid) || {}).targetId); if (x) x.sessions.delete(sid); sessions.delete(sid); return {}; }
       case 'Target.closeTarget': { const x = targets.get(p.targetId); if (!x) return { success: false }; targets.delete(x.targetId); for (const s of [...surfaces.values()]) if (s.targetId === x.targetId) surfaces.delete(s.surfaceId); all({ method: 'Target.targetDestroyed', params: { targetId: x.targetId } }); return { success: true }; }
       case 'Page.enable': if (ss) ss.page = true; if (t && mode.holdEnable && mode.holdEnable.has(t.targetId)) return { __noreply: true }; return {};
-      case 'Page.getFrameTree': return { frameTree: { frame: frameOf(t || [...targets.values()][0]) } };
+      case 'Page.getFrameTree': { const x = t || [...targets.values()][0]; const fr = frameOf(x); if (stdPage && stdPage.securityOrigin) fr.securityOrigin = stdPage.securityOrigin; return { frameTree: { frame: fr, ...(stdPage && Array.isArray(stdPage.childFrames) ? { childFrames: stdPage.childFrames } : {}) } }; }
+      case 'Page.createIsolatedWorld': { const ctxId = 100 + (++sseq); isoWorlds.set(ctxId, { frameId: String(p.frameId || (t && t.targetId) || ''), worldName: String(p.worldName || ''), grantUniveralAccess: !!p.grantUniveralAccess }); return { executionContextId: ctxId }; }
+      case 'Input.insertText': {
+        if (stdPage && stdPage.failInsertText) return { __error: { code: -32000, message: 'insertText failed' } };
+        if (stdPage) { stdPage.inserted = (stdPage.inserted || 0) + 1; stdPage.insertedLens = [...(stdPage.insertedLens || []), String(p.text || '').length]; }
+        return {};
+      }
       case 'Page.navigate': if (t) {
         t.url = String(p.url || 'about:blank'); t.title = t.url;
         const want = /#vs-surface=([a-z-]+)(?::([a-z]+))?/.exec(t.url);
@@ -275,7 +283,26 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         return {};
       }
       case 'Runtime.enable': if (t) setTimeout(() => ev('Runtime.executionContextCreated', { context: { id: 1, origin: '', name: '', uniqueId: 'U' + t.targetId, auxData: { isDefault: true, type: 'default', frameId: t.targetId } } }), 1); return {};
-      case 'Runtime.evaluate': return { result: { type: 'string', value: t ? (/title/.test(String(p.expression)) ? t.title : t.url) : '' } };
+      case 'Runtime.evaluate': {
+        const ex = String(p.expression || '');
+        if (stdPage && Number.isInteger(p.contextId) && isoWorlds.has(p.contextId)) {
+          const iw = isoWorlds.get(p.contextId);
+          const subSpec = stdPage.subFrames && iw && stdPage.subFrames[iw.frameId] ? stdPage.subFrames[iw.frameId] : null;
+          const sp = subSpec || stdPage;
+          if (ex.includes('isoOrigin')) return { result: { type: 'object', value: { ok: true, isoOrigin: sp.isoOrigin || originOfUrl(t && t.url) || '', isoHref: sp.isoHref || (t && t.url) || '', actionOrigin: sp.actionOrigin !== undefined ? sp.actionOrigin : (originOfUrl(t && t.url) || null), fields: sp.fields || [] } } };
+          if (ex.includes('focus_moved')) return { result: { type: 'object', value: sp.clearOnInput ? { ok: false, code: 'field_cleared' } : sp.moveFocus ? { ok: false, code: 'focus_moved' } : { ok: true } } };
+          if (ex.includes('clear_blocked')) return { result: { type: 'object', value: sp.focusStolen ? { ok: false, code: 'focus_stolen' } : { ok: true } } };
+          if (ex.includes('window.__vsBtns = btnMap')) return { result: { type: 'object', value: { ok: true, hasForm: sp.hasForm ?? true, candidates: sp.buttons || [] } } };
+          if (ex.includes('window.__vsBtns = null')) {
+            const bm = /btnMap\[("vs-b-\d+")\]/.exec(ex);
+            sp.clickedBtn = bm ? JSON.parse(bm[1]) : null;
+            if (sp.navigateOnSubmit && t) setTimeout(() => { t.url = sp.navigateOnSubmit; t.title = t.url; loaded(t); }, 5);
+            return { result: { type: 'object', value: sp.needEnter ? { ok: true, submitted: false, needEnter: true } : { ok: true, submitted: true, via: sp.clickedBtn ? 'button' : 'form' } } };
+          }
+          if (ex.includes('for (const id of')) { sp.wiped = (sp.wiped || 0) + 1; return { result: { type: 'boolean', value: true } }; }
+        }
+        return { result: { type: 'string', value: t ? (/title/.test(ex) ? t.title : t.url) : '' } };
+      }
       case 'VibeSpace.getVersion': return { protocol: 1, kinds: [...KINDS], features: feats() };
       case 'VibeSpace.enable': {
         if (p.expectedProtocol !== undefined && p.expectedProtocol !== null && Number(p.expectedProtocol) !== 1) return { ok: false, code: 'protocol_mismatch', protocol: 1, expectedProtocol: p.expectedProtocol };
@@ -305,8 +332,9 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     ws.on('message', (d) => {
       let m; try { m = JSON.parse(String(d)); } catch { return; }
       const on = m.sessionId ? sessions.get(m.sessionId) : null, tab = on ? on.targetId : !m.sessionId && /^Target\./.test(String(m.method)) && m.params && m.params.targetId ? String(m.params.targetId) : null;
-      calls.push({ seq: ++heard, id: Number.isInteger(m.id) ? m.id : null, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, tab, params: m.params || {} });
-      if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: m.params || {} }) + '\n'); } catch { /* best effort */ } }
+      const recParams = m.method === 'Input.insertText' && m.params && typeof m.params.text === 'string' ? { textLen: m.params.text.length } : (m.params || {});
+      calls.push({ seq: ++heard, id: Number.isInteger(m.id) ? m.id : null, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, tab, params: recParams });
+      if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: recParams }) + '\n'); } catch { /* best effort */ } }
       const r = answer(ws, m);
       if (r && r.__noreply) return;
       send(ws, r && r.__error ? { id: m.id, error: r.__error, ...(m.sessionId ? { sessionId: m.sessionId } : {}) } : { id: m.id, result: r || {}, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
@@ -324,6 +352,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
+    setStandardPage: (spec) => { stdPage = spec ? { ...spec } : null; return stdPage; }, standardPage: () => (stdPage ? { ...stdPage } : null), isoWorlds: () => [...isoWorlds.entries()],
     navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } } };
 }

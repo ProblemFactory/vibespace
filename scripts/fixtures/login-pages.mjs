@@ -38,6 +38,97 @@ function go() { post('/done/react', { username: st.u, password: st.p }).then(() 
 document.getElementById('rgo').addEventListener('click', go); document.getElementById('rp').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });`),
   '/plain': () => page('Nothing to sign in', '<p>No form here.</p><input id="q" placeholder="Search">'),
   '/welcome': () => page('Welcome', '<h1>Signed in</h1>'),
+  '/spoof': (url) => {
+    const target = url.searchParams.get('target') || 'https://accounts.example.test';
+    return page('Sign in — spoof', `<form id="f" method="post" action="/done/spoof"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+      `${post}
+const OrigString = window.String;
+const realOrigin = location.origin;
+const FAKE = ${JSON.stringify(target)};
+window.String = new Proxy(OrigString, { apply(t, th, a) { const r = Reflect.apply(t, th, a); return r === realOrigin ? FAKE : r; } });
+document.getElementById('p').addEventListener('input', (e) => { post('/done/spoof', { username: document.getElementById('u').value, password: e.target.value }); });`);
+  },
+  '/iframe-host': (url) => {
+    const src = url.searchParams.get('src') || 'about:blank';
+    return page('Embedded Sign-in', `<h1>Partner Portal</h1><iframe id="phish" src=${JSON.stringify(src)} width="420" height="280"></iframe>`);
+  },
+  '/clear-trap': () => page('Clear trap', `<form id="f" method="post" action="/done/clear-trap"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+    `${post}
+document.getElementById('p').addEventListener('input', (e) => { e.target.value = ''; });
+document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); post('/done/clear-trap', { username: document.getElementById('u').value, password: document.getElementById('p').value }); });`),
+  '/focus-trap': (url) => {
+    const when = url.searchParams.get('when') === 'input' ? 'input' : 'focus';
+    return page('Focus trap', `<form id="f" method="post" action="/done/focus-trap"><input id="trap" type="text" placeholder="Search"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+      `${post}
+const trap = document.getElementById('trap');
+document.getElementById('p').addEventListener(${JSON.stringify(when)}, () => { trap.focus(); });
+document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); post('/done/focus-trap', { trap: trap.value }); });`);
+  },
+  '/vanilla': () => page('Sign in — vanilla JS', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+    `${post}
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  post('/done/vanilla', { username: document.getElementById('u').value, password: document.getElementById('p').value }).then(() => { location.href = '/welcome'; });
+});`),
+  '/fd': () => page('Sign in — FormData', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+    `${post}
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  post('/done/fd', Object.fromEntries(fd.entries())).then(() => { location.href = '/welcome'; });
+});`),
+  '/btn-traps': () => page('Sign in — button traps', `<div id="box">
+  <button type="button" id="backBtn">Back</button>
+  <input id="u" autocomplete="username" placeholder="Username">
+  <input id="p" type="password" autocomplete="current-password" placeholder="Password">
+  <button type="button" id="showBtn" aria-label="Show password">Show</button>
+  <button type="button" id="toggleBtn" aria-pressed="false">Remember</button>
+  <button type="button" id="signupLink">Create account</button>
+  <div role="button" class="btn" id="realGo" tabindex="0">Sign in</div>
+</div>`,
+    `${post}
+const u = document.getElementById('u'), p = document.getElementById('p');
+document.getElementById('backBtn').addEventListener('click', () => post('/trap/back', { clicked: 'back' }));
+document.getElementById('showBtn').addEventListener('click', () => { p.type = 'text'; post('/trap/show', { clicked: 'show' }); });
+document.getElementById('toggleBtn').addEventListener('click', () => post('/trap/toggle', { clicked: 'toggle' }));
+document.getElementById('signupLink').addEventListener('click', () => post('/trap/signup', { clicked: 'signup' }));
+document.getElementById('realGo').addEventListener('click', () => {
+  post('/done/btn-traps', { username: u.value, password: p.value, pwType: p.type }).then(() => { location.href = '/welcome'; });
+});`),
+  '/signup-check': () => page('Create account', `<form id="f">
+  <input id="su" name="email" type="email" autocomplete="email" placeholder="Email">
+  <input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12" placeholder="New password">
+  <input id="sp2" name="confirm" type="password" autocomplete="new-password" minlength="12" placeholder="Confirm password">
+  <button type="submit">Create account</button>
+  <div id="err" hidden></div>
+</form>`,
+    `${post}
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('su').value;
+  const p1 = document.getElementById('sp1').value;
+  const p2 = document.getElementById('sp2').value;
+  if (!p1 || p1 !== p2) {
+    await post('/done/signup-mismatch', { email, len1: p1.length, len2: p2.length, match: p1 === p2 });
+    document.getElementById('err').hidden = false;
+    return;
+  }
+  const r = await fetch('/done/signup-check', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: p1, match: true }),
+  });
+  if (!r.ok) {
+    document.getElementById('err').hidden = false;
+    document.getElementById('err').textContent = 'Taken';
+    return;
+  }
+  if (new URLSearchParams(location.search).get('spa') === '1') {
+    document.getElementById('f').replaceWith(Object.assign(document.createElement('h1'), { textContent: 'Account created' }));
+  } else {
+    location.href = '/welcome';
+  }
+});`),
 };
 
 export function startLoginPages() {
@@ -50,13 +141,27 @@ export function startLoginPages() {
         let body = {}; try { body = /json/.test(String(req.headers['content-type'])) ? JSON.parse(b || '{}') : Object.fromEntries(new URLSearchParams(b)); } catch { body = { raw: b }; }
         got.push({ path: url.pathname, body, at: Date.now() });
         if (url.pathname === '/done/one') { res.writeHead(303, { location: '/welcome' }); return res.end(); }
+        if (url.pathname === '/done/signup-check' && body && body.email === 'reject@example.test') {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end('{"ok":false,"error":"taken"}');
+        }
         res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
       });
       return;
     }
     const p = PAGES[url.pathname.replace(/\/challenge\/pwd$/, '')];
     if (!p) { res.writeHead(404); return res.end('nope'); }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(p());
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(p(url));
   });
-  return new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok({ origin: `http://127.0.0.1:${srv.address().port}`, port: srv.address().port, received: () => got.slice(), clear: () => { got.length = 0; }, close: () => new Promise((r) => { srv.close(() => r()); srv.closeAllConnections(); }) })));
+  return new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok({
+    origin: `http://127.0.0.1:${srv.address().port}`,
+    port: srv.address().port,
+    received: () => got.slice(),
+    clear: () => { got.length = 0; },
+    close: () => new Promise((r) => {
+      srv.closeIdleConnections?.();
+      srv.closeAllConnections?.();
+      srv.close(() => r());
+    }),
+  })));
 }

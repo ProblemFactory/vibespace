@@ -13,12 +13,11 @@
  *     pending?, previous?, lastUsedAt}. `publicOf` = the record without a password (the Vault window's facts).
  *   · THE FORM — `VibeSpace.credentialFormDetected` → formOf (fieldId kernel-private, passed back verbatim — Q5; each password
  *     field's `constraints` — Q5b); a held http-auth surface's credential fields → formOfSurface (the same road answers it).
- *   · THE ROAD (roadVerdict — lane vault-login-chrome r2, HOTFIX 2.369.364) — FIRST, before any form read, vault read or CDP
+ *   · THE ROAD (roadVerdict — lane vault-login-chrome r2/r3) — FIRST, before any form read, vault read or CDP
  *     call: the browser's CAPABILITY ROW (the watch's kernel fact — VibeSpace.getVersion's `features`), never a provider id
  *     (the backend-caps pattern). ROADS: `kernel` (its features list `credentials`) fills · `kernel-no-credentials` ⇒
- *     login_no_form · `standard` (every other browser — standard Chrome, a fact not known yet) ⇒ login_fill_withdrawn by
- *     name: the hub-side CDP fill of 2.369.363 is withdrawn (accept-r1: the page reported its own origin, a fallback put the
- *     secret in a script string, the agent's read roads saw past the mask); it returns when the root fix is accepted.
+ *     login_no_form · `standard` (standard Chrome — no VibeSpace surfaces) fills via the isolated-world + Input.insertText
+ *     root fix (r3, replacing 2.369.364's temporary withdrawal).
  *   · THE FILL VERDICT (fillVerdict) — in order: a form on the tab · THE PHISHING RULE (pageOrigin === frameOrigin === the
  *     entry's origin, exact to the port, never the registrable domain; https, or http on localhost only) · ONE entry (several ⇒
  *     login_ambiguous) · THE GRANT (door `browser-login`: the rows of `<origin>#<user>`, `<origin>#*` and `*` ADD — GM.admits,
@@ -58,7 +57,15 @@ const SOURCES = Object.freeze(['owner', 'vault-minted', 'agent-typed']);
 const STRENGTHS = Object.freeze(['generated', 'unknown']);
 const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owner-card', 'none']);
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
-const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user']);
+const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live']);
+/** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
+const LIVE_FILL_ALLOW_VERBS = Object.freeze([
+  'login',
+  'click', 'dblclick', 'press', 'keyboard', 'keydown', 'keyup', 'hover', 'focus', 'check', 'uncheck', 'select', 'scroll', 'scrollintoview', 'mouse', 'wait',
+  'open', 'goto', 'navigate', 'back', 'forward', 'reload', 'stop', 'close', 'tab', 'window',
+  'dialog', 'passkey', 'permission', 'surfaces', 'answer', 'size', 'site-reset', 'profiles', 'takeover', 'request-takeover',
+]);
+const LIVE_FILL_ALLOW_SET = new Set(LIVE_FILL_ALLOW_VERBS);
 const HOST = '(?:[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){0,20}|\\[[0-9a-f:.]{2,45}\\])';
 const ORIGIN_SRC = `https?:\\/\\/${HOST}(?::\\d{1,5})?`;
 const USER_SRC = '[^\\s#\\u0000-\\u001f\\u007f]{1,160}';
@@ -276,14 +283,14 @@ function constraintsFor(form, plan) {
   return { minLength: mins.length ? Math.max(...mins) : null, maxLength: maxs.length ? Math.min(...maxs) : null, patterns };
 }
 
-// ── the road (lane vault-login-chrome r2, HOTFIX 2.369.364) ──────────────────
+// ── the road (lane vault-login-chrome r2 → r3) ───────────────────────────────
 const WITHDRAWN_IN = '2.369.364';
-/** One row per fill road — the suites read it. A road that does not fill names its refusal; `standard` names the release that
- *  withdrew it. Flipping `standard.fills` back is the root fix's job (its acceptance), never a hotfix's. */
+/** One row per fill road — the suites read it. `standard` was withdrawn in 2.369.364 (`WITHDRAWN_IN`) and re-opened by the
+ *  r3 root fix (browser-truth origin + isolated world, Input.insertText only, live-fill read fence + value scrubbing). */
 const ROADS = Object.freeze({
   kernel: Object.freeze({ fills: true }),
   'kernel-no-credentials': Object.freeze({ fills: false, code: 'login_no_form' }),
-  standard: Object.freeze({ fills: false, code: 'login_fill_withdrawn', withdrawnIn: WITHDRAWN_IN }),
+  standard: Object.freeze({ fills: true }),
 });
 const NO_CREDENTIALS = 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view';
 const WITHDRAWN = `the vault login fill on standard Chrome is withdrawn in ${WITHDRAWN_IN} (a page could claim another site's origin; a fallback put the secret in a script) — nothing was read from the vault and nothing was typed. Ask the owner through the vault (vibespace-vault request "<what you need>" --purpose "<why>") or ask a person to take over (vibespace-browser ask-human "<what you need>"); the fill returns when its fix is accepted`;
@@ -477,11 +484,53 @@ function noticeWords(state, { origin = '', username = '', conversation = '' } = 
   return { text: fill(w.text, params) + (conv ? ` — ${conv}` : ''), detail: w.detail, i18n: { text: { key: w.text, params }, detail: [{ key: w.detail }] } };
 }
 
+const SUBMIT_DENY_RE = /\b(show|hide|reveal|mask|peek|toggle|visibility|eye|clear|copy|paste|back|prev|previous|cancel|close|dismiss|forgot|recover|reset|trouble|help|switch|another|different|passkey|webauthn|security[-_ ]?key|google|github|apple|microsoft|facebook|sso|oauth|qr)\b|显示|隐藏|查看密码|切换|清除|返回|上一步|取消|关闭|忘记|找回|重置|其他方式|通行密钥/i;
+const SUBMIT_SIGNUP_RE = /\b(sign[-_ ]?up|register|create(?:\s+an?)?(?:\s+account)?|join)\b|注册|创建账号/i;
+const SUBMIT_CHANGE_RE = /\b(save|update|change[-_ ]?password|set[-_ ]?password)\b|保存|修改密码|更新密码/i;
+const SUBMIT_ALLOW_RE = /\b(sign[-_ ]?in|log[-_ ]?in|submit|next|continue|verify|confirm|proceed|go|enter|authenticate|unlock)\b|登录|登入|下一步|继续|提交|验证|确认|确定/i;
+/** Is a button / role="button" descriptor a genuine submit action for `mode` (`'login' | 'signup' | 'change'`)?
+ *  Explicitly excludes show/hide password toggles, aria-pressed toggles, Back / Cancel / Forgot / Switch / SSO / Passkey buttons,
+ *  and (on `login`) secondary Sign-up / Create-account links. */
+function isSubmitControl(raw, { mode = 'login', inForm = false } = {}) {
+  if (!raw || typeof raw !== 'object' || raw.visible === false || raw.disabled === true || raw.hidden === true) return false;
+  if (raw.ariaPressed !== undefined && raw.ariaPressed !== null && raw.ariaPressed !== '') return false;
+  if (raw.ariaExpanded !== undefined && raw.ariaExpanded !== null && raw.ariaExpanded !== '') return false;
+  const tag = str(raw.tag).toLowerCase().trim();
+  const type = str(raw.type).toLowerCase().trim();
+  const role = str(raw.role).toLowerCase().trim();
+  if (type === 'reset' || type === 'checkbox' || type === 'radio' || type === 'file' || type === 'hidden') return false;
+  const isBtn = tag === 'button' || (tag === 'input' && (type === 'submit' || type === 'button')) || role === 'button';
+  if (!isBtn) return false;
+  const words = [raw.text, raw.value, raw.ariaLabel, raw.title, raw.name, raw.id].map(str).filter(Boolean).join(' ');
+  if (SUBMIT_DENY_RE.test(words)) return false;
+  if (mode === 'login' && SUBMIT_SIGNUP_RE.test(words) && !SUBMIT_ALLOW_RE.test(words)) return false;
+  if ((tag === 'input' && type === 'submit') || (tag === 'button' && (type === 'submit' || (inForm && type === '')))) return true;
+  if (SUBMIT_ALLOW_RE.test(words)) return true;
+  if (mode === 'signup' && SUBMIT_SIGNUP_RE.test(words)) return true;
+  if (mode === 'change' && SUBMIT_CHANGE_RE.test(words)) return true;
+  return false;
+}
+function liveFillAllowsVerb(verb) { return LIVE_FILL_ALLOW_SET.has(str(verb).trim()); }
+/** While a filled vault secret sits in the tab's current document (before cross-document navigation), reading / scripting /
+ *  capturing verbs are refused by name (`login_fill_live`) so the secret never enters the agent's output. */
+function liveFillVerdict({ verb = '', batchVerbs = null, origin = '' } = {}) {
+  const o = originOf(origin);
+  const v = str(verb).trim();
+  const refuseVerb = (bad) => no('login_fill_live', `a vault secret was filled into your tab${o ? ` on ${o}` : ''} and the page has not navigated away yet — \`${bad || 'reading'}\` cannot read this document while the filled secret is live so the value never enters your output; submit the form (\`vibespace-browser login --submit\`, \`click\`, or \`press Enter\`) or navigate to another page first`);
+  if (v === 'batch') {
+    const list = Array.isArray(batchVerbs) ? batchVerbs.map((x) => str(x).trim()).filter(Boolean) : [];
+    if (!list.length) return refuseVerb('batch');
+    const bad = list.find((x) => !LIVE_FILL_ALLOW_SET.has(x));
+    return bad ? refuseVerb(bad) : { ok: true };
+  }
+  return v && LIVE_FILL_ALLOW_SET.has(v) ? { ok: true } : refuseVerb(v);
+}
+
 module.exports = {
-  PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS,
+  PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, newRecord, changedRecord,
-  formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, planOf, constraintsFor, roadOf, roadVerdict, fillVerdict, valuesOf,
+  formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, isSubmitControl, liveFillAllowsVerb, liveFillVerdict, planOf, constraintsFor, roadOf, roadVerdict, fillVerdict, valuesOf,
   generatePassword, patternOf, saveVerdict, nextRecord, loginText, noticeWords,
 };

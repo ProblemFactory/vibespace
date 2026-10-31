@@ -101,9 +101,10 @@ let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 let SFm = null, PTm = null;
 const SF = () => SFm || (SFm = require('../browser-surfaces.js'));
 const PT = () => PTm || (PTm = require('../peer-text.js'));
-let BLm = null, LFm = null;
+let BLm = null, LFm = null, VRm = null;
 const BL = () => BLm || (BLm = require('../browser-login.js')); // lane browser-login: lazily (two passkey suites copy this file beside three modules only)
 const LF = () => LFm || (LFm = require('./browser-login-fill.js')); // lane vault-login-chrome: hub-side Chrome login form inspection + CDP fill
+const VR = () => VRm || (VRm = require('../vault-run.js')); // lane vault-login-chrome r3: value-based scrubber over filled secrets
 // lane passkey-sink: the PURE passkey signer — asked only on a kernel with `webauthn` (required at first use, like SF / PT)
 let WAm = null;
 const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
@@ -235,6 +236,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
+      scrubBindings: [], // lane vault-login-chrome r3: filled secret values kept only in watch memory for value-based output scrubbing, wiped in down(w)
       kernel: null, surf: new Map(), surfTimers: new Map(), surfForYou: new Map(), nativeIgnored: 0, autoSurf: 0 }; // lane browser-surfaces: null = not asked yet; the open surfaces by id; the owner's card clock + item; the belt's count: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
     let readyResolve;
     w.readyP = new Promise((r) => { readyResolve = r; });
@@ -291,7 +293,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const rec of w.surf.values()) { surfaceAskDone(w, rec); if (!open.includes(rec)) open.push(rec); } w.surf.clear(); // lane browser-surfaces: a NOTED one is in the live view's bar too
     w.open.clear();
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
-    for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } }
+    if (w.scrubBindings) w.scrubBindings.length = 0;
+    for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); } }
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
     if (why === SOCKET_CLOSED && w.openedAt && now() - w.openedAt >= REARM_HEALTHY * rearmMs) { const r = rearms.get(w.profileId); if (r && !r.t) rearms.delete(w.profileId); } // a healthy socket's close starts the backoff over
@@ -369,6 +372,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!e) return;
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
+        e.liveFill = null; e.pendingLoginConfirm = null;
+        if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); }
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
         if (w.prompts.has(tid)) dropPrompt(w, w.prompts.get(tid), 'tab-closed'); // lane browser-ui-prompts
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
@@ -388,10 +393,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || ''); if (navUrl) e.url = navUrl; endNav(e); hop(w, e, { url: navUrl }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ onLoginFrameNavigated(w, e, navUrl); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
-        if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) hop(w, e, { url: String(p.url || ''), same: true });
+        if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) { const navUrl = String(p.url || ''); if (navUrl) e.url = navUrl; hop(w, e, { url: navUrl, same: true }); onLoginSameDocNav(w, e, navUrl); }
         if (e && String(p.frameId || '') === e.targetId) endNav(e);
         // verify r4 #4: the main frame STOPPED LOADING — this page loaded before the next hop (measured on 0.38.1: every hop of a
         // <meta refresh> dashboard and of the fast bounce, none of the incident's pending shape); the standing loop is re-judged
@@ -425,6 +430,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
       case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
       case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
+      case 'Network.requestWillBeSent': case 'Network.responseReceived': case 'Network.loadingFinished': case 'Network.loadingFailed': { const e = tabOf(w, m); if (e && e.authNet) onLoginNetEvent(w, m.method, e, p); return; }
       default: return;
     }
   }
@@ -1079,12 +1085,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (verb === 'upload' && profileId) { const w = watches.get(String(profileId)); if (w) for (const rec of [...w.prompts.values()]) if (rec.type === 'file') dropPrompt(w, rec, 'uploaded'); } // lane browser-ui-prompts: the agent's upload answers the chooser
     if (!browserKey) return;
     if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now(); // lane browser-swiftshader-cpu
-    const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0 }; on[String(profileId)] = { n: o.n + 1, at: now() }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
+    const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0, verb: null }; on[String(profileId)] = { n: o.n + 1, at: now(), verb: verb ? String(verb) : o.verb }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
     // lane site-reset: a page-ACTING command's instant — a page turn right after it is the agent's, never the page's loop
     const w = profileId ? watches.get(String(profileId)) : null;
     if (w && verb && ST.loopActing(verb)) { w.commands.push(now()); if (w.commands.length > LOOP_COMMANDS_KEEP) w.commands.splice(0, w.commands.length - LOOP_COMMANDS_KEEP); }
   }
-  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
+  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at, verb: o.verb || null }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
   function verbRunning(browserKey) { const r = running.get(browserKey); if (!r) return false; if (now() - r.at > VERB_RUNNING_MAX_MS) { running.delete(browserKey); return false; } return r.n > 0; }
 
   /** Rule 6: a dialog that opened while a holder of this browser ran NO verb ⇒ ONE free next-turn notice (never a wake). */
@@ -2496,25 +2502,281 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) out.push({ id: f.id, targetId: e.targetId, kind: f.kind, origin: f.pageOrigin, fields: f.fields.map((x) => x.type) });
     return out;
   }
-  /** THE `login` DOOR: the road (src/browser-login.js roadVerdict — the standard-Chrome road through
-   *  `src/server/browser-login-fill.js` is WITHDRAWN in 2.369.364, refused by name before anything below runs; its branches stay
-   *  for the root fix to re-open) → the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan →
-   *  the kernel fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
+  const AGENT_NAV_VERBS = new Set(['open', 'goto', 'navigate', 'back', 'forward', 'reload']);
+  const stripHash = (u) => String(u || '').split('#')[0];
+  function allowVerbInFlight(profileId, browserKey = null) {
+    const pid = String(profileId || '');
+    if (!pid) return false;
+    const t = now();
+    const want = browserKey ? parentKey(browserKey) : null;
+    for (const [bk, r] of running) {
+      if (want && parentKey(bk) !== want) continue;
+      const o = r && r.on ? r.on[pid] : null;
+      if (!o || !(o.n > 0) || t - (o.at || 0) > WITNESS_MS) continue;
+      if (o.verb && BL().liveFillAllowsVerb(o.verb)) return true;
+    }
+    return false;
+  }
+  function agentNavInFlight(profileId) {
+    const pid = String(profileId || '');
+    if (!pid) return false;
+    const t = now();
+    for (const [, r] of running) {
+      const o = r && r.on ? r.on[pid] : null;
+      if (o && o.n > 0 && t - (o.at || 0) <= WITNESS_MS && o.verb && AGENT_NAV_VERBS.has(o.verb)) return true;
+    }
+    return false;
+  }
+  function recordScrubSecret(w, label, val) {
+    if (!w || typeof val !== 'string' || !val) return;
+    const bytes = Buffer.byteLength(val, 'utf8');
+    if (bytes < 4) return;
+    const lbl = String(label || 'login');
+    const list = w.scrubBindings || (w.scrubBindings = []);
+    const idx = list.findIndex((x) => x.value === val);
+    if (idx !== -1) list.splice(idx, 1);
+    list.push({ label: lbl, value: val, bytes, at: now() });
+    if (list.length > 32) list.splice(0, list.length - 32);
+  }
+  function hasScrubSecrets(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || !w.scrubBindings || !w.scrubBindings.length) return false;
+    const t = now();
+    w.scrubBindings = w.scrubBindings.filter((b) => b.bytes >= 8 || t - b.at <= 10 * 60e3);
+    return w.scrubBindings.length > 0;
+  }
+  function scrubShortSecret(text, b, minB) {
+    let out = text;
+    const ph = `[vault:${b.label}]`;
+    const buf = Buffer.from(b.value, 'utf8');
+    const b64 = buf.toString('base64');
+    const b64u = buf.toString('base64url');
+    const hex = buf.toString('hex');
+    for (const enc of [b64, b64u, b64.replace(/=+$/, ''), hex, hex.toUpperCase()]) {
+      if (enc && Buffer.byteLength(enc, 'utf8') >= minB && out.includes(enc)) out = out.split(enc).join(ph);
+    }
+    if (!out.includes(b.value)) return out;
+    const re = new RegExp('(?<![0-9A-Za-z])' + b.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![0-9A-Za-z])', 'g');
+    const numeric = /^-?\d+$/.test(b.value);
+    return out.replace(re, (m, off, s) => {
+      if (off >= 1 && s[off - 1] === ':' && /127\.0\.0\.1|localhost|\[::1\]/i.test(s.slice(Math.max(0, off - 16), off - 1))) return m;
+      if (numeric) {
+        let L = off - 1; while (L >= 0 && (s[L] === ' ' || s[L] === '\t' || s[L] === '\n' || s[L] === '\r')) L--;
+        let R = off + m.length; while (R < s.length && (s[R] === ' ' || s[R] === '\t' || s[R] === '\n' || s[R] === '\r')) R++;
+        if (L >= 0 && (s[L] === ':' || s[L] === '[' || s[L] === ',') && R < s.length && (s[R] === ',' || s[R] === '}' || s[R] === ']')) return JSON.stringify(ph);
+      }
+      return ph;
+    });
+  }
+  function scrubText(profileId, text) {
+    if (typeof text !== 'string' || !text) return text;
+    const w = watches.get(String(profileId || ''));
+    if (!w || !w.scrubBindings || !w.scrubBindings.length) return text;
+    const minB = VR().MIN_MASK_BYTES || 8;
+    const t = now();
+    const long = []; const short = [];
+    for (const b of w.scrubBindings) {
+      if (b.bytes >= minB) long.push({ label: b.label, value: b.value });
+      else if (b.bytes >= 4 && t - b.at <= 10 * 60e3) short.push(b);
+    }
+    let out = long.length ? VR().maskText(text, long) : text;
+    for (const b of short) out = scrubShortSecret(out, b, minB);
+    return out;
+  }
+  function scrubOutput(target, raw) {
+    const pid = String((target && target.profileId) || '');
+    if (!pid || !raw || typeof raw !== 'object') return { out: '', err: '', changed: false };
+    const o0 = typeof raw.out === 'string' ? raw.out : '';
+    const e0 = typeof raw.err === 'string' ? raw.err : '';
+    const out = o0 ? scrubText(pid, o0) : '';
+    const err = e0 ? scrubText(pid, e0) : '';
+    return { out, err, changed: out !== o0 || err !== e0 };
+  }
+  function liveFillVerdictFor(target, { verb = '', batchVerbs = null } = {}) {
+    const w = watches.get(String((target && target.profileId) || ''));
+    if (!w || w.state !== 'open') return { ok: true };
+    let any = false;
+    for (const e of w.targets.values()) if (e.liveFill) { any = true; break; }
+    if (!any) return { ok: true };
+    const scope = scopeFor(target);
+    for (const e of w.targets.values()) {
+      if (e.liveFill && inScope(scope, e.targetId)) return BL().liveFillVerdict({ verb, batchVerbs, origin: e.liveFill.origin });
+    }
+    return { ok: true };
+  }
+  function liveFillOnTarget(profileId, targetId = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open') return null;
+    if (targetId) {
+      const e = w.targets.get(String(targetId));
+      return e && e.liveFill ? e.liveFill : null;
+    }
+    for (const e of w.targets.values()) if (e.liveFill) return e.liveFill;
+    return null;
+  }
+  async function ensureLoginNet(w, e) {
+    if (!e || !e.sid) return;
+    if (!e.authNet) e.authNet = { enabled: false, seq: 0, reqs: new Map(), lastDocStatus: 0, lastMutationStatus: 0, okMutationSeq: 0, failMutationSeq: 0 };
+    if (e.authNet.enabled) return;
+    const nr = await call(w, 'Network.enable', { maxPostDataSize: 0, maxResourceBufferSize: 0, maxTotalBufferSize: 0 }, e.sid, 1500);
+    if (nr && !nr.timeout && !nr.error) e.authNet.enabled = true;
+  }
+  function confirmPendingLogin(w, e, pc, outcome) {
+    if (!pc || pc.confirmed || !logins) return;
+    pc.confirmed = true;
+    if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+    try {
+      const sr = logins.submitted({
+        origin: pc.origin, usernameHint: pc.user,
+        password: null,
+        outcome, by: 'agent', name: pc.name, conv: pc.conv, convName: pc.actor, profileId: w.profileId,
+      });
+      emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null });
+    } catch { /* */ }
+  }
+  function wakeSubmitWaiters(e) { if (e && e.submitWaiters) for (const fn of [...e.submitWaiters]) fn(); }
+  function checkSpaConfirm(w, e, pc) {
+    const timer = setTimeout(async () => {
+      if (!pc || pc.confirmed || e.pendingLoginConfirm !== pc || w.state !== 'open' || !e.sid) return;
+      const an = e.authNet;
+      if (!an || !(an.okMutationSeq > pc.netMark) || an.failMutationSeq > an.okMutationSeq) return;
+      const ft = await call(w, 'Page.getFrameTree', {}, e.sid, 1000);
+      const fid = (ft && !ft.timeout && !ft.error && ft.result && ft.result.frameTree && ft.result.frameTree.frame && ft.result.frameTree.frame.id) || e.targetId;
+      const iw = await call(w, 'Page.createIsolatedWorld', { frameId: fid, worldName: 'vs-login-confirm', grantUniveralAccess: false }, e.sid, 1000);
+      const ctxId = iw && !iw.timeout && !iw.error && iw.result ? Number(iw.result.executionContextId) : 0;
+      if (!Number.isInteger(ctxId) || ctxId <= 0) return;
+      const probeExpr = 'Array.from(document.querySelectorAll("input")).some((i) => i.type === "pass" + "word" && !i.disabled && !i.hidden && i.getBoundingClientRect().width > 0 && i.value.length > 0)';
+      const pr = await call(w, 'Runtime.evaluate', { expression: probeExpr, contextId: ctxId, returnByValue: true }, e.sid, 1000);
+      const stillFilled = pr && !pr.timeout && !pr.error && pr.result && pr.result.result ? pr.result.result.value : true;
+      if (stillFilled === false && !pc.confirmed && e.pendingLoginConfirm === pc) {
+        confirmPendingLogin(w, e, pc, 'submitted');
+        wakeSubmitWaiters(e);
+      }
+    }, 60);
+    if (timer.unref) timer.unref();
+  }
+  function onLoginNetEvent(w, method, e, p) {
+    const an = e.authNet;
+    if (!an) return;
+    const rid = String(p.requestId || '');
+    if (method === 'Network.requestWillBeSent') {
+      const prev = rid ? an.reqs.get(rid) : null;
+      if (prev && p.redirectResponse && ['POST', 'PUT', 'PATCH'].includes(prev.method)) {
+        const rs = Number(p.redirectResponse.status) || 0;
+        if (e.pendingLoginConfirm && prev.origin === e.pendingLoginConfirm.origin && rs >= 200 && rs < 400) {
+          an.seq++; an.lastMutationStatus = rs; an.okMutationSeq = an.seq;
+        }
+      }
+      if (rid && p.request) {
+        const reqMethod = String(p.request.method || 'GET').toUpperCase();
+        const url = String(p.request.url || '');
+        an.reqs.set(rid, { method: reqMethod, origin: BL().originOf(url), url, type: String(p.type || ''), status: 0, at: now() });
+        if (an.reqs.size > 64) an.reqs.delete(an.reqs.keys().next().value);
+      }
+      return;
+    }
+    if (method === 'Network.responseReceived') {
+      const rq = rid ? an.reqs.get(rid) : null;
+      const status = Number(p.response && p.response.status) || 0;
+      const type = String(p.type || (rq && rq.type) || '');
+      if (type === 'Document' && (!p.frameId || String(p.frameId) === e.targetId)) an.lastDocStatus = status;
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method)) {
+        rq.status = status;
+        if (e.pendingLoginConfirm && rq.origin === e.pendingLoginConfirm.origin) {
+          an.seq++; an.lastMutationStatus = status;
+          if (status >= 200 && status < 400) an.okMutationSeq = an.seq;
+          else if (status >= 400) { an.failMutationSeq = an.seq; wakeSubmitWaiters(e); }
+        }
+      }
+      return;
+    }
+    if (method === 'Network.loadingFinished') {
+      const rq = rid ? an.reqs.get(rid) : null;
+      if (rid) an.reqs.delete(rid);
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && rq.status >= 200 && rq.status < 300) {
+        if (e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && rq.origin === e.pendingLoginConfirm.origin) {
+          checkSpaConfirm(w, e, e.pendingLoginConfirm);
+        }
+      }
+      return;
+    }
+    if (method === 'Network.loadingFailed') {
+      const rq = rid ? an.reqs.get(rid) : null;
+      if (rid) an.reqs.delete(rid);
+      if (rq && ['POST', 'PUT', 'PATCH'].includes(rq.method) && e.pendingLoginConfirm && rq.origin === e.pendingLoginConfirm.origin) {
+        an.seq++; an.failMutationSeq = an.seq; wakeSubmitWaiters(e);
+      }
+    }
+  }
+  function onLoginFrameNavigated(w, e, navUrl) {
+    e.navSeq = (e.navSeq || 0) + 1;
+    const navOrigin = e.liveFill || e.pendingLoginConfirm ? BL().originOf(navUrl) : null;
+    if (e.liveFill && navOrigin) e.liveFill = null;
+    const pc = e.pendingLoginConfirm;
+    if (pc && !pc.confirmed) {
+      const an = e.authNet || null;
+      const mutOk = !!(an && an.okMutationSeq > pc.netMark && an.okMutationSeq >= (an.failMutationSeq || 0));
+      const mutFailed = !!(an && an.failMutationSeq > pc.netMark && an.failMutationSeq > (an.okMutationSeq || 0));
+      const docOk = !an || !an.lastDocStatus || an.lastDocStatus < 400;
+      const sameUrl = stripHash(navUrl) === stripHash(pc.urlAtFill);
+      const abandoned = !pc.submitAsked && !mutOk && agentNavInFlight(w.profileId);
+      if (abandoned) e.pendingLoginConfirm = null;
+      else if (navOrigin && docOk && !mutFailed && (!sameUrl || mutOk)) confirmPendingLogin(w, e, pc, 'navigated');
+    }
+    wakeSubmitWaiters(e);
+  }
+  function onLoginSameDocNav(w, e, navUrl) {
+    const pc = e.pendingLoginConfirm;
+    if (!pc || pc.confirmed) return;
+    const an = e.authNet || null;
+    if (an && an.okMutationSeq > pc.netMark && an.okMutationSeq >= (an.failMutationSeq || 0) && stripHash(navUrl) !== stripHash(pc.urlAtFill)) {
+      confirmPendingLogin(w, e, pc, 'navigated');
+      wakeSubmitWaiters(e);
+    }
+  }
+  function settleAfterSubmit(e, navSeq0, netMark, pc, budgetMs = 1500) {
+    const doneNow = () => (e.navSeq || 0) > navSeq0 || !!(pc && pc.confirmed) || !!(e.authNet && e.authNet.failMutationSeq > netMark);
+    if (doneNow()) return Promise.resolve();
+    return new Promise((resolve) => {
+      if (!e.submitWaiters) e.submitWaiters = new Set();
+      let settled = false, hard = null, idle = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (hard) clearTimeout(hard);
+        if (idle) clearTimeout(idle);
+        if (e.submitWaiters) e.submitWaiters.delete(onWake);
+        resolve();
+      };
+      const onWake = () => { if (doneNow()) finish(); };
+      e.submitWaiters.add(onWake);
+      idle = setTimeout(() => {
+        const mutInFlight = e.authNet && [...e.authNet.reqs.values()].some((q) => ['POST', 'PUT', 'PATCH'].includes(q.method));
+        if (!e.navSince && !mutInFlight) finish();
+      }, 160);
+      if (idle.unref) idle.unref();
+      hard = setTimeout(finish, budgetMs);
+      if (hard.unref) hard.unref();
+    });
+  }
+  /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface; or on standard Chrome, hub-side read-only
+   *  DOM inspection via `src/server/browser-login-fill.js`) → the logins module's plan → the kernel or hub fills (or the surface is
+   *  answered) → ONE use line → the agent's answer: what was filled, never a value. */
   async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
     const pid = String(profileId || ''); const w = watches.get(pid);
     if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-    const road = BL().roadVerdict(w.kernel);   // lane vault-login-chrome r2 (HOTFIX 2.369.364): the road FIRST, from the capability row — standard Chrome (login_fill_withdrawn) and a kernel without `credentials` (login_no_form) are refused here, before a form is read, the vault is opened or a CDP command is sent
+    const road = BL().roadVerdict(w.kernel);   // lane vault-login-chrome r2 → r3: the road FIRST, from the capability row — a kernel without `credentials` (login_no_form) is refused here before a form is read, the vault is opened or a CDP command is sent
     if (!road.ok) return road;
     const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const forms = [];
-    if (w.kernel) {
+    if (loginSinks(w)) {
       for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
       for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
     } else {
       for (const e of w.targets.values()) {
         if (!inScope(scope, e.targetId) || !e.sid) continue;
-        const f = await LF().inspectTabLoginForm({ call: (m, p) => call(w, m, p, e.sid), targetId: e.targetId, now: now() });
+        const f = await LF().inspectTabLoginForm({ call: (m, p) => call(w, m, p, e.sid), browserCall: (m, p) => call(w, m, p, null, 2000), targetId: e.targetId, trackedUrl: () => e.url, now: now() });
         if (f) forms.push(f);
       }
     }
@@ -2522,26 +2784,44 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
     if (!plan.ok) return plan;
     const e = w.targets.get(String(plan.form.targetId || ''));
-    let r = null, kerr = null, chromeStep = null;
+    let r = null, kerr = null, chromeStep = null, navSeq0 = 0, netMark = 0, pc = null;
     if (!e || !e.sid) kerr = 'not_attached';
     else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
-    else if (!w.kernel) {
-      const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), origin: plan.origin, loginId: plan.name, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
-      if (!cf || !cf.ok) kerr = (cf && cf.code) || 'eval_failed';
-      else chromeStep = cf.step || plan.form.step || null;
+    else if (!loginSinks(w)) {
+      await ensureLoginNet(w, e);
+      navSeq0 = e.navSeq || 0;
+      netMark = (e.authNet && e.authNet.seq) || 0;
+      if (e.authNet) e.authNet.lastDocStatus = 0;
+      let hasSecret = false;
+      for (const f of (plan.form && plan.form.fields) || []) {
+        if (!f || f.type === 'username') continue;
+        const fid = f.fieldId || f.id;
+        const sv = fid && plan.values && typeof plan.values[fid] === 'string' ? plan.values[fid] : '';
+        if (sv) { recordScrubSecret(w, plan.name, sv); hasSecret = true; }
+      }
+      if (hasSecret) e.liveFill = { origin: plan.origin, loginId: plan.name, mode: plan.mode, at: now(), navSeq0 };
+      if (plan.mode === 'signup' || plan.mode === 'change') {
+        pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, submitAsked: !!submit, confirmed: false };
+        e.pendingLoginConfirm = pc;
+      }
+      const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), browserCall: (m, p) => call(w, m, p, null, 2000), targetId: e.targetId, trackedUrl: () => e.url, origin: plan.origin, loginId: plan.name, mode: plan.mode, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
+      if (!cf || !cf.ok) {
+        kerr = (cf && cf.code) || 'eval_failed';
+        e.liveFill = null;
+        if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+      } else chromeStep = cf.step || plan.form.step || null;
     } else {
       r = await call(w, 'VibeSpace.fillCredential', { surfaceId: plan.form.id, values: plan.values, expectedOrigin: plan.origin, submit: !!submit }, e.sid);
       kerr = !r || r.timeout ? 'timeout' : r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(stale_origin|invalid_values|no_such_surface|eval_failed)\b/) || [])[1] || 'eval_failed') : r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
     }
     plan.values = null; // handed to the kernel — kept by no one here
     const u = logins.noteFill(plan, { conv, actor, outcome: kerr ? 'login_failed' : 'ok' });
-    if (kerr) return { ok: false, code: kerr === 'stale_origin' ? 'login_phishing' : 'login_failed', error: kerr === 'stale_origin' ? `the page is no longer ${plan.origin} (the kernel checked it again) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
-    if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
-    if (!w.kernel && submit && (plan.mode === 'signup' || plan.mode === 'change')) {
-      try {
-        const sr = logins.submitted({ origin: plan.origin, usernameHint: plan.user, password: null, outcome: 'navigated', by: 'agent', name: plan.name, conv, convName: actor, profileId: w.profileId });   // int361: the password-naming call on its own line (test-browser-prompts' watch: no line naming the password emits)
-        emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null }); } catch { /* */ }
+    if (kerr) {
+      const phish = kerr === 'stale_origin' || kerr === 'login_phishing';
+      return { ok: false, code: phish ? 'login_phishing' : 'login_failed', error: phish ? `the page is no longer ${plan.origin} (checked again before filling) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
     }
+    if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
+    if (!w.kernel && submit) await settleAfterSubmit(e, navSeq0, netMark, pc, 1500);
     return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
   }
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
@@ -2567,6 +2847,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return null;
     });
   }
+  try { keeper?.mediator?.()?.setLoginFence?.({ liveFillTarget: liveFillOnTarget, allowVerbInFlight, scrubText }); } catch { /* optional */ }
 
   return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, waitSettled /* int347: the alert race */, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
@@ -2579,7 +2860,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
-    fillLogin, loginForms, // lane browser-login: the `login` verb's door (the vault's values to the kernel, never to anyone else) + the forms a tab reports
+    fillLogin, loginForms, liveFillVerdictFor, liveFillOnTarget, allowVerbInFlight, hasScrubSecrets, scrubOutput, scrubText, // lane browser-login + vault-login-chrome r3
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
     shutdown: () => { for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }

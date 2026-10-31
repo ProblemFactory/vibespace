@@ -154,8 +154,6 @@ PAGE VERBS (your own browser, or the attachment you name):
                                                   "create a passkey"; each sign-in follows the policy the owner set per key
   vibespace-browser login [<origin>] [--user <name>] [--submit]   on the custom browser kernel: a login the owner keeps
                                                   in the vault is filled into the page's form — you never see the password
-                                                  (standard Chrome: withdrawn in 2.369.364 [login_fill_withdrawn] — ask the
-                                                  owner with vibespace-vault request, or ask-human)
   vibespace-browser login [<origin>] --new-user <name> --generate   register an account THROUGH the vault (it makes the
                                                   password; the login is saved for the owner automatically)
   vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
@@ -708,15 +706,17 @@ async function runPage(c) {
   // verb or a batch line. The resolve says whether a PINNED picture size rules it (then nothing runs); after a set that ran,
   // the audit answers the page's resulting size
   const vpSet = isViewportSet(rest);
-  const vpInBatch = cls.verb === 'batch' && batchCommands(cls, framed).some(isViewportSet);
-  let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+  const batchCmds = cls.verb === 'batch' ? batchCommands(cls, framed) : null;
+  const vpInBatch = !!(batchCmds && batchCmds.some(isViewportSet));
+  const batchVerbs = batchCmds ? batchCmds.map((w) => String(w[V.verbAt(w)] || 'unknown')) : null;
+  let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
   // lane browser-takeover-queue: a person is asked to take over this browser (`ask-human`) — the verb WAITS for their
   // handback (bounded), then asks again ONCE; still waiting / a reply ⇒ nothing ran, said by the server's words
   if (r._failed && (r.code === 'human_asked' || r.code === 'browser_paused') && r.request && r.request.id) {
     const w = await waitForHuman(r.request);
     if (!w.ended) { console.error(`${r.error || r.code} [${r.code}]`); console.error(`  ${w.line}`); process.exit(1); }
     console.error(`note: ${w.line}`);
-    r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+    r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
   }
   if (r._failed) {
     // lane browser-viewport-answer: a set refused while the user drives says the page's size first (their pane rules it)
@@ -1056,8 +1056,8 @@ async function runPage(c) {
   }
   child.on('exit', async (code) => {
     childDone = true; pollAbort.abort(); if (shotTimer) clearTimeout(shotTimer);
-    const outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
-    const tail = (outText + errText).slice(-4000);
+    let outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
+    let tail = (outText + errText).slice(-4000);
     // §3.7's audit: who used which browser, when, to do WHAT (the verb only —
     // a fill's content is never recorded) — the ephemeral browser too. A
     // navigation also stamps the lease's lastUrl (the URL rides `url`, never
@@ -1067,13 +1067,23 @@ async function runPage(c) {
     // lane browser-stuck: …and what the verb ran into (`dialog`: the watch's fact after it, the notes it was not told);
     // `timedOut` / `dialog` feed the unresponsive verdict (the browser CLI's own timeout words, measured on 0.38.1)
     const timedOut = DS ? DS.timedOutText(outText + '\n' + errText) : /CDP command timed out|tab is not responding/.test(outText + errText);
+    const needScrub = !!(r.scrubOutput && (outText || errText));
+    const scrubCapOk = !needScrub || (Buffer.byteLength(outText, 'utf8') <= 16 * 1024 * 1024 && Buffer.byteLength(errText, 'utf8') <= 16 * 1024 * 1024);
     let au = null;
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
     // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
     const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
     // int347 (the alert race): the verb's OWN daemon printed a page dialog line ⇒ the audit waits for the watch to have it
     const daemonSaw = DS && dlg && dlg.watched && !dialogVerb && !dialogHit ? DS.daemonDialogLine(outText + '\n' + errText) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}), ...(needScrub && scrubCapOk ? { output: { out: outText, err: errText } } : {}) }, { soft: true }); } catch { au = null; }
+    if (needScrub) {
+      if (!scrubCapOk || !au || au._failed) { console.error('vibespace-browser: refused — the browser output could not be scrubbed by the hub; nothing was printed [login_fill_live]'); process.exit(1); }
+      if (au.scrubbed && typeof au.scrubbed === 'object') {
+        if (typeof au.scrubbed.out === 'string') outText = au.scrubbed.out;
+        if (typeof au.scrubbed.err === 'string') errText = au.scrubbed.err;
+        tail = (outText + errText).slice(-4000);
+      }
+    }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -1262,8 +1272,7 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     process.exit(0);
   }
   // lane browser-login: `login [<origin>] [--user <u>] [--submit]` · `login [<origin>] --new-user <u> --generate` — a login the
-  // VAULT keeps, filled by the custom kernel on your own tab (you never see a value: the answer says what was filled + a receipt);
-  // lane vault-login-chrome r2: on standard Chrome the hub refuses it by name (login_fill_withdrawn, 2.369.364) before any vault read
+  // VAULT keeps, filled by the custom kernel on your own tab (you never see a value: the answer says what was filled + a receipt)
   if (verbName === 'login') {
     const pos = []; let user = null, newUser = null, submit = false, generate = false;
     for (let i = 1; i < cls.argv.length; i++) {

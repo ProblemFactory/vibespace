@@ -193,6 +193,31 @@ function pausedWords(method, pv) {
   return INT.interruptedText(method);
 }
 function isPausedMethod(method) { return pausedVerdict(method).refuse; }
+const LIVE_FILL_CODE = 'login_fill_live';
+const LIVE_FILL_ALWAYS_REFUSED = new Set([
+  'Page.captureScreenshot', 'Page.printToPDF', 'Page.captureSnapshot', 'Page.getResourceContent', 'Page.startScreencast',
+  'Network.getResponseBody', 'Network.getRequestPostData', 'Network.streamResourceContent',
+  'Fetch.getResponseBody', 'Fetch.takeResponseBodyAsStream',
+  'Storage.getCookies', 'Network.getCookies', 'Network.getAllCookies', 'DOMStorage.getDOMStorageItems',
+]);
+const LIVE_FILL_IDLE_REFUSED = new Set([
+  'Runtime.evaluate', 'Runtime.callFunctionOn', 'Runtime.getProperties', 'Runtime.runScript',
+  'DOM.getOuterHTML', 'DOM.getDocument', 'DOM.getFlattenedDocument', 'DOM.describeNode', 'DOM.resolveNode', 'DOM.getAttributes',
+  'Input.insertText',
+]);
+const LIVE_FILL_REFUSED_DOMAINS = new Set(['Debugger', 'HeapProfiler', 'Profiler', 'Audits']);
+/** lane vault-login-chrome r3: while a vault secret stands filled in a tab before navigation, refuse CDP reading/capture/debugger methods by name (`login_fill_live`). */
+function liveFillCdpVerdict(method, { allowVerb = false } = {}) {
+  const m = String(method || '');
+  const dom = m.split('.')[0];
+  if (LIVE_FILL_REFUSED_DOMAINS.has(dom) || LIVE_FILL_ALWAYS_REFUSED.has(m)) {
+    return { refuse: true, code: LIVE_FILL_CODE, error: `${m} is refused while a vault login secret stands filled in this tab — submit the form or navigate first` };
+  }
+  if (!allowVerb && (dom === 'Accessibility' || LIVE_FILL_IDLE_REFUSED.has(m))) {
+    return { refuse: true, code: LIVE_FILL_CODE, error: `${m} is refused while a vault login secret stands filled in this tab — submit the form or navigate first` };
+  }
+  return { refuse: false, code: null, error: null };
+}
 /**
  * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27): which calls STILL WAITING on the browser at the takeover
  * instant the mediator answers NOW with `browser_interrupted` (`abort`: every pending call whose method is refused
@@ -554,6 +579,7 @@ module.exports = {
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
+  LIVE_FILL_CODE, liveFillCdpVerdict, // lane vault-login-chrome r3: CDP fence while a vault secret stands filled in the tab
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)
   INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)

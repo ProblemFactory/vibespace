@@ -216,7 +216,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
   login_fill_withdrawn: 409, login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
-  login_bad_origin: 400, login_bad_user: 400, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
+  login_bad_origin: 400, login_bad_user: 400, login_fill_live: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
   browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
@@ -1802,6 +1802,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       if (pairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
+        if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
         return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
@@ -1819,6 +1820,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
         { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
+        if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         // verify r2 (D6): a helper's browser keeps nothing — said ONCE, in its own first answer (the CLI prints the note)
         return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
       }
@@ -1829,6 +1831,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
     // agent harness's own tool timeout fired while the rebind queued) never reads it: put it back for the next command.
     if (r && r.rebound && clientGone(req, res) && typeof k.restoreRebound === 'function') k.restoreRebound(v.attachment.profileId, f.browserKey, r.rebound);
     { const g = await cliGoneVerdict(k, r.browser); if (g) return failVerdict(res, g); }
+    if (await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
     send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, resolvedAt) });
@@ -1848,6 +1851,7 @@ async function resolveForJob(req, res, k, f) {
     k.tell(f.browserKey);
     const v = k.resolveFor({ browserKey: f.browserKey, handle: '', verb });
     if (!v.ok) return failVerdict(res, v);
+    if (await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;
     const at = typeof k.clock === 'function' ? k.clock() : Date.now();
     res.json({ ok: true, kind: 'attachment', job: true, handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: true, at, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, at) });
   } catch (e) { fail(res, e); }
@@ -1985,7 +1989,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const vpq = req.body?.viewport && typeof req.body.viewport === 'object' ? req.body.viewport : null;
     let viewport = null;
     if (vpq && ctx.browserViewport) { try { viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: typeof vpq.handle === 'string' ? vpq.handle.slice(0, 200) : '', argv: Array.isArray(vpq.argv) ? vpq.argv.slice(0, 16).map((x) => String(x).slice(0, 200)) : [], ran: vpq.ran !== false }); } catch { viewport = null; } }
-    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}) });
+    let scrubbed = null;
+    if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {
+      const t = dialogTargetFor(k, f, profileId);
+      if (t.ok) { const sc = ctx.dialogs.scrubOutput(t, req.body.output); if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err }; }
+    }
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
@@ -2008,6 +2017,23 @@ function dialogTargetFor(k, f, profileId) {
   return { ok: true, profileId: p.id, ephemeral: false, sessionId: f.sessionId, browserKey: f.browserKey };
 }
 function endVerb(f, profileId = null) { try { ctx.dialogs?.verbEnded?.(f.browserKey, { profileId: profileId || null }); } catch { /* optional */ } }
+/** lane vault-login-chrome r3: while a vault secret stands filled in a tab before navigation, refuse reading/eval/capture verbs by name (`login_fill_live`). */
+async function liveFillRefusal(res, k, f, profileId, req, verb) {
+  const D = ctx.dialogs;
+  if (!D || !profileId || typeof D.liveFillVerdictFor !== 'function') return false;
+  const t = dialogTargetFor(k, f, profileId);
+  if (!t.ok) return false;
+  try { await D.arm(t.profileId); } catch { return false; }
+  const rawBatch = Array.isArray(req.body?.batchVerbs) ? req.body.batchVerbs : null;
+  const batchVerbs = rawBatch ? (rawBatch.length > 256 ? ['__overflow__'] : rawBatch.map((x) => String(x || ''))) : null;
+  const lv = D.liveFillVerdictFor(t, { verb, batchVerbs });
+  if (lv && !lv.ok) {
+    const BL = require('../browser-login.js'), PT = require('../peer-text.js');
+    res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code, ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) });
+    return true;
+  }
+  return false;
+}
 /** `{dialog: {watched, open, text, notes, stuck}}` for a resolve / audit answer ({} without a watch). A resolve ARMS the
  *  watch first (bounded — it must be on the tab before the verb can open a dialog) and marks the verb running; an
  *  audit ends it and notes its outcome. Notes are told ONCE (consumed here). Never throws. */
@@ -2063,7 +2089,8 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
+    const scrubOut = !!(arm && typeof D.hasScrubSecrets === 'function' && D.hasScrubSecrets(t.profileId));
+    return { ...(scrubOut ? { scrubOutput: true } : {}), dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -2305,6 +2332,10 @@ router.post('/api/agent/browser/direct', async (req, res) => {
       const r = await D.closeTab(t, tid ? { targetId: tid } : {});
       if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
       return res.json({ ok: true, text: tid ? ST.busyCloseText(r) : ST.closeText({ ...r, busyMs }), url: r.url, title: r.title, opened: !!r.opened, ...(r.was ? { loop: r.was } : {}) });
+    }
+    if (typeof D.liveFillVerdictFor === 'function') {
+      const lv = D.liveFillVerdictFor(t, { verb: 'screenshot' });
+      if (lv && !lv.ok) { const BL = require('../browser-login.js'), PT = require('../peer-text.js'); return res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code }); }
     }
     const r = await D.captureTab(t);
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code, ...(r.loop ? { loop: r.loop } : {}) });

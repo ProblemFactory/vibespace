@@ -72,6 +72,7 @@ const quiet = { log() { }, warn() { }, error() { } };
 const pwOf = (tag) => [tag, crypto.randomBytes(6).toString('hex'), 'Zq', String(crypto.randomInt(10, 99))].join('-');
 // a SEEDED rng (the suite's own — the server hands node crypto)
 const seeded = (seed) => { let s = seed >>> 0; return (n) => { const out = Buffer.alloc(n); for (let i = 0; i < n; i++) { s = (Math.imul(s, 1103515245) + 12345) >>> 0; out[i] = (s >>> 16) & 255; } return out; }; };
+// cdp-protocol-under-test — 'Page.navigate' in §⑪ tests pure CDP mediation verdicts, never a live browser navigation
 const SITE = 'https://shop.example.test', SITE2 = 'https://other.example.test';
 
 // ═══ ① PURE names / origins / resources ═══
@@ -155,15 +156,15 @@ const FORM = (o = {}) => BL.formOf({ surfaceId: 'surf-cred-1', targetId: 'T1', p
 console.log('④ the fill verdict — the road · form · phishing · ambiguity · grant · vault (in that order)');
 const ME = { conversationKeys: ['conv-1'], groupIds: ['tg-1'] };
 {
-  // lane vault-login-chrome r2 (HOTFIX 2.369.364): THE ROAD first — the browser's capability row, never a provider id
-  ok(eq(Object.keys(BL.ROADS), ['kernel', 'kernel-no-credentials', 'standard']) && BL.ROADS.kernel.fills === true && BL.ROADS['kernel-no-credentials'].code === 'login_no_form' && BL.ROADS.standard.fills === false && BL.ROADS.standard.code === 'login_fill_withdrawn' && BL.ROADS.standard.withdrawnIn === '2.369.364' && BL.WITHDRAWN_IN === '2.369.364' && BL.REFUSALS.includes('login_fill_withdrawn'),
-    'the road rows: a kernel with credentials fills; a kernel without them has no form; standard Chrome is WITHDRAWN in 2.369.364 by name');
+  // lane vault-login-chrome r2 → r3: THE ROAD first — the browser's capability row, never a provider id; r3 re-opens `standard`
+  ok(eq(Object.keys(BL.ROADS), ['kernel', 'kernel-no-credentials', 'standard']) && BL.ROADS.kernel.fills === true && BL.ROADS['kernel-no-credentials'].code === 'login_no_form' && BL.ROADS.standard.fills === true && BL.WITHDRAWN_IN === '2.369.364' && BL.REFUSALS.includes('login_fill_withdrawn') && BL.REFUSALS.includes('login_fill_live'),
+    'the road rows: a kernel with credentials fills; a kernel without them has no form; standard Chrome is RE-OPENED in r3 (fills: true)');
   ok(BL.roadOf({ protocol: 1, kinds: [], features: ['surfaces', 'credentials'] }) === 'kernel' && BL.roadOf({ protocol: 1, kinds: [], features: ['surfaces', 'webauthn'] }) === 'kernel-no-credentials' && BL.roadOf(false) === 'standard' && BL.roadOf(null) === 'standard' && BL.roadOf(undefined) === 'standard' && BL.roadOf('custom-kernel') === 'standard' && BL.roadOf({ provider: 'custom-kernel', features: ['surfaces'] }) === 'kernel-no-credentials',
     'roadOf reads the kernel fact\'s features alone: standard Chrome (false) and a fact not asked yet (null) are one road; a provider name never opens one');
   const wd = BL.roadVerdict(false), wn = BL.roadVerdict(null), nc = BL.roadVerdict({ protocol: 1, features: ['surfaces'] }), kr = BL.roadVerdict({ protocol: 1, features: ['surfaces', 'credentials'] });
-  ok(!wd.ok && wd.code === 'login_fill_withdrawn' && wd.road === 'standard' && wd.withdrawnIn === '2.369.364' && eq(wn, wd) && /withdrawn in 2\.369\.364/.test(wd.error) && /claim another site's origin/.test(wd.error) && /secret in a script/.test(wd.error) && /vibespace-vault request/.test(wd.error) && /ask-human/.test(wd.error) && /nothing was read from the vault and nothing was typed/.test(wd.error),
-    'roadVerdict(standard Chrome) ⇒ login_fill_withdrawn: why (the origin, the script), what was not done, the two doors (vibespace-vault request · ask-human)', wd);
-  ok(!nc.ok && nc.code === 'login_no_form' && /standard Chrome/.test(nc.error) && kr.ok === true && kr.road === 'kernel', 'roadVerdict: a kernel without credentials ⇒ login_no_form (its words unchanged); a kernel with them ⇒ the road is open');
+  ok(wd.ok === true && wd.road === 'standard' && eq(wn, wd),
+    'roadVerdict(standard Chrome) ⇒ {ok:true, road:"standard"} (re-opened by r3 root fix)', wd);
+  ok(!nc.ok && nc.code === 'login_no_form' && nc.road === 'kernel-no-credentials' && /standard Chrome/.test(nc.error) && kr.ok === true && kr.road === 'kernel', 'roadVerdict: a kernel without credentials ⇒ login_no_form (its words unchanged); a kernel with them ⇒ the road is open');
 }
 const rowsFrom = (rows) => (res) => rows.filter((r) => r.resource === res);
 const ROW = (resource, to, except = []) => ({ door: 'browser-login', resource, to, except });
@@ -302,11 +303,12 @@ async function world({ mode = {}, takeover = () => false, kernel = startFakeKern
 const FILL = (o = {}) => ({ facts: ME, conv: 'conv-1', actor: 'Chat One', ...o });
 const fresh = (X) => X.evs.length;
 // lane vault-login-chrome r2c: WHAT THE WATCH SENDS ON ITS OWN, by name (src/server/browser-dialogs.js) — a tab it arms: track
-// (Target.attachToTarget) → enable (Page.enable) → armPrompts (the file-chooser + sign-in hooks) → armHook (the passkey hook: a
-// binding, two scripts, Runtime.enable, then pkFind's ONE look — Runtime.evaluate('CredentialsContainer.prototype') — at every
-// document the stub had announced by then). The fill road (src/server/browser-login-fill.js, fillLogin in browser-dialogs.js) speaks
-// none of these (pinned below) — and a name is never the proof (r2d, mineOf).
-const WATCH_OWN = Object.freeze({ 'Target.attachToTarget': 'track', 'Page.enable': 'enable', 'Page.setInterceptFileChooserDialog': 'armPrompts', 'Fetch.enable': 'armPrompts', 'Runtime.addBinding': 'armHook', 'Page.addScriptToEvaluateOnNewDocument': 'armHook', 'Runtime.enable': 'armHook' });
+// (Target.attachToTarget) → armSurfaces (VibeSpace.enable + VibeSpace.listSurfaces on a kernel) → enable (Page.enable) →
+// armPrompts (the file-chooser + sign-in hooks) → armHook (the passkey hook: a binding, two scripts, Runtime.enable, then pkFind's
+// ONE look — Runtime.evaluate('CredentialsContainer.prototype') — at every document the stub had announced by then). The fill road
+// (src/server/browser-login-fill.js, fillLogin in browser-dialogs.js) speaks none of these (pinned below) — and a name is never the
+// proof (r2d, mineOf).
+const WATCH_OWN = Object.freeze({ 'Target.attachToTarget': 'track', 'VibeSpace.enable': 'armSurfaces', 'VibeSpace.listSurfaces': 'armSurfaces', 'Page.enable': 'enable', 'Page.setInterceptFileChooserDialog': 'armPrompts', 'Fetch.enable': 'armPrompts', 'Runtime.addBinding': 'armHook', 'Page.addScriptToEvaluateOnNewDocument': 'armHook', 'Runtime.enable': 'armHook' });
 const PK_LOOK = 'CredentialsContainer.prototype';
 const ownOf = (c) => (c.method === 'Runtime.evaluate' ? (c.params && c.params.expression === PK_LOOK ? 'pkFind' : null) : Object.hasOwn(WATCH_OWN, c.method) ? WATCH_OWN[c.method] : null);
 // r2d WHO SENT IT (review r2c F1: seven of the names matched any params on any session — a fillLogin that sent armHook's script on
@@ -363,7 +365,8 @@ async function fence(X) {
   const f = X.k.calls().find((c) => c.seq > before && c.id === id && c.tab === tab && c.method === 'Runtime.evaluate' && c.params.expression === '1');
   return a.asked && a.pages.length === 1 && a.pages[0].answered === true && f ? f.seq : NaN;
 }
-const withdrawn = (r) => !r.ok && r.code === 'login_fill_withdrawn' && r.road === 'standard' && r.error === BL.roadVerdict(false).error;
+const REFUSED_MODE = Object.freeze({ features: ['surfaces'] }); // kernel-no-credentials (and no webauthn, so armHook + pkFind still run): refused at roadVerdict
+const roadRefused = (r) => !r.ok && r.code === 'login_no_form' && r.road === 'kernel-no-credentials' && r.error === BL.roadVerdict(REFUSED_MODE).error;
 const roadCall = (c) => /^Input\./.test(c.method) || c.method === 'Runtime.evaluate';
 /** The window between the leg's two marks: the watch's own calls in it (mineOf — WHO, then the name), the rest = the fill road's. */
 function inWindow(X, m, to) {
@@ -576,39 +579,79 @@ async function refusedFills(X, during = null) {
     const r = await A.w.fillLogin(TGT, FILL());
     ok(A.w.loginForms(PID).length === 0 && !r.ok && r.code === 'login_no_form' && /standard Chrome/.test(r.error) && A.logs.some((l) => /does not list the credentials feature/.test(l)), 'a kernel whose features do not list credentials: no form is kept, `login` ⇒ login_no_form (one journal line)');
   } finally { await A.close(); }
+  // Refused capability road (kernel-no-credentials, with passkey hook active): 0 vault reads, 0 road CDP commands in the marked window
+  const S0 = await world({ mode: REFUSED_MODE });
+  try {
+    ok(S0.logins.addOwn({ origin: SITE, username: 'Alice', password: pwOf('std') }).ok && S0.logins.grant(`web-login:${SITE}#alice`, 'this-account', 'session:conv-1').ok, 'refused capability road: the owner keeps a login of the site and grants it to this conversation');
+    const reads = { secretGet: 0, secretNames: 0, noteUse: 0 };
+    for (const m of Object.keys(reads)) { const f = S0.eng[m].bind(S0.eng); S0.eng[m] = (...a) => { reads[m]++; return f(...a); }; }
+    const x = await refusedFills(S0), rs = x.rs;
+    ok(rs.every(roadRefused), 'roadVerdict refusal ⇒ login_no_form by name — login · --submit · --new-user --generate · --generate alike', rs);
+    ok(reads.secretGet === 0 && reads.secretNames === 0 && reads.noteUse === 0 && S0.audit().filter((l) => /^vault-(totp-)?use$/.test(l.event)).length === 0, '… 0 vault reads: secretGet / secretNames never called, the use-writer noteUse never called, no use line', reads);
+    ok(noRoad(x), '… 0 CDP commands for it: in the window between the leg\'s two marks on the stub\'s socket nothing rides the login tab — 0 Input.*, 0 Runtime.evaluate, no name the watch also speaks', { from: x.from, to: x.to, own: x.own, road: x.road });
+    ok(BL.loginText(rs[0]) === rs[0].error, '… the agent\'s sentence is the refusal\'s own words');
+  } finally { await S0.close(); }
+  // Standard Chrome (re-opened in r3): assert the FOUR r3 rules inside the marked window on the stub's socket
   const S = await world({ mode: { standard: true } });
   try {
-    // lane vault-login-chrome r2 (HOTFIX 2.369.364): a login the vault keeps AND its grant — only the road keeps it unread
-    ok(S.logins.addOwn({ origin: SITE, username: 'Alice', password: pwOf('std') }).ok && S.logins.grant(`web-login:${SITE}#alice`, 'this-account', 'session:conv-1').ok, 'standard Chrome: the owner keeps a login of the site and grants it to this conversation');
-    const reads = { secretGet: 0, secretNames: 0, noteUse: 0 };
-    for (const m of Object.keys(reads)) { const f = S.eng[m].bind(S.eng); S.eng[m] = (...a) => { reads[m]++; return f(...a); }; }
-    const x = await refusedFills(S), rs = x.rs;
-    ok(rs.every(withdrawn), 'standard Chrome ⇒ login_fill_withdrawn by name — login · --submit · --new-user --generate · --generate alike', rs);
-    ok(reads.secretGet === 0 && reads.secretNames === 0 && reads.noteUse === 0 && S.audit().filter((l) => /^vault-(totp-)?use$/.test(l.event)).length === 0, '… 0 vault reads: secretGet / secretNames never called, the use-writer noteUse never called, no use line', reads);
-    // lane vault-login-chrome r2c: the window the leg marks — never the whole socket (int361: a look the watch took while ARMING, before the first mark, read as the road's)
-    ok(noRoad(x), '… 0 CDP commands for it: in the window between the leg\'s two marks on the stub\'s socket nothing rides the login tab — 0 Input.*, 0 Runtime.evaluate, no name the watch also speaks (r2d: the watch\'s own only on a tab it arms there)', { from: x.from, to: x.to, own: x.own, road: x.road });
-    ok(BL.loginText(rs[0]) === rs[0].error, '… the agent\'s sentence is the refusal\'s own words');
+    const PWS = pwOf('std-r3');
+    ok(S.logins.addOwn({ origin: SITE, username: 'Alice', password: PWS }).ok && S.logins.grant(`web-login:${SITE}#alice`, 'this-account', 'session:conv-1').ok && S.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1').ok, 'standard Chrome (r3): login and any-account registration granted on the site');
+    // Rule 1: browser-truth origin + isolated world; disagreement refuses login_phishing with 0 Input.insertText
+    S.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE2, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'password', autocomplete: 'current-password', visible: true }] });
+    const mp = markOf(S), rp = await S.w.fillLogin(TGT, FILL()), top = await fence(S), wp = inWindow(S, mp, top);
+    ok(!rp.ok && rp.code === 'login_phishing' && !wp.win.some((c) => c.method === 'Input.insertText') && wp.win.filter((c) => c.method === 'Runtime.evaluate').every((c) => Number.isInteger(c.params.contextId)),
+      'r3 Rule 1 (origin gate): page claiming another origin vs browser truth ⇒ login_phishing, 0 Input.insertText, every Runtime.evaluate in isolated world', { rp, road: wp.road });
+    // Rule 2: zero secret in Runtime.evaluate (Input.insertText ONLY) + fail-closed on insert error / cleared field
+    S.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, clearOnInput: true, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'email', autocomplete: 'username', visible: true }, { fieldId: 'vs-f-1', tag: 'input', type: 'password', autocomplete: 'current-password', visible: true }] });
+    const mc = markOf(S), rc = await S.w.fillLogin(TGT, FILL()), toc = await fence(S), wc = inWindow(S, mc, toc);
+    ok(!rc.ok && rc.code === 'login_failed' && !JSON.stringify(wc.win).includes(PWS) && (S.k.standardPage().wiped || 0) >= 1,
+      'r3 Rule 2a (fail-closed): cleared field after Input.insertText ⇒ login_failed, touched fields wiped, 0 secret bytes in any CDP expression', { rc, wiped: S.k.standardPage().wiped });
+    S.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, hasForm: false, buttons: [
+      { btnId: 'vs-b-0', inForm: false, depth: 0, after: true, visible: true, tag: 'button', type: 'button', text: 'Show password' },
+      { btnId: 'vs-b-1', inForm: false, depth: 0, after: true, visible: true, tag: 'button', type: 'button', text: 'Back' },
+      { btnId: 'vs-b-2', inForm: false, depth: 0, after: true, visible: true, tag: 'div', role: 'button', text: 'Sign in' },
+    ], fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'email', autocomplete: 'username', visible: true }, { fieldId: 'vs-f-1', tag: 'input', type: 'password', autocomplete: 'current-password', visible: true }] });
+    const mf = markOf(S), rf = await S.w.fillLogin(TGT, FILL({ submit: true })), tof = await fence(S), wf = inWindow(S, mf, tof);
+    const isoIds = new Set(S.k.isoWorlds().map(([id]) => id));
+    ok(rf.ok && eq(rf.filled, ['username', 'password']) && rf.submitted === true && !JSON.stringify(rf).includes(PWS) && !JSON.stringify(wf.win).includes(PWS) && wf.win.some((c) => c.method === 'Input.insertText') && wf.win.filter((c) => c.method === 'Runtime.evaluate').every((c) => isoIds.has(c.params.contextId)),
+      'r3 Rule 2b (Input.insertText only + isolated world): filled on standard Chrome with 0 secret bytes in Runtime.evaluate and every eval in Page.createIsolatedWorld', { rf, road: wf.road });
+    // Rule 3: no .value getter mask; live-fill read fence active before navigation and cleared on navigation; value-based scrubbing
+    ok(!JSON.stringify(wf.win).includes('defineProperty') && S.w.liveFillVerdictFor(TGT, { verb: 'eval' }).code === 'login_fill_live' && S.w.liveFillVerdictFor(TGT, { verb: 'click' }).ok === true && S.w.scrubText(PID, `leak:${PWS}`) === `leak:[vault:web-login:${SITE}#alice]`,
+      'r3 Rule 3 (no getter mask + live_fill fence + value scrub): 0 defineProperty masks, eval fenced with login_fill_live while click allowed, value scrubbed to [vault:<id>]');
+    // Rule 4: form-less submit picked Sign in (skipping Show password & Back), and signup stays pending until proven navigation
+    ok(S.k.standardPage().clickedBtn === 'vs-b-2', 'r3 Rule 4a (submit classifier): form-less --submit clicked Sign in (vs-b-2), skipping Show password and Back', S.k.standardPage());
+    S.k.navigate(S.k.targets()[0].targetId, SITE + '/signup');
+    await until(() => S.w.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1500);
+    S.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'email', autocomplete: 'username', visible: true }, { fieldId: 'vs-f-1', tag: 'input', type: 'password', autocomplete: 'new-password', visible: true }] });
+    const rs = await S.w.fillLogin(TGT, FILL({ newUser: 'newstd@example.test', generate: true, submit: true }));
+    await sleep(90);
+    const pendRec = BL.recordOf(S.eng.secretGet(`web-login:${SITE}#newstd@example.test`).value.toString('utf8'));
+    ok(rs.ok && pendRec && pendRec.pending === 'register', 'r3 Rule 4b (no 60 ms timer): signup without navigation/2xx stays pending after 90 ms', pendRec && { pending: pendRec.pending });
+    S.k.navigate(S.k.targets()[0].targetId, SITE + '/welcome');
+    await until(() => { const r0 = BL.recordOf(S.eng.secretGet(`web-login:${SITE}#newstd@example.test`).value.toString('utf8')); return r0 && !r0.pending; }, 1500);
+    const confRec = BL.recordOf(S.eng.secretGet(`web-login:${SITE}#newstd@example.test`).value.toString('utf8'));
+    ok(confRec && !confRec.pending && confRec.submittedAt > 0, 'r3 Rule 4c (proven outcome): navigation away to /welcome promotes the pending signup entry', confRec && { submittedAt: confRec.submittedAt });
   } finally { await S.close(); }
   // r2c REPLAY ① — the recorded red, by the slow box's ONE read: the passkey hook's look lands while the watch ARMS, before the first mark
-  const S1 = await world({ mode: { standard: true }, WebSocketImpl: OneRead });
+  const S1 = await world({ mode: REFUSED_MODE, WebSocketImpl: OneRead });
   try {
     const x = await refusedFills(S1);
     const pre = S1.k.calls().filter((c) => c.seq <= x.from && roadCall(c));
     ok(!x.was.ok && x.was.sent.length === 0 && x.was.whole.length === 1 && pre.length === 1 && ownOf(pre[0]) === 'pkFind', 'REPLAY ① the recorded shape: pkFind\'s ONE Runtime.evaluate(CredentialsContainer.prototype) while the watch arms, before the first mark — `sent` [] and the whole-socket count 1: the leg as it was is RED on it', x.was);
-    ok(x.rs.every(withdrawn) && noRoad(x), '… the marked window is GREEN on it (the look is outside the window; the fills refused by name)', { own: x.own, road: x.road });
+    ok(x.rs.every(roadRefused) && noRoad(x), '… the marked window is GREEN on it (the look is outside the window; the fills refused by name)', { own: x.own, road: x.road });
   } finally { await S1.close(); }
   // r2c REPLAY ② — the same look INSIDE the window: a tab the page opens while the login is refused, armed by the watch through the one read
-  const S2 = await world({ mode: { standard: true }, WebSocketImpl: OneRead });
+  const S2 = await world({ mode: REFUSED_MODE, WebSocketImpl: OneRead });
   try {
     const at = {}, x = await refusedFills(S2, popUp(S2, at)), pop = at.pop;
     ok(!x.was.ok && x.was.sent.includes('Runtime.evaluate') && x.own.some((o) => o.startsWith('pkFind:')), 'REPLAY ② the same look INSIDE the window (a tab the page opens is armed while the login is refused): the leg as it was is RED on it', x.was);
-    ok(x.rs.every(withdrawn) && noRoad(x) && x.own.length >= 2 && x.win.every((c) => c.tab === pop), '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own, every one on the tab the page opened (r2d) and heard by the mid mark (r2e) — and the fill road still sent nothing', { own: x.own, road: x.road });
+    ok(x.rs.every(roadRefused) && noRoad(x) && x.own.length >= 2 && x.win.every((c) => c.tab === pop), '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own, every one on the tab the page opened (r2d) and heard by the mid mark (r2e) — and the fill road still sent nothing', { own: x.own, road: x.road });
   } finally { await S2.close(); }
   {
     // r2c: the names can never hide the fill road — r2d: a second layer (the tab decides, mineOf) over EVERY product text that sends
     // on the login tab: browser-login-fill.js and fillLogin in browser-dialogs.js, a method however quoted; the pin's RED controls in ⑩
     const p = pinOf(fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8'), fillLoginOf(fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8')));
-    ok(p.ok && eq(p.sends, ['Input.insertText', 'Runtime.evaluate']) && eq(p.doorSends, ['VibeSpace.fillCredential']), `… the names never hide the road: browser-login-fill.js sends ${p.sends.join(' · ')}, fillLogin ${p.doorSends.join(' · ')} (+ the fill module's, passed through) — no name of the watch's in either text however quoted, never pkFind's look, every call site names its method`, p);
+    ok(p.ok && eq(p.sends, ['Input.dispatchKeyEvent', 'Input.insertText', 'Page.createIsolatedWorld', 'Page.getFrameTree', 'Runtime.evaluate', 'Target.getTargetInfo']) && eq(p.doorSends, ['VibeSpace.fillCredential']), `… the names never hide the road: browser-login-fill.js sends ${p.sends.join(' · ')}, fillLogin ${p.doorSends.join(' · ')} (+ the fill module's, passed through) — no name of the watch's in either text however quoted, never pkFind's look, every call site names its method`, p);
     ok([{ method: 'Input.insertText', params: { text: 'x' } }, { method: 'Runtime.evaluate', params: { expression: '(() => document.forms.length)()' } }].every((c) => ownOf(c) === null) && ownOf({ method: 'constructor', params: {} }) === null, 'RED control: a road call (Input.insertText, a Runtime.evaluate the watch does not name) is nobody\'s own — it counts');
   }
   const X = await world();
@@ -872,30 +915,33 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   ok(M4 && M4.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).ok === true && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).code === 'login_not_granted' && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-1'], vaultState: 'unlocked' }).ok === true,
     'RED: a copy that reads any caller as the owner fills an agent\'s own login for another conversation (the real one: its owner only, by name)');
   ok(M3 && M3.fillVerdict({ forms: [p8443], entries: ENT, grantRows: rowsFrom([ROW('*', [{ kind: 'everyone' }])]), facts: ME, vaultState: 'unlocked' }).ok === true, 'RED: a copy matching by host alone offers the :443 login on a :8443 page (the real one is exact to the port)');
-  // lane vault-login-chrome r2 (HOTFIX 2.369.364): the row and the gate each hold the withdrawn road shut
-  const reopened = SRC.replace("standard: Object.freeze({ fills: false,", "standard: Object.freeze({ fills: true,");
-  const M5 = reopened !== SRC ? MUT.load('src/browser-login.js', reopened, 'reopened') : null;
-  ok(M5 && M5.roadVerdict(false).ok === true && BL.roadVerdict(false).code === 'login_fill_withdrawn', 'RED: a copy whose standard row fills opens the withdrawn road (the real row refuses it)');
+  // lane vault-login-chrome r2 → r3: a copy that flips kernel-no-credentials open or flips standard back to withdrawn
+  const reopenedNc = SRC.replace("'kernel-no-credentials': Object.freeze({ fills: false,", "'kernel-no-credentials': Object.freeze({ fills: true,");
+  const rewithdrawn = SRC.replace("standard: Object.freeze({ fills: true }),", "standard: Object.freeze({ fills: false, code: 'login_fill_withdrawn', withdrawnIn: WITHDRAWN_IN }),");
+  const M5 = reopenedNc !== SRC ? MUT.load('src/browser-login.js', reopenedNc, 'reopened-nc') : null;
+  const M5w = rewithdrawn !== SRC ? MUT.load('src/browser-login.js', rewithdrawn, 'rewithdrawn') : null;
+  ok(M5 && M5.roadVerdict(REFUSED_MODE).ok === true && BL.roadVerdict(REFUSED_MODE).code === 'login_no_form' && M5w && M5w.roadVerdict(false).code === 'login_fill_withdrawn' && BL.roadVerdict(false).ok === true,
+    'RED: a copy opening kernel-no-credentials lets the non-credential kernel through, and a copy withdrawing standard returns 2.369.364\'s login_fill_withdrawn');
 }
 {
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const noGate = DSRC.replace('    if (!road.ok) return road;\n', '    if (false) return road;\n');
   const MD = noGate !== DSRC ? MUT.load('src/server/browser-dialogs.js', noGate, 'nogate') : null;
-  // no login in this vault — the copy can only READ the tab (the 2.369.363 form inspection), never type
-  const S = MD ? await world({ mode: { standard: true }, Dmod: MD }) : null;
+  // no login in this vault — the copy can only READ the tab, never type
+  const S = MD ? await world({ mode: REFUSED_MODE, Dmod: MD }) : null;
   try {
     const m = S ? markOf(S) : null; // lane vault-login-chrome r2c: the same marked window the leg reads — a real leak is the road's, never a name's
     const r = S ? await S.w.fillLogin(TGT, FILL()) : null;
     const to = S ? await fence(S) : NaN;
     const road = S ? inWindow(S, m, to).road : [];
-    ok(MD && r && r.code !== 'login_fill_withdrawn' && road.some((c) => c.startsWith('Runtime.evaluate#')), 'RED: a watch copy without the road gate sends Runtime.evaluate to a standard-Chrome tab — the marked window counts it as the road\'s (the real watch sends nothing)', { code: r && r.code, road });
+    ok(MD && r && road.some((c) => c.startsWith('Runtime.evaluate#')), 'RED: a watch copy without the road gate sends Runtime.evaluate to a refused-road tab — the marked window counts it as the road\'s (the real watch sends nothing)', { code: r && r.code, road });
   } finally { if (S) await S.close(); }
   // lane vault-login-chrome r2d (review r2c F1 + F2): watch copies whose fillLogin sends on the login tab BEFORE the gate and still
   // refuses by name (0 vault reads) — the window counts every one as the road's: a name the watch also speaks hides nothing on the
   // login tab (B / B3 armHook's script, B2 pkFind's own look, C track's attach — a browser-level call rides the tab it names), and a
   // '1' the road sent (A2, the fence's own expression) is no fence
   const GATE = '    const road = BL().roadVerdict(w.kernel);';
-  const onTabs = (body) => `    if (!w.kernel) for (const e of w.targets.values()) if (e.sid) { ${body} }\n`;
+  const onTabs = (body) => `    if (!loginSinks(w)) for (const e of w.targets.values()) if (e.sid) { ${body} }\n`;
   const read = "call(w, 'Runtime.evaluate', { expression: 'document.forms.length', returnByValue: true }, e.sid);", script = "call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: 'void 0' }, e.sid);";
   for (const [name, what, body, method, n] of [
     ['A1', 'a form read (not awaited)', read, 'Runtime.evaluate', 4],
@@ -907,25 +953,25 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   ]) {
     const src = DSRC.includes(GATE) ? DSRC.replace(GATE, onTabs(body) + GATE) : DSRC;
     const MX = src !== DSRC ? MUT.load('src/server/browser-dialogs.js', src, 'r2d-' + name.toLowerCase()) : null;
-    const X = MX ? await world({ mode: { standard: true }, Dmod: MX }) : null;
+    const X = MX ? await world({ mode: REFUSED_MODE, Dmod: MX }) : null;
     try {
       const x = X ? await refusedFills(X) : null;
-      ok(x && x.rs.every(withdrawn) && !noRoad(x) && x.road.length === n && x.road.every((c) => c.startsWith(method + '#')), `RED control ${name}: a watch copy whose fillLogin sends ${what} on the login tab before the gate (still refused by name) — the window counts all ${n} as the road's`, x && { to: x.to, own: x.own, road: x.road });
+      ok(x && x.rs.every(roadRefused) && !noRoad(x) && x.road.length === n && x.road.every((c) => c.startsWith(method + '#')), `RED control ${name}: a watch copy whose fillLogin sends ${what} on the login tab before the gate (still refused by name) — the window counts all ${n} as the road's`, x && { to: x.to, own: x.own, road: x.road });
     } finally { if (X) await X.close(); }
   }
   // r2e (review r2d G1): a watch name is the watch's own only while it ARMS — a copy whose fillLogin re-arms the tab the page opened
   // (G1, in REPLAY ②'s world) or attaches to a target id the stub never had (G7, in the leg's) still refuses by name: every call it
   // sends rides a tab the mark did not know and speaks a watch name — after the mid mark the window counts each as the road's
   for (const [name, what, ins, popped, n] of [
-    ['G1', 're-runs armHook on every tab but the first — the tab the page opened while the login is refused: its arm and pkFind\'s look, once per fill —', '    if (!w.kernel) { const es = [...w.targets.values()].filter((e) => e.sid); for (const e of es.slice(1)) await armHook(w, e, e.sid); }\n', true, 20],
-    ['G7', "sends track's attach to a target id the stub never had (awaited)", "    if (!w.kernel) await call(w, 'Target.attachToTarget', { targetId: 'T' + 'NOPE' + String(w.id), flatten: true });\n", false, 4],
+    ['G1', 're-runs armHook on every tab but the first — the tab the page opened while the login is refused: its arm and pkFind\'s look, once per fill —', '    if (!loginSinks(w)) { const es = [...w.targets.values()].filter((e) => e.sid); for (const e of es.slice(1)) await armHook(w, e, e.sid); }\n', true, 20],
+    ['G7', "sends track's attach to a target id the stub never had (awaited)", "    if (!loginSinks(w)) await call(w, 'Target.attachToTarget', { targetId: 'T' + 'NOPE' + String(w.id), flatten: true });\n", false, 4],
   ]) {
     const MX = DSRC.includes(GATE) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(GATE, ins + GATE), 'r2e-' + name.toLowerCase()) : null;
-    const X = MX ? await world({ mode: { standard: true }, Dmod: MX, WebSocketImpl: popped ? OneRead : null }) : null;
+    const X = MX ? await world({ mode: REFUSED_MODE, Dmod: MX, WebSocketImpl: popped ? OneRead : null }) : null;
     try {
       const at = {}, x = X ? await refusedFills(X, popped ? popUp(X, at) : null) : null, had = X ? new Set(X.k.targets().map((t) => t.targetId)) : null;
       const after = x ? x.win.filter((c) => c.seq > x.mid) : [];
-      ok(x && x.rs.every(withdrawn) && !noRoad(x) && x.road.length === n && after.length === n && after.every((c) => ownOf(c) && (popped ? c.tab === at.pop : c.tab && !had.has(c.tab))), `RED control ${name}: a watch copy whose fillLogin ${what} before the gate (still refused by name) — all ${n} speak a watch name on a tab the mark did not know, after the mid mark: the window counts each as the road's`, x && { mid: x.mid, to: x.to, own: x.own, road: x.road });
+      ok(x && x.rs.every(roadRefused) && !noRoad(x) && x.road.length === n && after.length === n && after.every((c) => ownOf(c) && (popped ? c.tab === at.pop : c.tab && !had.has(c.tab))), `RED control ${name}: a watch copy whose fillLogin ${what} before the gate (still refused by name) — all ${n} speak a watch name on a tab the mark did not know, after the mid mark: the window counts each as the road's`, x && { mid: x.mid, to: x.to, own: x.own, road: x.road });
     } finally { if (X) await X.close(); }
   }
   // r2e (review r2d n1): the fence's own RED — a '1' with the fence's CDP id on the login tab heard BEFORE the fence's mark (a
@@ -941,6 +987,112 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   const built = pinOf(LFS, fillLoginOf(DSRC.replace(GATE, onTabs("const k = ['Page', 'addScriptToEvaluateOnNewDocument'].join('.'); call(w, k, {}, e.sid);") + GATE)));
   ok(pinOf(LFS, fillLoginOf(DSRC)).ok && !named.ok && eq(named.hides, ['Page.addScriptToEvaluateOnNewDocument']) && !built.ok && built.hides.length === 0 && built.doorSites.includes('k') && eq(vocabOf('a("Input.dispatchKeyEvent") b(`DOMStorage.clear`)'), ['Input.dispatchKeyEvent', 'DOMStorage.clear']),
     'RED control (the pin): a fillLogin that says the watch\'s method in double quotes, or builds a method at run time, is red — a double-quoted or template token of any domain is seen', { named: named.hides, built: built.doorSites });
+}
+
+// ═══ ⑪ Standard-Chrome r3 invariants: live-fill fence, CDP verdict, submit classification, isolated-world fill ═══
+console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict, submit classifier & fail-closed fill');
+{
+  const Med = require('../src/browser-mediation.js');
+  const LF = require('../src/server/browser-login-fill.js');
+  ok(BL.REFUSALS.includes('login_fill_live') && BL.loginText({ ok: false, code: 'login_fill_live', error: 'live secret' }) === 'live secret',
+    'login_fill_live is a named refusal in browser-login');
+  for (const allowVerb of ['login', 'click', 'press', 'open', 'goto', 'navigate', 'back', 'reload', 'wait', 'tab', 'close', 'dialog', 'takeover']) {
+    ok(BL.liveFillAllowsVerb(allowVerb) && BL.liveFillVerdict({ verb: allowVerb, origin: SITE }).ok === true, `liveFillVerdict allows non-reading verb \`${allowVerb}\``);
+  }
+  for (const denyVerb of ['eval', 'snapshot', 'screenshot', 'get', 'console', 'network', 'pdf', 'cookies', 'storage', 'trace']) {
+    const vd = BL.liveFillVerdict({ verb: denyVerb, origin: SITE });
+    ok(!BL.liveFillAllowsVerb(denyVerb) && !vd.ok && vd.code === 'login_fill_live', `liveFillVerdict refuses reading/scripting verb \`${denyVerb}\` with login_fill_live`, vd);
+  }
+  ok(BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'wait'], origin: SITE }).ok === true, 'liveFillVerdict allows batch of allowed verbs');
+  ok(BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).code === 'login_fill_live', 'liveFillVerdict refuses batch carrying eval');
+  ok(BL.liveFillVerdict({ verb: 'batch', batchVerbs: [], origin: SITE }).code === 'login_fill_live', 'liveFillVerdict refuses empty batch');
+
+  // CDP mediator live-fill verdict
+  ok(Med.liveFillCdpVerdict('Page.navigate').refuse === false && Med.liveFillCdpVerdict('Target.getTargets').refuse === false,
+    'liveFillCdpVerdict allows top-level navigation and target listing');
+  for (const m of ['Runtime.evaluate', 'Page.captureScreenshot', 'Accessibility.getFullAXTree', 'DOM.getOuterHTML', 'DOM.describeNode', 'Debugger.getScriptSource', 'Network.getResponseBody', 'Input.insertText']) {
+    const cv = Med.liveFillCdpVerdict(m, { allowVerb: false });
+    ok(cv.refuse === true && cv.code === 'login_fill_live', `liveFillCdpVerdict (raw CDP) refuses ${m}`, cv);
+  }
+  ok(Med.liveFillCdpVerdict('Input.dispatchMouseEvent', { allowVerb: true }).refuse === false
+    && Med.liveFillCdpVerdict('Accessibility.getFullAXTree', { allowVerb: true }).refuse === false
+    && Med.liveFillCdpVerdict('Page.captureScreenshot', { allowVerb: true }).code === 'login_fill_live'
+    && Med.liveFillCdpVerdict('Debugger.getScriptSource', { allowVerb: true }).code === 'login_fill_live'
+    && Med.liveFillCdpVerdict('Network.getResponseBody', { allowVerb: true }).code === 'login_fill_live',
+    'liveFillCdpVerdict with allowVerb:true permits click/press plumbing while still refusing captureScreenshot, Debugger.*, and Network.getResponseBody');
+
+  // Submit control classification
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Show', ariaLabel: 'Show password', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Show password toggle');
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Continue', ariaPressed: 'false', visible: true }, { mode: 'login' }), 'isSubmitControl rejects aria-pressed toggle');
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Back', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Back button');
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Forgot password?', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Forgot password');
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Sign in with Passkey', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Passkey button');
+  ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Create account', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Create account on login mode');
+  ok(BL.isSubmitControl({ tag: 'div', role: 'button', text: 'Sign in', visible: true }, { mode: 'login' }), 'isSubmitControl accepts role=button Sign in on login mode');
+  ok(BL.isSubmitControl({ tag: 'div', role: 'button', text: 'Next', visible: true }, { mode: 'login' }), 'isSubmitControl accepts role=button Next on login mode');
+  ok(BL.isSubmitControl({ tag: 'div', role: 'button', text: 'Create account', visible: true }, { mode: 'signup' }), 'isSubmitControl accepts Create account on signup mode');
+  ok(BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Update password', visible: true }, { mode: 'change' }), 'isSubmitControl accepts Update password on change mode');
+
+  // Stubbed CDP unit checks on browser-login-fill.js: isolated world + zero secret in Runtime.evaluate + origin mismatch refusal
+  const SECRET = pwOf('unit-fill');
+  for (const trig of ['ok', 'insert-err', 'cleared', 'focus-moved']) {
+    const sent = [];
+    let wiped = false;
+    const call = async (m, p) => {
+      sent.push({ m, p: m === 'Input.insertText' ? { textLen: String(p.text || '').length } : p });
+      if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'F1', url: `${SITE}/login`, securityOrigin: SITE } } } };
+      if (m === 'Target.getTargetInfo') return { result: { targetInfo: { targetId: 'T1', url: `${SITE}/login` } } };
+      if (m === 'Page.createIsolatedWorld') return { result: { executionContextId: 77 } };
+      if (m === 'Input.insertText') return trig === 'insert-err' ? { error: { message: 'boom' } } : { result: {} };
+      if (m === 'Runtime.evaluate') {
+        const ex = String(p.expression || '');
+        if (ex.includes('isoOrigin')) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/login`, actionOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'password', autocomplete: 'current-password', visible: true }] } } } };
+        if (ex.includes('focus_moved')) {
+          if (trig === 'cleared') return { result: { result: { value: { ok: false, code: 'field_cleared' } } } };
+          if (trig === 'focus-moved') return { result: { result: { value: { ok: false, code: 'focus_moved' } } } };
+          return { result: { result: { value: { ok: true } } } };
+        }
+        if (ex.includes('for (const id of')) { wiped = true; return { result: { result: { value: true } } }; }
+        return { result: { result: { value: { ok: true } } } };
+      }
+      return { result: {} };
+    };
+    const res = await LF.fillVaultLogin({ call, origin: SITE, trackedUrl: `${SITE}/login`, values: { 'vs-f-0': SECRET }, loginId: 'L1' });
+    const evalCarrying = sent.filter((x) => x.m === 'Runtime.evaluate' && JSON.stringify(x.p).includes(SECRET)).length;
+    const unisolated = sent.filter((x) => x.m === 'Runtime.evaluate' && x.p.contextId !== 77).length;
+    ok((trig === 'ok' ? res.ok === true : (res.ok === false && res.code === 'login_failed' && wiped)) && evalCarrying === 0 && unisolated === 0 && !JSON.stringify(res).includes(SECRET),
+      `fillVaultLogin (${trig}): 0 Runtime.evaluate expressions carry secret, all evals use isolated contextId, fail-closed wipes touched fields`, { trig, res, evalCarrying, unisolated, wiped });
+  }
+
+  // Disagreement between trackedUrl and Page.getFrameTree refuses login_phishing before touching any field
+  const misSent = [];
+  const misRes = await LF.fillVaultLogin({
+    call: async (m) => {
+      misSent.push(m);
+      if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'F1', url: `${SITE2}/phish`, securityOrigin: SITE2 } } } };
+      if (m === 'Target.getTargetInfo') return { result: { targetInfo: { targetId: 'T1', url: `${SITE2}/phish` } } };
+      if (m === 'Page.createIsolatedWorld') return { result: { executionContextId: 88 } };
+      if (m === 'Runtime.evaluate') return { result: { result: { value: { ok: true, isoOrigin: SITE2, isoHref: `${SITE2}/phish`, actionOrigin: SITE2, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'password', visible: true }] } } } };
+      return { result: {} };
+    },
+    origin: SITE,
+    trackedUrl: `${SITE}/login`,
+    values: { 'vs-f-0': SECRET },
+  });
+  ok(!misRes.ok && misRes.code === 'login_phishing' && !misSent.includes('Input.insertText'),
+    'disagreement between trackedUrl and browser frame URL refuses login_phishing with 0 Input.insertText calls', misRes);
+
+  // RED mutant controls for submit classifier and live-fill fence
+  const noDeny = SRC.replace('if (SUBMIT_DENY_RE.test(words)) return false;', '');
+  const M6 = noDeny !== SRC ? MUT.load('src/browser-login.js', noDeny, 'nosubmitdeny') : null;
+  ok(M6 && M6.isSubmitControl({ tag: 'button', type: 'submit', text: 'Show password', visible: true }, { mode: 'login' }) === true
+    && BL.isSubmitControl({ tag: 'button', type: 'submit', text: 'Show password', visible: true }, { mode: 'login' }) === false,
+    'RED: a copy without SUBMIT_DENY_RE treats a Show password button as a submit control');
+  const allowEval = SRC.replace("'takeover',", "'takeover', 'eval',");
+  const M7 = allowEval !== SRC ? MUT.load('src/browser-login.js', allowEval, 'alloweval') : null;
+  ok(M7 && M7.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).ok === true
+    && BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).code === 'login_fill_live',
+    'RED: a copy admitting eval in LIVE_FILL_ALLOW_VERBS lets batch+eval read a live-filled tab');
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed' : ''})`);
