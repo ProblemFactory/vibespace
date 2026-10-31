@@ -23,7 +23,7 @@ const { MessageWindow } = require('./message-window.js'); // the ordered card li
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
-const { permissionOutcome, outcomeHead } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
+const { permissionOutcome, outcomeHead, isStoppedRun } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -1911,6 +1911,10 @@ class MessageManager extends MessageWindow {
         existing.permission.resolved = this._resolutionFromResult(resultText, tr.is_error);
         if (existing.permission.resolved === 'unknown') { existing.permission.unknownHead = outcomeHead(resultText); this._noteOutcomeDrift(resultText, emit); } // verify r5
         permResolved = true;
+      } else if (existing.permission && existing.permission.resolved === 'allowed' && this._resolutionFromResult(resultText, tr.is_error) === 'stopped') {
+        // lane cli-2-1-314-records: the call we allowed RAN and a Stop cut it off (2.1.314's m9t) — the same card says so, patched in place
+        existing.permission.resolved = 'stopped';
+        permResolved = true;
       }
       if (this._autoAllowLines) this._autoAllowRefused(toolUseId, resultText, tr.is_error, emit); // lane bypass-no-prompts
       // Replace tool_call content with tool_result (keeps input + adds output)
@@ -1918,6 +1922,7 @@ class MessageManager extends MessageWindow {
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
         ...(split.images.length ? { images: split.images } : {}),
+        ...(tr.is_error && isStoppedRun(resultText) ? { stoppedWhileRunning: true } : {}), // lane cli-2-1-314-records: the census's word, for the tool card
       }];
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
       // LAUNCH-ACK taskInfo synthesis (2.368.30): works on HISTORY too (the
@@ -2452,7 +2457,8 @@ class MessageManager extends MessageWindow {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
       if (m.permission?.requestId === requestId) {
-        m.permission.resolved = approved ? 'allowed' : 'denied';
+        // a rebuild replays our allow AFTER the result: a call the CLI says was stopped while it ran stays stopped (it was allowed)
+        m.permission.resolved = approved ? (m.permission.resolved === 'stopped' ? 'stopped' : 'allowed') : 'denied';
         if (staleBy) m.permission.staleBy = staleBy;
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
@@ -2660,6 +2666,8 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   // 2026-10-15 (CLI 2.1.296, lane record-oracle-2-1-296 — read off the 2.1.296 zod union, scripts/fixtures/claude-cli/2.1.296.json):
   'permission_check_status', // {tool_use_id, agent_id?, status: checking|done} — a tool call's permission check has waited ~4 s / that wait is over: a pulse with no words, BEFORE any ask exists (the permission card is the control_request); the tool card already shows the call running — card-less
   'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* fire only when a client attached a UI surface channel (2.1.288 zi()); VibeSpace attaches none
+  // 2026-10-30 (CLI 2.1.314, lane cli-2-1-314-records — read off the 2.1.314 zod union, scripts/fixtures/claude-cli/2.1.314.json):
+  'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — behind the same UI-surface gate (2.1.314 Yd()); card-less
 ]);
 
 module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

@@ -5191,6 +5191,8 @@ export default {
   "{name} is waiting for you: permission to use {tool}": "{name} があなたを待っています：{tool} の使用許可",
   "{name} is waiting for you: a question: {line}": "{name} があなたを待っています：質問：{line}",
   "{name} is waiting for you: the plan awaits your approval": "{name} があなたを待っています：プランの承認待ち",
+  "Stopped while it ran — it was allowed, and may have run in part or in full": "実行中に停止されました——許可済みで、一部または全部が実行された可能性があります",
+  "Stopped while it ran — it may have run in part or in full": "実行中に停止されました——一部または全部が実行された可能性があります",
   "Stopped before it finished": "完了する前に停止されました",
   "The helper failed": "ヘルパーが失敗しました",
   "Nothing to answer is on screen — the request may have been settled already": "画面上に回答が必要なものはありません — すでに処理済みの可能性があります",

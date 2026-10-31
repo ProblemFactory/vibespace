@@ -49,7 +49,7 @@ import { clearedText } from './record-clear-ui.js'; // the .197 integration: a C
 import { GROUP_ADAPTER_ID } from '../channel-groups.js'; // lane group-report-card: a group card's group opens its window (the group namespace, never a registry adapter id)
 import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection, isSubTerminated, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
 /** The css class of a settled permission's words (verify r5): green for allowed, red for a refusal, grey for unknown. */
-const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : 'chat-permission-denied');
+const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : w && w.cls === 'stopped' ? 'chat-permission-stopped' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
 import { openResetCreditDialog, fmtInstant } from './reset-credit-dialog.js';
@@ -1659,7 +1659,11 @@ class ChatRenderers {
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent${desc ? ': ' + escHtml(desc) : ''}${agentModelChip(block.input?.model)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${body}</div>`;
     }
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
+      // lane cli-2-1-314-records: a call STOPPED WHILE IT RAN (2.1.314's correction after the canned «rejected» words — the normalizer
+      // reads it off the census and marks the block) says so; the CLI's own words stay behind the expander, never a red «Error»
+      const stoppedRun = block.stoppedWhileRunning === true;
+      const errHead = stoppedRun ? `<details class="chat-diff"><summary class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Stopped while it ran — it may have run in part or in full'))}</summary>` : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${errHead}<pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);

@@ -199,7 +199,8 @@ const isTerminal = (ti) => !!(ti && typeof ti.status === 'string' && TERMINAL.ha
 //   message-manager's _resolutionFromResult reads the CENSUS of the CLI's own
 //   sentences, src/permission-outcome.js: a non-error ran ⇒ allow; the user's
 //   words ⇒ deny; the CLI's own interrupt / turn-ended / parked-expired
-//   markers ⇒ cancel; any other error ⇒ unknown), helper-end (the helper's real
+//   markers ⇒ cancel; a call stopped WHILE IT RAN (2.1.314) ⇒ allow — it ran;
+//   any other error ⇒ unknown), helper-end (the helper's real
 //   terminal record), level-drop (a level set omitting the helper — a guess),
 //   parent-end (kill / exit), reattach (a restart's rebuild redraws the state
 //   the records say), reply (a For-you typed reply), timer (the 60 s inbox
@@ -213,8 +214,9 @@ const ASK_EFFECTS = Object.freeze(['write-stdin', 'refuse', 'resolve-item', 'fil
 const ASK_INITIAL = 'asked';
 /** The events a RECORD feeds through message-manager's settle (never a press — the press is the ws case's, and it writes). */
 const ASK_RECORD_EVENTS = Object.freeze(['record-allow', 'record-deny', 'withdraw', 'result-allow', 'result-deny', 'result-cancel', 'result-unknown']);
-/** The census's outcome word → the table's result event (verify r5; the ONE mapping message-manager uses). */
-const RESULT_EVENT_OF = Object.freeze({ allowed: 'result-allow', denied: 'result-deny', cancelled: 'result-cancel', unknown: 'result-unknown' });
+/** The census's outcome word → the table's result event (verify r5; the ONE mapping message-manager uses). `stopped` (2.1.314, lane
+ *  cli-2-1-314-records: the call RAN and a Stop cut it off) is an ALLOW for the ask — it ran, so it was allowed; nobody refused it. */
+const RESULT_EVENT_OF = Object.freeze({ allowed: 'result-allow', denied: 'result-deny', cancelled: 'result-cancel', stopped: 'result-allow', unknown: 'result-unknown' });
 const X = (state, ...effects) => Object.freeze({ state, effects: Object.freeze(effects.length ? effects : ['nothing']) });
 const SETTLE = ['redraw', 'resolve-item'];
 /** state → event → {state, effects}. Fully enumerated (8 × 15 = 120 cells; the suite's census refuses a hole). */
@@ -427,11 +429,12 @@ function helperAskSettledWords(state, t = fmt) {
 }
 
 /** How a MAIN card's settled permission reads (verify r5 — the renderer's one speller; `resolved` is a
- *  permission-outcome word: allowed · denied · cancelled · unknown). null = not settled (buttons). */
+ *  permission-outcome word: allowed · denied · cancelled · stopped · unknown). null = not settled (buttons). */
 function mainAskSettledWords(resolved, t = fmt) {
   if (resolved === 'allowed') return { icon: '✓', cls: 'allowed', text: t('Allowed') };
   if (resolved === 'denied') return { icon: '✗', cls: 'denied', text: t('Denied') };
   if (resolved === 'cancelled') return { icon: '✗', cls: 'denied', text: t('Not run — the request was withdrawn or the turn ended before an answer') };
+  if (resolved === 'stopped') return { icon: '✗', cls: 'stopped', text: t('Stopped while it ran — it was allowed, and may have run in part or in full') }; // lane cli-2-1-314-records: never «Denied»
   if (resolved === 'unknown') return { icon: '?', cls: 'unknown', text: t('Ended — reason unknown (the CLI wrote a result VibeSpace does not recognise)') };
   return null;
 }

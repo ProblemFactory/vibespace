@@ -748,6 +748,7 @@
 .chat-permission-allowed { color: var(--green); font-weight: 600; }
 .chat-permission-denied { color: var(--red); font-weight: 600; }
 .chat-permission-unknown { color: var(--text-secondary); font-weight: 600; } /* lane S1 verify r5: a result the sentence census does not know — never drawn as allowed */
+.chat-permission-stopped { color: var(--text-secondary); font-weight: 600; } /* lane cli-2-1-314-records: allowed, then stopped while it ran — never drawn as denied */
 .chat-permission-stale { color: var(--text-secondary); font-weight: 500; line-height: 1.4; } /* lane J r2: a browser approval answered stale at a takeover — informational, not a refusal the user made */
 
 .chat-diff { margin: 4px 0 0; font-size: 12px; }

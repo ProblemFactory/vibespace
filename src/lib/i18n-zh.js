@@ -5192,6 +5192,8 @@ export default {
   "{name} is waiting for you: permission to use {tool}": "{name} 在等你：使用 {tool} 的许可",
   "{name} is waiting for you: a question: {line}": "{name} 在等你：一个问题：{line}",
   "{name} is waiting for you: the plan awaits your approval": "{name} 在等你：计划等你批准",
+  "Stopped while it ran — it was allowed, and may have run in part or in full": "运行中被停止——它已获允许，可能已部分或全部运行",
+  "Stopped while it ran — it may have run in part or in full": "运行中被停止——可能已部分或全部运行",
   "Stopped before it finished": "在完成之前被停止了",
   "The helper failed": "帮手失败了",
   "Nothing to answer is on screen — the request may have been settled already": "屏幕上没有需要回答的请求 — 它可能已经处理过了",

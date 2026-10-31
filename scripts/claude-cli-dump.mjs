@@ -71,8 +71,9 @@ export function extractZodUnion(text) {
  *  declares them together; a reused minified name elsewhere in the bundle is not that). A declaration is
  *  the definition's line — through the line its closing backtick is on when a template literal is still
  *  open at the line's end. Template literals' VALUES end at the dump's line (a feedback tail after "the
- *  user said:" begins on the next line) — the rows are prefixes, as the binary's own matcher is. Never
- *  throws; every failure names its anchor. */
+ *  user said:" begins on the next line) — the rows are prefixes, as the binary's own matcher is; a `${M}`
+ *  naming another member is expanded to M's sentence (2.1.314's correction). Never throws; every failure
+ *  names its anchor. */
 export function extractPermissionSentences(text) {
   const anchor = /(?<![\w$])([\w$]+)="\[Request interrupted by user for tool use\]"/.exec(text);
   if (!anchor) return { error: 'NO ANCHOR: "[Request interrupted by user for tool use]" is not a named constant in the bundle — the interrupt marker moved or was reworded: read the binary around "Tool call did not complete" and teach extractPermissionSentences the new form' };
@@ -86,10 +87,13 @@ export function extractPermissionSentences(text) {
   if (!is) return { error: 'NO SET: no `Y=new Set([…,' + N + ',…])` (the exact is_error set the 2.1.281 bundle calls IS) — read the binary around "' + N + '"' };
   const from = new Map(); const suffixes = new Set();
   for (const tok of gd[2].split(',')) from.set(tok, 'Gd');
-  for (const tok of is[2].split(',')) { const [head, ...rest] = tok.split('+'); from.set(head, from.has(head) ? 'both' : 'IS'); for (const p of rest) suffixes.add(p); }
+  // a head counts ONCE per list: 2.1.314's m9t sits in the set bare AND with its suffix (`m9t,m9t+SBe`) and on no `Jm()` — it is 'IS',
+  // never 'both' (lane cli-2-1-314-records)
+  const inSet = new Set();
+  for (const tok of is[2].split(',')) { const [head, ...rest] = tok.split('+'); if (!inSet.has(head)) { inSet.add(head); from.set(head, from.has(head) ? 'both' : 'IS'); } for (const p of rest) suffixes.add(p); }
   const names = [...from.keys()];
   const defRe = (name, flags) => new RegExp('(?<![\\w$])' + name.replace(/\$/g, '\\$') + '=(?:"((?:[^"\\\\]|\\\\.)*)"|`([^`\\n]*))', flags);
-  const defsOf = (name) => { const out = []; const re = defRe(name, 'g'); let m; while ((m = re.exec(text))) out.push({ at: m.index, value: m[1] !== undefined ? m[1] : m[2] }); return out; };
+  const defsOf = (name) => { const out = []; const re = defRe(name, 'g'); let m; while ((m = re.exec(text))) out.push({ at: m.index, value: m[1] !== undefined ? m[1] : m[2], tpl: m[1] === undefined }); return out; };
   const lineOf = (at) => { const a = text.lastIndexOf('\n', at) + 1; const b = text.indexOf('\n', at); return [a, b < 0 ? text.length : b]; };
   // 2.1.306: the feedback sentence (`D0=`…the user said:`) OPENS its line — the members before it moved to another chunk — and
   // its template's own newline ends the line; its closing backtick and the next member (`n2=`) begin the next one. The census
@@ -107,15 +111,32 @@ export function extractPermissionSentences(text) {
     const members = (d) => { const line = declOf(d.at); return names.filter((o) => o !== name && defRe(o, '').test(line)).length; };
     const ranked = cands.length > 1 ? cands.map((d) => ({ d, n: members(d) })).sort((x, y) => y.n - x.n) : null;
     const pick = cands.length === 1 ? cands[0] : (ranked && ranked[0].n > ranked[1].n ? ranked[0].d : null);
-    if (pick) sentences.push({ name, from: from.get(name), text: pick.value.replace(/\\"/g, '"'), at: pick.at });
+    if (pick) sentences.push({ name, from: from.get(name), text: pick.value.replace(/\\"/g, '"'), at: pick.at, tpl: pick.tpl });
     else unresolved.push(name + ' (' + cands.length + ' candidate definitions on a line declaring another member)');
+  }
+  // 2.1.314: a member BUILDS ON another — `m9t=\`${Nh} Correction to the text above: …\`` (a RUNNING call cut off by a stream-json
+  // Stop, written where 2.1.312 wrote Nh alone). A template's value is read RAW, so an interpolation naming another census member is
+  // EXPANDED to that member's sentence: the row's text is the text the tool_result carries, the one the table's prefix lookup reads.
+  // An interpolation of anything else (a variable, an expression, a member that itself interpolates) is UNRESOLVED, named
+  // (lane cli-2-1-314-records)
+  const interpolates = (x) => x.tpl && x.text.includes('${');
+  const plain = new Map(sentences.filter((x) => !interpolates(x)).map((x) => [x.name, x.text]));
+  for (let i = sentences.length - 1; i >= 0; i--) {
+    const x = sentences[i];
+    if (!interpolates(x)) continue;
+    const refs = [...x.text.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]);
+    const bad = refs.filter((r) => !plain.has(r));
+    if (!refs.length || bad.length) { sentences.splice(i, 1); unresolved.push(x.name + ' (interpolates ' + (bad.join(', ') || 'an open ${') + ' — not a census sentence)'); continue; }
+    x.text = x.text.replace(/\$\{([^}]*)\}/g, (_, r) => plain.get(r));
   }
   return { anchor: N, list: gd[1], set: is[1], sentences, unresolved, suffixes: [...suffixes] };
 }
-/** PURE: the binary's sentences vs the table — {unclassified: sentences the table lacks, ghosts: rows the binary lacks}. */
+/** PURE: the binary's sentences vs the table — {unclassified: sentences the table lacks, ghosts: rows the binary lacks}. A sentence that
+ *  EXTENDS a row (2.1.314's m9t = ww + a correction) is named by that row and its tail: `m9t = ww + " Correction to the text above…"`. */
 export function outcomeCensus(sentences, rows, literalText = '') {
   const texts = new Set(sentences.map((x) => x.text));
-  const unclassified = sentences.filter((x) => !rows.some((r) => r.text === x.text)).map((x) => x.name + ' = ' + JSON.stringify(x.text.slice(0, 90)));
+  const nameOf = (x) => { const base = rows.filter((r) => r.text.length < x.text.length && x.text.startsWith(r.text)).sort((a, b) => b.text.length - a.text.length)[0]; return x.name + ' = ' + (base ? base.id + ' + ' + JSON.stringify(x.text.slice(base.text.length, base.text.length + 90)) : JSON.stringify(x.text.slice(0, 90))); };
+  const unclassified = sentences.filter((x) => !rows.some((r) => r.text === x.text)).map(nameOf);
   const ghosts = rows.filter((r) => (r.binary === 'literal' ? !literalText.includes(r.text) : !texts.has(r.text))).map((r) => r.id + ' (' + r.binary + ')');
   return { unclassified, ghosts };
 }

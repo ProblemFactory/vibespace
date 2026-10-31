@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -188,6 +188,11 @@ const SHAPES = {
   // message's file_attachments named that did not arrive (reason codes) — a plain dim line (message-manager HANDLED).
   "claude:stream:system/permission_check_status": sh(['tool_use_id', 'agent_id', 'status'], { enums: { status: ['checking', 'done'] } }),
   "claude:stream:system/file_attachments_missing": sh(['message_uuid', 'sent_count', 'missing']),
+  // NEW in 2.1.314 (lane cli-2-1-314-records) — VERBATIM from the 2.1.314 union (scripts/fixtures/claude-cli/2.1.314.json, `zod` holds the
+  // literal): the plugin UI host's placed rows {rows: [{plugin, id, request_id, after_uuid?}]} — where each `ui_render` ask with
+  // component "Placed" stands in the conversation; written only behind the same UI-surface gate as the other ui_* (2.1.314 `Yd()` =
+  // stream-json && uiSurfaceChannel) — VibeSpace attaches none: card-less (message-manager KNOWN_IGNORED)
+  "claude:stream:system/ui_placed": sh(['rows']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
@@ -519,6 +524,7 @@ const SHAPE_SINCE = Object.freeze({
   'system/permission_check_status': '2.1.296',
   'system/file_attachments_missing': '2.1.296',
   'system/inherited_asks_settled': '2.1.312', // lane claude-steer-inject r3 — the 2.1.312 dump (scripts/fixtures/claude-cli/2.1.312.json)
+  'system/ui_placed': '2.1.314', // lane cli-2-1-314-records — the 2.1.314 dump (scripts/fixtures/claude-cli/2.1.314.json)
 });
 // Names the corpus carries that are NOT in the SDK union (the REPL's own rows): the oracle's reverse
 // check excuses them so a handled/ignored list entry is never called dead by mistake.
@@ -713,12 +719,14 @@ function unknownFieldsSample(record) {
 // the 2.1.307 code rebuilt on a newer Bun runtime: its dump equals 2.1.307's in every key, field, nested object and
 // sentence, so nothing is declared for it — no FIELDS_308) + 2.1.312 (2026-10-27 — the box's claude self-updated: one new subtype
 // (inherited_asks_settled, remote transport only), 13 fields on two shapes, five non-record zod keys: FIELDS_312 / ZOD_NON_RECORDS;
-// the same 14 sentences under new names). Each
+// the same 14 sentences under new names) + 2.1.314 (2026-10-30 — the box's claude self-updated: one new subtype (ui_placed, the
+// plugin UI host's, card-less), no field, no nested key, no zod non-record; the 14 sentences + ONE, m9t — ww's sentence plus a
+// correction, a RUNNING call stopped (src/permission-outcome.js `stopped`) — so no FIELDS_314). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
 module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

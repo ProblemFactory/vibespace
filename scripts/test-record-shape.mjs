@@ -304,7 +304,7 @@ console.log('§3 enum drift — an undeclared enum value is a card, and the hand
 }
 
 // ── THE EXTRACTOR (§4a, §4) — moved verbatim to scripts/claude-cli-dump.mjs (lane cli-2-1-288-records) ──
-import { extractZodUnion, extractPermissionSentences, outcomeCensus, nestedOf, NESTED_FIELDS, NESTED_UNIONS } from './claude-cli-dump.mjs';
+import { extractZodUnion, extractPermissionSentences, outcomeCensus, nestedOf, dumpDiff, NESTED_FIELDS, NESTED_UNIONS } from './claude-cli-dump.mjs';
 /** PURE (lane cli-2-1-307-records): a dump's / a binary's `nested` ({'<shape>.<field>': keys}) vs the nested specs of Rx — every
  *  key outside known ∪ ignored, every object with no spec or not read, NAMED. */
 const nestedUndeclared = (Rx, nested) => Object.entries(nested).flatMap(([at, keys]) => {
@@ -388,7 +388,12 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
       if (!cen.error) {
         console.log(`    §4d permission sentences: anchor ${cen.anchor} · list ${cen.list}() · set ${cen.set} · ${cen.sentences.length} resolved (${cen.sentences.map((x) => x.name).join(',')}) · suffixes ${cen.suffixes.join(',') || '(none)'} · unresolved ${cen.unresolved.join('; ') || '(none)'}`);
         oracleOk(`§4d every member of both lists resolves to ONE sentence (${cen.sentences.length} — the 2.1.281 census is 13 + the user-message marker the set adds)`, cen.unresolved.length === 0 && cen.sentences.length >= 14, cen.unresolved);
-        const { unclassified, ghosts } = outcomeCensus(cen.sentences, PO.PERMISSION_OUTCOME_ROWS, text);
+        // a row a NEWER build added (its `since` past the installed build — 2.1.314's m9t on a 2.1.312 box) is excused, printed by name,
+        // exactly as SHAPE_SINCE excuses a shape (lane cli-2-1-314-records); the forward leg (an unclassified sentence) stays strict
+        const sinceCmp = (a, b) => { const pa = String(a).replace(/^≤/, '').split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); return 0; };
+        const rowsHere = PO.PERMISSION_OUTCOME_ROWS.filter((r) => !(installed && sinceCmp(r.since, installed) > 0));
+        if (rowsHere.length < PO.PERMISSION_OUTCOME_ROWS.length) console.log(`    §4d rows excused as newer than the installed ${installed}: ${PO.PERMISSION_OUTCOME_ROWS.filter((r) => !rowsHere.includes(r)).map((r) => r.id + ' (' + r.since + ')').join(', ')}`);
+        const { unclassified, ghosts } = outcomeCensus(cen.sentences, rowsHere, text);
         oracleOk(`§4d every sentence the binary writes for a permission outcome is a ROW of src/permission-outcome.js (${cen.sentences.length} checked) — a newer build's extra sentence FAILS HERE, named, until classified`, unclassified.length === 0, 'UNCLASSIFIED: ' + unclassified.join(' · '));
         oracleOk('§4d no GHOST row: every list-backed row is in the binary\'s lists and every literal row is spelled in the bundle (the WebFetch deadline, the conversation-ended and streaming-fallback results)', ghosts.length === 0, 'GHOST: ' + ghosts.join(', '));
         oracleOk('§4d the census names the installed build it was read from (PERMISSION_OUTCOME_CLI_VERSION = SCHEMA_CLI_VERSION)', PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION, PO.PERMISSION_OUTCOME_CLI_VERSION);
@@ -400,9 +405,9 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         const cleanBase = unclassified.length === 0 && ghosts.length === 0;
         const ctl = cleanBase ? oracleOk : (n, c, e) => skip(n, 'the base census is not clean on this build — a control over a drifted census proves nothing: ' + JSON.stringify({ unclassified, ghosts }).slice(0, 300));
         const planted = cen.sentences.concat([{ name: 'zz9', from: 'Gd', text: '[Tool call refused: the safety classifier declined it after your approval — a sentence a future build invented]' }]);
-        const pv = outcomeCensus(planted, PO.PERMISSION_OUTCOME_ROWS, text);
+        const pv = outcomeCensus(planted, rowsHere, text);
         ctl('…NEGATIVE CONTROL: the real lists plus ONE planted sentence fail the classification leg naming exactly it', pv.unclassified.length === unclassified.length + 1 && pv.unclassified.some((x) => /^zz9 = .*safety classifier declined it/.test(x)) && pv.ghosts.length === ghosts.length, pv);
-        const fewer = PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.id !== 'hL');
+        const fewer = rowsHere.filter((r) => r.id !== 'hL');
         const fv = outcomeCensus(cen.sentences, fewer, text);
         ctl('…NEGATIVE CONTROL: the table without the SUBAGENT\'s denial row (the r5 finding) fails the same leg naming that sentence', fv.unclassified.length === unclassified.length + 1 && fv.unclassified.some((x) => /Permission for this tool use was denied/.test(x)), fv);
         // the extractor's own controls: a synthetic bundle in the 2.1.281 spelling, a reused name elsewhere, a missing anchor / list
@@ -410,6 +415,23 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         const mc = extractPermissionSentences(mini);
         ok('§4d the extractor on a synthetic 2.1.281-shaped bundle: names read off the anchor, the LARGEST marker set taken (a two-member If is not the census), the reused `ok` elsewhere ignored (its line declares no other member), a template literal ends at its line, the suffix named, from = Gd | IS | both', !mc.error && mc.list === 'Gd' && mc.set === 'IS' && mc.suffixes.join() === 'u4e' && mc.sentences.length === 6 && mc.sentences.find((x) => x.name === 'ok').text.startsWith('[Tool call did not complete') && mc.sentences.find((x) => x.name === 'Dx').text === "The user doesn't want to proceed with this tool use. The user said:" && mc.sentences.find((x) => x.name === 'Jw').from === 'IS' && mc.sentences.find((x) => x.name === 'Dx').from === 'Gd' && mc.sentences.find((x) => x.name === 'Ud').from === 'both', mc);
         ok('§4d …and a bundle without the anchor / without the list fails BY NAME', /NO ANCHOR/.test(extractPermissionSentences('var x="nothing here";').error) && /NO LIST/.test(extractPermissionSentences('var Ud="[Request interrupted by user for tool use]";').error));
+        // THE CORRECTION'S WRITER (lane cli-2-1-314-records): where this build has the stopped-while-running sentence, it is written ONLY for
+        // a RUNNING call a stream-json Stop cut off — createSyntheticErrorMessage("user_interrupted") picks it over ww when the abort reason
+        // is remote-cancel AND its 4th argument holds, the caller's ql(call) = `call.callRunning === true`; read off the installed bundle
+        {
+          const ROW = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t'), WWR = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'ww');
+          // found by its CONTENT (ww's sentence + more), so a tree without the row fails here by name, never on a missing row
+          const sw = cen.sentences.find((x) => x.text === WWR.text), sm = cen.sentences.find((x) => x.text !== WWR.text && x.text.startsWith(WWR.text + ' Correction to the text above'));
+          if (!sm) console.log('    §4d the stopped-while-running sentence: not in this build (row m9t since ' + (ROW ? ROW.since : '—') + ')');
+          else {
+            const E = (n) => n.replace(/\$/g, '\\$');
+            const pick = !!sw && new RegExp('content:[\\w$]+\\(([\\w$]+)&&([\\w$]+)==="remote-cancel"\\?' + E(sm.name) + ':' + E(sw.name) + '\\)').exec(text);
+            const sig = /createSyntheticErrorMessage\(e,n,r,s\)\{if\(n==="user_interrupted"\)/.test(text);
+            const caller = /createSyntheticErrorMessage\(e\.id,"user_interrupted",e\.assistantMessage,([\w$]+)\(e\)\)/.exec(text);
+            const ran = !!caller && new RegExp('function ' + E(caller[1]) + '\\(e,n\\)\\{[^}]{0,160}return e\\.callRunning===!0').test(text);
+            oracleOk(`§4d the correction ${sm.name} is written ONLY for a RUNNING call a Stop cut off: createSyntheticErrorMessage("user_interrupted") writes ${sm.name}, not ${sw ? sw.name : 'ww'}, when the abort reason is remote-cancel and its 4th argument holds — the caller passes ${caller ? caller[1] : '?'}(call) = call.callRunning === true — and the table's row m9t says so (outcome stopped, never denied)`, !!pick && pick[1] === 's' && sig && ran && !!ROW && ROW.text === sm.text && ROW.outcome === 'stopped', { pick: pick && pick[0], sig, caller: caller && caller[0], ran, row: ROW ? ROW.outcome : 'NO m9t ROW' });
+          }
+        }
       }
     }
     const nb = nestedOf(text, helpers); // the nested objects, read while the dump is still in memory (lane cli-2-1-307-records)
@@ -524,7 +546,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307, 2.1.308 and 2.1.312 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && R.SCHEMA_CLI_VERSION === '2.1.312', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312 and 2.1.314 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314' && R.SCHEMA_CLI_VERSION === '2.1.314', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -606,9 +628,12 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     ok('CONTROL: a copy without FIELDS_288 is red on the 2.1.288 dump (23 fields named) and still green on 2.1.281', n288.length === 23 && n288.every((x) => x.startsWith('UNDECLARED ')) && judgeDump(no288, dumps[0]).length === 0, n288.length);
     // the §4d sentences of each pinned build: all resolved, each a row of the table
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
-    for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
-    const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308 → 2.1.312: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.312 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.312' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    // …and they ARE the table's list rows of THAT build (every row not spelled as a literal, `since` ≤ the build — lane cli-2-1-314-records)
+    const listRowsOf = (v) => PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.binary !== 'literal' && vcmp(String(r.since).replace(/^≤/, ''), v) <= 0);
+    for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''), want = listRowsOf(d.version); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js — exactly the table's ${want.length} list rows of that build (since ≤ ${d.version})`, (d.sentences.rows || []).length === want.length && want.every((r) => d.sentences.rows.some((x) => x.text === r.text)) && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified, want: want.length }); }
+    const texts = (d, drop = []) => JSON.stringify(d.sentences.rows.map((x) => x.text).filter((t) => !drop.includes(t)).sort());
+    const M9T = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t'), d314s = dumps.find((d) => d.version === '2.1.314');
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308 → 2.1.312: the same 14 sentences (none added, none vanished — no row needs `until`); 2.1.314 = those 14 + ONE (m9t, since 2.1.314) — none vanished; PERMISSION_OUTCOME_CLI_VERSION 2.1.314 (the newest pinned)', dumps.filter((d) => vcmp(d.version, '2.1.312') <= 0).every((d) => texts(d) === texts(dumps[0])) && !!d314s && !!M9T && M9T.since === '2.1.314' && d314s.sentences.rows.some((x) => x.text === M9T.text) && texts(d314s, [M9T.text]) === texts(dumps[0]) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.314' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -844,6 +869,58 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const [si12, si08] = await Promise.all([standIn(null), standIn('2.1.308')]);
     ok('the stand-in CLI is version-keyed: by default it IS 2.1.312 (init claude_code_version 2.1.312, every result carries model_usage_since_last_result); STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result (no such field); both clean under the declarations', si12.init === '2.1.312' && si12.results.length >= 1 && si12.results.every((x) => x.model_usage_since_last_result && typeof x.model_usage_since_last_result === 'object') && si08.init === '2.1.308' && si08.results.length >= 1 && si08.results.every((x) => !('model_usage_since_last_result' in x)) && si12.drift.length === 0 && si08.drift.length === 0, { si12: { init: si12.init, results: si12.results.length, drift: si12.drift }, si08: { init: si08.init, results: si08.results.length } });
     ok('…and a STAMPED frame (r5): both versions\' init names it in user_message_uuids (the writer is in 2.1.307 on) — clean under the declarations', JSON.stringify(si12.uuids) === JSON.stringify([STAMP]) && JSON.stringify(si08.uuids) === JSON.stringify([STAMP]) && si12.drift.length === 0 && si08.drift.length === 0, { si12: si12.uuids, si08: si08.uuids });
+    // THE 2.1.314 PIN (lane cli-2-1-314-records) — the box's claude SELF-UPDATED to 2.1.314 (2026-10-30 17:33 PT) and the strict oracle went
+    // red on two lines («UNLISTED: ui_placed» · «UNCLASSIFIED: m9t = "${Nh} Correction to the text above: …"»). Its dump (strings over a
+    // 0644 copy, the --auto road — the binary never run) minus the 2.1.312 dump, each decision on the dump
+    const d314 = dumps.find((d) => d.version === '2.1.314');
+    const z314 = (d314 && d314.zod) || {};
+    const [, lit14] = (/^([^/]+)\/([^ ]+) @/.exec((d314 && d314.helpers[0]) || '') || []).slice(1);
+    const WW = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'ww'), M9 = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t');
+    const diff14 = d314 && d312 ? dumpDiff(d312, d314) : null;
+    ok('2.1.314 against 2.1.312 is exactly TWO changes (the dump diff, recomputed): ONE new key, system/ui_placed, and ONE new sentence, m9t — no field grew or went on any shape, no nested key, no key gone, no sentence gone; so no FIELDS_314', !!diff14 && diff14.changes === 2 && diff14.newKeys.join() === 'system/ui_placed' && diff14.goneKeys.length === 0 && Object.keys(diff14.fields).length === 0 && Object.keys(diff14.nested).length === 0 && diff14.sentencesAdded.length === 1 && !!M9 && diff14.sentencesAdded[0] === M9.text && diff14.sentencesGone.length === 0 && !('FIELDS_314' in R), diff14);
+    // ui_placed — the plugin UI host's placed rows
+    const up = R.SHAPES['claude:stream:system/ui_placed'], upLit = z314['system/ui_placed'] || '';
+    ok('ui_placed: its zod literal in the dump (subtype:' + lit14 + '("ui_placed"), rows: [{plugin, id, request_id, after_uuid?}] — «The main conversation\'s placed rows, in order», each row the `ui_render` ask with component "Placed" that draws it), a stream shape row of exactly the literal\'s fields, SHAPE_SINCE 2.1.314', !!lit14 && upLit.includes('subtype:' + lit14 + '("ui_placed")') && /rows:[\w$]+\([\w$]+\(\{plugin:/.test(upLit) && upLit.includes('ui_render') && upLit.includes("The main conversation's placed rows, in order.") && !!up && [...up.known].join() === 'rows' && [...up.known].join() === (d314.union['system/ui_placed'] || []).filter((f) => f !== 'uuid' && f !== 'session_id').join() && R.SHAPE_SINCE['system/ui_placed'] === '2.1.314', { upLit, known: up && [...up.known] });
+    ok('…it is KNOWN_IGNORED (card-less) like the 2.1.288 ui_* — neither HANDLED nor declared-unseen: a placement list with no words for any card (no text / message / content field)', IGN.has('ui_placed') && !HANDLED.has('ui_placed') && !('ui_placed' in R.DECLARED_UPSTREAM_UNSEEN.system) && !/text:|message:|content:/.test(upLit.replace(/describe\((?:"[^"]*"|'[^']*')\)/g, '')));
+    const noUp = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).filter(([k]) => k !== 'claude:stream:system/ui_placed')), SHAPE_SINCE: Object.fromEntries(Object.entries(R.SHAPE_SINCE).filter(([k]) => k !== 'system/ui_placed')) };
+    let nUp14 = null, nUp12 = null;
+    const hadUp = IGN.has('ui_placed');
+    IGN.delete('ui_placed');
+    try { if (d314) { nUp14 = judgeDump(noUp, d314); nUp12 = judgeDump(noUp, d312); } } finally { if (hadUp) IGN.add('ui_placed'); }
+    ok('CONTROL: the lists and shapes without ui_placed (the .366 tree) are red on the 2.1.314 dump — exactly «UNLISTED system/ui_placed», the box\'s drift line — and green on 2.1.312', !!nUp14 && nUp14.join() === 'UNLISTED system/ui_placed' && nUp12.length === 0, { nUp14, nUp12 });
+    const upRec = (conv) => ({ type: 'system', subtype: 'ui_placed', rows: [{ plugin: 'acme-notes', id: 'row-1', request_id: 'inst-1', after_uuid: 'u-314-0' }, { plugin: 'acme-notes', id: 'row-2', request_id: 'inst-2' }], uuid: 'u-314-up', session_id: conv });
+    const liveUp = (MMx, conv) => { const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv); x.processLive(upRec(conv)); return { unknown: unknownCards(x).length, drift: driftCards(x).length, rows: ledgerOf(conv, MMx).length, all: x.messages.length }; };
+    const realUp = liveUp(MM, 'e2e00000-0000-4000-8000-0000000003c1');
+    ok('the REAL normalizer on a 2.1.314 ui_placed record (the literal\'s shape) ⇒ no card of any kind, no ledger row, no message', realUp.unknown === 0 && realUp.drift === 0 && realUp.rows === 0 && realUp.all === 0, realUp);
+    const M14 = mutantCopies('record-314', REPO);
+    const mmSrc14 = read('src/message-manager.js'), UP_LINE = mmSrc14.split('\n').filter((l) => l.startsWith("  'ui_placed',"));
+    const MMup = UP_LINE.length === 1 ? require(M14.write('src/message-manager.js', mmSrc14.replace(UP_LINE[0] + '\n', ''), 'no-ui-placed')) : null;
+    const ctlUp = MMup && liveUp(MMup, 'e2e00000-0000-4000-8000-0000000003c2');
+    ok('RED CONTROL: the same record on a copy without the ui_placed row (the .366 tree on 2.1.314) ⇒ the red «Unknown event» card is back, and no drift card', !!ctlUp && ctlUp.unknown === 1 && ctlUp.drift === 0, ctlUp);
+    // m9t — the correction: ww's sentence plus « Correction to the text above: this call was stopped while running, …»
+    const s14 = d314 && M9 && d314.sentences.rows.find((x) => x.text === M9.text);
+    const same14d = !!d314 && d312.sentences.rows.every((r) => d314.sentences.rows.some((x) => x.text === r.text && x.from === r.from));
+    ok('§4d 2.1.314: the 14 sentences of 2.1.312 on the same lists (renamed: anchor ' + d312.sentences.anchor + ' → ' + (d314 && d314.sentences.anchor) + ', list ' + d312.sentences.list + ' → ' + (d314 && d314.sentences.list) + ') and ONE more on the exact is_error set only (bare and with its suffix, on no ' + (d314 && d314.sentences.list) + '()) — ' + (s14 && s14.name) + ' = ww\'s sentence + « Correction to the text above: this call was stopped while running, not refused before it ran. …» (its template `${…} Correction…` EXPANDED by the extractor to the text the tool_result carries)', same14d && d314.sentences.rows.length === 15 && d314.sentences.unresolved.length === 0 && !!s14 && s14.from === 'IS' && M9.text.startsWith(WW.text) && M9.text.slice(WW.text.length).startsWith(' Correction to the text above: this call was stopped while running, not refused before it ran. It may have run in part or in full'), s14);
+    const po = (t, e = true) => PO.permissionOutcome(t, e).outcome;
+    ok('the row m9t: outcome STOPPED (the call ran — allowed, then cut off; never «denied», never «Not run»), since 2.1.314, on the exact is_error set (binary IS), its text the dump\'s; the LONGEST matching row wins — m9t (and m9t + a suffix) ⇒ stopped, ww alone ⇒ denied; isStoppedRun is the one speller', !!M9 && M9.outcome === 'stopped' && PO.PERMISSION_OUTCOMES.includes('stopped') && M9.since === '2.1.314' && M9.binary === 'IS' && M9.match === 'prefix' && !!s14 && po(M9.text) === 'stopped' && PO.permissionOutcome(M9.text, true).row.id === 'm9t' && po(M9.text + '\n\nNote: a suffix') === 'stopped' && po('  ' + M9.text) === 'stopped' && po(WW.text) === 'denied' && po(M9.text, false) === 'allowed' && PO.isStoppedRun(M9.text) && !PO.isStoppedRun(WW.text) && !PO.isStoppedRun(M9.text, false));
+    const c9 = d314 && outcomeCensus(d314.sentences.rows, PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.id !== 'm9t'), '');
+    ok('CONTROL: the table without the m9t row (the .366 tree) leaves exactly that sentence UNCLASSIFIED on the 2.1.314 dump — named by the row it extends: «' + (c9 && c9.unclassified[0] || '').slice(0, 70) + '…» — and nothing on 2.1.312', !!c9 && c9.unclassified.length === 1 && /^[\w$]+ = ww \+ " Correction to the text above: this call was stopped while running/.test(c9.unclassified[0]) && outcomeCensus(d312.sentences.rows, PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.id !== 'm9t'), '').unclassified.length === 0, c9);
+    const poSrc = read('src/permission-outcome.js');
+    const LOOK_A = '  let hit = null;\n', LOOK_B = "  return hit ? { outcome: hit.outcome, row: hit } : { outcome: 'unknown', row: null };\n";
+    const iA = poSrc.indexOf(LOOK_A), iB = poSrc.indexOf(LOOK_B);
+    const POfirst = iA > 0 && iB > iA ? require(M14.write('src/permission-outcome.js', poSrc.slice(0, iA) + "  for (const r of PERMISSION_OUTCOME_ROWS) if (r.match === 'prefix' ? t.startsWith(r.text) : s.includes(r.text)) return { outcome: r.outcome, row: r };\n  let hit = null;\n" + poSrc.slice(iB), 'first-match')) : null;
+    const fm = POfirst && POfirst.permissionOutcome(M9.text, true);
+    ok('RED CONTROL: a copy with the pre-lane FIRST-match lookup (the m9t row and all) reads m9t «denied» by the ww row — ww is its prefix and comes first: the longest-match rule is what makes the row work', !!fm && fm.outcome === 'denied' && fm.row.id === 'ww', fm && { outcome: fm.outcome, row: fm.row && fm.row.id });
+    // the extractor's expansion, on a synthetic 2.1.314-shaped chunk — and the copy that reads the template raw
+    const mini314 = 'var gf="[Request interrupted by user for tool use]",BA="The user doesn\'t want to take this action right now.",Dk="[Request interrupted by user]";\nvar Nh="The user doesn\'t want to proceed with this tool use. The tool use was rejected.",m9t=`${Nh} Correction to the text above: this call was stopped while running.`,Zq=`${e} a sentence built on a variable`,GPt="User rejected tool use";function Jm(){return[Nh,BA,gf]}\nvar Kr=new Set([Dk,gf,BA,BA+SBe,Nh,Nh+SBe,m9t,m9t+SBe,Zq]);';
+    const e14 = extractPermissionSentences(mini314), m9s = e14.sentences && e14.sentences.find((x) => x.name === 'm9t');
+    ok('the extractor on a synthetic 2.1.314-shaped chunk: m9t = `${Nh} Correction…` is EXPANDED to Nh\'s sentence + the correction (from IS — in the set bare and with its suffix, counted once); a template built on a non-member (`${e} …`) is UNRESOLVED, named — never a raw «${…}» row', !e14.error && e14.list === 'Jm' && e14.set === 'Kr' && !!m9s && m9s.text === "The user doesn't want to proceed with this tool use. The tool use was rejected. Correction to the text above: this call was stopped while running." && m9s.from === 'IS' && e14.sentences.length === 5 && e14.unresolved.join() === 'Zq (interpolates e — not a census sentence)', e14);
+    const dumpSrc14 = read('scripts/claude-cli-dump.mjs'), EXPAND = dumpSrc14.split('\n').filter((l) => l.includes('x.text = x.text.replace(/\\$\\{([^}]*)\\}/g'));
+    const rawX = EXPAND.length === 1 ? await import(pathToFileURL(M14.write('scripts/claude-cli-dump.mjs', dumpSrc14.replace(EXPAND[0], '    /* no expansion (control) */'), 'no-expand')).href) : null;
+    const rawMini = rawX && rawX.extractPermissionSentences(mini314), rawM9 = rawMini && rawMini.sentences.find((x) => x.name === 'm9t');
+    const rawGhost = rawMini && outcomeCensus(rawMini.sentences, [{ id: 'm9t', binary: 'Gd', text: m9s ? m9s.text : '?' }], '').ghosts;
+    ok('RED CONTROL: a copy of the extractor that reads the template RAW keeps «${Nh} Correction…» — the row is a GHOST and the box\'s drift line comes back verbatim («${Nh} Correction to the text above…»)', EXPAND.length === 1 && !!rawM9 && rawM9.text.startsWith('${Nh} Correction to the text above') && rawGhost.join() === 'm9t (Gd)', { expand: EXPAND.length, raw: rawM9 && rawM9.text, rawGhost });
+    ok('the copies live outside the tree', M14.files.every((f) => !f.startsWith(REPO)));
   }
 }
 
