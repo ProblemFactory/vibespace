@@ -114,6 +114,7 @@ const REARM_MS = 2000; // a watch whose socket closed under the person's own bro
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
 const REARM_HEALTHY = 10; // a socket that stayed open this many REARM_MS was healthy: its close starts the backoff over
 const PK_ORPHAN_MS = 1500; // a webauthn surface whose request never comes (it began before this socket) is cancelled after this — never a page left waiting
+const PK_DRAIN_MS = 1000; // r6: the next ceremony waits at most this for the tab's clean-up (pkDrained) — under the hook's hold bound (HOOK_HOLD_MS 1.5 s): a dead CDP session never holds his sign-in
 const NATIVE_ON_KERNEL = new Set(['Page.javascriptDialogOpening', 'Page.javascriptDialogClosed', 'Page.fileChooserOpened', 'Fetch.authRequired']); // one source: never read where surfaces are on
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
@@ -135,7 +136,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null, rearmMs = REARM_MS /* lane passkey-browse-yourself */,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
-  passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
+  passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, drainMs = PK_DRAIN_MS /* r6 */, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
@@ -1601,10 +1602,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function pkGate(w, e, rec) {
     if (rec && rec.kernel) return pkKernelGate(w, e, rec); // lane passkey-sink: the kernel road (no authenticator, VibeSpace signs)
     const person = w.mode === 'person'; // acceptance r1: HIS own ceremony — the vault only when he chose it, else Chrome's own window
-    if (person && e.pk.once && e.pk.auth && !(e.pk.onceFor && e.pk.onceFor.outcome === 'pending')) { if (e.pk.draining) await e.pk.draining.catch(() => {}); await pkOnceGone(w, e, e.pk.onceFor); } // r5 belt: a once-authenticator whose ceremony is over never meets the next one (Chrome's own window for it)
+    if (person && e.pk.once && e.pk.auth && !(e.pk.onceFor && e.pk.onceFor.outcome === 'pending')) { const stale = e.pk.onceFor; pkDrain(w, e, () => pkOnceGone(w, e, stale)).catch(() => {}); } // r5 belt: a once-authenticator whose ceremony is over never meets the next one (Chrome's own window for it) — r6: its remove is a drain like every other
+    if (person && e.pk.draining) await pkDrained(w, e); // r6: his autofill too meets no clean-up in flight (a disable after its pass drops the environment Chrome holds it in)
     if (person && rec.conditional) { rec.passed = true; return pkCtl(w, e, rec, 'pass'); } // acceptance r2: his AUTOFILL get (the page's, at load — a pick by nature, open as long as the page) goes to Chrome as is: no vault key, and it holds no queue — acceptance r3: Chrome takes ONE WebAuthn request per page (a modal one beside it is refused with OperationError — measured), so the hook ends it when his «Sign in with a passkey» starts (installHook's `supersede`)
     if (!e.pk.auth && !person) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
-    if (e.pk.draining) await e.pk.draining.catch(() => {}); // ONE ceremony per tab at a time: the last one's unload first
+    if (e.pk.draining) await pkDrained(w, e); // ONE ceremony per tab at a time: the last one's unload first (r6: bounded)
     const pid = w.profileId, part = PS.profileOf(pkRead(), pid);
     if (!rec.by) rec.by = person || pkTakeover(w, e) ? 'human' : 'agent'; // the operator at the START (a takeover never lifts an agent's ceremony)
     const owner = pkOwner(w, e);
@@ -1614,7 +1616,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (person && (v.verdict === 'refuse' || (v.verdict === 'release' && !(v.load && v.load.length) && !v.consumeGrant))) return pkCtl(w, e, rec, 'release'); // nothing of the vault he chose ⇒ Chrome's own window (never refused for the vault's sake)
     if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
-    if (person && !e.pk.auth) { e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null; if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); if (rec.outcome !== 'pending') return pkOnceGone(w, e, rec); } // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
+    if (person && !e.pk.auth) { // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
+      await pkDrain(w, e, async () => { // r6: the pairing AND the gate race's remove are ONE drain — a ceremony that starts meanwhile (his retry) pairs after both
+        if (e.pk.auth || rec.outcome !== 'pending') return; // paired meanwhile by the one before / over before its turn
+        e.pk.pairs = (e.pk.pairs || 0) + 1; e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null;
+        if (rec.outcome !== 'pending') await pkOnceGone(w, e, rec);
+      });
+      if (rec.outcome !== 'pending') return;
+      if (!e.pk.auth) return pkCtl(w, e, rec, 'release');
+    }
     if (v.consumeGrant) pkGrants.delete(gk);
     rec.createdBy = person ? 'human' : v.createdBy || null;
     let store = pkRead(); const loaded = [];
@@ -1641,16 +1651,40 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const a = rec.ask && pkAsks.get(rec.ask); if (a && a.state === 'open') pkClose(a, 'withdrawn');
     if (rec.passed) return; // acceptance r3: a request handed to Chrome as is holds no authenticator and no drain — its end touches neither
     if (!e.pk.auth || !e.sid) return;
-    const job = pkUnload(w, e, rec); e.pk.draining = job;
-    try { await job; } finally { if (e.pk.draining === job) e.pk.draining = null; }
+    await pkDrain(w, e, () => pkUnload(w, e, rec)); // r6: chained onto a clean-up in flight, never written over it
+  }
+  /** r6 (acceptance r5 MAJOR): ONE rule — every unload, every pairing of the person's once-authenticator and every remove of it
+   *  is a DRAIN: chained onto the tab's drain in flight (begun at once when there is none), and the next gate waits for it
+   *  (pkDrained). An old ceremony's WebAuthn.disable — Chrome drops the tab's whole virtual environment, the new authenticator
+   *  and his key in it — never lands after the next ceremony's enable. */
+  function pkDrain(w, e, fn) {
+    const prev = e.pk.draining;
+    const job = prev ? pkDrained(w, e, prev).then(fn) : fn();
+    e.pk.draining = job;
+    const done = () => { if (e.pk.draining === job) e.pk.draining = null; };
+    job.then(done, done);
+    return job;
+  }
+  /** The ONE wait on a drain — BOUNDED: one not over in drainMs (a dead CDP session: each call waits out its own timeout) is said
+   *  and gone past (no longer the tab's drain); what it still sends cannot reach a newer ceremony (pkOnceGone's `pairs`). */
+  async function pkDrained(w, e, d = e.pk.draining) {
+    if (!d) return;
+    let t = null;
+    const late = await Promise.race([d.then(() => false, () => false), new Promise((r) => { t = setTimeout(() => r(true), drainMs); if (t.unref) t.unref(); })]);
+    clearTimeout(t);
+    if (!late) return;
+    if (e.pk.draining === d) e.pk.draining = null;
+    say('pk-drain:' + w.profileId, `${w.profileId}: a passkey sign-in's clean-up did not finish in ${drainMs} ms — the next one goes on without waiting for it`);
   }
   /** r5 (acceptance r4 MAJOR 1): the person's once-authenticator (and the vault key loaded in it) leaves with ITS ceremony however
    *  that ceremony ended — its end (pkUnload), its document gone (pkPageGone), an end that landed while the gate was pairing it
-   *  (pkGate), or found stale when the next ceremony starts (pkGate's belt). Any other ending record touches it not (7.1). */
+   *  (pkGate), or found stale when the next ceremony starts (pkGate's belt). Any other ending record touches it not (7.1).
+   *  r6: always inside a drain (pkDrain); one gone past at the bound sends no disable once a newer pairing began. */
   async function pkOnceGone(w, e, rec) {
     if (!(e.pk.once && e.pk.auth && w.mode === 'person' && e.pk.onceFor === rec)) return false;
-    const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; e.pk.onceFor = null;
-    await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid);
+    const id = e.pk.auth, pairs = e.pk.pairs; e.pk.auth = null; e.pk.once = false; e.pk.onceFor = null;
+    await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid);
+    if (e.pk.pairs === pairs) await call(w, 'WebAuthn.disable', {}, e.sid); // r6: never the environment a newer ceremony paired in
     return true;
   }
   /** A document went (a navigation, its contexts cleared): its pending ceremonies ended with it (PK.endPending) — no end of theirs
@@ -1658,7 +1692,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function pkPageGone(w, e, ended) {
     if (!ended.length) return;
     passkeyChanged(w, e);
-    if (e.pk.onceFor && ended.includes(e.pk.onceFor)) pkOnceGone(w, e, e.pk.onceFor).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`));
+    const rec = e.pk.onceFor;
+    if (rec && ended.includes(rec)) pkDrain(w, e, () => pkOnceGone(w, e, rec)).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`));
   }
   async function pkUnload(w, e, rec) {
     if (rec.loaded || rec.uvSet) {
