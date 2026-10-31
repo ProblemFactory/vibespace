@@ -346,6 +346,11 @@ const PASSIVE_WITNESSES = quotaModel.PASSIVE_WITNESSES;
 // knows no For-you store, so it only reports what it saw.
 let _onWindowChange = null;
 function onWindowChange(fn) { _onWindowChange = typeof fn === 'function' ? fn : null; }
+// …and ONE listener for «a reading of `key` landed» (lane reset-unproven: the pool engine ends a member's proof in flight
+// — the proving spawn — the moment its first reading is written). `at` = when the windows were measured (ms). A REPAIR
+// (`replace`) measures nothing and says nothing.
+let _onReading = null;
+function onReading(fn) { _onReading = typeof fn === 'function' ? fn : null; }
 
 function atomicWrite(file, text) {
   fs.writeFileSync(file + '.tmp', text);
@@ -500,6 +505,7 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   const unsaidHolds = !!(unsaid && unsaid.kind === '5h' && (unsaid.change === 'removed' ? !!quotaModel.absentSince(nowPlan, '5h') : unsaid.change === 'restored' ? !!quotaModel.windowOfKind(nowPlan, '5h') : false));
   const windowChange = replace ? null : (windowChangeOf(prevObj, prevSet, merged) || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));
   if (windowChange && _onWindowChange) { try { _onWindowChange({ key, ...windowChange, source: source || (obj && obj.source) || null }); } catch { } }
+  if (!replace && _onReading) { try { _onReading({ key, at }); } catch { } }
   return { ok: true, file, limits: merged.limits, object: out, ...(windowChange ? { windowChange } : {}) };
 }
 
@@ -532,6 +538,6 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES,
+  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading,
   DERIVED_KEYS,
 };

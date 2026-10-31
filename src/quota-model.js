@@ -225,6 +225,69 @@ function windowRemaining(win, nowSec) {
   return Math.max(0, Math.min(100, Math.round((100 - used) * 100) / 100));
 }
 
+// ── THE DISPLAY VERDICT (lane reset-unproven, owner rulings 2026-10-30) ────────
+// «界面里对于 reset 了但没证实的账号要展示的像是 reset 了的账号而不是 reset 之前的状态，不然我看到会以为没账号可用». A
+// bucket whose last reading's reset has PASSED, with nothing newer in hand, is SHOWN as reset — 0 % used, marked
+// unconfirmed, with its reset instant — never the stale pre-reset number (the roster showed a member 95 % used whose
+// weekly reset had passed days before). ONE verdict, here; every surface that draws a bucket reads it and none decides
+// «the reset passed» itself. The stored window is never rewritten for this: the cache keeps the vendor's instant and
+// the clock derives the rest. «Lifted» (lane no-5h-window's tombstone) is its own shape: no window, and never «unread».
+
+/** WHAT A SURFACE SHOWS FOR ONE BUCKET. `win` = a typed window ({usedPct, resetsAt s, measuredAt ms, state}) or a
+ *  legacy bucket ({utilization 0..1 | usedPercent, resetsAt s — ms tolerated, state?}); `nowMs` = the caller's clock.
+ *    'read'              the reading stands — `usedPct` its stated spend (null when it stated none)
+ *    'reset-unconfirmed' its stated reset has LANDED (`resetLanded`: the pool's own inequality, the grace included) — the
+ *                        window rolled, so it is shown FULL: `usedPct` 0, `resetAt` the instant it reset. Only a window
+ *                        that may name a deadline rolls: an 'empty' / 'unknown' window's reset slides (B-8b12)
+ *    'lifted'            no window, and the caller hands the tombstone (`absentSince`, ms) — a window present outranks
+ *                        it, exactly as in `fiveHourAbsent`
+ *    'unread'            no window, or one stating neither a spend nor a reset
+ *  → { state, usedPct, resetAt (ms | null), readAt (ms | null — the window's `measuredAt`, else the caller's `readAt`) } */
+function windowDisplay(win, nowMs, { absentSince: lifted = null, readAt = null } = {}) {
+  if (!win || typeof win !== 'object') {
+    const since = posNum(lifted);
+    return since != null ? { state: 'lifted', usedPct: null, resetAt: null, readAt: since } : { state: 'unread', usedPct: null, resetAt: null, readAt: null };
+  }
+  const readMs = posNum(win.measuredAt) ?? posNum(readAt);
+  const u = num(win.utilization);
+  const used = num(win.usedPct) ?? num(win.usedPercent) ?? (u != null ? Math.round(u * 10000) / 100 : null);
+  const r = posNum(win.resetsAt);
+  const resetSec = r == null ? null : (r > 1e12 ? Math.floor(r / 1000) : r);
+  if (used == null && resetSec == null) return { state: 'unread', usedPct: null, resetAt: null, readAt: readMs };
+  const mayRoll = win.state === undefined || win.state === null || win.state === 'running';
+  const now = num(nowMs) != null ? num(nowMs) : Date.now();
+  if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000)) return { state: 'reset-unconfirmed', usedPct: 0, resetAt: resetSec * 1000, readAt: readMs };
+  return { state: 'read', usedPct: used, resetAt: resetSec != null ? resetSec * 1000 : null, readAt: readMs };
+}
+
+/** IS THIS MEMBER'S STANDING A READING OR A GUESS? (the proving spawn's question, account-pool-auto `decidePoolSwitch`.)
+ *  `x` = a cache object / its view (legacy buckets `fiveHour`, `sevenDay`, `scopedWeekly`, a projection's `spareScoped`)
+ *  or a typed LimitSet (`limits` only). Judge it on the READING, never on an estimator overlay: an overlay re-bases a
+ *  rolled weekly bucket onto next week's projected reset, which would read as fresh.
+ *    'unread'            nothing stated at all — no cache, or no window making a claim and no tombstone
+ *    'reset-unconfirmed' EVERY window that may name a deadline has rolled (`windowDisplay`) with nothing newer in hand
+ *    'proven'            anything else. An 'empty' window is no evidence of now (B-8b12) and is not counted; a member
+ *                        stating only such windows was READ (a free member is not an unknown one, §9 r4). A lifted 5h
+ *                        is not a window: it never leaves a member unread and never counts as reset-unconfirmed. */
+function memberProofState(x, nowMs) {
+  if (!x || typeof x !== 'object') return 'unread';
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  const legacy = ['fiveHour', 'sevenDay'].some((k) => x[k] && typeof x[k] === 'object') || arr(x.scopedWeekly).length > 0 || arr(x.spareScoped).length > 0;
+  const wins = legacy ? [x.fiveHour, x.sevenDay, ...arr(x.scopedWeekly), ...arr(x.spareScoped)] : limitsOf(x).flatMap((l) => windowsOf(l));
+  let stated = 0, counting = 0, rolled = 0;
+  for (const w of wins) {
+    const d = windowDisplay(w, nowMs);
+    if (d.state === 'unread') continue;
+    stated++;
+    if (w.state !== undefined && w.state !== null && w.state !== 'running') continue;
+    counting++;
+    if (d.state === 'reset-unconfirmed') rolled++;
+  }
+  if (counting) return rolled === counting ? 'reset-unconfirmed' : 'proven';
+  const lifted = fiveHourAbsent(x) != null || limitsOf(x).some((l) => absentSince(l, '5h') != null);
+  return stated || lifted ? 'proven' : 'unread';
+}
+
 // ── limits ──────────────────────────────────────────────────────────────────
 
 function makeLimit({ limitId, name = null, scope = 'plan', model = null, family = null, windows = [], flags = null, source = null, fetchedAt = null }, opts = undefined) {
@@ -1573,6 +1636,8 @@ module.exports = {
   validateLimitSet,
   // windows
   windowState, windowRemaining, minutesOf,
+  // the display verdict + the proving spawn's question (lane reset-unproven)
+  windowDisplay, memberProofState,
   // accessors
   limitsOf, windowsOf, windowOfKind, planLimit, limitFor, applicableLimits, limitNamesModel,
   remaining, deadline, bucketReport, countingWindows, isBudgetKind, bucketCounts,

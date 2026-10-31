@@ -1392,6 +1392,19 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .usage-est-stat { border-bottom: 1px dashed var(--text-dim); cursor: help; }
 /* Estimating state on donuts: dashed outer ring (popup pies + Agents rosters) */
 .usage-donut-est, .acct-donut-est { outline: 1px dashed color-mix(in srgb, var(--text-secondary) 70%, transparent); outline-offset: 1.5px; }
+/* A RESET NOT YET CONFIRMED (lane reset-unproven): the window reset since its last reading and nothing newer is in hand —
+   drawn as reset (nothing used) inside a FULL dashed ring in the muted colour, never the stale pre-reset arc; the words
+   («reset <time> · unconfirmed — confirms when a session uses it») ride the tooltip / the stat beside the bar. */
+.usage-donut-unconfirmed, .acct-donut-unconfirmed { outline: 1.5px dashed var(--text-secondary); outline-offset: -1.5px; }
+.acct-donut-eta.acct-donut-reset { display: inline-flex; align-items: center; height: 10px; color: var(--text-secondary); }
+.acct-donut-eta.acct-donut-reset svg { width: 8px; height: 8px; }
+.acct-mini-unconfirmed { border-bottom: 1px dashed currentColor; }
+.acct-usage-unread { font-size: 9px; line-height: 11px; color: var(--text-secondary); font-style: italic; text-align: right; white-space: normal; max-width: 170px; }
+/* …in a narrower roster the words wrap tighter (three short lines, the row's own height), so the name line keeps its chips whole (test-roster-reset-eta §5: a login chip at 384 px) */
+@container (max-width: 460px) { .acct-key-row .acct-usage-unread { max-width: 120px; } }
+.usage-bar.usage-bar-unconfirmed { outline: 1px dashed var(--text-secondary); outline-offset: -1px; }
+.usage-stat-unconfirmed { color: var(--text-secondary); font-style: italic; }
+.bsw-usage .bsw-seg.bsw-unconfirmed .bsw-pct { color: var(--text-secondary) !important; text-decoration: underline dashed 1px; text-underline-offset: 2px; }
 .acct-mini-est { border-bottom: 1px dashed currentColor; }
 .usage-popup {
   position: fixed; bottom: 50px; right: 10px; z-index: 99999;

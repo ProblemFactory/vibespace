@@ -492,6 +492,16 @@ function poolReadCache(poolId) {
   // the engine's readCache, extracted for reuse (identity-group freshest file
   // + estimator overlay); kept here so chooser/switch/engine cannot drift
   const now = Date.now();
+  const reading = poolReadReading();
+  return (id) => {
+    const raw = reading(id);
+    try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+  };
+}
+// THE READING the overlay starts from — the member's own file or its identity group's freshest — never an estimate.
+// The proving spawn judges a member on THIS (lane reset-unproven): the overlay re-bases a rolled weekly bucket onto next
+// week's projected reset, which would read as a fresh reading.
+function poolReadReading() {
   return (id) => {
     let raw = null;
     try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
@@ -500,9 +510,35 @@ function poolReadCache(poolId) {
         if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
-    try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+    return raw;
   };
 }
+// ── THE PROOFS IN FLIGHT (lane reset-unproven, owner ruling «B吧»): poolId → Map<memberId, sinceMs> — a spawn the
+// chooser placed to turn a member's guess into a reading (account-pool-auto PROVING_HOLD_MS). A mark ends when a reading
+// of that member lands (the write path's `onReading`; a direct writer — the shipped statusline — is seen here, by its
+// file's `fetchedAt`) or PROVING_HOLD_MS pass. In memory only: a restart forgets the proofs in flight, so at most one
+// more spawn goes to a member whose first turn is still running — said in docs/kb-features.md.
+const _proving = new Map();
+function provingOf(poolId, now = Date.now()) {
+  const { PROVING_HOLD_MS } = require('../account-pool-auto.js');
+  let m = _proving.get(poolId);
+  if (!m) { m = new Map(); _proving.set(poolId, m); }
+  const reading = m.size ? poolReadReading() : null;
+  for (const [id, since] of m) {
+    const landed = Number(reading && reading(id)?.fetchedAt) || 0;
+    if (now - since >= PROVING_HOLD_MS || landed > since) m.delete(id);
+  }
+  return m;
+}
+function noteProofLanded({ key, at } = {}) {
+  for (const [poolId, m] of _proving) {
+    const since = m.get(key);
+    if (since == null || !(Number(at) >= since)) continue;
+    m.delete(key);
+    console.log(`[pool] proving: ${accounts.get(key)?.name || key} (${key}) read at ${OF.when(Number(at))} — its proof is in (pool ${accounts.get(poolId)?.name || poolId})`);
+  }
+}
+usageWrite.onReading(noteProofLanded);
 // THE engine's login reader (2026-09-07). ONE memoized read per tick per
 // member: loginStateOf hits the credential file, and a single pool decision
 // asks about the same member several times. §ban-safety: file reads only —
@@ -674,7 +710,13 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // a Fable conversation hinted as Opus would be placed on the member whose Fable is spent.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: provingOf(poolId), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    // THE PROVING SPAWN (lane reset-unproven): the member it lands on is marked in flight and the placement is said
+    if (d && d.reason === 'proving' && d.to) {
+      provingOf(poolId).set(d.to, Date.now());
+      const { provingText } = require('../account-pool-auto.js');
+      console.log(`[pool] spawn on "${a.name || poolId}": ${provingText(d, { when: (ms) => OF.when(ms) })}`);
+    }
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that

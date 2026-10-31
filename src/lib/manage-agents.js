@@ -34,7 +34,8 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one con
 // like search-card.js): the menu can only offer what the server will run, and
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
-import { overageChip, spendControlChip, creditsChipHtml, creditsState } from './usage-source.js';
+import { overageChip, spendControlChip, creditsChipHtml, creditsState, bucketView, unconfirmedText } from './usage-source.js';
+import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
 import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
@@ -426,6 +427,11 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
 // A MACHINE LOGIN'S SNAPSHOT IS A READING when it carries a 5h bucket — or, for an account Anthropic lifted the 5-hour
 // limit from (lane no-5h-window), a weekly window that states a spend. The four host-own gates used to ask `fiveHour`
 // alone and blanked a weekly-only reading whole. PURE, exported for the gate.
+/** A MEMBER NEVER READ says so in its bucket slot (lane reset-unproven r2, 主开发's ruling): an empty slot reads as «no
+ *  data, unusable»; the words say what fills it. Kept visible at every width (its own class, not `.acct-usage`). */
+export function unreadUsageHtml() {
+  return `<span class="acct-usage-unread">${escHtml(t('no reading yet — confirms when a session uses it'))}</span>`;
+}
 export function hostOwnReading(h) {
   if (!h || typeof h !== 'object') return null;
   const w = h.sevenDay;
@@ -1504,6 +1510,8 @@ export function installManageAgents(App, ctx = {}) {
   _acctUsageHtml(u, est, probeNote = null) {
     if (!u) return '';
     const now = Date.now();
+    // a reading that states no window at all is NO READING (quota-model memberProofState) — words, never 0 % donuts (r2)
+    if (!Array.isArray(u.windows) && quotaModel.memberProofState(u, now) === 'unread') return unreadUsageHtml();
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
     // Reset countdown (2.268.7, user request — THIS surface, not the popup;
     // 2026-09-14: UNDER EVERY DONUT, owner: "把每个进度条的刷新时间都展示出来,
@@ -1529,7 +1537,11 @@ export function installManageAgents(App, ctx = {}) {
     // window's reset slides with the clock (B-8b12) and a missing/passed reset
     // is not a countdown — and the column keeps its height either way so the
     // rows stay aligned.
-    const donut = (label, x, tipName, estBucket) => {
+    // A RESET NOT YET CONFIRMED (lane reset-unproven): a bucket whose reset landed since its reading is drawn RESET —
+    // 0 % used, a dashed muted ring, a reset glyph under it, the words in its tooltip — never the stale pre-reset arc
+    const donut = (label, x0, tipName, est0) => {
+      const v = bucketView(quotaModel, x0, est0, now, { readAt: u.fetchedAt });
+      const x = v.reading, estBucket = v.est;
       const pair = estDisplayPair(x, estBucket);
       const p = pair.estPct != null ? pair.darkPct : pct(x);
       const eff = pair.estPct ?? p;
@@ -1538,7 +1550,8 @@ export function installManageAgents(App, ctx = {}) {
       const bg = pair.estPct != null && pair.estPct > pair.darkPct
         ? `conic-gradient(${c} ${Math.round(p * 3.6)}deg, ${light} ${Math.round(p * 3.6)}deg ${Math.round(pair.estPct * 3.6)}deg, var(--bg-input) ${Math.round(pair.estPct * 3.6)}deg)`
         : `conic-gradient(${c} ${Math.round(p * 3.6)}deg, var(--bg-input) ${Math.round(p * 3.6)}deg)`;
-      const tip = (typeof x?.tip === 'string' ? escHtml(x.tip) // an on-demand window says itself (onDemandUsageView)
+      const tip = (v.unconfirmed ? `${escHtml(tipName || label)}: ${escHtml(unconfirmedText(v, { t, nowMs: now }))}${pair.estPct != null ? ' · ' + escHtml(t('est {pct}%', { pct: pair.estPct })) : ''}`
+        : typeof x?.tip === 'string' ? escHtml(x.tip) // an on-demand window says itself (onDemandUsageView)
         : pair.estPct != null
         ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
         : `${escHtml(tipName || label)}: ${p}%`) + escHtml(etaTip(x));
@@ -1547,8 +1560,9 @@ export function installManageAgents(App, ctx = {}) {
       // the label's height, so every donut sits at the same y whether or not
       // its bucket names a deadline (the min-height alone kept the ROW height
       // equal while the donut floated above an empty gap).
-      const etaHtml = eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
-      return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
+      const etaHtml = v.unconfirmed ? `<span class="acct-donut-eta acct-donut-reset" aria-hidden="true">${UI_ICONS.refresh}</span>`
+        : eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
+      return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}${v.unconfirmed ? ' acct-donut-unconfirmed' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
     };
     // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
     const wins = Array.isArray(u.windows) ? u.windows : null;
@@ -1571,7 +1585,7 @@ export function installManageAgents(App, ctx = {}) {
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
     // detail in the tooltip).
     const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [...(has5h ? [['5h', u.fiveHour, est?.fiveHour, 'fiveHour']] : []), ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])])
-      .map(([label, x, e, kind]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind]; }).filter(([, p]) => Number.isFinite(p));
+      .map(([label, x0, e0, kind]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt }); const x = v.reading; const pr = estDisplayPair(x, v.est); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind, v.unconfirmed]; }).filter(([, p]) => Number.isFinite(p));
     // THE ROW'S OWN countdown (2026-09-15): one full-precision token per
     // account — blocked ⇒ when its last spent bucket resets (the pool's hard
     // bars say what "spent" is), else the earliest reset any bucket names.
@@ -1581,12 +1595,13 @@ export function installManageAgents(App, ctx = {}) {
     const nextTip = next ? nextTipFor(next) : '';
     let mini = '', etaTitle = '';
     if (buckets.length) {
-      const [wl, wp, wEst, wx] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const [wl, wp, wEst, wx, , wUn] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const allUn = buckets.every((b) => b[5]); // every bucket reset since its reading: the pill says so in words (lane reset-unproven)
       const wc = pressure(wp);
       const wEta = bucketEta(wx, now);
       if (wEta) etaTitle = `${wl} ${t('resets in {dur}', { dur: fmtEta(resetMs(wx)) })}`;
-      const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
-      mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
+      const tip = [buckets.map(([l, p, isE, , , un]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
+      mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}${wUn ? ' acct-mini-unconfirmed' : ''}" style="color:${wUn ? 'var(--text-secondary)' : wc}" title="${escHtml(tip)}">${allUn ? escHtml(t('reset · unconfirmed')) : `${escHtml(wl)} ${wp}%`}${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
     }
     // THE PROBE NOTE (acctProbeNote, lane auto-cli-oat-unprobeable): why this reading ages — never probed / the last probe's
     // failure; a failure older than the reading it would explain is not said
@@ -2683,7 +2698,8 @@ export function installManageAgents(App, ctx = {}) {
           const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml(dialWords)}"></span>`;
           let pill = '';
           const hu = this._hostOwnUsage?.[h.id];
-          const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x))) : [];
+          const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x)))
+            .map(([l, x]) => { const v = bucketView(quotaModel, x, null, Date.now(), { readAt: hu.fetchedAt }); return [l, v.reading, v.unconfirmed]; }) : []; // a landed reset is drawn reset (lane reset-unproven)
           if (bs.length) {
             const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
             const wp = pctOf(wx);
@@ -2698,7 +2714,7 @@ export function installManageAgents(App, ctx = {}) {
             // the same rule the roster donuts carry — bucketEta refuses a
             // window that may not name a deadline).
             const wEta = bucketEta(wx, Date.now());
-            const tip = bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
+            const tip = bs.map(([l, x, un]) => `${l} ${pctOf(x)}%${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
             pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
           }
           const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
@@ -3196,7 +3212,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
-        <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est, probeNote) : ''}</span>
+        <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est, probeNote) : isSub && !isPool && usageStamp && usageStamp.src === 'accounts' ? unreadUsageHtml() : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>

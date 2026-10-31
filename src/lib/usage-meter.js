@@ -8,7 +8,7 @@ import { backendFeatureCaps } from './agent-meta.js';
 // panel's latest number, and — for a member that can no longer produce one at
 // all — how old the last REAL reading is. DOM-free so scripts/test-readings-
 // attribution.mjs pins it in node.
-import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast } from './usage-source.js';
+import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast, bucketView, unconfirmedText } from './usage-source.js';
 // The ONE overage verdict (PURE, CJS — the same function the spend
 // authorizer and the pool's voluntary-target rule read).
 import { overageState, spendControlState } from '../spend-authorizer.js';
@@ -351,10 +351,12 @@ export function installUsageMeter(App, ctx = {}) {
       if (!rows2.length) return '';
       return rows2.map((r) => {
         const wins = r.windows.length ? r.windows.map((w) => {
-          const pct = w.usedPct == null ? null : Math.round(w.usedPct);
+          const un = !!(w.display && w.display.state === 'reset-unconfirmed'); // its reset landed since the reading: drawn reset (lane reset-unproven)
+          const pct = un ? 0 : w.usedPct == null ? null : Math.round(w.usedPct);
           const when = w.note ? escHtml(w.note) : fmtReset(w.resetsAt, (w.usedPct || 0) / 100);
           return `<span class="usage-stat">${escHtml(w.kind)} ${pct == null ? escHtml(t('no data')) : escHtml(t('{pct}% used', { pct }))}</span>`
-            + `<span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${when}</span>`;
+            + (un ? `<span class="usage-stat usage-stat-unconfirmed">${escHtml(unconfirmedText({ unconfirmed: true, display: w.display }, { t }))}</span>`
+              : `<span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${when}</span>`);
         }).join('') : `<span class="usage-stat">${escHtml(t('no window reported'))}</span>`;
         const prov = r.sourceLabel ? `<span class="usage-src">${escHtml(t('via {source}', { source: r.sourceLabel }))}</span>` : '';
         const age = r.fetchedAt ? `<span class="usage-stat">${escHtml(t('Updated {ago}', { ago: agoText(r.fetchedAt) }))}</span>` : '';
@@ -369,7 +371,10 @@ export function installUsageMeter(App, ctx = {}) {
     // CONFIRMED reading fills solid and the ESTIMATED delta fills LIGHT (same
     // hue mixed toward the track); after a window reset the reading no longer
     // applies, so the whole arc renders light (estDisplayPair's rolled rule).
-    const renderPie = (label, pct, noData, pair) => {
+    // `view` = the bucket's bucketView (lane reset-unproven): a reset that landed since the reading draws an EMPTY pie
+    // inside a dashed muted ring, and its tooltip says «reset <time> · unconfirmed — confirms when a session uses it»
+    const renderPie = (label, pct, noData, pair, view = null) => {
+      const unconf = !noData && !!(view && view.unconfirmed);
       const clamped = Math.max(0, Math.min(100, Math.round(pct || 0)));
       const hasEst = !noData && pair?.estPct != null;
       const dark = hasEst ? pair.darkPct : clamped;
@@ -382,17 +387,18 @@ export function installUsageMeter(App, ctx = {}) {
         ? `conic-gradient(${color} ${darkDeg}deg, ${light} ${darkDeg}deg ${estDeg}deg, var(--bg-input) ${estDeg}deg)`
         : `conic-gradient(${color} ${darkDeg}deg, var(--bg-input) ${darkDeg}deg)`;
       const tip = noData ? `${label}: ${t('no data yet')}`
+        : unconf ? `${label}: ${unconfirmedText(view, { t })}${hasEst ? ' · ' + t('est {pct}%', { pct: estP }) : ''}`
         : hasEst ? `${label}: ${dark}% · ${t('est {pct}%', { pct: estP })}${pair.rolled ? ' · ' + t('window reset since last reading') : ''}`
         : `${label}: ${clamped}%`;
-      return `<div class="usage-pie usage-donut${hasEst ? ' usage-donut-est' : ''}" title="${tip}" style="background:${bg}"><span class="usage-donut-label">${label}</span></div>`;
+      return `<div class="usage-pie usage-donut${hasEst ? ' usage-donut-est' : ''}${unconf ? ' usage-donut-unconfirmed' : ''}" title="${escHtml(tip)}" style="background:${bg}"><span class="usage-donut-label">${label}</span></div>`;
     };
     // a null primary label draws no primary donut (lane no-5h-window: a reading without a 5h window)
-    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs) => (
+    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs, views = null) => (
       `<div class="taskbar-usage-row">
         ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: getBackendMeta(backend).label })}
         <div class="taskbar-usage-pair">
-          ${primaryLabel == null ? '' : renderPie(primaryLabel, primaryPct, noData, pairs?.[0])}
-          ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1])}
+          ${primaryLabel == null ? '' : renderPie(primaryLabel, primaryPct, noData, pairs?.[0], views?.[0])}
+          ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1], views?.[1])}
         </div>
       </div>`
     );
@@ -404,6 +410,11 @@ export function installUsageMeter(App, ctx = {}) {
     };
     const estStat = (pair) => (pair?.estPct == null ? '' :
       `<span class="usage-stat usage-est-stat" title="${escHtml(t('Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.'))}">${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`);
+    // the «Resets» stat, or — for a reset that landed since the reading — its unconfirmed words (lane reset-unproven)
+    const resetStat = (view, resetHtml) => (view && view.unconfirmed
+      ? `<span class="usage-stat usage-stat-unconfirmed">${escHtml(unconfirmedText(view, { t }))}</span>`
+      : `<span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${resetHtml}</span>`);
+    const barClass = (view) => (view && view.unconfirmed ? 'usage-bar usage-bar-unconfirmed' : 'usage-bar');
     const renderSectionTitle = (backend, label, extra = '') => (
       `<div class="usage-section-title">${createBackendIconHtml(backend, { className: 'usage-section-backend', title: label })}<span>${label}</span>${extra}</div>`
     );
@@ -449,13 +460,16 @@ export function installUsageMeter(App, ctx = {}) {
       // no 5h bucket for any other reason shows no 5h figure at all (nobody measured one).
       const has5h = !!(rl && rl.fiveHour && typeof rl.fiveHour === 'object');
       const no5hSince = quotaModel.fiveHourAbsent(rl);
-      const pct5h = Math.round((rl?.fiveHour?.utilization || 0) * 100);
+      // every bucket through its display verdict first (lane reset-unproven): a landed reset is drawn reset, unconfirmed
+      const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });
+      const v7 = bucketView(quotaModel, rl?.sevenDay, estSel?.sevenDay, Date.now(), { readAt: rl?.fetchedAt });
+      const pct5h = Math.round((v5.reading?.utilization || 0) * 100);
       const color = usageColor(pct5h);
-      const pct7d = Math.round((rl?.sevenDay?.utilization || 0) * 100);
+      const pct7d = Math.round((v7.reading?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
-      const p5 = estDisplayPair(rl?.fiveHour, estSel?.fiveHour);
-      const p7 = estDisplayPair(rl?.sevenDay, estSel?.sevenDay);
-      rows.push(renderRow('claude', has5h || noData ? '5h' : null, pct5h, '7d', pct7d, noData, [p5, p7]));
+      const p5 = estDisplayPair(v5.reading, v5.est);
+      const p7 = estDisplayPair(v7.reading, v7.est);
+      rows.push(renderRow('claude', has5h || noData ? '5h' : null, pct5h, '7d', pct7d, noData, [p5, p7], [v5, v7]));
       if (!noData) chipWorst = Math.max(chipWorst, has5h ? (p5.estPct ?? pct5h) : -1, p7.estPct ?? pct7d);
       // Account switcher — one chip per viewable identity. When the CLI login
       // is a named account (gl.accountId), NO separate CLI-login chip renders:
@@ -472,8 +486,9 @@ export function installUsageMeter(App, ctx = {}) {
       const scopedSections = [];
       for (const sc of rl?.scopedWeekly || []) {
         const scEst = (estSel?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;
-        const pSc = estDisplayPair(sc, scEst);
-        const pctSc = pSc.estPct != null ? pSc.darkPct : Math.round((sc.utilization || 0) * 100);
+        const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });
+        const pSc = estDisplayPair(vSc.reading, vSc.est);
+        const pctSc = pSc.estPct != null ? pSc.darkPct : Math.round((vSc.reading.utilization || 0) * 100);
         // A LIMIT WHOSE WINDOW HAS NOT STARTED (B-8b12): it is shown (the
         // vendor named it, and hiding a limit is its own kind of lie) but it
         // states no reset — its `resetsAt` is `now + duration` on every read —
@@ -491,11 +506,11 @@ export function installUsageMeter(App, ctx = {}) {
         scopedSections.push(`
       <div class="usage-session">
         <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div>${estBar(pSc)}</div>
+        <div class="${barClass(vSc)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div>${estBar(pSc)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
           ${estStat(pSc)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${scNotStarted ? escHtml(windowNote(sc, { t })) : fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated)}</span>
+          ${resetStat(vSc, scNotStarted ? escHtml(windowNote(sc, { t })) : fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated))}
           ${scNotStarted ? '' : scAge}
         </div>
       </div>`);
@@ -513,11 +528,11 @@ export function installUsageMeter(App, ctx = {}) {
         ? `<div class="usage-note">${t('No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.')}</div>`
         : `${has5h ? `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
+        <div class="${barClass(v5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
           ${estStat(p5)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization)}</span>
+          ${resetStat(v5, fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization))}
         </div>
       </div>` : no5hSince ? `<div class="usage-session usage-session-lifted" data-window="5h">
         <div class="usage-session-name">${escHtml(t('5-hour limit lifted ({when})', { when: stampText(no5hSince) }))}</div>
@@ -525,11 +540,11 @@ export function installUsageMeter(App, ctx = {}) {
       </div>` : ''}
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
+        <div class="${barClass(v7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
           ${estStat(p7)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated)}</span>
+          ${resetStat(v7, fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated))}
         </div>
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
@@ -547,13 +562,15 @@ export function installUsageMeter(App, ctx = {}) {
 
     if (codex?.fiveHour || codex?.sevenDay || codexHasSwitch || cglKnown) {
       const cNoData = !(codex?.fiveHour || codex?.sevenDay);
-      const pct5h = Math.round(codex?.fiveHour?.usedPercent || ((codex?.fiveHour?.utilization || 0) * 100));
-      const pct7d = Math.round(codex?.sevenDay?.usedPercent || ((codex?.sevenDay?.utilization || 0) * 100));
+      const cv5 = bucketView(quotaModel, codex?.fiveHour, cEstSel?.fiveHour, Date.now(), { readAt: codex?.fetchedAt }); // a landed reset is drawn reset (lane reset-unproven)
+      const cv7 = bucketView(quotaModel, codex?.sevenDay, cEstSel?.sevenDay, Date.now(), { readAt: codex?.fetchedAt });
+      const pct5h = Math.round(cv5.reading?.usedPercent || ((cv5.reading?.utilization || 0) * 100));
+      const pct7d = Math.round(cv7.reading?.usedPercent || ((cv7.reading?.utilization || 0) * 100));
       const color5h = usageColor(pct5h);
       const color7d = usageColor(pct7d);
-      const cp5 = estDisplayPair(codex?.fiveHour, cEstSel?.fiveHour);
-      const cp7 = estDisplayPair(codex?.sevenDay, cEstSel?.sevenDay);
-      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData, [cp5, cp7]));
+      const cp5 = estDisplayPair(cv5.reading, cv5.est);
+      const cp7 = estDisplayPair(cv7.reading, cv7.est);
+      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData, [cp5, cp7], [cv5, cv7]));
       if (!cNoData) chipWorst = Math.max(chipWorst, cp5.estPct ?? pct5h, cp7.estPct ?? pct7d);
       // Account switcher — same model as Claude's: merged chip when the machine
       // login IS a named account, ★ marks the default; data-be routes the click.
@@ -582,20 +599,20 @@ export function installUsageMeter(App, ctx = {}) {
           : `<div class="usage-note">${t('No usage captured yet for this account — run a session on it.')}</div>`)
         : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cp5)}</div>
+        <div class="${barClass(cv5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cp5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
           ${estStat(cp5)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.fiveHour?.resetsAt, codex.fiveHour?.utilization)}</span>
+          ${resetStat(cv5, fmtReset(codex.fiveHour?.resetsAt, codex.fiveHour?.utilization))}
         </div>
       </div>
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cp7)}</div>
+        <div class="${barClass(cv7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cp7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
           ${estStat(cp7)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt, codex.sevenDay?.utilization)}</span>
+          ${resetStat(cv7, fmtReset(codex.sevenDay?.resetsAt, codex.sevenDay?.utilization))}
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
           ${codex.resetCredits ? `<span class="usage-stat" title="${escHtml(t('Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)'))}"><span class="usage-stat-label">${escHtml(t('Reset credits'))}</span> ${Number(codex.resetCredits.availableCount) || 0}</span>` : ''}
         </div>

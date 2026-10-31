@@ -94,7 +94,7 @@ function serveAfterFailure(prev, { why = '', now = Date.now(), fp = '' } = {}) {
 // the vendor state a spend" and gates `bucketRemaining`. Asking the deadline
 // predicate about the remaining made a fully FREE member read back as "no usage
 // data" — see the essay in quota-model.js.
-const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC, nowSecOf, resetLanded } = require('./quota-model.js');
+const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC, nowSecOf, resetLanded, memberProofState, windowDisplay } = require('./quota-model.js');
 const { familyOfScopedBucket } = require('./model-family.js');
 
 const SWITCH_THRESHOLD_PCT = 5;
@@ -423,6 +423,42 @@ function priorityOrder(priority, base = edfCompare) {
  *  usable members in EDF order — the device executes a LOCAL fallback switch
  *  down this list only when it both sees a hard limit banner AND cannot
  *  reach the orchestrator. */
+// ── THE PROVING SPAWN (lane reset-unproven, owner ruling «B吧», 2026-10-30) ────────────────────────────────────
+// A member whose every stated window has reset since its last reading — or that was never read — stands on a GUESS
+// (quota-model `memberProofState`): the roster shows it reset (unconfirmed), and nothing turns that into a reading but
+// a turn on it. So a NEW conversation (a spawn — `placing`, the chooser only: a turn the owner starts and pays anyway)
+// is placed on such a member, deterministically: the one with the OLDEST reading (never read = oldest; ties by id),
+// ONE proof in flight per member — a member picked for proving ranks as it always has (no-deadline members last) until
+// its first reading lands or PROVING_HOLD_MS pass, so three spawns in a row never pile onto one guess. MOVES are
+// unchanged (EDF, the hot switch, every escape): a conversation never MOVES onto ignorance (the anti-flap law below).
+// The in-flight marks are the ENGINE's (`proving: Map<id, sinceMs>`, src/server/usage-pool-engine.js) — an input, the
+// clock is `nowSec`; omit it ⇒ byte-identical. A pinned conversation never reaches this rule (its pin wins).
+const PROVING_HOLD_MS = 10 * 60e3;
+const PROVING_WINDOW_WORDS = { '5h': '5-hour window', '7d': '7-day window' };
+/** The window a proving verdict names: the one that reset LAST (the one a reading confirms the rest by); a tie prefers
+ *  the weekly. → { label, kind, resetAt (ms) } | null (an unread member has none). */
+function provingWindowOf(c, nowMs) {
+  if (!c || typeof c !== 'object') return null;
+  const rows = [['5h', '5h', c.fiveHour], ['7d', '7d', c.sevenDay], ...(Array.isArray(c.scopedWeekly) ? c.scopedWeekly : []).map((b) => [String((b && b.name) || 'model'), 'scoped', b])];
+  let best = null;
+  for (const [label, kind, b] of rows) {
+    const d = windowDisplay(b, nowMs);
+    if (d.state !== 'reset-unconfirmed') continue;
+    if (!best || d.resetAt > best.resetAt || (d.resetAt === best.resetAt && kind !== '5h')) best = { label, kind, resetAt: d.resetAt };
+  }
+  return best;
+}
+/** The proving verdict in words (the engine's journal line; `when(ms)` words an instant):
+ *  «placed on <name> to confirm its 7-day window reset on <date>; a reading follows its first turn». */
+function provingText(d, { when = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z' } = {}) {
+  const p = d && d.proving;
+  if (!p) return '';
+  const name = p.name || p.id;
+  if (p.state === 'unread' || !p.window) return `placed on ${name} — it has never been read; a reading follows its first turn`;
+  const what = PROVING_WINDOW_WORDS[p.window.kind] || `${p.window.label} weekly limit`;
+  return `placed on ${name} to confirm its ${what} reset on ${when(p.window.resetAt)}; a reading follows its first turn`;
+}
+
 function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, priority = null, providerOf = null, fromProvider = null }) {
   const out = [];
   // THE PROVIDER (q-053 P0b): the snapshot is a list of HOT re-points the device makes by itself — a member of another
@@ -522,7 +558,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // a usable default is left for a settleable member with less SPARE lane (`reason:
 // 'spare-lane'`, see THE SPARE LANE). Omit it ⇒ byte-identical. A HOT pool's proactive pass
 // moves an idle running conversation the same way, past SPARE_MOVE_MARGIN_PCT (S5).
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, roster = null, explain = false }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, proving = null, readReading = null, roster = null, explain = false }) {
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
@@ -605,7 +641,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // says this member cannot authenticate, which is a fact, not a gap.
   // (a manual priority keeps asking: a return to a higher-priority member is not
   // a judgement about the CURRENT member, so its missing data is no reason to stay)
-  if (!cur.known && !proactive && !curLoginDead && !notMember && !prioRank) return none('no-data');
+  // THE PROVING SPAWN asks first (see PROVING_HOLD_MS): an unread default is itself a guess a spawn may prove, so the
+  // hold is answered after that rule — the verdict is 'no-data' exactly as before when it picks nobody
+  const provingOn = !!placing && !pinned && proving != null;
+  const noDataHold = !cur.known && !proactive && !curLoginDead && !notMember && !prioRank;
+  if (noDataHold && !provingOn) return none('no-data');
   if (!exhausted && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
   // Rank candidates by EDF: known weekly deadline ascending; same deadline
@@ -745,6 +785,37 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   } : {});
   nearRanked.sort(order);
   creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));
+  // THE PROVING SPAWN (PROVING_HOLD_MS above). Candidates = the members every VOLUNTARY gate admitted (`ranked`: a usable
+  // login not about to die, not lapsed, not rejected, this provider, not a credits / overage / reserve-floor member, no
+  // bucket under its hard bar) + the default itself when it can serve. Judged on the READING (`readReading`, never the
+  // estimator's overlay), on the decision's own clock.
+  if (provingOn) {
+    const nowMs = Number(nowSec) * 1000;
+    const readingOf = (id) => (typeof readReading === 'function' ? readReading(id) : readCache(id));
+    const held = (id) => { const at = Number(typeof proving.get === 'function' ? proving.get(id) : null) || 0; return at > 0 && nowMs - at < PROVING_HOLD_MS; };
+    const curOk = !exhausted && !curCredits && !(overage && overage.has(currentId)) && !(provOf && fallbackOnlyOf(curProv));
+    const unproven = [];
+    const cands = [...(curOk ? [{ id: currentId, name: (members || []).find((m) => m && m.id === currentId)?.name || null, remaining: cur.known ? cur.remaining : null }] : []), ...ranked];
+    // THE OWNER'S MANUAL PRIORITY WINS (主开发's ruling, r2): proving ranks only among the members the order leaves EQUAL —
+    // the best rank any candidate holds; the top listed member being unproven is simply what the order says
+    const topRank = prioRank && cands.length ? Math.min(...cands.map((r) => prioRank(r.id))) : null;
+    for (const r of cands) {
+      if (topRank != null && prioRank(r.id) !== topRank) continue;
+      if (held(r.id)) continue;
+      const c = readingOf(r.id);
+      const state = memberProofState(c, nowMs);
+      if (state === 'proven') continue;
+      unproven.push({ r, state, readAt: state === 'unread' ? 0 : (Number(c && c.fetchedAt) || 0), c });
+    }
+    unproven.sort((x, y) => (x.readAt - y.readAt) || (String(x.r.id) < String(y.r.id) ? -1 : String(x.r.id) > String(y.r.id) ? 1 : 0));
+    const pick = unproven[0];
+    if (pick) {
+      const w = pick.state === 'unread' ? null : provingWindowOf(pick.c, nowMs);
+      return { to: pick.r.id, toName: pick.r.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: pick.r.remaining ?? null, reason: 'proving',
+        proving: { id: pick.r.id, name: pick.r.name || null, state: pick.state, readAt: pick.readAt || null, window: w, stay: pick.r.id === currentId } };
+    }
+    if (noDataHold) return none('no-data');
+  }
   // ESCAPE SCRAPS (round-2 verifier, reproduced: current hard-dead on 5h, the
   // only quota-healthy member 20 min from its login deadline ⇒ round 1 refused
   // to move AT ALL, a strict availability regression vs the shipped code). The
@@ -1663,4 +1734,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 module.exports = {
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
-  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

@@ -3229,5 +3229,90 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
   }
 }
 
+// ── ㉒ THE DISPLAY VERDICT + THE PROVING SPAWN'S QUESTION (lane reset-unproven, owner rulings 2026-10-30) ──────
+// «reset 了但没证实的账号要展示的像是 reset 了的账号而不是 reset 之前的状态»: `windowDisplay` is the ONE verdict every
+// surface reads (read / reset-unconfirmed / lifted / unread); `memberProofState` asks whether a member stands on a
+// reading or a guess. Both on the pool's ONE clock (`resetLanded`, the grace included), each rule RED on its patched copy.
+console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on a guess is unproven (lane reset-unproven)');
+{
+  const POOL22 = require(path.join(ROOT, 'src/account-pool-auto.js'));
+  const EST22 = require(path.join(ROOT, 'src/usage-estimator.js'));
+  const S = 1800000000, NOW = S * 1000, G = QM.RESET_GRACE_SEC;
+  // (absent accessors answer a shape no leg accepts, so on a tree without this lane every leg goes RED BY NAME)
+  const WD = (w, now = NOW, o) => (typeof QM.windowDisplay === 'function' ? QM.windowDisplay(w, now, o) : { state: 'no windowDisplay' });
+  const MPS = (x, now) => (typeof QM.memberProofState === 'function' ? QM.memberProofState(x, now) : 'no memberProofState');
+  // ㉒a every state
+  const rd = WD({ utilization: 0.4, resetsAt: S + 3600 });
+  ok(rd.state === 'read' && rd.usedPct === 40 && rd.resetAt === (S + 3600) * 1000, `㉒a a reading inside its window stands: ${JSON.stringify(rd)}`);
+  const un = WD({ utilization: 0.95, resetsAt: S - 3 * 86400 }, NOW, { readAt: NOW - 5 * 86400e3 });
+  ok(un.state === 'reset-unconfirmed' && un.usedPct === 0 && un.resetAt === (S - 3 * 86400) * 1000 && un.readAt === NOW - 5 * 86400e3,
+    `㉒a a 95 % reading whose weekly reset passed 3 days ago is shown RESET — 0 % used, its reset instant, its reading time — never 95: ${JSON.stringify(un)}`);
+  const typed = QM.makeWindow({ kind: '7d', usedPct: 95, resetsAt: S - 86400, measuredAt: NOW - 3 * 86400e3 });
+  const tun = WD(typed);
+  ok(tun.state === 'reset-unconfirmed' && tun.usedPct === 0 && tun.readAt === NOW - 3 * 86400e3, `㉒a …a TYPED window too (its own measuredAt is the reading time): ${JSON.stringify(tun)}`);
+  ok(WD({ usedPercent: 88, resetsAt: S - 7200 }).state === 'reset-unconfirmed' && WD({ usedPercent: 88, resetsAt: (S + 7200) * 1000 }).usedPct === 88,
+    '㉒a …the codex spelling (usedPercent) and a millisecond resetsAt are read alike');
+  ok(WD(null).state === 'unread' && WD(undefined).state === 'unread' && WD({}).state === 'unread' && WD({ status: 'allowed' }).state === 'unread',
+    '㉒a no window, or one stating neither a spend nor a reset ⇒ unread (never 0 %, never 50 %)');
+  ok(WD({ utilization: 0.3 }).state === 'read' && WD({ utilization: 0.3 }).usedPct === 30, '㉒a a reset-less stated spend is a reading (r3: a stated spend is decisive) — it can never roll');
+  // ㉒b the clock at the exact reset instant (the jitter the minute-precise panel adds — RESET_GRACE_SEC)
+  const R = S - 1000, at = (sec) => WD({ utilization: 0.9, resetsAt: R }, sec * 1000).state;
+  ok(at(R - 1) === 'read' && at(R) === 'read' && at(R + G - 1) === 'read' && at(R + G) === 'reset-unconfirmed',
+    `㉒b at the stated instant the reading still stands; it is shown reset once the grace (${G} s) has passed — ${[at(R - 1), at(R), at(R + G - 1), at(R + G)].join(' / ')}`);
+  ok(WD({ utilization: 0.9, resetsAt: R }, (R + G) * 1000 - 1).state === 'read' && WD({ utilization: 0.9, resetsAt: R }, (R + G) * 1000 + 0.5).state === 'reset-unconfirmed',
+    '㉒b …a fractional millisecond clock answers every second alike (the one floored inequality)');
+  let agree = true, firstOff = null;
+  for (let d = -180; d <= 180; d += 7) {
+    const now = R + d, b = { utilization: 0.9, resetsAt: R };
+    const shownReset = WD(b, now * 1000).state === 'reset-unconfirmed', poolFull = POOL22.bucketRemaining(b, now) === 100;
+    if (shownReset !== poolFull) { agree = false; firstOff = firstOff ?? d; }
+  }
+  ok(agree, `㉒b ONE CLOCK: over ±3 min of a reset the display says «reset» exactly when the pool's bucketRemaining calls the bucket full again (first disagreement ${firstOff})`);
+  // ㉒c a window that has not started never rolls (B-8b12): its reset slides with the clock
+  const empty = QM.makeWindow({ kind: '5h', usedPct: 0, resetsAt: S - 9000 + 5 * 3600, measuredAt: (S - 9000) * 1000 });
+  ok(empty.state === 'empty' && WD(empty, (S + 5 * 3600) * 1000).state === 'read' && WD({ utilization: 0, resetsAt: S - 60, state: 'empty' }).state === 'read',
+    '㉒c an EMPTY window (nothing spent, its reset sliding) is never «reset» — it says «starts on first use» as before');
+  // ㉒d THE LIFTED SHAPE, UNTOUCHED (lane no-5h-window): no window + the tombstone ⇒ lifted, never unread
+  const lifted = { fetchedAt: NOW - 3600e3, fiveHourAbsent: NOW - 86400e3, sevenDay: { utilization: 0.5, resetsAt: S + 86400 } };
+  const ld = WD(lifted.fiveHour, NOW, { absentSince: QM.fiveHourAbsent(lifted) });
+  ok(ld.state === 'lifted' && ld.readAt === NOW - 86400e3 && ld.usedPct === null, `㉒d a lifted 5h is LIFTED (its since), never «unread» and never «reset»: ${JSON.stringify(ld)}`);
+  ok(WD({ utilization: 0.2, resetsAt: S + 60 }, NOW, { absentSince: NOW - 1 }).state === 'read', '㉒d …a window present outranks a stale tombstone (as fiveHourAbsent)');
+  ok(MPS(lifted, NOW) === 'proven' && MPS({ ...lifted, sevenDay: { utilization: 0.95, resetsAt: S - 86400 } }, NOW) === 'reset-unconfirmed'
+    && MPS({ fiveHourAbsent: NOW - 86400e3 }, NOW) === 'proven',
+    '㉒d memberProofState: lifted + 7d read = proven; lifted + 7d reset = reset-unconfirmed; a tombstone alone was a READING (never unread)');
+  // ㉒e memberProofState
+  const MP = (x) => MPS(x, NOW);
+  const owner = { fetchedAt: NOW - 4 * 86400e3, fiveHour: { utilization: 0, resetsAt: S - 4 * 86400 + 5 * 3600, state: 'empty' }, sevenDay: { utilization: 0.95, resetsAt: S - 2 * 86400 } };
+  ok(MP(owner) === 'reset-unconfirmed', '㉒e the owner\'s member — 7d 95 % reset 2 days ago, its 5h idle (empty) at the reading — stands on a GUESS: reset-unconfirmed (an empty window is no evidence of now)');
+  ok(MP(null) === 'unread' && MP({}) === 'unread' && MP({ fetchedAt: NOW }) === 'unread', '㉒e no cache / no window making a claim ⇒ unread');
+  ok(MP({ fiveHour: { utilization: 0.2, resetsAt: S - 100 }, sevenDay: { utilization: 0.95, resetsAt: S + 86400 } }) === 'proven',
+    '㉒e PER BUCKET: a member whose 5h reset but whose 7d is inside its window stands on a reading — proven');
+  ok(MP({ sevenDay: { utilization: 0.95, resetsAt: S - 86400 }, spareScoped: [{ name: 'Fable', utilization: 0.4, resetsAt: S + 3 * 86400 }] }) === 'proven',
+    '㉒e a projection\'s spare cap is a window too — a fresh Fable reading proves the member under an Opus view');
+  ok(MP({ fiveHour: { utilization: 0, resetsAt: S + 3600, state: 'empty' }, sevenDay: { utilization: 0, resetsAt: S + 7 * 86400, state: 'empty' } }) === 'proven',
+    '㉒e a member read at 0 % / 0 % (nothing running) was READ — proven (a free member is not an unknown one, §9 r4)');
+  const tset = QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 80, resetsAt: S - 500, measuredAt: NOW - 86400e3 })] })] });
+  ok(MP(tset) === 'reset-unconfirmed' && MP(QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 80, resetsAt: S + 500, measuredAt: NOW })] })] })) === 'proven',
+    '㉒e a TYPED set is judged by its windows alike');
+  const overlaid = EST22.overlayCache(owner, { sevenDay: { utilization: 0.01, resetsAt: S - 2 * 86400 + 604800, estimated: true } });
+  ok(MP(overlaid) === 'proven' && MP(owner) === 'reset-unconfirmed',
+    '㉒e WHY THE ENGINE HANDS THE READING: the estimator overlay re-bases a rolled week onto next week\'s reset and reads as proven — judged on the reading it is a guess (usage-pool-engine poolReadReading)');
+  // ㉒f RED controls — each rule on a patched copy of the real module
+  const SRC = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
+  const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; return { hit, mod: hit ? require(MUTC.write('src/quota-model.js', SRC.replace(from, to), tag, { esm: false })) : null }; };
+  const noGrace = patched('q22grace', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000))', 'if (mayRoll && resetSec != null && resetSec * 1000 <= now /* PATCHED: the bare instant */)');
+  ok(noGrace.hit && noGrace.mod.windowDisplay({ utilization: 0.9, resetsAt: R }, (R + 1) * 1000).state === 'reset-unconfirmed',
+    '㉒f RED: without the grace the display calls a bucket reset 1 s after a minute-precise instant — while the pool still counts it spent (the ㉒b leg goes red)');
+  const allRoll = patched('q22roll', "const mayRoll = win.state === undefined || win.state === null || win.state === 'running';", 'const mayRoll = true; // PATCHED');
+  ok(allRoll.hit && allRoll.mod.windowDisplay({ utilization: 0, resetsAt: S - 60, state: 'empty' }, NOW).state === 'reset-unconfirmed',
+    '㉒f RED: letting an empty window roll prints a sliding «reset» as an instant (the ㉒c leg goes red)');
+  const emptyCounts = patched('q22empty', "    if (w.state !== undefined && w.state !== null && w.state !== 'running') continue;\n", '');
+  ok(emptyCounts.hit && emptyCounts.mod.memberProofState(owner, NOW) === 'proven',
+    '㉒f RED: counting the idle 5h as evidence leaves the owner\'s 95 % member «proven» — no spawn would ever confirm it (the ㉒e leg goes red)');
+  const base = patched('q22base', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000)) return { state: \'reset-unconfirmed\'', 'if (false) return { state: \'reset-unconfirmed\'');
+  ok(base.hit && base.mod.windowDisplay({ utilization: 0.95, resetsAt: S - 3 * 86400 }, NOW).usedPct === 95,
+    '㉒f RED (the base): without the verdict the display hands back the stale 95 % — the owner\'s «no account available»');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

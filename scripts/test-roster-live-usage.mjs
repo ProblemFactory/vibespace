@@ -222,5 +222,26 @@ console.log('— B-ce1c: the machine login and a named account of the same ident
   ok('B-ce1c: the new words are in zh and ja (and the tooltip keeps {name} + {vendor} in both)', keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))
     && [zh, ja].every((d) => { const m = d.match(/^  "This machine’s CLI login and “\{name\}” are the same \{vendor\} account[^\n]*": "([^\n]*)",$/m); return !!m && m[1].includes('{name}') && m[1].includes('{vendor}'); }));
 }
+console.log('— a reset nobody confirmed is drawn RESET; a member never read says so (lane reset-unproven)');
+{
+  class AppR { }
+  installManageAgents(AppR, {});
+  const app = new AppR();
+  const nowS = Math.floor(Date.now() / 1000);
+  const ur = typeof MA.unreadUsageHtml === 'function' ? MA.unreadUsageHtml() : 'no unreadUsageHtml';
+  const reset = app._acctUsageHtml({ fetchedAt: Date.now() - 4 * 86400e3, fiveHour: { utilization: 0.84, resetsAt: nowS - 3 * 86400 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: nowS - 86400 }] }, null);
+  ok('every bucket whose reset landed is drawn RESET — three dashed empty rings + the reset glyph, never the stale 84 / 95 / 100 %', (reset.match(/acct-donut-unconfirmed/g) || []).length === 3 && (reset.match(/acct-donut-reset/g) || []).length === 3 && !/(84|95|100)%/.test(reset), reset.slice(0, 300));
+  ok('…its words ride the tooltip and the narrow pill says «reset · unconfirmed»', /unconfirmed — confirms when a session uses it/.test(reset) && /acct-mini-unconfirmed[^>]*>reset · unconfirmed</.test(reset));
+  const half = app._acctUsageHtml({ fetchedAt: Date.now() - 5 * 3600e3, fiveHour: { utilization: 0.97, resetsAt: nowS - 2400 }, sevenDay: { utilization: 0.7, resetsAt: nowS + 4 * 86400 } }, null);
+  ok('PER BUCKET: the 5h that reset is drawn reset, the week inside its window keeps its reading (70 %)', (half.match(/acct-donut-unconfirmed/g) || []).length === 1 && /7d: 70%/.test(half) && !/97%/.test(half), half.slice(0, 300));
+  const none = app._acctUsageHtml({ fetchedAt: Date.now() }, null);
+  ok('a reading that states no window is NO READING — «no reading yet — confirms when a session uses it», never a 0 % donut', none === ur && /no reading yet — confirms when a session uses it/.test(none) && !/acct-usage-donut/.test(none), none);
+  const fresh = app._acctUsageHtml({ fetchedAt: Date.now(), fiveHour: { utilization: 0.42, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.55, resetsAt: nowS + 2 * 86400 } }, null);
+  ok('a reading inside its windows is drawn as before (no reset mark, 42 % / 55 %)', !/unconfirmed/.test(fresh) && /5h: 42%/.test(fresh) && /7d: 55%/.test(fresh));
+  const roster = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  ok('the never-read SUBSCRIPTION row (no file at all) puts the same words in its bucket slot', /rowSnap \? usageHtml\(rowSnap\.u, rowSnap\.est, probeNote\) : isSub && !isPool && usageStamp && usageStamp\.src === 'accounts' \? unreadUsageHtml\(\) : ''/.test(roster));
+  const k = ['reset {time} · unconfirmed — confirms when a session uses it', 'reset · unconfirmed', 'no reading yet — confirms when a session uses it'];
+  ok('zh + ja carry the three new phrases', k.every((x) => typeof DICT.zh[x] === 'string' && typeof DICT.ja[x] === 'string'), k.filter((x) => !DICT.zh[x] || !DICT.ja[x]).join(' | '));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

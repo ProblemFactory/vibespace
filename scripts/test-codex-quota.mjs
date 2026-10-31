@@ -63,7 +63,8 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
   ok('auto-cli refresh loop skips codex accounts (claude -p /usage is claude-only)', /capsOf\(a\.backend\)\.quotaProbe !== 'cli-usage'[^\n]*\) continue; \/\/ auto-cli/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(/.test(read('server.js'))
     && require('../src/backend-caps.js').capsOf('codex').quotaProbe !== 'cli-usage' && require('../src/backend-caps.js').capsOf('claude').quotaProbe === 'cli-usage');
   const um = read('src/lib/usage-meter.js');
-  ok('the popup codex section renders est pairs like the claude one', /estDisplayPair\(codex\?\.fiveHour, cEstSel\?\.fiveHour\)/.test(um) && /estBar\(cp5\)/.test(um) && /estStat\(cp7\)/.test(um));
+  // (lane reset-unproven: each bucket goes through its display verdict first — bucketView — and the pair is drawn from it)
+  ok('the popup codex section renders est pairs like the claude one', /bucketView\(quotaModel, codex\?\.fiveHour, cEstSel\?\.fiveHour,/.test(um) && /estDisplayPair\(cv5\.reading, cv5\.est\)/.test(um) && /estBar\(cp5\)/.test(um) && /estStat\(cp7\)/.test(um));
   ok('cache-efficiency bar drops the fake cache-write segment for codex-only views', /codexOnly \? \[\] : \[\{ k: t\('Cache writes'\)/.test(read('src/lib/usage-window.js')));
 }
 

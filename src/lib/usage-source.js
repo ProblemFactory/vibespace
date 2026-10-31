@@ -209,12 +209,46 @@ export function windowNote(b, { t = (s) => s } = {}) {
   return windowNotStarted(b) ? t('starts on first use') : null;
 }
 
+// A RESET NOT YET CONFIRMED (lane reset-unproven, owner 2026-10-30: «reset 了但没证实的账号要展示的像是 reset 了的账号而不是
+// reset 之前的状态»). The verdict is the model's (`windowDisplay`, src/quota-model.js); these two are how a surface draws
+// it — every bucket a surface renders goes through `bucketView` first, and none decides «the reset passed» itself.
+const fillParams = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
+
+/** ONE BUCKET AS A SURFACE DRAWS IT. `model` = src/quota-model.js (injected — this file imports nothing), `reading` =
+ *  the stored bucket, `est` = the dead-reckoning estimate for it (or null), `nowMs` = the clock, `readAt` = when the
+ *  reading was taken (the file's `fetchedAt`). A bucket whose reset has LANDED with nothing newer is drawn RESET:
+ *  `reading` comes back at 0 % used (the stale pre-reset number is never drawn) and `est` survives only when the
+ *  estimator has rolled past that reset itself (its own reset is later, and it counted something) — a pre-roll estimate
+ *  is the stale number again. → { display, reading, est, unconfirmed } */
+export function bucketView(model, reading, est, nowMs, { readAt = null } = {}) {
+  const display = model.windowDisplay(reading, nowMs, { readAt });
+  if (display.state !== 'reset-unconfirmed') return { display, reading, est: est || null, unconfirmed: false };
+  const sec = (v) => { const n = Number(v) || 0; return n > 1e12 ? n / 1000 : n; };
+  const rolled = !!est && sec(est.resetsAt) > sec(reading.resetsAt) && Math.round((Number(est.utilization) || 0) * 100) > 0;
+  const zero = { ...reading, utilization: 0, ...(reading.usedPercent != null ? { usedPercent: 0 } : {}) };
+  return { display, reading: zero, est: rolled ? est : null, unconfirmed: true };
+}
+
+/** The instant a bucket reset, in this device's words: today ⇒ the time, else the date + time. */
+export function resetInstantText(ms, nowMs = Date.now(), { locale = undefined } = {}) {
+  const d = new Date(Number(ms)), n = new Date(Number(nowMs));
+  if (!Number.isFinite(d.getTime())) return '';
+  const time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === n.toDateString() ? time : `${d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })} ${time}`;
+}
+
+/** The words of an unconfirmed reset — «reset <time> · unconfirmed — confirms when a session uses it» — or ''. */
+export function unconfirmedText(view, { t = fillParams, nowMs = Date.now(), locale = undefined } = {}) {
+  if (!view || !view.unconfirmed) return '';
+  return t('reset {time} · unconfirmed — confirms when a session uses it', { time: resetInstantText(view.display.resetAt, nowMs, { locale }) });
+}
+
 /** The panel row for every limit an account holds, served-model first.
  *  `set` is a typed LimitSet (src/quota-model.js — `limitsOfCache` lifts a
  *  stored snapshot into one). Each row carries its OWN producer and age,
  *  because three limits on one account are three separate readings and
  *  "Updated 3min ago" on the panel header describes only the newest. */
-export function limitRows(model, set, { modelName = null, family = null, t = (s) => s } = {}) {
+export function limitRows(model, set, { modelName = null, family = null, t = (s) => s, nowMs = Date.now() } = {}) {
   if (!model || !set) return [];
   return model.orderLimits(set, { model: modelName, family }).map((l) => ({
     limitId: l.limitId,
@@ -226,6 +260,7 @@ export function limitRows(model, set, { modelName = null, family = null, t = (s)
     fetchedAt: l.fetchedAt || null,
     windows: model.windowsOf(l).map((w) => ({
       kind: w.kind, usedPct: w.usedPct, resetsAt: w.resetsAt, state: w.state,
+      display: model.windowDisplay(w, nowMs), // a window whose reset landed is drawn reset — 0 % used, unconfirmed (lane reset-unproven)
       note: w.state === 'empty' ? t('starts on first use') : null,
     })),
   }));

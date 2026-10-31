@@ -2211,6 +2211,132 @@ await (async () => {
   const sl = strip('src/lib/session-lifecycle.js');
   ck('WIRING PIN: the client carries the pin on a RESUME (session config) and drops it on a fork', /poolPin: savedCfg\.poolPin,/.test(sl) && /poolPin: \(!fork && poolPin && typeof poolPin\.memberId === 'string'\)/.test(sl));
   fs.rmSync(scr, { recursive: true, force: true });
+  // ── THE PROVING SPAWN (lane reset-unproven, owner «B吧» 2026-10-30) ───────────────────────────────────────
+  // A member whose every stated window reset since its last reading — or one never read — stands on a GUESS; a NEW
+  // conversation (placing, the chooser only) is placed on the one with the OLDEST reading (never read first, ties by id),
+  // one proof in flight per member (PROVING_HOLD_MS), never on a move, never past a pin — and the placement is SAID.
+  {
+    const A = require(path.resolve('src/account-pool-auto.js'));
+    const S = 1800000000, NOWMS = S * 1000;
+    const fresh = (u7, d7 = 3 * 86400) => ({ fetchedAt: NOWMS - 60e3, fiveHour: { utilization: 0.2, resetsAt: S + 3600 }, sevenDay: { utilization: u7, resetsAt: S + d7 } });
+    const stale = (ageD, resetAgoD) => ({ fetchedAt: NOWMS - ageD * 86400e3, fiveHour: { utilization: 0.3, resetsAt: S - ageD * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: S - resetAgoD * 86400 } });
+    const caches = { a: fresh(0.5), b: stale(5, 2), c: null, d: stale(3, 1), e: fresh(0.3, 5 * 86400) };
+    const mem = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, name: id.toUpperCase() }));
+    const base = { currentId: 'a', members: mem, readCache: (id) => caches[id], nowSec: S, hot: true, placing: true, explain: true };
+    const D = (o = {}) => A.decidePoolSwitch({ ...base, ...o });
+    const held = (...ids) => new Map(ids.map((id, i) => [id, NOWMS - 1000 * (i + 1)]));
+    // (absent exports answer what no leg accepts, so on a tree without this lane every leg goes RED BY NAME)
+    const HOLD = A.PROVING_HOLD_MS || 600e3, PT = (d, o) => (typeof A.provingText === 'function' ? A.provingText(d, o) : 'no provingText');
+    const d0 = D({ proving: new Map() });
+    ck('proving: a spawn takes the NEVER-READ member first (C) — reason «proving», the member named, its state said', d0 && d0.to === 'c' && d0.reason === 'proving' && d0.proving.state === 'unread' && d0.proving.name === 'C', JSON.stringify(d0));
+    const d1 = D({ proving: held('c') });
+    ck('proving: …C in flight ⇒ the OLDEST reading next (B, read 5 days ago — before D\'s 3), its last-reset window named (7d)', d1 && d1.to === 'b' && d1.proving.state === 'reset-unconfirmed' && d1.proving.window.kind === '7d' && d1.proving.window.resetAt === (S - 2 * 86400) * 1000, JSON.stringify(d1));
+    const d2 = D({ proving: held('c', 'b') });
+    ck('proving: …ONE proof in flight per member: three spawns in a row land on three guesses (C, B, D)', d2 && d2.to === 'd', JSON.stringify(d2));
+    const d3 = D({ proving: held('c', 'b', 'd') }), dOff = D();
+    ck('proving: …every guess in flight ⇒ today\'s placement, byte-identical to a decision without the input', JSON.stringify(d3) === JSON.stringify(dOff), JSON.stringify({ d3, dOff }));
+    const expired = new Map([['c', NOWMS - HOLD]]), notYet = new Map([['c', NOWMS - HOLD + 1000]]);
+    ck(`proving: …a mark ends after PROVING_HOLD_MS (${HOLD / 60e3} min) — C is asked again; 1 s before, it is not`, A.PROVING_HOLD_MS === 600e3 && D({ proving: expired })?.to === 'c' && D({ proving: notYet })?.to === 'b');
+    const tie = { x2: null, x1: null }, dt = A.decidePoolSwitch({ ...base, members: [{ id: 'a', name: 'A' }, { id: 'x2', name: 'X2' }, { id: 'x1', name: 'X1' }], readCache: (id) => (id === 'a' ? caches.a : tie[id]), proving: new Map() });
+    ck('proving: ties (two never read) go by id — deterministic, never «occasionally»', dt && dt.to === 'x1', JSON.stringify(dt));
+    // never on a MOVE: the anti-flap law stands (a conversation never moves onto ignorance)
+    const mv = D({ placing: false, proactive: true, proving: new Map() }), mv0 = D({ placing: false, proactive: true });
+    ck('proving: NEVER ON A MOVE — a hot pool\'s proactive pass decides exactly as without the input', JSON.stringify(mv) === JSON.stringify(mv0) && (!mv || mv.reason !== 'proving'), JSON.stringify(mv));
+    const deadCur = { ...caches, a: { fetchedAt: NOWMS, fiveHour: { utilization: 0.99, resetsAt: S + 3600 }, sevenDay: { utilization: 0.5, resetsAt: S + 86400 } } };
+    const esc = A.decidePoolSwitch({ ...base, placing: false, readCache: (id) => deadCur[id], proving: new Map() });
+    ck('proving: …a hard-dead conversation ESCAPES onto measured headroom (E), never onto the guess (the anti-flap law)', esc && esc.to === 'e' && esc.reason === 'exhausted', JSON.stringify(esc));
+    // a pin wins; the voluntary gates hold
+    const pn = D({ pinned: true, proving: new Map() });
+    ck('proving: a PINNED conversation never reaches the rule (the pin wins over everything)', !pn || pn.reason !== 'proving', JSON.stringify(pn));
+    const li = { c: { state: 'expired' }, b: { state: 'ok' }, d: { state: 'ok' } };
+    const g1 = D({ proving: new Map(), readLogin: (id) => li[id] || { state: 'ok' }, exclude: ['b'], creditsIds: ['d'] });
+    ck('proving: …only a member every VOLUNTARY gate admits is proven — a dead login (C), one that just refused this conversation (B), a credits member (D) are not', g1 && g1.reason !== 'proving', JSON.stringify(g1));
+    const unreadCur = D({ currentId: 'c', proving: new Map() }), unreadHeld = D({ currentId: 'c', proving: held('c', 'b', 'd') });
+    ck('proving: an UNREAD default is itself the oldest guess — the spawn stays and proves it (stay); held, the no-data hold answers as before', unreadCur.to === 'c' && unreadCur.proving.stay === true && unreadHeld.reason === 'no-data', JSON.stringify({ unreadCur, unreadHeld }));
+    // judged on the READING, never the estimator's overlay
+    const overlay = (id) => (id === 'b' ? { ...caches.b, sevenDay: { utilization: 0.01, resetsAt: S - 2 * 86400 + 604800, estimated: true } } : caches[id]);
+    const viaOverlay = D({ readCache: overlay, proving: held('c', 'd') }), viaReading = D({ readCache: overlay, readReading: (id) => caches[id], proving: held('c', 'd') });
+    ck('proving: judged on the READING (readReading) — under the estimator overlay alone B\'s rolled week reads fresh and nobody would confirm it', viaOverlay.reason !== 'proving' && viaReading.to === 'b', JSON.stringify({ viaOverlay: viaOverlay.reason, viaReading: viaReading.to }));
+    // the words
+    const when = (ms) => new Date(ms).toISOString().slice(0, 10);
+    ck('proving words: «placed on B to confirm its 7-day window reset on <date>; a reading follows its first turn»', PT(d1, { when }) === `placed on B to confirm its 7-day window reset on ${when((S - 2 * 86400) * 1000)}; a reading follows its first turn`);
+    ck('proving words: …a never-read member says so', PT(d0) === 'placed on C — it has never been read; a reading follows its first turn');
+    // THE OWNER'S MANUAL PRIORITY WINS (主开发's ruling, r2): proving ranks only among the members the order leaves EQUAL
+    const pr1 = D({ proving: new Map(), priority: ['e'] }), pr1off = D({ priority: ['e'] });
+    ck('proving × priority: a LISTED member that can serve and is proven (E) takes the spawn exactly as the order says — no proving, byte-identical', JSON.stringify(pr1) === JSON.stringify(pr1off) && pr1.reason !== 'proving', JSON.stringify(pr1));
+    const pr2 = D({ proving: new Map(), priority: ['d'] });
+    ck('proving × priority: the TOP listed member unproven (D) is proven — simply what the order says (never C, the older guess the order ranks below it)', pr2.to === 'd' && pr2.reason === 'proving', JSON.stringify(pr2));
+    const pr3 = D({ proving: new Map(), priority: ['nobody-listed-here'] });
+    ck('proving × priority: members the order leaves EQUAL are proven as without an order (C, never read, first)', pr3.to === 'c' && pr3.reason === 'proving', JSON.stringify(pr3));
+    const pr4 = D({ proving: new Map(), priority: ['a', 'e'] }), pr4off = D({ priority: ['a', 'e'] });
+    ck('proving × priority: a listed DEFAULT that is proven (A #1) holds the spawn — byte-identical to the order alone', JSON.stringify(pr4) === JSON.stringify(pr4off) && pr4.reason !== 'proving', JSON.stringify(pr4));
+    // BYTE-IDENTICAL when every member is proven, over seeded worlds
+    let seed = 7, same = 0, n = 300, diff = null;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < n; i++) {
+      const cs = {}; for (const m of mem) cs[m.id] = fresh(Math.round(rnd() * 100) / 100, Math.round(rnd() * 6 * 86400) + 600);
+      const o = { ...base, currentId: mem[Math.floor(rnd() * mem.length)].id, readCache: (id) => cs[id], placing: rnd() < 0.7, hot: rnd() < 0.5 };
+      const x = JSON.stringify(A.decidePoolSwitch({ ...o, proving: new Map() })), y = JSON.stringify(A.decidePoolSwitch(o));
+      if (x === y) same++; else if (!diff) diff = { i, x, y };
+    }
+    ck(`proving: ${n} seeded worlds where every member is PROVEN decide byte-identically with and without the input`, same === n, JSON.stringify(diff));
+    // RED controls — each rule on a patched copy of the real module
+    const { mutantCopies: mcP, copiesCensus: ccP } = await import('./mutant-copy.mjs');
+    const MPC = mcP('proving', path.resolve('.'));
+    const psrc = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
+    const pctl = (tag, from, to) => (psrc.split(from).length === 2 ? MPC.load('src/account-pool-auto.js', psrc.replace(from, to), tag) : null);
+    const noHeld = pctl('noheld', '      if (held(r.id)) continue;\n', '');
+    ck('proving RED: without the in-flight mark three spawns in a row pile onto one guess (C, C, C)', !!noHeld && noHeld.decidePoolSwitch({ ...base, proving: held('c') }).to === 'c');
+    const onMoves = pctl('onmoves', 'const provingOn = !!placing && !pinned && proving != null;', 'const provingOn = !pinned && proving != null; // PATCHED');
+    const mvx = onMoves && onMoves.decidePoolSwitch({ ...base, placing: false, proactive: true, proving: new Map() });
+    ck('proving RED: on every decision (not only a spawn) a healthy running conversation is MOVED onto the never-read member — the anti-flap law broken', !!mvx && mvx.to === 'c' && mvx.reason === 'proving', JSON.stringify(mvx));
+    const noPin = pctl('nopin', 'const provingOn = !!placing && !pinned && proving != null;', 'const provingOn = !!placing && proving != null; // PATCHED');
+    ck('proving RED: without the pin clause a pinned conversation is placed on a guess', !!noPin && noPin.decidePoolSwitch({ ...base, pinned: true, proving: new Map() }).reason === 'proving');
+    const noOrder = pctl('noorder', '      if (topRank != null && prioRank(r.id) !== topRank) continue;\n', '');
+    const nox = noOrder && noOrder.decidePoolSwitch({ ...base, proving: new Map(), priority: ['e'] });
+    ck('proving RED: without the order clause a spawn the owner\'s #1 (E) should take is sent to a guess the order ranks below it (C)', !!nox && nox.to === 'c' && nox.reason === 'proving', JSON.stringify(nox));
+    const baseRule = pctl('base', '  if (provingOn) {\n    const nowMs = Number(nowSec) * 1000;', '  if (false) {\n    const nowMs = Number(nowSec) * 1000;');
+    const bx = baseRule && baseRule.decidePoolSwitch({ ...base, proving: new Map() });
+    ck('proving RED (the base): without the rule the spawn holds on the default — the 95 % member\'s reset is never confirmed', !!bx && bx.reason === 'hold' && bx.to === null, JSON.stringify(bx));
+    for (const r of ccP(MPC.files, MPC.dir, path.resolve('.'), { minCopies: 5, label: 'proving: ' })) ck(r.name, r.pass);
+
+    // ── THE ENGINE: the chooser marks, says, and lets a reading end the mark ───────────────────────────────
+    fs.mkdirSync(scr, { recursive: true }); // (the pin legs above already swept the scratch dir)
+    const pw = world({});
+    if (pw) {
+      const nowS = Math.floor(Date.now() / 1000);
+      const cdir = path.join(pw.am._dataDir, 'usage-cache');
+      const put = (k, o) => fs.writeFileSync(path.join(cdir, pw.id[k] + '.json'), JSON.stringify(o));
+      put('uci', { fetchedAt: Date.now() - 5 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nowS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 2 * 86400 } });
+      const ask = (o = {}) => { let r; const lines = quietly(() => { r = pw.eng.poolChooserForModel(pw.P, { model: 'claude-fable-5-1', ...o }); }); return { at: Object.keys(pw.id).find((k) => pw.id[k] === r) || r, lines }; };
+      const s1 = ask();
+      ck('engine: a spawn is placed on the member whose week reset unconfirmed (UCI, 95 % read 5 days ago) — and SAID in the journal', s1.at === 'uci' && s1.lines.some((l) => /^\[pool\] spawn on "全部": placed on UCI Max to confirm its 7-day window reset on .+; a reading follows its first turn$/.test(l)), JSON.stringify(s1));
+      const s2 = ask(), s3 = ask();
+      ck('engine: …the proof is IN FLIGHT: the next two spawns are placed as today (the default, Martin) — never piled onto the guess', s2.at === 'martin' && s3.at === 'martin', JSON.stringify([s2.at, s3.at]));
+      const hinted = ask({ hinted: true }), pinned = ask({ pin: pw.id.fish });
+      put('uci', { fetchedAt: Date.now() - 5 * 86400e3 - 1, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nowS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 2 * 86400 } });
+      ck('engine: a RESUME (a hinted family) places nothing on a guess; a PINNED one starts on its pin', hinted.at === 'martin' && pinned.at === 'fish', JSON.stringify([hinted.at, pinned.at]));
+      // the 10-minute end: the clock moves past PROVING_HOLD_MS ⇒ the guess is asked again
+      const realNow = Date.now; let s4;
+      try { Date.now = () => realNow() + HOLD + 1000; s4 = ask(); } finally { Date.now = realNow; }
+      ck('engine: …after PROVING_HOLD_MS with no reading, the next spawn proves UCI again', s4.at === 'uci', JSON.stringify(s4));
+      // a reading lands through THE write path ⇒ the mark ends at once and is said; the member is proven ⇒ today's EDF
+      const wpath = require(path.resolve('src/usage-cache-write.js'));
+      // (on the clock the mark was set on — the leg above moved it PROVING_HOLD_MS ahead)
+      let landed;
+      try { Date.now = () => realNow() + HOLD + 5000; landed = quietly(() => wpath.writeCacheObject({ cacheDir: cdir, key: pw.id.uci, obj: { fetchedAt: Date.now(), source: 'passive', fiveHour: { utilization: 0.05, resetsAt: nowS + 4 * 3600 }, sevenDay: { utilization: 0.02, resetsAt: nowS + 5 * 86400 } }, source: 'passive', backend: 'claude' })); } finally { Date.now = realNow; }
+      ck('engine: a reading of UCI written through usage-cache-write ends its proof in flight — «its proof is in»', landed.some((l) => l.startsWith('[pool] proving: UCI Max (' + pw.id.uci + ') read at ') && l.includes('its proof is in')), landed.join(' | '));
+      const s5 = ask();
+      ck('engine: …UCI is PROVEN now and falls into today\'s placement (no proving verdict)', s5.at !== undefined && !s5.lines.some((l) => /placed on .* to confirm/.test(l)), JSON.stringify(s5));
+      // a member the pool lists that has NEVER been read (added just now, no file, no identity group)
+      const nid = pw.am.createSubscription({ name: 'New Max' }).id;
+      fs.writeFileSync(path.join(pw.am.subDir(nid), '.credentials.json'), CREDS(nid), { mode: 0o600 });
+      quietly(() => pw.am.updatePool(pw.P, { members: [pw.id.martin, pw.id.uci, pw.id.fish, nid] }));
+      const s6 = ask();
+      ck('engine: a member with NO reading at all (just added) is proven next — «it has never been read»', s6.at === nid && s6.lines.some((l) => l.endsWith('placed on New Max — it has never been read; a reading follows its first turn')));
+    } else ck('proving engine SKIP — pools unsupported', true);
+    fs.rmSync(scr, { recursive: true, force: true });
+  }
 })();
 
 // ── A LAPSED SUBSCRIPTION (2026-10-08, lane pool-subscription-lapsed; owner: "UCI Max 订阅到期没续费，系统会自动排除它吗？

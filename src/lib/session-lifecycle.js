@@ -6,6 +6,8 @@ import { t } from './i18n.js';
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { bucketView, unconfirmedText } from './usage-source.js'; // a landed reset is shown reset, unconfirmed (lane reset-unproven)
+import * as quotaModel from '../quota-model.js'; // PURE: the display verdict (windowDisplay)
 // THE RESUME LADDER, the client's half (B-6b6d) — the same PURE rule the server
 // spawns by (a CJS module pulled into the bundle, like task-color-seq /
 // collab-row), so "the instance default is a NEW-session default" is ONE law
@@ -1343,11 +1345,16 @@ export function installSessionLifecycle(App, ctx = {}) {
       // estimate; a stale reading here contradicted them and mis-informed the
       // exact decision this menu exists for). estDisplayPair = the shared
       // roll-aware discriminator; an estimated value renders dash-underlined.
-      const eff = (raw, e) => {
+      // …through the display verdict first (lane reset-unproven): a bucket whose reset landed since its reading shows
+      // 0 % (dashed, its tooltip «reset <time> · unconfirmed — confirms when a session uses it») — never the stale number
+      const eff = (raw0, e0) => {
+        const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });
+        const raw = v.reading, e = v.est;
+        const un = v.unconfirmed ? unconfirmedText(v, { t }) : '';
         const pair = estDisplayPair(raw, e);
-        if (pair.estPct != null) return { p: pair.estPct, est: true };
+        if (pair.estPct != null) return { p: pair.estPct, est: true, un };
         const p = pctOf(raw);
-        return p == null ? null : { p, est: false };
+        return p == null ? null : { p, est: false, un };
       };
       const f = eff(u.fiveHour, est?.fiveHour), s7 = eff(u.sevenDay, est?.sevenDay);
       // Scoped buckets (e.g. the Fable weekly cap) — same 2-char short label
@@ -1359,7 +1366,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
       const ageTxt = age != null && age > 5 ? escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
-      const seg = (k, v) => (v == null ? '' : `<span class="bsw-seg${v.est ? ' bsw-est' : ''}"><span class="bsw-k">${escHtml(k)}</span>${pctHtml(v.p)}</span>`);
+      const seg = (k, v) => (v == null ? '' : `<span class="bsw-seg${v.est ? ' bsw-est' : ''}${v.un ? ' bsw-unconfirmed' : ''}"${v.un ? ` title="${escHtml(v.un)}"` : ''}><span class="bsw-k">${escHtml(k)}</span>${pctHtml(v.p)}</span>`);
       return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, v]) => seg(l, v)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
     };
     const rowHtml = (nameText, subText, usage) =>

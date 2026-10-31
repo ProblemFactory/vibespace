@@ -11683,4 +11683,7 @@ export default {
   "{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again": "{account} の 5 時間制限が戻りました（{since} 以降）：プールは再び 5 時間ウィンドウを数えます",
   "Its usage reading lists a 5-hour window again, so the pool counts it again.": "使用量の読み取りに再び 5 時間ウィンドウが含まれるため、プールは再びそれを数えます。",
   "{m}: its limit window is unknown (it has no 5-hour limit).": "{m}：制限ウィンドウは不明です（5 時間制限はありません）。",
+  "reset {time} · unconfirmed — confirms when a session uses it": "{time} にリセット済み · 未確認 — セッションが使うと確定します",
+  "reset · unconfirmed": "リセット済み · 未確認",
+  "no reading yet — confirms when a session uses it": "まだ使用量の読み取りなし — セッションが使うと確定します",
 };

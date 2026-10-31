@@ -3509,12 +3509,14 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         const cxMulti = {
           limitId: 'codex', limitName: '', planType: 'pro',
           fiveHour: null,
-          sevenDay: { utilization: 0.05, usedPercent: 5, windowMinutes: 10080, resetsAt: 1789509325 },
+          // (lane reset-unproven: the captured reset 1789509325 has PASSED — a reading past its reset is drawn RESET, 0 %; this leg
+          //  is about the 5 % surviving a Spark push, so the week's reset is derived from the REAL clock, ~5 days out — T0 here is itself a fixed Sept instant)
+          sevenDay: { utilization: 0.05, usedPercent: 5, windowMinutes: 10080, resetsAt: Math.floor(Date.now() / 1000) + 5 * 86400 + 325 },
           scopedWeekly: [{ name: 'GPT-5.3-Codex-Spark', utilization: 0, resetsAt: nowS + 10080 * 60 - 40, state: 'empty' }],
           fetchedAt: T0, source: 'codex-rate-limits',
           limits: [
             { limitId: 'codex', name: null, scope: 'plan', model: null, family: null, source: 'codex-rate-limits', fetchedAt: T0, flags: {},
-              windows: [{ kind: '7d', minutes: 10080, minutesStated: true, usedPct: 5, resetsAt: 1789509325, measuredAt: T0, state: 'running' }] },
+              windows: [{ kind: '7d', minutes: 10080, minutesStated: true, usedPct: 5, resetsAt: Math.floor(Date.now() / 1000) + 5 * 86400 + 325, measuredAt: T0, state: 'running' }] },
             { limitId: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', scope: 'model', model: 'GPT-5.3-Codex-Spark', family: null, source: 'codex-rate-limits', fetchedAt: T0 + 1000, flags: {},
               windows: [
                 { kind: '5h', minutes: 300, minutesStated: true, usedPct: 0, resetsAt: nowS + 300 * 60 - 40, measuredAt: T0 + 1000, state: 'empty' },
