@@ -16,6 +16,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - «Who may use it» keeps the conversations you excluded unless you remove one there, saves only what you changed, and still saves after a 1-hour approval ends.
 - Saving «Who may use it» keeps a Task Group as it was, removes an ended 1-hour approval as it says, and tells you when only the members were saved.
 
+### Changed
+- When Anthropic lifts an account's 5-hour limit, the usage popup says so on its row and the pool stops counting a window that no longer exists.
+
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
 - A scheduled job set for a time that does not exist on the day clocks go forward now runs once right after the jump instead of skipping that day.
