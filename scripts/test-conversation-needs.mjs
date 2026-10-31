@@ -364,6 +364,18 @@ ok(/this\._dockPass\(plan\.waiting\);/.test(CARD) && /this\._dockPass\(\[\]\); \
 ok(/try \{ if \(!card\) card = this\._create\(e\); else this\._patch\(card, e\); \} catch \(err\) \{ console\.warn\('\[chat-needs\] a card failed to draw:'[^}]*continue; \}/.test(CARD), 'ONE card that throws is said and skipped — the pass still reaches the chip');
 // acceptance round 2 (P2): THE ACCORDION — one open slot (the person's pick while it waits, else the newest; a filing takes it back)
 ok(/const fresh = open\.filter\(\(e\) => !this\._seen\.has\(e\.item\.id\)\);\n\s+if \(fresh\.length\) this\._slot = newestOf\(fresh\)\.item\.id;\n\s+this\._seen = new Set\(open\.map\(\(e\) => e\.item\.id\)\);\n\s+const openSlot = this\._slot;/.test(CARD) && /fold: x\.item\.id !== openSlot/.test(CARD) && /card\.classList\.toggle\('cn-fold', fold\);/.test(CARD) && /row\.classList\.toggle\('ut-open', !fold\);/.test(CARD) && /const fold = !!e\.fold && !boxInUse\(card\.querySelector\('\.ut-reply'\)\);/.test(CARD) && /card\.addEventListener\('click', \(ev\) => \{\n\s+if \(unfold\(ev\) \|\| card\._openedAt == null/.test(CARD), 'THE ACCORDION: ONE open card (the slot: a FILING\'s newest id, a tap, the chip), the rest folded rows whose whole row opens them; a reply box in use is never folded');
+// r12 (the r11 acceptance — repro/accept-r11/tie-accordion.cjs): THE ACCORDION's open slot rides THE one order — a same-ms batch
+// unfolds in the flow the SAME twin the strip and the announce's stack show (the REAL newestOf line, run here over three store orders)
+{ const src = (CARD.match(/^const newestOf = (.*);$/m) || [])[1];
+  let newestOf = null; try { newestOf = src ? new Function('newestFirst', 'return ' + src)(CN.newestFirst) : null; } catch { }
+  const KEY = 'claude:c0ffee', T = 1_800_000_000_000;
+  const batch = (ids) => ids.map((id) => ({ id, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: T, sessionKey: KEY, text: id, action: { type: 'exit-run-ask', askId: id + 'x'.repeat(10) } }));
+  const got = [['ut-aaa', 'ut-mmm', 'ut-zzz'], ['ut-zzz', 'ut-mmm', 'ut-aaa'], ['ut-mmm', 'ut-zzz', 'ut-aaa']].map((o) => {
+    const open = CN.needsOf(batch(o), [KEY]), slot = newestOf ? ((newestOf(open) || {}).item || {}).id : null;
+    const d = typeof CN.dockOf === 'function' ? CN.dockOf(CN.flowPlan(open, [], { atEnd: true }).waiting) : null;
+    return { stored: o.join(), slot, dock: d && d.newest.id, stack: typeof CN.newestFirst === 'function' ? [...batch(o)].sort(CN.newestFirst)[0].id : null };
+  });
+  ok(!!src && /newestFirst\(/.test(src) && got.every((g) => g.slot === 'ut-aaa' && g.dock === 'ut-aaa' && g.stack === 'ut-aaa'), 'RED-able (r12 — 9f8b8d846: newestOf took the list\'s last on a tie — ut-zzz unfolded while the strip and the stack showed ut-aaa): THE ACCORDION\'s open slot over a same-ms batch is newestFirst\'s — the SAME twin in the flow, the strip and the stack, whatever the store\'s order', got); }
 // acceptance round 3 — the accordion's slot law, the tap's hold on a pinned view, the box kept across a resolve, the pass a frame
 ok(!/this\._pick|this\._newest/.test(CARD) && /this\._seen\.clear\(\); \/\/ nothing waits/.test(CARD) && /if \(el\.classList\.contains\('cn-fold'\)\) \{ this\._slot = el\.dataset\.item; this\.render\(\{ hold: true \}\); \}/.test(CARD), '#3 the slot moves on a FILING, a tap or the chip — never on a resolution (no «newest changed ⇒ the pick goes» left)');
 { const oc = CARD.slice(CARD.indexOf('  openCard(id'), CARD.indexOf('  /** THE ONE LANDING (lane needs-card-tail'));

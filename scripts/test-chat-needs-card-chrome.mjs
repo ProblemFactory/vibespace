@@ -1591,8 +1591,12 @@ try {
   // page): an automation card's REACH radios stood in the card AND, hidden, in the attention dock's copy of the row — radios of
   // ONE name with no form are ONE group, so the copy drawn last took the check: the card showed none checked and its Allow sent
   // no reach. Now a form control exists once per item: the dock draws no pick, every drawn copy's group is its own, the pick is
-  // the item's (user-todos-row.js reachFor) — it survives a repaint, and every Allow carries it ──
-  console.log('⑲ THE PICK IS THE ITEM\'S — an automation card\'s reach in the card, none in the strip; the owner\'s pick survives a repaint; the Allow carries it');
+  // the item's (user-todos-row.js reachFor) — it survives a repaint, and every Allow carries it.
+  // r12 (the r11 acceptance — r11 pinned the strip's Always carrying the card's pick while the strip SHOWED no reach: the owner
+  // reads «The whole VibeSpace» in the tray, closes it unanswered, presses the strip's Always ⇒ an instance-wide grant):
+  // A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT SHOW — the strip SAYS the pick beside its answers and its Always names it; a
+  // pick made anywhere rewords it before any press; every press carries exactly the scope its press point shows ──
+  console.log('⑲ THE PICK IS THE ITEM\'S; A PRESS POINT SAYS THE SCOPE IT SENDS — the reach in the card, none in the strip but its words; a pick made anywhere rewords the strip before any press; every Allow carries what its press point shows');
   try {
     await A.front(); await A.device(1280, 800, { mouse: true });
     const s9 = await newConv('reach'); await sleep(600); sayTo(s9, 'hello'); await sleep(1500);
@@ -1603,33 +1607,71 @@ try {
     const ak = (detail = 'first use') => [{ id: 'ut-r11reach01', sessionKey: KEY9, status: 'open', kind: 'action', origin: 'vault', urgency: 'urgent', createdAt: T9,
       text: 'reach wants to use the automation key K1 (conversations.open)', detail, action: { type: 'automation-ask', askId: 'r'.repeat(32), groups: 'grp-1 grp-2', keyId: 'k1', verb: 'conversations.open' } }];
     const PUSH9 = (extra) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = [...todos.open, ...${extra}]; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const WORD = { opened: 'Only the conversations it opens', groups: 'The conversations of its Task Groups', instance: 'The whole VibeSpace' }; // (automation-reach.js reachWord — en)
     const R9 = `(() => { const w = ${CHAT(s9)}; const card = w.element.querySelector('.cn-card .ut-item[data-id="ut-r11reach01"]'), dock = w.element.querySelector('.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"]');
       const pick = (el) => (el ? (el.querySelector('.ut-ak-reach input:checked') || {}).value || null : 'n/a'), names = card ? [...new Set([...card.querySelectorAll('.ut-ak-reach input')].map((r) => r.name))] : [];
-      return { card: !!card, dock: !!dock, cardPick: pick(card), dockRadios: dock ? dock.querySelectorAll('.ut-ak-reach, input[type="radio"]').length : -1, names, shared: names.length ? document.querySelectorAll('input[name="' + names[0] + '"]').length : 0, cardRadios: card ? card.querySelectorAll('.ut-ak-reach input').length : 0 }; })()`;
+      const sc = dock && dock.querySelector('.ut-ak-scope'), word = sc && sc.querySelector('.ut-ak-scope-word'), al = dock && dock.querySelector('.ut-hub-always');
+      const bx = (e) => { const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top) }; };
+      return { card: !!card, dock: !!dock, cardPick: pick(card), dockRadios: dock ? dock.querySelectorAll('.ut-ak-reach, input[type="radio"]').length : -1, names, shared: names.length ? document.querySelectorAll('input[name="' + names[0] + '"]').length : 0, cardRadios: card ? card.querySelectorAll('.ut-ak-reach input').length : 0,
+        says: sc ? sc.dataset.reach : null, word: word ? word.textContent : null, red: !!word && word.classList.contains('ut-ak-reach-instance'), seen: !!sc && sc.getClientRects().length > 0 && getComputedStyle(sc).display !== 'none', px: word ? parseFloat(getComputedStyle(word).fontSize) : 0,
+        always: al ? al.textContent : null, cardAlways: card ? (card.querySelector('.ut-hub-always') || {}).textContent || null : null, scope: sc ? bx(sc) : null,
+        answers: dock ? [...dock.querySelectorAll('.ut-exit-answer > button')].map((b) => ({ k: b.textContent.trim(), ...bx(b) })) : [], over: dock ? w.element.querySelector('.chat-attn-dock').scrollWidth - w.element.querySelector('.chat-attn-dock').clientWidth : null, vw: innerWidth }; })()`;
+    const saysAll = (x, k) => !!x && x.says === k && x.word === WORD[k] && x.seen && !!x.always && x.always.includes(WORD[k]);
     await A.evalJs(PUSH9(J(ak()))); await A.waitFor(`(() => { const x = ${R9}; return x.card && x.dock; })()`, 8000); await sleep(800);
     const r1 = await A.evalJs(R9);
     await A.shot('desktop-1280-reach-card.png');
     check(`RED-able (r11 — 7ec6c6dcf: card=null, the dock's hidden copy took the check): the automation card stands in the flow and in the strip; its REACH radios are the card's alone (the strip draws ${r1.dockRadios} of them), ONE group of its own (${r1.names.join()} — ${r1.shared} radios of that name in the page), «opened» checked by default`,
       r1.card && r1.dock && r1.dockRadios === 0 && r1.cardRadios === 3 && r1.names.length === 1 && r1.shared === 3 && r1.cardPick === 'opened', r1);
+    check(`RED-able (r12 — 9f8b8d846: the strip said no reach): the strip SAYS the reach its answers carry — «${r1.word}» (${r1.px} px) beside them, its Always «${r1.always}»; the card keeps «${r1.cardAlways}» beside its radios`, saysAll(r1, 'opened') && r1.cardAlways === 'Always for this conversation', r1);
     await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-groups`, { touch: false }); await sleep(300);
-    const r2 = await A.evalJs(R9);
+    const r2 = await A.evalJs(R9); // (no broadcast between: the pick alone)
+    check(`RED-able (r12 — 9f8b8d846): a pick made on the CARD rewords the strip BEFORE any press — «${r2.word}», «${r2.always}»`, r2.cardPick === 'groups' && saysAll(r2, 'groups'), r2);
     await A.evalJs(PUSH9(J(ak('first use — still waiting on you')))); await sleep(1200); // its words moved: both rows' signatures move ⇒ the card AND the strip repaint (the acceptance's PATH A, a minute's age, moves them the same way)
     const r3 = await A.evalJs(R9);
-    check(`RED-able (r11 — 7ec6c6dcf: the repaint left card=null): the owner picks «groups» on the card (${r2.cardPick}); a pass that repaints the card AND the strip keeps it — the card still reads «${r3.cardPick}»`, r2.cardPick === 'groups' && r3.card && r3.cardPick === 'groups', { r2, r3 });
+    await A.shot('desktop-1280-dock-reach.png');
+    check(`RED-able (r11 — 7ec6c6dcf: the repaint left card=null): the owner picks «groups» on the card (${r2.cardPick}); a pass that repaints the card AND the strip keeps it — the card still reads «${r3.cardPick}», the strip «${r3.word}»`, r3.card && r3.cardPick === 'groups' && saysAll(r3, 'groups') && r3.over <= 0, { r2, r3 });
     await A.evalJs(`(() => { const m = app._inboxModel; window.__ra19 = m.runAction; window.__got19 = []; m.runAction = (rec, answer, extra) => { window.__got19.push({ id: rec && rec.id, answer, extra }); return Promise.resolve(true); }; return 1; })()`);
-    await sleep(1100); // the press arm: an Allow shown under 700 ms ago is not the one the owner read
-    await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-hub-always`, { touch: false }); await sleep(400);
-    const dockAlways = await A.evalJs(`!!${CHAT(s9)}.element.querySelector('.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"] .ut-hub-always')`);
-    if (dockAlways) { await A.press(`.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"] .ut-hub-always`, { touch: false }); await sleep(400); }
+    const pressDock = async (cls) => { await sleep(1100); const shown = (await A.evalJs(R9)).says; await A.press(`.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"] .${cls}`, { touch: false }); await sleep(400); return shown; }; // (the press arm: an Allow shown under 700 ms ago is not the one read)
+    // THE OWNER'S SHAPE: «The whole VibeSpace» pressed in the TRAY to read it, the tray closed unanswered; then only the strip
+    await A.press('#taskbar-user-todos', { touch: false });
+    await A.waitFor(`!!document.querySelector('#user-todos-popup:not(.hidden) .ut-item[data-id="ut-r11reach01"]')`, 6000);
+    if (!(await A.evalJs(`(() => { const l = document.querySelector('#user-todos-popup .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-instance'); return !!l && l.getClientRects().length > 0; })()`))) await A.press(`#user-todos-popup .ut-item[data-id="ut-r11reach01"] .ut-text`, { touch: false });
+    await A.waitFor(`(() => { const l = document.querySelector('#user-todos-popup .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-instance'); return !!l && l.getClientRects().length > 0; })()`, 4000);
+    await A.press(`#user-todos-popup .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-instance`, { touch: false }); await sleep(300);
+    await A.press('#taskbar-user-todos', { touch: false }); await A.waitFor(`document.getElementById('user-todos-popup').classList.contains('hidden')`, 4000);
+    const r4 = await A.evalJs(R9);
+    await A.shot('desktop-1280-dock-reach-instance.png');
+    const sawI = await pressDock('ut-hub-always');
+    // the owner picks the narrowest again (on the card); the strip's Allow once then carries exactly that — never 'instance'
+    await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-opened`, { touch: false }); await sleep(300);
+    const r5 = await A.evalJs(R9);
+    const sawO = await pressDock('ut-hub-once');
+    await sleep(1100); await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-hub-always`, { touch: false }); await sleep(400);
     const got = await A.evalJs(`window.__got19 || []`);
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra19) m.runAction = window.__ra19; delete window.__ra19; return 1; })()`);
-    check(`RED-able (r11 — 7ec6c6dcf: the card's Allow sent no reach, the strip's sent «opened»): «Always for this conversation» on the card carries the owner's pick${dockAlways ? ', and the strip\'s carries the SAME (one answer writer)' : ''} — ${J(got.map((g) => g.extra))}`,
-      got.length === (dockAlways ? 2 : 1) && got.every((g) => g.id === 'ut-r11reach01' && g.answer === 'always' && g.extra && g.extra.reach === 'groups'), got);
+    check(`RED-able (r12 — 9f8b8d846: the strip said nothing, then sent 'instance'): THE OWNER'S SHAPE — «The whole VibeSpace» read in the tray and left: the strip says «${r4.word}» (red: ${r4.red}) and «${r4.always}» BEFORE the press, and its Always sends exactly that (${J(got[0] && got[0].extra)})`,
+      r4.cardPick === 'instance' && saysAll(r4, 'instance') && r4.red && sawI === 'instance' && !!got[0] && got[0].answer === 'always' && got[0].extra && got[0].extra.reach === 'instance', { r4, sawI, got0: got[0] });
+    check(`RED-able (r12): every press carries exactly the scope its press point shows — the strip said «${r5.word}» ⇒ its Allow once sent ${J(got[1] && got[1].extra)} (never 'instance'); the card's Always (its radio «opened») sent ${J(got[2] && got[2].extra)}`,
+      saysAll(r5, 'opened') && sawO === 'opened' && got.length === 3 && got[1].answer === 'once' && got[1].extra && got[1].extra.reach === 'opened' && got[2].answer === 'always' && got[2].extra && got[2].extra.reach === 'opened' && got.every((g) => g.id === 'ut-r11reach01'), got);
+    await A.evalJs(PUSH9('[]')); await sleep(600);
+    // THE PHONE (390×844 touch): the strip's words at 16 px on their own line, every answer ≥ 44 px on ONE row, the longest reach
+    // in the Always's words («Always · The conversations of its Task Groups») wrapping inside it — nothing past the screen's edge
+    await toConv(A, s9, [], 390, 844, true);
+    await A.evalJs(PUSH9(J(ak()))); await A.waitFor(`(() => { const x = ${R9}; return x.card && x.dock && x.seen; })()`, 8000); await sleep(900);
+    await A.press(`.cn-card .ut-item[data-id="ut-r11reach01"] .ut-ak-reach-groups`, { touch: true }); await sleep(500);
+    await A.evalJs(`(() => { for (const x of document.querySelectorAll('.global-toast .global-toast-x')) x.click(); return 1; })()`); await sleep(500); // (the arrival toast stands over the strip for its seconds — closed by its own ×, for the shot)
+    const p9 = await A.evalJs(R9);
+    const seen9 = await A.evalJs(`(() => { const d = ${CHAT(s9)}.element.querySelector('.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"]'); const els = [d.querySelector('.ut-ak-scope-word'), ...d.querySelectorAll('.ut-exit-answer > button')]; return els.every((e) => { if (!e) return false; const r = e.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === e || e.contains(h)); }); })()`);
+    await A.shot('phone-390-dock-reach.png');
+    const small9 = p9.answers.filter((b) => b.h < 44 || b.w < 44), past9 = p9.answers.filter((b) => b.right > p9.vw || b.left < 0);
+    const row9 = p9.answers.length === 3 && p9.answers.every((b) => b.top === p9.answers[0].top) && p9.scope && p9.scope.top < p9.answers[0].top;
+    check(`r12 THE PHONE (390×844 touch): the strip says «${p9.word}» at ${p9.px} px (≥ 16) on its own line, and its answers are ≥ 44 px on ONE row below it (${p9.answers.map((b) => b.k + ' ' + b.w + '×' + b.h).join(', ')}) — none past the edge, each the topmost thing at its centre`,
+      saysAll(p9, 'groups') && p9.px >= 16 && row9 && !small9.length && !past9.length && p9.over <= 0 && seen9 === true, { p9, small9, past9, seen9 });
     await A.evalJs(PUSH9('[]')); await sleep(600);
   } catch (e) { fail++; console.log('  ✗ ⑲ threw: ' + (e?.message || e)); }
   lap('⑲ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
