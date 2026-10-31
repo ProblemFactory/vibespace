@@ -1499,6 +1499,10 @@ try {
     await A.waitFor(`(() => { const x = ${ANN}; return x.all === 11; })()`, 10000); await sleep(500);
     const a2 = await A.evalJs(ANN);
     await A.shot('desktop-1280-announce-ten.png');
+    // r14: NOTHING TRANSIENT ON A WINDOW'S SEND (the acceptance's own shot of r13: the first card over Session 10's Send; the shot of
+    // the first r14 commits: the four toasts there instead) — at every shown chat window's Send the topmost thing is the Send
+    const sends = await A.evalJs(`[...document.querySelectorAll('.window .chat-input-area .chat-send-btn')].filter((b) => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden').map((b) => { const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, h = document.elementFromPoint(x, y); const win = b.closest('.window'), front = h && h.closest('.window'); return { at: [Math.round(x), Math.round(y)], top: h === b || b.contains(h) ? 'send' : !h ? 'none' : h.closest('#global-toasts') ? 'a toast' : h.closest('.ut-announce') ? 'the stack' : front && front !== win ? 'another window' : (h.className || h.tagName).toString().slice(0, 24) }; })`);
+    check(`r14 TEN IN A MINUTE: no toast and no card on a window's Send — at each Send the topmost thing is the Send or a window in front of it (${J(sends.map((x) => x.top))})`, sends.length >= 1 && sends.every((x) => x.top === 'send' || x.top === 'another window'), sends);
     // the newest three BY FILING TIME, a same-ms tie by id — ONE order (PURE newestFirst: the stack's, the dock's, this oracle's;
     // r11 — the heavy on 7ec6c6dcf showed 408 where the leg's own sort had picked its same-ms twin: the stack broke a tie by
     // when its card was made)
@@ -1537,9 +1541,10 @@ try {
     check('r10+ SEEN: a press on window 2 ends ITS flash and its strip\'s fill (the waiting blink\'s own clear); window 1, unseen, still flashes', !!a6.w2 && !a6.w2.waiting && !a6.w2.announce && !!a6.w1 && a6.w1.waiting && a6.w1.announce, a6);
     // (g) ONE PRESS OPENS IT: the card of q412 ⇒ window 1 in front, the card landed; its stack card gone, its flash ends
     await A.evalJs(`(() => { window.__d18 = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__d18.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
+    const top7 = await A.evalJs(`(() => { const c = document.querySelector('.ut-announce .uta-card[data-id="${q412 && q412.id}"] .uta-go'); if (!c) return null; const r = c.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return h === c || c.contains(h) ? 'the card' : h ? (h.closest('#global-toasts') ? 'a toast' : (h.className || h.tagName).toString().slice(0, 30)) : null; })()`);
     await A.press(`.ut-announce .uta-card[data-id="${q412 && q412.id}"] .uta-go`, { touch: false }); await sleep(1500);
     const a7 = await A.evalJs(ANN), fl = await A.evalJs('window.__d18 || []');
-    check(`r10+ ONE PRESS on a card opens its item (THE For-you door): window 1 in front, its card landed (${J(fl)}), the stack card gone, window 1's flash ended (seen)`, !a7.cards.some((c) => c.id === q412.id) && !!a7.w1 && a7.w1.active && !a7.w1.waiting && !a7.w1.announce && fl.includes(q412.id), { a7, fl });
+    check(`r10+ ONE PRESS on a card opens its item (THE For-you door): the topmost thing at its centre is the card (${top7} — r14: on fb61162f9 a toast stood there, the stack having moved from under it), window 1 in front, its card landed (${J(fl)}), the stack card gone, window 1's flash ended (seen)`, top7 === 'the card' && !a7.cards.some((c) => c.id === q412.id) && !!a7.w1 && a7.w1.active && !a7.w1.waiting && !a7.w1.announce && fl.includes(q412.id), { top7, a7, fl });
     // (g2) r11 THE BLINK HAS REASONS (the r10 acceptance): window 2 (not in front) files a band-1 ask and its turn ENDS — the
     // announce's flash first, then the turn's «finished»; the ask answered on another client ⇒ the announce's part goes, the
     // turn's blink STAYS (7ec6c6dcf decided once whose blink it was and cleared it)
@@ -1742,7 +1747,137 @@ try {
   } catch (e) { fail++; console.log('  ✗ ⑳ threw: ' + (e?.message || e)); }
   lap('⑳ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  // ── ㉑ lane needs-card-tail r14 (the r13 acceptance): the announce stands clear of a window's own controls (its first card
+  // stood over Session 10's Send); the strip's Allow keeps its press arm over an age tick; a run ask answers in the strip; the
+  // stack judges what the person SEES (a form behind the window in front) and steps aside AT a dialog's open; the phone's layers ──
+  console.log('㉑ THE ANNOUNCE STANDS CLEAR · THE STRIP KEEPS ITS ARM · A RUN ASK ANSWERS IN THE STRIP · WHAT THE PERSON SEES · THE PHONE (lane needs-card-tail r14)');
+  try {
+    await A.front(); await A.device(1280, 800, { mouse: true });
+    const s21 = await newConv('clear'); await sleep(600); sayTo(s21, 'hello'); await sleep(1500);
+    await A.evalJs(`(() => { app.phoneHome?.hide?.(); if (!${CHAT(s21)}) app.attachSession(${J(s21)}, 'clear', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return 1; })()`);
+    await A.waitFor(`!!${CHAT(s21)}`, 8000); await sleep(1000);
+    await A.evalJs(`(() => { const w = ${CHAT(s21)}; app.wm.focusWindow?.(w.id); if (!w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(800);
+    const KEY21 = await A.evalJs(`(() => { const w = ${CHAT(s21)}; return (app.foryouRows.keysForWin(w.id) || [])[0] || null; })()`);
+    const PUSH21 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const T21 = Date.now(), ex21 = (id, cmd, at = T21) => ({ id, sessionKey: KEY21, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: at, expiresAt: T21 + 3600e3,
+      text: 'Allow "clear" to run a command on exmac?', detail: cmd, action: { type: 'exit-run-ask', askId: id.slice(-1).repeat(32), machine: 'exmac', cmd } });
+    const noToasts = `(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`;
+    const R21 = `const R = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) } : null; };`;
+    // (a) MAJOR A: a maximized chat — its composer and strip lie under the For-you button's place
+    const A1 = ex21('ut-r14clear1', 'echo pong', T21 - 61e3);
+    await A.evalJs(PUSH21(`[${J(A1)}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14clear1"]') && !!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14clear1"]')`, 8000); await sleep(1300);
+    const CLEAR = `(() => { ${R21} const w = ${CHAT(s21)}, s = document.querySelector('.ut-announce'); if (!w || !s) return null; const sr = s.getBoundingClientRect();
+      const hit = (q) => !!q && sr.left < q.r && sr.right > q.l && sr.top < q.b && sr.bottom > q.t;
+      const comp = R(w.element.querySelector('.chat-input-area')), strip = R(w.element.querySelector('.chat-attn-dock')), ctl = R(w.element.querySelector('.window-controls')), send = R(w.element.querySelector('.chat-input-area button[class*="send"], .chat-input-area .send-btn'));
+      return { stack: R(s), comp, strip, ctl, send, onComp: hit(comp), onStrip: hit(strip), onCtl: hit(ctl), aside: getComputedStyle(s).visibility === 'hidden', max: !!w.isMaximized, cards: s.querySelectorAll('.uta-card:not([hidden])').length, btn: R(document.getElementById('taskbar-user-todos')) }; })()`;
+    const c1 = await A.evalJs(CLEAR);
+    await A.shot('desktop-1280-announce-clear-composer.png');
+    check(`RED-able (r14 — 5b4b36649: by the For-you button over a maximized chat's composer; the acceptance's shot desktop-1280-announce-ten.png had its first card over Session 10's Send): THE TOASTS' ONE RULE — the stack ${J(c1 && c1.stack)} stands clear of the composer ${J(c1 && c1.comp)}, the strip ${J(c1 && c1.strip)} and the title bar's buttons, shown (${c1 && c1.cards} card)`,
+      !!c1 && c1.max && !!c1.comp && !!c1.strip && !c1.onComp && !c1.onStrip && !c1.onCtl && !c1.aside && c1.cards === 1, c1);
+    // (b) MAJOR B: the strip's Allow over an age tick («1min ago» → «3min ago») — the same node, its arm kept: a press just after answers
+    const SA = `.chat-attn-dock .cad-rows .ut-item[data-id="ut-r14clear1"] .ut-exit-allow`;
+    await A.evalJs(`(() => { const b = ${CHAT(s21)}.element.querySelector(${J(SA)}); if (b) b.__r14 = 1; const m = app._inboxModel; window.__ra21 = m.runAction; window.__got21 = []; m.runAction = (rec, answer) => { window.__got21.push({ id: rec && rec.id, answer }); return Promise.resolve(true); }; return !!b; })()`);
+    const age0 = await A.evalJs(`(${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14clear1"] .ut-meta') || {}).textContent || ''`);
+    await A.evalJs(`(() => { window.__dn21 = Date.now; Date.now = () => window.__dn21.call(Date) + 120000; return 1; })()`);
+    await A.evalJs(PUSH21(`[${J(A1)}]`)); await sleep(400);
+    const b1 = await A.evalJs(`(() => { const w = ${CHAT(s21)}, b = w.element.querySelector(${J(SA)}); return { same: !!b && b.__r14 === 1, age: (w.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14clear1"] .ut-meta') || {}).textContent || '' }; })()`);
+    await A.evalJs(noToasts);
+    await A.press(SA, { touch: false }); await sleep(500);
+    const got21 = await A.evalJs(`window.__got21 || []`), said21 = await A.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent).join(' | ')`);
+    await A.evalJs(`(() => { if (window.__dn21) Date.now = window.__dn21; delete window.__dn21; return 1; })()`);
+    check(`RED-able (r14 — 5b4b36649: the age in the row's signature rebuilt the strip's Allow, and nothing re-armed it — the acceptance's probe: {ok:false, code:'just-moved'}): an age tick («${age0.trim()}» → «${b1.age.trim()}») keeps the SAME Allow node (${b1.same}) — a press just after it answers (${J(got21)})`,
+      /1min ago/.test(age0) && /3min ago/.test(b1.age) && b1.same && got21.length === 1 && got21[0].id === 'ut-r14clear1' && got21[0].answer === 'allow' && !/moved under the pointer/i.test(said21), { age0, b1, got21, said21 });
+    await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra21) m.runAction = window.__ra21; delete window.__ra21; return 1; })()`);
+    // (c) MINOR C: a vault-run ask in the strip — its command head, its three answers, its clock
+    const FXR = JSON.parse(fs.readFileSync(new URL('./fixtures/vault-run-card-facts.json', import.meta.url), 'utf8')).variants.find((v) => v.name === 'hosts-known-always').facts;
+    const RUN21 = { id: 'ut-r14run01', sessionKey: KEY21, status: 'open', kind: 'action', origin: 'vault', by: 'agent', urgency: 'urgent', text: 'clear wants to run a command with a stored secret', detail: 'Program: psql', createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3,
+      action: { type: 'vault-run-ask', askId: 'e'.repeat(32), always: true, tool: 'x' }, facts: FXR };
+    await A.evalJs(PUSH21(`[${J(RUN21)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]')`, 8000); await sleep(800);
+    const RUNM = `(() => { ${R21} const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), row = d && d.querySelector('.ut-item[data-id="ut-r14run01"]'); if (!row) return null; const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+      const ans = [...row.querySelectorAll('.ut-run-answer > button')].filter(vis).map((b) => ({ k: b.dataset.answer, ...R(b) })), cmd = row.querySelector('.ut-run-cmd'), dl = row.querySelector('.ut-deadline');
+      return { ans, cmd: vis(cmd) ? { text: cmd.textContent.slice(0, 40), h: Math.round(cmd.getBoundingClientRect().height) } : null, clock: vis(dl) ? dl.textContent : null, over: d.scrollWidth - d.clientWidth, facts: !!row.querySelector('.ut-run-facts') && vis(row.querySelector('.ut-run-facts')), vw: innerWidth }; })()`;
+    const r1 = await A.evalJs(RUNM);
+    await A.shot('desktop-1280-dock-run.png');
+    check(`RED-able (r14 — 5b4b36649 hid .ut-run and .ut-deadline: a vault-run ask's strip showed its question and ⤢ only, yet the no-record toast says «answer it in the strip»): the strip draws the run card's command head («${r1 && r1.cmd && r1.cmd.text}», one line), its THREE answers (${J(r1 && r1.ans.map((a) => a.k))}) and its clock («${r1 && r1.clock}») — the facts stay the card's; nothing past the window's edge`,
+      !!r1 && r1.ans.map((a) => a.k).join() === 'once,always,deny' && !!r1.cmd && /psql/.test(r1.cmd.text) && r1.cmd.h <= 20 && /left|sec/.test(r1.clock || '') && !r1.facts && r1.over <= 1, r1);
+    // (d) MINOR D (1): a FORM the system opened — BEHIND the maximized chat, under the stack ⇒ the card shows; in front ⇒ aside
+    const F21 = `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'form' && !x.isMinimized); return w || null; })()`;
+    await A.evalJs(`(() => { window.__sh21 = app.pluginClient._hostApi({ id: 'r14probe', version: '1' }, new AbortController()).createModalShell({ id: 'r14form', title: 'A form the system opened', kind: 'form', opener: 'system', escapeToClose: true }); window.__sh21.body.innerHTML = '<label>Name <input class="r14-in"></label>'; return 1; })()`);
+    await A.waitFor(`!!${F21}`, 6000); await sleep(600);
+    await A.evalJs(PUSH21(`[${J(ex21('ut-r14form1', 'echo behind'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14form1"]')`, 8000); await sleep(300);
+    await A.evalJs(`(() => { const f = ${F21}, s = document.querySelector('.ut-announce').getBoundingClientRect(), ws = app.wm.workspace.getBoundingClientRect(); f.element.style.left = Math.max(0, s.left - ws.left - 40) + 'px'; f.element.style.top = Math.max(0, s.top - ws.top - 40) + 'px'; return 1; })()`); await sleep(1300);
+    await A.evalJs(noToasts);
+    const SEEN = `(() => { const s = document.querySelector('.ut-announce'), c = s && s.querySelector('.uta-card[data-id="ut-r14form1"]'), f = ${F21}; if (!c || !f) return null; const r = c.getBoundingClientRect(), fr = f.element.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const under = document.elementsFromPoint(x, y).find((e) => !s.contains(e)); return { aside: getComputedStyle(s).visibility === 'hidden', formUnder: fr.left < r.right && fr.right > r.left && fr.top < r.bottom && fr.bottom > r.top, front: under ? (under.closest('.window') === f.element ? 'form' : under.closest('.window') ? 'chat' : (under.id || under.className || under.tagName).toString().slice(0, 30)) : null }; })()`;
+    const d1 = await A.evalJs(SEEN);
+    await A.shot('desktop-1280-announce-form-behind.png');
+    await A.evalJs(`(() => { const f = ${F21}; app.wm.focusWindow?.(f.id); return 1; })()`); await sleep(1300);
+    const d2 = await A.evalJs(SEEN);
+    check(`RED-able (r14 — 5b4b36649 judged rectangles: a form window BEHIND the window in front hid an urgent card for its whole clock): a system-opened form under the stack, behind the maximized chat (what is under the card: ${d1 && d1.front}) ⇒ the card shows (${d1 && (d1.aside ? 'hidden' : 'shown')}); the same form brought in front (${d2 && d2.front}) ⇒ it steps aside (${d2 && (d2.aside ? 'hidden' : 'shown')})`,
+      !!d1 && d1.formUnder && d1.front === 'chat' && !d1.aside && !!d2 && d2.front === 'form' && d2.aside, { d1, d2 });
+    await A.evalJs(`(() => { try { window.__sh21?.close?.(); } catch { } delete window.__sh21; const w = ${CHAT(s21)}; app.wm.focusWindow?.(w.id); return 1; })()`); await sleep(600);
+    // (e) MINOR D (2): a dialog's OPEN asks at once — aside within two frames, never the next second's tick
+    await A.evalJs(PUSH21(`[${J(ex21('ut-r14open1', 'echo open'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14open1"]') && getComputedStyle(document.querySelector('.ut-announce')).visibility !== 'hidden'`, 8000); await sleep(300);
+    const e1 = await A.evalJs(`(async () => { const s = document.querySelector('.ut-announce'); const t0 = performance.now(); app.showNewSessionDialog(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return { aside: getComputedStyle(s).visibility === 'hidden', ms: Math.round(performance.now() - t0), open: !document.getElementById('dialog-overlay').classList.contains('hidden') }; })()`);
+    await A.evalJs(`(() => { const o = document.getElementById('dialog-overlay'); (o.querySelector('.dialog-close, [data-close], .btn-cancel') || {}).click?.(); if (!o.classList.contains('hidden')) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1; })()`); await sleep(400);
+    check(`RED-able (r14 — 5b4b36649 asked at its 1 s tick only: up to a second over the act just opened): a dialog opened while a card stands ⇒ the stack steps aside AT the open (${e1 && (e1.aside ? 'aside' : 'still shown')} ${e1 && e1.ms} ms after, two frames)`, !!e1 && e1.open && e1.aside, e1);
+    await A.evalJs(`(() => { const w = ${CHAT(s21)}; if (w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`);
+    await A.evalJs(PUSH21('d.todos.open')); await sleep(600);
+    // (f) THE PHONE (375 × 812, touch): a card arriving while the phone's For-you page shows steps aside; the stack's layer is under the tray's
+    await A.device(375, 812); await A.load();
+    // (the load's own restore settles first — a window it creates or focuses on the phone hides the page: window.js _mobileYieldSidebar)
+    await A.waitFor(`document.documentElement.dataset.vc === 'compact' && !!app.phoneHome && !app.layoutManager?._restoring && !app.layoutManager?._applying`, 15000); await sleep(1000);
+    const SHOWH = `(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); if (!app.phoneHome.shown()) app.phoneHome.show(); return app.phoneHome.shown(); })()`;
+    const HOME = (id) => `(() => { const s = document.querySelector('.ut-announce'), c = s && s.querySelector('.uta-card[data-id="${id}"]'); if (!c) return null; const r = c.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const D = (e) => (e.id ? '#' + e.id : (e.className || e.tagName).toString().split(' ')[0]).slice(0, 24), hm = document.getElementById('phone-home'), hr = hm && hm.getBoundingClientRect();
+      return { home: !!app.phoneHome?.shown?.(), aside: getComputedStyle(s).visibility === 'hidden', inAnn: !!h && !!h.closest('.ut-announce'), inHome: !!h && !!h.closest('#phone-home'), z: Number(getComputedStyle(s).zIndex),
+        chain: document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2).slice(0, 7).map(D), homeBox: hr ? [Math.round(hr.left), Math.round(hr.top), Math.round(hr.right), Math.round(hr.bottom), getComputedStyle(hm).display, getComputedStyle(hm).zIndex] : null }; })()`;
+    // THE PRECONDITION, checked each try (the full suite: a window the load restored is focused late — window.js focusWindow →
+    // _mobileYieldSidebar hides the page — after the card arrived): the page shown when the card arrives AND when it is measured;
+    // a try whose page the environment hid is said and tried again with a NEW ask (a re-show would put the cards away — annYield)
+    let h1 = null, tries = 0;
+    for (; tries < 3; tries++) {
+      for (let k = 0; k < 3; k++) { await A.evalJs(SHOWH); await sleep(800); if (await A.evalJs(`!!app.phoneHome.shown() && getComputedStyle(document.getElementById('phone-home')).display !== 'none'`)) break; }
+      const hid = 'ut-r14home' + (tries + 1);
+      await A.evalJs(PUSH21(`[${J(ex21(hid, 'echo home'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="${hid}"]')`, 8000); await sleep(1300);
+      await A.evalJs(noToasts);
+      h1 = await A.evalJs(HOME(hid));
+      if (h1 && h1.home) break;
+      console.log(`    (㉑ f: try ${tries + 1} — the page was hidden under the card by the environment ${J(h1 && h1.chain)}; again with a new ask)`);
+    }
+    if (h1) h1.tries = tries + 1;
+    await A.shot('phone-375-announce-over-home.png');
+    check(`RED-able (r14 — 5b4b36649 had no #phone-home in its list: a card arriving while the phone's For-you page shows stood over it — the tray bug's shape on the phone): the page shown (try ${h1 && h1.tries}), a card arrives ⇒ the stack steps aside (${h1 && (h1.aside ? 'hidden, its card kept' : 'shown')}), the page is what a tap at the card's place reaches (${h1 && (h1.inHome ? '#phone-home' : h1.inAnn ? 'the card' : '?')})`,
+      !!h1 && h1.home && h1.aside && !h1.inAnn && h1.inHome, h1);
+    // the tray SHEET (the phone's media list lays .usage-popup out full width under the nav — the compact badge opens the page,
+    // so the sheet is opened by its own handler here): a card arriving while it is open stands UNDER it
+    await A.evalJs(`(() => { app.phoneHome?.hide?.(); return 1; })()`); await sleep(400);
+    await A.evalJs(`(() => { document.getElementById('taskbar-user-todos').click(); return 1; })()`); await A.waitFor(`(() => { const p = document.getElementById('user-todos-popup'); return !p.classList.contains('hidden') && p.getBoundingClientRect().height > 40; })()`, 6000); await sleep(400);
+    await A.evalJs(PUSH21(`[${J(ex21('ut-r14tray1', 'echo tray'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14tray1"]')`, 8000); await sleep(1300);
+    await A.evalJs(noToasts);
+    const t1 = await A.evalJs(`(() => { const s = document.querySelector('.ut-announce'), c = s && s.querySelector('.uta-card[data-id="ut-r14tray1"]'), p = document.getElementById('user-todos-popup'); if (!c) return null; const r = c.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const D = (e) => (e.id ? '#' + e.id : (e.className || e.tagName).toString().split(' ')[0]).slice(0, 24), pr = p.getBoundingClientRect();
+      return { z: Number(getComputedStyle(s).zIndex), tray: Number(getComputedStyle(p).zIndex), aside: getComputedStyle(s).visibility === 'hidden', inTray: !!h && !!h.closest('#user-todos-popup'), inAnn: !!h && !!h.closest('.ut-announce'),
+        chain: document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2).slice(0, 7).map(D), card: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], trayBox: [Math.round(pr.left), Math.round(pr.top), Math.round(pr.right), Math.round(pr.bottom)] }; })()`);
+    await A.shot('phone-375-announce-under-tray.png');
+    check(`RED-able (r14 — 5b4b36649: 99990 over the phone's tray 90001 and mini inbox 90002, only a 1 s rectangle check between): ONE z table on the phone — the stack's ${t1 && t1.z} stands under the tray's ${t1 && t1.tray}; a card arriving while the tray is open is under it (${t1 && (t1.inTray ? 'the tray' : t1.inAnn ? 'the card' : '?')} at its place)`,
+      !!t1 && t1.z < t1.tray && t1.inTray && !t1.inAnn, t1);
+    await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return 1; })()`); await sleep(400);
+    // …and the run ask's strip at 375: its head folds to one line, its three answers wrap to their own row, its clock shown
+    await A.evalJs(`(() => { app.phoneHome?.hide?.(); for (const w of [...app.wm.windows.values()]) if (w.type === 'chat' && app.sessions.get(w.id)?.sessionId !== ${J(s21)}) app.wm.closeWindow(w.id); if (!${CHAT(s21)}) app.attachSession(${J(s21)}, 'clear', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`);
+    await A.waitFor(`!!${CHAT(s21)}`, 8000); await sleep(800);
+    await A.evalJs(PUSH21(`[${J({ ...RUN21, createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3 })}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]')`, 8000); await sleep(800);
+    const r2 = await A.evalJs(RUNM);
+    const top2 = await A.evalJs(`(() => { const row = ${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]'); return row ? [...row.querySelectorAll('.ut-run-answer > button')].map((b) => { const q = b.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h === b || b.contains(h) ? 'own' : h ? (h.closest('#global-toasts') ? 'toast' : h.closest('.ut-announce') ? 'announce' : (h.className || h.tagName).toString().slice(0, 30)) : 'none'; }) : []; })()`); // (the arrival toasts STAND: on this tier they rise above the composer — r14: and above the strip)
+    await A.shot('phone-375-dock-run.png');
+    check(`r14 the run ask's strip at 375 (touch): the command head on one line («${r2 && r2.cmd && r2.cmd.text}»), the three answers (${J(r2 && r2.ans.map((a) => a.k + ' ' + (a.b - a.t) + 'px'))}) each ≥ 44 px, inside the window and the topmost thing where a tap lands — the arrival toasts standing (${J(top2)}; the phone's toasts stood over the strip's answers before r14), the clock («${r2 && r2.clock}»)`,
+      !!r2 && r2.ans.map((a) => a.k).join() === 'once,always,deny' && r2.ans.every((a) => a.b - a.t >= 44 && a.l >= 0 && a.r <= r2.vw) && top2.length === 3 && top2.every((x) => x === 'own') && !!r2.cmd && r2.cmd.h <= 24 && !!r2.clock && r2.over <= 1, { r2, top2 });
+    await A.evalJs(PUSH21('d.todos.open')); await sleep(400);
+    await A.device(1280, 800, { mouse: true }); await A.load(); await sleep(600);
+  } catch (e) { fail++; console.log('  ✗ ㉑ threw: ' + (e?.message || e)); }
+  lap('㉑ done');
+
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

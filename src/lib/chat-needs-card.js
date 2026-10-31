@@ -452,13 +452,17 @@ export class NeedsCards {
     if (count.title !== (words ? words.title : '')) count.title = words ? words.title : '';
     all.hidden = !(d && d.n > 1);
     if (d && d.n > 1) { const w = t('View all · {n}', { n: d.n }); if (all.textContent !== w) all.textContent = w; }
+    const had = new Set(rows.querySelectorAll('button')); // r14: the buttons drawn before this patch (a patch that MAKES one arms the strip)
     this.app.foryouRows?.reconcileDock(rows, [entry]); // r11: THE renderer with the summary + the plain buttons — never a pick (a form exists once per item: the pick is the item's)
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
     if (row) row._item = entry.item;
     // the question is the door to its card (a navigation the owner asked for) — a button for the keyboard too
     if (q && q.getAttribute('role') !== 'button') { q.setAttribute('role', 'button'); q.tabIndex = 0; q.title = t('Show it in the conversation'); }
     if (dock.hidden) dock.hidden = false;
-    if (sig !== this._dockSig) { this._dockSig = sig; this.app.foryouRows?.arm?.(dock); } // what appeared under the pointer answers nothing for ARM_MS (the press arm)
+    // what appeared under the pointer answers nothing for ARM_MS (the press arm) — a new key, AND (r14, the belt: the r13
+    // acceptance's age tick rebuilt the Allow and left it unstamped ⇒ «just-moved» for ever) any patch that made a button
+    const made = [...rows.querySelectorAll('button')].some((b) => !had.has(b));
+    if (sig !== this._dockSig || made) { this._dockSig = sig; this.app.foryouRows?.arm?.(dock); }
   }
 
   /** The strip's parts, built once a view: the head (icon + count), the row's holder, «View all»; its one wiring — THE verbs

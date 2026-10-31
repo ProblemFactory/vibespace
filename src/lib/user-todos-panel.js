@@ -33,7 +33,7 @@ import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, 
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
@@ -1311,29 +1311,65 @@ export function installUserTodos(app) {
   const annCards = new Map(); // item id → { el, key: {id, createdAt}, until, expiredAt }
   const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
   const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
+  let annAt = '';
   const annPlace = () => {
     if (!annStack || !annStack.isConnected) return;
+    if (annStack.matches?.(':hover') && annAt) { annAside(); return; } // r14: a card under the pointer stays where it was read
     const a = annAnchor(), Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
-    if (!a) { annStack.style.left = (Math.max(4, (vw - pr.width) / 2) / Z) + 'px'; annStack.style.top = (8 / Z) + 'px'; annAside(); return; }
-    const r = a.getBoundingClientRect(), up = r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
-    annStack.style.top = (Math.max(4, Math.min(vh - pr.height - 4, up ? r.top - pr.height - 6 : r.bottom + 6)) / Z) + 'px';
-    annStack.style.left = (Math.max(4, Math.min(vw - pr.width - 4, r.right - pr.width)) / Z) + 'px';
+    const r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
+    const left = r ? Math.max(4, Math.min(vw - pr.width - 4, r.right - pr.width)) : Math.max(4, (vw - pr.width) / 2);
+    let top = r ? Math.max(4, Math.min(vh - pr.height - 4, up ? r.top - pr.height - 6 : r.bottom + 6)) : 8;
+    // r14 (the r13 acceptance's shot: the first card over Session 10's Send — the toasts above it stood clear of the composer,
+    // the stack did not): THE TOASTS' ONE RULE — never on a window's own controls a person SEES (utils chromeAvoidRects: a
+    // composer, an attention strip, a title bar's buttons — a covered window's are none): risen above what it meets (sunk below
+    // it, under a top bar's button); no room ⇒ its own place. A move asks the toasts again (they stand clear of the stack)
+    const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
+    const spot = toastDeskSpot({ rect: { left, right: left + pr.width, top, bottom: top + pr.height, height: pr.height }, avoid: chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), down: !up,
+      topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
+    if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - pr.height;
+    annStack.style.top = (top / Z) + 'px';
+    annStack.style.left = (left / Z) + 'px';
+    const at = `${Math.round(top)},${Math.round(left)}`;
+    if (at !== annAt) { const moved = !!annAt; annAt = at; if (moved) placeToastsSoon(); }
     annAside();
   };
   /** r13 (the .365 runner: test-pair-dialog-ui's 生成新命令 — a FORM in its window, under a stack that stands above windows):
    *  THE OWNER'S OWN ACT stands where the stack would — a dialog or a form (DIALOG_ROOTS: a decision's overlay, a form in its
-   *  window), a menu, a popover, the tray — so the stack steps aside: hidden with its cards kept, back once that closes (the
-   *  placement and the 1 s tick ask again; a window on another desktop is visibility:hidden — not the person's act) */
+   *  window), a menu, a popover, the tray, the phone's For-you page (r14: `#phone-home` — a card arriving while it shows) —
+   *  so the stack steps aside: hidden with its cards kept, back once that closes (the placement and the 1 s tick ask again; a
+   *  window on another desktop is visibility:hidden — not the person's act). r14 (the r13 acceptance, MINOR D): what the
+   *  person SEES there, never a rectangle alone — a form window BEHIND the window in front (a system-opened form opens behind
+   *  the focused one) is no act: the topmost element under the stack (elementsFromPoint, the stack's own and a toast skipped) at the
+   *  overlap's corners and middle must be inside it; and the open itself asks (annWatch), never the next tick. */
+  const ANN_ASIDE = `${DIALOG_ROOTS}, [data-popover], .context-menu, .taskbar-context-menu, #user-todos-popup, #phone-home`;
+  const annSees = (el, l, tp, rt, bt) => {
+    if (typeof document.elementsFromPoint !== 'function') return true; // (no hit test — the rectangle decides, as before)
+    const xs = [l + 1, (l + rt) / 2, rt - 1], ys = [tp + 1, (tp + bt) / 2, bt - 1];
+    return [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]].some(([i, j]) => {
+      const hit = document.elementsFromPoint(xs[i], ys[j]).find((e) => !annStack.contains(e) && !e.closest?.('#global-toasts')); // (a toast above both is no act either)
+      return !!hit && el.contains(hit);
+    });
+  };
   const annAside = () => {
     if (!annStack || !annStack.isConnected) return;
     const sr = annStack.getBoundingClientRect();
-    const over = [...document.querySelectorAll(`${DIALOG_ROOTS}, [data-popover], .context-menu, .taskbar-context-menu, #user-todos-popup`)].some((el) => {
+    const over = [...document.querySelectorAll(ANN_ASIDE)].some((el) => {
       if (annStack.contains(el) || !el.getClientRects().length || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) return false;
       const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0 && r.left < sr.right && r.right > sr.left && r.top < sr.bottom && r.bottom > sr.top;
+      const l = Math.max(r.left, sr.left), rt = Math.min(r.right, sr.right), tp = Math.max(r.top, sr.top), bt = Math.min(r.bottom, sr.bottom);
+      return r.width > 0 && r.height > 0 && l < rt && tp < bt && annSees(el, l, tp, rt, bt);
     });
     if (annStack.style.visibility !== (over ? 'hidden' : '')) annStack.style.visibility = over ? 'hidden' : '';
   };
+  /** r14 (MINOR D (2)): a dialog / a form announces its open (utils announceModal) and a menu / a popover / the desktop picker
+   *  is a <body> child — the stack asks AT the open (and once the frame after, laid out), never a second later over it */
+  let annMO = null;
+  const annSoon = () => { if (!annStack) return; annAside(); requestAnimationFrame(() => annAside()); };
+  const annWatch = (on) => {
+    if (on && !annMO && typeof MutationObserver === 'function') { annMO = new MutationObserver(annSoon); annMO.observe(document.body, { childList: true }); }
+    else if (!on && annMO) { annMO.disconnect(); annMO = null; }
+  };
+  document.addEventListener(MODAL_OPEN_EVENT, annSoon);
   const annDrop = (id) => { const c = annCards.get(id); if (c) c.el.remove(); annCards.delete(id); };
   /** r13 (the .365 runner, 2026-10-30: the stack stood OVER the tray it points to — its 允许 / 一直 pressed the card instead —
    *  and over a dialog's button, the pairing sheet's 生成新命令): THE OWNER OPENED FOR YOU — the tray or the phone's page
@@ -1342,7 +1378,7 @@ export function installUserTodos(app) {
   const annYield = () => { if (!annCards.size) return; annCards.clear(); annLayout(); };
   const annLayout = () => {
     if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
-    if (!annCards.size) { annStack?.remove(); annStack = null; clearInterval(annTimer); annTimer = 0; return; }
+    if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
     const order = [...annCards.values()].sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
     order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });
     const more = annStack.querySelector(':scope > .uta-more'), n = order.length - ANN_SHOWN;
@@ -1419,6 +1455,7 @@ export function installUserTodos(app) {
       // popover's / window's), no outside-press closer; fixed where annPlace puts it (public/style.css .ut-announce)
       annStack = mk('div', 'ut-announce');
       document.body.append(annStack);
+      annWatch(true);
       annStack.setAttribute('role', 'status'); annStack.setAttribute('aria-live', 'polite'); annStack.setAttribute('aria-label', t('Waiting for you'));
       const more = mk('button', 'uta-more'); more.type = 'button'; more.hidden = true;
       more.onclick = () => { const a2 = annAnchor(); annCards.clear(); annLayout(); if (a2 && popup.classList.contains('hidden')) togglePopup(a2); };

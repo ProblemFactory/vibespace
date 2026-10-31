@@ -1756,7 +1756,7 @@ console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the b
   ok(an.length > 2000 && gate > 0 && toast > gate && call > toast && ap.split('announce(').length === 2 && !/announceWorthy|row\.band === PARKED|policyOf/.test(P) && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(ap), 'RED-able (r11 — 7ec6c6dcf ran its own rule BEFORE the gate and `continue`d past the toast): ONE attention policy — the announce rides the toast rule\'s own gate (toastWorthy(attentionRow, attnPolicy())), AFTER the toast (its words, its history entry, its tap — unchanged); no rule of its own, no dead 搁置 check');
   ok(/w\.element\.classList\.add\('window-waiting', 'window-announce'\);/.test(an) && /w\._notifyChanged\?\.\(\);/.test(an) && !/blink-fade|setInterval\([^)]*window-waiting/.test(an), 'the flash is THE existing waiting blink (`window-waiting` + _notifyChanged: the title bar, the taskbar button, a tab group\'s tab, a hidden desktop\'s tab) — never a second mechanism');
   ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
-  ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.chat-input-area, \.ut-announce'\)\) \{/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
+  ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.ut-announce'\), \(el\) => el\.id === 'global-toasts'/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
   ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
   ok(/const order = \[\.\.\.annCards\.values\(\)\]\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
   ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
@@ -1901,7 +1901,7 @@ console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-ta
   // ③ the yield itself: every card goes, the stack leaves the page (the windows' flash is not its business)
   let removed = 0;
   const S3 = { annCards: new Map([['a', { el: { remove() {} } }], ['b', { el: { remove() {} } }]]), annStack: { isConnected: true, remove: () => { removed++; } }, annTimer: 7,
-    clearInterval() {}, newestFirst: () => 0, ANN_SHOWN: 3, annPlace() {}, t: (k) => k };
+    clearInterval() {}, newestFirst: () => 0, ANN_SHOWN: 3, annPlace() {}, annWatch() {}, annAt: '', t: (k) => k };
   const Y = run(slice('  const annDrop = (id) =>', '  const annPaint = (c, it) => {'), 'annYield, annLayout', S3);
   if (Y.annYield) Y.annYield();
   ok(!!Y.annYield && S3.annCards.size === 0 && removed === 1 && S3.annStack === null, `RED-able (r13 — 3b8602717 has no yield): the yield empties the stack (${S3.annCards.size} cards left) and takes it off the page (${removed} removed)`, Y.threw || { left: S3.annCards.size, removed });
@@ -1911,18 +1911,209 @@ console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-ta
   const box = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
   const el = (rect, vis = true) => ({ getClientRects: () => [rect], checkVisibility: () => vis, getBoundingClientRect: () => rect });
   const asideRun = (els) => { const st = { isConnected: true, style: { visibility: '' }, contains: () => false, getBoundingClientRect: () => box(880, 560, 1260, 760) };
-    const A2 = run(slice('  const annAside = () => {', '  const annDrop = (id) =>'), 'annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: { querySelectorAll: () => els } });
+    const A2 = run(slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || slice('  const annAside = () => {', '  const annDrop = (id) =>'), 'annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: { querySelectorAll: () => els } });
     if (A2.annAside) A2.annAside(); return A2.threw ? A2.threw : st.style.visibility; };
   const formOver = asideRun([el(box(340, 120, 940, 700))]), farForm = asideRun([el(box(40, 60, 600, 400))]), hiddenDesk = asideRun([el(box(340, 120, 940, 700), false)]), none = asideRun([]);
   ok(formOver === 'hidden' && farForm === '' && hiddenDesk === '' && none === '', `RED-able (r13 — 3b8602717 has no step-aside): a form / dialog / menu where the stack stands ⇒ the stack steps aside («${formOver}»); one elsewhere («${farForm}»), on another desktop («${hiddenDesk}»), none («${none}») ⇒ it stands`, { formOver, farForm, hiddenDesk, none });
-  const P2 = P.slice(P.indexOf('  const annPlace = () => {'), P.indexOf('  const annDrop = (id) =>'));
-  ok((P2.match(/annAside\(\)/g) || []).length >= 2 && /\$\{DIALOG_ROOTS\}, \[data-popover\], \.context-menu/.test(P2), 'the placement asks it on both of its roads (anchored, and the centred one with no For-you button) — every second while a card stands (annRefresh → annLayout → annPlace), over THE one dialog predicate (form-yield.js DIALOG_ROOTS)');
+  const P2 = P.slice(P.indexOf('  const annPlace = () => {'), P.indexOf('  const annDrop = (id) =>')), P1 = P2.slice(0, P2.indexOf('  /** r13 (the .365 runner'));
+  ok(/\n    annAside\(\);\n  \};$/.test(P1.trimEnd()) && (P1.match(/annAside\(\); return;/g) || []).length === 1 && /matches\?\.\(':hover'\) && annAt\) \{ annAside\(\); return; \}/.test(P1) && /\$\{DIALOG_ROOTS\}, \[data-popover\], \.context-menu/.test(P2), 'the placement asks it on its one road (anchored, or centred with no For-you button — r14: one road; its one early return, a stack under the pointer held, asks it too) — every second while a card stands (annRefresh → annLayout → annPlace), over THE one dialog predicate (form-yield.js DIALOG_ROOTS)');
   // ④ the layers: below the palette / a dialog's overlay / menus, popovers, the tray / the toasts — above every window
   const zOf = (sel) => { const m = CSS.match(new RegExp('(^|\\n)' + sel.replace(/[.#()-]/g, (c) => '\\' + c) + '\\s*\\{[^}]*?z-index:\\s*(\\d+)')); return m ? Number(m[2]) : NaN; };
   const za = zOf('.ut-announce'), above = { palette: zOf('.palette-overlay'), dialog: zOf('.dialog-overlay'), tray: zOf('.usage-popup'), toasts: Number((CSS.match(/#global-toasts \{[^}]*?z-index:\s*(\d+)/) || [])[1]),
     popover: Number((UT.match(/pop\.style\.zIndex = '(\d+)'/) || [])[1]) };
   const under = Object.entries(above).filter(([, z]) => !(za < z));
   ok(Number.isFinite(za) && Object.values(above).every(Number.isFinite) && !under.length && za > 9990, `RED-able (r13 — 3b8602717: 99999, the tray's own and above a dialog's 99998): the announce's z ${za} stands under ${Object.entries(above).map(([k, z]) => k + ' ' + z).join(', ')} and above every window (≤ 9990)`, { za, above, under });
+}
+
+console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUDGES WHAT THE PERSON SEES · THE PHONE\'S LAYERS · THE STRIP\'S ALLOW KEEPS ITS ARM (lane needs-card-tail r14 — the r13 acceptance: its first card over Session 10\'s Send; «1min ago» → «3min ago» rebuilt the strip\'s Allow and nothing re-armed it)');
+{
+  const { pathToFileURL } = await import('node:url'); const { createRequire } = await import('node:module'); const J = JSON.stringify;
+  const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8'), CSS = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+  const UT = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8'), CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8');
+  const slice = (a, b, src = P) => { const i = src.indexOf(a), j = src.indexOf(b, i); return i >= 0 && j > i ? src.slice(i, j) : null; };
+  const run = (src, names, S) => { try { if (src == null) throw new Error('slice not found'); return new Function('scope', `with (scope) { ${src} return { ${names} }; }`)(new Proxy(S, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; } };
+  const box = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
+  const meets = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  const U = await import(pathToFileURL(path.join(ROOT, 'src/lib/utils.js')).href);
+  const had = { document: globalThis.document, window: globalThis.window };
+  // A — THE TOASTS' ONE RULE: the REAL annPlace (sliced) over the REAL avoidRects / toastDeskSpot / chromeAvoidEls (utils.js)
+  const tags = (sel) => String(sel).split(',').map((s) => s.trim());
+  const fakeEl = (sel, rect) => { const e = { sel, getBoundingClientRect: () => rect, checkVisibility: () => true, getClientRects: () => [rect] }; e.contains = (x) => x === e; return e; };
+  const placeRun = (anchor, els, { avoid = U.chromeAvoidRects, hits = null, hover = false, passes = 1 } = {}) => {
+    const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), getElementById: () => null, ...(hits ? { elementsFromPoint: hits } : {}) };
+    globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
+    try {
+      let nudged = 0;
+      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: (q) => q === ':hover' && hover }; // (read for its size: 380 × 200, three cards)
+      const S = { annStack: st, annAnchor: () => (anchor ? { getBoundingClientRect: () => anchor } : null), uiScale: () => 1, annAt: '',
+        window: globalThis.window, document: doc, chromeAvoidRects: avoid, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
+      const A = run(slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S);
+      if (A.threw) return { threw: A.threw };
+      const tops = [];
+      for (let k = 0; k < passes; k++) { if (typeof passes === 'number' && k && S.between) S.between(); A.annPlace(); tops.push(parseFloat(st.style.top)); }
+      const l = parseFloat(st.style.left), tp = parseFloat(st.style.top);
+      return { rect: box(l, tp, l + 380, tp + 200), tops, nudged, S };
+    } finally { globalThis.document = had.document; globalThis.window = had.window; }
+  };
+  const BTN = box(1200, 760, 1240, 796), TOPBTN = box(1200, 4, 1240, 40);
+  const composer = box(0, 640, 1280, 756), strip = box(0, 590, 1280, 640), controls = box(1150, 46, 1280, 76);
+  const maxed = [fakeEl('.chat-input-area', composer), fakeEl('.chat-attn-dock', strip)];
+  const p1 = placeRun(BTN, maxed), p2 = placeRun(TOPBTN, [fakeEl('.window-controls', controls)]), p3 = placeRun(BTN, []);
+  const m1 = placeRun(BTN, maxed, { avoid: () => [] }); // the mutant: the avoidance dropped
+  // a COVERED window's composer and strip (⑱ on fb61162f9: the For-you window in front of them — they pushed the toasts and the
+  // stack into each other) are no controls to keep clear of; the same ones in front are
+  const cover = { cover: 1 }, compSeen = (x, y) => { const e = maxed.find((m) => { const r = m.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }); return e ? [e] : [cover]; };
+  const pc = placeRun(BTN, maxed, { hits: () => [cover] }), ps = placeRun(BTN, maxed, { hits: compSeen });
+  ok(!!p1.rect && !meets(p1.rect, composer) && !meets(p1.rect, strip) && p1.rect.bottom <= strip.top && !!p2.rect && !meets(p2.rect, controls) && p2.rect.top >= controls.bottom && !!p3.rect && p3.rect.top === 554,
+    `RED-able (r14 — 5b4b36649: the stack stood by the For-you button over a maximized chat's composer — the toasts above it cleared it): the stack never stands on a window's own controls — a maximized chat's composer and strip under its place ⇒ it RISES above both (top ${p1.rect && p1.rect.top}); under a top bar's button a window's title-bar buttons ⇒ it SINKS below them (top ${p2.rect && p2.rect.top}); nothing there ⇒ its own place (top ${p3.rect && p3.rect.top})`, { p1, p2, p3 });
+  ok(!!m1.rect && meets(m1.rect, composer), 'CONTROL (r14): the mutant that drops the avoidance stands on the composer — the leg goes red', m1);
+  ok(!!pc.rect && pc.rect.top === 554 && !!ps.rect && ps.rect.bottom <= strip.top, `r14 (⑱ on fb61162f9 — the toasts and the stack pushed into each other by the controls of windows the For-you window covered): what the person SEES decides — the same composer and strip COVERED by a window in front ⇒ the stack keeps its own place (top ${pc.rect && pc.rect.top}); in front ⇒ it rises above them (top ${ps.rect && ps.rect.top})`, { pc: pc.rect, ps: ps.rect });
+  // a MOVE asks the toasts again (they stand clear of the stack — they had stayed where the stack had been); a stack under the
+  // pointer stays where it was read (the press lands on the card it aimed at)
+  const twoPlaces = (els1, els2, { hover = false } = {}) => {
+    let els = els1, nudged = 0;
+    const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), getElementById: () => null };
+    globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
+    try {
+      const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: () => false };
+      const A = run(slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '',
+        window: globalThis.window, document: doc, chromeAvoidRects: U.chromeAvoidRects, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} });
+      if (A.threw) return { threw: A.threw };
+      A.annPlace(); const t1 = parseFloat(st.style.top);
+      els = els2; if (hover) st.matches = (q) => q === ':hover';
+      A.annPlace(); return { t1, t2: parseFloat(st.style.top), nudged };
+    } finally { globalThis.document = had.document; globalThis.window = had.window; }
+  };
+  // A TITLE BAR'S BUTTONS ARE SOFT (the shot on e73738019 — ⑱'s ten: four toasts at their own place over Session 10's Send,
+  // no room above the composer, the stack AND two title bars): the PURE rule clears them while there is room, gives them way
+  // first when there is none — the composer, a strip, a menu and the stack never (that shot's own geometry)
+  const T4 = { left: 655, right: 1215, top: 528, bottom: 760, height: 232 }, COMP = { left: 191, right: 873, top: 575, bottom: 632 }, ANN = { left: 836, right: 1216, top: 355, bottom: 520 };
+  const BARS = [{ left: 730, right: 870, top: 172, bottom: 200, soft: true }, { left: 690, right: 840, top: 141, bottom: 170, soft: true }];
+  const sNo = U.toastDeskSpot({ rect: T4, avoid: [COMP, ANN, ...BARS], topY: 41, vh: 800 }), sAllHard = U.toastDeskSpot({ rect: T4, avoid: [COMP, ANN, ...BARS.map(({ soft, ...b }) => b)], topY: 41, vh: 800 });
+  const T1 = { left: 655, right: 1215, top: 600, bottom: 658, height: 58 }, BAR2 = { left: 900, right: 1000, top: 300, bottom: 330, soft: true };
+  const sRoom = U.toastDeskSpot({ rect: T1, avoid: [COMP, ANN, BAR2], topY: 41, vh: 800 });
+  const at = (sp, r) => (sp && sp.bottom != null ? { top: 800 - sp.bottom - r.height, bottom: 800 - sp.bottom } : null), a4 = at(sNo, T4), a1 = at(sRoom, T1);
+  const clear = (b, o) => !!b && !(b.top < o.bottom && b.bottom > o.top);
+  ok(!!a4 && clear(a4, COMP) && clear(a4, ANN) && a4.top >= 41 && sAllHard === null && !!a1 && clear(a1, BAR2) && clear(a1, ANN) && clear(a1, COMP),
+    `r14 (the shot on e73738019: four toasts over Session 10's Send — no room clear of the composer, the stack AND two title bars): a title bar's buttons are SOFT — with no room they give way first (the toasts at ${a4 && a4.top}–${a4 && a4.bottom}, clear of the composer and the stack; the same bars HARD ⇒ ${J(sAllHard)}: the own place, on the Send); with room they are cleared too (${a1 && a1.top}–${a1 && a1.bottom})`, { sNo, sAllHard, sRoom });
+  const mv = twoPlaces(maxed, []), hv = twoPlaces(maxed, [], { hover: true });
+  ok(!mv.threw && mv.t1 < 554 && mv.t2 === 554 && mv.nudged === 1 && !hv.threw && hv.t2 === hv.t1 && hv.nudged === 0,
+    `r14 (⑱ on fb61162f9: the stack moved at a tick and the toasts stayed where it had been — over its cards, a press on a card opened a toast's item): the chat closed ⇒ the stack moves back (${mv.t1} → ${mv.t2}) and asks the toasts again (${mv.nudged}); the same with the pointer on it ⇒ it stays where it was read (${hv.t1} → ${hv.t2})`, { mv, hv });
+  const ta = (UT.match(/function _toastAvoid\(\) \{[\s\S]*?\n\}/) || [''])[0], one = (UT.match(/export const chromeAvoidEls = \(\) => document\.querySelectorAll\('([^']+)'\);/) || [])[1];
+  const ct = (UT.match(/function _composerTop\(\) \{[\s\S]*?\n\}/) || [''])[0];
+  ok(tags(one).sort().join() === '.chat-attn-dock,.chat-input-area,.window-controls' && /chromeAvoidRects\(sr \? sr\.left : 0, sr \? sr\.right : window\.innerWidth,/.test(ta) && /avoid: chromeAvoidRects\(left, left \+ pr\.width,/.test(slice('  const annPlace = () => {', '  /** r13 (the .365 runner') || '') && /export function chromeAvoidRects\(x0, x1, over = \(\) => false\) \{\n  const hits = typeof document\.elementsFromPoint === 'function', out = \[\];\n  for \(const el of chromeAvoidEls\(\)\) \{/.test(UT) && /soft: !!el\.classList\?\.contains\('window-controls'\) \}\);/.test(UT) && /document\.querySelectorAll\('\.chat-input-area, \.chat-attn-dock'\)/.test(ct),
+    'ONE LIST, ONE RULE: utils chromeAvoidEls names a window\'s own controls (every composer, every attention strip, a title bar\'s buttons), chromeAvoidRects keeps the ones a person SEES in a column — the global toasts (_toastAvoid) and the announce (annPlace) both read it and both move through toastDeskSpot; the phone tier\'s toasts (_composerTop) rise above the strip as above the composer (r14 — the 375 shot: two arrival toasts over the strip\'s answers)');
+  // B — WHAT THE PERSON SEES: the REAL annAside — every entry of its list on its own, the topmost element under the stack
+  const ASIDE = ['.dialog-overlay', '.dialog-form', '[data-popover]', '.context-menu', '.taskbar-context-menu', '#user-todos-popup', '#phone-home'];
+  const SR = box(880, 360, 1260, 560), OVER = box(700, 200, 1280, 700);
+  const ASIDE_SRC = slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || slice('  const annAside = () => {', '  const annDrop = (id) =>');
+  const asideRun = (els, { hits = null, roots = '.dialog-overlay, .dialog-form', src = ASIDE_SRC } = {}) => {
+    const st = { isConnected: true, style: { visibility: '' }, contains: (e) => e === st || e === card, getBoundingClientRect: () => SR }, card = { card: 1 };
+    const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), ...(hits ? { elementsFromPoint: () => [card, ...hits()] } : {}) };
+    const A = run(src, 'annAside', { annStack: st, DIALOG_ROOTS: roots, document: doc });
+    if (A.threw) return A.threw;
+    A.annAside(); return st.style.visibility;
+  };
+  const inside = (e) => { const kid = { kid: 1 }; e.contains = (x) => x === e || x === kid; return kid; };
+  const each = ASIDE.map((s) => { const e = fakeEl(s, OVER); const kid = inside(e); return [s, asideRun([e], { hits: () => [kid, e] })]; });
+  ok(each.every(([, v]) => v === 'hidden'), `RED-able (r14 — 5b4b36649 had no #phone-home: a card arriving while the phone's For-you page shows stood over it): EVERY entry of the step-aside list on its own, where the stack stands and in front ⇒ it steps aside — ${each.map(([s, v]) => `${s} «${v}»`).join(', ')}`, each);
+  const lit = ASIDE_SRC || '';
+  const muts = ASIDE.map((s) => {
+    const e = fakeEl(s, OVER), kid = inside(e);
+    const src = s.startsWith('.dialog-') ? lit : lit.replace(', ' + s, '');
+    const roots = s === '.dialog-overlay' ? '.dialog-form' : s === '.dialog-form' ? '.dialog-overlay' : '.dialog-overlay, .dialog-form';
+    return [s, src !== lit || roots !== '.dialog-overlay, .dialog-form', asideRun([e], { hits: () => [kid, e], roots, src })];
+  });
+  ok(muts.every(([, applied, v]) => applied && v === ''), `CONTROL (r14 — the acceptance's M3 stayed ALL PASS): a mutant dropping ANY ONE entry leaves the stack over it — ${muts.map(([s, , v]) => `${s} «${v}»`).join(', ')}`, muts);
+  const formEl = fakeEl('.dialog-form', OVER), formKid = inside(formEl), front = { front: 1 };
+  const toast = { closest: (s) => (s === '#global-toasts' ? toast : null) };
+  const covered = asideRun([formEl], { hits: () => [front, formEl] }), seen = asideRun([formEl], { hits: () => [formKid, formEl] }), noHit = asideRun([formEl]), underToast = asideRun([formEl], { hits: () => [toast, formKid, formEl] });
+  ok(covered === '' && seen === 'hidden' && noHit === 'hidden' && underToast === 'hidden', `RED-able (r14 — 5b4b36649 judged rectangles: a form BEHIND the window in front hid an urgent card for its whole clock): a form window covered where the stack stands ⇒ the card shows («${covered}»); the same form in front ⇒ it steps aside («${seen}»), a toast above both changing nothing («${underToast}» — the phone's arrival toast sat on the stack's points); a page with no hit test ⇒ the rectangle decides («${noHit}»)`, { covered, seen, noHit, underToast });
+  // C — THE OPEN ASKS AT ONCE (never the next tick): the REAL annSoon / annWatch and the open event's listener
+  const heard = [], obs = [];
+  let asks = 0;
+  class MO { constructor(fn) { this.fn = fn; obs.push(this); } observe(t, o) { this.t = t; this.o = o; } disconnect() { this.off = true; } }
+  const body = { body: 1 };
+  const W = run(slice('  let annMO = null;', '  const annDrop = (id) =>'), 'annWatch, annSoon', { annStack: { s: 1 }, annAside: () => { asks++; }, requestAnimationFrame: (f) => f(), MutationObserver: MO, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT,
+    document: { body, addEventListener: (type, fn) => heard.push([type, fn]) } });
+  let atOpen = -1, atMut = -1, off = false;
+  if (!W.threw) {
+    const h = heard.find(([type]) => type === U.MODAL_OPEN_EVENT);
+    if (h) { h[1](); atOpen = asks; }
+    W.annWatch(true); const o = obs[0];
+    if (o && o.t === body && o.o && o.o.childList) { asks = 0; o.fn([]); atMut = asks; }
+    W.annWatch(false); off = !!(o && o.off);
+  }
+  const an = slice('  const annCard = (it) => {', '  const announce = (it) =>') || '', lay = slice('  const annLayout = () => {', '  const annPaint = (c, it) => {') || '';
+  ok(!W.threw && atOpen === 2 && atMut === 2 && off && /document\.body\.append\(annStack\);\n\s+annWatch\(true\);/.test(an) && /annTimer = 0; annWatch\(false\); return; \}/.test(lay),
+    `RED-able (r14 — 5b4b36649 asked only at its 1 s tick: up to a second over a form window, the phone's mini inbox, the desktop picker): a dialog / form announcing its open (utils MODAL_OPEN_EVENT) asks the stack AT the open and the frame after (${atOpen}); a menu / popover / picker added to <body> the same (${atMut}); the watch lives exactly while the stack does (${off ? 'off with it' : 'left on'})`, W.threw || { atOpen, atMut, off });
+  // D — THE PHONE'S LAYERS (the same table): on the phone media list the stack stands under the drawer, the sheets, the mini inbox
+  const VC = createRequire(import.meta.url)(path.join(ROOT, 'src/viewport-class.js'));
+  const blocks = [];
+  for (let i = CSS.indexOf('@media ' + VC.VC_PHONE_MEDIA + ' {'); i >= 0; i = CSS.indexOf('@media ' + VC.VC_PHONE_MEDIA + ' {', i + 1)) {
+    let d = 0, j = CSS.indexOf('{', i);
+    for (let k = j; k < CSS.length; k++) { if (CSS[k] === '{') d++; else if (CSS[k] === '}' && --d === 0) { blocks.push(CSS.slice(j + 1, k)); break; } }
+  }
+  const phoneZ = (sel) => { for (const b of blocks) { const m = b.match(new RegExp('(^|[\\n;}])\\s*' + sel.replace(/[.#()-]/g, (c) => '\\' + c) + '\\s*\\{[^}]*?z-index:\\s*(\\d+)')); if (m) return Number(m[2]); } return NaN; };
+  const zp = phoneZ('.ut-announce') || Number((CSS.match(/\n\.ut-announce \{ position: fixed; z-index: (\d+);/) || [])[1]), phone = { drawer: phoneZ('.sidebar'), tray: phoneZ('.usage-popup'), settings: phoneZ('.global-settings-popover'), plusMenu: phoneZ('.context-menu.mobile-sheet'), mini: phoneZ('.ut-mini-popover') };
+  const homeZ = Number((CSS.match(/#phone-home \{ display: block; position: absolute; inset: 0; z-index: (\d+);/) || [])[1]);
+  const bad = Object.entries(phone).filter(([, z]) => !(zp < z));
+  ok(blocks.length >= 2 && Number.isFinite(zp) && Object.values(phone).every(Number.isFinite) && !bad.length && zp > 10000 && zp > homeZ,
+    `RED-able (r14 — 5b4b36649 had no phone layer: the tray 90001 and the mini inbox 90002 stood UNDER its 99990): on the phone media list (VC_PHONE_MEDIA, ${blocks.length} blocks) the announce's z ${zp} stands under ${Object.entries(phone).map(([k, z]) => k + ' ' + z).join(', ')} and above every window (10000+) and the phone's page (${homeZ})`, { zp, phone, homeZ, bad });
+  // E — THE STRIP'S ALLOW KEEPS ITS ARM: the REAL row (renderRow / patchRow) a minute on, then the REAL _dockPass's belt
+  const noop = () => {};
+  const Dnow = Date.now, T0 = Dnow();
+  let sets = 0;
+  const ageNode = { textContent: '' }, expNode = { textContent: '' };
+  const mkEl = () => { let html = ''; return { dataset: {}, className: '', get innerHTML() { return html; }, set innerHTML(v) { html = v; sets++; }, querySelector: (s) => (/\.ut-age$/.test(s) ? ageNode : /\.ut-exp$/.test(s) ? expNode : null), querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, style: {} }; };
+  const hadE = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
+    const REL = 'src/lib/user-todos-row.js';
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'S', replyState: () => ({ show: false }) };
+    const ask = { item: { id: 'ut-r14age', status: 'open', kind: 'action', urgency: 'urgent', text: 'Allow "ops" to run a command on exmac?', detail: 'echo pong', createdAt: T0 - 61e3, expiresAt: T0 + 3600e3, action: { type: 'exit-run-ask', askId: 'a'.repeat(32), machine: 'exmac', cmd: 'echo pong' } } };
+    const tick = async (R) => {
+      sets = 0; ageNode.textContent = ''; Date.now = () => T0;
+      const el = R.renderRow(ask, ctx); const made = sets;
+      Date.now = () => T0 + 120e3; // the age tick: «1min ago» → «3min ago»
+      R.patchRow(el, ask, ctx);
+      return { rebuilt: sets - made, age: ageNode.textContent };
+    };
+    const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
+    const g = await tick(R);
+    const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
+    const pre = src.replace(".replace(/<span class=\"ut-(age|exp)\">[^<]*<\\/span>/g, '<span class=\"ut-$1\"></span>');", ';');
+    const Rp = await import(pathToFileURL(mutantCopies('utrow14', ROOT).write(REL, pre, 'agesig')).href);
+    const gm = await tick(Rp);
+    ok(g.rebuilt === 0 && /^3min ago/.test(g.age), `RED-able (r14 — 5b4b36649: the signature carried the age, «3min ago» rebuilt the row and its buttons): a minute on, the SAME row — no rebuild (${g.rebuilt} innerHTML writes), its age written in place («${g.age}»); the buttons are the nodes the press arm stamped`, g);
+    ok(pre !== src && gm.rebuilt === 1, `CONTROL (r14): the mutant whose signature reads the age rebuilds the row on the tick (${gm.rebuilt}) — the leg goes red`, gm);
+  } finally { Date.now = Dnow; for (const [k, v] of Object.entries(hadE)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+  // …and the belt: the REAL _dockPass over stubs — a patch that MADE a button (the same key) arms the strip; a press 30 s later
+  // through the REAL press-arm answers (5b4b36649: no stamp ⇒ «just-moved» for ever)
+  const PA = await import(pathToFileURL(path.join(ROOT, 'src/lib/press-arm.js')).href);
+  const dp = slice('  _dockPass(waiting) {', '  /** The strip\'s parts, built once a view', CARD);
+  const belt = (body) => {
+    let btns = [{ b: 1 }], clock = 1000, armed = 0;
+    const row = { dataset: { id: 'ut-r14age' }, querySelector: () => null };
+    const rows = { querySelector: (s) => (/ut-item/.test(s) ? row : null), querySelectorAll: () => btns, replaceChildren() {} };
+    const count = { textContent: '', title: '' }, all = { hidden: true, textContent: '' };
+    const dock = { hidden: false, querySelector: (s) => (/cad-count/.test(s) ? count : /cad-all/.test(s) ? all : null) };
+    const item = { id: 'ut-r14age', status: 'open' };
+    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null,
+      app: { foryouRows: { reconcileDock: () => { if (self.rebuild) btns = [{ b: 2 }]; }, arm: () => { armed++; for (const b of btns) if (b._armSince == null) b._armSince = clock; } } } };
+    let f; try { f = new Function('scope', `with (scope) { return function (waiting) { ${body} }; }`)(new Proxy({ dockOf: (l) => (l.length ? { newest: l[0].item, n: l.length, words: { text: 'waiting for you · 1', title: '' } } : null), t: (k) => k, boxInUse: () => false, inboxModel: () => ({ todos: {} }), console }, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
+    f.call(self, [{ item }]); clock += 60e3; // shown, stamped; a minute on
+    self.rebuild = true; f.call(self, [{ item }]); // the repaint that made a new Allow — the same key
+    const b = btns[0]; clock += 30e3;
+    return { armed, stamped: b._armSince != null, press: PA.pressVerdict({ since: b._armSince ?? null, now: clock }) };
+  };
+  const bodyOf = (s) => (s ? s.slice(s.indexOf('{') + 1, s.lastIndexOf('}')) : null);
+  const bg = belt(bodyOf(dp)), bm = belt(bodyOf(dp && dp.replace('if (sig !== this._dockSig || made) {', 'if (sig !== this._dockSig) {')));
+  ok(!bg.threw && bg.armed === 2 && bg.stamped && bg.press.ok, `RED-able (r14 — 5b4b36649 armed the strip only when its key changed: the acceptance's probe pressed 30 s on ⇒ {ok:false, code:'just-moved'}): THE BELT — a patch that made a button arms the strip (${bg.armed} arms), and a press 30 s later answers (${J(bg.press)})`, bg);
+  ok(!bm.threw && bm.armed === 1 && !bm.stamped && !bm.press.ok && bm.press.code === 'just-moved', `CONTROL (r14): the mutant that arms on a new key only leaves the new Allow unstamped — a press 30 s later is «${bm.press.code}» (the acceptance's shape) — the leg goes red`, bm);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

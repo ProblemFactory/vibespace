@@ -591,31 +591,75 @@ export function toastSpot({ tier = false, anchored = false, modal = false, compo
  *  takes the menu's). PURE: WHERE THE DESKTOP TIER'S STACK STANDS — its own place (beside the inbox button, else the
  *  centred strip over the taskbar) unless its rect `rect` meets an open menu or a composer (`avoid`, viewport px); then it
  *  rises above what it meets (`gap` px clear), again while it meets another, never past the toolbar's bottom `topY` (no
- *  room ⇒ its own place). → { bottom } (the stack's CSS bottom, layout px: ÷ `scale`) | null (its own place). */
-export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale = 1, gap = 8 } = {}) {
+ *  room ⇒ its own place). → { bottom } (the stack's CSS bottom, layout px: ÷ `scale`) | null (its own place).
+ *  `down` (lane needs-card-tail r14 — the For-you announce under a TOP bar's button): it SINKS below what it meets instead,
+ *  never past `bottomY` → { top } (the stack's CSS top, layout px). A SOFT obstacle (`soft: true` — a window's title-bar
+ *  buttons, r14) is cleared while there is room; with no room clear of everything it gives way first (the composer, a strip,
+ *  a menu, the announce never do — ⑱'s shot on the first r14 commit: four toasts at their own place over Session 10's Send). */
+export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale = 1, gap = 8, down = false, bottomY = vh } = {}) {
   if (!rect || !(rect.height > 0) || !(vh > 0)) return null;
-  const list = (Array.isArray(avoid) ? avoid : []).filter(Boolean);
-  const meets = (top, bottom) => list.find((a) => rect.left < a.right && rect.right > a.left && top < a.bottom && bottom > a.top);
-  let bottom = rect.bottom;
-  for (let i = 0; i <= list.length; i++) {
-    const a = meets(bottom - rect.height, bottom);
-    if (!a) return bottom === rect.bottom ? null : { bottom: (vh - bottom) / (scale || 1) };
-    bottom = a.top - gap;
-    if (bottom - rect.height < topY) return null;
-  }
-  return null;
+  const all = (Array.isArray(avoid) ? avoid : []).filter(Boolean);
+  const place = (list) => {   // → null (its own place is clear) | a spot | false (no room)
+    const meets = (top, bottom) => list.find((a) => rect.left < a.right && rect.right > a.left && top < a.bottom && bottom > a.top);
+    let bottom = rect.bottom;
+    for (let i = 0; i <= list.length; i++) {
+      const a = meets(bottom - rect.height, bottom);
+      if (!a) return bottom === rect.bottom ? null : down ? { top: (bottom - rect.height) / (scale || 1) } : { bottom: (vh - bottom) / (scale || 1) };
+      bottom = down ? a.bottom + gap + rect.height : a.top - gap;
+      if (down ? bottom > bottomY : bottom - rect.height < topY) return false;
+    }
+    return false;
+  };
+  const spot = place(all);
+  if (spot !== false) return spot;
+  const hard = all.filter((a) => !a.soft);
+  return hard.length < all.length ? place(hard) || null : null;
 }
-/** what the desktop tier's stack must not stand on: every open menu / float and every composer shown (viewport px) */
-function _toastAvoid() {
+/** THE ONE LIST of a window's own interactive chrome that transient attention UI never stands on (lane needs-card-tail r14 —
+ *  the r13 acceptance: the For-you announce's first card over Session 10's Send, the toasts above it clear of the composer):
+ *  every composer, every attention strip (chat-view's `.chat-attn-dock`), a window's title-bar buttons. The global toasts
+ *  (_toastAvoid) and the For-you announce (user-todos-panel.js annPlace) both stand clear of it through toastDeskSpot.
+ *  (The selector stays INSIDE its DOM query: test-oat-identity's census reads a `.window-` literal anywhere else as a path.) */
+export const chromeAvoidEls = () => document.querySelectorAll('.chat-input-area, .chat-attn-dock, .window-controls');
+/** the viewport rects of the elements `els` that show on this desktop (a window on another one is visibility:hidden); `skip(el)` ⇒ not counted */
+export function avoidRects(els, skip = null) {
   const out = [];
-  for (const el of document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .chat-input-area, .ut-announce')) { // (.ut-announce — the For-you announce's stack, no popover since lane needs-card-tail r11)
-    if (el.id === 'global-toasts' || el.closest('#global-toasts')) continue;
-    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue; // a window on another desktop is visibility:hidden
+  for (const el of els) {
+    if (skip && skip(el)) continue;
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue;
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) out.push(r);
   }
   return out;
 }
+/** THE CHROME A PERSON SEES in the column [x0, x1] (lane needs-card-tail r14 — ⑱ on fb61162f9: the composers and strips of
+ *  windows COVERED by the For-you window pushed the toasts and the announce into each other, a toast over the card pressed):
+ *  chromeAvoidEls' rects whose element is the topmost thing (elementsFromPoint, the overlays `over(el)` passed over) at a point
+ *  of it inside the column — a covered window's controls are no control to keep clear of; outside the column nothing meets */
+export function chromeAvoidRects(x0, x1, over = () => false) {
+  const hits = typeof document.elementsFromPoint === 'function', out = [];
+  for (const el of chromeAvoidEls()) {
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) || r.right <= x0 || r.left >= x1) continue;
+    if (hits) { // (no hit test — the rectangle decides)
+      const l = Math.max(r.left, x0), rt = Math.min(r.right, x1), xs = [l + 1, (l + rt) / 2, rt - 1], ys = [r.top + 1, (r.top + r.bottom) / 2, r.bottom - 1];
+      if (!xs.some((x) => ys.some((y) => { const h = document.elementsFromPoint(x, y).find((e) => !over(e)); return !!h && el.contains(h); }))) continue;
+    }
+    // a title bar's buttons are SOFT: they give way first when there is no room clear of everything (toastDeskSpot)
+    out.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, soft: !!el.classList?.contains('window-controls') });
+  }
+  return out;
+}
+/** what the desktop tier's stack must not stand on: every open menu / float, THE window chrome it would meet (chromeAvoidRects in
+ *  its own column) and the For-you announce's stack (`.ut-announce`, no popover since lane needs-card-tail r11) — viewport px */
+function _toastAvoid() {
+  const st = document.getElementById('global-toasts'), sr = st ? st.getBoundingClientRect() : null;
+  return [...avoidRects(document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .ut-announce'), (el) => el.id === 'global-toasts' || !!el.closest('#global-toasts')),
+    ...chromeAvoidRects(sr ? sr.left : 0, sr ? sr.right : window.innerWidth, (e) => !!e.closest?.('#global-toasts, .ut-announce'))];
+}
+/** r14: the For-you announce MOVED (its placement follows the window chrome now) — the toasts placed clear of it ask again */
+export function placeToastsSoon() { _queueToastPlace(); }
 /** THE STACK'S OWN PLACE: beside the inbox button when it shows (customize mode can move it to any bar; a phone hides it ⇒
  *  the centred strip). Re-asked by the desktop tier's placement before it measures (lane desktop-small fence ⑨). */
 function _anchorToastStack(stack) {
@@ -651,10 +695,11 @@ function _openModalDialog() {
   const ov = ovs[ovs.length - 1];
   return ov ? [...ov.children].find((d) => d.classList.contains('dialog') && !d.classList.contains('hidden') && d.getClientRects().length) || null : null;
 }
-/** the highest composer on screen (a chat window's .chat-input-area), viewport px; null when none shows */
+/** the highest composer on screen (a chat window's .chat-input-area) — or the attention strip standing on it (lane needs-card-tail
+ *  r14: the phone's toasts stood over the strip's answers — the one avoid list's rule on this tier too), viewport px; null when none shows */
 function _composerTop() {
   let top = null;
-  for (const el of document.querySelectorAll('.chat-input-area')) {
+  for (const el of document.querySelectorAll('.chat-input-area, .chat-attn-dock')) {
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height || r.bottom <= 0 || r.top >= window.innerHeight) continue;
     if (top === null || r.top < top) top = r.top;

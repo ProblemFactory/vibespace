@@ -2438,6 +2438,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
    (99997), a dialog's overlay (99998), menus / popovers / the tray (99999) and the toasts (100000): a card that stands for an
    ask's whole clock never covers the owner's own act (it stood over the pairing sheet's 生成新命令 at 99999) */
 .ut-announce { position: fixed; z-index: 99990; display: flex; flex-direction: column; gap: 6px; width: min(380px, calc(100vw - 16px)); }
+/* r14 — THE PHONE'S LAYERS, the same table (the r13 acceptance measured at 500 px: the tray 90001 and the mini inbox 90002 !important
+   UNDER the stack's 99990): on the phone media list (viewport-class.js VC_PHONE_MEDIA) the stack stands below the drawer (90000),
+   the sheets — the tray, the settings, the + menu (90001) — and the mini inbox (90002), above every window and the phone's page */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .ut-announce { z-index: 89990; } }
 .uta-card { display: flex; align-items: stretch; background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: var(--radius); box-shadow: 0 4px 16px color-mix(in srgb, var(--bg-window) 70%, transparent); }
 .uta-card[hidden], .uta-more[hidden], .uta-clock[hidden] { display: none; }
 .uta-go { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px 8px 10px; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -5295,7 +5299,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   /* r12: the reach the answers carry reads at 16 px on its own line; the answers stay ONE row (the card's shape) — Allow once and
      Deny keep their words on one line, the Always takes the rest and wraps its words (a long reach in them) */
   .chat-attn-dock .cad-rows .ut-body > .ut-ak-scope { flex: 1 1 100%; font-size: 16px !important; line-height: 24px; white-space: normal; }
-  .chat-attn-dock .cad-rows .ut-body > .ut-exit-answer { flex: 1 1 100%; gap: 6px; }
+  .chat-attn-dock .cad-rows :is(.ut-body, .ut-run) > .ut-exit-answer { flex: 1 1 100%; gap: 6px; } /* r14: a run card's answers too */
+  .chat-attn-dock .cad-rows .ut-body > .ut-deadline { flex: 1 1 100%; white-space: normal; line-height: 20px; }
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-act { flex: none; white-space: nowrap; }
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; white-space: normal; line-height: 1.2; padding: 4px 8px; }
   .chat-attn-dock textarea { font-size: 16px !important; }

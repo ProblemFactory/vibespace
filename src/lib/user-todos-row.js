@@ -440,7 +440,7 @@ function partsOf(entry, ctx) {
   const optList = rowOptions(i, ctx);
   const opts = !resolved && rs.show && optList.length
     ? `<div class="ut-opts">${optList.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(optionWords(o, t))}</button>`).join('')}</div>` : ''; // lane controls-that-lie: a reply reads as a reply
-  let meta;
+  let meta, ageWords = null, expWords = null; // r14: the row's VOLATILE words (the age, the lifetime) — patched in place, never in the signature
   if (resolved) {
     const by = resolvedByText(i.resolvedBy, t, i);
     const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
@@ -449,6 +449,7 @@ function partsOf(entry, ctx) {
       + escHtml(statusWords(i, t)) // r3: a hidden pointer reads «hidden — nothing was decided», never «done»
       + (by ? ' · ' + escHtml(by) : '') + (endCodeOf(i) ? ` · <code class="ut-end-code">${escHtml(endCodeOf(i))}</code>` : '') + replied // r8: an end this client cannot classify — its code, typed
       + (tail ? `<span class="ut-age"> · ${escHtml(agoText(i.resolvedAt || i.createdAt, t))}</span>` : '');
+    if (tail) ageWords = ' · ' + agoText(i.resolvedAt || i.createdAt, t);
   } else {
     const exp = itemExpiryText(i, t, notice); // a notice's window; r3: a wake ask's lifetime («expires in 7 d»)
     // lane foryou-folds: a row of the tray's attention list (`entry.band`) names its conversation — the bands are flat, no
@@ -458,7 +459,9 @@ function partsOf(entry, ctx) {
     // (no break before the dot), so a long name wraps INSIDE itself and no line starts with «·»; an expiry's dot rides the age
     const age = escHtml(agoText(i.createdAt, t)) + (exp ? ' ·' : '');
     meta = (notice || entry.band ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span><span class="ut-age"> · ${age}</span>` // lane foryou-honest (P3-8): the name is the tray row's door to its conversation
-      : `<span class="ut-age">${age}</span>`) + (exp ? ' ' + escHtml(exp) : '');
+      : `<span class="ut-age">${age}</span>`) + (exp ? `<span class="ut-exp"> ${escHtml(exp)}</span>` : '');
+    ageWords = (notice || entry.band ? ' · ' : '') + agoText(i.createdAt, t) + (exp ? ' ·' : '');
+    expWords = exp ? ' ' + exp : null;
   }
   // lane foryou-honest (the phone's ONE row shape): a touch screen folds a row to its question + meta line — the whole row
   // opens it in place — and THIS trailing door keeps the conversation one tap away (a mouse never sees it: style.css); a row
@@ -485,8 +488,12 @@ function partsOf(entry, ctx) {
       + (closers.includes('hide') ? `<button class="ut-act ut-dismiss ut-hide" title="${escHtml(t('Hide — decides nothing; what it points at stays open in the conversation'))}" data-label="${escHtml(t('Hide'))}">✕</button>` : '') + '</span>';
   // the deadline line's words, accent and state move every second (the ticker's) — the signature reads its facts only
   const sigBody = (deadline ? body.replace(deadline, deadline.replace(/>[^<]*<\/div>$/, '></div>').replace(/ ut-deadline-warn| data-state="[^"]*"/g, '')) : body)
-    .replace(/ name="(ut-ak-reach-[^"]*)-\d+" value="(\w+)"(?: checked)?/g, ' name="$1" value="$2"'); // r11: a copy's own group and the pick are no change of the row (a pick never repaints the radio under the person)
-  return { cls, dot, body, actions, deadline: !!deadline, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
+    .replace(/ name="(ut-ak-reach-[^"]*)-\d+" value="(\w+)"(?: checked)?/g, ' name="$1" value="$2"') // r11: a copy's own group and the pick are no change of the row (a pick never repaints the radio under the person)
+    // lane needs-card-tail r14 (the r13 acceptance: «1min ago» → «3min ago» rebuilt the strip's Allow, and nothing re-armed the
+    // new one — a press 30 s later was «moved under the pointer just now»): the age and the lifetime are words that move with
+    // the clock — patchRow writes them in place (THE LIVE CARD LAW: never detach a button in use); a change of them is no change of the row
+    .replace(/<span class="ut-(age|exp)">[^<]*<\/span>/g, '<span class="ut-$1"></span>');
+  return { cls, dot, body, actions, deadline: !!deadline, age: ageWords, exp: expWords, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
 }
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
@@ -681,10 +688,17 @@ export function patchRow(el, entry, ctx) {
     if (runOpen) { const d = body.querySelector('.ut-run-fold'); if (d) d.open = true; }
     // (lane key-instance-scope: a re-render keeps the owner's pick — r11: drawn from the item's pick, reachPickOf, never re-read off this copy)
     el.dataset.sig = p.sig;
-  }
+  } else patchVolatile(el, p); // r14: the same row a minute on — its words in place, its buttons the same nodes (their press arm kept)
   if (p.deadline) armDeadlines();
   applyLive(el, entry.item, ctx);
   return el;
+}
+/** r14: a row's words that move with the clock (partsOf `age` / `exp`) written into the nodes already drawn. */
+function patchVolatile(el, p) {
+  for (const [cls, w] of [['ut-age', p.age], ['ut-exp', p.exp]]) {
+    const n = w == null ? null : el.querySelector(`:scope > .ut-body > .ut-meta > .${cls}`);
+    if (n && n.textContent !== w) n.textContent = w;
+  }
 }
 
 /** THE KEYED RECONCILER (design-user-inbox-reply D1.9; §9 shares it with the
