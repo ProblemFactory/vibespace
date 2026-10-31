@@ -96,9 +96,15 @@ export function applyViewportClass(app, next) {
 export function installViewportSwitch(app) {
   let timer = null;
   let portrait = null;
-  const settle = () => {
+  const settle = (now = false) => {
     timer = null;
-    applyViewportClass(app, readViewportClass(app._vc));
+    const next = readViewportClass(app._vc);
+    // r20 (lane needs-card-tail, the r19 acceptance — the form host's press guard): a TIER crossing waits for a press in flight
+    // (form-window's app.crossingWait: the bounded press) as ONE unit — enterPhone's first rule (the forms become sheets) still
+    // runs first when it goes; settleNow (a form opening reads the class fresh) never waits
+    const wait = !now && switchVerdict(app._vc, next).act === 'tier' && typeof app.crossingWait === 'function' ? app.crossingWait() : 0;
+    if (wait > 0) { timer = setTimeout(settle, wait); return; }
+    applyViewportClass(app, next);
     // a rotation starts the list as that orientation does: portrait shows it (a hidden list there is a view of one
     // orientation, SPEC-v3 §4 / §7), landscape takes this tab's own choice back (lane desktop-switch-phone)
     let p = null; try { p = window.matchMedia('(orientation: portrait)').matches; } catch { }
@@ -110,5 +116,8 @@ export function installViewportSwitch(app) {
   window.addEventListener('resize', kick);
   // a page BORN in the regular class: its list column's head now (the switch below only acts on a crossing)
   if (app._vc === 'regular') { try { app.sidebar?.setRegularMode?.(true); } catch (e) { console.warn('[viewport] the list column:', e); } }
-  return { settleNow: () => { clearTimeout(timer); settle(); } };
+  // `pending` (lane needs-card-tail r19, for the form host): the class the page acts on is stale — a crossing seen and not yet
+  // settled, or one the viewport already made and no resize has told yet (read fresh: the same reading the settle makes)
+  // `classNow` (r21, for the form host): the class the viewport reads now — a form opening inside a crossing a press holds is hosted by it
+  return { settleNow: () => { clearTimeout(timer); settle(true); }, pending: () => timer !== null || readViewportClass(app._vc) !== app._vc, classNow: () => readViewportClass(app._vc) };
 }

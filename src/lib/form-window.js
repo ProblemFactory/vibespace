@@ -28,8 +28,8 @@
 // Every form gets a HANDLE here (its shape — 'sheet' | 'window' — moves; the shell asks the handle, never the shape).
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { setFormHost } from './utils.js';
-import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
-import { VC_PHONE_MEDIA } from '../viewport-class.js'; // the phone paths' ONE media list — a crossing into it turns the open forms into sheets
+import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, rehostWaitVerdict, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
+import { VC_PHONE_MEDIA, isPhoneClass } from '../viewport-class.js'; // the phone paths' ONE media list — a crossing into it turns the open forms into sheets
 
 registerWindowType({ type: 'form', icon: svgIcon16('<rect x="2.5" y="2" width="11" height="12" rx="1.5"/><path d="M5 5.5h6M5 8h6M5 10.5h3.5"/>'), label: 'Form', persist: false });
 
@@ -41,6 +41,11 @@ const blockedNow = () => { try { return [...document.querySelectorAll(BLOCKING_L
  *  its own OK, and a form a script opened while it stood must wait under it, not cover its Delete (round 2's attack (a)). */
 const LAYERED = `${BLOCKING_LAYERS}, .form-sheet`;
 let pressAt = null, typedAt = null, typedEl = null, lastTabAt = 0;
+let pressDownAt = 0, pressEnd = 0; // r19: the press a crossing waits for (rehostWaitVerdict) — r20: its start too (bounded)
+// r21 (the r20 acceptance, MINORS 3 + 4): the press is EACH POINTER's — a Set of the pointer ids down (two fingers: the first one
+// lifting leaves the press on) — and its stamps are the MONOTONIC clock (a wall clock stepping back never holds a crossing)
+const pressIds = new Set();
+const monoNow = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 const EDIT_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Backspace', 'Delete', 'Process', 'Dead', 'Compose', 'Unidentified']);
 /** THE PRESS OF THIS TASK (round 3): a token naming whether the person's press landed inside a blocking layer — judged AT the
  *  press; it lives for the task that dispatched it (its handler and that handler's microtasks), a caller that awaits first
@@ -68,6 +73,16 @@ export function installFormHost(app) {
     document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { pressAt = Date.now(); notePress(e); } }, true);
     // (the release is the click's task — a mouse's pointerup and its click, a Space's keyup and its click: the handler that opens a form runs in it)
     document.addEventListener('pointerup', (e) => { if (e.isTrusted) notePress(e); }, true);
+    // r19 (lane needs-card-tail, a cross-fix — rehostWaitVerdict): a press in flight, and when it ended — a crossing waits for it.
+    // r20 (the r19 acceptance, MINOR 2): a press is BOUNDED — a move with no button down, the page losing the focus or going
+    // hidden ends one whose release never came (and rehostWaitVerdict ends it at PRESS_MAX_MS whatever happens)
+    const pressOver = (id) => { if (!pressIds.size) return; if (id === undefined) pressIds.clear(); else pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow(); };
+    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { if (!pressIds.size) pressDownAt = monoNow(); pressIds.add(e.pointerId); } }, true);
+    for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, (e) => { if (e.isTrusted) pressOver(e.pointerId); }, true);
+    // (a move with no button down ends a MOUSE's press only — a finger or a pen hovering beside a held finger ends nothing)
+    document.addEventListener('pointermove', (e) => { if (pressIds.has(e.pointerId) && e.isTrusted && e.buttons === 0 && e.pointerType === 'mouse') pressOver(e.pointerId); }, true);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) pressOver(); });
+    try { window.addEventListener('blur', () => pressOver()); } catch { /* no window: no blur */ }
     document.addEventListener('keyup', (e) => { if (e.isTrusted && e.key === ' ') notePress(e); }, true);   // (Enter clicks at its keydown: noted above)
     // a COMMAND key (a named key that is not an edit — Enter, Tab, Escape, an arrow, F1… — or a chord) is an act like a press
     document.addEventListener('keydown', (e) => {
@@ -83,13 +98,25 @@ export function installFormHost(app) {
   app.formsToSheets = () => { for (const h of [...OPEN]) h.toSheet(); };
   /** …and back (viewport-switch enterDesktop, a resize, the last blocking layer closed): every sheet whose home is gone re-hosts */
   app.sheetsToForms = () => { if (sheetHomeVerdict({ phone: phoneNow(), blocked: blockedNow() }) !== 'window') return; for (const h of sheets()) h.toWindow(); };
-  try { phoneMq = window.matchMedia(VC_PHONE_MEDIA); phoneMq.addEventListener('change', (e) => { if (e.matches) app.formsToSheets(); else app.sheetsToForms(); }); } catch { /* no matchMedia: no crossing */ }
+  // r19 → r20 (lane needs-card-tail, a cross-fix — .367's ⑫; r20 the r19 acceptance: r19 deferred the FORMS alone, so enterPhone
+  // built the phone around a form window and closed it after): NO FORM MOVES UNDER A PRESS, AND THE FORMS STILL GO FIRST —
+  //  · the crossing itself waits as ONE unit: viewport-switch's settle asks `app.crossingWait()` (the bounded press —
+  //    rehostWaitVerdict) and holds the WHOLE tier switch while it answers > 0, so enterPhone's first rule and enterDesktop's
+  //    last run in their place when it goes (formsToSheets / sheetsToForms above never wait);
+  //  · the other doors (the media query's change, a resize, a layer closed) re-host through ONE retry that re-reads the tier
+  //    when it fires and re-hosts to what the viewport IS (a round trip inside one press ends where it started)
+  // r21 (the r20 acceptance, MINOR 1 — r20 held EVERY tier crossing for a press, no form open: the page's own layout stayed the
+  // old tier up to 2.3 s): the guard protects forms — with none open the crossing never waits
+  app.crossingWait = () => (OPEN.size ? rehostWaitVerdict({ pressing: pressIds.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow() }) : 0);
+  let retry = 0;
+  const rehost = () => { clearTimeout(retry); retry = 0; const ms = app.crossingWait(); if (ms > 0) { retry = setTimeout(rehost, ms); return; } if (phoneNow()) app.formsToSheets(); else app.sheetsToForms(); };
+  try { phoneMq = window.matchMedia(VC_PHONE_MEDIA); phoneMq.addEventListener('change', () => rehost()); } catch { /* no matchMedia: no crossing */ }
   // a resize re-fits every open form window — and on the phone tier re-hosts it as its sheet (the crossing's second door)
-  try { window.addEventListener('resize', () => { if (phoneNow()) { app.formsToSheets(); return; } for (const h of [...OPEN]) h.refit(); app.sheetsToForms(); }, { passive: true }); } catch { /* no window: no resize */ }
+  try { window.addEventListener('resize', () => { if (!phoneNow()) for (const h of [...OPEN]) h.refit(); rehost(); }, { passive: true }); } catch { /* no window: no resize */ }
   /** the layers a sheet stands over: armed while a sheet is open — a decision removed, the static sheet / the tour hidden */
   const watchLayers = () => {
     if (typeof MutationObserver !== 'function') return;
-    if (!layerMo) layerMo = new MutationObserver(() => { if (!sheets().length) { layerMo.disconnect(); return; } app.sheetsToForms(); });
+    if (!layerMo) layerMo = new MutationObserver(() => { if (!sheets().length) { layerMo.disconnect(); return; } rehost(); }); // (r20: through the one retry)
     layerMo.disconnect();
     if (!sheets().length) return;
     layerMo.observe(document.body, { childList: true });
@@ -101,7 +128,23 @@ export function installFormHost(app) {
     pressToken: () => taskPress,
     open({ id = null, title = '', opener = 'person', from = null } = {}) {
       const wm = app && app.wm;
-      const phone = !wm || phoneNow(), blocked = blockedNow();
+      // r19 (lane needs-card-tail, a cross-fix — .367's ⑫: test-automation-keys-chrome left a phone-sized page for 1280×800 and
+      // opened 授权给… inside the crossing's 120 ms settle: app.isMobile was still the phone's, the form opened as a SHEET, and the
+      // settle re-hosted it into its window under the next press): A STALE CLASS IS NEVER READ AT AN OPEN — a crossing seen and
+      // not yet settled is settled now, so the form stands where the page is, never where it was
+      // r21 (the r20 acceptance, MINOR 2 — settleNow ran the WHOLE crossing at any open, a system open too, under a press that
+      // held it: the forms already open moved under the press): a crossing a press holds is NOT run by an open — this form is
+      // hosted where the viewport is now (the class read fresh) and the crossing goes when the press does; a crossing nothing
+      // holds is settled now, as r19
+      let freshPhone = null;
+      try {
+        const vs = app && app._viewportSwitch;
+        if (vs && typeof vs.pending === 'function' && vs.pending()) {
+          if (typeof app.crossingWait === 'function' && app.crossingWait() > 0 && typeof vs.classNow === 'function') freshPhone = isPhoneClass(vs.classNow());
+          else vs.settleNow();
+        }
+      } catch { /* the switch's own failure is its own — the verdict reads what is */ }
+      const phone = !wm || (freshPhone !== null ? freshPhone : phoneNow()), blocked = blockedNow();
       // (the field typed into must still HOLD the keys — a form the person typed in and closed protects nothing)
       const typing = typedLastVerdict({ typedAt, pressAt, now: Date.now() }) && !!typedEl && typedEl.isConnected && document.activeElement === typedEl;
       const where = formOpenVerdict({ phone, blocked, fromLayer: blocked && !!(from && from.inLayer), opener, typedLast: typing });

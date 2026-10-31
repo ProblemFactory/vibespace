@@ -2131,11 +2131,95 @@ try {
     check(`RED-able (r18 — 34ebfcb93: the refill took the line from under the mouse, then the oldest card stood there): the mouse resting on «N more waiting» (${J(lAt)}), the top card answered elsewhere, two ticks ⇒ the line stays where it was read (${J(lNow)}) saying «${lSaid}», under the mouse ${lUnder && lUnder.id}; the mouse leaves ⇒ the stack refills (${J(lAfter && lAfter.kids.map((x) => x.id))})`,
       !!lAt && !!lHeld && lHeld.hover && sameR(lAt, lNow) && /\b1\b/.test(lSaid || '') && !!lUnder && lUnder.id === 'more' && !lHeld.kids.some((x) => x.id === 'ut-r18line4')
         && !!lAfter && !lAfter.hover && lAfter.kids.length === 3 && !lAfter.kids.some((x) => x.id === 'more') && lAfter.kids.some((x) => x.id === 'ut-r18line1'), { lFree, lHeld, lSaid, lAfter });
+    // (i) r19 — THE WINDOW LAYER ASKS THE STACK AT ONCE (.367: test-automation-keys-chrome ⑫'s class — between two 1 s ticks the
+    // stack stood over a form whose window had moved, grown or been raised under it): three cards by the For-you button; a FORM
+    // (the app's own createModalShell kind 'form', through a plugin's dialog door) opens centred; 400 ms later — past the open's
+    // own asks — its window is moved under the stack (as a drag, or its host's fit after its list opened, moves it): the stack
+    // steps aside at once and a real click 200 ms later lands on the form; a window raised over the form ⇒ the stack back; the
+    // form raised again ⇒ aside at once, a click 200 ms later on the form
+    await A.evalJs(PUSH22('[]')); await A.waitFor(`!document.querySelector('.ut-announce .uta-card')`, 6000); await sleep(400);
+    const i3 = Array.from({ length: 3 }, (_, k) => ex22(`ut-r19form${k + 1}`, T22 - (3 - k) * 1000));
+    await A.evalJs(PUSH22(J(i3))); await A.waitFor(`document.querySelectorAll('.ut-announce .uta-card').length === 3`, 8000); await sleep(1300); await A.evalJs(noToasts);
+    await mouse(40, 300);
+    const API19 = `(window.__r19Api ||= app.pluginClient._hostApi({ id: 'r19probe', version: '1' }, new AbortController()))`;
+    const OPEN19 = (id, label, w, h) => `{ const sh = ${API19}.createModalShell({ id: ${J(id)}, title: ${J(label)}, kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<button type="button" class="r19-hit" style="display:block;width:${w}px;height:${h}px">' + ${J(label)} + '</button>'; window.__r19Hits = window.__r19Hits || {}; window.__r19Hits[${J(id)}] = 0; sh.body.querySelector('.r19-hit').addEventListener('click', () => { window.__r19Hits[${J(id)}]++; }); (window.__r19Shells ||= {})[${J(id)}] = sh; }`;
+    const FORM19 = (id, label, w, h) => `(() => { ${OPEN19(id, label, w, h)} return true; })()`;
+    await A.evalJs(FORM19('under', 'A form under the stack', 420, 240)); await sleep(400);
+    const VIS19 = `(() => { const s = document.querySelector('.ut-announce'); return s ? { vis: s.style.visibility, cards: s.querySelectorAll('.uta-card').length } : null; })()`;
+    const moved = await A.evalJs(`(() => { ${R22} const s = document.querySelector('.ut-announce'), f = document.getElementById('plugin-r19probe-under'), w = f && f.closest('.window'), ws = document.getElementById('workspace').getBoundingClientRect(); if (!s || !w) return null;
+      const sr = s.getBoundingClientRect(); w.style.left = Math.round(sr.left - ws.left - 30) + 'px'; w.style.top = Math.round(sr.top - ws.top - 40) + 'px'; return { stack: R(s), win: R(w) }; })()`);
+    const iNow = await A.evalJs(VIS19);
+    await sleep(200);
+    const iAt = await A.evalJs(`(() => { const s = document.querySelector('.ut-announce'), b = document.querySelector('#plugin-r19probe-under .r19-hit'); if (!s || !b) return null; const sr = s.getBoundingClientRect(), br = b.getBoundingClientRect(); const l = Math.max(sr.left, br.left), r = Math.min(sr.right, br.right), t = Math.max(sr.top, br.top), bt = Math.min(sr.bottom, br.bottom); return l < r && t < bt ? { x: Math.round((l + r) / 2), y: Math.round((t + bt) / 2) } : null; })()`);
+    if (iAt) await A.clickAt(iAt.x, iAt.y);
+    const iClick = await A.evalJs(`({ hits: (window.__r19Hits || {}).under || 0, ...(${VIS19} || {}) })`);
+    // a window raised over the form (a plain one, no form in it) ⇒ the stack is back; the form raised ⇒ aside at once
+    const cover = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-under'), fw = f && f.closest('.window'); const w = app.wm.createWindow({ title: 'r19 cover', type: 'form', width: 700, height: 520 }); const ws = document.getElementById('workspace').getBoundingClientRect(), r = fw.getBoundingClientRect(); w.element.style.left = Math.round(r.left - ws.left - 60) + 'px'; w.element.style.top = Math.round(r.top - ws.top - 60) + 'px'; window.__r19Cover = w.id; return w.id; })()`);
+    await sleep(60); const iCovered = await A.evalJs(VIS19);
+    await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-under'), fw = f && f.closest('.window'), w = [...app.wm.windows.values()].find((x) => x.element === fw); app.wm.focusWindow(w.id); return true; })()`);
+    const iRaised = await A.evalJs(VIS19);
+    await sleep(200);
+    if (iAt) await A.clickAt(iAt.x, iAt.y);
+    const iClick2 = await A.evalJs(`({ hits: (window.__r19Hits || {}).under || 0, ...(${VIS19} || {}) })`);
+    await A.shot('desktop-1280-form-under-stack.png');
+    check(`RED-able (r19 — 1c4261dcc asked only at its 1 s tick: the stack stayed over a form moved under it, a click landed on a card): a form window moved under the stack (${J(moved && moved.win)} under ${J(moved && moved.stack)}) ⇒ aside at once («${iNow && iNow.vis}»); a real click 200 ms later at ${J(iAt)} lands on the form (${iClick.hits}), the three cards kept (${iClick.cards}); a window raised over it ⇒ the stack back («${iCovered && iCovered.vis}»); the form raised ⇒ aside at once («${iRaised && iRaised.vis}»), a click 200 ms later on the form again (${iClick2.hits})`,
+      !!moved && !!iAt && !!iNow && iNow.vis === 'hidden' && iClick.hits === 1 && iClick.cards === 3 && !!cover && !!iCovered && iCovered.vis === '' && !!iRaised && iRaised.vis === 'hidden' && iClick2.hits === 2 && iClick2.cards === 3, { moved, iAt, iNow, iClick, iCovered, iRaised, iClick2 });
+    await A.evalJs(`(() => { try { app.wm.closeWindow(window.__r19Cover); } catch { } try { window.__r19Shells.under.close(); } catch { } return true; })()`); await sleep(300);
+    // (j) r19 — THE FORM HOST'S CROSSING (a cross-fix in form-window.js — ⑫'s actual red): (j1) a phone-sized page (700 px, the
+    // compact class, settled) goes back to 1280 and a form opens AT ONCE, inside the crossing's 120 ms settle ⇒ it stands as its
+    // WINDOW (the open settles the crossing first), never a sheet that jumps into its window under the next press
+    await A.evalJs(PUSH22('[]')); await sleep(300);
+    await A.device(700, 800, { mouse: true }); await sleep(700);
+    const j0 = await A.evalJs(`({ vc: document.documentElement.dataset.vc, isMobile: app.isMobile })`);
+    await A.device(1280, 800, { mouse: true });
+    const j1 = await A.evalJs(`(() => { const before = { vc: document.documentElement.dataset.vc, isMobile: app.isMobile, inner: innerWidth }; ${OPEN19('cross', 'Opened inside the crossing', 560, 120)} const f = document.getElementById('plugin-r19probe-cross'); return { before, sheet: !!f && f.classList.contains('form-sheet'), win: !!f && !!f.closest('.window'), after: { vc: document.documentElement.dataset.vc, isMobile: app.isMobile } }; })()`);
+    await sleep(400);
+    const j1b = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { sheet: !!f && f.classList.contains('form-sheet'), win: !!f && !!f.closest('.window'), vc: document.documentElement.dataset.vc }; })()`);
+    check(`RED-able (r19 — 1c4261dcc read the phone's app.isMobile inside the settle: the form opened as a SHEET and jumped into its window 120 ms later): from the phone class (${J(j0)}) back to 1280 and a form opened at once (the page then ${J(j1 && j1.before)}) ⇒ it opens as its window (sheet ${j1 && j1.sheet}, window ${j1 && j1.win}; the class settled at the open: ${J(j1 && j1.after)}), and stays one (${J(j1b)})`,
+      !!j0 && j0.isMobile === true && !!j1 && !j1.sheet && j1.win && j1.after && j1.after.isMobile === false && !!j1b && j1b.win && !j1b.sheet, { j0, j1, j1b });
+    // (j2) a re-host never moves a form under a press (r20: on the crossing's real road): on the phone tier (700 px) the form is
+    // its sheet; a real press goes DOWN on its button and the viewport goes back to 1280 while it is down ⇒ the crossing waits (a
+    // sheet still, the page still the phone's); the press UP — the pointer kept on its button through the re-layout — ⇒ the click lands on
+    // it; then the crossing: the form in its window, the page the desktop's
+    await A.device(700, 800, { mouse: true }); await sleep(800);
+    const BTN20 = `(() => { const f = document.getElementById('plugin-r19probe-cross'), b = f && f.querySelector('.r19-hit'); if (!b) return null; const r = b.getBoundingClientRect(); return { sheet: f.classList.contains('form-sheet'), win: !!f.closest('.window'), vc: document.documentElement.dataset.vc, isMobile: app.isMobile, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`;
+    const jb = await A.evalJs(BTN20);
+    let j2 = null;
+    if (jb) {
+      await mouse(jb.x, jb.y); await sleep(30);
+      await A.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: jb.x, y: jb.y, button: 'left', buttons: 1, clickCount: 1 }); await sleep(40);
+      await A.device(1280, 800, { mouse: true }); await sleep(400);
+      const held = await A.evalJs(BTN20);   // the page re-laid the sheet out at the new width — the press follows its button there (a drag inside it), the button still pressed
+      if (held) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: held.x, y: held.y, button: 'left', buttons: 1 }); await sleep(30); }
+      await A.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: held ? held.x : jb.x, y: held ? held.y : jb.y, button: 'left', buttons: 0, clickCount: 1 }); await sleep(60);
+      const up = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { hits: (window.__r19Hits || {}).cross || 0, sheet: f.classList.contains('form-sheet') }; })()`);
+      await sleep(700);
+      const later = await A.evalJs(BTN20);
+      j2 = { jb, held, up, later };
+    }
+    check(`a re-host never moves a form under a press (r19's (j2) on the crossing's real road): the sheet on the phone tier (${J(jb)}), a press DOWN on its button, the viewport back to 1280 while it is down ⇒ the crossing waits (${J(j2 && j2.held)}); the press UP (on its button, re-laid out at the new width) ⇒ the click lands on it (${J(j2 && j2.up)}); then its window on the desktop (${J(j2 && j2.later)})`,
+      !!jb && jb.sheet && jb.vc === 'compact' && !!j2 && !!j2.held && j2.held.sheet && !j2.held.win && j2.held.vc === 'compact' && j2.up.hits === 1 && !!j2.later && j2.later.win && !j2.later.sheet && j2.later.vc === 'desktop', j2 || jb);
+    // (j3) r20 — THE CROSSING WAITS AS ONE UNIT AND THE FORMS STILL GO FIRST (the r19 acceptance's MAJOR — b4271577f deferred the
+    // forms alone: the phone's rules ran around the form window): the form a window on the desktop; a real press DOWN on the empty
+    // workspace; the viewport goes to 700 px while it is down ⇒ nothing moves, no phone rule runs; the press UP ⇒ the crossing —
+    // the form is its sheet BEFORE the phone's rules run (the sidebar's setPhoneMode counts the form windows it sees: none)
+    await A.evalJs(`(() => { if (!app.sidebar.__r20) { const orig = app.sidebar.setPhoneMode.bind(app.sidebar); app.sidebar.setPhoneMode = (p) => { if (p) window.__r20Seen = [...app.wm.windows.values()].filter((w) => w.type === 'form').map((w) => w.element.dataset.form || w.id); return orig(p); }; app.sidebar.__r20 = 1; } window.__r20Seen = null; return true; })()`);
+    const j3a = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { win: !!f && !!f.closest('.window'), vc: document.documentElement.dataset.vc }; })()`);
+    await mouse(120, 620); await sleep(30);
+    await A.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: 120, y: 620, button: 'left', clickCount: 1 }); await sleep(40);
+    await A.device(700, 800, { mouse: true }); await sleep(450);
+    const j3h = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { win: !!f.closest('.window'), sheet: f.classList.contains('form-sheet'), vc: document.documentElement.dataset.vc, isMobile: app.isMobile, seen: window.__r20Seen }; })()`);
+    await A.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 120, y: 620, button: 'left', clickCount: 1 }); await sleep(800);
+    const j3b = await A.evalJs(`(() => { const f = document.getElementById('plugin-r19probe-cross'); return { win: !!f.closest('.window'), sheet: f.classList.contains('form-sheet'), vc: document.documentElement.dataset.vc, isMobile: app.isMobile, seen: window.__r20Seen }; })()`);
+    check(`RED-able (r20 — b4271577f: the phone's rules ran around the form window, «setPhoneMode sees form windows=w1»): a form window on the desktop (${J(j3a)}), a press DOWN, the viewport to 700 px while it is down ⇒ nothing moves and no phone rule runs (${J(j3h)}); the press UP ⇒ the crossing, the form its sheet first — the phone's setPhoneMode saw ${J(j3b.seen)} form windows (${J(j3b)})`,
+      !!j3a && j3a.win && j3a.vc === 'desktop' && !!j3h && j3h.win && !j3h.sheet && j3h.vc === 'desktop' && j3h.seen === null && !!j3b && j3b.sheet && !j3b.win && j3b.vc === 'compact' && Array.isArray(j3b.seen) && j3b.seen.length === 0, { j3a, j3h, j3b });
+    await A.device(1280, 800, { mouse: true }); await sleep(800);
+    await A.evalJs(`(() => { try { window.__r19Shells.cross.close(); } catch { } return true; })()`); await sleep(300);
     await A.evalJs(PUSH22('d.todos.open')); await sleep(500);
   } catch (e) { fail++; console.log('  ✗ ㉒ threw: ' + (e?.message || e)); }
   lap('㉒ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-dock-592.png', 'desktop-dock-670.png', 'desktop-1280-held-grid.png', 'desktop-1280-held-line.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-dock-592.png', 'desktop-dock-670.png', 'desktop-1280-held-grid.png', 'desktop-1280-held-line.png', 'desktop-1280-form-under-stack.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

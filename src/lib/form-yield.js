@@ -89,6 +89,22 @@ export function typedLastVerdict({ typedAt = null, pressAt = null, now = 0, with
 /** A SHEET'S HOME (PURE): a form's sheet exists only while what made it does — the phone tier, or a blocking layer it stands
  *  over; the moment neither holds it re-hosts as its window ('window'), what was typed kept. */
 export function sheetHomeVerdict({ phone = false, blocked = false } = {}) { return phone || blocked ? 'sheet' : 'window'; }
+/** A RE-HOST NEVER MOVES A FORM UNDER A PRESS (PURE — lane needs-card-tail r19, a cross-fix of this lane's host; .367:
+ *  test-automation-keys-chrome ⑫ — the 授权给… form was re-hosted from its sheet into its window AT the press on its picker's
+ *  row, the row moved between the pointerdown and the click, the pick never landed and the leg cascaded): the ms a crossing
+ *  waits — 0 = now; while a press is down, and for REHOST_QUIET_MS after it ended (the press-arm's idea: what moved under
+ *  the pointer is not what the person aimed at), it waits and asks again then. r20 (the r19 acceptance, MINOR 2): A PRESS IS
+ *  BOUNDED — one down for PRESS_MAX_MS (a release the page never received: the native context menu took it, a drag ended
+ *  outside, a lost touch) counts as ended there, so nothing waits for ever. r21 (the r20 acceptance, MINOR 3): the stamps
+ *  are the caller's MONOTONIC clock (performance.now — a wall clock stepping back would hold a crossing for the size of the
+ *  step), and whatever it is handed, no answer exceeds quietMs + maxPressMs. */
+export const REHOST_QUIET_MS = 300, PRESS_MAX_MS = 2000;
+export function rehostWaitVerdict({ pressing = false, pressAt = 0, pressEnd = 0, now = 0, quietMs = REHOST_QUIET_MS, maxPressMs = PRESS_MAX_MS } = {}) {
+  const age = Number(now) - Number(pressAt), cap = quietMs + maxPressMs;
+  if (pressing && age < maxPressMs) return Math.min(quietMs, maxPressMs - age, cap);
+  const left = (pressing ? Number(pressAt) + maxPressMs : Number(pressEnd)) + quietMs - Number(now);
+  return left > 0 ? Math.min(left, cap) : 0;
+}
 /** THE SAME FORM AGAIN (PURE): a form whose id is open. Its IDENTITY is the caller's fact — the id plus the KEY it declares
  *  (the subject the content is about: the caller, the entry, the document, the conversation, the profile, the request, the
  *  field INSTANCE; null ≡ null = a single-subject form), NEVER its title (round 3 — acceptance r2: Rotate… twice raised the

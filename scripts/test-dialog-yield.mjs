@@ -203,8 +203,8 @@ ok(/if \(s\.holds\.some\(formOf\) && !s\.holds\.some\(\(h\) => inHeld\(h\.overla
 ok(/<button class="mounts-btn plugin-install-cancel">[^<]*<\/button><button class="mounts-btn mounts-btn-primary plugin-install-go">/.test(PU) && /plugin-install-cred-row dialog-field-row hidden"><span>\$\{escHtml\(t\('Credential'\)\)\}<\/span><div class="dialog-field-line">/.test(PU), 'Install plugin…: Cancel left of the primary Install; the Credential row is a field row (its name above, select + 建立… on one line)');
 ok(/\.dialog-actions > \.mounts-btn, \.dialog-actions > \.btn-create, \.dialog-actions > \.btn-cancel \{ padding: 5px 14px; font-size: 12px; line-height: normal; border-radius: var\(--radius-sm\); \}/.test(CSS) && /\.mounts-btn-primary:hover:not\(:disabled\) \{ background: var\(--accent-hover\);/.test(CSS) && !/\.mounts-btn-primary:hover[^{]*\{[^}]*opacity/.test(CSS), 'style.css: ONE action row (every button at the footer\'s size, --radius-sm); the primary\'s hover is --accent-hover, never an opacity');
 ok(/\.window\.window-form > \.window-content \{ overflow: clip; \}/.test(CSS) && /\.dialog-form > \.dialog > \.dialog-header \{ display: none; \}/.test(CSS) && /\.dialog-form \{ position: absolute; left: 0; top: 0; outline: none; \}/.test(CSS) && /\.plugin-install-row\.hidden, \.plugin-install-cred-hint\.hidden, \.plugin-install-error\.hidden \{ display: none; \}/.test(CSS), 'style.css: a form\'s head is its window\'s title bar, its dialog stands absolute (the window takes its size); the git-only rows hide');
-ok(/app\.formsToSheets = \(\) => \{ for \(const h of \[\.\.\.OPEN\]\) h\.toSheet\(\); \};/.test(FW) && /function enterPhone\(app\) \{\n  app\.formsToSheets\?\.\(\);/.test(VS) && /app\.sheetsToForms\?\.\(\); \/\/ lane dialog-yield r2: LAST/.test(VS), 'viewport-switch: entering the phone tier re-hosts every open form as its sheet FIRST; entering the desktop tier re-hosts every sheet as its window LAST');
-ok(/app\.sheetsToForms = \(\) => \{ if \(sheetHomeVerdict\(\{ phone: phoneNow\(\), blocked: blockedNow\(\) \}\) !== 'window'\) return; for \(const h of sheets\(\)\) h\.toWindow\(\); \};/.test(FW) && /layerMo = new MutationObserver\(\(\) => \{ if \(!sheets\(\)\.length\) \{ layerMo\.disconnect\(\); return; \} app\.sheetsToForms\(\); \}\);/.test(FW), 'form-window: a sheet exists only while what made it does — the layer it stands over closing (a MutationObserver while a sheet is open) or the page back at a desktop width re-hosts it as its window');
+ok(/app\.formsToSheets = \(\) => \{ for \(const h of \[\.\.\.OPEN\]\) h\.toSheet\(\); \};/.test(FW) /* r20: STRICT again — the forms go first, never deferred alone (⑧ ⑨) */ && /function enterPhone\(app\) \{\n  app\.formsToSheets\?\.\(\);/.test(VS) && /app\.sheetsToForms\?\.\(\); \/\/ lane dialog-yield r2: LAST/.test(VS), 'viewport-switch: entering the phone tier re-hosts every open form as its sheet FIRST; entering the desktop tier re-hosts every sheet as its window LAST');
+ok(/app\.sheetsToForms = \(\) => \{ if \(sheetHomeVerdict\(\{ phone: phoneNow\(\), blocked: blockedNow\(\) \}\) !== 'window'\) return; for \(const h of sheets\(\)\) h\.toWindow\(\); \};/.test(FW) && /layerMo = new MutationObserver\(\(\) => \{ if \(!sheets\(\)\.length\) \{ layerMo\.disconnect\(\); return; \} (?:app\.sheetsToForms|rehost)\(\); \}\);/.test(FW) /* r20: the layer's door through the one retry (⑧) */, 'form-window: a sheet exists only while what made it does — the layer it stands over closing (a MutationObserver while a sheet is open) or the page back at a desktop width re-hosts it as its window');
 ok(/grow = new MutationObserver\(soon\); if \(dlg\) grow\.observe\(dlg, \{ childList: true, subtree: true, characterData: true/.test(FW) && /queueMicrotask\(\(\) => \{ queued = false; fit\(\); \}\)/.test(FW), 'form-window: a content change re-fits the form too (a MutationObserver, per microtask) — a background tab runs no ResizeObserver');
 ok(/const cap = formMaxDialog\(\{ ws, chrome \}\);/.test(FW) && /const k = formInside\(\{ at: \{ left: parseFloat\(win\.element\.style\.left\) \|\| 0, top: parseFloat\(win\.element\.style\.top\) \|\| 0 \}, box, ws \}\);/.test(FW), 'form-window: every fit caps the dialog at the workspace (its body scrolls) and keeps the WHOLE form inside (formInside)');
 ok((FW.match(/\bfocusWindow\(/g) || []).length === 1 && /if \(back && !back\.isMinimized && !back\._hiddenByDesktop\) wm\.focusWindow\(backTo\);/.test(FW) && (FW.match(/wm\.revealWindow\(win\.id\)/g) || []).length === 2, 'form-window: a Tab the person pressed and the same form re-opened raise it through revealWindow (§62\'s door); its ONE focusWindow gives the active window back to its opener when it closes');
@@ -367,6 +367,154 @@ console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential 
   const PU9 = read('src/lib/plugins-ui.js'), IR9 = read('src/routes/integrations.js');
   ok(/const st = pluginGitCredOf\(c\);/.test(PU9) && /import \{ pluginGitCredOf \} from '\.\.\/plugin-cred-state\.js'/.test(PU9) && !/c\.values\s*\?\s*String\(c\.values\.host/.test(PU9), 'WIRING: readCred reads through pluginGitCredOf — the envelope reading is gone from plugins-ui.js');
   ok(/res\.json\(\{ integration: store\(\)\.publicView\(req\.params\.id\) \}\)/.test(IR9), 'the route still answers { integration: view } — the shape the reader unwraps (a change here changes the reader)');
+}
+
+console.log('⑧ r19 (lane needs-card-tail, a cross-fix — .367: test-automation-keys-chrome ⑫ — 授权给… opened inside a viewport crossing\'s 120 ms settle as a SHEET, and the settle re-hosted it into its window under the press on its picker\'s row): a stale class is never read at an open; a re-host never moves a form under a press');
+{
+  // the PURE verdict: the ms a crossing waits (0 = now) — a press down, a press just ended, a press long past
+  const RW = [
+    [{ pressing: true, pressAt: 9900, pressEnd: 0, now: 10000 }, 300, 'a press is down (between its pointerdown and pointerup) ⇒ wait'],
+    [{ pressing: true, pressAt: 8100, pressEnd: 0, now: 10000 }, 100, 'r20: a press down 1.9 s ⇒ wait only to its 2 s bound'],
+    [{ pressing: true, pressAt: 7900, pressEnd: 0, now: 10000 }, 200, 'r20: a press down 2.1 s (its release never came) counts as ended at 2 s ⇒ the 300 ms quiet from there'],
+    [{ pressing: true, pressAt: 5000, pressEnd: 0, now: 10000 }, 0, 'r20: a press stuck 5 s ⇒ now — nothing waits for ever'],
+    [{ pressing: false, pressAt: 69900, pressEnd: 70000, now: 10000 }, 2300, 'r21: stamps 60 s AHEAD of now (a clock stepped back) ⇒ never more than the 300 ms quiet + the 2 s bound'],
+    [{ pressing: false, pressEnd: 9900, now: 10000 }, 200, '100 ms after the press ended ⇒ wait the rest of the 300'],
+    [{ pressing: false, pressEnd: 9700, now: 10000 }, 0, 'the press ended 300 ms ago ⇒ now'],
+    [{ pressing: false, pressEnd: 0, now: 10000 }, 0, 'no press ⇒ now'],
+  ];
+  const runRW = (F) => RW.filter(([x, want]) => !F || typeof F.rehostWaitVerdict !== 'function' || F.rehostWaitVerdict(x) !== want).map(([, , w]) => w);
+  ok(runRW(FY).length === 0 && FY.REHOST_QUIET_MS === 300 && FY.PRESS_MAX_MS === 2000, `RED-able (r19 — 1c4261dcc had no rehostWaitVerdict; r20 — b4271577f's press had no bound: «answers 300 for ever»): rehostWaitVerdict's table (${RW.length} rows)`, runRW(FY));
+  const mut8 = async (from, to) => { try { return await mutant(from, to); } catch { return null; } };   // (a tree without the verdict: no anchor — the control is red, never a crash)
+  const mDown = await mut8('  if (pressing && age < maxPressMs) return Math.min(quietMs, maxPressMs - age, cap);\n', ''), mQuiet = await mut8('export const REHOST_QUIET_MS = 300, PRESS_MAX_MS = 2000;', 'export const REHOST_QUIET_MS = 0, PRESS_MAX_MS = 2000;'), mBound = await mut8('  if (pressing && age < maxPressMs) return', '  if (pressing) return'), mCap = await mut8('return left > 0 ? Math.min(left, cap) : 0;', 'return left > 0 ? left : 0;');
+  ok(!!mDown && !!mQuiet && !!mBound && !!mCap && runRW(mDown).includes(RW[0][2]) && runRW(mQuiet).includes(RW[0][2]) && runRW(mBound).includes(RW[3][2]) && runRW(mCap).includes(RW[4][2]), 'MUTANTS: «a press down is no reason to wait», «no quiet after the press», «a press without a bound» and (r21) «no cap» each go RED on their rows', { mDown: runRW(mDown), mQuiet: runRW(mQuiet), mBound: runRW(mBound), mCap: runRW(mCap) });
+  // the wiring: the press in flight is tracked; BOTH crossings ask the verdict; the open settles a crossing still pending first
+  const FW8 = read('src/lib/form-window.js'), VS8 = read('src/lib/viewport-switch.js');
+  ok(/document\.addEventListener\('pointerdown', \(e\) => \{ if \(e\.isTrusted\) \{ if \(!pressIds\.size\) pressDownAt = monoNow\(\); pressIds\.add\(e\.pointerId\); \} \}, true\);/.test(FW8) && /for \(const type of \['pointerup', 'pointercancel'\]\) document\.addEventListener\(type, \(e\) => \{ if \(e\.isTrusted\) pressOver\(e\.pointerId\); \}, true\);/.test(FW8)
+      && /document\.addEventListener\('pointermove', \(e\) => \{ if \(pressIds\.has\(e\.pointerId\) && e\.isTrusted && e\.buttons === 0 && e\.pointerType === 'mouse'\) pressOver\(e\.pointerId\); \}, true\);/.test(FW8) && /document\.addEventListener\('visibilitychange', \(\) => \{ if \(document\.hidden\) pressOver\(\); \}\);/.test(FW8) && /window\.addEventListener\('blur', \(\) => pressOver\(\)\);/.test(FW8)
+      && /const monoNow = \(\) => \(typeof performance !== 'undefined' && typeof performance\.now === 'function' \? performance\.now\(\) : Date\.now\(\)\);/.test(FW8)
+      && /app\.crossingWait = \(\) => \(OPEN\.size \? rehostWaitVerdict\(\{ pressing: pressIds\.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow\(\) \}\) : 0\);/.test(FW8)
+      && /const rehost = \(\) => \{ clearTimeout\(retry\); retry = 0; const ms = app\.crossingWait\(\); if \(ms > 0\) \{ retry = setTimeout\(rehost, ms\); return; \} if \(phoneNow\(\)\) app\.formsToSheets\(\); else app\.sheetsToForms\(\); \};/.test(FW8)
+      && /phoneMq\.addEventListener\('change', \(\) => rehost\(\)\);/.test(FW8) && /window\.addEventListener\('resize', \(\) => \{ if \(!phoneNow\(\)\) for \(const h of \[\.\.\.OPEN\]\) h\.refit\(\); rehost\(\); \}, \{ passive: true \}\);/.test(FW8)
+      && /const wait = !now && switchVerdict\(app\._vc, next\)\.act === 'tier' && typeof app\.crossingWait === 'function' \? app\.crossingWait\(\) : 0;\n    if \(wait > 0\) \{ timer = setTimeout\(settle, wait\); return; \}\n    applyViewportClass\(app, next\);/.test(VS8),
+    'RED-able (r20 — b4271577f deferred the FORMS alone, each direction on its own timer, with an unbounded press; r21 — 7a01f4626: one boolean for every pointer, wall-clock stamps, a wait with no form open): the host tracks a BOUNDED press PER POINTER on the MONOTONIC clock (down adds its id, up / cancel removes it; a mouse\'s move with no button, a blur, the page hidden end it); the WHOLE tier crossing waits on app.crossingWait — only while a form is open — in the viewport switch\'s settle (settleNow never waits); the other doors re-host through ONE retry that re-reads the tier');
+  const op8 = (/    open\(\{ id = null[\s\S]*?const where = formOpenVerdict\(/.exec(FW8) || [''])[0];
+  ok(/if \(vs && typeof vs\.pending === 'function' && vs\.pending\(\)\) \{\n          if \(typeof app\.crossingWait === 'function' && app\.crossingWait\(\) > 0 && typeof vs\.classNow === 'function'\) freshPhone = isPhoneClass\(vs\.classNow\(\)\);\n          else vs\.settleNow\(\);\n        \}/.test(op8) && /const phone = !wm \|\| \(freshPhone !== null \? freshPhone : phoneNow\(\)\), blocked = blockedNow\(\);/.test(op8) && /classNow: \(\) => readViewportClass\(app\._vc\) \};/.test(VS8)
+      && /return \{ settleNow: \(\) => \{ clearTimeout\(timer\); settle\(true\); \}, pending: \(\) => timer !== null \|\| readViewportClass\(app\._vc\) !== app\._vc, classNow: \(\) => readViewportClass\(app\._vc\) \};/.test(VS8) && /const settle = \(now = false\) => \{\n    timer = null;/.test(VS8),
+    'RED-able (r19 — 1c4261dcc read app.isMobile as it stood: a form opened inside the 120 ms settle of a phone → desktop crossing was a SHEET, then jumped into its window; r21 — 7a01f4626 ran the whole crossing at the open under a held press): the open settles a crossing seen and not yet settled BEFORE its verdict (viewport-switch `pending`) — unless a press holds it: then the form is hosted by the class read fresh (`classNow`) and the crossing waits');
+}
+
+console.log('⑨ r20 (lane needs-card-tail, the r19 acceptance) — the REAL form-window.js + viewport-switch.js (copies with only their UI imports stubbed) over a fake DOM and a fake clock: a press holds the WHOLE tier crossing and the forms still go first; one retry re-hosts to what the viewport IS; a press is bounded');
+{
+  const { execFileSync } = await import('node:child_process');
+  const VC_URL = pathToFileURL(path.join(repo, 'src/viewport-class.js')).href, FY_URL = pathToFileURL(path.join(repo, 'src/lib/form-yield.js')).href;
+  fs.writeFileSync(path.join(tmp, 'st-utils.mjs'), 'export const setFormHost = (h) => { globalThis.__fwHost = h; };\n');
+  fs.writeFileSync(path.join(tmp, 'st-wt.mjs'), "export const registerWindowType = () => {}; export const svgIcon16 = () => '';\n");
+  fs.writeFileSync(path.join(tmp, 'st-nav.mjs'), 'export class MobileNav { constructor() {} }\n');
+  fs.writeFileSync(path.join(tmp, 'st-back.mjs'), 'export const installMobileBack = () => ({});\n');
+  fs.writeFileSync(path.join(tmp, 'st-pal.mjs'), 'export const installSessionPalette = () => {};\n');
+  const swap = (text, map) => { let t = text; for (const [x, y] of map) { if (!t.includes(x)) return null; t = t.split(x).join(y); } return t; };
+  const fwCopy = swap(read('src/lib/form-window.js'), [["from './window-types.js'", "from './st-wt.mjs'"], ["from './utils.js'", "from './st-utils.mjs'"], ["from './form-yield.js'", `from ${J(FY_URL)}`], ["from '../viewport-class.js'", `from ${J(VC_URL)}`]]);
+  const vsCopy = swap(read('src/lib/viewport-switch.js'), [["from '../viewport-class.js'", `from ${J(VC_URL)}`], ["from './mobile-nav.js'", "from './st-nav.mjs'"], ["from './mobile-back.js'", "from './st-back.mjs'"], ["from './session-palette.js'", "from './st-pal.mjs'"]]);
+  // the child: a fake DOM enough for installFormHost + installViewportSwitch, a fake clock, ONE scenario → JSON
+  const HARNESS = String.raw`
+const [, , FW, VS, SCEN] = process.argv;
+let now = 1000000, width = 1280, tid = 0; const timers = [];
+let wallOffset = 0;
+Object.defineProperty(globalThis, 'performance', { value: { now: () => now }, configurable: true, writable: true });   // (r21: the MONOTONIC clock)
+globalThis.setTimeout = (f, ms = 0) => { const id = ++tid; timers.push({ id, at: now + Math.max(0, ms | 0), f }); return id; };
+globalThis.clearTimeout = (id) => { const k = timers.findIndex((t) => t.id === id); if (k >= 0) timers.splice(k, 1); };
+Date.now = () => now + wallOffset;   // (the wall clock — r21's leg steps it back)
+const advance = (ms) => { const end = now + ms; for (;;) { timers.sort((x, y) => x.at - y.at || x.id - y.id); const t = timers[0]; if (!t || t.at > end) break; timers.shift(); now = t.at; t.f(); } now = end; };
+const L = {}, W = {}, MQ = [], log = [];
+const mqm = (q) => { if (/max-width: 768px\), \(pointer: coarse\)/.test(q)) return width <= 768; let m; if ((m = /\(max-width: (\d+)px\)/.exec(q)) && !/min/.test(q)) return width <= +m[1]; if ((m = /\(min-width: (\d+)px\)/.exec(q))) return width >= +m[1]; return false; };
+const el = (tag = 'div') => { const e = { tag, className: '', style: {}, dataset: {}, parentNode: null, isConnected: true, scrollTop: 0, scrollLeft: 0, classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+  querySelector: () => null, querySelectorAll: () => [], contains: () => false, addEventListener() {}, getClientRects: () => [], appendChild(c) { c.parentNode = e; return c; }, append(...cs) { for (const c of cs) c.parentNode = e; }, focus() {} }; return e; };
+globalThis.Element = class {};
+const body = el('body');
+globalThis.document = { addEventListener: (t, f) => { (L[t] ||= []).push(f); }, querySelectorAll: () => [], getElementById: () => null, body, documentElement: { dataset: {} }, activeElement: body, scrollingElement: null, hidden: false };
+globalThis.window = globalThis;
+globalThis.matchMedia = (q) => { const o = { q, get matches() { return mqm(q); }, ls: [], addEventListener(t, f) { o.ls.push(f); } }; MQ.push(o); return o; };
+globalThis.addEventListener = (t, f) => { (W[t] ||= []).push(f); };
+globalThis.dispatchEvent = () => true;
+globalThis.CustomEvent = class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } };
+globalThis.requestAnimationFrame = (f) => setTimeout(f, 16);
+globalThis.MutationObserver = class { observe() {} disconnect() {} };
+globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+globalThis.getComputedStyle = () => ({ overflowX: 'hidden' });
+Object.defineProperty(globalThis, 'innerWidth', { get: () => width, configurable: true });
+globalThis.scrollX = 0; globalThis.scrollY = 0;
+let wid = 0;
+const forms = () => [...wm.windows.values()].filter((w) => w.type === 'form').map((w) => w.id).join(',') || 'none';
+const wm = { windows: new Map(), activeWindowId: null,
+  createWindow({ title, type }) { const id = 'w' + (++wid); const w = { id, type, title, element: el('window'), content: el('content'), isMinimized: false }; this.windows.set(id, w); this.activeWindowId = id; return w; },
+  closeWindow(id) { this.windows.delete(id); if (this.activeWindowId === id) this.activeWindowId = null; log.push('closeWindow ' + id); },
+  placeBehind() {}, markArrived() {}, setFixedSize() {}, setTitle() {}, revealWindow() {}, focusWindow() {},
+  refitForViewport(phone) { log.push('refit(' + phone + ') forms=' + forms()); }, _mobileLayout: () => width <= 768 };
+const { installFormHost } = await import(FW);
+const { installViewportSwitch } = await import(VS);
+const app = { wm, isMobile: false, _vc: 'desktop', _mobileNav: {}, _mobileBack: {}, updateTaskbar() {}, _applyChromeArrangement() {}, phoneHome: { hide() {} }, _updateMobileNavTitle() {},
+  sidebar: { setPhoneMode(p) { log.push('setPhoneMode(' + p + ') forms=' + forms()); }, setRegularMode() {}, restoreListHidden() {} } };
+installFormHost(app);
+app._viewportSwitch = installViewportSwitch(app);
+const fire = (t, extra = {}) => { for (const f of L[t] || []) f({ isTrusted: true, target: body, key: '', buttons: 1, pointerId: 1, pointerType: 'mouse', ...extra }); };
+const crossTo = (w) => { width = w; for (const m of MQ) for (const f of m.ls) f({ matches: m.matches }); for (const f of W.resize || []) f({}); };
+const NOFORM = SCEN === 'noform-held';
+const h = NOFORM ? { mode: () => 'none' } : globalThis.__fwHost.open({ id: 'f1', title: 'F1' }); if (!NOFORM) h.adopt(el('root'));
+const out = { at0: h.mode() };
+if (SCEN === 'press-then-cross') { fire('pointerdown'); fire('pointerup'); advance(50); crossTo(390); advance(600); }
+else if (SCEN === 'held-press-cross') { fire('pointerdown'); advance(20); crossTo(390); advance(500); out.held = { mode: h.mode(), log: log.slice() }; fire('pointerup'); advance(700); }
+else if (SCEN === 'round-trip') { fire('pointerdown'); advance(20); crossTo(390); advance(200); crossTo(1280); advance(400); fire('pointerup'); advance(1200); }   // (200: the class settles into the phone under the press)
+else if (SCEN === 'reverse-trip') { crossTo(390); advance(500); out.phone = h.mode(); fire('pointerdown'); fire('pointerup'); advance(400); fire('pointerdown'); advance(20); crossTo(1280); advance(200); crossTo(390); advance(400); fire('pointerup'); advance(1200); }
+else if (SCEN === 'stuck-press') { fire('pointerdown'); crossTo(390); advance(1000); out.held = { mode: h.mode(), log: log.slice() }; advance(1600); }
+else if (SCEN === 'move-ends-press') { fire('pointerdown'); advance(10); fire('pointermove', { buttons: 0 }); advance(10); crossTo(390); advance(700); }
+else if (SCEN === 'blur-ends-press') { fire('pointerdown'); advance(10); for (const f of W.blur || []) f({}); advance(10); crossTo(390); advance(700); }
+else if (SCEN === 'no-press') { crossTo(390); advance(300); }
+else if (SCEN === 'noform-held') { fire('pointerdown'); advance(20); crossTo(390); advance(200); out.at200 = { vc: app._vc, log: log.slice() }; fire('pointerup'); advance(500); }
+else if (SCEN === 'code-open-held') { fire('pointerdown'); advance(20); crossTo(390); advance(200); const h2 = globalThis.__fwHost.open({ id: 'f2', title: 'F2', opener: 'system' }); h2.adopt(el('root2')); out.atOpen = { f1: h.mode(), f2: h2.mode(), vc: app._vc, log: log.slice() }; advance(300); out.held = { f1: h.mode(), f2: h2.mode(), log: log.slice() }; fire('pointerup'); advance(700); out.f2 = h2.mode(); }
+else if (SCEN === 'wall-steps-back') { fire('pointerdown'); fire('pointerup'); wallOffset -= 60000; advance(50); crossTo(390); advance(600); }
+else if (SCEN === 'two-fingers') { fire('pointerdown', { pointerId: 2, pointerType: 'touch' }); fire('pointerdown', { pointerId: 3, pointerType: 'touch' }); advance(20); crossTo(390); advance(300); fire('pointerup', { pointerId: 2, pointerType: 'touch' }); fire('pointermove', { pointerId: 4, pointerType: 'pen', buttons: 0 }); advance(600); out.held = { mode: h.mode(), log: log.slice() }; fire('pointerup', { pointerId: 3, pointerType: 'touch' }); advance(700); }
+out.mode = h.mode(); out.vc = app._vc; out.width = width; out.log = log; out.pending = timers.length;
+console.log(JSON.stringify(out));
+process.exit(0);
+`;
+  fs.writeFileSync(path.join(tmp, 'fw-harness.mjs'), HARNESS);
+  let nCopy = 0;
+  const scenOf = (fwText, vsText, scen) => {
+    if (!fwText || !vsText) return { threw: 'an import to stub was not found' };
+    const a = path.join(tmp, `fw-real-${++nCopy}.mjs`), b = path.join(tmp, `vs-real-${nCopy}.mjs`);
+    fs.writeFileSync(a, fwText); fs.writeFileSync(b, vsText);
+    try { return JSON.parse(execFileSync(process.execPath, ['--no-warnings', path.join(tmp, 'fw-harness.mjs'), pathToFileURL(a).href, pathToFileURL(b).href, scen], { encoding: 'utf8', timeout: 20000 }).trim().split('\n').pop()); }
+    catch (e) { return { threw: String(e.stderr || e.message).slice(0, 400) }; }
+  };
+  const phoneRule = (r) => (r.log || []).find((x) => x.startsWith('setPhoneMode(true)')) || null, refitRule = (r) => (r.log || []).find((x) => x.startsWith('refit(true)')) || null;
+  const firstOk = (r) => !r.threw && phoneRule(r) === 'setPhoneMode(true) forms=none' && refitRule(r) === 'refit(true) forms=none' && r.log.indexOf('closeWindow w1') >= 0 && r.log.indexOf('closeWindow w1') < r.log.indexOf(phoneRule(r));
+  const A = scenOf(fwCopy, vsCopy, 'press-then-cross'), B = scenOf(fwCopy, vsCopy, 'held-press-cross'), N = scenOf(fwCopy, vsCopy, 'no-press');
+  ok(firstOk(A) && A.mode === 'sheet' && A.vc === 'compact',
+    `RED-able (r20 — b4271577f: «setPhoneMode sees form windows=w1 / refitForViewport sees w1 active=w1», the forms deferred alone): a click, 50 ms later the viewport crosses INTO the phone tier ⇒ the crossing waits for the press's quiet as one unit and the forms still go FIRST — ${J(A.log)}`, A);
+  ok(firstOk(B) && B.held && B.held.mode === 'window' && !B.held.log.some((x) => /setPhoneMode|refit/.test(x)) && B.mode === 'sheet',
+    `RED-able (r20 — b4271577f built the phone around the form window under the held press): a press DOWN, the viewport crosses into the phone tier ⇒ while it is down nothing moves and no phone rule runs (${J(B.held)}); the press UP ⇒ the crossing, the forms first — ${J(B.log)}`, B);
+  ok(firstOk(N) && N.mode === 'sheet', `no press anywhere ⇒ the crossing as it always was: the forms first (${J(N.log)})`, N);
+  const RT = scenOf(fwCopy, vsCopy, 'round-trip'), RV = scenOf(fwCopy, vsCopy, 'reverse-trip');
+  ok(!RT.threw && RT.mode === 'window' && RT.vc === 'desktop' && RT.width === 1280 && !RV.threw && RV.phone === 'sheet' && RV.mode === 'sheet' && RV.vc === 'compact' && RT.pending === 0 && RV.pending === 0,
+    `RED-able (r20 — b4271577f: every form a SHEET on a 1280 px desktop after the round trip): desktop → phone → desktop inside one held press ⇒ the form a ${RT.mode} on the ${RT.width} px ${RT.vc}; phone → desktop → phone ⇒ a ${RV.mode} on the ${RV.vc} — ONE retry re-hosts to what the viewport IS, nothing left pending (${RT.pending}, ${RV.pending})`, { RT, RV });
+  const ST = scenOf(fwCopy, vsCopy, 'stuck-press'), MV = scenOf(fwCopy, vsCopy, 'move-ends-press'), BL = scenOf(fwCopy, vsCopy, 'blur-ends-press');
+  ok(!ST.threw && ST.held && ST.held.mode === 'window' && firstOk(ST) && ST.mode === 'sheet' && firstOk(MV) && MV.mode === 'sheet' && firstOk(BL) && BL.mode === 'sheet',
+    `RED-able (r20 — b4271577f: a release the page never received held every re-host for ever, «rehostWaitVerdict answers 300»): a press whose release never comes holds the crossing 1 s (${ST.held && ST.held.mode}) and no longer than its 2 s bound + the quiet (then ${ST.mode}, the forms first); a move with no button down ends it (${MV.mode}); the page losing the focus ends it (${BL.mode})`, { ST, MV, BL });
+  // r21 (the r20 acceptance's four minors)
+  const NF = scenOf(fwCopy, vsCopy, 'noform-held'), CO = scenOf(fwCopy, vsCopy, 'code-open-held'), WS = scenOf(fwCopy, vsCopy, 'wall-steps-back'), TF = scenOf(fwCopy, vsCopy, 'two-fingers');
+  ok(!NF.threw && !!NF.at200 && NF.at200.vc === 'compact' && NF.at200.log.some((x) => x === 'setPhoneMode(true) forms=none'),
+    `RED-able (r21 — 7a01f4626 held EVERY tier crossing for a press, no form open: setPhoneMode at +2300): no form open, a press DOWN, the viewport to 390 ⇒ the crossing settles at its 120 ms as the base did, the press still down (${J(NF.at200)})`, NF);
+  ok(!CO.threw && !!CO.atOpen && CO.atOpen.f2 === 'sheet' && CO.atOpen.f1 === 'window' && CO.atOpen.vc === 'desktop' && !CO.atOpen.log.some((x) => /setPhoneMode|refit|closeWindow/.test(x)) && CO.held.f1 === 'window' && !CO.held.log.some((x) => /setPhoneMode|refit/.test(x)) && firstOk(CO) && CO.mode === 'sheet' && CO.f2 === 'sheet',
+    `RED-able (r21 — 7a01f4626: settleNow at the open ran the crossing under the press, f1 moved): a press holds a crossing into the phone, a SYSTEM form opens ⇒ it stands as the viewport is (a sheet, read fresh) and nothing else moves, no phone rule runs (${J(CO.atOpen)}); the press UP ⇒ the crossing, forms first (${J(CO.log)})`, CO);
+  ok(!WS.threw && firstOk(WS) && WS.mode === 'sheet',
+    `RED-able (r21 — 7a01f4626 stamped the press on the wall clock: a step back of 60 s held the crossing ~60 s): a click, the wall clock steps back 60 s, the viewport crosses ⇒ the crossing goes after the press's quiet, forms first (${J(WS.log)})`, WS);
+  ok(!TF.threw && !!TF.held && TF.held.mode === 'window' && !TF.held.log.some((x) => /setPhoneMode|refit/.test(x)) && firstOk(TF) && TF.mode === 'sheet',
+    `RED-able (r21 — 7a01f4626: one boolean — the first finger lifting ended the press): two fingers down, the viewport crosses, the FIRST lifts and a pen hovers by ⇒ still held (${J(TF.held)}); the second lifts ⇒ the crossing, forms first (${J(TF.log)})`, TF);
+  // the control: r19's shape — the forms deferred ALONE (the strict first rule's mutant) — breaks the first rule
+  const r19ish = fwCopy && fwCopy.replace('app.formsToSheets = () => { for (const h of [...OPEN]) h.toSheet(); };', "app.formsToSheets = () => { if (app.crossingWait() > 0) { setTimeout(() => app.formsToSheets(), app.crossingWait()); return; } for (const h of [...OPEN]) h.toSheet(); };");
+  const vsNoWait = vsCopy && vsCopy.replace("if (wait > 0) { timer = setTimeout(settle, wait); return; }", '');
+  const XA = scenOf(r19ish, vsNoWait, 'press-then-cross');
+  ok(!!r19ish && r19ish !== fwCopy && vsNoWait !== vsCopy && !firstOk(XA), `CONTROL (r20): the forms deferred alone and the crossing not held (r19's shape) ⇒ a phone rule sees the form window — ${J(XA.log)}`, XA);
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);
