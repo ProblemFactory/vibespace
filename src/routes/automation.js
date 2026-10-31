@@ -25,6 +25,7 @@
 const A = require('../automation-keys.js');
 const { personVerdict } = require('./vault.js');
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
+const GM = require('../grant-model.js');   // lane held-except-doors: the ONE writer's «除了 leaves by name» sentence
 
 const WORDS = Object.freeze({
   not_granted: 'no grant lets this conversation use that key, or the key does not reach that target — the owner grants it (or widens the grant\'s reach) in the Vault window, or answers the For-you card',
@@ -48,6 +49,7 @@ const WORDS = Object.freeze({
   permission_not_allowed: 'that permission mode is not one of this key\'s', model_not_allowed: 'that model is not one of this key\'s',
   mode_not_allowed: 'that mode is not one of this key\'s',
   ask_unknown: 'that question is gone', ask_settled: 'already answered',
+  except_unnamed: GM.EXCEPT_UNNAMED_WORDS,   // lane held-except-doors: a Save that leaves a 除了 out without naming it
   write_failed: 'the change could not be written on the server — nothing changed; try again in a minute',   // lane feedback-handled-verb
   maintainer_key_scope: 'the maintainer key opens the two feedback verbs only (feedback.list, feedback.handled)',   // lane fleet-feedback-marks
   maintainer_key_unknown: 'this instance does not know that maintainer key',
@@ -56,7 +58,7 @@ const WORDS = Object.freeze({
   cross_site: 'these doors answer this instance\'s own page only',
   unauthorized: 'missing or unknown session token', not_found: 'not found', not_ready: 'the server is still starting — try again in a moment', failed: 'it failed',
 });
-const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503 });
+const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409 });
 
 /**
  * @param {object} o
@@ -108,7 +110,7 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));
   app.post('/api/automation/keys/:id/prune-ended', person((req) => engine.pruneEnded(String(req.params.id), liveOf(subjects()), { by: byOf(req) })));   // lane vault-key-row-compact: 清理已结束的授权
   app.post('/api/automation/grants/:grantId/reach', person((req) => engine.setReach(String(req.params.grantId), body(req).reach, { by: byOf(req) })));   // lane key-instance-scope: the key row's reach chip
-  app.post('/api/automation/grants/:grantId/except', person((req) => engine.setExcept(String(req.params.grantId), { except: body(req).except, reachExcept: body(req).reachExcept }, { by: byOf(req) })));   // lane grants-unify: «除了» — a Task Group grant's members / its reach's conversations left out
+  app.post('/api/automation/grants/:grantId/except', person((req) => engine.setExcept(String(req.params.grantId), { except: body(req).except, reachExcept: body(req).reachExcept, removeExcept: body(req).removeExcept, reachRemoveExcept: body(req).reachRemoveExcept }, { by: byOf(req) })));   // lane grants-unify: «除了» — a Task Group grant's members / its reach's conversations left out
   app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
 
   // ── agents: THEIR conversation's token names the caller ──

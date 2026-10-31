@@ -897,7 +897,7 @@ console.log('㉕ ROUND 4 (MAJOR item 4) — deleting the `except` row does not a
   const x0 = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'), { caller: w.caller('cid-left-out', 'Left out') });
   ok(set.ok && x0.r.by !== 'grant', 'CONTROL: the excepted conversation is not admitted (the card)', { by: x0.r.by });
   const cur = w.grants.rowsFor('vault-use', e.id)[0];
-  w.grants.set('vault-use', e.id, { to: cur.to, except: [] }, 'agent');   // the agent deletes its own except row off data/grants.json
+  w.grants.set('vault-use', e.id, { to: cur.to, except: [], removeExcept: cur.except }, 'agent');   // the agent deletes its own except row off data/grants.json (lane held-except-doors: a write that NAMES it — the writer's «除了 by name» law is no fence against a hand on the file; the mac is)
   const x1 = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'), { caller: w.caller('cid-left-out', 'Left out') });
   ok(x1.r.by !== 'grant' && w.staleRows.includes(e.id), 'after the agent deletes `except`, the excepted conversation is STILL not by: grant — the group member\'s mac no longer verifies (by: grant on 16c68243)', { by: x1.r.by, stale: w.staleRows.slice() });
 }

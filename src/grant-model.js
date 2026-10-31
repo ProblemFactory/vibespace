@@ -365,6 +365,23 @@ function validateWrite(door, resource, { to = [], except = [] } = {}, { at = nul
   if (typeof by === 'string' && by) row.by = by.slice(0, 64);
   return { ok: true, row };
 }
+/**
+ * «除了» LEAVES BY NAME ONLY (lane held-except-doors, 2026-10-31 — the vault-standing-request r11 acceptance (d): every grant
+ * dialog but one saved `except: []` whenever its «除了» row was not offered, so a grant the owner narrowed to «everyone
+ * except Cee» became «everyone» the next time the dialog was saved for another reason). A write keeps every exception the
+ * stored row `was` holds unless it NAMES it in `removeExcept` (principal keys, or entries — what the page SAID it takes
+ * away: «Cee will no longer be excluded»). → the first exception left out unnamed (its principal key) | null. The ONE
+ * writer refuses such a write `except_unnamed` (EXCEPT_UNNAMED_WORDS), nothing written; its explicit `remove` (a resource
+ * that is gone) is the one road that names the whole row.
+ */
+function exceptUnnamed(was, except, removeExcept) {
+  const keyOf = (x) => (x && typeof x === 'object' ? principalKey(x) : typeof x === 'string' && x ? x : null);
+  const next = new Set((Array.isArray(except) ? except : []).map(keyOf).filter(Boolean));
+  const named = new Set((Array.isArray(removeExcept) ? removeExcept : []).map(keyOf).filter(Boolean));
+  for (const x of was && Array.isArray(was.except) ? was.except : []) { const k = keyOf(x); if (k && !next.has(k) && !named.has(k)) return k; }
+  return null;
+}
+const EXCEPT_UNNAMED_WORDS = 'this Save leaves out a conversation or Task Group you excluded (除了) without naming it — nothing was written; open the dialog again to see who is left out';
 
 // ── the verdict ─────────────────────────────────────────────────────────────
 /** The caller's facts, normalized: its keys (a Set), its groups (a Set), the two fault flags. */
@@ -788,7 +805,7 @@ const LEGACY = Object.freeze({
 
 module.exports = {
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
-  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
+  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,
   fromAutomationReach, fromChannelPrincipal, toChannelPrincipal, fromChannelAccess, fromChannelRows, fromChannelApiRows,

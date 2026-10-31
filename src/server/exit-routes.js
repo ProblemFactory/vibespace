@@ -100,7 +100,7 @@ app.post('/api/agent/exit/push', async (req, res) => {
   } catch (err) { agentFail(res, err); try { if (!req.readableEnded) req.resume(); } catch { } } // the unread rest is drained; the CLI stops on the answer
 });
 // ── the user's side (cookie) ──
-const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, except_conflicts: 400, not_written: 500, store_unreadable: 409, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
+const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, except_conflicts: 400, except_unnamed: 409, not_written: 500, store_unreadable: 409, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
 const cookieFail = (res, e) => res.status(COOKIE_STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.added ? { added: e.added, removed: e.removed } : {}), ...(e && e.grant ? { grant: e.grant } : {}) });
 app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
 app.post('/api/hosts/:id/allow-exit', (req, res) => res.status(410).json({ error: 'use PATCH /api/hosts/:id/exit-access — exit access is two lists now', code: 'retired' }));
@@ -132,11 +132,15 @@ app.patch('/api/hosts/:id/exit-access', async (req, res) => {
     resolved.push({ session: row.session, key, forkPending: key.startsWith('webui:') && !!(s.claudeSessionId || s.backendSessionId) });
     return { kind: 'conversation', key };
   };
+  // lane held-except-doors r2 (主开发's acceptance, MINOR 1): an exception STORED under a pending fork's `webui:<id>` key whose
+  // fork now has its own id is RE-KEYED to it — a named rename through the ONE writer (PURE E.rekeyForkExcept), never a drop
+  // (the page sends a kept exception by its stored key)
+  const keyOfSession = (sid) => { const s = activeSessions.get(sid); return s ? exitProxy.conversationKeyOf(s, sid) : null; };
   try {
     for (const g of ['use', 'run']) {
       if (!b || !b[g] || typeof b[g] !== 'object') continue;
       if (Array.isArray(b[g].who)) b[g] = { ...b[g], who: b[g].who.map(live) };
-      if (Array.isArray(b[g].except)) b[g] = { ...b[g], except: b[g].except.map(live) };
+      if (Array.isArray(b[g].except)) b[g] = E.rekeyForkExcept({ ...b[g], except: b[g].except.map(live) }, keyOfSession);
     }
     const out = await exitProxy.setAccess(req.params.id, b, { by: 'user' });
     res.json({ ...out, resolved });

@@ -111,7 +111,10 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
       except: onExcept ? { selected: exceptKeys, extra: () => st.exceptExtra, onChange: (keys) => {
         const byKey = new Map([...st.items, ...st.exceptExtra].map((r) => [r.key, r]));
         // a LIVE session by its webui id (the engine spells its key), one not running now by its key, a group by its id
-        st.onExcept?.(keys.map((k) => byKey.get(k)).filter(Boolean).map((r) => (r.ref.kind === 'group' ? { kind: 'group', id: r.ref.row.id } : { kind: 'session', id: r.ref.row.id || r.ref.row.key })));
+        // lane held-except-doors: each stored exception the ✕ took away is NAMED (the ONE writer refuses an unnamed drop)
+        const now = new Set(keys);
+        const gone = (st.exceptModel || []).filter((p) => !now.has(`${p.kind === 'group' ? 'group' : 'session'}:${p.id}`)).map((p) => (p.kind === 'group' ? `group:${p.id}` : `conversation:${p.id}`));
+        st.onExcept?.(keys.map((k) => byKey.get(k)).filter(Boolean).map((r) => (r.ref.kind === 'group' ? { kind: 'group', id: r.ref.row.id } : { kind: 'session', id: r.ref.row.id || r.ref.row.key })), gone);
       } } : null,
       onChange: (keys) => {
         const before = new Set(st.sel), after = new Set(keys);
@@ -132,6 +135,7 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
   st.onToggle = onToggle;
   st.onExcept = onExcept;
   st.exceptExtra = exceptExtra;
+  st.exceptModel = model.except || [];   // lane held-except-doors: the 除了 as drawn — what a ✕ takes away is named against it
   st.sel = items.filter((r) => r.checked).map((r) => r.key);
   st.picker.setSelected(st.sel);
   if (onExcept) st.picker.setExcept(exceptKeys);
@@ -377,9 +381,9 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         if (live()) draw();
       },
       // «除了» (lane grants-unify): the members left OUT of a shared Task Group / All agents — the whole list, one PUT
-      onExcept: async (except) => {
+      onExcept: async (except, removeExcept = []) => {
         busy = true; draw();
-        const res = await fetchJson(`${base}/except`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ except }) });
+        const res = await fetchJson(`${base}/except`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ except, ...(removeExcept.length ? { removeExcept } : {}) }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, t('Could not change who is left out')), { type: 'error' });
         else { view = res; if (res.excepted && res.excepted.leaseDropped) showToast(t('The agent that held this window no longer reaches it')); }

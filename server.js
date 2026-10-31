@@ -739,7 +739,7 @@ app.post('/api/tasks', (req, res) => {
 });
 app.patch('/api/tasks/:id', (req, res) => {
   try { res.json({ success: true, task: tasks.update(req.params.id, req.body || {}) }); }
-  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed
 });
 app.delete('/api/tasks/:id', (req, res) => {
   try { tasks.remove(req.params.id); res.json({ success: true }); }

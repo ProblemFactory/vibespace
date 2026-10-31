@@ -61,6 +61,7 @@ const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_sha
   // lane grants-unify: the user left this conversation out of a group's / everyone's list (an exception) · a save that both
   // picks and leaves out one principal · the ONE store could not write / read
   'excepted', 'except_conflicts', 'not_written', 'store_unreadable',
+  'except_unnamed',   // lane held-except-doors: a Save that leaves a 除了 out without naming it (the ONE writer's refusal)
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
   'session_token_required', 'bad_command', 'bad_grant', 'bad_mode', 'bad_principal', 'empty_list',
   'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed', 'device_agent_outdated',
@@ -297,6 +298,7 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
   if (isUnknown(cur) && !('use' in body && 'run' in body)) return refuse('bad_grant', { error: 'the stored access is unreadable — send both use and run to replace it' });
   const next = {};
   const changed = { use: false, run: false };
+  const removeExcept = { use: [], run: [] };
   for (const grant of GRANTS) {
     const was = isUnknown(cur) ? null : cur[grant];
     if (!(grant in body)) { next[grant] = was; continue; }
@@ -304,6 +306,10 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
     if (!g || typeof g !== 'object' || Array.isArray(g)) return refuse('bad_grant', { grant, error: `${grant} must be {mode, who?, except?${grant === 'run' ? ', ask?' : ''}}` });
     if (!MODES.includes(g.mode)) return refuse('bad_mode', { grant, error: `${grant}.mode is one of ${MODES.join(' | ')}` });
     let who = [], except = [];
+    // lane held-except-doors: the exceptions this list's Save takes away, by principal key («X will no longer be excluded») —
+    // the ONE writer refuses one left out unnamed (`except_unnamed`)
+    if (g.removeExcept != null && (!Array.isArray(g.removeExcept) || g.removeExcept.length > WHO_MAX || g.removeExcept.some((k) => typeof k !== 'string' || k.length > 260))) return refuse('bad_principal', { grant, error: `${grant}.removeExcept must be a list of principal keys` });
+    removeExcept[grant] = Array.isArray(g.removeExcept) ? g.removeExcept.slice() : [];
     if (g.mode === 'only' || g.mode === 'everyone') {
       if (g.who != null && !Array.isArray(g.who)) return refuse('bad_principal', { grant, error: `${grant}.who must be a list` });
       const seen = new Set();
@@ -329,6 +335,19 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
         seenX.add(k); except.push(GM.bareOf(p));
       }
       if (except.length > WHO_MAX) return refuse('too_many', { grant, error: `at most ${WHO_MAX} exceptions per list` });
+    } else if (g.except != null) {
+      // lane held-except-doors: «Nobody» keeps the list's 除了 (a dialog never drops an exception it did not SHOW as removed —
+      // they hold again when a Task Group / All agents is given back); the page sends them as it holds them
+      if (!Array.isArray(g.except)) return refuse('bad_principal', { grant, error: `${grant}.except must be a list` });
+      const seenX = new Set();
+      for (const row of g.except) {
+        const p = row && typeof row === 'object' && row.kind === 'session' ? whoPrincipal(row) : GM.normExcept(row);
+        if (!p || p.kind === 'everyone') return refuse('bad_principal', { grant, error: `${JSON.stringify(row).slice(0, 80)} cannot be left out — an exception names a conversation or a Task Group` });
+        const k = GM.principalKey(p);
+        if (seenX.has(k)) continue;
+        seenX.add(k); except.push(GM.bareOf(p));
+      }
+      if (except.length > WHO_MAX) return refuse('too_many', { grant, error: `at most ${WHO_MAX} exceptions per list` });
     }
     const out = { mode: g.mode, who, except };
     if (grant === 'run') {
@@ -348,7 +367,7 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
     hub = { mode: g.mode };
   }
   const access = { use: next.use, run: next.run, hub, updatedAt: Number(now) || Date.now(), updatedBy: by, lastRun: cur.lastRun || null };
-  return { ok: true, access, changed };
+  return { ok: true, access, changed, removeExcept };
 }
 /** What the HOST RECORD keeps of an access now (lane grants-unify) — never a who-list: `ask`, the hub list (only when
  *  set), the stamp. hosts.js replaces `exit` with it, keeping only `lastRun` and the pre-unify `use` / `run` (unread). */
@@ -359,12 +378,34 @@ function storedExit(access) {
 }
 /** THE TWO ROWS an access writes through the ONE writer (`grants.setMany`): `<hostId>:use`, `<hostId>:run` — `to` =
  *  everyone (when All is picked) + the rows picked beside it, `except` = the members left out; nobody ⇒ an empty row
- *  (the store removes it). */
-function exitRows(access, hostId) {
+ *  (the store removes it) — lane held-except-doors: nobody KEEPS its 除了 (an except-only row; they hold again when a Task
+ *  Group / All agents is given back), and `removeExcept` ({use, run} — patchVerdict's) names each one the Save takes away. */
+/**
+ * A FORK'S EXCEPTION FOLLOWS ITS FORK (lane held-except-doors r2 — 主开发's acceptance, MINOR 1): an exception stored under a
+ * pending fork's `webui:<id>` key (the route's spelling while the fork had no id of its own) whose fork NOW has its own
+ * conversation id is RE-KEYED to it — a named rename through the ONE writer (the old key into `removeExcept`, the
+ * conversation's own beside the kept ones), never a drop and never a refusal of the whole dialog. `keyOfSession(webuiId)` →
+ * the session's conversation key NOW (its own id, or `webui:<id>` while it is still pending) | null (not running). PURE.
+ * → the list's body `g` with `except` / `removeExcept` re-keyed (the same object when nothing moved).
+ */
+function rekeyForkExcept(g, keyOfSession) {
+  if (!g || typeof g !== 'object' || !Array.isArray(g.except)) return g;
+  const named = [];
+  const except = g.except.map((row) => {
+    const m = row && row.kind === 'conversation' && typeof row.key === 'string' ? /^webui:(.+)$/.exec(row.key) : null;
+    const key = m ? keyOfSession(m[1]) : null;
+    if (!key || String(key).startsWith('webui:')) return row;
+    named.push(`conversation:${row.key}`);
+    return { kind: 'conversation', key: String(key) };
+  });
+  return named.length ? { ...g, except, removeExcept: [...(Array.isArray(g.removeExcept) ? g.removeExcept : []), ...named] } : g;
+}
+
+function exitRows(access, hostId, removeExcept = null) {
   return GRANTS.map((grant) => {
     const g = access[grant];
     const r = rowOfGrant(g);
-    return { door: 'exit', resource: `${hostId}:${grant}`, to: r.to, except: g.mode === 'nobody' ? [] : r.except };
+    return { door: 'exit', resource: `${hostId}:${grant}`, to: r.to, except: r.except, removeExcept: (removeExcept && removeExcept[grant]) || [] };
   });
 }
 /** The access as a page sees it (GET /api/hosts' `exit`, the dialog's GET): the lists with the CURRENT names when a
@@ -797,7 +838,7 @@ module.exports = {
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
-  exitAccessOf, accessOfView, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit, exitRows, exitView, whoPrincipal,
+  exitAccessOf, accessOfView, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit, exitRows, exitView, whoPrincipal, rekeyForkExcept,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, migrateExitAccess,
   spawnErrorOf, spawnMsOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
   TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,

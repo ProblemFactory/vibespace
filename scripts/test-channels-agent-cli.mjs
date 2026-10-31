@@ -58,8 +58,12 @@ const RETRYABLE = new Set([429, 409, 503]);
 // R4 (B-6acc): `compose-not-available` belongs to the COMPOSE verb alone, the same way;
 // 2026-09-27: `not-withdrawable` belongs to WITHDRAW (and reply/compose --replaces) alone
 const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available', 'not-withdrawable'];
+// lane held-except-doors r2: a grant row's refusals by the ONE writer (409 by name — they were a 500) belong to the WATCH verb
+// alone (an agent's own watch / unwatch writes the grain's watch row) — proven like the reply ones: the request-set region
+// never spells them
+const GRANT_ONLY = ['except_conflicts', 'except_unnamed'];
 const routeRetryable = [...ROUTE_STATUS].filter(([, st]) => RETRYABLE.has(st)).map(([c]) => c);
-const expectedRefused = routeRetryable.filter((c) => !REPLY_ONLY.includes(c)).sort();
+const expectedRefused = routeRetryable.filter((c) => !REPLY_ONLY.includes(c) && !GRANT_ONLY.includes(c)).sort();
 const cliSrc = fs.readFileSync(CLI, 'utf-8');
 const cliSetM = /const REFRESH_REFUSED = \[([^\]]*)\]/.exec(cliSrc);
 const cliRefused = cliSetM ? [...cliSetM[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort() : [];
@@ -67,6 +71,7 @@ ok(ROUTE_STATUS.size >= 8 && routeRetryable.length >= 7, `CENSUS setup: the agen
 const esrc = engineSource(REPO);
 const requestSetRegion = esrc.slice(esrc.indexOf('async function pass(adapterId'), esrc.indexOf('async function watch(adapterId'));
 ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the retry-able codes excepted as reply / compose only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
+ok(GRANT_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`) && ROUTE_STATUS.get(c) === 409), `CENSUS: the grant row's refusals (${GRANT_ONLY.join(', ')}) are 409 on the agent route and never spelled in the engine's pass / request-set region (the watch verb's alone — lane held-except-doors r2)`, GRANT_ONLY.map((c) => `${c}:${ROUTE_STATUS.get(c)}`).join(' '));
 ok(cliRefused.length > 0 && JSON.stringify(cliRefused) === JSON.stringify(expectedRefused), `CENSUS: the CLI's REFRESH_REFUSED set == the route's retry-able refresh codes — [${cliRefused.join(', ')}]`, `cli [${cliRefused.join(', ')}] vs route [${expectedRefused.join(', ')}]`);
 const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
 ok(cliRefused.every((c) => words.includes(`case '${c}'`)), 'CENSUS: every refused code has its own words in channel-words.js (the panel says it in the device\'s language)', cliRefused.filter((c) => !words.includes(`case '${c}'`)).join(', '));

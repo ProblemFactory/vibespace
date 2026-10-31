@@ -199,7 +199,10 @@ function create(engineCtx) {
   function overlay(holder, kind, id, legacy = undefined) {
     const res = CG.grainResource(kind, id);
     const access = CG.accessOf(res);
-    if (!holder && !access.length) return null;
+    // lane held-except-doors r2 (主开发's acceptance, BLOCKER): a row that holds only exceptions is a ROW — read like any
+    // other (the account's last Task Group removed left {to: [], except: [m1]}: this read said «no grain», the dialog drew no
+    // 除了 and every later Save was refused except_unnamed)
+    if (!holder && !access.length && !CG.exceptOf(res).length && !CG.watchOf(res).except.length) return null;
     const h = holder ? { ...holder } : { adapterId: id, scope: { kind, id }, access: [], watchers: [] };
     const old = legacy !== undefined ? legacy : (holder && holder.principal ? holder : null);
     delete h.principal;
@@ -2243,8 +2246,11 @@ function create(engineCtx) {
     // anywhere (the index's watcher settings follow only landed rows). An agent's own watch never edits the owner's
     // exceptions (they ride as stored).
     const res = CG.grainResource(kind, kind === 'conversation' ? site.key : site.id);
-    const wr = CG.setGrainRows(res, { access, watchers: stored, ...(byUser && p.except !== undefined ? { except: p.except || [] } : {}), ...(byUser && p.watchExcept !== undefined ? { watchExcept: p.watchExcept || [] } : {}) }, by);
-    // an agent's own row where the user LEFT IT OUT never lifts the user's exception — refused in the agent's words
+    // lane held-except-doors: + the exceptions the person's Save NAMES as taken away (one left out unnamed ⇒ except_unnamed);
+    // r2: a row this write keeps the stored list of and gives a member BY ITSELF lifts that member's own exception, named
+    // (`lift` — the owner's writes always; an agent's own only where no Task Group / All agents entry makes it live)
+    const wr = CG.setGrainRows(res, { access, watchers: stored, lift: byUser ? 'always' : 'dormant', ...(byUser && p.except !== undefined ? { except: p.except || [] } : {}), ...(byUser && p.watchExcept !== undefined ? { watchExcept: p.watchExcept || [] } : {}), ...(byUser && Array.isArray(p.removeExcept) ? { removeExcept: p.removeExcept } : {}), ...(byUser && Array.isArray(p.watchRemoveExcept) ? { watchRemoveExcept: p.watchRemoveExcept } : {}) }, by);
+    // an agent's own row where the user LEFT IT OUT (beside a Task Group / All agents entry) never lifts the user's exception — refused in the agent's words
     if (!wr.ok && !byUser && wr.code === 'except_conflicts') return { ok: false, code: 'excepted', error: 'the user left you out of this grant here (an exception on the Task Group / All agents row) — only the user can lift it, in Channels (Grant access… / Notify…)' };
     if (!wr.ok) return { ok: false, code: wr.code, error: wr.error };
     await store.index.update((ix) => {
@@ -2485,10 +2491,10 @@ function create(engineCtx) {
     return { grain: { kind: site.kind, id: site.id }, access: v ? v.access : [], watchers: v ? v.watchers : [], except: v ? v.except : [], watchExcept: v ? v.watchExcept : [], assignment: v };
   }
   /** GRANT ACCESS — the first operation: a grain's whole ACCESS list. */
-  function setAccess(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { access: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}), ...(opts && opts.except !== undefined ? { except: opts.except } : {}) }, opts); }   // lane grants-unify: + «除了» (the access row's members left out)
+  function setAccess(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { access: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}), ...(opts && opts.except !== undefined ? { except: opts.except } : {}), ...(opts && Array.isArray(opts.removeExcept) ? { removeExcept: opts.removeExcept } : {}) }, opts); }   // lane grants-unify: + «除了» (the access row's members left out)
   /** NOTIFY — the second operation: a grain's whole WATCHERS list; every
    *  principal must already hold access there. */
-  function setWatchers(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { watchers: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}), ...(opts && opts.except !== undefined ? { watchExcept: opts.except } : {}) }, opts); }   // lane grants-unify: + «除了» (the watch row's members left out)
+  function setWatchers(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { watchers: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}), ...(opts && opts.except !== undefined ? { watchExcept: opts.except } : {}), ...(opts && Array.isArray(opts.removeExcept) ? { watchRemoveExcept: opts.removeExcept } : {}) }, opts); }   // lane grants-unify: + «除了» (the watch row's members left out)
   /** REMOVE a rule (its access rows, its watchers, its derived reach). */
   async function removePattern(adapterId, id, { by = 'user' } = {}) {
     const pa = patternById(id);

@@ -231,11 +231,20 @@ export function exceptCandidates(rows, selected, { ownHint = '' } = {}) {
   }
   return out;
 }
-/** The exceptions a SAVE writes: the picked ones while the row is offered, minus any picked itself; else none. */
-export function exceptSaved(rows, selected, except) {
-  if (!exceptOffered(rows, selected)) return [];
+/** The exceptions a SAVE writes: the picked ones while the row is offered, minus any picked itself; else none — lane
+ *  held-except-doors: else, with `held` (the STORED row's exception keys), those VERBATIM minus any picked itself (a dialog
+ *  never drops an exception it did not SHOW as removed: the row is folded away, so nothing there was shown). */
+export function exceptSaved(rows, selected, except, { held = null } = {}) {
   const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
+  if (!exceptOffered(rows, selected)) return Array.isArray(held) ? held.map(String).filter((k) => !sel.has(k)) : [];
   return (Array.isArray(except) ? except : []).map(String).filter((k) => !sel.has(k));
+}
+/** lane held-except-doors: the stored exceptions (`held`) a Save takes away (`saved` = what it writes) — each one the
+ *  dialog SAYS («X will no longer be excluded») and names on the wire (`removeExcept`; the ONE writer refuses one left out
+ *  unnamed, `except_unnamed`). Picker keys in, picker keys out. */
+export function exceptRemoved(held, saved) {
+  const s = new Set((Array.isArray(saved) ? saved : []).map(String));
+  return [...new Set((Array.isArray(held) ? held : []).map(String))].filter((k) => !s.has(k));
 }
 /** A picker row → the grant model's principal (`{kind:'everyone'}` | `{kind:'group', id}` | `{kind:'conversation',
  *  key}` — a conversation row's `id` IS its key, the conversation id), or null. */
@@ -251,9 +260,7 @@ export function principalOfRow(r) {
 export function pickToRow(rows, selected, except = [], { held = null } = {}) {
   const byKey = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null).map((r) => [String(r.key), r]));
   const map = (keys) => (Array.isArray(keys) ? keys : []).map((k) => principalOfRow(byKey.get(String(k)))).filter(Boolean);
-  const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
-  const keep = Array.isArray(held) && !exceptOffered([...byKey.values()], selected) ? held.map(String).filter((k) => !sel.has(k)) : exceptSaved([...byKey.values()], selected, except);
-  return { to: map(selected), except: map(keep) };
+  return { to: map(selected), except: map(exceptSaved([...byKey.values()], selected, except, { held })) };   // lane held-except-doors: the one rule, exceptSaved's
 }
 /** r11: an entry carrying its principal's KEY (`principal` — a published member) → that principal (its name kept); else the
  *  entry as it is. */
@@ -268,12 +275,23 @@ export function principalOfEntry(p) {
  * What a STORED row draws: `{selected, except, extra}` — the picker keys of its `to` and `except` entries over the live
  * roster (`rows`), and an `extra` row for every entry the roster does not hold (a conversation not running now, a Task
  * Group deleted — kept and saved again as it is, the caller's hint words). `everyoneKey` = the caller's All row key. r11: an
- * entry with a `principal` key is read by it (`principalOfEntry`).
+ * entry with a `principal` key is read by it (`principalOfEntry`). lane held-except-doors r2: `storedKey` = picker key → the
+ * principal key the entry is STORED under (a pending fork's `conversation:webui:<id>` drawn as its live row `agent:<cid>`) —
+ * what a door names a removal by and sends a kept entry as (never re-resolved: the machine dialog named it
+ * `conversation:<cid>` and every Save was refused except_unnamed).
  */
 export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = '', deletedGroup = '' } = {}) {
   const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null);
   const extra = [];
+  const storedKey = {};
   const keyOf = (p0) => {
+    const k = drawnKeyOf(p0);
+    const p = principalOfEntry(p0);
+    const sk = !p || typeof p !== 'object' ? null : p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : p.kind === 'conversation' ? `conversation:${p.key}` : null;
+    if (k && sk && !(k in storedKey)) storedKey[k] = sk;
+    return k;
+  };
+  const drawnKeyOf = (p0) => {
     const p = principalOfEntry(p0);
     if (!p || typeof p !== 'object') return null;
     if (p.kind === 'everyone') return String(everyoneKey);
@@ -297,5 +315,5 @@ export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = 
   const r = row && typeof row === 'object' ? row : {};
   const selected = (Array.isArray(r.to) ? r.to : []).map(keyOf).filter(Boolean);
   const except = (Array.isArray(r.except) ? r.except : []).map(keyOf).filter(Boolean);
-  return { selected: [...new Set(selected)], except: [...new Set(except)], extra };
+  return { selected: [...new Set(selected)], except: [...new Set(except)], extra, storedKey };
 }

@@ -7291,6 +7291,14 @@ label.chan-cap-row { cursor: default; }
 .pp-except-picker .pp-list { max-height: 200px; }
 /* a picker whose main list is fixed by its surface (a Task Group's own visibility): only its «除了» row is drawn */
 .pp.pp-except-only > .pp-chips, .pp.pp-except-only > .pp-input, .pp.pp-except-only > .pp-list { display: none !important; }
+/* lane held-except-doors r2: the «除了» a door KEEPS while no Task Group / All agents is picked — drawn under the picker,
+   each with its ✕ (its own classes: a suite reading the first .pp-chip never meets one of these) */
+.pp-kept { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-left: 10px; border-left: 2px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+.pp-kept-chip { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; min-width: 0; padding: 2px 3px 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--text-secondary) 10%, transparent); color: var(--text); }
+.pp-kept-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-kept-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0; }
+.pp-kept-x:hover, .pp-kept-x:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
+.pp-kept-hint { flex-basis: 100%; color: var(--text-dim); }
 
 /* phone (≤480px): targets ≥36px, one-column grids, rows padded 8px 10px */
 @media (max-width: 480px) {
@@ -7327,6 +7335,8 @@ label.chan-cap-row { cursor: default; }
   .pp-input, .pp-trigger { min-height: 36px; font-size: 14px; }
   .pp-chip { min-height: 36px; padding-right: 2px; }
   .pp-chip-x { width: 36px; height: 36px; }
+  .pp-kept-chip { min-height: 36px; }
+  .pp-kept-x { width: 36px; height: 36px; }
   .chan-grow { padding-top: 9px; padding-bottom: 9px; }
   .chan-af-grid { grid-template-columns: 1fr; }
   /* a rule row on a phone: kind + × on line 1, the value(s) on line 2 (round 2:

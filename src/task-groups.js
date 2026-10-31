@@ -1938,7 +1938,10 @@ class TaskGroupManager {
     const e = n.row.to.find((x) => x.kind === 'group' && x.id === String(id));
     return { externalVisibility: e && (e.level === 'visible' || e.level === 'messageable') ? e.level : null, externalVisibilityExcept: n.row.except };
   }
-  /** THE ONE WRITER of a group's outside visibility: `{externalVisibility?, externalVisibilityExcept?}` (each absent ⇒ kept). */
+  /** THE ONE WRITER of a group's outside visibility: `{externalVisibility?, externalVisibilityExcept?}` (each absent ⇒ kept).
+   *  lane held-except-doors: Closed KEEPS the members left out (an except-only row — they hold again when the group is opened
+   *  again; never a silent drop), and `externalVisibilityRemoveExcept` names each one the change takes away (one left out
+   *  unnamed ⇒ the ONE writer's `except_unnamed`, thrown with its code). */
   _setVisibility(id, patch) {
     const g = this._grants();
     if (!g) throw new Error('the grants store is not available — the visibility was not changed');
@@ -1946,8 +1949,9 @@ class TaskGroupManager {
     const level = patch.externalVisibility !== undefined ? (['visible', 'messageable'].includes(patch.externalVisibility) ? patch.externalVisibility : null) : cur.externalVisibility;
     const except = patch.externalVisibilityExcept !== undefined ? (Array.isArray(patch.externalVisibilityExcept) ? patch.externalVisibilityExcept : null) : cur.externalVisibilityExcept;
     if (except === null) throw new Error('externalVisibilityExcept must be a list of conversations ({kind:"conversation", key}) and Task Groups');
-    const w = g.set('group-visibility', String(id), level ? { to: [{ kind: 'group', id: String(id), level }], except } : { to: [], except: [] }, 'user');
-    if (!w.ok) throw new Error(w.error || w.code);
+    const removeExcept = Array.isArray(patch.externalVisibilityRemoveExcept) ? patch.externalVisibilityRemoveExcept : [];
+    const w = g.set('group-visibility', String(id), { to: level ? [{ kind: 'group', id: String(id), level }] : [], except, removeExcept }, 'user');
+    if (!w.ok) throw Object.assign(new Error(w.error || w.code), { code: w.code });
   }
 
   // ONE group as the wire carries it (list() / view()) — copies, never the live record.

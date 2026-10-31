@@ -38,9 +38,16 @@
 //    on a MULTI picker folds ONE more row under the chips once a Task Group or All agents is picked — «除了（可选）» —
 //    opening the SAME searchable list over the members to leave out (PURE `exceptCandidates`: a picked group's live
 //    members, under All every conversation); the chosen ones are chips «除了：Name ×»; a member picked ITSELF is greyed
-//    «有自己的授权» (its own grant counts). `api.except()` = what a save writes (PURE `exceptSaved`: none while no group /
-//    All is picked); the caller maps picks + exceptions to the grant model's row with `pickToRow` (and draws a stored
-//    row with `rowToPick`). Every door that draws this picker gets the row by passing `except`.
+//    «有自己的授权» (its own grant counts). `api.except({held})` = what a save writes (PURE `exceptSaved`: while no group /
+//    All is picked, the stored exceptions `held` VERBATIM — lane held-except-doors: a dialog never drops an exception it did
+//    not SHOW as removed; every caller passes `held`, scripts/test-grants-store.mjs ⑧ is the census); the caller maps picks +
+//    exceptions to the grant model's row with `pickToRow` (and draws a stored row with `rowToPick`), says each one the Save
+//    takes away (PURE `exceptRemoved`) and names it on the wire (`removeExcept`). Every door that draws this picker gets
+//    the row by passing `except`. A chip names its member by the roster's row (lane held-except-doors (e): a conversation
+//    left out that is not in the picked Task Group was a raw key «除了：agent:e842a0f6-…»). r2 (主开发's acceptance, BLOCKER):
+//    what a door KEEPS while no Task Group / All agents is picked is DRAWN — «Kept from an earlier grant — left out: Cee ✕»
+//    (`.pp-kept`, its own classes) — and its ✕ takes one away: `api.except({held})` leaves it out, so the door SAYS it and
+//    NAMES it (`exceptRemoved`); a row the owner cannot see is never a Save the writer has to refuse.
 import { t } from './i18n.js';
 import { createPopover } from './utils.js';
 import { icon, el, avatar } from './channel-chrome.js';
@@ -324,9 +331,45 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   let exSel = except && multi && !compact ? (except.selected || []).map(String) : [];
   let exOpen = exSel.length > 0;
   let exWrap = null, exToggle = null, exInner = null;
+  // lane held-except-doors r2: the exceptions as the door drew them (its stored row — `held`), and the ones the person took
+  // away on the kept line (`dropped`: each is left out of what `api.except` saves, so the door says and names it)
+  let heldAtOpen = exSel.slice();
+  const dropped = new Set();
+  let keptEl = null;
+  const exRowOf = (k) => (exInner && exInner.knownRows().find((r) => String(r.key) === k)) || byKey().get(k) || known.get(k) || null;
+  function drawKept(offered) {
+    if (!keptEl) return;
+    const keys = offered ? [] : PM.exceptSaved(rows, sel, exSel, { held: heldAtOpen.filter((k) => !dropped.has(k)) });
+    keptEl.textContent = '';
+    keptEl.style.display = keys.length ? '' : 'none';
+    if (!keys.length) return;
+    keptEl.appendChild(el('span', 'pp-kept-label', t('Kept from an earlier grant — left out:')));
+    for (const k of keys) {
+      const name = (exRowOf(k) || {}).name || k;
+      const c = el('span', 'pp-kept-chip');
+      c.dataset.key = k;
+      c.appendChild(el('span', 'pp-kept-name', name));
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'pp-kept-x';
+      x.title = t('Stop leaving {name} out', { name }); x.setAttribute('aria-label', x.title);
+      x.appendChild(icon('close', 10));
+      x.onclick = (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        dropped.add(k); exSel = exSel.filter((y) => y !== k);
+        if (exInner) exInner.setSelected(exSel);
+        syncExcept();
+        if (typeof except.onChange === 'function') { try { except.onChange(api.except({ held: heldAtOpen })); } catch (e) { console.warn('[principal-picker] except.onChange', e); } }
+        fire(null);
+      };
+      c.appendChild(x);
+      keptEl.appendChild(c);
+    }
+    keptEl.appendChild(el('span', 'pp-kept-hint', t('They stay left out of any Task Group or All agents picked here later.')));
+  }
   function syncExcept() {
     if (!exWrap) return;
     const offered = PM.exceptOffered(rows, sel);
+    drawKept(offered);
     // a member picked ITSELF leaves the exceptions (its own grant counts — it cannot be both)
     const kept = exSel.filter((k) => !sel.includes(k));
     if (kept.length !== exSel.length) { exSel = kept; exInner.setSelected(exSel); }
@@ -346,12 +389,13 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     exToggle.title = t('Leave members of the picked Task Groups (or of All agents) out');
     exToggle.onclick = (ev) => { ev.preventDefault(); exOpen = !(exOpen || exSel.length) ; syncExcept(); if (exOpen) exInner.focus(); };
     exInner = principalPicker({
-      items: () => { const cand = PM.exceptCandidates(source(), sel, { ownHint: t('has its own grant') }); const seen = new Set(cand.map((r) => String(r.key))); return [...cand, ...extra().filter((r) => r && !seen.has(String(r.key)) && exSel.includes(String(r.key)))]; },
+      items: () => { const cand = PM.exceptCandidates(source(), sel, { ownHint: t('has its own grant') }); const seen = new Set(cand.map((r) => String(r.key))); const left = (r) => r && !seen.has(String(r.key)) && exSel.includes(String(r.key)) && (seen.add(String(r.key)), true); return [...cand, ...(source() || []).filter((r) => !PM.isEveryone(r) && left(r)), ...extra().filter(left)]; },   // lane held-except-doors (e): one left out from outside the picked groups is named by its roster row
       multi: true, selected: exSel, placeholder: t('Search members to leave out…'), label: t('Except (optional)'), emptyText: t('No member of the picked Task Groups is running'),
       cls: 'pp-except-picker', chipPrefix: t('Except: '), onChange: (keys) => { exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
     });
     exWrap.append(exToggle, exInner.el);
-    root.append(exWrap);
+    keptEl = el('div', 'pp-kept');
+    root.append(exWrap, keptEl);
   }
   drawChips(); drawList(); syncExcept();
 
@@ -372,9 +416,10 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     setSelected: (keys) => { sel = (keys || []).map(String); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     // the roster's broadcast: rows patched in place, the highlight kept by KEY (gone ⇒ nothing highlighted)
     refresh: () => { rows = source() || []; noteRows(); drawChips(); drawList({ byPerson: false }); syncExcept(); },
-    /** «除了»: the exceptions a save writes (none while no Task Group / All agents is picked) — PURE `exceptSaved`. */
-    except: () => PM.exceptSaved(rows, sel, exSel),
-    setExcept: (keys) => { exSel = (keys || []).map(String); if (exInner) exInner.setSelected(exSel); syncExcept(); },
+    /** «除了»: the exceptions a save writes — PURE `exceptSaved`; while no Task Group / All agents is picked, `held` (the stored
+     *  row's exception keys) VERBATIM (lane held-except-doors — every caller passes it). */
+    except: ({ held = null } = {}) => PM.exceptSaved(rows, sel, exSel, { held: Array.isArray(held) ? held.filter((k) => !dropped.has(String(k))) : held }),   // r2: less the ones ✕-ed on the kept line
+    setExcept: (keys) => { exSel = (keys || []).map(String); heldAtOpen = exSel.slice(); dropped.clear(); if (exInner) exInner.setSelected(exSel); syncExcept(); },   // r2: the stored row re-drawn (window-share) — the kept line follows it
     /** The rows this picker has seen (live + the caller's extra) — what `PM.pickToRow` maps keys through. */
     knownRows: () => { const m = new Map(known); if (exInner) for (const r of exInner.knownRows()) if (!m.has(String(r.key))) m.set(String(r.key), r); return [...m.values()]; },
     focus: () => { try { (trigger || box).focus({ preventScroll: true }); } catch {} },

@@ -7,7 +7,7 @@
 import { fetchJson, api, createModalShell, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
-import { rowToPick, principalOfRow } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
+import { rowToPick, principalOfRow, exceptRemoved } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
 import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: the ONE card (chat · Outbox · For you · here)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -105,7 +105,15 @@ export async function showApiAccessDialog(app, cred) {
     // «除了» (lane grants-unify): with a Task Group or All agents granted, the members left OUT of this credential's tier
     const exPick = rowToPick({ to: [], except: cur.except || [] }, rosterFromApp(app), { everyoneKey: 'everyone:*', notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
     let picker = null;
-    const exceptWire = () => { const all = [...rosterFromApp(app), ...exPick.extra]; return (picker ? picker.except() : exPick.except).map((k) => principalOfRow(all.find((x) => String(x.key) === String(k)))).filter(Boolean); };
+    // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; every one a Save takes away is SAID
+    // (the line under the picker) and NAMED (`removeExcept`) — the ONE writer refuses an unnamed drop
+    const exRowOf = (k) => [...(picker ? picker.knownRows() : []), ...rosterFromApp(app), ...exPick.extra].find((x) => String(x.key) === String(k));
+    const exceptPicks = () => (picker ? picker.except({ held: exPick.except }) : exPick.except);
+    const exceptWire = () => exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
+    const removedPicks = () => exceptRemoved(exPick.except, exceptPicks());
+    const pkOf = (p) => (p.kind === 'group' ? `group:${p.id}` : p.kind === 'conversation' ? `conversation:${p.key}` : 'everyone');
+    const unexcept = el('div', 'chan-api-unexcept chat-status-dim');
+    const syncUnexcept = () => { const r = removedPicks(); unexcept.textContent = r.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || (picker ? picker.nameOf(k) : k) })).join(' · '); unexcept.style.display = r.length ? '' : 'none'; };
     grantsNow = () => JSON.stringify([wire(), exceptWire()]); grantsBase = grantsNow();
     if (!rows.length) body.appendChild(el('div', 'chan-api-none chat-status-dim', t('Agents cannot call this API until you grant it')));
     const list = el('div', 'chan-api-rows');
@@ -143,11 +151,11 @@ export async function showApiAccessDialog(app, cred) {
       onChange: (keys) => {
         for (let i = rows.length - 1; i >= 0; i--) if (!keys.includes(rows[i].key)) rows.splice(i, 1);
         for (const k of keys) if (!rows.some((r) => r.key === k)) { const i = k.indexOf(':'); rows.push({ key: k, principal: { kind: k.slice(0, i), id: k.slice(i + 1) }, tier: 'read', perDay: null }); }   // D1: a new principal starts at Read
-        drawRows();
+        drawRows(); syncUnexcept();
       },
     });
-    body.append(picker.el, list);
-    drawRows();
+    body.append(picker.el, unexcept, list);
+    drawRows(); syncUnexcept();
     // THE SENSITIVE LIST (read-only)
     const sens = el('div', 'chan-api-sensitive chat-status-dim', `${t('DELETE and these paths always ask')}: ${(cur.sensitive || []).map(sensitiveWords).join(' · ')}`);
     body.appendChild(sens);
@@ -171,9 +179,10 @@ export async function showApiAccessDialog(app, cred) {
     // a refused write is SAID and the dialog stays (fetchJson never throws — its answer's error was read as a success)
     saveGrants = async () => {
       let r;
-      try { r = await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: wire(), except: exceptWire() }) }); }
+      const removeExcept = removedPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOf);   // lane held-except-doors: each 除了 taken away, named
+      try { r = await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: wire(), except: exceptWire(), ...(removeExcept.length ? { removeExcept } : {}) }) }); }
       catch (e) { r = { error: String((e && e.message) || e) }; }
-      if (!r || r.error) { const why = (r && r.error) || t('server unreachable'); showToast(why, { type: 'error' }); return why; }
+      if (!r || r.error) { const why = r && r.code === 'except_unnamed' ? t('This grant changed while the dialog was open — close it and open it again') : (r && r.error) || t('server unreachable'); showToast(why, { type: 'error' }); return why; }
       close();
       return true;
     };

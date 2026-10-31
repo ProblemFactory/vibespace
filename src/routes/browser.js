@@ -204,6 +204,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // "Who can use it" is a LIST (2026-09-27): the whole-list rule, the write's refusals, the resolver of a picked session,
   // and a Task Group list that could not be read (never `not_owner`)
   'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410, groups_unreadable: 409,
+  except_unnamed: 409,   // lane held-except-doors: a Save that leaves a «除了» out without naming it (the ONE writer's refusal)
   // lane browser-stuck (2026-09-28): a page dialog holds the page; nothing open to answer; no watch on that browser; the browser did not take the answer
   dialog_open: 409, no_dialog: 409, not_watched: 409, answer_failed: 502,
   // lane browser-surfaces: a kernel's surface answered (src/browser-surfaces.js SURFACE_CODES — the kernel's six error codes mapped
