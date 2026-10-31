@@ -6,9 +6,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - A background job can now use a key its agent saved in your vault: handed over at each start, never in its logs or command line; a locked vault makes it wait.
+- An urgent request, or one an agent or a person waits on, flashes its window and shows a countdown card by For you that opens it; others only update the count.
 
 ### Changed
 - A vault command card now also shows a long working folder, program path or secret reference whole under Technical details.
+- What a conversation waits on you for now sits in a fixed strip above the message box, not in the chat; tap the question to go to where it was asked.
 
 ### Fixed
 - While public URLs are down because the relay keeps dropping the connection, For you says why; publishing tries once first, and no longer asks about DNS.
@@ -21,6 +23,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A stopped job now counts as cut short only a process killed without its time to stop, not one that got the stop signal while time was left.
 - After Claude Code updated to 2.1.314, the accounts you sign in with a long-lived token are back in the pool.
 - Stopped sessions' windows stay as tiles you can resume; one that cannot reopen says why and how to get the window back, and one desktop can be restored alone.
+- Jumping to a search result is no longer undone when the latest messages from an earlier ↓ or send finish loading.
 
 ### Removed
 - Background jobs no longer read secrets from a plain file (nothing used it) — a job's secret comes from the vault.
