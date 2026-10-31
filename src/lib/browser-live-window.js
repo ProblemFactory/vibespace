@@ -1238,6 +1238,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (pkUnknown) { // lane passkey-browse-yourself (rule 4): never silence — VibeSpace says it cannot see passkey requests here
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-unknown'; line.textContent = pkUnknown.line;
       dialogBar.append(line);
+      if (pkUnknown.retry) dialogBar.append(textBtn(pkUnknown.retry, () => send({ type: 'passkey-retry' }), 'browser-live-dialog-restart browser-live-passkey-retry')); // acceptance r2: the re-arms stopped — his door (his clicks on the page never re-arm)
     }
   };
   /** lane browser-surfaces: A KERNEL PROMPT'S CARD — the actor + verb + object as ONE title (the kind's words), the page's words,

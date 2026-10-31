@@ -7190,10 +7190,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   async function cdpEndpointFor(profileId, { fresh = false } = {}) {
     let p = null; try { p = profile(String(profileId || '')); } catch { p = null; }
-    if (!p) return { ok: false, error: 'no such browser' };
+    if (!p) return { ok: false, code: 'no-browser', error: 'no such browser' };
     const rec = reg.browsers[p.id];
-    if (!rec || rec.state !== 'ready') return { ok: false, error: 'the browser is not running' };
-    if (rec.hostId) return { ok: false, error: 'the browser runs on another machine' };
+    if (!rec || rec.state !== 'ready') return { ok: false, code: 'not-running', error: 'the browser is not running' };
+    if (rec.hostId) return { ok: false, code: 'remote', error: 'the browser runs on another machine' }; // lane passkey-browse-yourself r3: the watch says THIS answer's cause (never its own hostId branch)
     if (!isEph(p)) return rec.cdpUrl ? { ok: true, url: rec.cdpUrl } : { ok: false, error: 'the browser answered no CDP url' }; // the record's own (a restart writes the new one)
     if (fresh) vpUrls.delete('child:' + String(p.owner.id)); // a watch that went down re-asks the daemon (a relaunched Chrome has a new port)
     return withCdpUrl({ kind: 'child', handle: p.owner.id }, async (url) => ({ ok: true, url }));

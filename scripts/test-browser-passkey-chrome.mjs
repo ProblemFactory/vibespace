@@ -251,16 +251,37 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       const r1 = await Promise.race([pend, sleep(3000).then(() => null)]);
       ok(cn.ok && cn.n === 1 && r1 && r1.v === 'AbortError', 'S11 … and his Cancel ends it (the page sees AbortError)', { cn, r1 });
       await dcall('Target.closeTarget', { targetId: P1.tid });
+      // S11c acceptance r2: his AUTOFILL request (the page's own, at load) is handed to Chrome as is (`pass`) and holds no queue — his
+      // «Sign in with a passkey» that follows reaches Chrome's window at once (the watch says passkey_open); what Chrome does with
+      // the autofill one meanwhile is MEASURED (said in the line)
+      const P3 = await ptab(); const t3 = Date.now();
+      let c3 = null, m3 = null;
+      P3.ev('signin(true)').then((r) => { c3 = { v: r && r.result && r.result.result ? r.result.result.value : null, ms: Date.now() - t3 }; });
+      await until(() => P3.e().pk.records.some((r) => r.conditional), 4000);
+      P3.ev('signin()').then((r) => { m3 = { v: r && r.result && r.result.result ? r.result.result.value : null, ms: Date.now() - t3 }; });
+      await sleep(PK.PENDING_SAID_MS + 400);
+      const v3 = Wp.passkeyIn(PID, null), recs3 = P3.e().pk.records.map((r) => ({ conditional: !!r.conditional, outcome: r.outcome }));
+      ok(v3.state === 'passkey_open' && recs3.some((r) => !r.conditional && r.outcome === 'pending') && m3 === null && !P3.e().pk.auth, `S11c his AUTOFILL request goes to Chrome as is and holds no queue: his own «Sign in with a passkey» that follows reaches Chrome's window at once (passkey_open, no authenticator) — measured: the autofill request ${c3 ? `ended «${c3.v}» at ${c3.ms} ms` : 'is still open beside it'}`, { v3: v3.state, recs3, c3, m3 });
+      const cn3 = await Wp.cancelPasskey({ profileId: PID, browserKey: 'hu-pkstore0', ephemeral: true }, { by: 'user' });
+      await until(() => m3 !== null, 4000);
+      ok(cn3.ok && m3 && m3.v === 'AbortError', 'S11c … and his Cancel ends his sign-in (AbortError)', { cn3, m3, c3 });
+      await dcall('Target.closeTarget', { targetId: P3.tid });
       // S11b the vault key he CHOSE (his «always» on the key S3 stored): an authenticator for THAT ceremony only, Chrome's UI on
       // (enableUI true), removed when it ends — and what Chrome does with its own sheet then is MEASURED (said in the line)
       const kept = rows(); let pst = null; for (const rw of kept) pst = PSx.setPolicy(PSx.withRow(pst, PID, rw), PID, rw.credentialId, 'yes');
       fs.writeFileSync(PSTORE, JSON.stringify(pst), { mode: 0o600 });
       const P2 = await ptab();
       const sent = []; const w0 = Wp._watches.get(PID); const send0 = w0.ws.send.bind(w0.ws); w0.ws.send = (raw) => { try { const m = JSON.parse(raw); if (/^WebAuthn\./.test(m.method)) sent.push({ method: m.method, ui: m.params && m.params.enableUI }); } catch { /* */ } return send0(raw); };
-      const t1 = Date.now(); const r2 = await P2.ev('signin()'); const ms2 = Date.now() - t1; await sleep(500);
-      const out2 = r2 && r2.result && r2.result.result ? r2.result.result.value : null;
+      // r3: BOUNDED — with Chrome's UI on, Chrome's own sheet holds the request for HIS pick (nobody presses it here: the r2 run's
+      // unbounded await held the box lock to the suite's 1500 s timeout); 3.4 s, then his Cancel
+      const t1 = Date.now(); let d2 = null; const pend2 = P2.ev('signin()').then((r) => { d2 = { v: r && r.result && r.result.result ? r.result.result.value : null, ms: Date.now() - t1 }; return d2; });
+      await sleep(3400);
+      const held2 = d2 === null;
+      const cn2 = held2 ? await Wp.cancelPasskey({ profileId: PID, browserKey: 'hu-pkstore0', ephemeral: true }, { by: 'user' }) : null;
+      const r2c = held2 ? await Promise.race([pend2, sleep(4000).then(() => null)]) : d2; await sleep(500);
+      const out2 = held2 ? `Chrome's own sheet held it ${3400} ms for his pick; his Cancel ⇒ «${r2c && r2c.v}»` : `«${d2.v}» in ${d2.ms} ms`, ms2 = held2 ? null : d2.ms;
       const en = sent.filter((x) => x.method === 'WebAuthn.enable'), add = sent.filter((x) => x.method === 'WebAuthn.addVirtualAuthenticator'), rm = sent.filter((x) => x.method === 'WebAuthn.removeVirtualAuthenticator');
-      ok(kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, removed after — measured: the page's get answered «${out2}» in ${ms2} ms`, { kept: kept.length, sent, out2, ms2 });
+      ok(kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, removed after — measured: ${out2}`, { kept: kept.length, sent, out2, ms2, cn2 });
       w0.ws.send = send0;
       await dcall('Target.closeTarget', { targetId: P2.tid }); Wp.shutdown(); await sleep(300);
     }

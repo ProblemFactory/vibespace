@@ -279,7 +279,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!dialogs) return;
     const pid = relayProfileId(relay);
     if (!pid) return;
-    dialogs.arm(pid).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact
+    dialogs.arm(pid, { by: 'viewer' }).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact
   }
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);
@@ -1471,6 +1471,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
     if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
+    if (msg && msg.type === 'passkey-retry') { armDialogs(relay); return; } // acceptance r2 of lane passkey-browse-yourself: the gave-up line's Retry — a fresh arm (the tries start over), then the current fact
     if (msg && msg.type === 'prompt-answer') { answerPromptFor(relay, viewer, msg); return; } // lane browser-ui-prompts: the sign-in boxes / Dismiss — the message is never kept, traced or logged
     if (msg && msg.type === 'x-ticket') { xTicketFor(relay, viewer); return; } // lane browser-x-in-window (B2): the X picture's ticket for THIS viewer
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)

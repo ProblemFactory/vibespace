@@ -20,6 +20,9 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r3 its acceptance r2: the hook's `pending` is the whole start event (an autofill get stays one across a re-arm, no For-you
+//       item); his autofill holds no queue; his Close ends only the watch HE opened; a restarted hub finds the hook (names from the
+//       browser's devtools id); the unwatched cause from the machine handle's answer; the gave-up line's Retry press
 //   ⑨r2 its acceptance r1: the PERSON's watch observes (no permission plan / print release / prompt hooks / authenticator; a vault
 //       passkey only when he chose it), the view's fact is the CURRENT one and the shown browser's, a page already waiting is said
 //       across a reconnect, the re-arm is bounded, a remote browser says the true cause
@@ -635,7 +638,7 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     await R.lease({ kind: 'browser-ready', profileId: PID, why: 'heal' });
     v.afterHeal = R.state();
     R.H.on = false; try { R.f.sock().h.close(); } catch { /* */ }
-    await until9(() => false, 30); v.withoutHim = R.state(); // CONTROL: nobody browses it himself ⇒ no re-arm
+    await until9(() => false, 12); v.withoutHim = R.state(); // CONTROL: nobody browses it himself ⇒ no re-arm (a re-arm would come at rearmMs·2^n ≤ 40 ms; 12 ticks ≥ 60 ms)
     R.D.shutdown();
     return v;
   }
@@ -687,7 +690,7 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     const SRC = { d: fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'), p: fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8') };
     const base = () => { for (const x of ['browser-stuck.js', 'browser-passkey-store.js', 'browser-human.js']) put('src/' + x, fs.readFileSync(path.join(REPO, 'src', x), 'utf8')); put('src/browser-passkey.js', SRC.p); put('src/server/browser-dialogs.js', SRC.d); };
     const M = [
-      ['rule 1 (no watch at human-start)', 'd', "      else if (ev.kind === 'human-start') return arm(ev.profileId);", "      else if (ev.kind === 'human-start') return null;", rule1],
+      ['rule 1 (no watch at human-start)', 'd', "      else if (ev.kind === 'human-start') return arm(ev.profileId", "      else if (ev.kind === 'human-start') return null && arm(ev.profileId", rule1],
       ['rule 2 (his key has no candidate)', 'd', "const humanPid = /^hu-/.test(bk) ? HM().profileOfHumanKey(bk) : null;", 'const humanPid = null;', rule2],
       ['rule 3 (the display is not named)', 'p', 'desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : ', 'desktop: headed ? (', rule3],
       ['rule 4 (an unwatched block is null)', 'd', ': unknownBlock(pid), // lane browser-passkey:', ': null, // lane browser-passkey:', rule4],
@@ -729,8 +732,10 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
         else if (m.method === 'Runtime.addBinding' && sid === 'S-T3') error = { message: 'no binding here' };
         else if (m.method === 'Page.addScriptToEvaluateOnNewDocument') { if (!m.params.worldName) slotOf = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null; result = { identifier: '1' }; }
         else if (m.method === 'Runtime.evaluate' && m.params.expression === 'CredentialsContainer.prototype') result = { result: { type: 'object', objectId: 'P-' + m.params.contextId } };
+        else if (m.method === 'Runtime.evaluate' && world.docSlots && /#(vs[0-9a-f]{32})\b/.test(String(m.params.expression))) { world.docSlots.push(String(m.params.expression).match(/#(vs[0-9a-f]{32})\b/)[1]); world.installs = (world.installs || 0) + 1; result = { result: { type: 'boolean', value: true } }; } // ⑨r3: a hook evaluated into the LIVE document (none of ours found there)
         else if (m.method === 'Runtime.evaluate') result = { result: { type: 'string', value: 'released' } };
-        else if (m.method === 'Runtime.getProperties') result = { result: [], privateProperties: slotOf ? [{ name: '#' + slotOf, value: { type: 'function', objectId: 'CTL-1' } }] : [] };
+        else if (m.method === 'Runtime.getProperties') result = { result: [], privateProperties: (world.docSlots || (slotOf ? [slotOf] : [])).map((s, i) => ({ name: '#' + s, value: { type: 'function', objectId: 'CTL-' + (i + 1) } })) };
+        else if (m.method === 'Runtime.callFunctionOn' && world.hook && m.params.functionDeclaration === PK.CTL_FN) { const v = world.hook(m.params.arguments.map((a) => a.value)); result = { result: { type: typeof v === 'number' ? 'number' : 'object', value: v } }; } // ⑨r3: the watch's verbs reach a REAL hook
         else if (m.method === 'Runtime.callFunctionOn') result = { result: verbOf(m) === 'pending' ? { type: 'object', value: world.pending } : m.params.functionDeclaration === PK.REARM_FN ? { type: 'object', value: { displaced: [], kept: [] } } : { type: 'number', value: 1 } };
         else if (m.method === 'Page.createIsolatedWorld') result = { executionContextId: 70 };
         else if (m.method === 'WebAuthn.addVirtualAuthenticator') result = { authenticatorId: 'AUTH-' + (++n) };
@@ -743,18 +748,18 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   }
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
-  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20 } = {}) {
+  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null } = {}) {
     const world = { sockets: 0, refuse: false, pending: [], print, H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
     const listeners = new Set(), items = [], events = [];
-    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async () => (hostId ? { ok: false, error: 'the browser runs on another machine' } : { ok: true, url: 'ws://fake' }), onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async () => ep || (hostId ? { ok: false, code: 'remote', error: 'the browser runs on another machine' } : { ok: true, url }) /* the keeper's own answers (its hostId branch is ITS — the machine handle's) */, onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
       browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
-    const D = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn() {}, log() {} }, now: () => clock, holdersOf, leaseCountOf: () => holdersOf().length, passkeys,
-      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } });
-    D.onChange((ev) => events.push(ev));
+    const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn() {}, log() {} }, now: () => clock, holdersOf, leaseCountOf: () => holdersOf().length, passkeys,
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } }); d.onChange((ev) => events.push(ev)); return d; };
+    let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
     const w = () => D._watches.get(PID) || null;
     const calls = (method, pred = () => true) => f.log.filter((m) => m.method === method && pred(m));
@@ -763,7 +768,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const start = (id, rp = 'vercel.com') => say({ ev: 'start', id, kind: 'get', rpId: rp, origin: 'https://' + rp });
     const end = (id) => say({ ev: 'end', id, outcome: 'ok' });
     const opened = async () => { await lease({ kind: 'human-start', profileId: PID, key: HK, launched: true }); await until2(() => w() && w().state === 'open'); await sleep2(30); };
-    return { D, f, world, items, events, lease, w, calls, start, end, opened, step: (ms) => { clock += ms; } };
+    return { get D() { return D; }, restart: () => { D.shutdown(); D = mkD(); }, f, world, items, events, lease, w, calls, start, end, opened, say, now: () => clock, step: (ms) => { clock += ms; } };
   }
   const released = (X) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'release').length;
   // MAJOR 1: his press alone ⇒ the PERSON's watch (observation only)
@@ -825,13 +830,13 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     await X.opened();
     X.world.refuse = true; const s0 = X.world.sockets;
     try { X.f.sock().h.close(); } catch { /* */ }
-    await sleep2(450); const n1 = X.world.sockets - s0;
-    await sleep2(250); const n2 = X.world.sockets - s0;
+    await until2(() => X.world.sockets - s0 >= 5, 1500); await sleep2(200); const n1 = X.world.sockets - s0; // past where a sixth would come (5·2^5 = 160 ms)
+    await sleep2(60); const n2 = X.world.sockets - s0;
     const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
     const words = fact && PK.passkeyWords(fact.passkey, null);
     X.world.refuse = false; await X.D.arm(PID);
     const back = { state: X.w() && X.w().state, fact: X.D.passkeyFactOf({ profileId: PID, browserKey: HK }) };
-    ok(n1 === 5 && n2 === 5 && !!fact && fact.passkey.state === 'unknown' && fact.passkey.why === 'gave-up' && fact.passkey.text === PK.GAVE_UP_TEXT && words && words.unknown && words.line === PK.GAVE_UP_TEXT && X.events.some((e) => e.kind === 'passkey' && e.why === 'gave-up') && back.state === 'open' && back.fact === null,
+    ok(n1 === 5 && n2 === 5 && !!fact && fact.passkey.state === 'unknown' && fact.passkey.why === 'gave-up' && fact.passkey.text === PK.GAVE_UP_TEXT && words && words.unknown && /stopped retrying/.test(words.line) && words.retry === 'Retry' && X.events.some((e) => e.kind === 'passkey' && e.why === 'gave-up') && back.state === 'open' && back.fact === null,
       '⑨r2 the re-arm is BOUNDED: a refused port (ECONNREFUSED reaches the close) is tried 5 times with a doubling backoff, then never again — his fact says the watch stopped (`gave-up`, its own words), never the endless 2-s loop; the next arm starts over', { n1, n2, fact: fact && fact.passkey, back });
     X.D.shutdown();
   }
@@ -925,6 +930,149 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const elseBlock = cut('    } else if (pkElse) {', '    } else if (pkUnknown) {') || '';
     ok(/dialogBar\.classList\.toggle\('stuck', true\); dialogBar\.classList\.toggle\('blind', false\); \/\/ acceptance r1/.test(src) && !!elseBlock && !/textBtn|passkey-cancel/.test(elseBlock) && /rowBase\(row\)/.test(elseBlock),
       '⑨r2 the banner: a passkey banner that follows the quiet unknown line drops the quiet look (never an urgent banner painted grey); another browser\'s note names it and carries no button');
+  }
+
+  // ⑨r3 — acceptance r2 of lane passkey-browse-yourself (baf2bd229): every leg below is RED on baf2bd229 by name
+  console.log('⑨r3 acceptance r2: an autofill get stays one across a re-arm; his autofill holds no queue; his Close ends only his watch; a restart finds the hook; the true cause; the Retry door');
+  const hookRealm = (host = 'github.com') => { const r = fakeRealm(); let hc = 5_000_000; r.G.DOMException = DOMException; r.G.btoa = btoa; r.G.location = { hostname: host, origin: 'https://' + host }; r.G.Date = { now: () => hc }; r.cfg.hold = true; r.cfg.holdMs = 60000; PK.installHook(r.G, r.cfg); return Object.assign(r, { step: (ms) => { hc += ms; }, ctl: (verb, id) => r.box.ctl(r.cfg.key, verb, id) }); };
+  const AGE = PK.FOR_YOU_AFTER_MS + 1000;
+  const STORE = () => ({ file: null, cipher: PS2.cipherOf(crypto2, crypto2.randomBytes(32)) });
+  let autofillPending = [], modalPending = [];
+  // MAJOR (the hook half): `pending` is the WHOLE start event the live road said
+  {
+    const r = hookRealm('github.com');
+    r.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } }).catch(() => {}); await tick();
+    const live = r.sent.find((x) => x.ev === 'start') || {};
+    r.ctl('release', live.id); await tick(); r.step(AGE);
+    autofillPending = r.ctl('pending', 0) || [];
+    const m = hookRealm('vercel.com');
+    m.nav.get({ publicKey: { challenge: 1, rpId: 'vercel.com', allowCredentials: [{ id: new Uint8Array([1, 2, 3]) }] } }).catch(() => {}); await tick();
+    const mlive = m.sent.find((x) => x.ev === 'start') || {};
+    m.ctl('release', mlive.id); await tick(); m.step(AGE);
+    modalPending = m.ctl('pending', 0) || [];
+    const a = autofillPending[0] || {}, b = modalPending[0] || {};
+    ok(live.mediation === 'conditional' && a.ev === 'start' && a.mediation === 'conditional' && a.origin === 'https://github.com' && a.rpId === 'github.com' && a.age === AGE && a.held === false && JSON.stringify(PK.parseEvent(JSON.stringify(a))) === JSON.stringify(PK.parseEvent(JSON.stringify(live))) && Array.isArray(b.allow) && b.allow.join() === 'AQID' && !b.mediation && b.age === AGE,
+      '⑨r3 MAJOR (the hook): `pending` answers the WHOLE start event the live road said — an autofill get keeps mediation:conditional, its origin and rpId (parseEvent reads it exactly as the live start), a modal get its allow list — plus its age and held', { a, b, live });
+  }
+  // MAJOR (the watch half): what the REAL hook answered, across a re-arm of his watch
+  {
+    const across = async (list) => {
+      const X = world2({ holders: 'human', print: false, store: STORE() });
+      await X.opened();
+      X.world.pending = list; const items0 = X.items.length;
+      try { X.f.sock().h.close(); } catch { /* */ }
+      await until2(() => X.world.sockets === 2 && X.w() && X.w().state === 'open'); await sleep2(15);
+      const rec = (X.w() ? X.w().targets.get('T1').pk.records : []).find((x) => x.again) || null;
+      const out = { row: (X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey || {}).state, view: (X.D.passkeyFactOf({ profileId: PID, browserKey: HK }) || { passkey: {} }).passkey.state || null, items: X.items.length - items0, conditional: !!(rec && rec.conditional), age: rec ? X.now() - rec.startedAt : null };
+      X.D.shutdown(); return out;
+    };
+    const auto = await across(autofillPending), modal = await across(modalPending);
+    ok(auto.conditional && auto.row === 'none' && auto.view === null && auto.items === 0 && !modal.conditional && modal.row === 'passkey_open' && modal.view === 'passkey_open' && modal.age === AGE && modal.items === 1,
+      '⑨r3 MAJOR (the watch): an AUTOFILL get open across a re-arm (github.com/login\'s conditional request, the real hook\'s `pending` answer) is recorded as one — none, no banner, 0 For-you items; a MODAL get pending across it is passkey_open with its age and its For-you item', { auto, modal });
+  }
+  // the found one: his autofill (handed to Chrome as is) holds no queue — his «Sign in with a passkey» reaches the watch at once
+  {
+    const X = world2({ holders: 'human', print: false, store: STORE() });
+    await X.opened();
+    const r = hookRealm('github.com'); let fwd = 0;
+    X.world.hook = (args) => r.box.ctl(r.cfg.key, args[1], args[2]); // the watch's verbs reach the REAL hook
+    const forward = () => { for (const s of r.sent.slice(fwd)) X.say(s); fwd = r.sent.length; };
+    r.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } }).catch(() => {}); await tick(); forward();
+    await until2(() => r.calls.length >= 1, 1000); await sleep2(20);
+    const verbs1 = X.calls('Runtime.callFunctionOn', (m) => m.params.functionDeclaration === PK.CTL_FN).map(verbOf).filter((v) => v !== 'pending' && v !== 'wait');
+    r.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } }).catch(() => {}); await tick(); forward();
+    await sleep2(40); X.step(PK.PENDING_SAID_MS + 100);
+    const starts = r.sent.filter((x) => x.ev === 'start').length, view = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
+    ok(verbs1[0] === 'pass' && starts === 2 && !!view && view.passkey.state === 'passkey_open' && r.calls.length === 2,
+      '⑨r3 his AUTOFILL get is handed to Chrome as is (`pass`: no vault key, no queue) — his own «Sign in with a passkey» that follows starts AT ONCE (its start reaches the watch: passkey_open, Chrome\'s own window), never queued behind an autofill request that stays open as long as the page', { verbs1, starts, view: view && view.passkey.state, natives: r.calls.length });
+    X.D.shutdown();
+  }
+  // MINOR: his Close ends only the watch HE opened
+  {
+    const X = world2({ holders: 'agent', print: false });
+    await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open'); await sleep2(10);
+    X.world.H.agent = false; await X.lease({ kind: 'detach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await sleep2(10);
+    X.world.H.human = true; await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: false }); await sleep2(10);
+    const mid = X.w() && X.w().mode;
+    X.world.H.human = false; await X.lease({ kind: 'human-end', profileId: PID, key: HK, reason: 'released' }); await sleep2(10);
+    const agentOpened = { open: !!X.w() && X.w().state === 'open', mode: X.w() && X.w().mode, paint: !!X.D.paintFacts(PID) };
+    X.D.shutdown();
+    const V = world2({ holders: 'agent', print: false }); V.world.H.agent = false;
+    await V.D.arm(PID, { by: 'viewer' }); await until2(() => V.w() && V.w().state === 'open'); await sleep2(10);
+    V.world.H.human = true; await V.lease({ kind: 'human-start', profileId: PID, key: HK, launched: false }); await sleep2(10);
+    V.world.H.human = false; await V.lease({ kind: 'human-end', profileId: PID, key: HK, reason: 'released' }); await sleep2(10);
+    const viewerOpened = { open: !!V.w() && V.w().state === 'open' };
+    V.D.shutdown();
+    const P = world2({ holders: 'human', print: false }); await P.opened();
+    P.world.H.human = false; await P.lease({ kind: 'human-end', profileId: PID, key: HK, reason: 'released' }); await sleep2(10);
+    const his = { watch: !!P.w() };
+    P.D.shutdown();
+    ok(mid === 'person' && agentOpened.open && agentOpened.mode === 'agent' && agentOpened.paint && viewerOpened.open && !his.watch,
+      '⑨r3 MINOR: the watch remembers its OPENER — an AGENT\'s verb opened it, the conversation detached, he browsed and pressed Close ⇒ it stays (back in the agent\'s mode; the idle-paint freeze still has it); a live view\'s own watch stays too; only the watch HIS press opened ends with his Close', { mid, agentOpened, viewerOpened, his });
+  }
+  // TO VERIFY 1: a hub restart finds the hook of a document open across it (the names are the browser's)
+  {
+    const URL0 = 'ws://127.0.0.1:9/devtools/browser/0b5e2c1a-3f4d-4e5f-8a9b-0c1d2e3f4a5b';
+    const X = world2({ holders: 'human', print: false, url: URL0 });
+    await X.opened();
+    const slot0 = X.w().pkSlot, chan0 = X.w().pkChan, world0 = X.w().pkWorld;
+    X.world.docSlots = [slot0]; // the live document keeps THIS process's hook from here on
+    X.world.pending = [{ ev: 'start', id: 1, kind: 'get', rpId: 'vercel.com', origin: 'https://vercel.com', age: AGE, held: false }];
+    const L0 = X.f.log.length;
+    X.restart(); // the hub restarts: a new create(), its own socket — the same browser (the same devtools id)
+    await X.opened();
+    const asked = X.f.log.slice(L0).filter((m) => m.method === 'Runtime.callFunctionOn' && verbOf(m) === 'pending').length;
+    const view = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
+    const same = { slot: X.w().pkSlot === slot0, chan: X.w().pkChan === chan0, world: X.w().pkWorld === world0, installs: X.world.installs || 0 };
+    X.D.shutdown();
+    const Y = world2({ holders: 'human', print: false, url: URL0.replace('0b5e2c1a', '1c6f3d2b') }); await Y.opened(); const relaunched = Y.w().pkSlot; Y.D.shutdown();
+    const Z = world2({ holders: 'human', print: false }); await Z.opened(); const z1 = Z.w().pkSlot; Z.restart(); await Z.opened(); const z2 = Z.w().pkSlot; Z.D.shutdown();
+    ok(same.slot && same.chan && same.world && same.installs === 0 && asked >= 1 && !!view && view.passkey.state === 'passkey_open' && relaunched !== slot0 && z1 !== z2 && /^vs[0-9a-f]{32}$/.test(slot0),
+      '⑨r3 TO VERIFY 1: a HUB RESTART is the re-arm road — the hook\'s slot / world / channel are derived from the browser\'s devtools id (no page reads it), so the restarted hub finds the hook of a document open across the restart (no second hook evaluated over it), asks it `pending` and says the wait (passkey_open); a relaunched browser gets new names; a URL without the id keeps random names per process', { same, asked, view: view && view.passkey.state, relaunched: relaunched !== slot0, random: z1 !== z2 });
+  }
+  // TO VERIFY 3: the unwatched cause is the machine handle's own answer (never a branch on the record's hostId)
+  {
+    const R = world2({ holders: 'human', hostId: 'host-0000m1', print: false });
+    await R.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true });
+    const remote = R.D.passkeyFactOf({ profileId: PID, browserKey: HK }); R.D.shutdown();
+    const F = world2({ holders: 'human', hostId: 'host-0000m1', print: false, rearmMs: 2, ep: { ok: true, url: 'ws://fake' } }); // a paired machine's browser the hub CAN reach (a forwarded CDP url)
+    await F.opened(); const fwdOpen = !!F.w() && F.w().state === 'open';
+    F.world.refuse = true; try { F.f.sock().h.close(); } catch { /* */ }
+    await until2(() => (F.D.passkeyFactOf({ profileId: PID, browserKey: HK }) || { passkey: {} }).passkey.why === 'gave-up', 1500);
+    const fwd = F.D.passkeyFactOf({ profileId: PID, browserKey: HK }); F.D.shutdown();
+    const N = world2({ holders: 'human', print: false, ep: { ok: false, code: 'no-cdp', error: 'the browser answered no CDP url' } });
+    await N.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true });
+    const nf = N.D.passkeyFactOf({ profileId: PID, browserKey: HK }), nw = nf && PK.passkeyWords(nf.passkey, null); N.D.shutdown();
+    ok(!!remote && remote.passkey.why === 'remote' && remote.passkey.text === PK.REMOTE_TEXT && fwdOpen && !!fwd && fwd.passkey.why === 'gave-up' && !!nf && nf.passkey.why === 'refused' && nf.passkey.text.includes('(the browser answered no CDP url)') && !/started before/.test(nf.passkey.text) && !!nw && nw.line.includes('the browser answered no CDP url'),
+      '⑨r3 TO VERIFY 3: the unwatched cause is the machine handle\'s OWN answer — `remote` from the keeper\'s refusal; a paired machine\'s browser the hub CAN reach is watched, and when its socket gives up says gave-up (never «another machine» from the record\'s hostId); any other refusal in the handle\'s words, never the false «started before»', { remote: remote && remote.passkey.why, fwdOpen, fwd: fwd && fwd.passkey.why, nf: nf && nf.passkey });
+  }
+  // TO VERIFY 2: the gave-up line's door — a Retry press the bridge turns into a fresh arm
+  {
+    const words = PK.passkeyWords(PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), null), plain = PK.passkeyWords(PK.passkeyBlock({ state: 'unknown' }), null);
+    const http = require('http'), WSm = require('ws');
+    const SB = require(path.join(REPO, 'src/server/browser-stream.js')), BHS = require(path.join(REPO, 'src/browser-stream.js'));
+    const target = BHS.humanTarget({ key: HK, profileId: PID, label: 'Mine' });
+    const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
+    const arms = [];
+    const dialogs = { arm: async (pid, o) => { arms.push(o || null); return { ok: false, watched: false }; }, passkeyFactOf: () => ({ state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), profileId: PID }), onChange: () => () => {}, cancelPasskey: async () => ({ ok: true, n: 0 }), openOn: () => null, surfacesIn: () => [] };
+    class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+    const bridge = SB.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
+    const srv = http.createServer(); srv.on('upgrade', (req, s, h) => bridge.handleUpgrade(req, s, h));
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = [];
+    ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } });
+    await new Promise((r) => { ws.on('open', r); ws.on('error', r); });
+    await until2(() => arms.length >= 1); const a0 = arms.length;
+    ws.send(JSON.stringify({ type: 'passkey-retry' }));
+    await until2(() => arms.length > a0, 1000); await sleep2(30);
+    const refused = got.some((m) => m.type === 'refused');
+    try { ws.close(); } catch { /* */ }
+    bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+    const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const unk = (live.split('    } else if (pkUnknown) {')[1] || '').split('\n    }\n')[0];
+    ok(words.retry === 'Retry' && plain.retry === '' && /Retry in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'viewer' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
+      '⑨r3 TO VERIFY 2: the gave-up line names a door that WORKS — his window draws a Retry press (only on gave-up), the bridge turns `passkey-retry` into a fresh arm (the tries start over); never the false «the next action on this browser reconnects» (his clicks never re-arm)', { retry: words.retry, plain: plain.retry, arms, refused });
   }
 }
 
