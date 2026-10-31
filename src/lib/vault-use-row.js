@@ -41,7 +41,10 @@ const clockOf = (ms) => { try { return new Date(ms).toTimeString().slice(0, 5); 
 // «… (legacy wildcard: any tool) · 20 d», «… · expired» — a grant no longer has one end
 const leftWord = (s) => { if (s.expired) return t('expired'); if (!(Number(s.until) > 0)) return t('no end'); const ms = Number(s.until) - Date.now(); return ms >= 86400e3 ? t('{n} d', { n: Math.round(ms / 86400e3) }) : ms >= 3600e3 ? t('{n} h', { n: Math.round(ms / 3600e3) }) : t('{n} min', { n: Math.max(1, Math.ceil(ms / 60e3)) }); };
 const scopesOfM = (m) => (Array.isArray(m.scopes) && m.scopes.length ? m.scopes : [...(m.hosts || []).map((h) => ({ kind: 'host', host: h, until: m.until, expired: m.expired, tool: m.toolFor && m.toolFor[h], legacy: Array.isArray(m.legacy) && m.legacy.includes(h) })), ...(m.commands || []).map((c) => ({ kind: 'command', command: c, until: m.until, expired: m.expired }))]);   // an older hub's row: each scope with the member's end
-const scopeWord = (s, entryHosts) => (s.kind === 'command' ? t('the command {command}', { command: commandWord(s.command) }) : oneHostWord(s.host, entryHosts, s.tool, !!s.legacy));
+const scopeWord = (s, entryHosts) => (s.kind === 'window' ? t('any destination') : s.kind === 'command' ? t('the command {command}', { command: commandWord(s.command) }) : oneHostWord(s.host, entryHosts, s.tool, !!s.legacy));
+// lane vault-standing-request r7: a WINDOW scope (a run card's «Allow for 1 hour» — any run of this conversation until its end):
+// «any destination · until 10:41 · 42 min», the warning accent; an ended one «… · expired» as the others
+const windowWords = (s) => `${t('any destination')} · ${s.expired ? t('expired') : `${t('until {when}', { when: clockOf(s.until) })} · ${leftWord(s)}`}`;
 /** lane vault-standing-request r5 (the r4 acceptance, MINOR 2 — «As each has it now» gave a newly typed host NO end whenever ANY
  *  live scope had none, against the rule written beside it): ONE member's scopes as the Save writes them — PURE (the suite reads
  *  it; the dialog's Save and its preview line both call it). `was` = the member as the row has it (null: new to the row),
@@ -54,7 +57,7 @@ const KEEP_DEFAULT = '30d';
 export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now() } = {}) {
   const wasSc = was ? scopesOfM(was) : [];
   const ended = (s) => !!s.expired || (Number(s.until) > 0 && Number(s.until) <= now);
-  const live = wasSc.filter((s) => !ended(s)), finite = live.map((s) => Number(s.until)).filter((u) => u > 0);
+  const live = wasSc.filter((s) => !ended(s) && s.kind !== 'window'), finite = live.map((s) => Number(s.until)).filter((u) => u > 0);   // r7: a 1-hour window is no «now» a new host keeps
   const keepNew = !live.length ? now + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
   const endMs = (ENDS.find(([id]) => id === endId) || [])[1];
   const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? now + endMs : null);
@@ -70,6 +73,9 @@ export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep'
     if (!s0) fresh.push(scopes.length);
     scopes.push({ command: { program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null }, ...(until ? { until } : {}) });   // lane vault-standing-request: a command scope keeps its own end too
   }
+  // r7: a WINDOW scope is the card's — the Save keeps it EXACTLY as the member holds it (its own end, whatever the end chosen
+  // here: the dialog never makes or moves one — the hub refuses it `window_card_only`)
+  for (const s of wasSc) if (s.kind === 'window' && Number(s.until) > 0) scopes.push({ kind: 'window', until: Number(s.until) });
   return { scopes, fresh };
 }
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? t('«Always» on a card') : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };
@@ -118,7 +124,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         const sc = scopesOfM(m);
         const words = el('span', 'vw-use-words');
         words.append(document.createTextNode(`${nameOf(m, app)} · `));
-        sc.forEach((s, k) => { if (k) words.append(document.createTextNode(', ')); const w = el('span', `vw-use-scope${s.expired ? ' vw-use-scope-ended' : ''}`, `${scopeWord(s, u.entryHosts)} · ${leftWord(s)}`); w.title = s.expired ? t('ended {when}', { when: dateOf(s.until) }) : Number(s.until) > 0 ? t('until {when}', { when: dateOf(s.until) }) : t('no end'); words.append(w); });   // r4: EACH scope with its own end
+        sc.forEach((s, k) => { if (k) words.append(document.createTextNode(', ')); const win = s.kind === 'window'; const w = el('span', `vw-use-scope${s.expired ? ' vw-use-scope-ended' : ''}${win ? ' vw-use-scope-window' : ''}`, win ? windowWords(s) : `${scopeWord(s, u.entryHosts)} · ${leftWord(s)}`); w.title = win ? t('A 1-hour approval from a run card: this conversation uses it in any run without asking, each use shows a notice — then it asks again. ✕ takes it back now.') : s.expired ? t('ended {when}', { when: dateOf(s.until) }) : Number(s.until) > 0 ? t('until {when}', { when: dateOf(s.until) }) : t('no end'); words.append(w); });   // r4: EACH scope with its own end; r7: a window «any destination · until HH:MM · N min»
         const bits = [];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (pausedM) bits.push(t('paused by you'));
@@ -248,7 +254,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const was = had.get(keyOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
-      if (!h.length && !cmds.length) return { error: t('Name the hosts it may be used for — a host name or address each (never «any host»)') };
+      const wins = was ? scopesOfM(was).filter((s) => s.kind === 'window') : [];   // r7: a 1-hour window rides it unchanged too
+      if (!h.length && !cmds.length && !wins.length) return { error: t('Name the hosts it may be used for — a host name or address each (never «any host»)') };
       const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });
       to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes: plan.scopes });
       fresh.push(plan.fresh);
@@ -266,6 +273,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       line.append(document.createTextNode(`${nameOf(m, app)} · `));
       m.scopes.forEach((s, i) => {
         if (i) line.append(document.createTextNode(', '));
+        if (s.kind === 'window') { line.append(el('span', 'vw-use-scope vw-use-scope-window', `${windowWords({ until: s.until, expired: Number(s.until) <= Date.now() })} ${t('(kept)')}`)); return; }   // r7: the card's window, kept as it is
         const sc = s.command ? { kind: 'command', command: s.command } : { kind: 'host', host: s.host, tool: s.tool };
         const isNew = plan.fresh[k].includes(i);
         line.append(el('span', `vw-use-scope${isNew ? ' vw-use-scope-new' : ''}`, `${scopeWord(sc, entryHosts)} · ${leftWord({ until: s.until, expired: Number(s.until) > 0 && Number(s.until) <= Date.now() })}${isNew ? ' ' + t('(new)') : ''}`));

@@ -34,6 +34,10 @@
 //      asked; the judge sees the card's facts, never the value; Revoke ⇒ that command asks again, the judge not asked; the
 //      policy persists in the MARKED store (a forged one carries nothing; a 2.369.359 body still verifies); a control door
 //      that runs on a judge's no is RED
+//   ㊳ ROUND 7 (lane vault-standing-request, the owner 2026-10-31 «… 1个小时授权吧»): THE WINDOW scope — a live one admits every shape
+//      the card refuses «Always» for (read by the real shape reader); no end ⇒ dropped (fail closed); past its end ⇒ expired;
+//      除了 first; the narrowest scope named (hosts › command › window); its own canon tag; spanOf / the views; the writer's rule;
+//      the ORCH: written by addMember only, a Save never mints one (window_card_only)
 // Run: node scripts/test-vault-use-grants.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1193,6 +1197,72 @@ console.log('㊳ ROUND 12 (MAJOR M3, the r11 regression) — the eviction stamp 
   const disk2 = JSON.parse(fs.readFileSync(path.join(w2.dataDir, 'vault-run.json'), 'utf8'));
   const fb = w2.door.rowFacts({ id: idOf(small), store: 'secrets', entry: small, field: 'secret' });
   ok((disk2.suspended || []).length === 256 && (disk2.suspended || []).includes(idOf(small)) && fb.paused === true, 'the suspended trim keeps the NEWEST by last-toggle: the small-id entry turned OFF last keeps its «paused» word (r11 kept the largest ids ⇒ the small id lost «paused» at once)', { susp: (disk2.suspended || []).length, hasSmall: (disk2.suspended || []).includes(idOf(small)), paused: fb.paused });
+}
+
+console.log('㊳ ROUND 7 (lane vault-standing-request — the owner 2026-10-31 «不清楚发往何处的话，就允许我直接给agent … 1个小时授权吧») — THE WINDOW SCOPE: any run of ONE conversation until its end; never without one');
+{
+  const WIN = typeof U.WINDOW_MS === 'number' ? U.WINDOW_MS : 3600e3;
+  const ID = VR.refFor('secrets', 'secret:abc1234567', 'secret').ref;   // the entry's reference (vault://…), built by the model
+  // the shapes the card refuses «Always» for — read by the REAL shape reader (src/vault-run.js), as the door reads them
+  const shapeOf = (argv, resolved, programWritable = false) => { const pr = VR.parseRunArgs(['--env', `T=${ID}`, '--', ...argv]); const spec = pr.ok && VR.planOf({ ...pr.req, resolved, templates: {}, programWritable }); const sh = spec && spec.ok ? VR.shapeOf(spec) : null; return sh ? { always: !!sh.always, destinationKnown: !!sh.destKnown, hosts: VR.destinationsOf(sh).hosts, why: sh.noAlways } : null; };
+  const SHAPES = [
+    ['a shell\'s inline code', ['bash', '-c', 'curl -s -H "A: $T" https://api.tts.example/v1'], '/usr/bin/bash'],
+    ['an interpreter and its script', ['python3', 'upload.py'], '/usr/bin/python3'],
+    ['a tool routed through a proxy (an opaque route)', ['curl', '-x', 'http://p.example:8080', 'https://k.example/x'], '/usr/bin/curl'],
+    ['a tool reading a config file', ['curl', '-K', 'cfg.txt', 'https://k.example/x'], '/usr/bin/curl'],
+    ['a program outside the tool table', ['mytool', 'up'], '/opt/x/mytool'],
+    ['a program an agent could have written', ['curl', 'https://k.example/x'], '/home/u/bin/curl', true],
+  ];
+  const winRow = (until, extra = []) => ({ door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-w', scopes: [{ kind: 'window', until, source: 'card', at: NOW }, ...extra] }], except: [] });
+  const F = { conversationKeys: ['cid-w'] };
+  const vs = SHAPES.map(([n, argv, res, pw]) => { const s = shapeOf(argv, res, pw); return { n, s, v: s && U.useVerdict([winRow(NOW + WIN)], F, { ...s, now: NOW + 60e3 }) }; });
+  ok(vs.every((x) => x.s && x.s.always === false && x.v && x.v.ok === true && x.v.scope === 'window' && x.v.until === NOW + WIN && x.v.id === U.grantIdOf(RES, 'conversation:cid-w')), 'a LIVE window admits every shape the card refuses «Always» for — a shell, an interpreter, an opaque route, a config file, an unknown program, a writable program — scope window, its end and the grant named', vs.map((x) => ({ n: x.n, always: x.s && x.s.always, why: x.s && x.s.why, ok: x.v && x.v.ok, scope: x.v && x.v.scope, code: x.v && x.v.code })));
+  // fail closed: no end / a non-finite end ⇒ the ONE reader drops it
+  const noEnd = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-w', scopes: [{ kind: 'window', source: 'card', at: NOW }] }], except: [] };
+  const inf = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-w', scopes: [{ kind: 'window', until: Infinity, source: 'card' }] }], except: [] };
+  const vNo = U.useVerdict([noEnd], F, { destinationKnown: false, now: NOW }), vInf = U.useVerdict([inf], F, { destinationKnown: false, now: NOW });
+  ok(U.scopesOf(noEnd.to[0]).length === 0 && U.scopesOf(inf.to[0]).length === 0 && !vNo.ok && !vInf.ok, 'a window with NO end (or a non-finite one) is DROPPED by the one reader (scopesOf) — it admits nothing, ever (fail closed)', { vNo, vInf });
+  const sl = GM.scopeListOf;
+  ok(!!(sl([{ kind: 'window', until: NOW + WIN, source: 'card', at: NOW }]) && sl([{ kind: 'window', until: NOW + WIN }, { host: 'a.example' }]) && !sl([{ kind: 'window', until: NOW + WIN }, { kind: 'window', until: NOW + 2 * WIN }]) && !sl([{ kind: 'window', until: NOW, tool: 'curl' }]) && !sl([{ kind: 'everything', until: NOW }]) && !sl([{ kind: 'window', until: -5 }])), 'the store\'s shape (GM.scopeListOf): {kind: window, until, source, at} — closed keys, ONE window per member, never another kind', null);
+  // past its end ⇒ expired (the card); an ended window beside a live host ⇒ the host's own verdict (a shell still asks)
+  const vEnd = U.useVerdict([winRow(NOW + WIN)], F, { destinationKnown: false, now: NOW + WIN + 1 });
+  const vMix = U.useVerdict([winRow(NOW + WIN, [{ host: 'a.example' }])], F, { hosts: [], destinationKnown: false, now: NOW + WIN + 1 });
+  ok(!vEnd.ok && vEnd.code === 'expired' && !vMix.ok && vMix.code === 'destination_unknown' && vMix.member && vMix.member.window === null, 'past its end ⇒ expired (the card asks); an ENDED window beside a live host scope admits nothing — a shell asks (destination_unknown)', { vEnd: vEnd.code, vMix: vMix.code });
+  // 除了 beats a window
+  const ex = { ...winRow(NOW + WIN), except: [{ kind: 'conversation', key: 'cid-w' }] };
+  const vEx = U.useVerdict([{ ...ex, to: [...ex.to, { kind: 'everyone', scopes: [{ kind: 'window', until: NOW + WIN }] }] }], F, { destinationKnown: false, now: NOW });
+  ok(!vEx.ok && vEx.code === 'excepted', '(a control — 除了 is the model\'s, green on every tree) membership first: a conversation left out by 除了 holds nothing, whatever window a member holds (excepted)', vEx);
+  // the NARROWEST scope is named: hosts › command › window — across every admitting entry
+  const narrow = winRow(NOW + WIN, [{ host: 'a.example' }]);
+  const vH = U.useVerdict([narrow], F, { hosts: ['a.example'], destinationKnown: true, now: NOW }), vW = U.useVerdict([narrow], F, { hosts: ['b.example'], destinationKnown: true, now: NOW });
+  const tok = { program: '/usr/bin/python3', pre: [], arg: '/w/up.py', sha: 'a'.repeat(64), psha: null };
+  const two = { door: 'vault-use', resource: RES, to: [winRow(NOW + WIN).to[0], { kind: 'group', id: 'T-g', scopes: [{ command: tok }] }], except: [] };
+  const vC = U.useVerdict([two], { conversationKeys: ['cid-w'], groupIds: ['T-g'] }, { hosts: [], destinationKnown: false, command: tok, now: NOW });
+  ok(vH.ok && vH.scope === 'hosts' && vW.ok && vW.scope === 'window' && vC.ok && vC.scope === 'command' && vC.via === 'group', 'the verdict names the NARROWEST scope that admits the run — its own hosts (a.example ⇒ hosts; b.example ⇒ the window), and a Task Group\'s command scope over the conversation\'s own window (command) — the receipt says the least trust that let it through', { vH: vH.scope, vW: vW.scope, vC: [vC.scope, vC.via] });
+  // the canon (the vault's mark) names the window — a window added to (or moved on) a signed member never verifies under its old mac
+  const plain = { kind: 'conversation', key: 'cid-w', scopes: [{ host: 'a.example', source: 'card', at: NOW }] };
+  const withW = { ...plain, scopes: [...plain.scopes, { kind: 'window', until: NOW + WIN, source: 'card', at: NOW }] };
+  const moved = { ...plain, scopes: [...plain.scopes, { kind: 'window', until: NOW + 2 * WIN, source: 'card', at: NOW }] };
+  const cP = U.canonOf(RES, plain, [], 3), cW = U.canonOf(RES, withW, [], 3), cM = U.canonOf(RES, moved, [], 3);
+  ok(cP !== cW && cW !== cM && /^\["vault-use-v2"/.test(cW) && cW.includes(JSON.stringify(JSON.stringify(['w', 'window', NOW + WIN, null, 'card', NOW]))) && /^\["vault-use-v2"/.test(U.canonOf(RES, { kind: 'conversation', key: 'cid-w', scopes: [{ kind: 'window', until: NOW + WIN, source: 'card', at: NOW }] }, [], 0)), 'the canon carries the window as its own tag (\'w\', its end, its writer) — a member with one is never «uniform»: a window added to or moved on a signed member changes its mark (a forged window never verifies)', { cW: cW.slice(0, 160) });
+  // spanOf / the derived views with a window present
+  const sp1 = U.spanOf(U.scopesOf({ scopes: [{ host: 'a.example' }, { kind: 'window', until: NOW + WIN }] })), sp2 = U.spanOf(U.scopesOf({ scopes: [{ host: 'a.example', until: NOW + 5 * 86400e3 }, { kind: 'window', until: NOW + WIN }] })), sp3 = U.spanOf(U.scopesOf({ scopes: [{ kind: 'window', until: NOW + WIN }] }));
+  const pub = (U.publicGrants(winRow(NOW + WIN, [{ host: 'a.example' }]), { now: NOW }).to || [])[0] || {};   // (a tree without the window drops the member — the leg fails by name, never a crash)
+  ok(sp1 === null && sp2 === NOW + 5 * 86400e3 && sp3 === NOW + WIN && pub.window === NOW + WIN && (pub.hosts || []).join() === 'a.example' && (pub.commands || []).length === 0 && (pub.scopes || []).some((s) => s.kind === 'window' && s.until === NOW + WIN && s.expired === false && s.host === undefined && s.command === undefined), 'spanOf with a window (a no-end host ⇒ null; a 5-day host ⇒ 5 days; a window alone ⇒ its end); the row\'s views keep the window out of hosts and commands and list it as its own scope (`window`)', { sp1, sp2, sp3, pub });
+  // the ONE writer's rule for a window (withMember)
+  const p0 = { kind: 'conversation', key: 'cid-w' };
+  const w1 = U.withMember(null, p0, { window: NOW + WIN, source: 'card', at: NOW, now: NOW });
+  const r1 = { door: 'vault-use', resource: RES, to: w1.to || [], except: [] };
+  const wSame = U.withMember(r1, p0, { window: NOW + WIN, source: 'card', at: NOW + 5, now: NOW + 5 }), wMove = U.withMember(r1, p0, { window: NOW + WIN + 9e3, source: 'card', at: NOW + 9e3, now: NOW + 9e3 }), wEnded = U.withMember(r1, p0, { window: NOW + 3 * WIN, source: 'card', at: NOW + 2 * WIN, now: NOW + 2 * WIN });
+  const wPast = U.withMember(null, p0, { window: NOW - 1, now: NOW }), wHost = U.withMember(r1, p0, { hosts: ['a.example'], until: null, source: 'card', at: NOW, now: NOW });
+  ok(w1.ok && w1.changes.added.length === 1 && w1.changes.added[0].kind === 'window' && wSame.changes.same.length === 1 && !wSame.widened && wMove.changes.replaced.length === 1 && wMove.changes.replaced[0].was === NOW + WIN && !wMove.changes.replaced[0].expired && wEnded.changes.replaced[0].expired === true && wPast.code === 'window_end_required' && wHost.ok && U.scopesOf(wHost.to[0]).some((s) => s.kind === 'window' && s.until === NOW + WIN), 'the writer: a window is ADDED; the same end moves nothing; another end REPLACES it (named, the old end); an ended one is replaced as new (expired: true); an end not in the future is refused window_end_required; a host write never touches the window', { w1: w1.changes, same: wSame.changes, move: wMove.changes, ended: wEnded.changes, past: wPast });
+  // the ORCH: the window is the CARD's (addMember); the owner's Save keeps one as it is, never mints or moves one
+  const w = await world();
+  const add = w.useGrants.addMember(RES, { kind: 'conversation', key: 'cid-w', name: 'W' }, { window: Date.now() + WIN, source: 'card' });
+  const vf = w.useGrants.verdictFor(RES, F, { hosts: [], destinationKnown: false });
+  const mint = w.useGrants.setRow(RES, { to: [{ kind: 'conversation', key: 'cid-x', name: 'X', scopes: [{ kind: 'window', until: Date.now() + WIN }] }], except: [] }, { reauthed: true });
+  const held = w.useGrants.heldBy(F);
+  ok(add.ok && vf.ok && vf.scope === 'window' && mint.code === 'window_card_only' && held.length === 1 && held[0].scopes.some((s) => s.kind === 'window'), 'the ONE writer: addMember({window}) writes it (the card\'s road) and the verdict admits a shell by it; a Save that MINTS one is refused window_card_only; heldBy (`list`) names it', { add, vf: vf.scope, mint: mint.code, held });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

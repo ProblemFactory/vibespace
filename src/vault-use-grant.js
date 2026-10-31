@@ -7,7 +7,9 @@
  * (src/server/vault-use-grants.js → grants-store `set`); each `to` entry carries the door's OWN settings:
  *   · `hosts` — the destinations the use may reach: host names / addresses, or `@entry` («the hosts the entry was stored
  *     for»: an owner-filled request's named hosts — resolved at USE time, so a re-labelled entry is read as it is now);
- *     NEVER «any host» (no wildcard is a value of the field) — a use whose destination cannot be told is never admitted;
+ *     NEVER «any host» (no wildcard is a value of the field) — a use whose destination cannot be told is never admitted by a
+ *     host — EXCEPT by a WINDOW scope (below): the owner's time-boxed trust of ONE conversation, written from the card only,
+ *     one hour, every use noticed and never filed;
  *   · `until` — an optional end (ms); past it the scope admits nothing (the card asks again, the window says «expired»);
  *   · r4 (lane vault-standing-request, THE ROOT MODEL — 主开发: «a member's scopes carry THEIR OWN ENDS … never one end per
  *     member»): a member is stored as its `scopes` — each host `{host, until?, tool?, source?, at?}` and each command
@@ -22,11 +24,24 @@
  *     script, a script whose bytes changed ⇒ another shape ⇒ the card). A member carries hosts, commands, or both — never none;
  *   · `source` — who wrote the member last: 'owner' (the row's «谁可以用…»), 'request' (an agent's standing request the owner
  *     allowed), 'card' (a run card's «Always»); `at` its time. A standing grant is the OWNER's row whoever asked for it.
+ *   · r7 — THE WINDOW (the owner 2026-10-31, on a card that offered no «Always» because the hub could not read where `bash -c
+ *     '… curl …'` sends the key: 「以后对于这种情况，不清楚发往何处的话，就允许我直接给agent … 1个小时授权吧 … 如果攻击者通过钓鱼我的agent来让它
+ *     发送密钥到未知地方，那得正好是我给了授权之后一个小时之内攻击才行，我此时也大概率能发现。你可以每次自动允许也弹个notification，但不常驻到
+ *     inbox。」): a scope `{kind: 'window', until, source: 'card', at}` — «this conversation may use this entry in ANY run (any
+ *     shape, any destination) until `until`». Written ONLY by a run card's «Allow for 1 hour» (offered exactly where the card
+ *     cannot offer a hosts «Always»), `until` = the press + WINDOW_MS. THE OWNER'S THREAT MODEL, in his words: a phished agent
+ *     would have to exfiltrate inside that hour, and every use in it pops a notice on every open client (never filed in For
+ *     you), so he is likely to see it — the hour BOUNDS the exposure, the notice makes it SEEN. It is the vault's
+ *     accident-not-adversary model: a determined agent inside the hour is the owner's accepted risk. Fail closed: a window
+ *     with no end (or a non-finite one) is DROPPED by the one reader — it admits nothing, ever.
  *
  * THE VERDICT `useVerdict(rows, facts, run)` — membership is the MODEL's (`GM.admits`: 给谁 / 除了, a Task Group's members
  * read at use time, every refusal by name); this file only reads the admitting entries' own settings:
  *   → { ok: true, id, via, entry, hosts, scope }  (the MOST SPECIFIC live entry whose hosts cover every host of the run —
- *     scope 'hosts' — or whose `commands` hold the run's exact command token — scope 'command')
+ *     scope 'hosts' — or whose `commands` hold the run's exact command token — scope 'command' — or, r7, one holding a LIVE
+ *     window — scope 'window', + `until` (its end) and `member`: any run, whatever the destination or the token. The verdict
+ *     names the NARROWEST scope that admits it — hosts › command › window, across every admitting entry — so the receipt says
+ *     the least trust that let it through; membership (给谁 / 除了) is judged first: a conversation left out holds nothing)
  *   | { ok: false, code, member?, missing? } — admits' codes (not_granted · excepted · groups_unreadable · unknown_shape ·
  *     fork_pending), or `expired` (every admitting entry is past its end), `destination_unknown` (the run's shape cannot
  *     tell where the value goes — a shell, an interpreter, a config file, a tool naming no host, a program an agent could
@@ -53,6 +68,8 @@ const DOOR = 'vault-use';
 const ENTRY_HOSTS = '@entry';
 const ID_RE = /^vg-[0-9a-f]{8}$/;
 const SOURCES = Object.freeze(['owner', 'request', 'card']);
+/** r7: THE WINDOW's length — the card's «Allow for 1 hour» writes exactly the press + WINDOW_MS (the owner: 「1个小时授权」). */
+const WINDOW_MS = 3600e3;
 const CODES = Object.freeze(['not_granted', 'excepted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'expired', 'destination_unknown', 'outside_hosts']);
 
 /** FNV-1a (32 bit) over `resource` NUL `principalKey` → `vg-xxxxxxxx`. */
@@ -112,9 +129,11 @@ const liveScope = (s, now) => !(s && s.until != null && s.until <= now);
 function scopesOf(e) {
   if (!e || typeof e !== 'object') return [];
   if (Array.isArray(e.scopes)) {
-    return e.scopes.filter((s) => s && typeof s === 'object').map((s) => (s.command
+    // r7: a WINDOW scope is read only WITH a finite end — one with none (or a non-finite one) is DROPPED: it admits nothing, ever
+    const winOf = (s) => { const n = Number(s.until); return n > 0 && Number.isFinite(n) ? { kind: 'window', key: 'window', until: Math.floor(n), tool: null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) } : null; };
+    return e.scopes.filter((s) => s && typeof s === 'object').map((s) => (s.kind === 'window' ? winOf(s) : s.kind !== undefined ? null : s.command
       ? { kind: 'command', key: GM.commandKeyOf(s.command), command: s.command, until: endOf(s.until), tool: null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) }
-      : { kind: 'host', key: String(s.host), host: String(s.host), until: endOf(s.until), tool: s.tool ? String(s.tool).toLowerCase() : null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) }));
+      : { kind: 'host', key: String(s.host), host: String(s.host), until: endOf(s.until), tool: s.tool ? String(s.tool).toLowerCase() : null, source: SOURCES.includes(s.source) ? s.source : null, at: endOf(s.at) })).filter(Boolean);
   }
   const until = endOf(e.until), source = SOURCES.includes(e.source) ? e.source : null, at = endOf(e.at);
   const hs = (Array.isArray(e.hosts) ? e.hosts : []).map((h) => ({ kind: 'host', key: String(h), host: String(h), until, tool: toolOfHost(e, h), source, at }));
@@ -123,7 +142,7 @@ function scopesOf(e) {
   return [...hs, ...cs];
 }
 /** A scope as the store keeps it (GM.scopeListOf's closed keys; no end = no `until`). */
-const storedScope = (s) => (s.kind === 'command'
+const storedScope = (s) => (s.kind === 'window' ? { kind: 'window', until: s.until, ...(s.source ? { source: s.source } : {}), ...(s.at ? { at: s.at } : {}) } : s.kind === 'command'
   ? { command: s.command, ...(s.until ? { until: s.until } : {}), ...(s.source ? { source: s.source } : {}), ...(s.at ? { at: s.at } : {}) }
   : { host: s.host, ...(s.until ? { until: s.until } : {}), ...(s.tool ? { tool: s.tool } : {}), ...(s.source ? { source: s.source } : {}), ...(s.at ? { at: s.at } : {}) });
 /** A member in the r4 shape: its principal, its name (and GM's `by`), its scopes — every one-end field dropped; `mac` kept
@@ -153,13 +172,13 @@ function canonOf(id, e, xc, gen) {
     return JSON.stringify([String(id), pk, (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, endOf(e.until), name, x, g, ...extra]);
   }
   const sc = scopesOf(e), u = sc[0] || null;
-  if (u && sc.every((s) => s.until === u.until && s.source === u.source && (!u.source || s.at === u.at))) {
+  if (u && !sc.some((s) => s.kind === 'window') && sc.every((s) => s.until === u.until && s.source === u.source && (!u.source || s.at === u.at))) {   // r7: a member with a window is never «uniform» — its canon names the window (tag 'w')
     const tf = sc.filter((s) => s.kind === 'host' && s.tool).map((s) => [s.host, s.tool]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     const cs = sc.filter((s) => s.kind === 'command').map((s) => s.key).sort();
     const extra = cs.length || u.source ? [{ c: cs, s: u.source || null, a: u.source && u.at ? u.at : null }] : [];
     return JSON.stringify([String(id), pk, hostsOfScopes(sc).slice().sort(), tf.length ? tf : null, u.until, name, x, g, ...extra]);
   }
-  return JSON.stringify(['vault-use-v2', String(id), pk, name, x, g, sc.map((s) => JSON.stringify([s.kind === 'host' ? 'h' : 'c', s.key, s.until, s.tool, s.source, s.at])).sort()]);
+  return JSON.stringify(['vault-use-v2', String(id), pk, name, x, g, sc.map((s) => JSON.stringify([s.kind === 'host' ? 'h' : s.kind === 'window' ? 'w' : 'c', s.key, s.until, s.tool, s.source, s.at])).sort()]);
 }
 const live = (e, now) => scopesOf(e).some((s) => liveScope(s, now));
 /** lane vault-standing-request: do these scopes hold the run's EXACT command token? (null token ⇒ never) */
@@ -171,7 +190,8 @@ const missingIn = (list, run, runTool, entryHosts) => runHostsOf(run).filter((h)
 const memberOf = (hit, entryHosts, now = 0) => {
   if (!hit) return null;
   const all = scopesOf(hit.entry), ls = all.filter((s) => liveScope(s, now)), shown = ls.length ? ls : all, last = latestOf(shown);
-  return { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hostsOfScopes(shown), entryHosts), declared: hostsOfScopes(shown), commands: commandsOfScopes(shown), scopes: all.map((s) => ({ ...s, expired: !liveScope(s, now) })), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(shown), until: spanOf(shown) };
+  const win = ls.find((s) => s.kind === 'window');   // r7: the live window (its end) — the CLI and the notice say it
+  return { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hostsOfScopes(shown), entryHosts), declared: hostsOfScopes(shown), commands: commandsOfScopes(shown), scopes: all.map((s) => ({ ...s, expired: !liveScope(s, now) })), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(shown), until: spanOf(shown), window: win ? win.until : null };
 };
 
 /** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, tool, command, now } —
@@ -183,14 +203,16 @@ function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, en
   const alive = v.hits.filter((h) => live(h.entry, now));
   if (!alive.length) return { ok: false, code: 'expired', expired: memberOf(v.hits[0], entryHosts, now) };
   const run = runHostsOf(hosts);
-  let best = null, bestMissing = null;
+  let best = null, bestMissing = null, win = null;
   for (const h of alive) {   // admits' hits: the most specific first (its own › a group's › everyone)
     const ls = scopesOf(h.entry).filter((s) => liveScope(s, now));
+    if (!win && ls.some((s) => s.kind === 'window')) win = h;   // r7: a live window — taken only when NO hosts / command scope of any admitting entry admits the run (the narrowest scope is named)
     const miss = missingIn(ls, run, tool, entryHosts);
     if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(hostsOfScopes(ls), entryHosts), scope: 'hosts' };
     if (destinationKnown !== true && commandIn(ls, command)) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(hostsOfScopes(ls), entryHosts), scope: 'command' };   // lane vault-standing-request: the EXACT command the owner trusted — only where the hub cannot read the destination (a known destination is judged by its hosts)
     if (!best || miss.length < bestMissing.length) { best = h; bestMissing = miss; }
   }
+  if (win) { const m = memberOf(win, entryHosts, now); return { ok: true, id: m.id, via: win.entry.kind, entry: win.entry, hosts: m.hosts, scope: 'window', until: m.window, member: m }; }   // r7: THE WINDOW — any run, whatever the destination or the token, until its end
   const member = memberOf(best, entryHosts, now);
   if (destinationKnown !== true || !run.length) return { ok: false, code: 'destination_unknown', member };
   return { ok: false, code: 'outside_hosts', member, missing: bestMissing };
@@ -213,10 +235,13 @@ const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except
  *  the two ends, never a later one (an ended one stays ended). Over GM.HOSTS_MAX host scopes the member's oldest ENDED host
  *  scopes go first (`changes.pruned`), then `too_many_hosts`; over COMMANDS_MAX command scopes `too_many_commands`. The member
  *  leaves `except`; it is written in the r4 shape (a one-end member is read as its scopes and written back scoped).
+ *  r7: `window` (ms) — the member's WINDOW scope with THAT end (a run card's «Allow for 1 hour»: the press + WINDOW_MS), by the
+ *  same rule (a live one with another end, or an ended one, is REPLACED and named; the same end moves nothing); an end that
+ *  is not in the future (`now`) is refused `window_end_required` — a window is never written without one.
  *  → { ok: true, to, except, widened, added, changes: {added: [scope], replaced: [{scope, was, until, expired}], same:
  *    [scope], kept: [scope], pruned: [scope]} } (a `scope` = {kind, key, host | command}) | { ok: false, code } (`unknown_shape`,
- *    `bad_principal`, `hosts_required`, `command_unreadable`, `too_many_hosts`, `too_many_commands`). */
-function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, carry = false } = {}) {
+ *    `bad_principal`, `hosts_required`, `command_unreadable`, `too_many_hosts`, `too_many_commands`, `window_end_required`). */
+function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, carry = false, window = null } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const b = GM.bareOf(principal), key = b && GM.principalKey(b);
@@ -226,17 +251,19 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   if (wantCmds && !cmds) return { ok: false, code: 'command_unreadable' };
   const hostsGiven = Array.isArray(hosts) && hosts.length > 0;
   const add = hostsGiven ? GM.hostListOf(hosts) : [];
-  if (!add || (!add.length && !cmds)) return { ok: false, code: 'hosts_required' };
+  const winEnd = window == null ? null : Number(window) > 0 && Number.isFinite(Number(window)) ? Math.floor(Number(window)) : NaN;   // r7
+  if (window != null && !(winEnd > (Number(now) > 0 ? Number(now) : 0))) return { ok: false, code: 'window_end_required' };
+  if (!add || (!add.length && !cmds && !winEnd)) return { ok: false, code: 'hosts_required' };
   const src = SOURCES.includes(source) ? source : null, stampAt = endOf(at);
   const end = endOf(until);
   const tl = tool ? String(tool).toLowerCase() : null;   // round 4 (item 3): the CLI a wildcard THIS «Always» mints is scoped to — PER HOST
   const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
   const was = i >= 0 ? cur.to[i] : null;
   const next = was ? scopesOf(was).map((s) => ({ ...s })) : [];
-  const asked = [...add.map((h) => ({ kind: 'host', key: h, host: h, until: end, tool: tl && isWild(h) ? tl : null, source: src, at: src ? stampAt : null })), ...(cmds || []).map((c) => ({ kind: 'command', key: GM.commandKeyOf(c), command: c, until: end, tool: null, source: src, at: src ? stampAt : null }))];
+  const asked = [...add.map((h) => ({ kind: 'host', key: h, host: h, until: end, tool: tl && isWild(h) ? tl : null, source: src, at: src ? stampAt : null })), ...(cmds || []).map((c) => ({ kind: 'command', key: GM.commandKeyOf(c), command: c, until: end, tool: null, source: src, at: src ? stampAt : null })), ...(winEnd ? [{ kind: 'window', key: 'window', until: winEnd, tool: null, source: src, at: src ? stampAt : null }] : [])];
   const nowN = Number(now) > 0 ? Number(now) : 0;
   const gone = (s) => s.until != null && nowN > 0 && s.until <= nowN;
-  const scopeWord = (s) => (s.kind === 'host' ? { kind: 'host', key: s.key, host: s.host } : { kind: 'command', key: s.key, command: s.command });
+  const scopeWord = (s) => (s.kind === 'host' ? { kind: 'host', key: s.key, host: s.host } : s.kind === 'window' ? { kind: 'window', key: 'window' } : { kind: 'command', key: s.key, command: s.command });
   const changes = { added: [], replaced: [], same: [], kept: [], pruned: [] };
   for (const s of asked) {
     const j = next.findIndex((x) => x.kind === s.kind && x.key === s.key);
@@ -362,8 +389,9 @@ function publicGrants(row, { now = 0 } = {}) {
     to: (p.to || []).map((e) => {
       const all = scopesOf(e), ls = all.filter((s) => liveScope(s, now)), last = latestOf(all);
       const { scopes: _s, hosts: _h, commands: _c, toolFor: _t, tool: _tl, until: _u, source: _src, at: _at, ...rest } = e;
-      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length,
-        scopes: all.map((s) => ({ kind: s.kind, ...(s.kind === 'host' ? { host: s.host } : { command: s.command }), until: s.until, expired: !liveScope(s, now), tool: s.tool, legacy: s.kind === 'host' && isWild(s.host) && !s.tool, source: s.source, at: s.at })) };   // r3: `legacy` — its wildcard hosts with no tool (any tool)
+      const win = ls.find((s) => s.kind === 'window');   // r7: its live window (the chip says «any destination · until HH:MM»)
+      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length, window: win ? win.until : null,
+        scopes: all.map((s) => ({ kind: s.kind, ...(s.kind === 'host' ? { host: s.host } : s.kind === 'command' ? { command: s.command } : {}), until: s.until, expired: !liveScope(s, now), tool: s.tool, legacy: s.kind === 'host' && isWild(s.host) && !s.tool, source: s.source, at: s.at })) };   // r3: `legacy` — its wildcard hosts with no tool (any tool)
     }),
     except: p.except || [],
   };
@@ -389,4 +417,4 @@ function standingLines(verdicts, { always = false } = {}) {
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const commandWords = (c) => (c && c.program ? [baseOf(c.program), ...(Array.isArray(c.pre) ? c.pre : []), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');   // r2: + the options it pins before the script
 
-module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines, scopesOf, scopedMember, scopedRowOf, canonOf, spanOf };
+module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, WINDOW_MS, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines, scopesOf, scopedMember, scopedRowOf, canonOf, spanOf };

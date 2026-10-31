@@ -356,6 +356,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'auto-always': () => actBtn('auto-always', UI_ICONS.check, t('Always for this conversation'), t('Grants the key to this conversation — the Vault window lists it; take it back there'), 'iw-act-exit'),
     // q-053 P0b (decision ①): a pool's move to another provider — Always lets THIS pool make such a move by itself from now on
     'pool-always': () => actBtn('pool-always', UI_ICONS.check, t('Always for this pool'), t('Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time'), 'iw-act-exit'),
+    // lane vault-standing-request r7: «Allow for 1 hour» — where the card has no hosts «Always»: this conversation uses it in any
+    // run for one hour, each use a notice (never filed here) — the second password again first
+    'shape-window': () => actBtn('shape-window', UI_ICONS.check, t('Allow for 1 hour'), t('For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.'), 'iw-act-exit'),
     // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
     'shape-always': (it) => (it && it.action && it.action.command ? actBtn('shape-always', UI_ICONS.check, t('Always (this command)'), t('A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first'), 'iw-act-exit') : actBtn('shape-always', UI_ICONS.check, t('Always let this conversation use it (these hosts)'), t('A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first'), 'iw-act-exit')),   // lane vault-use-grants: «Always» = a vault-use grant; lane vault-standing-request: «Always (this command)» where no host can be read
     // lane vault-manual-and-lock: an agent's request for a stored secret — For 8 hours = every run of that conversation with it for 8 hours (a lock ends it)
@@ -540,11 +543,14 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const acts = model.isCleared(it) || v.actions.includes('more') ? v.actions : [...v.actions, 'clear']; // a card's Clear content… is in its ⋯
     // r7: beside a run card's missing «Always», why it is not offered (the model's words, in the answers' row)
     const hint = run && !v.resolved && acts.includes('hub-once') && (!acts.includes('shape-always') || (it && it.action && it.action.command)) ? run.always.hint : null;   // lane vault-standing-request: «Always (this command)» keeps its plain words
-    const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint);
+    const whint = run && !v.resolved && acts.includes('shape-window') && run.window && run.window.hint ? run.window.hint : null;   // r7: «Allow for 1 hour»'s own words
+    const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint) + '\u0000' + JSON.stringify(whint);
     if (c.sig.actions !== actSig) {
       c.actions.replaceChildren(...acts.map((a) => ACT[a](it)));
       const deny = hint && c.actions.querySelector('[data-act="hub-deny"]');
       if (deny) { const h = mk('span', 'ut-run-hint'); h.append(...hint.map((x) => (x.code != null ? mk('code', 'ut-run-code', x.code) : x.mono != null ? mk('span', 'ut-run-mono', x.mono) : document.createTextNode(x.text || '')))); deny.after(h); } // TEXT nodes
+      const denyW = whint && c.actions.querySelector('[data-act="hub-deny"]');
+      if (denyW) { const h = mk('span', 'ut-run-hint ut-run-hint-window'); h.append(...whint.map((x) => document.createTextNode(x.text || ''))); (c.actions.querySelector('.ut-run-hint') || denyW).after(h); } // r7: TEXT nodes
       c.sig.actions = actSig;
     }
     // the verdict's sentence sits under the box — or, with no box, where the box would be
@@ -772,11 +778,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'grant-8h' || a === 'grant-standing') {
+      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'shape-window' || a === 'grant-8h' || a === 'grant-standing') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
         const reachPick = st.cur && st.cur.id === id ? st.cur.reach.querySelector('input:checked') : null;   // lane key-instance-scope: the pane's picked reach rides an automation answer
-        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a === 'grant-standing' ? 'standing' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'shape-window' ? 'window' : a === 'grant-8h' ? '8h' : a === 'grant-standing' ? 'standing' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
       return;
     }
     if (a === 'secret-paste') { showSecretPasteDialog(model, it, { words: model.wordsOf(it), detail: model.detailOf(it) }); return; }   // lane vault-paste-request: the box as a dialog (the store resolves the item — the pane follows)

@@ -11649,4 +11649,18 @@ export default {
   "An older «Always» lets any program reach a wildcard host — set its tool": "一个旧版的「总是」让任何程序都能访问通配主机——请设定它的工具", // lane vault-standing-request r3
   "A grant carried from an older version covers {where} for ANY program: it was stored before a wildcard host named the one tool that uses it. Its chip in the Vault window says «legacy wildcard: any tool». Take it back (✕) and press «Always» on the next run of that tool — the new grant names its tool. No value was given out.": "一个从旧版本带过来的授权让任何程序都能用于 {where}：它保存时，通配主机还不写明使用它的那一个工具。它在密钥库窗口里的标签写着「旧版通配：任何工具」。收回它（✕），在那个工具下一次运行时按「总是」——新的授权会写明它的工具。没有给出任何值。", // lane vault-standing-request r3
   "Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「允许」同时会打开这个条目的「可供 agent 运行使用」——只为这个对话打开；你暂停的授权保持暂停。", // lane vault-standing-request r2
+  "allowed this conversation for 1 hour": "已允许这个对话 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "take it back in the Vault window": "可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour»: this conversation will be able to use “{entry}” in any run until {until}.": "「允许 1 小时」：到 {until} 为止，这个对话可以在任何运行中使用“{entry}”。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.": "「允许 1 小时」会替换这个对话在“{entry}”上到 {when} 为止的 1 小时授权：之后到 {until} 为止。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "This conversation's 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.": "这个对话在“{entry}”上的 1 小时授权已于 {when} 结束 — 「允许 1 小时」会给一个新的，到 {until} 为止。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "(kept)": "（保留）", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "A 1-hour approval from a run card: this conversation uses it in any run without asking, each use shows a notice — then it asks again. ✕ takes it back now.": "来自运行卡片的 1 小时授权：这个对话在任何运行中使用它都不再问你，每次使用都会弹一条提示 — 到期后再问。✕ 立即收回。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「允许 1 小时」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → {where}": "{who} 在你的 1 小时授权下用了“{entry}”（还剩 {left} 分钟）— {program} → {where}", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → destination unknown": "{who} 在你的 1 小时授权下用了“{entry}”（还剩 {left} 分钟）— {program} → 去向未知", // lane vault-standing-request r7 («Allow for 1 hour»)
 };

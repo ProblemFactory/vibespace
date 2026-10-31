@@ -11648,4 +11648,18 @@ export default {
   "An older «Always» lets any program reach a wildcard host — set its tool": "古い「常に」で、どのプログラムでもワイルドカードのホストに届きます——ツールを設定してください", // lane vault-standing-request r3
   "A grant carried from an older version covers {where} for ANY program: it was stored before a wildcard host named the one tool that uses it. Its chip in the Vault window says «legacy wildcard: any tool». Take it back (✕) and press «Always» on the next run of that tool — the new grant names its tool. No value was given out.": "古いバージョンから引き継がれた許可が、どのプログラムにも {where} を許しています：ワイルドカードのホストが使うツールを一つ記すようになる前に保存されたものです。保管庫ウィンドウのチップには「旧形式のワイルドカード：どのツールでも」と表示されます。取り消して（✕）、そのツールの次の実行で「常に」を押してください——新しい許可にはツールが記されます。値は渡していません。", // lane vault-standing-request r3
   "Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「許可」するとこの項目の「エージェントの実行で使用可」もオンになります——この会話にだけ開き、一時停止した許可は停止したままです。", // lane vault-standing-request r2
+  "allowed this conversation for 1 hour": "この会話を 1 時間許可済み", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "take it back in the Vault window": "保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour»: this conversation will be able to use “{entry}” in any run until {until}.": "「1 時間許可」：この会話は {until} まで、どの実行でも“{entry}”を使えます。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.": "「1 時間許可」は、この会話が“{entry}”に {when} まで持っている 1 時間の承認を置き換えます：その後は {until} までです。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "This conversation's 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.": "この会話の“{entry}”に対する 1 時間の承認は {when} に終わりました — 「1 時間許可」で新しく {until} まで与えます。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 時間、この会話はこのシークレットを確認なしで使います。使うたびに通知が出ます（「あなた宛て」には入りません）。その後はまた確認します。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "(kept)": "（保持）", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "A 1-hour approval from a run card: this conversation uses it in any run without asking, each use shows a notice — then it asks again. ✕ takes it back now.": "実行カードからの 1 時間の承認：この会話はどの実行でも確認なしで使い、使うたびに通知が出ます — その後はまた確認します。✕ ですぐ取り消します。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「1 時間許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → {where}": "{who} が 1 時間の承認のもとで“{entry}”を使いました（残り {left} 分）— {program} → {where}", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → destination unknown": "{who} が 1 時間の承認のもとで“{entry}”を使いました（残り {left} 分）— {program} → 宛先不明", // lane vault-standing-request r7 («Allow for 1 hour»)
 };

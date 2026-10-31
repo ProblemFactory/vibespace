@@ -22,6 +22,11 @@
 //      wildcard «… · 20 天» — and at 390 px every chip stays inside the screen
 //   r2 (主开发's visual read): the standing card = label rows (密钥 = the NAME, 用途, 命令 / 主机, 运行, 期限 …) + ONE 技术细节 fold —
 //      the vault:// reference only there, as code, never a link (desktop and phone)
+//   ⑧ (r7, the owner 2026-10-31 «不清楚发往何处的话 … 1个小时授权吧») «ALLOW FOR 1 HOUR»: the shell card's three answers at 1280 and
+//      390 (the line of what it writes on its own row, the words beside them), the For-you window's row, the press (验证是你), the
+//      record «已允许这个对话 1 小时 · 至 HH:MM · 可在保险库窗口收回» in the chat card, the tray and the window, the NEXT use with no card
+//      and nothing filed + its notice on a SECOND client, `uses`, the chip «任何目的地 · 至 HH:MM · 60 分钟» (warning accent), ✕;
+//      MEASURED first: what an admitted standing-grant use shows in the chat (nothing — the report says the counts)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -139,6 +144,7 @@ try {
   const cookie = String(lr.headers.get('set-cookie') || '').split(';')[0];
   const ws0 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Cookie: cookie, Origin: `http://127.0.0.1:${PORT}` } });
   await new Promise((r, j) => { ws0.on('open', r); ws0.on('error', j); });
+  const frames0 = []; ws0.on('message', (d) => frames0.push(String(d)));   // r7: the conversation's session id (its `created` frame) — ⑧ opens its chat
   ws0.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: 'vsr1', sessionName: 'Transcriber' }));
   let env = null;
   for (let i = 0; i < 100 && !env; i++) { for (const f of fs.readdirSync(stubDir).filter((x) => x.startsWith('env-'))) { try { const e = JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')); if (e.VIBESPACE_SESSION_TOKEN) env = e; } catch { } } if (!env) await sleep(250); }
@@ -335,6 +341,111 @@ try {
   // put the field back as it was (the dialog's unsaved guard sees no change), then Cancel — nothing is saved
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const h = d && d.querySelector('.vw-use-hosts'); if (h) { h.value = ${JSON.stringify((pv1 && pv1.was) || '')}; h.dispatchEvent(new Event('input', { bubbles: true })); } const b = d && [...d.querySelectorAll('button')].find((x) => x.classList.contains('btn-cancel')); if (b) b.click(); return true; })()`);
   check('Cancel closes it with nothing saved', !!(await A.until(`!document.getElementById('vault-use-grant')`, { timeout: 5000 })));
+
+  console.log('⑧ (r7, the owner 2026-10-31 «不清楚发往何处的话 … 1个小时授权吧») «ALLOW FOR 1 HOUR» — three answers (1280 + 390), the press, the record in every client, a notice on a SECOND client at the next use (nothing filed), the chip with its end');
+  const countItems = async () => { const t = await todo(); return (t.open || []).length + (t.resolved || []).length; };
+  // (measured first) what an ADMITTED standing-grant use shows in the CHAT today — the conversation's chat open, a run its ④ command grant admits
+  const SID = (frames0.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m && m.type === 'created' && m.reqId === 'vsr1') || {}).sessionId;
+  await A.evalJs(`(() => { if (![...app.wm.windows.values()].some((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${JSON.stringify(SID)})) app.attachSession(${JSON.stringify(SID)}, 'Transcriber', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+  const chatOpen = await A.until(`!!document.querySelector('.chat-message-list')`, { timeout: 15000 });
+  const chatNow = () => A.evalJs(`({ msgs: document.querySelectorAll('.chat-message-list .chat-msg').length, cards: document.querySelectorAll('.cn-card').length, open: document.querySelectorAll('.cn-card:not(.cn-done)').length })`);
+  const ch0 = await chatNow(), n0 = await countItems();
+  const gu = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'upload.py'], TOKEN, { timeout: 70000 });
+  await sleep(1500);
+  const ch1 = await chatNow(), n1 = await countItems();
+  check(`(MEASURED) an ADMITTED standing-grant use shows NOTHING in the chat today — no row, no card (its chat: ${ch0.msgs} messages / ${ch0.cards} cards before, ${ch1.msgs} / ${ch1.cards} after) and For you +0; its trace is the use line («by grant · standing») and the row's «used N×»`, !!SID && !!chatOpen && gu.code === 0 && /uploaded key set/.test(gu.out) && ch1.msgs === ch0.msgs && ch1.cards === ch0.cards && n1 === n0, { SID, chatOpen, gu: gu.out.slice(0, 160), ch0, ch1, n0, n1 });
+  console.log(`    measured: chat ${JSON.stringify(ch0)} → ${JSON.stringify(ch1)}, For-you items ${n0} → ${n1}`);
+  // the SECOND client: another page of the same sign-in, its toasts recorded as they come (a toast lives 6 s)
+  const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const B = await pageOf(tB);
+  await B.cdp('Page.navigate', { url: URL });
+  await B.until(`!!(window.app && app.wm)`, { timeout: 30000 });
+  await B.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  await B.evalJs(`window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList && n.classList.contains('global-toast')) window.__toasts.push({ text: n.textContent, at: Date.now() }); }).observe(document.body, { childList: true, subtree: true }); true`);
+  // THE CARD: the brief's own shape — a shell whose inline code sends the key (the hub cannot read where)
+  const winP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'bash', '-c', 'curl -s -m 2 -H "Authorization: Bearer $T" https://api.tts.example/v1/asr || true'], TOKEN, { timeout: 70000 });
+  let wc = null;
+  for (let i = 0; i < 60 && !wc; i++) { wc = (await openOf('vault-run-ask')).find((x) => /v1\/asr/.test(String(x.detail))) || null; if (!wc) await sleep(200); }
+  const T_W = Date.now();   // the card's 60 s: everything below is read and pressed inside it
+  check('`bash -c \'curl … -H "Authorization: Bearer $T" …\'` draws its card WITHOUT a hosts «Always» and WITH «Allow for 1 hour» (action.window)', !!wc && wc.action.window === true && wc.action.always === false, wc && wc.action);
+  const HOUR_ROW = () => A.evalJs(`(() => { const it = ${ITEM('/v1\\/asr/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const ch = it.querySelector('.ut-run-changes'), ans = it.querySelector('.ut-run-answer'); const r = it.getBoundingClientRect(), q = ch && ch.getBoundingClientRect(), a = ans && ans.getBoundingClientRect(); const btns = ans ? [...ans.querySelectorAll('button')] : []; return { changes: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null, above: !!(q && a && q.bottom <= a.top + 1), buttons: btns.map((b) => { const z = b.getBoundingClientRect(); return { t: b.textContent.trim(), inside: z.left >= r.left - 1 && z.right <= r.right + 1, h: Math.round(z.height) }; }), hints: ans ? [...ans.querySelectorAll('.ut-run-hint')].map((h) => h.textContent) : [], overflow: it.scrollWidth > it.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, vw: window.innerWidth }; })()`);
+  const HOUR_LINE = /^「允许 1 小时」：到 \d\d:\d\d 为止，这个对话可以在任何运行中使用“TTS API key”。$/;
+  const HOUR_HINT = '1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。';
+  await openTray();
+  const h1 = await HOUR_ROW();
+  check('the tray row (1280): 允许一次 · 允许 1 小时 · 拒绝 — its OWN row above them «「允许 1 小时」：到 HH:MM 为止，这个对话可以在任何运行中使用“TTS API key”。», and beside them «1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。»', !!h1 && h1.buttons.map((b) => b.t).join('|') === '允许一次|允许 1 小时|拒绝' && h1.changes && h1.changes.length === 1 && HOUR_LINE.test(h1.changes[0]) && h1.above && h1.hints.includes(HOUR_HINT), h1);
+  await sleep(300);
+  await A.shot('vsr-16-hour-card-desktop.png');
+  await closeTray();
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wc && wc.id)} }); true`);
+  const wv = await A.until(`(() => { const acts = [...document.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0 && a.querySelector('[data-act="shape-window"]')); if (!acts) return null; const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); return { acts: [...acts.querySelectorAll('[data-act]')].map((b) => b.dataset.act), label: (acts.querySelector('[data-act="shape-window"]').textContent || '').trim(), hints: [...acts.querySelectorAll('.ut-run-hint')].map((h) => h.textContent), line: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null }; })()`, { timeout: 10000 });
+  check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same line in its pane', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && /允许 1 小时/.test(wv.label) && wv.hints.includes(HOUR_HINT) && wv.line && HOUR_LINE.test(wv.line[0]), wv);
+  await sleep(300);
+  await A.shot('vsr-17-hour-card-foryou-window.png');
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
+  await narrow(true);
+  await openTray();
+  const h2 = await HOUR_ROW();
+  check('the phone (390 px): the three answers inside the card and ≥ 32 px tall, the line on its own row above them, no sideways overflow', !!h2 && h2.buttons.length === 3 && h2.buttons.every((b) => b.inside && b.h >= 32) && h2.changes && HOUR_LINE.test(h2.changes[0]) && h2.above && !h2.overflow, h2);
+  await sleep(300);
+  await A.shot('vsr-18-hour-card-phone.png');
+  await closeTray();
+  await narrow(false);
+  await A.evalJs(`(() => { if (![...app.wm.windows.values()].some((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${JSON.stringify(SID)})) app.attachSession(${JSON.stringify(SID)}, 'Transcriber', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); return true; })()`);   // its chat again (the reloads above)
+  await A.until(`!!document.querySelector('.chat-message-list .cn-card[data-item="${wc && wc.id}"]')`, { timeout: 15000 });
+  // THE PRESS (验证是你), inside the card's 60 s
+  const nW = await countItems();
+  const pageW = await reveal();
+  const wa = wc && await A.api('POST', `/api/vault/run/asks/${wc.action.askId}`, { answer: 'window' }, { 'X-Vault-Page': pageW || '' });
+  const wr = await winP;
+  const T_P = Date.now();
+  check('«允许 1 小时» (验证是你) ⇒ ok · window (its end the press + 1 h), inside the card\'s 60 s; the run goes', !!wa && wa.status === 200 && wa.json.ok && wa.json.outcome === 'window' && Math.abs(Number(wa.json.until) - (T_P + 3600e3)) < 60e3 && T_P - T_W < 58000 && wr.code === 0, { wa: wa && wa.json, ms: T_P - T_W, wr: wr.out.slice(0, 200) });
+  const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const TAIL = `已允许这个对话 1 小时 · 至 ${hm(Number(wa && wa.json && wa.json.until))} · 可在保险库窗口收回`;
+  // THE RECORD — the same words in the chat card, the tray and the For-you window
+  const chatRec = await A.until(`(() => { const c = document.querySelector('.cn-card.cn-done[data-item="${wc && wc.id}"]'); if (!c) return null; const l = c.querySelector('.cn-line'); return l ? l.textContent : c.textContent; })()`, { timeout: 10000 });
+  await openTray();
+  const trayRec = await A.until(`(() => { const it = ${ITEM('/v1\\/asr/')}; return it && /已允许这个对话 1 小时/.test(it.textContent) ? it.textContent : null; })()`, { timeout: 8000 });
+  await sleep(300);
+  await A.shot('vsr-19-hour-record-tray.png');
+  await closeTray();
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wc && wc.id)} }); true`);
+  const winRec = await A.until(`(() => { const m = [...document.querySelectorAll('.iw-pane, .iw-detail-pane, .iw-head, .iw-meta')].map((e) => e.textContent).find((x) => /已允许这个对话 1 小时/.test(x)); return m || null; })()`, { timeout: 10000 });
+  await sleep(300);
+  await A.shot('vsr-20-hour-record-foryou-window.png');
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
+  const near = (x) => (typeof x === 'string' ? x.slice(Math.max(0, x.indexOf('已允许') - 30), x.indexOf('已允许') + 90) : x);
+  check(`the record says «${TAIL}» — in the chat card, the tray and the For-you window alike`, [chatRec, trayRec, winRec].every((x) => typeof x === 'string' && x.includes(TAIL)), { chatRec: near(chatRec), trayRec: near(trayRec), winRec: near(winRec) });
+  // THE NEXT USE — another command: no card, nothing filed, a notice on the SECOND client
+  const ch2 = await chatNow(), n2 = await countItems();
+  await B.evalJs(`window.__toasts.length = 0; true`);
+  const u1 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'sh', '-c', 'printf "%s\\n" "${T:+the key is set}"'], TOKEN, { timeout: 70000 });
+  const toastB = await B.until(`(window.__toasts || []).find((t) => /在你的 1 小时授权下用了/.test(t.text)) || null`, { timeout: 10000 });
+  const SHN = (() => { for (const d of String(process.env.PATH || '').split(':')) { try { return path.basename(fs.realpathSync(path.join(d, 'sh'))); } catch { } } return 'sh'; })();   // the program's REAL name (sh is a link: dash here) — what the card and the notice say
+  await B.shot('vsr-21-hour-use-toast-second-client.png');
+  await sleep(800);
+  const ch3 = await chatNow(), n3 = await countItems();
+  check(`the NEXT use (\`sh -c …\`, another command) runs with NO card, files NOTHING (For you +0, the chat +0 rows / +0 cards — ${ch2.msgs} messages / ${ch2.cards} cards before and after) — and the SECOND client pops «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 60 分钟）— ${SHN} → 去向未知»`, u1.code === 0 && /the key is set/.test(u1.out) && !!toastB && new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (59|60) 分钟）— ${reEsc(SHN)} → 去向未知`).test(toastB.text) && n3 === n2 && n2 === nW + 0 && ch2.cards > 0 && ch3.msgs === ch2.msgs && ch3.cards === ch2.cards, { u1: u1.out.slice(0, 160), toastB, n: [nW, n2, n3], ch2, ch3 });
+  console.log(`    measured (a window use): chat ${JSON.stringify(ch2)} → ${JSON.stringify(ch3)}, For-you items ${n2} → ${n3}`);
+  const uses2 = await cli('vibespace-vault', ['uses'], TOKEN);
+  check('`vibespace-vault uses`: the window said («any run (the 1-hour approval, until …)»), the use line «by grant · standing vg-…» saying «under the 1-hour approval · N min left»', /any run \(the 1-hour approval, until /.test(uses2.out) && /by grant · standing vg-[0-9a-f]{8}.*for: under the 1-hour approval · \d+ min left/.test(uses2.out), uses2.out.slice(0, 1200));
+  // THE CHIP — the window with its end, the warning accent
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  const wchip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const s = c && c.querySelector('.vw-use-scope-window'); if (!s) return null; c.scrollIntoView({ block: 'center' }); const probe = document.createElement('span'); probe.style.color = 'var(--warn-text)'; document.body.append(probe); const warn = getComputedStyle(probe).color; probe.remove(); return { chip: c.textContent, scope: s.textContent, color: getComputedStyle(s).color, warn, title: s.title }; })()`, { timeout: 15000 });
+  check('the Vault row\'s chip says the window beside its other scopes — «任何目的地 · 至 HH:MM · 60 分钟», in the warning accent', !!wchip && /^任何目的地 · 至 \d\d:\d\d · (59|60) 分钟$/.test(wchip.scope) && wchip.color === wchip.warn && /^Transcriber · /.test(wchip.chip) && /命令 /.test(wchip.chip), wchip);
+  await sleep(300);
+  await A.shot('vsr-22-hour-chip-desktop.png');
+  // ✕ takes it back (the member, its window with it) — the next run asks again
+  await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const x = c && c.querySelector('.vw-use-x'); if (x) x.click(); return !!x; })()`);
+  const xgone = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; return r && ![...r.querySelectorAll('.vw-use-chip')].some((x) => /Transcriber/.test(x.textContent)) ? true : null; })()`, { timeout: 10000 });
+  const backP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'sh', '-c', 'printf "%s\\n" "${T:+again}"'], TOKEN, { timeout: 70000 });
+  let bc = null;
+  for (let i = 0; i < 60 && !bc; i++) { bc = (await openOf('vault-run-ask')).find((x) => /again/.test(String(x.detail))) || null; if (!bc) await sleep(200); }
+  if (bc) await A.api('POST', `/api/vault/run/asks/${bc.action.askId}`, { answer: 'deny' });
+  await backP;
+  check('its ✕ takes it back: the chip goes, the next run draws its card again («Allow for 1 hour» offered anew)', xgone === true && !!bc && bc.action.window === true, { xgone, card: bc && bc.action });
+  try { await B.cdp('Page.close'); } catch { }
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tB.id}`); } catch { }
 
   console.log('⑦ (r3, MAJOR 1) A LEGACY WILDCARD — carried from an older version with no tool: named on its row, the owner told once');
   await stopServer();

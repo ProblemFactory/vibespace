@@ -183,14 +183,28 @@ function commandListOf(v) {
  *  (a host token as `hosts` takes it; `tool` the CLI a wildcard is scoped to) or a COMMAND `{command: <token>, until?,
  *  source?, at?}` (a token as `commands` takes it) — closed keys, `until` an instant in ms (none = no end), `source` who wrote
  *  that scope ('owner' | 'request' | 'card'), `at` when. ≤ HOSTS_MAX host scopes and ≤ COMMANDS_MAX command scopes, never
- *  none; a host or a command named twice is refused (a scope has ONE end — never two read as one). */
+ *  none; a host or a command named twice is refused (a scope has ONE end — never two read as one).
+ *  r7 (the owner 2026-10-31 «不清楚发往何处的话，就允许我直接给agent … 1个小时授权吧»): a WINDOW `{kind: 'window', until, source?, at?}` —
+ *  «this conversation may use this entry in ANY run until `until`» — at most ONE per member; its shape only here (the ONE reader
+ *  src/vault-use-grant.js scopesOf drops one with no end: it admits nothing, ever). */
 const SCOPE_SOURCES = Object.freeze(['owner', 'request', 'card']);
 const TOOL_RE = /^[a-z0-9][a-z0-9.+-]{0,39}$/;
 function scopeListOf(v) {
-  if (!Array.isArray(v) || !v.length || v.length > HOSTS_MAX + COMMANDS_MAX) return null;
+  if (!Array.isArray(v) || !v.length || v.length > HOSTS_MAX + COMMANDS_MAX + 1) return null;
   const out = [], hostsSeen = new Set(), cmdsSeen = new Set();
+  let winSeen = false;
   for (const s of v) {
     if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    if (s.kind !== undefined) {   // r7: a WINDOW scope (closed keys; one per member)
+      if (s.kind !== 'window' || winSeen || Object.keys(s).some((k) => !['kind', 'until', 'source', 'at'].includes(k))) return null;
+      winSeen = true;
+      const o = { kind: 'window' };
+      if (s.until != null) { const n = Math.floor(Number(s.until)); if (!(n > 0) || n > 8.64e15) return null; o.until = n; }
+      if (s.source != null) { if (!SCOPE_SOURCES.includes(s.source)) return null; o.source = s.source; }
+      if (s.at != null) { const n = Math.floor(Number(s.at)); if (!(n > 0) || n > 8.64e15) return null; o.at = n; }
+      out.push(o);
+      continue;
+    }
     const isHost = s.host !== undefined, isCmd = s.command !== undefined;
     if (isHost === isCmd) return null;
     if (Object.keys(s).some((k) => !(isHost ? ['host', 'until', 'tool', 'source', 'at'] : ['command', 'until', 'source', 'at']).includes(k))) return null;

@@ -16,6 +16,9 @@
  *   · `snapshotRow(id)` / `restoreRow(id, snap)` (r4, C) — the run door's ALL-OR-NOTHING: the row as it was (verified),
  *     written back RAW (no row rules — it restores what WAS, lawful when written; re-marked at a new generation);
  *   · `revoke(id, principalKey)` — ONE member out (the chip's ✕, a click); `drop(id)` — the entry deleted: its row goes.
+ *   · r7 (lane vault-standing-request): a member's WINDOW scope (src/vault-use-grant.js — «any run until `until`», the owner's
+ *     time-boxed trust of one conversation) is written by addMember ONLY (`window`: the run card's «Allow for 1 hour»); the
+ *     owner's Save keeps one exactly as it is (its own end) and never mints or moves one — `window_card_only`.
  *   · `verdictFor(id, facts, run)` — the run door's question before it draws a card (src/server/vault-run-door.js);
  *   · `publicFor(id, counts)` — the row as the window draws it: each member's id, hosts, end, «used N× by M conversations».
  * Every landed write notifies the Vault window (`vault.contentsChanged` — the engine's ONE notify): every open window patches
@@ -35,7 +38,7 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ window_end_required: 400, window_card_only: 400, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -46,6 +49,8 @@ const WORDS = Object.freeze({
   reveal_needs_password: 'giving a conversation more needs the second password again (验证是你)',
   vault_locked: 'the vault is locked — unlock it (验证是你) to change who may use a stored value',
   entry_unknown: 'that stored value is not there any more',
+  window_end_required: 'a 1-hour approval needs its end in the future — nothing was written',   // r7
+  window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7
 });
 const named = (code, extra = {}) => ({ ok: false, code, error: WORDS[code] || code, ...extra });
 
@@ -180,6 +185,12 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const was = rowOf(id);
     const v = rowRules(id, { to, except }, { was: verifiedRow(was) });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
     if (!v.ok) return v;
+    // r7: a WINDOW scope is the CARD's (its «Allow for 1 hour») — a Save may keep one exactly as the stored member holds it (the
+    // same end), never mint one or move its end (the dialog offers none: «written from the card only»)
+    {
+      const held = new Map((((verifiedRow(was) && GM.publicRow(verifiedRow(was)).to) || [])).map((e) => [GM.principalKey(e), (Array.isArray(e.scopes) ? e.scopes : []).filter((s) => s && s.kind === 'window').map((s) => Number(s.until))]));
+      for (const e of v.row.to) for (const s of (Array.isArray(e.scopes) ? e.scopes : []).filter((x) => x && x.kind === 'window')) if (!(held.get(GM.principalKey(e)) || []).includes(Number(s.until))) return named('window_card_only', { principal: GM.principalKey(GM.bareOf(e)) });
+    }
     // lane vault-standing-request r4: the Save in the per-scope shape — a scope this Save ADDS or whose end / tool it CHANGES is
     // the owner's («你设置的», now); a scope it keeps as it was keeps its writer and time (a page's own `source` is never read)
     const wasV = verifiedRow(was);
@@ -198,11 +209,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
-  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, legacy = false } = {}, { by = 'user' } = {}) {
+  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, legacy = false, window = null } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
-    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration' });   // r4: per scope — a scope it names is added, or replaced when there with another end / ended; nothing else moves (the carry: the EARLIER end)
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration', window });   // r7: `window` — the run card's «Allow for 1 hour» (its end)   // r4: per scope — a scope it names is added, or replaced when there with another end / ended; nothing else moves (the carry: the EARLIER end)
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was, legacy: legacy && by === 'migration' });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads; r3: judged on what THIS write brings
     if (!v.ok) return v;
@@ -214,11 +225,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** r2 (MAJOR 1): THE QUESTION BEFORE A STANDING REQUEST'S CARD — would addMember write this member? (the plan + the row
    *  rules, nothing written) → { ok: true } | the named refusal the Allow would meet. */
-  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}) {
+  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, window = null } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
-    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now() });
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), window });
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was });   // r3: THIS member, the row as it becomes through it — never another member's legacy wildcard
     return v.ok ? { ok: true, changes: plan.changes } : v;   // r4 (B): what the write WOULD change — the door's card words, drawn and compared at the press
@@ -321,7 +332,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const out = [];
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
-      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, toolFor: v.member.toolFor || null, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until, scopes: v.member.scopes.filter((s) => !s.expired) });   // lane vault-standing-request: the scope + who wrote it + since when; r4: the LIVE scopes, each its own end
+      if (U.holds(v) && v.member) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, toolFor: v.member.toolFor || null, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until, scopes: v.member.scopes.filter((s) => !s.expired) });   // lane vault-standing-request: the scope + who wrote it + since when; r4: the LIVE scopes, each its own end
     }
     return out;
   }

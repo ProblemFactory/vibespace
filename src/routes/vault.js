@@ -39,6 +39,7 @@ const STATUS = Object.freeze({
   entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
   ask_redrawn: 409, restore_failed: 500,   // lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
   always_not_offered: 400, conversation_gone: 410,
+  window_not_offered: 400, window_card_only: 400, window_end_required: 400,   // lane vault-standing-request r7: «Allow for 1 hour»
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
@@ -89,6 +90,9 @@ const WORDS = Object.freeze({
   ask_redrawn: 'what this card writes changed since it was shown — nothing was written; it is drawn again with the new words: read it and answer again',   // lane vault-standing-request r4 (B)
   restore_failed: 'the write failed partway and what it had written could not be put back on every entry — check «Who may use it…» on its row',   // r4 (C)
   always_not_offered: '«always» is not offered for this command', conversation_gone: 'the conversation that asked has ended — nothing to run it for',
+  window_not_offered: '«Allow for 1 hour» is not offered on this card (it has an «Always», or it is late)',   // r7
+  window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7 (= vault-use-grants WORDS)
+  window_end_required: 'a 1-hour approval needs its end in the future — nothing was written',   // r7
   failed: 'the vault door failed — nothing changed',
   bad_scope: 'this session has no conversation to own a vault entry',
   bad_length: 'the length is a whole number from 8 to 256',
@@ -425,7 +429,8 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
  * the hub and answers {exit, stdout, stderr, …} SCRUBBED (each value, in every spelling of vault-run.js's FORMS, is its placeholder); a job token ⇒
  * 403 job_no_use; no bearer (a cookie) ⇒ 401. GET /api/agent/vault/runnable → {entries: [{ref, store, label, kind, field}]}.
  * A PERSON (this page — any bearer human_only): POST /api/vault/runnable {id, on, page} (ON needs this page's 验证是你 window) ·
- * POST /api/vault/run/asks/:askId {answer: once | always | deny, ttl, page} («always» needs the window too).
+ * POST /api/vault/run/asks/:askId {answer: once | always | window | deny, ttl, page} («always» and r7's «window» — «Allow for
+ * 1 hour» — need the window too).
  * lane vault-manual-and-lock (design q-043 D4): POST /api/agent/vault/request {entry, purpose} — a conversation's own bearer
  * asks the owner for an entry with its purpose (ONE For-you ask; a second for the same entry while one is open ⇒
  * request_pending) · GET /api/agent/vault/uses → {grants, requests, uses} — THIS conversation's grants, open requests and
@@ -509,7 +514,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   const whoOf = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
   const reauthedOf = (req, page) => !!(contents && contents.windowFacts(whoOf(req), typeof page === 'string' ? page : pageHeader(req)).open);
   app.post('/api/vault/runnable', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setRunnable({ id: b.id, on: b.on === true, reauthed: b.on === true && reauthedOf(req, page), by: 'user' }); }));
-  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»
+  // lane vault-standing-request r7: «Allow for 1 hour» (`window`) writes a standing grant, so it asks 验证是你 as «Always» does
+  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: (b.answer === 'always' || b.answer === 'window') && reauthedOf(req, page), by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»
   // lane vault-use-grants: «谁可以用…» — the entry's vault-use row (给谁 / 除了, each member its hosts and its end): a save that WIDENS
   // (a new member, a new host, a later end, an exception taken away) needs THIS page's 验证是你 window; a narrowing and ✕ are clicks
   app.post('/api/vault/use-grants', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.setRow(String(b.id || ''), { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [] }, { by: 'user', reauthed: reauthedOf(req, page) }); }));

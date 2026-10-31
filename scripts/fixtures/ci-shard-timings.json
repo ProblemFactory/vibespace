@@ -319,6 +319,7 @@
   "test-usage-scan-subagents": 65,
   "test-usage-window-pivots": 40053,
   "test-vault-chrome": 75791,
+  "test-vault-hour-grant": 400,
   "test-vault-login-chrome": 213,
   "test-vault-paste-chrome": 22317,
   "test-vault-run-wire": 75,

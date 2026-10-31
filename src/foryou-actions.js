@@ -611,7 +611,7 @@ function grantLifeOf(item, now = Date.now()) {
   const run = !!(item && item.action && item.action.type === 'vault-run-ask' && item.resolvedBy === 'always');
   if (!req && !run) return null;
   const f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
-  const grantedFor = run ? 'always' : f.grantedFor === 'once' || f.grantedFor === '8h' || f.grantedFor === 'standing' ? f.grantedFor : null;   // lane vault-standing-request: + 'standing' (no `until` — it lives until revoked)
+  const grantedFor = run ? (f.windowFor === '1h' ? 'window' : 'always') : f.grantedFor === 'once' || f.grantedFor === '8h' || f.grantedFor === 'standing' ? f.grantedFor : null;   // lane vault-standing-request: + 'standing' (no `until` — it lives until revoked); r7: + 'window' — the run card's «Allow for 1 hour» (an «always» record carrying `windowFor: '1h'` + its `until`)
   const until = Number(f.until) > 0 ? Number(f.until) : null;
   const endedAt = Number(f.endedAt) > 0 ? Number(f.endedAt) : null;
   if (endedAt && f.endedBy === 'revoked') return { state: 'revoked', at: endedAt, grantedFor, until };
@@ -621,15 +621,19 @@ function grantLifeOf(item, now = Date.now()) {
 }
 /** A row's own two verbs (`verbs` — the held digest's Deliver / Discard), or null (Approve / Deny). */
 const verbsOf = (type) => (ROW_OF[type] && ROW_OF[type].verbs) || null;
-const GRANT_VERB = Object.freeze({ '8h': i18nKey('allowed for 8 hours'), once: i18nKey('allowed once'), always: i18nKey('always allowed'), standing: i18nKey('allowed until revoked') });
+const GRANT_VERB = Object.freeze({ '8h': i18nKey('allowed for 8 hours'), once: i18nKey('allowed once'), always: i18nKey('always allowed'), standing: i18nKey('allowed until revoked'), window: i18nKey('allowed this conversation for 1 hour') });
+/** r7: a LIVE 1-hour window's record says its end and where it is taken back — the SAME words in the chat card, the tray and
+ *  the For-you window (decidedStamp / settledWords both read grantWords) */
+const WINDOW_BACK_WORDS = i18nKey('take it back in the Vault window');
 /** A granted record in words, its life said: «allowed for 8 hours» / «allowed once» / «allowed» (no duration on the record),
  *  «allowed for 8 hours · ended 17:41», «allowed · revoked 17:41». → {verb, when, text, state} | null (not a grant). */
 function grantWords(item, { t = fmt, now = Date.now() } = {}) {
   const life = grantLifeOf(item, now);
   if (!life) return null;
-  if (life.state === 'revoked') { const verb = t(life.grantedFor === 'always' ? GRANT_VERB.always : 'allowed'), when = t('revoked {time}', { time: clockWords(life.at, now) }); return { verb, when, text: `${verb} · ${when}`, state: 'revoked' }; }
+  if (life.state === 'revoked') { const verb = t(life.grantedFor === 'always' || life.grantedFor === 'window' ? GRANT_VERB[life.grantedFor] : 'allowed'), when = t('revoked {time}', { time: clockWords(life.at, now) }); return { verb, when, text: `${verb} · ${when}`, state: 'revoked' }; }
   const verb = t(GRANT_VERB[life.grantedFor] || 'allowed');
   if (life.state === 'ended') { const when = t('ended {time}', { time: clockWords(life.at, now) }); return { verb, when, text: `${verb} · ${when}`, state: 'ended' }; }
+  if (life.grantedFor === 'window' && life.until) { const when = `${t('until {when}', { when: clockWords(life.until, now) })} · ${t(WINDOW_BACK_WORDS)}`; return { verb, when, text: `${verb} · ${when}`, state: 'live', window: true }; }   // r7: «allowed this conversation for 1 hour · until 10:41 · take it back in the Vault window»
   return { verb, when: null, text: verb, state: 'live' };
 }
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
@@ -640,6 +644,7 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   // r6: a grant that ENDED (or was revoked) says so, whoever decided it — «allowed for 8 hours · ended 17:41»
   const gw = by === 'granted' || by === 'always' ? grantWords(item, { t, now }) : null;
   if (gw && gw.state !== 'live') return { verb: gw.verb, time: gw.when, text: gw.text, denied: false, ended: gw.state };
+  if (gw && gw.window) return { verb: gw.verb, time: gw.when, text: gw.text, denied: false };   // r7: a live 1-hour window — its end and where to take it back, whoever pressed
   const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
   const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h' || fact.grantedFor === 'standing') ? `granted:${fact.grantedFor}` : by === 'allowed' && fact && fact.late === true ? 'allowed:late' : by;
   if (!Object.prototype.hasOwnProperty.call(words, key)) return null;
@@ -789,8 +794,12 @@ function runCardOf(item, { t = fmt } = {}) {
   const chs = (x) => (x && Array.isArray(x.changes) ? x.changes.filter((c) => c && typeof c === 'object' && str(c.scope)) : []);
   const open = !item.status || item.status === 'open';
   const chList = !open || alwaysGone ? [] : cmdA ? chs(cmdA) : a.offered === true ? chs(a) : [];
-  const redrawn = open && !alwaysGone && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;
-  const changes = chList.length || redrawn ? { lines: chList.map((c) => [{ text: changeWords(c, t) }]), redrawn } : null;
+  // r7: «Allow for 1 hour» — only on an OPEN card the door marked (`action.window`), never a late one (a late card offers neither
+  // answer that writes); its row says what the press writes, and the window of its own it replaces
+  const win = open && act.late !== true && act.window === true && f.window && typeof f.window === 'object' && f.window.offered === true ? f.window : null;
+  const winLines = win ? windowWords(win, t) : [];
+  const redrawn = open && (!alwaysGone || !!win) && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;   // r7: while ANY answer that writes is there
+  const changes = chList.length || winLines.length || redrawn ? { lines: [...chList.map((c) => [{ text: changeWords(c, t) }]), ...winLines.map((x) => [{ text: x }])], redrawn } : null;
   const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
@@ -842,7 +851,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, fold };
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }] } : { offered: false, hint: null }, fold };   // r7: `window` — «Allow for 1 hour» and its words
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -862,6 +871,19 @@ const ON_ENTRY_WORDS = i18nKey('On «{entry}»: {line}');
 // r5: a card the press drew again (what its answer writes moved since it was shown) is MARKED — never the same face as before
 // (= vault-run-door REDRAWN_LINE)
 const REDRAWN_WORDS = i18nKey('Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.');
+// r7 (the owner 2026-10-31 «不清楚发往何处的话，就允许我直接给agent … 1个小时授权吧»): «ALLOW FOR 1 HOUR» — where the card has no hosts
+// «Always», what the press writes (the card's own row) and the words beside it (= vault-run-door WINDOW_* lines)
+const WINDOW_WRITES_WORDS = i18nKey('«Allow for 1 hour»: this conversation will be able to use “{entry}” in any run until {until}.');
+const WINDOW_REPLACES_WORDS = i18nKey('«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.');
+const WINDOW_ENDED_WORDS = i18nKey('This conversation\'s 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.');
+const WINDOW_HINT_WORDS = i18nKey('For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.');
+/** r7: the window's facts (vault-run-door windowFactsOf: {offered, until, entries, changes: [{entry, until, expired?}]}) → its lines. */
+function windowWords(w, t = fmt) {
+  const s = (x) => (typeof x === 'string' ? x : '');
+  const until = clockWords(Number(w.until)), entries = (Array.isArray(w.entries) ? w.entries : []).filter((x) => typeof x === 'string' && x);
+  return [t(WINDOW_WRITES_WORDS, { entry: entries.join('”, “'), until }),
+    ...(Array.isArray(w.changes) ? w.changes : []).filter((c) => c && typeof c === 'object').map((c) => t(c.expired === true ? WINDOW_ENDED_WORDS : WINDOW_REPLACES_WORDS, { entry: s(c.entry), when: clockWords(Number(c.until)), until }))];
+}
 const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
 /** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */
 function changeWords(c, t = fmt) {
