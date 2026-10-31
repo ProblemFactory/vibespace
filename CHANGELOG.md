@@ -38,6 +38,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A command whose shell text cannot be fully read, such as a zsh glob pattern or a value run a second time, keeps the conversation links it may have caused.
 - When a page waits for a passkey, in your own browsing or the agent's live view, the window now says so and tells you how to answer it.
 - Jumping to a search result is no longer undone when the latest messages from an earlier ↓ or send finish loading.
+- A form that opens just as the window grows from phone size to desktop size opens in its own window at once, and no form moves while you are clicking it.
 
 ## 2.369.366 — 2026-10-31
 
