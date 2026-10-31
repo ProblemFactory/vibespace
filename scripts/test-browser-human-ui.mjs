@@ -28,6 +28,9 @@
 //   verify r2 (the owner's option A, "有提醒就行"): on a profile whose tabs its agents share, ONE line at the top of his
 //       window says they can also see and drive this tab — under the address row, above the page, a keyed chip patched in
 //       place when the digest says "separate tabs" (hidden) and back; in en / zh / ja on the phone.
+//   (a2) lane passkey-browse-yourself (the owner 2026-10-30 in «自己浏览», «还是没有 passkey 提示»): his page (his address row)
+//       waits for a passkey ⇒ HIS window shows the banner a conversation's live view shows; a real click on its Cancel ends
+//       HIS page's request (the page sees AbortError) and the banner goes.
 // SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.37 + an installed Chrome, or a viewer chrome.
 // Scratch only (/tmp/vs-browseself-<pid>): never ~/.agent-browser (the machine's own Chrome serves both the agent's
 // browser and the viewer), never `close --all`, never the production data/.
@@ -132,9 +135,12 @@ const hook = JSON.stringify({ type: 'system', subtype: 'hook_started', session_i
 const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: CWD, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
 fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) env > "${ENVS}/$$.env"; sleep 1; printf '%s\\n%s\\n' '${hook}' '${init}'; exec cat > "${ENVS}/$$.stdin";; esac\necho '2.1.281 (Claude Code)'\n`, { mode: 0o755 });
 const reports = new Map();
+// lane passkey-browse-yourself: a page that starts a passkey ceremony at load (rpId localhost — loopback only) and reports its outcome
+const PK_PAGE = `<!doctype html><meta charset=utf-8><title>pk</title><p>Verifying it's you — use your passkey</p><script>let st='pending';const ch=new Uint8Array(32);crypto.getRandomValues(ch);navigator.credentials.get({publicKey:{challenge:ch,rpId:'localhost',userVerification:'preferred',timeout:120000}}).then(()=>{st='ok'},(e)=>{st=e.name});setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:'pk',a:st,b:'',act:''}),keepalive:true}).catch(()=>{}),150);</script>`;
 const col = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.pathname === '/q') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(innerPage(u.searchParams.get('n') || '')); return; }
+  if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(PK_PAGE); return; } // lane passkey-browse-yourself
   if (u.pathname === '/st' && req.method === 'POST') { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { try { const o = JSON.parse(b); o.at = Date.now(); reports.set(o.n, o); } catch { } res.statusCode = 204; res.end(); }); return; }
   res.statusCode = 404; res.end();
 });
@@ -322,6 +328,23 @@ console.log('— (b2) tabs on the real 0.38.1: the agent lists / opens / closes 
   const hr = await until(() => E.h('if (!L) return null; const r = L.state().tabRow; return r && r.rows.length >= 2 && r.rows.some((x) => x.owner === "you") && r.rows.some((x) => x.owner === "other") ? r : null;').catch(() => null), 10000, 200);
   const hisRow = hr && hr.rows.find((x) => x.owner === 'you'), agentRows = hr ? hr.rows.filter((x) => x.owner === 'other') : [];
   ok(hisRow && !hisRow.canClose && agentRows.length >= 1 && agentRows.every((x) => !x.canClose && !x.canSwitch), 'HIS window\'s tab row: his tab "Yours" (his only one — no ✕: Close ends his browsing), the conversation\'s "Another conversation’s" with NO control on it', JSON.stringify(hr));
+}
+
+// ═══ (a2) lane passkey-browse-yourself: HIS PAGE WAITS FOR A PASSKEY ⇒ HIS WINDOW SAYS SO ═══════════════════════
+console.log('— (a2) his page waits for a passkey: his window shows the banner, its Cancel ends HIS page\'s request');
+{
+  const typeAddress = async (url) => { await E.h('const i = L.el().querySelector(".browser-live-address-input"); if (!i) return false; i.focus(); i.select(); return true;'); await E.call('Input.insertText', { text: url }); await E.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); };
+  const barText = 'const b = L.el().querySelector(".browser-live-dialog"); return b && b.style.display !== "none" && /waiting for a passkey/.test(b.textContent) ? b.textContent : null;';
+  await typeAddress(`http://localhost:${CP}/pk`);
+  const started = await innerUntil('pk', (r) => r.a === 'pending', 20000);
+  const bar = await until(() => E.h(barText), 20000, 200);
+  ok(!!started && /This page is waiting for a passkey \(localhost\)/.test(String(bar)) && /Cancel passkey request/.test(String(bar)), `his page (his address row) waits for a passkey ⇒ HIS window shows the banner ("${String(bar || '').slice(0, 80)}…")`, JSON.stringify({ started, bar }));
+  ok(await E.clickSel('.browser-live-passkey-cancel'), 'a real click on the banner\'s Cancel');
+  const ended = await innerUntil('pk', (r) => r.a === 'AbortError', 10000);
+  const gone = await until(() => E.h('const b = L.el().querySelector(".browser-live-dialog"); return !b || b.style.display === "none" || !/waiting for a passkey/.test(b.textContent);'), 10000, 200);
+  ok(!!ended && !!gone, `…its Cancel ends HIS page's request (the page saw ${ended && ended.a}) and the banner goes`, JSON.stringify({ ended, gone }));
+  await typeAddress(innerUrl('mine')); // (c) finds his tab by its page
+  ok(!!(await innerUntil('mine', (r) => r.at > ((reports.get('pk') || {}).at || 0), 20000)), 'his address row takes his tab back to his page (the legs below find his tab by it)');
 }
 
 // ═══ (c) CLOSE ⇒ HIS TAB ONLY; BROWSE YOURSELF AGAIN ⇒ JOIN ═══════════════════════

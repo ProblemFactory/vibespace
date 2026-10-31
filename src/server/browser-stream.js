@@ -116,6 +116,7 @@ const FIT_HOLD_MAX_MS = 15000;
 
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 const LIVE_CHECK_MS = 2000;
+const PASSKEY_RECHECK_MS = 2500; // lane passkey-browse-yourself: a live view's passkey fact read again after its watch went down (past the watch's 2 s re-arm)
 /** r6 A-F8: how many `command` records a relay remembers by id (a confirmation's result pairs with its command). */
 const CMD_MEMORY = 64;
 const RESUME_POLL_MS = 50;
@@ -218,10 +219,15 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   // dialog (measured on 0.38.1: status / tabs / command / result / url only) — the dialog watch does. A relay shows the
   // dialog on the tab it shows (its `activeTarget`; before the first `tabs` record, any of its browser's); a viewer's
   // `dialog-answer` is the USER's answer (Page.handleJavaScriptDialog through the watch — the one client that saw it).
+  // lane passkey-browse-yourself (2026-10-30): his OWN browsing window names its profile too — measured on 43d0f8d2d it named
+  // none, so the watch was never armed by it and no dialog / passkey fact of his page ever reached it
   const relayProfileId = (relay) => {
-    if (relay.target.kind === 'attachment') return relay.target.profileId || null;
+    if (relay.target.kind === 'attachment' || relay.target.kind === 'human') return relay.target.profileId || null;
     try { const e = keeper && keeper.ephemeralFor ? keeper.ephemeralFor(relay.target.kind === 'child' ? relay.target.handle : relay.browserKey) : null; return e ? e.profileId : null; } catch { return null; }
   };
+  /** lane passkey-browse-yourself: is the relay's browser an EPHEMERAL one (every tab its holder's)? his own browsing is a named
+   *  profile's — his tabs are his row's (the watch's scope by his key), never every tab of the browser. */
+  const relayEph = (relay) => relay.target.kind !== 'attachment' && relay.target.kind !== 'human';
   const dialogShownOn = (relay, targetId) => !relay.activeTarget || !targetId || relay.activeTarget === targetId;
   function dialogRecordFor(relay) {
     if (!dialogs) return null;
@@ -239,6 +245,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!ev || !ev.profileId) return;
     for (const r of relays.values()) {
       if (relayProfileId(r) !== ev.profileId) continue;
+      if (ev.kind === 'passkey' || ev.kind === 'passkey-proposal' || ev.kind === 'watched') pushPasskey(r); else if (ev.kind === 'down') passkeyAfterDown(r); // lane passkey-browse-yourself
       if (ev.kind === 'open' && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'open', dialog: blockOfEv(ev.dialog) });
       // lane browser-surfaces: a kernel's NOTED surface (the bar shows it; it never holds the page) / a surface whose words moved
       else if (ev.kind === 'surface' && ev.surface && (ev.state === 'open' || ev.state === 'updated') && dialogShownOn(r, ev.targetId)) broadcast(r, ev.surface.cls === 'held' ? { type: 'dialog', state: 'open', dialog: blockOfEv(ev.surface) } : { type: 'surface', state: 'open', surface: blockOfEv(ev.surface) });
@@ -249,11 +256,27 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       else if (ev.kind === 'print' && (!ev.targetId || dialogShownOn(r, ev.targetId))) broadcast(r, { type: 'page-note', print: { released: !!ev.released } });
     }
   }) : null;
+  /** lane passkey-browse-yourself (rule 2): THE PASSKEY FACT of the browser this relay shows (the watch's passkeyFactOf: open /
+   *  ask with its card / unknown — never silence) — sent to its viewers when it MOVES and replayed to a viewer that attaches; the
+   *  window draws it with the SAME banner a session's fact drives (a browsing window has no session row: this record is its fact). */
+  function pushPasskey(relay) {
+    if (!dialogs || typeof dialogs.passkeyFactOf !== 'function' || relays.get(relay.key) !== relay) return;
+    const live = !!(relay.upstream && relay.upstream.readyState === 1); // a view that shows no browser says nothing of one — a stopped browser's banner is taken down
+    const pid = live ? relayProfileId(relay) : null;
+    let fact = null; try { fact = pid ? dialogs.passkeyFactOf({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay) }) : null; } catch { fact = null; }
+    const digest = fact ? JSON.stringify(fact) : '';
+    if (digest === (relay.pkDigest || '')) return;
+    relay.pkDigest = digest;
+    relay.lastPasskey = fact ? { type: 'passkey', fact } : null;
+    broadcast(relay, { type: 'passkey', fact });
+  }
+  /** A watch that went down: read again once its re-arm had its chance (a stopped browser's upstream is gone by then — nothing said). */
+  function passkeyAfterDown(relay) { const t = setTimeout(() => pushPasskey(relay), PASSKEY_RECHECK_MS); if (t.unref) t.unref(); }
   function armDialogs(relay) {
     if (!dialogs) return;
     const pid = relayProfileId(relay);
     if (!pid) return;
-    dialogs.arm(pid).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces
+    dialogs.arm(pid).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact
   }
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);
@@ -263,12 +286,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (typeof msg.answerId === 'string' && typeof dialogs.answerSurface === 'function') {
       const vals = msg.values && typeof msg.values === 'object' && !Array.isArray(msg.values) ? msg.values : null;
       const files = Array.isArray(msg.files) ? msg.files.filter((x) => typeof x === 'string').slice(0, 32) : null;
-      dialogs.answerSurface({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment' }, { surfaceId: String(msg.id || '').slice(0, 80), answerId: msg.answerId.slice(0, 80), values: vals, files, by: 'user' })
+      dialogs.answerSurface({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay) }, { surfaceId: String(msg.id || '').slice(0, 80), answerId: msg.answerId.slice(0, 80), values: vals, files, by: 'user' })
         .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
         .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
       return;
     }
-    dialogs.answer({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment', dialogId: msg.id ? String(msg.id).slice(0, 80) : null }, { accept: !!msg.accept, text: msg.accept && typeof msg.text === 'string' ? msg.text.slice(0, 2000) : null, by: 'user' })
+    dialogs.answer({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay), dialogId: msg.id ? String(msg.id).slice(0, 80) : null }, { accept: !!msg.accept, text: msg.accept && typeof msg.text === 'string' ? msg.text.slice(0, 2000) : null, by: 'user' })
       .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
   }
@@ -277,7 +300,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const pid = relayProfileId(relay);
     const ack = (o) => send(viewer.ws, { type: 'passkey-ack', ...o });
     if (!dialogs || !pid || typeof dialogs.cancelPasskey !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
-    dialogs.cancelPasskey({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment' }, { by: 'user' })
+    dialogs.cancelPasskey({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay) }, { by: 'user' })
       .then((r) => ack(r.ok ? { ok: true, n: r.n } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
   }
@@ -287,7 +310,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const pid = relayProfileId(relay);
     const ack = (o) => send(viewer.ws, { type: 'prompt-ack', id: String(msg.id || '').slice(0, 80), ...o });
     if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
-    dialogs.answerPrompt({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment', promptId: msg.id ? String(msg.id).slice(0, 80) : null },
+    dialogs.answerPrompt({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay), promptId: msg.id ? String(msg.id).slice(0, 80) : null },
       { cancel: msg.cancel === true, username: typeof msg.username === 'string' ? msg.username : '', password: typeof msg.password === 'string' ? msg.password : '', by: 'user' })
       .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch(() => ack({ ok: false, code: 'internal', error: 'the answer was not delivered' }));
@@ -368,6 +391,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFit) send(ws, relay.lastFit); // lane S4: what the page's size is and whose pane it follows (the chip's words)
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: whose each tab is (the tab row's controls), replayed like the tabs record
     if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b): the tab on show is in the background (said to a late viewer too)
+    if (relay.lastPasskey) send(ws, relay.lastPasskey); // lane passkey-browse-yourself: the page waits for a passkey (said to a late viewer too)
     // 2.369.180 (lanes H + J on one tree): a viewer that joins a relay whose upstream is ALREADY open is told so — the
     // 'upstream-open' broadcast went out before it came, and lane H's recorder taps a holder's relay before anybody
     // watches, so EVERY live view of an ephemeral browser is such a joiner. Without it the view never read itself
@@ -407,6 +431,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFit) send(ws, relay.lastFit);
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
     if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b)
+    if (relay.lastPasskey) send(ws, relay.lastPasskey); // lane passkey-browse-yourself: his page waits for a passkey
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     broadcastViewers(relay);
     ws.on('message', (d) => onViewerMessage(relay, viewer, d));

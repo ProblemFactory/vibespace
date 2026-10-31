@@ -170,6 +170,7 @@ function registerText(state, rpId) {
 /** A verdict as the routes and the CLI carry it (no clock inside; `record` trimmed to what a reader needs). */
 function passkeyBlock(v) {
   if (v && v.state === 'refused') return { state: 'refused', why: v.why, rpId: v.rpId, text: v.text }; // lane passkey-store-core
+  if (v && v.state === 'unknown') return { state: 'unknown', text: UNKNOWN_TEXT }; // lane passkey-browse-yourself: a browser the watch cannot see says so — never a bare state a reader prints as nothing
   if (!v || (v.state !== PASSKEY_OPEN_CODE && v.state !== PASSKEY_ASK_CODE)) return v ? { state: v.state } : null;
   const r = v.record;
   return { state: v.state, id: r.id, kind: r.kind, rpId: r.rpId, tab: r.tab, startedAt: r.startedAt, text: v.text, ...(r.ask ? { proposal: r.ask } : {}) };
@@ -199,9 +200,11 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
  *  lane passkey-ui (§2.4 / §2.5): `passkey_ask` = the page waits for the OWNER's card — the banner carries that card's
  *  words and choices (`card`, the same buttons as the tray and the chat; the same approve route). */
-function passkeyWords(b, tIn, { headed = false, card = null } = {}) {
-  if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
+function passkeyWords(b, tIn, { headed = false, card = null, display = null } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line, no button), never nothing
+  if (b && b.state === 'unknown') return { unknown: true, title: '', line: t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '' };
+  if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
   const rp = rpWord(b.rpId) || t('this site');
   if (b.state === PASSKEY_ASK_CODE) {
     const cw = passkeyCardWords(card, tIn);
@@ -210,11 +213,16 @@ function passkeyWords(b, tIn, { headed = false, card = null } = {}) {
   return {
     title: t('This page is waiting for a passkey ({rp})', { rp }),
     line: t('A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page\'s other way in, or sign in on your own device.'),
-    desktop: headed ? t('Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.') : '',
+    // lane passkey-browse-yourself: a browser on a VIRTUAL display (the attach road) — the sentence names the display and the ways in
+    desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : t('Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.')) : '',
     cancel: t('Cancel passkey request'),
     chip: t('page waits for a passkey'),
   };
 }
+/** lane passkey-browse-yourself (the owner, 2026-10-30 «还是没有 passkey 提示»): a HEADED browser on a virtual display — Chrome's
+ *  own passkey window is THERE (tab-modal in the browser's window, measured): the sentence names that display and every way
+ *  in. The banner's line and the For-you item's first detail line are this one literal (zh + ja entries). */
+const DOORS_WORDS = 'Chrome\'s own passkey window is on the virtual display {display} — open it from Desktop to use a phone\'s passkey (the QR), or use the site\'s other method, or register a passkey for this site in this profile first (vibespace-browser passkey register {rp})';
 /** The For-you item (origin browser; ONE per (profile, rpId); resolved by itself when the request ends). Literal keys. */
 const FOR_YOU_WORDS = Object.freeze({
   text: 'A page in the agent\'s browser is waiting for a passkey ({rp})',
@@ -266,12 +274,14 @@ function keyForYouItem(r) {
   const file = str(r.file) || 'the key file', key = KEY_WORDS[m[1]], params = m[1] === 'key-unreadable' ? { file, code: m[2] || '?' } : { file };
   return { text: fill(key, params), detail: KEY_WORDS.detail, urgency: 'high', i18n: { text: { key, params }, detail: [{ key: KEY_WORDS.detail }] } };
 }
-function forYouItem(b, { label = '' } = {}) {
+function forYouItem(b, { label = '', display = null } = {}) {
   const rp = rpWord(b && b.rpId) || 'this site';
+  // lane passkey-browse-yourself: a headed browser on a virtual display ⇒ the first line names it and the ways in (the banner's words)
+  const doors = display ? { key: DOORS_WORDS, params: { display: str(display).slice(0, 40), rp } } : null;
   return {
     text: fill(FOR_YOU_WORDS.text, { rp }) + (label ? ` — ${str(label).slice(0, 80)}` : ''),
-    detail: FOR_YOU_WORDS.detail,
-    i18n: { text: { key: FOR_YOU_WORDS.text, params: { rp } }, detail: [{ key: FOR_YOU_WORDS.detail }] }, // lane passkey-ui: detail = an array of lines (user-todos normalizeI18n refused the object)
+    detail: (doors ? fill(doors.key, doors.params) + '\n' : '') + FOR_YOU_WORDS.detail,
+    i18n: { text: { key: FOR_YOU_WORDS.text, params: { rp } }, detail: [...(doors ? [doors] : []), { key: FOR_YOU_WORDS.detail }] }, // lane passkey-ui: detail = an array of lines (user-todos normalizeI18n refused the object)
   };
 }
 
@@ -460,7 +470,7 @@ const HOOK_HOLD_MS = 1500;
 module.exports = {
   passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
-  NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS,
+  NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS, DOORS_WORDS,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
   loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

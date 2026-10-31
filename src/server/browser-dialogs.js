@@ -57,6 +57,13 @@
  * own `ctl` in the ceremony's execution context (found by identity, never through the page's slot): the hooked closure
  * aborts its AbortControllers — the page's promise rejects AbortError.
  * A tab whose hook never armed is `unknown`, never `passkey_open`.
+ * EVERY ROAD IS WATCHED (lane passkey-browse-yourself, 2026-10-30 — the owner in «自己浏览» on a headed attach-road browser, a page
+ * at /challenge/pk, «还是没有 passkey 提示»; measured on 43d0f8d2d: nothing opened this socket for a browser HIS press launched,
+ * his window's relay named no profile, and `stuckForKey` of his key was null even when watched): a browser the person browses
+ * himself is watched like any other — opened at `human-start` (bounded: his press waits for it like a verb's /resolve), again
+ * at `browser-ready` while he holds it (a heal), and a socket that CLOSED under him is opened again once after REARM_MS; his
+ * key (`hu-…`) has a stuck fact like a conversation's (his tabs: the wiring's holderTabs); `passkeyFactOf` = ONE passkey fact per
+ * live view (his window reads it from its relay); an unwatched browser's block is `unknown` + UNKNOWN_TEXT, never null.
  *
  * ONE BROWSER = ONE SOURCE (lane browser-surfaces, 2026-10-25 — P1 of the custom browser kernel, design-custom-browser-plugin
  * §2): at every socket's open the watch asks `VibeSpace.getVersion` FIRST (before any tab is tracked). No such method (standard
@@ -89,6 +96,10 @@ const LF = () => LFm || (LFm = require('./browser-login-fill.js')); // lane vaul
 // lane passkey-sink: the PURE passkey signer — asked only on a kernel with `webauthn` (required at first use, like SF / PT)
 let WAm = null;
 const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
+// lane passkey-browse-yourself: the user's own key (`hu-…`) → its profile — required at first use (only a human key asks it)
+let HMm = null;
+const HM = () => HMm || (HMm = require('../browser-human.js'));
+const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this (once; his window / human-start re-arm after)
 const PK_ORPHAN_MS = 1500; // a webauthn surface whose request never comes (it began before this socket) is cancelled after this — never a page left waiting
 const NATIVE_ON_KERNEL = new Set(['Page.javascriptDialogOpening', 'Page.javascriptDialogClosed', 'Page.fileChooserOpened', 'Fetch.authRequired']); // one source: never read where surfaces are on
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
@@ -105,10 +116,11 @@ const SAW_SETTLE_MS = 2000;                  // int347: the audit's wait for a d
 const NATIVE_SHEET_PAGE_RE = /^chrome-error:\/\/chromewebdata\//;
 const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is asked again (it answers once the hold ends)
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
+const SOCKET_CLOSED = 'the browser\'s CDP socket closed'; // lane passkey-browse-yourself: the one `down` reason a re-arm answers (a stop / a restart / a shutdown never)
 
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
-  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null,
+  tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null, rearmMs = REARM_MS /* lane passkey-browse-yourself */,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
   passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
@@ -148,6 +160,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const sayOnce = new Set();
   const kernelOf = new Map();      // lane browser-surfaces: profileId → false (standard Chrome: never asked again) | {protocol, kinds, features}
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
+  // lane passkey-browse-yourself (rule 1): does the person browse this profile himself (the wiring's holder row `human: true`)?
+  const humanHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && h.human); } catch { return false; } };
+  const rearms = new Map(); // profileId → the one pending re-arm of a socket that closed under his browsing
+  function rearmLater(pid) {
+    if (rearms.has(pid)) return;
+    const t = setTimeout(() => { rearms.delete(pid); if (humanHolds(pid)) arm(pid, { budgetMs: 0 }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs);
+    if (t.unref) t.unref();
+    rearms.set(pid, t);
+  }
 
   function emit(ev) { for (const fn of [...listeners]) { try { fn(ev); } catch (e) { say('listener:' + (e && e.message), `a listener threw: ${e && e.message}`); } } }
   /** verify r1 (lane browser-stuck, A3/A6): the idle notice of a dialog that closed is withdrawn — the agent's next verb
@@ -206,10 +227,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // the hook's last CDP answer, so a verb's first fact read the tab as `unknown` (the mirror's red, run 37419676410)
       await Promise.allSettled([...w.targets.values()].map((e) => e.pk.arming));
       w.ready();
+      emit({ kind: 'watched', profileId: w.profileId }); // lane passkey-browse-yourself: a live view's passkey fact is read again (unknown → none)
     });
     ws.on('message', (d) => { try { onMessage(w, d); } catch (err) { say('msg:' + (err && err.message), `${w.profileId}: a CDP event was not handled — ${err && err.message}`); } }); // key-file-law-fix: a throw never leaves the listener (uncaughtException = the hub's exit)
     ws.on('error', (e) => { say('err:' + w.profileId + ':' + (e && e.code), `${w.profileId}: the watch's socket failed — ${e && e.message}`); });
-    ws.on('close', () => down(w, 'the browser\'s CDP socket closed'));
+    ws.on('close', () => down(w, SOCKET_CLOSED));
   }
   function down(w, why, { keepNotices = false } = {}) {
     if (w.state === 'down') return;
@@ -226,6 +248,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } }
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
+    if (why === SOCKET_CLOSED && humanHolds(w.profileId)) rearmLater(w.profileId); // lane passkey-browse-yourself (rule 1): re-opened on reconnect
   }
   /** One page tab: attach (flat session) + Page.enable — the enable bounded; a tab that never answers is HELD. */
   function track(w, info) {
@@ -839,18 +862,51 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       loop: loop ? { ...ST.loopBlock(loop), runStart: loop.runStart, text: ST.loopText(loop) } : null,
       loopAny: loopAny ? { ...ST.loopBlock(loopAny), runStart: loopAny.runStart } : null,
       loopShared, // verify r1: kinds only
-      passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : null, // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed
+      passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : PK.passkeyBlock({ state: 'unknown' }), // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed — lane passkey-browse-yourself: an unwatched browser too (UNKNOWN_TEXT), never null
       prompt: watched ? ST.promptBlock(promptIn(pid, scope), { now: t }) : null, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, with THE SENTENCE
     };
+  }
+  /** lane passkey-browse-yourself: THE PASSKEY FACT a view renders out of a facts block — `passkey_open` (a headed browser's
+   *  desktop, and the virtual display it is on: the sentence names it) / `passkey_ask` (the owner's card: the banner's buttons);
+   *  null for any other state. ONE shape on every road (a conversation's session row, his window's relay). */
+  function passkeyFactFrom(pk, pid) {
+    if (!pk) return null;
+    if (pk.state === PK.PASSKEY_ASK_CODE) { const a = pk.proposal ? pkAsks.get(String(pk.proposal)) : null; return { state: 'passkey', passkey: pk, ...(a && a.state === 'open' ? { card: a.card } : {}), headed: false, since: pk.startedAt, profileId: pid }; }
+    if (pk.state === PK.PASSKEY_OPEN_CODE) { const headed = onDesktop(pid); const display = headed ? displayOf(pid) : null; return { state: 'passkey', passkey: pk, headed, ...(display ? { display } : {}), since: pk.startedAt, profileId: pid }; }
+    return null;
+  }
+  /** lane passkey-browse-yourself (rules 2 + 4): the passkey fact of ONE live view (its relay's profile + holder) — the window
+   *  with no session row (browse yourself) reads its banner from here. A browser the watch does not see — or a web page of the
+   *  view whose hook never armed — ⇒ `unknown` with UNKNOWN_TEXT (the view's quiet line): never silence. null = nothing to say. */
+  function passkeyFactOf({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}) {
+    const pid = String(profileId || '');
+    if (!pid) return null;
+    const unknown = { state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown' }), headed: false, since: 0, profileId: pid };
+    const w = watches.get(pid);
+    if (w && w.state === 'connecting') return null; // its `watched` / `down` comes next — never a flash of the unknown line
+    if (!w || w.state !== 'open') return unknown;
+    const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+    const b = PK.passkeyBlock(passkeyIn(pid, scope));
+    if (b && b.state === 'unknown') return passkeyTabs(w, scope).some((e) => !e.pk.armed && /^https?:/i.test(e.url || '')) ? unknown : null; // a blank / chrome:// tab holds no ceremony
+    return passkeyFactFrom(b, pid);
+  }
+  /** The virtual display an attach-road browser runs on (`:N` — the keeper's record), or null. */
+  function displayOf(profileId) {
+    let rec = null; try { rec = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(profileId)) : null; } catch { rec = null; }
+    const d = rec && rec.displaySession && rec.displaySession.display;
+    return d ? String(d).slice(0, 40) : null;
   }
   /** The conversation-level stuck fact (the keeper's `factFor` → the chip / the row): across its browsers. */
   function stuckForKey(browserKey) {
     if (!keeper || !browserKey) return null;
     const bk = String(browserKey);
-    let set = null; try { set = keeper.setFor(bk); } catch { set = null; }
-    const cands = [];
+    // lane passkey-browse-yourself (rule 2): the user's OWN browsing (`hu-…`: no lease, no set) — its profile, his tabs (the
+    // wiring's holderTabs: his own tab + the ones he took) — the fact his window renders, the same as a conversation's
+    const humanPid = /^hu-/.test(bk) ? HM().profileOfHumanKey(bk) : null;
+    let set = null; if (!humanPid) { try { set = keeper.setFor(bk); } catch { set = null; } }
+    const cands = humanPid ? [{ profileId: humanPid, ephemeral: false }] : [];
     for (const a of (set && set.attachments) || []) cands.push({ profileId: a.profileId, ephemeral: false });
-    let e = null; try { e = keeper.ephemeralFor ? keeper.ephemeralFor(bk) : null; } catch { e = null; }
+    let e = null; if (!humanPid) { try { e = keeper.ephemeralFor ? keeper.ephemeralFor(bk) : null; } catch { e = null; } }
     if (e && e.profileId) cands.push({ profileId: e.profileId, ephemeral: true, sessionId: e.sessionId || null });
     for (const c of cands) {
       // lane browser-unresponsive: the WHOLE browser judged hung (the keeper's fact) is said before any page's state
@@ -859,8 +915,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const f = factFor({ ...c, browserKey: bk, consume: false });
       // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
       // lane passkey-ui: + `passkey_ask` — the page waits for the OWNER's card: the fact carries that card (the live banner's buttons)
-      if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_ASK_CODE) { const a = f.passkey.proposal ? pkAsks.get(String(f.passkey.proposal)) : null; return { state: 'passkey', passkey: f.passkey, ...(a && a.state === 'open' ? { card: a.card } : {}), headed: false, since: f.passkey.startedAt, profileId: c.profileId }; }
-      if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };
+      { const pf = !f.open ? passkeyFactFrom(f.passkey, c.profileId) : null; if (pf) return pf; } // lane passkey-browse-yourself: ONE shape (passkeyFactFrom)
       const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, prompt: f.prompt, verdict: f.stuck || (f.held && !f.loopAny ? f.held : null), loop: f.loopAny, now: now() }); // lane browser-ui-prompts: + the browser's own prompt
       if (fact) return { ...fact, profileId: c.profileId };
     }
@@ -1280,7 +1335,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const [rp, id] of [...w.pkForYou]) if (!open.has(rp)) { w.pkForYou.delete(rp); try { forYou.resolve?.(id); } catch (err) { say('pk-fy:' + (err && err.message), `the passkey For-you item was not resolved — ${err && err.message}`); } }
     for (const [rp, r] of open) if (!w.pkForYou.has(rp)) {
       let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
-      let id = null; try { id = forYou.add?.(w.profileId, PK.forYouItem(r, { label: label || '' })); } catch (err) { say('pk-fy:' + (err && err.message), `the passkey For-you item was not filed — ${err && err.message}`); }
+      let id = null; try { id = forYou.add?.(w.profileId, PK.forYouItem(r, { label: label || '', display: onDesktop(w.profileId) ? displayOf(w.profileId) : null })); } catch (err) { say('pk-fy:' + (err && err.message), `the passkey For-you item was not filed — ${err && err.message}`); }
       if (id) w.pkForYou.set(rp, id);
     }
   }
@@ -2258,7 +2313,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (!ev || !ev.profileId) return null;
       if (ev.kind === 'browser-stopped' || ev.kind === 'browser-ready') kernelOf.delete(String(ev.profileId)); // lane browser-surfaces: a browser started again may be another engine (Change build…) — asked again
       if (ev.kind === 'browser-stopped') disarm(ev.profileId, 'the browser stopped');
-      else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } }
+      else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId); } // lane passkey-browse-yourself: a heal under his browsing is watched again
+      // lane passkey-browse-yourself (rule 1): the person's own browsing starts (his press launched or joined the browser) ⇒ the
+      // watch opens now — before any agent verb, before his window connects (the keeper's settleArming bounds the wait)
+      else if (ev.kind === 'human-start') return arm(ev.profileId);
       return null;
     });
   }
@@ -2275,7 +2333,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
     fillLogin, loginForms, // lane browser-login: the `login` verb's door (the vault's values to the kernel, never to anyone else) + the forms a tab reports
-    shutdown: () => { shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
+    passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
+    shutdown: () => { for (const t of rearms.values()) clearTimeout(t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 
 module.exports = { create, ANSWERED_KEEP, OUTCOMES_KEEP, VERB_RUNNING_MAX_MS, RE_ENABLE_MS };

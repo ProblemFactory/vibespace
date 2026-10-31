@@ -20,6 +20,12 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨ lane passkey-browse-yourself (the owner 2026-10-30 in «自己浏览», «还是没有 passkey 提示»): EVERY ROAD IS WATCHED — the
+//      watch opens at `human-start` (no verb, no window), again at `browser-ready` while he holds it, and once after a socket
+//      closed under him (never without him); his key (`hu-…`) has a fact like a conversation's (stuckForKey, passkeyFactOf);
+//      a headed browser on a virtual display names it + the ways in (banner + For-you, zh + ja); an unwatched browser's block is
+//      `unknown` + UNKNOWN_TEXT, never null; a census over the roads (ordinary / takeover / browse-yourself / attach) each
+//      non-null in a ceremony; one patched-copy mutant per rule, each red on its own rule only
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
@@ -223,7 +229,7 @@ function fakeWs({ addBinding = true } = {}) {
       setTimeout(() => this.h.message && this.h.message(JSON.stringify(reply)), 0);
     }
   }
-  return { FakeWS, log, push: (o) => sock.h.message(JSON.stringify(o)) };
+  return { FakeWS, log, push: (o) => sock.h.message(JSON.stringify(o)), sock: () => sock };
 }
 async function watchOver(modPath, o = {}) {
   const f = fakeWs(o);
@@ -569,6 +575,130 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
   ok(a.error === 'NotAllowedError' && x.last().why === 'none', '⑧n no passkey store wired ⇒ NotAllowedError at once (refused `none`, never said)');
   await x.close();
   PK.applyEvent = realApply;
+}
+
+console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window has a fact, a headed browser names its display, never silence');
+{
+  const PID = 'bp-0000a001', HK = 'hu-0000a001', CK = 'bk-0000c001';
+  /** The world: ④'s fake CDP socket, a keeper with the lease seam and the attach road's record (a virtual display), the
+   *  wiring's holder rows (the conversation CK + — while `H.on` — the person's own row), the wiring's tab source. */
+  function roads(modPath) {
+    const f = fakeWs();
+    let clock = 1_000_000;
+    const listeners = new Set(); const items = [];
+    const H = { on: true };
+    const keeper = { profile: () => ({ id: PID, label: 'Shared' }), cdpEndpointFor: async () => ({ ok: true, url: 'ws://fake' }), onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+      browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x1', display: ':1' } }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
+    const holdersOf = () => [{ browserKey: CK, sessionId: 's-c', ephemeral: false }, ...(H.on ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
+    const D = require(modPath).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn() {}, log() {} }, now: () => clock, holdersOf, leaseCountOf: () => holdersOf().length,
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs: 20, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } });
+    const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
+    const state = () => { const w = D._watches.get(PID); return w ? w.state : 'none'; };
+    const start = (id) => { const bind = [...f.log].reverse().find((x) => x.method === 'Runtime.addBinding'); f.push({ method: 'Runtime.bindingCalled', sessionId: 'S1', params: { name: bind ? bind.params.name : 'x', executionContextId: 7, payload: JSON.stringify({ ev: 'start', id, kind: 'get', rpId: 'vercel.com' }) } }); };
+    return { D, f, H, items, lease, state, start, step: (ms) => { clock += ms; } };
+  }
+  const until9 = async (pred, n = 200) => { for (let i = 0; i < n && !pred(); i++) await tick(); return pred(); };
+  /** The four rules' facts over ONE module pair (the lane's files, or a patched copy) — each mutant reds its own rule only. */
+  async function judge(dir) {
+    const P = require(path.join(dir, 'src/browser-passkey.js'));
+    const R = roads(path.join(dir, 'src/server/browser-dialogs.js'));
+    const v = { P };
+    // rule 4 before anything is armed: an unwatched browser
+    v.unwatched = R.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey;
+    v.unwatchedView = typeof R.D.passkeyFactOf === 'function' ? R.D.passkeyFactOf({ profileId: PID, browserKey: HK }) : null;
+    // rule 1: his press — `human-start` (no verb, no window)
+    await R.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true });
+    v.atHumanStart = R.state();
+    if (R.state() !== 'open') await R.D.arm(PID); // a mutant of rule 1 still lets the other rules be judged
+    R.start(1); R.step(P.PENDING_SAID_MS);
+    // rule 2: his key's fact (his window's banner) — the session-row shape and the relay's
+    v.his = R.D.stuckForKey(HK);
+    v.hisView = typeof R.D.passkeyFactOf === 'function' ? R.D.passkeyFactOf({ profileId: PID, browserKey: HK }) : null;
+    // rule 4 THE CENSUS over the roads in a ceremony
+    v.census = {
+      ordinary: R.D.factFor({ profileId: PID, browserKey: CK, sessionId: 's-c', consume: false }).passkey, // the agent's verb
+      takeover: (R.D.stuckForKey(CK) || {}).passkey || null, // the conversation's session row → its live view (the owner taking over)
+      'browse-yourself': (v.hisView || {}).passkey || null, // his window (its relay)
+      attach: R.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey, // the browser HIS press launched, watched from its start
+    };
+    // rule 3: the headed browser on a virtual display — the banner's line and the For-you item's doors
+    v.conv = R.D.stuckForKey(CK); // the display is the BROWSER's fact (read off the conversation's: rule 2's mutant leaves it standing)
+    v.words = v.conv && v.conv.passkey ? P.passkeyWords(v.conv.passkey, null, { headed: v.conv.headed === true, display: v.conv.display || null }) : null;
+    R.step(P.FOR_YOU_AFTER_MS); R.start(2);
+    v.item = R.items[0] || null;
+    // rule 1: re-opened on reconnect (a socket that closed under him), and a heal (`browser-ready`) while he holds it
+    try { R.f.sock().h.close(); } catch { /* */ }
+    v.reopened = await until9(() => R.state() === 'open');
+    await R.lease({ kind: 'browser-ready', profileId: PID, why: 'heal' });
+    v.afterHeal = R.state();
+    R.H.on = false; try { R.f.sock().h.close(); } catch { /* */ }
+    await until9(() => false, 30); v.withoutHim = R.state(); // CONTROL: nobody browses it himself ⇒ no re-arm
+    R.D.shutdown();
+    return v;
+  }
+  const WORDS3 = (v) => !!(v.words && /virtual display :1\b/.test(v.words.desktop) && /from Desktop/.test(v.words.desktop) && /passkey register vercel\.com/.test(v.words.desktop) && /phone's passkey \(the QR\)/.test(v.words.desktop));
+  const rule1 = (v) => v.atHumanStart === 'open' && v.reopened && v.afterHeal === 'open';
+  const rule2 = (v) => !!(v.his && v.his.state === 'passkey' && v.his.passkey.state === 'passkey_open' && v.hisView && v.hisView.passkey.state === 'passkey_open' && v.hisView.passkey.id === v.his.passkey.id);
+  const rule3 = (v) => !!(v.conv && v.conv.headed === true && v.conv.display === ':1' && (!v.his || v.his.display === ':1') && WORDS3(v) && v.item && v.item.i18n.detail[0] && v.item.i18n.detail[0].key === v.P.DOORS_WORDS && v.item.i18n.detail[0].params.display === ':1' && v.item.detail.startsWith('Chrome\'s own passkey window is on the virtual display :1'));
+  const rule4 = (v) => !!(v.unwatched && v.unwatched.state === 'unknown' && v.unwatched.text === v.P.UNKNOWN_TEXT && v.unwatchedView && v.unwatchedView.passkey.state === 'unknown' && Object.values(v.census).every((b) => b && b.state === 'passkey_open'));
+  const L = await judge(REPO);
+  ok(L.atHumanStart === 'open', '⑨ rule 1: the person\'s press (`human-start` — no agent verb, no window yet) OPENS the watch on his browser', L.atHumanStart);
+  ok(L.reopened && L.afterHeal === 'open', '⑨ rule 1: a socket that closed under his browsing is opened again (re-opened on reconnect), and a heal (`browser-ready`) while he holds it is watched again', { reopened: L.reopened, afterHeal: L.afterHeal });
+  ok(L.withoutHim === 'none', '⑨ rule 1 CONTROL: the same close with nobody browsing it himself ⇒ no re-arm (a conversation\'s browser is armed by its verbs and its view, as before)', L.withoutHim);
+  ok(rule2(L), '⑨ rule 2: HIS key (`hu-…`) has the fact his window renders — stuckForKey (the session-row shape) and passkeyFactOf (his relay\'s record) both say passkey_open, the same ceremony', { his: L.his, view: L.hisView });
+  ok(rule3(L), '⑨ rule 3: a headed browser on the virtual display :1 — the fact names the display; the banner names it + Desktop + the phone\'s QR + the site\'s other method + `passkey register vercel.com`; the For-you item\'s first line carries the same doors', { conv: L.conv && { headed: L.conv.headed, display: L.conv.display }, his: L.his && L.his.display, words: L.words && L.words.desktop, item: L.item && L.item.i18n.detail });
+  ok(rule4(L), `⑨ rule 4: NEVER SILENCE — an unwatched browser's block is \`unknown\` with UNKNOWN_TEXT (never null), and every road gives a non-null block in a ceremony (${Object.entries(L.census).map(([k, b]) => k + '=' + (b && b.state)).join(', ')})`, { unwatched: L.unwatched, census: L.census });
+  // the words en / zh / ja (② style): the doors line + the quiet unknown line
+  {
+    const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+    const used = []; const t = (k, p) => { used.push(k); return k.replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? p[x] : m)); };
+    const b = { state: 'passkey_open', id: 'a', rpId: 'vercel.com' };
+    const wd = PK.passkeyWords(b, t, { headed: true, display: ':1' }); const wu = PK.passkeyWords({ state: 'unknown' }, t);
+    const miss = [...new Set(used)].filter((k) => !zh[k] || !ja[k]);
+    const zw = PK.passkeyWords(b, (k, p) => t(zh[k] || k, p), { headed: true, display: ':1' }).desktop, jw = PK.passkeyWords(b, (k, p) => t(ja[k] || k, p), { headed: true, display: ':1' }).desktop;
+    ok(!miss.length && used.includes(PK.DOORS_WORDS) && wu && wu.unknown && wu.line && !wu.cancel && /:1/.test(zw) && /桌面/.test(zw) && /passkey register vercel\.com/.test(zw) && /:1/.test(jw) && /デスクトップ/.test(jw) && /passkey register vercel\.com/.test(jw), `⑨ the words: the doors line and the quiet unknown line have zh + ja entries (zh names 桌面, ja デスクトップ, both the display and the register command); the unknown line has no button`, { miss, zw, jw, wu });
+    ok(PK.passkeyWords(b, t, { headed: true }).desktop === 'Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.' && PK.passkeyWords(b, t, { headed: false, display: ':1' }).desktop === '', '⑨ a headed browser with no virtual display keeps its desktop line; a headless one says nothing of a desktop (a display alone is not headed)');
+  }
+  // THE ONE RENDERER: the live view draws the session's fact OR its relay's record through the SAME banner; the bridge names his
+  // window's profile, pushes the fact when it moves, replays it to a late viewer (its real road: test-browser-live ⑪)
+  {
+    const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const br = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+    const fct = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
+    ok(/case 'passkey': st\.pkRelay = /.test(live) && /const pk = !d \? pkFactNow\(\) : null;/.test(live) && /const pkFactNow = \(\) => \{ const s = st\.fact && st\.fact\.stuck; if \(s && s\.state === 'passkey' && s\.passkey\) return s; const r = st\.pkRelay;/.test(live) && !/if \(H\)[^\n]{0,80}pkRelay/.test(live) && /display: pk\.display \|\| null/.test(live), '⑨ ONE renderer: the banner reads pkFactNow() — the session row\'s fact, else the relay\'s record — gated on the fact, never on the road; the display rides it');
+    ok(/relay\.target\.kind === 'attachment' \|\| relay\.target\.kind === 'human'\) return relay\.target\.profileId/.test(br) && /if \(ev\.kind === 'passkey' \|\| ev\.kind === 'passkey-proposal' \|\| ev\.kind === 'watched'\) pushPasskey\(r\);/.test(br) && (br.match(/if \(relay\.lastPasskey\) send\(ws, relay\.lastPasskey\);/g) || []).length === 2 && !/ephemeral: relay\.target\.kind !== 'attachment'/.test(br), '⑨ the bridge: his window names its profile (armed by it, its dialogs + passkey reach it, answered as a named profile\'s), the passkey fact pushed when it moves, replayed to a late viewer on both doors');
+    ok(/v\.stuck\.state === 'passkey' \|\| v\.stuck\.state === 'prompt'\)\) fact\.stuck = v\.stuck;/.test(fct), '⑨ the session row\'s fact lets `passkey` through (measured on 43d0f8d2d: fact.stuck null while stuckForKey said passkey_open — the takeover banner was dead on every road)');
+    const BF = require(path.join(REPO, 'src/browser-fact.js'));
+    const sess = { browserKey: CK, variant: null, pin: null };
+    const view = (stuck) => ({ attachments: [], own: null, input: null, live: null, stuck });
+    const pkSt = { state: 'passkey', passkey: { state: 'passkey_open', id: 'T1:7:1', rpId: 'vercel.com' }, headed: true, display: ':1', since: 1, profileId: PID };
+    const f1 = BF.browserFactFor(sess, view(pkSt)), f2 = BF.browserFactFor(sess, view({ ...pkSt, passkey: { ...pkSt.passkey, id: 'T1:9:1' } })), f0 = BF.browserFactFor(sess, view(null));
+    const words = BF.browserFactWords(f1, null);
+    ok(f1.stuck && f1.stuck.state === 'passkey' && f1.digest !== f2.digest && f1.digest !== f0.digest && words.stuck === 'page waits for a passkey' && words.amber, '⑨ …its digest moves with the ceremony (the view re-renders), and the chip says it (amber)', { stuck: f1.stuck, words });
+  }
+  // THE MUTANTS — one per rule, each a patched copy beside the modules it loads
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pk-roads-'));
+    fs.mkdirSync(path.join(dir, 'src/server'), { recursive: true });
+    const put = (rel, txt) => { fs.writeFileSync(path.join(dir, rel), txt); delete require.cache[path.join(dir, rel)]; };
+    const SRC = { d: fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'), p: fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8') };
+    const base = () => { for (const x of ['browser-stuck.js', 'browser-passkey-store.js', 'browser-human.js']) put('src/' + x, fs.readFileSync(path.join(REPO, 'src', x), 'utf8')); put('src/browser-passkey.js', SRC.p); put('src/server/browser-dialogs.js', SRC.d); };
+    const M = [
+      ['rule 1 (no watch at human-start)', 'd', "      else if (ev.kind === 'human-start') return arm(ev.profileId);\n", '', rule1],
+      ['rule 2 (his key has no candidate)', 'd', "const humanPid = /^hu-/.test(bk) ? HM().profileOfHumanKey(bk) : null;", 'const humanPid = null;', rule2],
+      ['rule 3 (the display is not named)', 'p', 'desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : ', 'desktop: headed ? (', rule3],
+      ['rule 4 (an unwatched block is null)', 'd', ": PK.passkeyBlock({ state: 'unknown' }), // lane browser-passkey:", ': null, // lane browser-passkey:', rule4],
+    ];
+    for (const [name, which, from, to, own] of M) {
+      base();
+      const src = SRC[which];
+      put(which === 'd' ? 'src/server/browser-dialogs.js' : 'src/browser-passkey.js', src.replace(from, to));
+      const mv = await judge(dir);
+      const others = [rule1, rule2, rule3, rule4].filter((r) => r !== own).every((r) => r(mv));
+      ok(src.includes(from) && !own(mv) && others, `⑨ MUTANT ${name}: red on its own rule, the other three still hold`, { found: src.includes(from), own: own(mv), others });
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

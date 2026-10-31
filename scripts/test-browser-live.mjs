@@ -82,6 +82,12 @@
 //      + CLI + driver, ONE owner-shared profile, two conversations: a new tab born busy / with a confirm() never holds the
 //      other conversation (≤ 2 s; RED CONTROL: a driver on the RAW url is held); a conversation's own silent page is answered
 //      page_busy by name. BROWSER_LIVE_ONLY=freeze runs it alone.
+//   ⑪ lane passkey-browse-yourself (the owner 2026-10-30 in «自己浏览», a page at /challenge/pk, «还是没有 passkey 提示»): the
+//      REAL keeper (HIS press launches the browser), the REAL dialog watch wired like mounts-plugins-wiring, the REAL bridge with
+//      his browsing window's socket: the watch opens at his press (no verb, no window), his window's socket gets the passkey fact
+//      (replayed to a late window), his Cancel aborts HIS page only, a headed browser's fact names its display (stubbed w.headed)
+//      and the For-you item carries the doors, a socket closed under him re-opens, and the census over the roads (ordinary /
+//      takeover = the session row / browse-yourself / attach) is non-null in a ceremony. BROWSER_LIVE_ONLY=pk runs it alone.
 //   ③b+ lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr): the agent browser's twin row — the
 //      same lane H world with the person in ANOTHER window of this desk when the
 //      agent's browser starts ⇒ no live view, the chat's box unchanged, the chat's
@@ -433,6 +439,129 @@ async function legSharedFreeze() {
   }
 }
 const M10SCOPE = require('../src/browser-mediation.js').SCOPE_MODE;
+// ═══ ⑪ LANE PASSKEY-BROWSE-YOURSELF (the owner 2026-10-30, «自己浏览» on a headed attach-road browser, a page at /challenge/pk,
+// «还是没有 passkey 提示» — measured on 43d0f8d2d: no watch on a browser HIS press launched, none when his window connected, his
+// key's fact null even when watched, the session row's fact dropped `passkey`). A PAGE WAITING FOR A PASSKEY SAYS SO WHERE THE
+// PERSON LOOKS, ON EVERY ROAD: the REAL keeper (headless here — the headed sentence by a stubbed `w.headed` + the attach road's
+// display record), the REAL watch wired like mounts-plugins-wiring (holdersOf with his row, holderTabs, the stuck source), the
+// REAL bridge with his window's socket (?browse=<key>), a loopback page that starts navigator.credentials.get at load (rpId
+// localhost — never a real site). SKIPs by name without the driver.
+const PK_ROADS_PAGE = `<!doctype html><title>PK roads</title><p>Verifying it's you — use your passkey</p><script>const ch=new Uint8Array(32);crypto.getRandomValues(ch);window.__pk='pending';navigator.credentials.get({publicKey:{challenge:ch,rpId:'localhost',userVerification:'preferred',timeout:120000}}).then(()=>{window.__pk='ok'},(e)=>{window.__pk=e.name});</script>`;
+async function legPasskeyRoads() {
+  console.log('— ⑪ lane passkey-browse-yourself: a page waiting for a passkey says so where the person looks — on every road, his own browsing too');
+  const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'].includes(k)) envBase[k] = v;
+  const realBin = F.binaryResolver('agent-browser', envBase)();
+  if (!realBin) { skip('⑪ the passkey roads leg: the driver (agent-browser) is not on this machine'); return; }
+  const K11 = require('../src/server/browser-keeper.js'), D11 = require('../src/server/browser-dialogs.js'), PK11 = require('../src/browser-passkey.js'), BF11 = require('../src/browser-fact.js');
+  const RT = path.join(ROOT, 'pkroads'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x');
+  for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-gpu' }));
+  const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
+  const quiet = { log() { }, warn() { }, error() { }, info() { } };
+  const pages = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.setHeader('cache-control', 'no-store'); res.end(req.url.startsWith('/pk') ? PK_ROADS_PAGE : '<!doctype html><title>plain</title><p>plain'); });
+  await new Promise((r) => pages.listen(0, '127.0.0.1', r));
+  const PKURL = (n) => `http://localhost:${pages.address().port}/pk?n=${n}`;
+  const settings = { 'browser.headed': 'no', 'browser.idleTimeoutMs': 600000 };
+  const kk = K11.create({ dataDir: path.join(RT, 'data'), homeDir: KH, env: () => env, serverSetting: (x) => settings[x], runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: quiet, install: false, tickMs: 3600e3 });
+  const prof = kk.createProfile({ label: 'Shared (pk roads)' }, { owner: { kind: 'instance', id: null } });
+  const PID = prof.id, KA = 'bk-0000d0a1';
+  // the keeper as the watch reads it — (d) stubs the attach road's display record on this headless browser
+  let stubDisplay = null;
+  const kview = { ...kk, browserOf: (id) => { const r = kk.browserOf(id); return r && stubDisplay ? { ...r, displaySession: { id: 'da-0000stub', display: stubDisplay } } : r; } };
+  const holdersOf = (profileId) => { try { const out = (kk.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = kk.humanOf(profileId); if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } }; // mounts-plugins-wiring's own
+  const fy = [];
+  const dialogs = D11.create({ keeper: kview, log: quiet, holdersOf, leaseCountOf: (pid) => new Set(holdersOf(pid).map((h) => h.browserKey)).size, forYou: { add: (pid, it) => { fy.push(it); return 'fy-' + fy.length; }, resolve: () => { } }, labelOf: () => prof.label });
+  kk.setStuckSource((bk) => dialogs.stuckForKey(bk));
+  dialogs.setTabsOf((q) => { try { return kk.holderTabs(q && q.profileId, q && q.browserKey) || []; } catch { return []; } });
+  const bs = BS.create({ keeper: kk, activeSessions: new Map(), requestAuthed: () => true, dialogs, log: quiet });
+  const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
+  srv.on('upgrade', (req, sock, head) => bs.handleUpgrade(req, sock, head));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const watch = () => dialogs._watches.get(PID);
+  const untilV = async (pred, ms, every = 50) => { const t0 = Date.now(); for (;;) { const v = await pred(); if (v || Date.now() - t0 >= ms) return v; await sleep(every); } }; // the suite's until() answers true, not the value, and reads a promise as truthy
+  const viewer = (key, fresh) => { const recs = []; const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/?browse=${key}${fresh ? '&fresh=' + fresh : ''}`); ws.on('message', (m) => { try { recs.push(JSON.parse(String(m))); } catch { } }); return { ws, recs, open: new Promise((r) => { ws.once('open', r); ws.once('error', r); }), pk: () => [...recs].reverse().find((x) => x.type === 'passkey') || null }; };
+  const pkOpen = (V) => { const r = V.pk(); return r && r.fact && r.fact.passkey && r.fact.passkey.state === 'passkey_open' ? r : null; };
+  async function rawBrowser(url) {
+    const ws = new WebSocket(url); await new Promise((r, e) => { ws.once('open', r); ws.once('error', e); });
+    let id = 0; const wait = new Map(); ws.on('message', (m) => { const j = JSON.parse(String(m)); if (j.id && wait.has(j.id)) { wait.get(j.id)(j); wait.delete(j.id); } });
+    const send = (method, params = {}, sessionId) => new Promise((r) => { const n = ++id; wait.set(n, r); ws.send(JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) })); });
+    const sids = new Map();
+    const sidOf = async (tid) => { if (!sids.has(tid)) { const a = await send('Target.attachToTarget', { targetId: tid, flatten: true }); sids.set(tid, a.result && a.result.sessionId); } return sids.get(tid); };
+    const evalIn = async (tid, expr) => { const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true }, await sidOf(tid)); return r.result && r.result.result ? r.result.result.value : undefined; };
+    return { send, sidOf, evalIn, close: () => { try { ws.close(); } catch { } } };
+  }
+  let V1 = null, raw = null, key = null;
+  try {
+    // a  HIS PRESS alone: the keeper's start() + his own tab — the watch opens at `human-start` (no verb, no window)
+    const b = await kk.browse(PID);
+    key = b.key;
+    const w0 = watch(); const own0 = kk.holderTabs(PID, key)[0]; const e0 = w0 && own0 ? w0.targets.get(own0) : null;
+    ok(b.how === 'launch' && (kk.browserOf(PID) || {}).startedBy === 'browse yourself' && w0 && w0.state === 'open' && e0 && e0.enabled && e0.pk.armed, `⑪ a: his press launched the browser and the watch is OPEN before any verb or window — his own tab tracked, enabled, its hook armed`, JSON.stringify({ how: b.how, watch: w0 && w0.state, tab: e0 && { enabled: e0.enabled, armed: e0.pk.armed } }));
+    // b  his page in a ceremony ⇒ HIS WINDOW's socket gets the fact; a later window of his gets it replayed
+    V1 = viewer(key, b.fresh); await V1.open;
+    await untilV(() => V1.recs.some((x) => x.type === 'status' && x.state === 'upstream-open'), 20000, 50);
+    await kk.navigateHuman(key, { url: PKURL('b') });
+    const got = await untilV(() => pkOpen(V1), PK11.PENDING_SAID_MS + 10000, 50);
+    const words = got ? PK11.passkeyWords(got.fact.passkey, null, { headed: got.fact.headed === true, display: got.fact.display || null }) : null;
+    ok(!!got && got.fact.passkey.rpId === 'localhost' && /^This page is waiting for a passkey \(localhost\)/.test(got.fact.passkey.text) && words && words.title === 'This page is waiting for a passkey (localhost)' && !!words.cancel, `⑪ b: his page in a ceremony ⇒ HIS WINDOW's socket gets the passkey fact (passkey_open + THE SENTENCE) — the banner reads "${words && words.title}"`, JSON.stringify(V1.recs.filter((x) => x.type === 'passkey').slice(-2)));
+    const V2 = viewer(key); await V2.open;
+    const late = await untilV(() => pkOpen(V2), 6000, 50);
+    ok(!!late && late.fact.passkey.id === (got && got.fact.passkey.id), '⑪ b: a window of his that attaches later gets the same fact replayed', JSON.stringify(V2.recs.filter((x) => x.type === 'passkey')));
+    try { V2.ws.close(); } catch { }
+    // d  the headed sentence: a stubbed w.headed + the attach road's display record ⇒ his fact names the display; the For-you doors
+    watch().headed = true; stubDisplay = ':97';
+    await kk.navigateHuman(key, { url: PKURL('d') });
+    const gd = await untilV(() => { const r = pkOpen(V1); return r && r.fact.display ? r : null; }, PK11.PENDING_SAID_MS + 10000, 50);
+    const wd = gd ? PK11.passkeyWords(gd.fact.passkey, null, { headed: gd.fact.headed === true, display: gd.fact.display }) : null;
+    ok(!!gd && gd.fact.headed === true && gd.fact.display === ':97' && wd && /virtual display :97/.test(wd.desktop) && /from Desktop/.test(wd.desktop) && /passkey register localhost/.test(wd.desktop), `⑪ d: a headed browser on a virtual display — his fact names :97, the banner names it + Desktop + \`passkey register localhost\``, JSON.stringify({ fact: gd && { headed: gd.fact.headed, display: gd.fact.display }, desktop: wd && wd.desktop }));
+    const item = await untilV(() => fy.find((x) => x.i18n && x.i18n.detail && x.i18n.detail[0] && x.i18n.detail[0].key === PK11.DOORS_WORDS), PK11.FOR_YOU_AFTER_MS + 10000, 200);
+    ok(!!item && item.i18n.detail[0].params.display === ':97' && /waiting for a passkey \(localhost\)/.test(item.text), `⑪ d: the For-you item after FOR_YOU_AFTER_MS carries the same doors ("${item ? item.detail.split('\n')[0].slice(0, 80) : 'none'}…")`, JSON.stringify(fy.map((x) => x.i18n)));
+    // e  the watch's socket closed under him ⇒ opened again by itself; his next ceremony is said again
+    // ready = the watch's own `watched` (emitted once its tabs carry the hook again — `state` is 'open' before that)
+    let rewatched = false; const unw = dialogs.onChange((ev) => { if (ev && ev.kind === 'watched' && ev.profileId === PID) rewatched = true; });
+    const wOld = watch(); try { wOld.ws.close(); } catch { }
+    const re = await untilV(() => { const w = watch(); return !!(w && w !== wOld && w.state === 'open' && rewatched); }, 15000, 50);
+    unw();
+    await kk.navigateHuman(key, { url: PKURL('e') });
+    const ge = await untilV(() => { const r = pkOpen(V1); return r && /n=e|:/.test(String(r.fact.passkey.id)) && r.fact.passkey.id !== (gd && gd.fact.passkey.id) ? r : null; }, PK11.PENDING_SAID_MS + 10000, 50);
+    ok(re && !!ge, '⑪ e: the watch\'s socket closed under his browsing ⇒ re-opened by itself (no verb, no window act), and his next ceremony is said in his window again', JSON.stringify({ re, last: V1.pk() }));
+    // f  THE CENSUS on one browser in a ceremony — a conversation's own tab beside his (made LAST by a raw client: a target born
+    //    outside his driver session moves that session's current tab — his address row would then drive the newcomer)
+    await kk.attach({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', by: 'user' });
+    raw = await rawBrowser(kk.browserOf(PID).cdpUrl);
+    const ct = await raw.send('Target.createTarget', { url: 'about:blank' }); const ctid = ct.result && ct.result.targetId;
+    kk.noteOwnTab(PID, KA, ctid);
+    await untilV(() => { const e = watch() && watch().targets.get(ctid); return !!(e && e.pk.armed); }, 10000, 50);
+    const csid = await raw.sidOf(ctid);
+    await raw.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }, csid);
+    await raw.send('Page.navigate', { url: PKURL('c') }, csid);
+    await untilV(() => { const x = dialogs.factFor({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', consume: false }).passkey; return x && x.state === 'passkey_open'; }, PK11.PENDING_SAID_MS + 10000, 50);
+    const row = kk.factFor({ browserKey: KA, variant: 'D', pinId: null, active: null, remote: false });
+    const census = { ordinary: dialogs.factFor({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', consume: false }).passkey, takeover: row && row.stuck ? row.stuck.passkey : null, 'browse-yourself': (V1.pk() || {}).fact ? V1.pk().fact.passkey : null, attach: dialogs.factFor({ profileId: PID, browserKey: key, consume: false }).passkey };
+    const chip = row ? BF11.browserFactWords(row, null) : null;
+    ok(Object.values(census).every((x) => x && x.state === 'passkey_open') && chip && chip.stuck === 'page waits for a passkey', `⑪ f: THE CENSUS on one browser in a ceremony — ${Object.entries(census).map(([k, x]) => k + '=' + (x && x.state)).join(', ')}; the takeover's is the conversation's SESSION ROW fact (its chip: "${chip && chip.stuck}")`, JSON.stringify(census));
+    // c  his window's Cancel — HIS page only (a named profile's tab, never every tab of the browser)
+    V1.ws.send(JSON.stringify({ type: 'passkey-cancel' }));
+    const ack = await untilV(() => V1.recs.find((x) => x.type === 'passkey-ack'), 8000, 50);
+    const hisTab = kk.holderTabs(PID, key)[0];
+    const aborted = await untilV(async () => (await raw.evalIn(hisTab, 'window.__pk')) === 'AbortError', 8000, 100);
+    const cleared = await untilV(() => { const r = V1.pk(); return r && r.fact === null; }, 8000, 50);
+    const convStill = await raw.evalIn(ctid, 'window.__pk');
+    ok(!!(ack && ack.ok) && aborted && cleared && convStill === 'pending', `⑪ c: his window's Cancel ⇒ HIS page's own promise rejects AbortError and his fact clears; the conversation's page still waits (${convStill})`, JSON.stringify({ ack, aborted, cleared, convStill, last: V1.pk() }));
+  } catch (e) {
+    ok(false, '⑪ the passkey roads leg threw', e && (e.stack || e.message));
+  } finally {
+    try { V1 && V1.ws.close(); } catch { }
+    try { raw && raw.close(); } catch { }
+    try { await kk.stop(PID, { why: 'user' }); } catch { }
+    try { dialogs.shutdown(); kk.shutdown?.(); } catch { }
+    await new Promise((r) => srv.close(() => r())); await new Promise((r) => pages.close(() => r()));
+    reapDaemons(new Set([`vs-${PID}`, `vs-${KA}`, ...(key ? [`vs-${key}`] : [])]));
+    try { fs.rmSync(RT, { recursive: true, force: true }); } catch { }
+  }
+}
+// lane passkey-browse-yourself: BROWSER_LIVE_ONLY=pk runs ⑪ alone (the passkey roads' real leg)
+if (process.env.BROWSER_LIVE_ONLY === 'pk') { await legPasskeyRoads(); done(); }
 // lane browser-shared-profile-freeze: BROWSER_LIVE_ONLY=freeze runs ⑩ alone (the shared-profile freeze's real leg)
 if (process.env.BROWSER_LIVE_ONLY === 'freeze') { await legSharedFreeze(); done(); }
 // lane one-browser-b1: BROWSER_LIVE_ONLY=b1 runs ⑨ alone (the attach road's real leg — the other sections need a worktree server)
@@ -2000,4 +2129,5 @@ await (async () => {
 
 await legSharedFreeze(); // ⑩ lane browser-shared-profile-freeze
 await legAttach(); // ⑨ lane one-browser-b1
+await legPasskeyRoads(); // ⑪ lane passkey-browse-yourself
 done();
