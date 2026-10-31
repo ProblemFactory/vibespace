@@ -20,6 +20,11 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r7 its acceptance r6: a clean-up acts only on what ITS ceremony loaded (the authenticator and keys captured at its load),
+//       never the tab's live authenticator — his retry past the old cap (the NEW HOLE), the agent's shared authenticator (probe B;
+//       two ceremonies on it; an end mid-load), an authenticator replaced under a ceremony in flight; the drain wait has no cap
+//       (a dying socket still settles it); a sign-in that waits keeps its page's hold (the hook's `wait`, bounded: BREAK 6's slow
+//       link); the slow line once per episode — over a fake Chrome that also keeps each authenticator's credentials and UV
 //   ⑨r6 its acceptance r5: every remove of the once-authenticator is a DRAIN the next ceremony waits on — measured as the CDP
 //       order over a fake Chrome that drops its WebAuthn environment at disable (Chromium's rule): a navigation with the new
 //       document's sign-in (or autofill) at load in the same batch, the gate race with his retry at once / while the remove is
@@ -765,10 +770,17 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
         else if (m.method === 'Runtime.callFunctionOn') result = { result: verbOf(m) === 'pending' ? { type: 'object', value: world.pending } : m.params.functionDeclaration === PK.REARM_FN ? { type: 'object', value: { displaced: [], kept: [] } } : { type: 'number', value: 1 } };
         else if (m.method === 'Page.createIsolatedWorld') result = { executionContextId: 70 };
         else if (world.chrome && m.method === 'WebAuthn.enable') world.chrome.env = true; // ⑨r6 Chromium: enable makes the environment (a no-op when there is one)
-        else if (world.chrome && m.method === 'WebAuthn.disable') { world.chrome.env = false; world.chrome.auths.clear(); } // … disable drops it and every authenticator in it
+        else if (world.chrome && m.method === 'WebAuthn.disable') { world.chrome.env = false; world.chrome.auths.clear(); world.chrome.creds.clear(); world.chrome.uv.clear(); } // … disable drops it and every authenticator in it
         else if (world.chrome && m.method === 'WebAuthn.addVirtualAuthenticator' && !world.chrome.env) error = { message: 'The Virtual Authenticator Environment has not been enabled for this session' };
-        else if (world.chrome && m.method === 'WebAuthn.removeVirtualAuthenticator') world.chrome.auths.delete(m.params.authenticatorId);
-        else if (world.chrome && m.method === 'WebAuthn.addCredential') { if (world.chrome.auths.has(m.params.authenticatorId)) world.chrome.keys.push(m.params.authenticatorId); else error = { message: 'Could not find a Virtual Authenticator matching the ID' }; }
+        else if (world.chrome && m.method === 'WebAuthn.removeVirtualAuthenticator') { world.chrome.auths.delete(m.params.authenticatorId); world.chrome.creds.delete(m.params.authenticatorId); world.chrome.uv.delete(m.params.authenticatorId); }
+        else if (world.chrome && m.method === 'WebAuthn.addCredential') { const a = m.params.authenticatorId, cid = m.params.credential && m.params.credential.credentialId, cs = world.chrome.creds.get(a) || new Set(); if (!world.chrome.auths.has(a)) error = { message: 'Could not find a Virtual Authenticator matching the ID' }; else if (cs.has(cid)) error = { message: 'Could not add the credential: its id is already registered' }; else { world.chrome.keys.push(a); world.chrome.creds.set(a, cs.add(cid)); } } // ⑨r7: a credential id already in it is refused
+        else if (world.chrome && /^WebAuthn\.(getCredentials|removeCredential|setUserVerified)$/.test(m.method)) { // ⑨r7: each authenticator's credentials and UV
+          const a = m.params.authenticatorId, cs = world.chrome.creds.get(a) || new Set();
+          if (!world.chrome.auths.has(a)) error = { message: 'Could not find a Virtual Authenticator matching the ID' };
+          else if (m.method === 'WebAuthn.getCredentials') result = { credentials: [...cs].map((credentialId) => ({ credentialId })) };
+          else if (m.method === 'WebAuthn.removeCredential') { if (!cs.delete(m.params.credentialId)) error = { message: 'Could not find a credential matching the ID' }; }
+          else world.chrome.uv.set(a, !!m.params.isUserVerified);
+        }
         else if (m.method === 'WebAuthn.addVirtualAuthenticator') result = { authenticatorId: 'AUTH-' + (++n) };
         else if (m.method === 'WebAuthn.getCredentials') result = { credentials: [] };
         if (m.method === 'Runtime.enable' && sid === 'S-T1') setTimeout(() => this.h.message && this.h.message(JSON.stringify({ method: 'Runtime.executionContextCreated', sessionId: sid, params: { context: { id: 7, auxData: { isDefault: true, frameId: 'T1' } } } })), 0);
@@ -782,7 +794,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   }
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
-  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null } = {}) {
+  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null } = {}) {
     const world = { sockets: 0, refuse: false, pending: [], print, said: [], H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
@@ -791,7 +803,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
-    const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
+    const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
       tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } }); d.onChange((ev) => events.push(ev)); return d; };
     let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
@@ -803,7 +815,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const end = (id) => say({ ev: 'end', id, outcome: 'ok' });
     const armed = () => { const t = w() && w().targets.get('T1'); return !!t && t.pk.armed && !t.pk.arming && t.pk.ctl.has(7); }; // ⑨r6: his tab's hook armed and reached in its document — the fact, never a fixed 30 ms
     const opened = async () => { await lease({ kind: 'human-start', profileId: PID, key: HK, launched: true }); await until2(() => w() && w().state === 'open'); await until2(armed, 500); await sleep2(5); };
-    return { get D() { return D; }, restart: () => { D.shutdown(); D = mkD(); }, f, world, items, events, lease, w, calls, start, end, opened, say, now: () => clock, step: (ms) => { clock += ms; } };
+    return { get D() { return D; }, restart: () => { D.shutdown(); D = mkD(); }, f, world, items, events, lease, w, calls, start, end, opened, armed, say, now: () => clock, step: (ms) => { clock += ms; } };
   }
   const released = (X) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'release').length;
   // MAJOR 1: his press alone ⇒ the PERSON's watch (observation only)
@@ -1301,7 +1313,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   console.log('⑨r6 acceptance r5: every remove of the once-authenticator is a drain the next ceremony waits on (a navigation, the gate race, the belt) — the old disable is answered before the new enable; the wait is bounded and said');
   const at6 = (tr, s, from = 0) => { for (let i = from; i < tr.length; i++) if (tr[i] === s) return i; return -1; };
   const nth6 = (tr, s, k) => { let i = -1; for (let j = 0; j < k; j++) { i = at6(tr, s, i + 1); if (i < 0) return -1; } return i; };
-  const chrome6 = () => ({ env: false, auths: new Set(), keys: [] });
+  const chrome6 = () => ({ env: false, auths: new Set(), keys: [], creds: new Map() /* ⑨r7 */, uv: new Map() });
   const rec6 = (X, n) => X.w().targets.get('T1').pk.records.find((r) => r.n === n) || {};
   const live6 = (X) => { const a = authOf5(X); return { auth: a, alive: !!a && X.world.chrome.auths.has(a), env: X.world.chrome.env, keyIn: !!a && X.world.chrome.keys.includes(a) }; };
   const doc6 = (X, ctx, frame = 'T1') => X.f.push({ method: 'Runtime.executionContextCreated', sessionId: 'S-T1', params: { context: { id: ctx, auxData: { isDefault: true, frameId: frame } } } });
@@ -1363,22 +1375,146 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       '⑨r6 MAJOR (the belt): the stale once-authenticator\'s remove is a drain like the others — two sign-ins in one batch: ONE pairing, after the old disable is answered, his key held by a live authenticator', { ...k, tr: tr3.filter((s) => /WebAuthn/.test(s)).slice(0, 12) });
     X.D.shutdown();
   }
-  // (c) the wait is BOUNDED: a session that does not answer the old remove ⇒ the next ceremony goes on after drainMs, said once; when that answer comes at last, no disable follows
+  // ⑨r7 — acceptance r6 of lane passkey-browse-yourself (d63b4cf6e): every leg below is RED on d63b4cf6e by name (BREAK 4's is kept: green on both)
+  console.log('⑨r7 acceptance r6: a clean-up acts only on what ITS ceremony loaded, never on the tab\'s live authenticator; the wait has no cap; a sign-in that waits keeps its page\'s hold (bounded); the slow line once per episode');
+  const keys7 = (X, a) => [...(X.world.chrome.creds.get(a) || [])].map((s) => String(s).replace(/=+$/, ''));
+  const uv7 = (X, a) => X.world.chrome.uv.get(a) === true;
+  const slow7 = (X) => X.world.said.filter((l) => /clean-up is still running after/.test(l)).length;
+  const verbs7 = (X, verb, id) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === verb && m.params.arguments[2] && m.params.arguments[2].value === id).length;
+  const draining7 = (X) => !!X.w().targets.get('T1').pk.draining;
+  const sent7 = (tr, a) => tr.filter((s) => s.startsWith('>WebAuthn.') && s.endsWith('(' + a + ')'));
+  const adds7 = (tr) => tr.filter((s) => s.startsWith('>WebAuthn.addCredential')).length;
+  const free7 = (X) => { X.world.hold = null; X.world.held.splice(0).forEach((f) => f()); };
+  // the PERSON's road: the wait has no cap (r6's bounded leg, turned); THE NEW HOLE; the slow line once per episode; a socket that dies mid-drain
   {
-    const X = world2({ holders: 'human', store: VAULT5(), print: false, drainMs: 20 });
+    const X = world2({ holders: 'human', store: VAULT5(), print: false, drainMs: 10 });
     await X.opened();
     X.world.chrome = chrome6();
     X.start(1, 'vercel.com'); await until2(() => released(X) > 0);
     const on1 = authOf5(X);
     X.world.hold = new Set(['WebAuthn.removeVirtualAuthenticator']); X.world.held = []; X.world.trace = [];
-    X.f.push({ method: 'Runtime.executionContextDestroyed', sessionId: 'S-T1', params: { executionContextId: 7 } }); doc6(X, 8); const t0 = Date.now(); X.start(2, 'vercel.com', 8);
-    const went = await until2(() => released(X) > 1, 600);
-    const mid = { went, held: X.world.held.length, waited: Date.now() - t0, said: X.world.said.filter((l) => /clean-up did not finish in 20 ms/.test(l)).length, auth: authOf5(X), loaded: rec6(X, 2).loaded || null };
-    X.world.hold = null; X.world.held.splice(0).forEach((f) => f()); // the old remove answered at last: its pkOnceGone goes on
-    await until2(() => at6(X.world.trace, '<WebAuthn.removeVirtualAuthenticator(' + on1 + ')') >= 0, 300); await sleep2(5);
-    const late = { ...live6(X), disabled: X.world.trace.filter((s) => s === '>WebAuthn.disable').length };
-    ok(!!on1 && mid.went && mid.held === 1 && mid.waited >= 20 && mid.said === 1 && !!mid.auth && mid.auth !== on1 && JSON.stringify(mid.loaded) === '["Kvault005"]' && late.auth === mid.auth && late.alive && late.env && late.keyIn && late.disabled === 0,
-      '⑨r6 the drain is BOUNDED: a CDP session that has not answered the old remove holds his next sign-in drainMs (then said, once) — it goes on with that answer still outstanding, and when the answer comes at last the old ceremony sends no disable onto the authenticator his next sign-in paired', { mid, late });
+    X.f.push({ method: 'Runtime.executionContextDestroyed', sessionId: 'S-T1', params: { executionContextId: 7 } }); doc6(X, 8); X.start(2, 'vercel.com', 8);
+    await until2(() => slow7(X) > 0, 300); await sleep2(5);
+    const mid = { held: X.world.held.length, released: released(X), enables: X.world.trace.filter((s) => s === '>WebAuthn.enable').length, outcome: rec6(X, 2).outcome, waits: verbs7(X, 'wait', 2), said: slow7(X) };
+    free7(X); await until2(() => released(X) > 1, 300);
+    const tr = X.world.trace, a2 = authOf5(X);
+    const after = { rm: at6(tr, '<WebAuthn.removeVirtualAuthenticator(' + on1 + ')'), dis: at6(tr, '<WebAuthn.disable'), en: at6(tr, '>WebAuthn.enable'), a2, alive: !!a2 && X.world.chrome.auths.has(a2), env: X.world.chrome.env, keys: keys7(X, a2) };
+    ok(!!on1 && mid.held === 1 && mid.released === 1 && mid.enables === 0 && mid.outcome === 'pending' && mid.waits >= 1 && mid.said === 1 && after.rm >= 0 && after.dis > after.rm && after.en > after.dis && !!a2 && a2 !== on1 && after.alive && after.env && after.keys.join() === 'Kvault005',
+      '⑨r7 MAJOR (3) the drain has NO cap (r6\'s bounded leg, turned): the old remove unanswered past drainMs — his next sign-in WAITS for it (said; his page\'s hold kept by the hook\'s `wait`) and nothing of it reaches Chrome meanwhile; once answered: the old disable, then his pairing — his key in a live authenticator', { mid, after });
+    // THE NEW HOLE: his sign-in ends while its unload's getCredentials answer is held past the old cap; another frame's retry in the same batch
+    X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = []; X.world.trace = [];
+    const r2 = released(X);
+    doc6(X, 12, 'F2'); X.say({ ev: 'end', id: 2, outcome: 'ok' }, 8); X.start(3, 'vercel.com', 12); X.say({ ev: 'start', id: 9, kind: 'get', rpId: 'vercel.com', origin: 'https://vercel.com', mediation: 'conditional' }, 8); // … and the top page's autofill
+    await until2(() => slow7(X) > 1, 300); await sleep2(5);
+    X.say({ ev: 'end', id: 9, outcome: 'error', name: 'NotAllowedError' }, 8); // its page's own hold ran out while it waited
+    const mid2 = { held: X.world.held.length, released: released(X) - r2, enables: X.world.trace.filter((s) => s === '>WebAuthn.enable').length, outcome: rec6(X, 3).outcome, said: slow7(X) };
+    free7(X); await until2(() => released(X) > r2, 300); await sleep2(5);
+    const tr2 = X.world.trace, a3 = authOf5(X);
+    const p = { a2, a3, alive: !!a3 && X.world.chrome.auths.has(a3), env: X.world.chrome.env, keys: keys7(X, a3), uv: uv7(X, a3), toA3: sent7(tr2, a3), dis: at6(tr2, '<WebAuthn.disable'), en: at6(tr2, '>WebAuthn.enable'), pass9: verbs7(X, 'pass', 9) };
+    ok(mid2.held === 1 && mid2.released === 0 && mid2.enables === 0 && mid2.outcome === 'pending' && !!a3 && a3 !== a2 && p.alive && p.env && p.keys.join() === 'Kvault005' && p.uv && p.toA3.join() === `>WebAuthn.addCredential(${a3}),>WebAuthn.setUserVerified(${a3})` && p.en > p.dis && p.pass9 === 0,
+      '⑨r7 MAJOR (1) THE NEW HOLE (his road): his sign-in ends with its unload\'s answer held past the old cap and his retry starts in another frame — the retry waits; the old unload acts on ITS authenticator alone (its key, its UV, then it goes); the retry\'s authenticator keeps his key and UV true while it is pending (r6: removeCredential + setUserVerified false sent onto it); his autofill that waited behind it and ended meanwhile is handed nothing', { mid2, p });
+    ok(mid.said === 1 && mid2.said === 2 && slow7(X) === 2,
+      '⑨r7 MINOR: the slow line is said once per EPISODE — the second slow clean-up on the tab (after the first one\'s drain was over) is said again; never twice within one', { first: mid.said, second: mid2.said, now: slow7(X) });
+    // two of his sign-ins on ONE once-authenticator (the second, in another frame, while the first is pending): the first one's end leaves the second's key, UV and the authenticator itself
+    doc6(X, 13, 'F3'); let r = released(X); X.start(6, 'vercel.com', 13); await until2(() => released(X) > r, 300);
+    X.say({ ev: 'end', id: 3, outcome: 'ok' }, 12); await until2(() => verbs7(X, 'drained', 3) > 0 && !draining7(X), 300);
+    const H1 = { auth: authOf5(X), alive: X.world.chrome.auths.has(a3), keys: keys7(X, a3), uv: uv7(X, a3), outcome6: rec6(X, 6).outcome };
+    X.say({ ev: 'end', id: 6, outcome: 'ok' }, 13); await until2(() => verbs7(X, 'drained', 6) > 0 && !draining7(X), 300);
+    const H2 = { auth: authOf5(X), alive: X.world.chrome.auths.has(a3), env: X.world.chrome.env };
+    ok(H1.auth === a3 && H1.alive && H1.keys.join() === 'Kvault005' && H1.uv && H1.outcome6 === 'pending' && H2.auth === null && !H2.alive && !H2.env,
+      '⑨r7 MAJOR (2) on his road too: two of his sign-ins on ONE once-authenticator (the second in another frame while the first is pending) — the first one\'s end leaves the second\'s key, its UV and the authenticator itself (it passes to the second); the second\'s end removes them (r6: the first one\'s end took the key, the UV and the authenticator from under the second)', { H1, H2 });
+    // BREAK 4 kept: the socket dies with a drain in flight — the drain settles at once; the new socket's tab is a new one and its sign-in goes
+    r = released(X); X.start(4, 'vercel.com', 12); await until2(() => released(X) > r, 300);
+    X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = [];
+    const w0 = X.w(), e0 = w0.targets.get('T1');
+    X.say({ ev: 'end', id: 4, outcome: 'ok' }, 12); X.start(7, 'vercel.com', 12);
+    await until2(() => X.world.held.length > 0, 300);
+    const t0 = Date.now(); X.f.sock().close();
+    const settled = await until2(() => !e0.pk.draining, 300), took = Date.now() - t0;
+    X.world.hold = null; X.world.held.splice(0);
+    await until2(() => X.w() && X.w() !== w0 && X.w().state === 'open' && X.armed(), 1500);
+    const r5 = released(X); X.start(5, 'vercel.com'); const went = await until2(() => released(X) > r5, 300);
+    const e1 = X.w() && X.w().targets.get('T1');
+    ok(settled && !!e1 && e1 !== e0 && went && keys7(X, authOf5(X)).join() === 'Kvault005',
+      '⑨r7 (BREAK 4 kept — green on both trees): a socket that dies with a drain in flight settles it at once (every call answered «not connected»), so no cap is needed for a dead session; the new socket\'s tab is a new one and his sign-in there goes with his key', { settled, took, went });
+    X.D.shutdown();
+  }
+  // the AGENT's road (ONE shared per-tab authenticator): probe B; the slow link; the hold's ceiling; an end mid-load; two ceremonies on it; a clean-up whose authenticator was replaced
+  {
+    const X = world2({ holders: 'agent', store: VAULT5(), print: false, drainMs: 10, beatMs: 15, holdMaxMs: 75 });
+    X.world.chrome = chrome6();
+    await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open'); await until2(X.armed, 500);
+    const A = authOf5(X);
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0);
+    const k1 = { A, keys: keys7(X, A), uv: uv7(X, A) };
+    // probe B: the last ceremony's unload answered late; the page retries (another frame) at once
+    X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = []; X.world.trace = [];
+    doc6(X, 8, 'F2'); X.end(1); X.start(2, 'vercel.com', 8);
+    await until2(() => slow7(X) > 0, 300); await sleep2(5);
+    const midB = { held: X.world.held.length, released: released(X), loads: adds7(X.world.trace), outcome: rec6(X, 2).outcome };
+    free7(X); await until2(() => released(X) > 1, 300); await sleep2(5);
+    const trB = X.world.trace;
+    const B = { keys: keys7(X, A), uv: uv7(X, A), rm: at6(trB, '<WebAuthn.removeCredential(' + A + ')'), add: at6(trB, '>WebAuthn.addCredential(' + A + ')') };
+    ok(!!A && k1.keys.join() === 'Kvault005' && k1.uv && midB.held === 1 && midB.released === 1 && midB.loads === 0 && midB.outcome === 'pending' && B.rm >= 0 && B.add > B.rm && B.keys.join() === 'Kvault005' && B.uv,
+      '⑨r7 MAJOR (the agent\'s road, probe B): the last ceremony\'s unload answered late on the ONE shared authenticator — the retry waits for it (no cap), then loads: its key and UV survive (r6: the late unload removed the key the retry had just loaded and set UV false)', { k1, midB, B });
+    // BREAK 6, the slow link: every answer 10 ms — a sign-in behind a clean-up keeps its page's hold (this fake's page holds 4 beats; production: HOOK_HOLD_MS 1500 over a 1000-ms beat)
+    const HOLD = 60, marks = [], t6 = Date.now();
+    X.world.rtt = 10;
+    X.world.onSend = (m) => { const v = verbOf(m); if (m.method === 'Runtime.callFunctionOn' && (v === 'wait' || v === 'release') && m.params.arguments[2] && m.params.arguments[2].value === 3) marks.push([v, Date.now() - t6]); };
+    doc6(X, 9, 'F3'); X.say({ ev: 'end', id: 2, outcome: 'ok' }, 8); X.start(3, 'vercel.com', 9);
+    await until2(() => released(X) > 2, 800);
+    X.world.rtt = 0; X.world.onSend = null;
+    const upto = marks.slice(0, marks.findIndex(([v]) => v === 'release') + 1); // (a beat that crosses the release's answer is answered 0 by the hook: no longer held)
+    const S = { marks, gaps: upto.map(([, t], i) => t - (i ? upto[i - 1][1] : 0)), waits: upto.filter(([v]) => v === 'wait').length, rel: upto.length ? upto[upto.length - 1][1] : -1, keys: keys7(X, A) };
+    ok(S.waits >= 2 && S.rel >= HOLD && S.gaps.every((g) => g < HOLD) && S.keys.join() === 'Kvault005',
+      '⑨r7 HONESTY (BREAK 6, the slow link): a sign-in behind a clean-up is released after its page\'s hold alone would have run out — but the hook\'s `wait` went while it waited and paired / loaded, no gap reaching the hold: the page still holds its request when the release lands', S);
+    // the hold is BOUNDED: a clean-up that never answers — the hook's `wait` stops at holdMaxMs; the page's own hold then ends its request; nothing is loaded or released for it
+    X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = []; X.world.trace = [];
+    doc6(X, 10, 'F4'); X.say({ ev: 'end', id: 3, outcome: 'ok' }, 9); X.start(4, 'vercel.com', 10); X.start(12, 'github.com', 10); // … and a sign-in on a site the vault holds nothing for, beside it
+    await until2(() => verbs7(X, 'wait', 4) >= 5, 400); await sleep2(25);
+    const n4 = verbs7(X, 'wait', 4);
+    X.say({ ev: 'end', id: 4, outcome: 'error', name: 'NotAllowedError' }, 10); X.say({ ev: 'end', id: 12, outcome: 'error', name: 'NotAllowedError' }, 10);
+    free7(X); await until2(() => !draining7(X), 300); await sleep2(5);
+    const C = { n4, loads: adds7(X.world.trace), released4: verbs7(X, 'release', 4), outcome: rec6(X, 4).outcome, keys: keys7(X, A), uv: uv7(X, A), verdict12: ['release', 'refuse', 'pass'].map((v) => verbs7(X, v, 12)).reduce((a, b) => a + b, 0), cards: X.items.length };
+    ok(C.n4 === 5 && C.loads === 0 && C.released4 === 0 && C.outcome === 'error' && C.keys.length === 0 && !C.uv && C.verdict12 === 0,
+      '⑨r7 HONESTY: the page\'s hold is kept for holdMaxMs at most (5 beats here) — a clean-up that never answers lets the page\'s own hold end its request, and the gate then loads, releases or refuses nothing for it, nor for the sign-in beside it on a site the vault holds nothing for (the clean-up\'s key and UV gone once it is answered)', C);
+    // the law at the load: an end that lands while the gate is still loading the key unloads AFTER the load (it was §11.5's leak)
+    X.world.hold = new Set(['WebAuthn.addCredential']); X.world.held = []; X.world.trace = [];
+    doc6(X, 11, 'F5'); X.start(5, 'vercel.com', 11); await until2(() => X.world.held.length > 0, 300);
+    X.say({ ev: 'end', id: 5, outcome: 'aborted-by-page', name: 'AbortError' }, 11); await sleep2(5);
+    const gets = X.world.trace.filter((s) => s.startsWith('>WebAuthn.getCredentials')).length;
+    free7(X); await until2(() => !draining7(X), 300); await sleep2(5);
+    const trL = X.world.trace;
+    const L = { gets, add: at6(trL, '<WebAuthn.addCredential(' + A + ')'), get: at6(trL, '>WebAuthn.getCredentials(' + A + ')'), keys: keys7(X, A), uv: uv7(X, A) };
+    ok(L.gets === 0 && L.add >= 0 && L.get > L.add && L.keys.length === 0 && !L.uv,
+      '⑨r7 the law at the load (§11.5 closed): an end that lands while the gate is loading its key waits for the load (ONE drain), then removes what it loaded and turns UV off — nothing left in the shared authenticator (r6: the unload ran first, found nothing, and the key it loaded stayed)', L);
+    // two ceremonies on the ONE shared authenticator: a clean-up removes only what no other PENDING ceremony holds
+    doc6(X, 13, 'F6'); doc6(X, 14, 'F7');
+    let r = released(X); X.start(6, 'vercel.com', 13); await until2(() => released(X) > r, 300);
+    r = released(X); X.start(7, 'vercel.com', 14); await until2(() => released(X) > r, 300);
+    X.say({ ev: 'end', id: 7, outcome: 'error', name: 'OperationError' }, 14); // Chrome takes ONE request per page: #7, beside #6, refused at once
+    await until2(() => verbs7(X, 'drained', 7) > 0 && !draining7(X), 300);
+    const F = { keys: keys7(X, A), uv: uv7(X, A), outcome6: rec6(X, 6).outcome };
+    X.say({ ev: 'end', id: 6, outcome: 'ok' }, 13); await until2(() => verbs7(X, 'drained', 6) > 0 && !draining7(X), 300);
+    const G = { keys: keys7(X, A), uv: uv7(X, A) };
+    ok(F.keys.join() === 'Kvault005' && F.uv && F.outcome6 === 'pending' && G.keys.length === 0 && !G.uv,
+      '⑨r7 MAJOR (2) the ONE shared authenticator: #7 (refused by Chrome beside #6) ends — its clean-up leaves the key and the UV #6 still holds (#6 keeps signing in); #6\'s own end then removes them', { F, G });
+    // a clean-up whose authenticator was REPLACED — the person took the browser while #8 was in flight and gave it back: it touches nothing of the new one
+    doc6(X, 15, 'F8'); r = released(X); X.start(8, 'vercel.com', 15); await until2(() => released(X) > r, 300);
+    const dis8 = X.world.trace.length;
+    X.world.H.agent = false; await X.lease({ kind: 'detach', browserKey: CK, profileId: PID, sessionId: 's-c' });
+    X.world.H.human = true; await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: false });
+    await until2(() => X.w().mode === 'person' && at6(X.world.trace, '<WebAuthn.disable', dis8) >= 0, 300); // toPerson over: A removed, its disable answered (toPerson / toAgent stay outside the drain — §13.5)
+    X.world.H.human = false; X.world.H.agent = true; await X.lease({ kind: 'human-end', profileId: PID, key: HK, reason: 'released' }); await X.lease({ kind: 'attach', browserKey: CK, profileId: PID, sessionId: 's-c' });
+    await until2(() => X.w().mode === 'agent' && !!authOf5(X) && authOf5(X) !== A, 300);
+    const A2 = authOf5(X);
+    doc6(X, 16, 'F9'); r = released(X); X.start(9, 'vercel.com', 16); await until2(() => released(X) > r, 300);
+    X.world.trace = [];
+    X.say({ ev: 'end', id: 8, outcome: 'error', name: 'NotAllowedError' }, 15); // #8's late end (its key went with A)
+    await until2(() => verbs7(X, 'drained', 8) > 0 && !draining7(X), 300); await sleep2(5);
+    const R = { A, A2, toA2: sent7(X.world.trace, A2), keys: keys7(X, A2), uv: uv7(X, A2), aAlive: X.world.chrome.auths.has(A), outcome9: rec6(X, 9).outcome };
+    ok(!!A2 && A2 !== A && !R.aAlive && R.toA2.length === 0 && R.keys.join() === 'Kvault005' && R.uv && R.outcome9 === 'pending',
+      '⑨r7 MAJOR (1) the law — ITS authenticator, never the tab\'s live one: #8\'s authenticator went while it was in flight (the person took the browser, gave it back: a new one, #9 signing in on it); #8\'s late end sends NOTHING to the new authenticator — #9 keeps its key and UV (r6 read e.pk.auth live: removeCredential + UV off on #9\'s)', R);
     X.D.shutdown();
   }
 }
