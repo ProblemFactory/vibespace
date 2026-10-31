@@ -481,6 +481,8 @@ async function legPasskeyRoads() {
   const untilV = async (pred, ms, every = 50) => { const t0 = Date.now(); for (;;) { const v = await pred(); if (v || Date.now() - t0 >= ms) return v; await sleep(every); } }; // the suite's until() answers true, not the value, and reads a promise as truthy
   const viewer = (key, fresh) => { const recs = []; const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/?browse=${key}${fresh ? '&fresh=' + fresh : ''}`); ws.on('message', (m) => { try { recs.push(JSON.parse(String(m))); } catch { } }); return { ws, recs, open: new Promise((r) => { ws.once('open', r); ws.once('error', r); }), pk: () => [...recs].reverse().find((x) => x.type === 'passkey') || null }; };
   const pkOpen = (V) => { const r = V.pk(); return r && r.fact && r.fact.passkey && r.fact.passkey.state === 'passkey_open' ? r : null; };
+  // acceptance r1 of the lane: what a page of his reads of its geolocation permission (Chrome's own «prompt» on the person's watch; «denied» once the agent's plan is on)
+  const permIn = async (tid) => { const sid = await raw.sidOf(tid); const r = await raw.send('Runtime.evaluate', { expression: "navigator.permissions.query({name:'geolocation'}).then((p)=>p.state)", awaitPromise: true, returnByValue: true }, sid); return r.result && r.result.result ? r.result.result.value : null; };
   async function rawBrowser(url) {
     const ws = new WebSocket(url); await new Promise((r, e) => { ws.once('open', r); ws.once('error', e); });
     let id = 0; const wait = new Map(); ws.on('message', (m) => { const j = JSON.parse(String(m)); if (j.id && wait.has(j.id)) { wait.get(j.id)(j); wait.delete(j.id); } });
@@ -508,6 +510,11 @@ async function legPasskeyRoads() {
     const late = await untilV(() => pkOpen(V2), 6000, 50);
     ok(!!late && late.fact.passkey.id === (got && got.fact.passkey.id), '⑪ b: a window of his that attaches later gets the same fact replayed', JSON.stringify(V2.recs.filter((x) => x.type === 'passkey')));
     try { V2.ws.close(); } catch { }
+    // a2 acceptance r1: HIS watch OBSERVES — the person's mode (only he holds it): his page reads Chrome's own permission, never the
+    //    agent plan's «denied» (a raw client ATTACHES to his tab — it creates none, so his driver session's tab stays his)
+    raw = await rawBrowser(kk.browserOf(PID).cdpUrl);
+    const perm0 = await permIn(kk.holderTabs(PID, key)[0]);
+    ok(watch().mode === 'person' && perm0 === 'prompt', `⑪ a2: his own browsing is the PERSON's watch — observation only: his page reads Chrome's own geolocation permission («${perm0}»; the agent's plan decides «denied» ahead)`, JSON.stringify({ mode: watch().mode, perm0 }));
     // d  the headed sentence: a stubbed w.headed + the attach road's display record ⇒ his fact names the display; the For-you doors
     watch().headed = true; stubDisplay = ':97';
     await kk.navigateHuman(key, { url: PKURL('d') });
@@ -528,7 +535,8 @@ async function legPasskeyRoads() {
     // f  THE CENSUS on one browser in a ceremony — a conversation's own tab beside his (made LAST by a raw client: a target born
     //    outside his driver session moves that session's current tab — his address row would then drive the newcomer)
     await kk.attach({ profileId: PID, browserKey: KA, sessionId: 'sess-pk', by: 'user' });
-    raw = await rawBrowser(kk.browserOf(PID).cdpUrl);
+    const perm1 = await permIn(kk.holderTabs(PID, key)[0]);
+    ok(watch().mode === 'agent' && perm1 === 'denied', `⑪ f0: a conversation took the browser (attach) ⇒ the agent's watch — its permission plan is on before its verb runs (his page now reads «${perm1}»)`, JSON.stringify({ mode: watch().mode, perm1 }));
     const ct = await raw.send('Target.createTarget', { url: 'about:blank' }); const ctid = ct.result && ct.result.targetId;
     kk.noteOwnTab(PID, KA, ctid);
     await untilV(() => { const e = watch() && watch().targets.get(ctid); return !!(e && e.pk.armed); }, 10000, 50);
@@ -548,6 +556,12 @@ async function legPasskeyRoads() {
     const cleared = await untilV(() => { const r = V1.pk(); return r && r.fact === null; }, 8000, 50);
     const convStill = await raw.evalIn(ctid, 'window.__pk');
     ok(!!(ack && ack.ok) && aborted && cleared && convStill === 'pending', `⑪ c: his window's Cancel ⇒ HIS page's own promise rejects AbortError and his fact clears; the conversation's page still waits (${convStill})`, JSON.stringify({ ack, aborted, cleared, convStill, last: V1.pk() }));
+    // g  acceptance r1: the conversation lets go (detach) ⇒ the person's watch again, on the SAME socket — the overrides reset
+    const wBefore = watch();
+    kk.detach({ profileId: PID, browserKey: KA, by: 'user' });
+    const back = await untilV(() => watch() === wBefore && watch().mode === 'person', 5000, 50);
+    const perm2 = await untilV(async () => { const p = await permIn(kk.holderTabs(PID, key)[0]); return p === 'prompt' ? p : null; }, 3000, 100);
+    ok(!!back && perm2 === 'prompt', `⑪ g: the conversation let go (detach) ⇒ the person's watch again on the SAME socket — the agent's overrides reset (his page reads «${perm2}» again)`, JSON.stringify({ back, mode: watch() && watch().mode, perm2 }));
   } catch (e) {
     ok(false, '⑪ the passkey roads leg threw', e && (e.stack || e.message));
   } finally {

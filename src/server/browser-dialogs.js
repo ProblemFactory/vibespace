@@ -61,9 +61,20 @@
  * at /challenge/pk, «还是没有 passkey 提示»; measured on 43d0f8d2d: nothing opened this socket for a browser HIS press launched,
  * his window's relay named no profile, and `stuckForKey` of his key was null even when watched): a browser the person browses
  * himself is watched like any other — opened at `human-start` (bounded: his press waits for it like a verb's /resolve), again
- * at `browser-ready` while he holds it (a heal), and a socket that CLOSED under him is opened again once after REARM_MS; his
+ * at `browser-ready` while he holds it (a heal), and a socket that CLOSED under him is opened again after REARM_MS; his
  * key (`hu-…`) has a stuck fact like a conversation's (his tabs: the wiring's holderTabs); `passkeyFactOf` = ONE passkey fact per
  * live view (his window reads it from its relay); an unwatched browser's block is `unknown` + UNKNOWN_TEXT, never null.
+ * THE PERSON'S WATCH OBSERVES (acceptance r1 of the lane): WHO holds the browser decides the watch's MODE (`w.mode`, from the
+ * holder rows). A conversation holds it ⇒ 'agent' — the agent browser's policies (every permission decided ahead, the print
+ * preview released, the file chooser + HTTP sign-in hooked, the tab's EMPTY virtual authenticator, a kernel's surfaces). Only the
+ * person ⇒ 'person' — the hooks that REPORT (dialogs, the passkey ceremony) and nothing else: Chrome asks him as always (his
+ * saved grants, his print preview, its own sign-in sheet, its own passkey window with the phone's QR). A vault passkey is used
+ * only when he chose it (a stored key whose card he answered or set to always, a registration he approved): its authenticator
+ * is paired for that ceremony only, Chrome's UI on. Re-decided at `human-start` / `human-end` / a conversation's `attach` /
+ * `detach` — in place on standard Chrome (the policies put on or taken off over the same socket), a new socket on a kernel. A
+ * (re)armed document's pending ceremonies are asked of the hook (`pending`) and recorded with their age, so a page that was
+ * already waiting is said too. A socket that keeps failing is re-armed with a backoff, REARM_TRIES at most, and then its fact
+ * says the watch stopped; a paired machine's browser says the true cause (it runs there; the hub cannot watch it).
  *
  * ONE BROWSER = ONE SOURCE (lane browser-surfaces, 2026-10-25 — P1 of the custom browser kernel, design-custom-browser-plugin
  * §2): at every socket's open the watch asks `VibeSpace.getVersion` FIRST (before any tab is tracked). No such method (standard
@@ -99,7 +110,9 @@ const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
 // lane passkey-browse-yourself: the user's own key (`hu-…`) → its profile — required at first use (only a human key asks it)
 let HMm = null;
 const HM = () => HMm || (HMm = require('../browser-human.js'));
-const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this (once; his window / human-start re-arm after)
+const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
+const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
+const REARM_HEALTHY = 10; // a socket that stayed open this many REARM_MS was healthy: its close starts the backoff over
 const PK_ORPHAN_MS = 1500; // a webauthn surface whose request never comes (it began before this socket) is cancelled after this — never a page left waiting
 const NATIVE_ON_KERNEL = new Set(['Page.javascriptDialogOpening', 'Page.javascriptDialogClosed', 'Page.fileChooserOpened', 'Fetch.authRequired']); // one source: never read where surfaces are on
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
@@ -162,12 +175,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
   // lane passkey-browse-yourself (rule 1): does the person browse this profile himself (the wiring's holder row `human: true`)?
   const humanHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && h.human); } catch { return false; } };
-  const rearms = new Map(); // profileId → the one pending re-arm of a socket that closed under his browsing
+  // acceptance r1 (MAJOR 1): WHO holds it decides the watch's mode — a conversation ⇒ 'agent' (the agent browser's policies);
+  // only the person ⇒ 'person' (observation only: his own Chrome asks him, as on a browser no agent touched)
+  const agentHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && !h.human); } catch { return false; } };
+  const modeOf = (pid) => (humanHolds(pid) && !agentHolds(pid) ? 'person' : 'agent');
+  const rearms = new Map(); // profileId → {t: the one pending re-arm, n: the tries so far} of a socket that closed under his browsing
+  const gaveUp = new Map(); // profileId → when the re-arms stopped (REARM_TRIES failed) — his fact says so until the next arm
   function rearmLater(pid) {
-    if (rearms.has(pid)) return;
-    const t = setTimeout(() => { rearms.delete(pid); if (humanHolds(pid)) arm(pid, { budgetMs: 0 }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs);
+    const r = rearms.get(pid) || { t: null, n: 0 };
+    if (r.t) return;
+    rearms.set(pid, r);
+    if (r.n >= REARM_TRIES) { gaveUp.set(pid, now()); try { log.warn?.(`[browser-dialog] ${pid}: the watch's socket failed ${r.n} re-arms in a row — stopped trying (the next arm of this browser starts again)`); } catch { /* */ } emit({ kind: 'passkey', profileId: pid, state: 'unwatched', why: 'gave-up' }); return; }
+    const t = setTimeout(() => { r.t = null; if (humanHolds(pid)) arm(pid, { budgetMs: 0, rearm: true }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs * 2 ** r.n);
+    r.n++;
     if (t.unref) t.unref();
-    rearms.set(pid, t);
+    r.t = t;
   }
 
   function emit(ev) { for (const fn of [...listeners]) { try { fn(ev); } catch (e) { say('listener:' + (e && e.message), `a listener threw: ${e && e.message}`); } } }
@@ -185,7 +207,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   // ── the socket ──
   function newWatch(profileId, url) {
-    const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
+    const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
       pkSlot: pkIdsFor(profileId).slot, pkWorld: pkIdsFor(profileId).world, pkChan: pkIdsFor(profileId).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
@@ -211,7 +233,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     try { ws = new WebSocketImpl(w.url, { perMessageDeflate: false, handshakeTimeout: connectTimeoutMs, maxPayload: 16 * 1024 * 1024 }); } catch (e) { w.state = 'down'; w.ready(); say('connect:' + w.profileId, `${w.profileId}: the watch could not connect — ${e && e.message}`); return; }
     w.ws = ws;
     ws.on('open', async () => {
-      w.state = 'open';
+      w.state = 'open'; w.openedAt = now();
       // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
       call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
       await probeKernel(w); // lane browser-surfaces: ONE source per browser — known before the first tab is tracked
@@ -248,7 +270,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } }
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
-    if (why === SOCKET_CLOSED && humanHolds(w.profileId)) rearmLater(w.profileId); // lane passkey-browse-yourself (rule 1): re-opened on reconnect
+    if (why === SOCKET_CLOSED && w.openedAt && now() - w.openedAt >= REARM_HEALTHY * rearmMs) { const r = rearms.get(w.profileId); if (r && !r.t) rearms.delete(w.profileId); } // a healthy socket's close starts the backoff over
+    if (why === SOCKET_CLOSED && humanHolds(w.profileId)) rearmLater(w.profileId); // lane passkey-browse-yourself (rule 1): re-opened on reconnect — acceptance r1: with a backoff, REARM_TRIES at most
   }
   /** One page tab: attach (flat session) + Page.enable — the enable bounded; a tab that never answers is HELD. */
   function track(w, info) {
@@ -256,12 +279,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!info || info.type !== 'page' || !info.targetId) return Promise.resolve();
     // lane browser-swiftshader-cpu: thawPaint's own blank tab (opened and closed in ~20 ms) is nobody's — never tracked
     if (w.flipping && !info.openerId && /^(about:blank)?$/.test(String(info.url || ''))) return Promise.resolve();
-    if (!w.kernel) decideAhead(w, info.browserContextId || null); // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
+    if (!w.kernel && w.mode !== 'person') decideAhead(w, info.browserContextId || null); // acceptance r1: never on the person's watch (Chrome asks him, his saved grants stand) // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
-    const e = { targetId: tid, url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
-      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set(), frameOf: new Map(), mainCtxOf: new Map() } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
+    const e = { targetId: tid, bctx: info.browserContextId ? String(info.browserContextId) : '', url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
+      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, againQ: [], records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set(), frameOf: new Map(), mainCtxOf: new Map() } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
     // verify r2: the ONE conversation whose verb was in flight when it appeared (null = nobody / unclear) — verify r3 #1: only for
     // a tab born of NO page (the CLI's `tab new`, the page it gets on attach: measured, no `openerId`); a tab a PAGE opened
     // (`window.open`, a `target=_blank` link — `openerId` set even under `noopener`, measured) is its OPENER's, whoever's verb
@@ -288,7 +311,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const was = e.heldAt;
       e.enabled = true; e.heldAt = 0;
       armPasskey(w, e);
-      if (!w.kernel) armPrompts(w, e); // lane browser-ui-prompts (lane browser-surfaces: a kernel's chooser / sign-in are surfaces — never hooked twice)
+      if (!w.kernel && w.mode !== 'person') armPrompts(w, e); // acceptance r1: never on the person's watch (his own file chooser, Chrome's own sign-in sheet) // lane browser-ui-prompts (lane browser-surfaces: a kernel's chooser / sign-in are surfaces — never hooked twice)
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       return;
     }
@@ -307,7 +330,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let m; try { m = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { return; }
     if (m.id && w.waiting.has(m.id)) { const fn = w.waiting.get(m.id); w.waiting.delete(m.id); fn(m); return; }
     const p = m.params || {};
-    if (w.kernel && NATIVE_ON_KERNEL.has(m.method)) { w.nativeIgnored++; say('native:' + w.profileId + ':' + m.method, `${w.profileId}: the kernel sent ${m.method} on a session with surfaces on — ignored (one source: its surface is the prompt)`); return; } // lane browser-surfaces: the belt
+    if (w.kernel && NATIVE_ON_KERNEL.has(m.method)) { if (w.mode !== 'person') { w.nativeIgnored++; say('native:' + w.profileId + ':' + m.method, `${w.profileId}: the kernel sent ${m.method} on a session with surfaces on — ignored (one source: its surface is the prompt)`); return; } } // lane browser-surfaces: the belt (acceptance r1: not on the person's watch — no surfaces there, the native event is the only source)
     switch (m.method) {
       case 'VibeSpace.surfaceOpened': return onSurfaceOpened(w, surfaceTab(w, m), p); // lane browser-surfaces (Q2: routed by the page session, else params.targetId)
       case 'VibeSpace.surfaceUpdated': return onSurfaceUpdated(w, surfaceTab(w, m), p);
@@ -659,8 +682,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── arming ──
   /** Arm the watch on a LOCAL live browser (idempotent; a down watch re-resolves the endpoint — the browser may have
    *  restarted on a new port). Waits at most `budgetMs` for the tabs to be enabled and their passkey hook armed — never holds a verb longer. */
-  async function arm(profileId, { budgetMs = 800 } = {}) {
+  async function arm(profileId, { budgetMs = 800, rearm = false } = {}) {
     const pid = String(profileId || '');
+    if (!rearm) { gaveUp.delete(pid); const r = rearms.get(pid); if (r && !r.t) rearms.delete(pid); } // acceptance r1: any arm but a re-arm's own starts the tries over
+    remode(pid); // acceptance r1: an arm (a verb, his press, his window) re-reads WHO holds it
     if (!pid || !keeper || typeof keeper.cdpEndpointFor !== 'function') return { ok: false, code: 'not_watched', error: 'no keeper' };
     let w = watches.get(pid);
     if (!w || w.state === 'down') {
@@ -684,6 +709,45 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w) return;
     try { w.ws && w.ws.close(1000); } catch { /* closing */ }
     down(w, why);
+  }
+  /** acceptance r1 (MAJOR 1): THE WATCH'S MODE re-read from the holder rows — 'person' (only he holds it: observation only) /
+   *  'agent' (a conversation holds it: the agent browser's policies). Standard Chrome flips in place over the same socket; a
+   *  kernel's surfaces are per socket, so it gets a new one. → a promise (a conversation's `attach` waits for its policies). */
+  function remode(profileId) {
+    const pid = String(profileId || '');
+    const w = watches.get(pid);
+    if (!w || w.state === 'down') return null;
+    const want = modeOf(pid);
+    if (w.mode === want) return null;
+    w.mode = want;
+    if (w.state !== 'open') return null; // still connecting: its tabs are tracked in the mode it has now
+    try { log.log?.(`[browser-dialog] ${pid}: the watch is now ${want === 'person' ? "the person's own (observation only — Chrome asks him)" : "the agent's (its permission plan, prompt hooks and passkey authenticator)"}`); } catch { /* */ }
+    emit({ kind: 'mode', profileId: pid, mode: want });
+    if (w.kernel) { try { w.ws && w.ws.close(1000); } catch { /* closing */ } down(w, 'the watch changed hands', { keepNotices: true }); return arm(pid, { budgetMs: 0, rearm: true }); }
+    return (want === 'person' ? toPerson(w) : toAgent(w)).catch((e) => say('mode:' + pid + ':' + (e && e.message), `${pid}: the watch's mode did not move cleanly — ${e && e.message}`));
+  }
+  /** agent → person: every policy off over the same socket — a paused sign-in handed back to Chrome's own sheet, the file chooser +
+   *  sign-in hooks off, each tab's authenticator removed, the permission overrides reset (his saved grants stand again). */
+  async function toPerson(w) {
+    const tabs = [...w.targets.values()].filter((e) => e.sid);
+    for (const rec of [...w.prompts.values()]) { const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person'); }
+    await Promise.all(tabs.map(async (e) => {
+      if (e.enabled) { await call(w, 'Fetch.disable', {}, e.sid); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
+      if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid); }
+    }));
+    if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));
+    const ctxs = [...w.permCtx.keys()]; w.permCtx.clear();
+    for (const k of ctxs) await call(w, 'Browser.resetPermissions', k ? { browserContextId: k } : {});
+  }
+  /** person → agent: the agent browser's policies on, as a fresh agent watch puts them (each context's plan first). */
+  async function toAgent(w) {
+    await Promise.all([...new Set([...w.targets.values()].map((e) => e.bctx || ''))].map((k) => decideAhead(w, k || null))); // the plan stands before the conversation's verb runs (`attach` waits for this)
+    for (const e of [...w.targets.values()]) {
+      if (!e.sid || !e.enabled) continue;
+      armPrompts(w, e);
+      if (pks && e.pk.armed && !e.pk.auth) e.pk.auth = await pairAuthenticator(w, e, e.sid);
+      else if (e.pk.once) e.pk.once = false; // a vault ceremony in flight keeps its authenticator — the agent's from now on
+    }
   }
 
   // ── lane browser-swiftshader-cpu: IDLE PAINT (src/browser-idle.js) — the keeper's tick freezes, a verb / a viewer thaws ──
@@ -862,7 +926,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       loop: loop ? { ...ST.loopBlock(loop), runStart: loop.runStart, text: ST.loopText(loop) } : null,
       loopAny: loopAny ? { ...ST.loopBlock(loopAny), runStart: loopAny.runStart } : null,
       loopShared, // verify r1: kinds only
-      passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : PK.passkeyBlock({ state: 'unknown' }), // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed — lane passkey-browse-yourself: an unwatched browser too (UNKNOWN_TEXT), never null
+      passkey: watched ? PK.passkeyBlock(passkeyIn(pid, scope)) : unknownBlock(pid), // lane browser-passkey: `passkey_open` with THE SENTENCE, `unknown` where no hook armed — lane passkey-browse-yourself: an unwatched browser too (UNKNOWN_TEXT), never null
       prompt: watched ? ST.promptBlock(promptIn(pid, scope), { now: t }) : null, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, with THE SENTENCE
     };
   }
@@ -881,14 +945,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function passkeyFactOf({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}) {
     const pid = String(profileId || '');
     if (!pid) return null;
-    const unknown = { state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown' }), headed: false, since: 0, profileId: pid };
+    const unknown = (b = PK.passkeyBlock({ state: 'unknown' })) => ({ state: 'passkey', passkey: b, headed: false, since: 0, profileId: pid });
     const w = watches.get(pid);
     if (w && w.state === 'connecting') return null; // its `watched` / `down` comes next — never a flash of the unknown line
-    if (!w || w.state !== 'open') return unknown;
+    if (!w || w.state !== 'open') return unknown(unknownBlock(pid));
     const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const b = PK.passkeyBlock(passkeyIn(pid, scope));
-    if (b && b.state === 'unknown') return passkeyTabs(w, scope).some((e) => !e.pk.armed && /^https?:/i.test(e.url || '')) ? unknown : null; // a blank / chrome:// tab holds no ceremony
+    if (b && b.state === 'unknown') return passkeyTabs(w, scope).some((e) => !e.pk.armed && /^https?:/i.test(e.url || '')) ? unknown() : null; // a blank / chrome:// tab holds no ceremony
     return passkeyFactFrom(b, pid);
+  }
+  /** acceptance r1: an unwatched browser's block with its TRUE cause when the watch knows one — `remote` (it runs on a paired
+   *  machine: the hub never watches it), `gave-up` (its socket failed REARM_TRIES re-arms), else not watched yet (UNKNOWN_TEXT). */
+  function unknownBlock(pid) {
+    let rec = null; try { rec = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(pid)) : null; } catch { rec = null; }
+    const why = rec && rec.hostId ? 'remote' : gaveUp.has(String(pid)) ? 'gave-up' : null;
+    return PK.passkeyBlock(why ? { state: 'unknown', why } : { state: 'unknown' });
   }
   /** The virtual display an attach-road browser runs on (`:N` — the keeper's record), or null. */
   function displayOf(profileId) {
@@ -1279,7 +1350,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   // ── lane browser-passkey: the ceremony hook ──
   function armPasskey(w, e) {
-    if (pkSinks(w)) return null; // lane passkey-sink: a kernel with `webauthn` — no hook, no virtual authenticator (both stay for standard Chrome)
+    if (pkSinks(w) && w.mode !== 'person') return null; // acceptance r1: the person's watch on a kernel hooks like standard Chrome (no surfaces there) // lane passkey-sink: a kernel with `webauthn` — no hook, no virtual authenticator (both stay for standard Chrome)
     if (!e.pk.armed && !e.pk.arming && e.sid) e.pk.arming = armHook(w, e, e.sid).finally(() => { e.pk.arming = null; });
     return e.pk.arming || null;
   }
@@ -1299,14 +1370,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const r3 = rr && rr.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies) + the ones here
     e.pk.armed = !!(r3 && r3.result) && e.sid === sid;
     if (e.pk.armed) for (const ctx of [...e.pk.ctxs]) await pkReach(w, e, ctx, { arm: true });
-    if (e.pk.armed && pks) e.pk.auth = await pairAuthenticator(w, e, sid); // lane passkey-store-core: the tab's EMPTY authenticator, re-paired on every attach
+    if (e.pk.armed && pks && w.mode !== 'person') e.pk.auth = await pairAuthenticator(w, e, sid); // lane passkey-store-core: the tab's EMPTY authenticator, re-paired on every attach — acceptance r1: never on the person's watch (an empty one fails his passkey in < 1 s, no Chrome window)
+    if (e.pk.armed) pkPendingAgain(w, e); // acceptance r1: a ceremony this document was ALREADY waiting on (the watch reconnected, the hub restarted) is recorded with its age
     if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (rr && rr.error && rr.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
+    if (w.readySeen && w.state === 'open') emit({ kind: 'passkey', profileId: w.profileId, targetId: e.targetId, state: e.pk.armed ? 'armed' : 'unarmed', hook: true }); // acceptance r1: a hook that armed (or failed) after the socket's first pass — a held tab, a new tab — moves the view's fact
   }
   /** lane browser-passkey-chrome (MEASURED on 0.38.1): Chrome draws its passkey dialog TAB-MODAL in the browser's own window —
    *  on this computer's desktop only when that window is. The hidden-window rung's window is on the CLI's own Xvfb, which
    *  nobody sees: the banner's desktop note there sent the user looking for a window that is not on any screen. */
   function onDesktop(profileId) {
-    if (pkSinks(watches.get(String(profileId)))) return false; // lane passkey-sink: the kernel draws no passkey window — VibeSpace answers
+    { const w0 = watches.get(String(profileId)); if (pkSinks(w0) && w0.mode !== 'person') return false; } // lane passkey-sink: the kernel draws no passkey window — VibeSpace answers (acceptance r1: not on the person's watch — no surfaces there)
     if ((watches.get(String(profileId)) || {}).headed !== true) return false;
     let rec = null; try { rec = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(profileId)) : null; } catch { rec = null; }
     const fb = rec && rec.display && rec.display.fallback;
@@ -1367,8 +1440,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const b64 = (u) => { const s = String(u || '').replace(/-/g, '+').replace(/_/g, '/'); return s + '='.repeat((4 - (s.length % 4)) % 4); };
   const b64u = (s) => String(s || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   /** P0 (b): `enable` and the authenticator are ONE step — an enabled domain with no authenticator hangs every get. */
-  async function pairAuthenticator(w, e, sid) {
-    const en = await call(w, 'WebAuthn.enable', { enableUI: false }, sid);
+  async function pairAuthenticator(w, e, sid, { ui = false } = {}) {
+    const en = await call(w, 'WebAuthn.enable', { enableUI: !!ui }, sid); // acceptance r1: `ui` = a vault ceremony the person chose (Chrome's own window stays usable)
     if (!en || !en.result) { say('pk-auth:' + w.profileId, `${w.profileId}: the passkey authenticator was not attached — ${(en && en.error && en.error.message) || 'no answer'}`); return null; }
     const a = await call(w, 'WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: false, automaticPresenceSimulation: true } }, sid);
     const id = a && a.result && a.result.authenticatorId ? String(a.result.authenticatorId) : null;
@@ -1411,6 +1484,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const r = await call(w, 'Runtime.callFunctionOn', { objectId: f.ctl, functionDeclaration: PK.REARM_FN, arguments: [{ value: e.pk.key }], returnByValue: true }, sid);
       const v = r && r.result && r.result.result ? r.result.result.value : null;
       if (v && Array.isArray(v.displaced) && v.displaced.length) pkDisplaced(w, e, ctx, v);
+      const q = await call(w, 'Runtime.callFunctionOn', { objectId: f.ctl, functionDeclaration: PK.CTL_FN, arguments: [{ value: e.pk.key }, { value: 'pending' }, { value: 0 }], returnByValue: true }, sid); // acceptance r1: what this document is ALREADY waiting on (its hook is from before this arm)
+      const list = q && q.result && q.result.result && Array.isArray(q.result.result.value) ? q.result.result.value : [];
+      for (const p of list.slice(0, 8)) if (p && typeof p === 'object') e.pk.againQ.push({ ...p, ctx: Number(ctx) });
     }
     if (f.n !== 1) {
       if (f.n > 1) say('pk-twin:' + w.profileId, `${w.profileId}: two passkey hooks answered in one document — neither was armed`);
@@ -1419,6 +1495,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     e.pk.ctl.set(ctx, f.ctl);
     if (arm) await pkArmReporter(w, e, ctx, sid); // lane passkey-binding-isolated: the live document's isolated-world reporter (this arm's binding)
     return f.ctl;
+  }
+  /** acceptance r1 (rule 4): the ceremonies a (re)armed document was ALREADY waiting on, recorded with the age the hook gives
+   *  (a page at /challenge/pk across a reconnect or a hub restart is said like any other); one still HELD is gated now. */
+  function pkPendingAgain(w, e) {
+    let n = 0;
+    for (const p of e.pk.againQ.splice(0)) {
+      const ev = PK.parseEvent(JSON.stringify({ ev: 'start', id: p.id, kind: p.kind, rpId: p.rpId }));
+      if (!ev || e.pk.records.some((r) => r.n === ev.id && r.ctx === p.ctx && r.outcome === 'pending')) continue;
+      const age = Math.min(Math.max(0, Number(p.age) || 0), 24 * 3600e3);
+      const rec = PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.ctx, now: now() - age });
+      if (!rec) continue;
+      rec.again = true; n++;
+      if (p.held === true && pks) pkGate(w, e, rec).catch((err) => pkFailed(w, e, rec, err));
+    }
+    if (n) passkeyChanged(w, e, true);
   }
   async function pkCall(w, e, ctx, verb, id = 0) {
     const ctl = ctx == null ? null : await pkReach(w, e, Number(ctx));
@@ -1481,18 +1572,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** ① a held ceremony starts → ② the gate → release (load ONLY its rows) | ask (a card) | refuse (the hook rejects in-page). */
   async function pkGate(w, e, rec) {
     if (rec && rec.kernel) return pkKernelGate(w, e, rec); // lane passkey-sink: the kernel road (no authenticator, VibeSpace signs)
-    if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
+    const person = w.mode === 'person'; // acceptance r1: HIS own ceremony — the vault only when he chose it, else Chrome's own window
+    if (!e.pk.auth && !person) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
     if (e.pk.draining) await e.pk.draining.catch(() => {}); // ONE ceremony per tab at a time: the last one's unload first
     const pid = w.profileId, part = PS.profileOf(pkRead(), pid);
-    if (!rec.by) rec.by = pkTakeover(w, e) ? 'human' : 'agent'; // the operator at the START (a takeover never lifts an agent's ceremony)
+    if (!rec.by) rec.by = person || pkTakeover(w, e) ? 'human' : 'agent'; // the operator at the START (a takeover never lifts an agent's ceremony)
     const owner = pkOwner(w, e);
     const gk = pid + ' ' + PS.grantKey(rec.rpId, owner || '');
     const grant = pkGrants.get(gk) || null;
-    const v = PS.gateVerdict({ kind: rec.conditional ? 'conditional' : rec.kind, rpId: rec.rpId, origin: rec.origin || e.url, rows: part.rows, grant, input: { allow: rec.allow || [] }, answer: rec.answer || null, profileSwitch: part.agentsOff, takeover: rec.by === 'human', now: now() });
+    const v = PS.gateVerdict({ kind: rec.conditional ? 'conditional' : rec.kind, rpId: rec.rpId, origin: rec.origin || e.url, rows: part.rows, grant, input: { allow: rec.allow || [] }, answer: rec.answer || null, profileSwitch: !person && part.agentsOff, takeover: !person && rec.by === 'human', now: now() }); // acceptance r1: his own ceremony is ASKED (or his `always`), never taken over
+    if (person && (v.verdict === 'refuse' || (v.verdict === 'release' && !(v.load && v.load.length) && !v.consumeGrant))) return pkCtl(w, e, rec, 'release'); // nothing of the vault he chose ⇒ Chrome's own window (never refused for the vault's sake)
     if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
+    if (person && !e.pk.auth) { e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); } // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on
     if (v.consumeGrant) pkGrants.delete(gk);
-    rec.createdBy = v.createdBy || null;
+    rec.createdBy = person ? 'human' : v.createdBy || null;
     let store = pkRead(); const loaded = [];
     for (const cid of v.load) {
       const row = PS.profileOf(store, pid).rows.find((r) => r.credentialId === cid); if (!row) continue;
@@ -1526,6 +1620,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (rec.uvSet) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: e.pk.auth, isUserVerified: false }, e.sid);
       if (!rec.refused) pkTrace(w, e, rec, rec.outcome, rec.harvested ? { harvested: true } : {});
     }
+    if (e.pk.once && e.pk.auth && w.mode === 'person') { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid); } // acceptance r1: the vault ceremony's authenticator leaves with it — Chrome's own window for his next one
     await pkCtl(w, e, rec, 'drained');
   }
   /** ④ the harvest: a new key sealed + stored (`credentialAdded`), a sign count reconciled (`credentialAsserted`). */
@@ -1788,6 +1883,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** The print preview (`chrome://print/`) the hidden window opened: ITS OWN Cancel is pressed (measured: closing the target
    *  leaves the opener held; the WebUI's cancel frees it in ≤ 25 ms), the opener's conversation is told ONCE. */
   async function releasePrint(w, info) {
+    if (w.mode === 'person') return; // acceptance r1 of lane passkey-browse-yourself: on the agent's watch only — the person's own print preview is his
     const tid = String(info.targetId || '');
     if (!tid || w.printing.has(tid)) return;
     w.printing.add(tid);
@@ -2004,7 +2100,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** THE THREE-TOUCH RULE on one page session (every attach, every re-ask of a held tab): ① `VibeSpace.enable {surfaces:true}`
    *  ② `VibeSpace.listSurfaces {targetId}` aligns `w.surf` (③ the CLI's long-poll is module-wide — it re-arms by itself). */
   async function armSurfaces(w, e) {
-    if (!e.sid) return;
+    if (!e.sid || w.mode === 'person') return; // acceptance r1 of lane passkey-browse-yourself: the person's watch never turns his prompts into surfaces (a kernel's policy answers are the agent's)
     const en = await call(w, 'VibeSpace.enable', { surfaces: true }, e.sid);
     if (!en || en.timeout || en.error || (en.result && en.result.ok === false)) { say('senable:' + w.profileId + ':' + (en && en.error ? en.error.message : en && en.timeout ? 'timeout' : 'refused'), `${w.profileId}: VibeSpace.enable was not taken on tab ${e.targetId} — ${en && en.error ? en.error.message : en && en.timeout ? 'it did not answer' : String((en.result && en.result.code) || 'refused').slice(0, 40)}`); return; }
     e.surfaces = true;
@@ -2316,7 +2412,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId); } // lane passkey-browse-yourself: a heal under his browsing is watched again
       // lane passkey-browse-yourself (rule 1): the person's own browsing starts (his press launched or joined the browser) ⇒ the
       // watch opens now — before any agent verb, before his window connects (the keeper's settleArming bounds the wait)
-      else if (ev.kind === 'human-start') return arm(ev.profileId);
+      else if (ev.kind === 'human-start') return arm(ev.profileId); // (arm re-reads WHO holds it: his alone ⇒ the person's watch)
+      // acceptance r1: WHO holds it moved — his browsing ended (nobody left: the watch he opened goes, as on a browser no agent
+      // touched), a conversation took the browser (its policies BEFORE its verb runs: `attach` is awaited by settleArming) or let it go
+      else if (ev.kind === 'human-end') { const w = watches.get(String(ev.profileId)); if (w && w.mode === 'person' && !agentHolds(ev.profileId) && !humanHolds(ev.profileId)) disarm(ev.profileId, 'the person stopped browsing it'); else return remode(ev.profileId); }
+      else if (ev.kind === 'attach') return remode(ev.profileId);
+      else if (ev.kind === 'detach' || ev.kind === 'lease-dropped') { const t = setTimeout(() => remode(ev.profileId), 0); if (t.unref) t.unref(); }
       return null;
     });
   }
@@ -2334,7 +2435,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
     fillLogin, loginForms, // lane browser-login: the `login` verb's door (the vault's values to the kernel, never to anyone else) + the forms a tab reports
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
-    shutdown: () => { for (const t of rearms.values()) clearTimeout(t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
+    shutdown: () => { for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 
 module.exports = { create, ANSWERED_KEEP, OUTCOMES_KEEP, VERB_RUNNING_MAX_MS, RE_ENABLE_MS };

@@ -20,6 +20,9 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r2 its acceptance r1: the PERSON's watch observes (no permission plan / print release / prompt hooks / authenticator; a vault
+//       passkey only when he chose it), the view's fact is the CURRENT one and the shown browser's, a page already waiting is said
+//       across a reconnect, the re-arm is bounded, a remote browser says the true cause
 //   ⑨ lane passkey-browse-yourself (the owner 2026-10-30 in «自己浏览», «还是没有 passkey 提示»): EVERY ROAD IS WATCHED — the
 //      watch opens at `human-start` (no verb, no window), again at `browser-ready` while he holds it, and once after a socket
 //      closed under him (never without him); his key (`hu-…`) has a fact like a conversation's (stuckForKey, passkeyFactOf);
@@ -665,8 +668,8 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const br = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
     const fct = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
-    ok(/case 'passkey': st\.pkRelay = /.test(live) && /const pk = !d \? pkFactNow\(\) : null;/.test(live) && /const pkFactNow = \(\) => \{ const s = st\.fact && st\.fact\.stuck; if \(s && s\.state === 'passkey' && s\.passkey\) return s; const r = st\.pkRelay;/.test(live) && !/if \(H\)[^\n]{0,80}pkRelay/.test(live) && /display: pk\.display \|\| null/.test(live), '⑨ ONE renderer: the banner reads pkFactNow() — the session row\'s fact, else the relay\'s record — gated on the fact, never on the road; the display rides it');
-    ok(/relay\.target\.kind === 'attachment' \|\| relay\.target\.kind === 'human'\) return relay\.target\.profileId/.test(br) && /if \(ev\.kind === 'passkey' \|\| ev\.kind === 'passkey-proposal' \|\| ev\.kind === 'watched'\) pushPasskey\(r\);/.test(br) && (br.match(/if \(relay\.lastPasskey\) send\(ws, relay\.lastPasskey\);/g) || []).length === 2 && !/ephemeral: relay\.target\.kind !== 'attachment'/.test(br), '⑨ the bridge: his window names its profile (armed by it, its dialogs + passkey reach it, answered as a named profile\'s), the passkey fact pushed when it moves, replayed to a late viewer on both doors');
+    ok(/case 'passkey': st\.pkRelay = /.test(live) && /const pk = !d \? pkFactNow\(\) : null;/.test(live) && /return real\(r\) \? r : real\(s\) \? s : r \|\| s;/.test(live) && !/if \(H\)[^\n]{0,80}pkRelay/.test(live) && /display: pk\.display \|\| null/.test(live), '⑨ ONE renderer: the banner reads pkFactNow() — the session row\'s fact, else the relay\'s record — gated on the fact, never on the road; the display rides it');
+    ok(/relay\.target\.kind === 'attachment' \|\| relay\.target\.kind === 'human'\) return relay\.target\.profileId/.test(br) && /if \(ev\.kind === 'passkey' \|\| ev\.kind === 'passkey-proposal' \|\| ev\.kind === 'watched'\) pushPasskey\(r\);/.test(br) && (br.match(/if \(!pushPasskey\(relay\)\) send\(ws, passkeyNow\(relay\)\);/g) || []).length === 2 && !/ephemeral: relay\.target\.kind !== 'attachment'/.test(br), '⑨ the bridge: his window names its profile (armed by it, its dialogs + passkey reach it, answered as a named profile\'s), the passkey fact pushed when it moves, replayed to a late viewer on both doors');
     ok(/v\.stuck\.state === 'passkey' \|\| v\.stuck\.state === 'prompt'\)\) fact\.stuck = v\.stuck;/.test(fct), '⑨ the session row\'s fact lets `passkey` through (measured on 43d0f8d2d: fact.stuck null while stuckForKey said passkey_open — the takeover banner was dead on every road)');
     const BF = require(path.join(REPO, 'src/browser-fact.js'));
     const sess = { browserKey: CK, variant: null, pin: null };
@@ -684,10 +687,10 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     const SRC = { d: fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'), p: fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8') };
     const base = () => { for (const x of ['browser-stuck.js', 'browser-passkey-store.js', 'browser-human.js']) put('src/' + x, fs.readFileSync(path.join(REPO, 'src', x), 'utf8')); put('src/browser-passkey.js', SRC.p); put('src/server/browser-dialogs.js', SRC.d); };
     const M = [
-      ['rule 1 (no watch at human-start)', 'd', "      else if (ev.kind === 'human-start') return arm(ev.profileId);\n", '', rule1],
+      ['rule 1 (no watch at human-start)', 'd', "      else if (ev.kind === 'human-start') return arm(ev.profileId);", "      else if (ev.kind === 'human-start') return null;", rule1],
       ['rule 2 (his key has no candidate)', 'd', "const humanPid = /^hu-/.test(bk) ? HM().profileOfHumanKey(bk) : null;", 'const humanPid = null;', rule2],
       ['rule 3 (the display is not named)', 'p', 'desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : ', 'desktop: headed ? (', rule3],
-      ['rule 4 (an unwatched block is null)', 'd', ": PK.passkeyBlock({ state: 'unknown' }), // lane browser-passkey:", ': null, // lane browser-passkey:', rule4],
+      ['rule 4 (an unwatched block is null)', 'd', ': unknownBlock(pid), // lane browser-passkey:', ': null, // lane browser-passkey:', rule4],
     ];
     for (const [name, which, from, to, own] of M) {
       base();
@@ -698,6 +701,230 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
       ok(src.includes(from) && !own(mv) && others, `⑨ MUTANT ${name}: red on its own rule, the other three still hold`, { found: src.includes(from), own: own(mv), others });
     }
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ⑨r2 — acceptance r1 of lane passkey-browse-yourself (f5d694a0e): every leg below is RED on f5d694a0e by name
+console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact is the current one and the shown browser\'s; said across a reconnect; a bounded re-arm; the true cause');
+{
+  const PID = 'bp-0000b002', HK = 'hu-0000b002', CK = 'bk-0000c002';
+  const crypto2 = require('crypto'), PS2 = require(path.join(REPO, 'src/browser-passkey-store.js'));
+  const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until2 = async (pred, ms = 2000) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await sleep2(5); return pred(); };
+  const verbOf = (m) => (m.params && m.params.arguments && m.params.arguments[1] ? m.params.arguments[1].value : null);
+  /** ④'s socket, grown: a print preview beside his tab, the hook's document (an execution context), the hook's `pending` answer,
+   *  the authenticator's id, a refused port on demand, a tab whose hook fails (T3); every socket counted. */
+  function sock2(world) {
+    let slotOf = null, cur = null, n = 0; const log = [];
+    class FakeWS {
+      constructor() { this.readyState = 0; this.h = {}; cur = this; world.sockets++; setTimeout(() => { if (world.refuse) { this.readyState = 3; if (this.h.error) this.h.error(new Error('connect ECONNREFUSED 127.0.0.1:9')); if (this.h.close) this.h.close(); } else { this.readyState = 1; if (this.h.open) this.h.open(); } }, 0); }
+      on(ev, fn) { this.h[ev] = fn; }
+      close() { if (this.readyState === 3) return; this.readyState = 3; setTimeout(() => this.h.close && this.h.close(), 0); }
+      send(raw) {
+        const m = JSON.parse(raw); log.push(m);
+        const sid = m.sessionId || null; let result = {}, error = null;
+        if (m.method === 'Target.getTargets') result = { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey', browserContextId: 'CTX1' }, ...(world.print ? [{ targetId: 'PR', type: 'page', url: 'chrome://print/', title: 'Print', browserContextId: 'CTX1' }] : [])] };
+        else if (m.method === 'Target.attachToTarget') result = { sessionId: 'S-' + m.params.targetId };
+        else if (m.method === 'Browser.getVersion') result = { userAgent: 'Mozilla/5.0 Chrome/154.0.0.0' };
+        else if (m.method === 'Runtime.addBinding' && sid === 'S-T3') error = { message: 'no binding here' };
+        else if (m.method === 'Page.addScriptToEvaluateOnNewDocument') { if (!m.params.worldName) slotOf = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null; result = { identifier: '1' }; }
+        else if (m.method === 'Runtime.evaluate' && m.params.expression === 'CredentialsContainer.prototype') result = { result: { type: 'object', objectId: 'P-' + m.params.contextId } };
+        else if (m.method === 'Runtime.evaluate') result = { result: { type: 'string', value: 'released' } };
+        else if (m.method === 'Runtime.getProperties') result = { result: [], privateProperties: slotOf ? [{ name: '#' + slotOf, value: { type: 'function', objectId: 'CTL-1' } }] : [] };
+        else if (m.method === 'Runtime.callFunctionOn') result = { result: verbOf(m) === 'pending' ? { type: 'object', value: world.pending } : m.params.functionDeclaration === PK.REARM_FN ? { type: 'object', value: { displaced: [], kept: [] } } : { type: 'number', value: 1 } };
+        else if (m.method === 'Page.createIsolatedWorld') result = { executionContextId: 70 };
+        else if (m.method === 'WebAuthn.addVirtualAuthenticator') result = { authenticatorId: 'AUTH-' + (++n) };
+        else if (m.method === 'WebAuthn.getCredentials') result = { credentials: [] };
+        if (m.method === 'Runtime.enable' && sid === 'S-T1') setTimeout(() => this.h.message && this.h.message(JSON.stringify({ method: 'Runtime.executionContextCreated', sessionId: sid, params: { context: { id: 7, auxData: { isDefault: true, frameId: 'T1' } } } })), 0);
+        setTimeout(() => this.h.message && this.h.message(JSON.stringify(error ? { id: m.id, error } : { id: m.id, result })), 0);
+      }
+    }
+    return { FakeWS, log, push: (o) => cur.h.message(JSON.stringify(o)), sock: () => cur };
+  }
+  /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
+   *  passkey store, an optional paired machine. */
+  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20 } = {}) {
+    const world = { sockets: 0, refuse: false, pending: [], print, H: { human: holders !== 'agent', agent: holders !== 'human' } };
+    const f = sock2(world);
+    let clock = 1_000_000;
+    const listeners = new Set(), items = [], events = [];
+    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async () => (hostId ? { ok: false, error: 'the browser runs on another machine' } : { ok: true, url: 'ws://fake' }), onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+      browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
+    const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
+    const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
+    const D = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn() {}, log() {} }, now: () => clock, holdersOf, leaseCountOf: () => holdersOf().length, passkeys,
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } });
+    D.onChange((ev) => events.push(ev));
+    const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
+    const w = () => D._watches.get(PID) || null;
+    const calls = (method, pred = () => true) => f.log.filter((m) => m.method === method && pred(m));
+    const bind = () => { const b = [...f.log].reverse().find((x) => x.method === 'Runtime.addBinding' && x.sessionId === 'S-T1'); return b ? b.params.name : 'x'; };
+    const say = (o) => f.push({ method: 'Runtime.bindingCalled', sessionId: 'S-T1', params: { name: bind(), executionContextId: 7, payload: JSON.stringify(o) } });
+    const start = (id, rp = 'vercel.com') => say({ ev: 'start', id, kind: 'get', rpId: rp, origin: 'https://' + rp });
+    const end = (id) => say({ ev: 'end', id, outcome: 'ok' });
+    const opened = async () => { await lease({ kind: 'human-start', profileId: PID, key: HK, launched: true }); await until2(() => w() && w().state === 'open'); await sleep2(30); };
+    return { D, f, world, items, events, lease, w, calls, start, end, opened, step: (ms) => { clock += ms; } };
+  }
+  const released = (X) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'release').length;
+  // MAJOR 1: his press alone ⇒ the PERSON's watch (observation only)
+  {
+    const X = world2({ holders: 'human', store: { file: null, cipher: PS2.cipherOf(crypto2, crypto2.randomBytes(32)) } });
+    await X.opened();
+    const pol = { mode: X.w() && X.w().mode, perms: X.calls('Browser.setPermission').length, print: X.calls('Target.attachToTarget', (m) => m.params.targetId === 'PR').length, fetch: X.calls('Fetch.enable').length, chooser: X.calls('Page.setInterceptFileChooserDialog', (m) => m.params.enabled === true).length, webauthn: X.calls('WebAuthn.enable').length, auth: X.calls('WebAuthn.addVirtualAuthenticator').length, hook: X.calls('Runtime.addBinding').length };
+    X.start(1); await until2(() => released(X) > 0); X.step(PK.PENDING_SAID_MS);
+    const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
+    ok(pol.mode === 'person' && pol.perms === 0 && pol.print === 0 && pol.fetch === 0 && pol.chooser === 0 && pol.webauthn === 0 && pol.auth === 0 && pol.hook >= 1 && !!fact && fact.passkey.state === 'passkey_open' && released(X) === 1 && X.calls('WebAuthn.enable').length === 0,
+      '⑨r2 MAJOR 1: his press alone (human-start; a passkey store wired; no conversation holds it) ⇒ the PERSON\'s watch — 0 permission calls, 0 print releases, 0 Fetch.enable, 0 file-chooser intercepts, 0 WebAuthn.enable / virtual authenticators; the hook still reports his ceremony (passkey_open) and the gate hands it to Chrome\'s own window',
+      { pol, fact: fact && fact.passkey.state, released: released(X) });
+    // a conversation takes the browser ⇒ the agent's policies; it lets go ⇒ the person's again, over the same socket
+    X.world.H.agent = true;
+    await X.lease({ kind: 'attach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await sleep2(30);
+    const on = { mode: X.w().mode, perms: X.calls('Browser.setPermission').length, fetch: X.calls('Fetch.enable').length, chooser: X.calls('Page.setInterceptFileChooserDialog', (m) => m.params.enabled === true).length, auth: X.calls('WebAuthn.addVirtualAuthenticator').length, ui: X.calls('WebAuthn.enable').map((m) => m.params.enableUI) };
+    X.world.H.agent = false;
+    await X.lease({ kind: 'detach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await until2(() => X.w().mode === 'person'); await sleep2(30);
+    const off = { mode: X.w().mode, reset: X.calls('Browser.resetPermissions').length, fetchOff: X.calls('Fetch.disable').length, chooserOff: X.calls('Page.setInterceptFileChooserDialog', (m) => m.params.enabled === false).length, removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, sockets: X.world.sockets };
+    ok(on.mode === 'agent' && on.perms > 0 && on.fetch >= 1 && on.chooser >= 1 && on.auth >= 1 && on.ui.length >= 1 && on.ui.every((u) => u === false) && off.mode === 'person' && off.reset >= 1 && off.fetchOff >= 1 && off.chooserOff >= 1 && off.removed >= 1 && off.sockets === 1,
+      '⑨r2 MAJOR 1: a conversation takes the browser (`attach`) ⇒ the agent\'s watch — its permission plan, Fetch + the file chooser hooked, the tab\'s empty authenticator (UI off); it lets go (`detach`) ⇒ the person\'s again over the SAME socket — the overrides reset, the hooks off, the authenticator removed', { on, off });
+    X.D.shutdown();
+  }
+  // MAJOR 1: a vault passkey he chose ⇒ an authenticator for that ceremony only (Chrome's UI on); nothing chosen ⇒ none
+  {
+    const cipher = PS2.cipherOf(crypto2, crypto2.randomBytes(32));
+    const store = { file: PS2.withRow(null, PID, { credentialId: 'Kvault001', rpId: 'vercel.com', userName: 'me', displayName: 'Me', keySealed: cipher.seal('pkcs8-key-text'), signCount: 1, createdBy: 'human', createdAt: 1, lastUsedAt: 0, uses: 0, policy: 'yes' }), cipher };
+    const X = world2({ holders: 'human', store, print: false });
+    await X.opened();
+    const atArm = X.calls('WebAuthn.enable').length + X.calls('WebAuthn.addVirtualAuthenticator').length;
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await sleep2(20);
+    const during = { ui: X.calls('WebAuthn.enable').map((m) => m.params.enableUI), auth: X.calls('WebAuthn.addVirtualAuthenticator').length, added: X.calls('WebAuthn.addCredential').length, released: released(X) };
+    X.end(1); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0); await sleep2(20);
+    const after = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, disabled: X.calls('WebAuthn.disable').length, auth: X.w().targets.get('T1').pk.auth || null };
+    X.start(2, 'example.com'); await until2(() => released(X) > 1); await sleep2(20);
+    const other = { auth: X.calls('WebAuthn.addVirtualAuthenticator').length, released: released(X) };
+    ok(atArm === 0 && during.ui.length === 1 && during.ui[0] === true && during.auth === 1 && during.added === 1 && during.released === 1 && after.removed === 1 && after.disabled >= 1 && !after.auth && other.auth === 1 && other.released === 2,
+      '⑨r2 MAJOR 1: a vault passkey he CHOSE (a stored key for the site he set to always) ⇒ an authenticator for THAT ceremony only, Chrome\'s UI on (enableUI true), its key loaded, removed when the ceremony ends; a site the vault holds nothing for ⇒ Chrome\'s own window (no authenticator)', { atArm, during, after, other });
+    X.D.shutdown();
+  }
+  // rule 4: a ceremony the page was ALREADY waiting on when the watch came back is said
+  {
+    const X = world2({ holders: 'human', print: false });
+    await X.opened();
+    X.start(1); await sleep2(20); X.step(PK.FOR_YOU_AFTER_MS + 1000);
+    X.world.pending = [{ id: 1, kind: 'get', rpId: 'vercel.com', age: PK.FOR_YOU_AFTER_MS + 1000, held: false }]; // the page's hook still holds its promise
+    const items0 = X.items.length;
+    try { X.f.sock().h.close(); } catch { /* */ }
+    await until2(() => X.world.sockets === 2 && X.w() && X.w().state === 'open'); await sleep2(40);
+    const row = X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey, view = X.D.passkeyFactOf({ profileId: PID, browserKey: HK }), his = X.D.stuckForKey(HK);
+    const again = X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'pending').length;
+    ok(again >= 1 && row && row.state === 'passkey_open' && view && view.passkey.state === 'passkey_open' && his && his.state === 'passkey' && X.items.length > items0,
+      '⑨r2 rule 4: a ceremony the page was ALREADY waiting on when the watch came back (a socket that closed under him; a hub restart is the same road) is said — the hook\'s `pending` gives it with its age: passkey_open on his key, his window\'s fact, the For-you item — never silence', { again, row: row && row.state, view: view && view.passkey.state, his: his && his.state, items: X.items.length - items0 });
+    X.D.shutdown();
+  }
+  // the re-arm is bounded (rearmMs 5: the five tries' backoff is 5+10+20+40+80 ms)
+  {
+    const X = world2({ holders: 'human', print: false, rearmMs: 5 });
+    await X.opened();
+    X.world.refuse = true; const s0 = X.world.sockets;
+    try { X.f.sock().h.close(); } catch { /* */ }
+    await sleep2(450); const n1 = X.world.sockets - s0;
+    await sleep2(250); const n2 = X.world.sockets - s0;
+    const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
+    const words = fact && PK.passkeyWords(fact.passkey, null);
+    X.world.refuse = false; await X.D.arm(PID);
+    const back = { state: X.w() && X.w().state, fact: X.D.passkeyFactOf({ profileId: PID, browserKey: HK }) };
+    ok(n1 === 5 && n2 === 5 && !!fact && fact.passkey.state === 'unknown' && fact.passkey.why === 'gave-up' && fact.passkey.text === PK.GAVE_UP_TEXT && words && words.unknown && words.line === PK.GAVE_UP_TEXT && X.events.some((e) => e.kind === 'passkey' && e.why === 'gave-up') && back.state === 'open' && back.fact === null,
+      '⑨r2 the re-arm is BOUNDED: a refused port (ECONNREFUSED reaches the close) is tried 5 times with a doubling backoff, then never again — his fact says the watch stopped (`gave-up`, its own words), never the endless 2-s loop; the next arm starts over', { n1, n2, fact: fact && fact.passkey, back });
+    X.D.shutdown();
+  }
+  // a paired machine's browser: the TRUE cause
+  {
+    const X = world2({ holders: 'human', hostId: 'host-0000m1', print: false });
+    await X.lease({ kind: 'human-start', profileId: PID, key: HK, launched: true });
+    const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK }), row = X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey;
+    const words = fact && PK.passkeyWords(fact.passkey, null);
+    ok(!X.w() && !!fact && fact.passkey.why === 'remote' && fact.passkey.text === PK.REMOTE_TEXT && row && row.text === PK.REMOTE_TEXT && words && words.line === PK.REMOTE_TEXT && !/started before/.test(words.line),
+      '⑨r2 a paired machine\'s browser (the hub never watches it) says the TRUE cause — it runs on another machine — never the false «started before VibeSpace could watch them»', { fact: fact && fact.passkey, row });
+    X.D.shutdown();
+  }
+  // a hook that arms (or fails) after the socket's first pass moves the view's fact
+  {
+    const X = world2({ holders: 'human', print: false });
+    await X.opened();
+    const n0 = X.events.length;
+    X.f.push({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T2', type: 'page', url: 'https://example.com/', title: 'New', browserContextId: 'CTX1' } } });
+    X.f.push({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T3', type: 'page', url: 'https://example.org/', title: 'Newer', browserContextId: 'CTX1' } } });
+    await until2(() => X.events.slice(n0).filter((e) => e.kind === 'passkey' && e.hook).length >= 2);
+    const evs = X.events.slice(n0).filter((e) => e.kind === 'passkey' && e.hook).map((e) => e.targetId + ':' + e.state).sort();
+    ok(evs.join(',') === 'T2:armed,T3:unarmed', '⑨r2 a hook that arms after the socket\'s first pass (a new tab; a held tab on its re-ask) — or fails — moves the view\'s fact: a `passkey` event the bridge re-reads (never a stale line, never silence for a tab it cannot see)', evs);
+    X.D.shutdown();
+  }
+  // MAJOR 2: the bridge (loopback) — the CURRENT fact after hello, null included; a Cancel whose wait is gone
+  {
+    const http = require('http'), WSm = require('ws');
+    const SB = require(path.join(REPO, 'src/server/browser-stream.js')), BHS = require(path.join(REPO, 'src/browser-stream.js'));
+    const target = BHS.humanTarget({ key: HK, profileId: PID, label: 'Mine' });
+    const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
+    let cur = null; const dl = new Set();
+    const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => cur, onChange: (fn) => { dl.add(fn); return () => dl.delete(fn); }, cancelPasskey: async () => ({ ok: true, n: 0, state: 'none', text: PK.NONE_TEXT }), openOn: () => null, surfacesIn: () => [] };
+    class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+    const bridge = SB.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
+    const srv = http.createServer(); srv.on('upgrade', (req, s, h) => bridge.handleUpgrade(req, s, h));
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const url = `ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`;
+    const view = () => new Promise((res) => { const ws = new WSm.WebSocket(url); const got = []; ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); ws.on('open', () => res({ ws, got })); ws.on('error', () => res({ ws, got })); });
+    const pkOf = (got) => got.filter((m) => m.type === 'passkey');
+    cur = { state: 'passkey', passkey: { state: 'passkey_open', id: 'T1:7:1', rpId: 'vercel.com', text: 'x' }, headed: false, since: 1, profileId: PID };
+    const V1 = await view(); await until2(() => pkOf(V1.got).some((m) => m.fact && m.fact.passkey.state === 'passkey_open'));
+    const v1saw = pkOf(V1.got).some((m) => m.fact && m.fact.passkey.state === 'passkey_open');
+    V1.ws.close(); await sleep2(80);
+    cur = null; for (const fn of [...dl]) fn({ kind: 'passkey', profileId: PID, state: 'none' }); // the ceremony ended while nobody watched
+    const V2 = await view(); await until2(() => V2.got.some((m) => m.type === 'status' && m.state === 'upstream-open')); await sleep2(80);
+    const v2 = { hello: V2.got.findIndex((m) => m.type === 'hello'), firstPasskey: V2.got.findIndex((m) => m.type === 'passkey'), facts: pkOf(V2.got).map((m) => m.fact), stale: pkOf(V2.got).some((m) => m.fact) };
+    V2.ws.send(JSON.stringify({ type: 'passkey-cancel' }));
+    await until2(() => V2.got.some((m) => m.type === 'passkey-ack')); await sleep2(40);
+    const ack = V2.got.find((m) => m.type === 'passkey-ack') || null, afterAck = ack ? V2.got.slice(V2.got.indexOf(ack) + 1).filter((m) => m.type === 'passkey') : [];
+    ok(v1saw && v2.hello >= 0 && v2.firstPasskey > v2.hello && !v2.stale && v2.facts.length >= 1 && !!ack && ack.ok && ack.n === 0 && ack.ended === true && afterAck.length >= 1 && afterAck.every((m) => m.fact === null),
+      '⑨r2 MAJOR 2 (the bridge, loopback): a viewer that joins after the ceremony ended is told the CURRENT fact right after hello — null, so no phantom banner; a Cancel whose wait is gone is answered `ended` and followed by the fact that stands', { v1saw, v2, ack, afterAck });
+    try { V2.ws.close(); } catch { /* */ }
+    bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+  }
+  // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
+  {
+    const src = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const cut = (from, to) => { const i = src.indexOf(from); if (i < 0) return null; const j = src.indexOf(to, i + from.length); return j < 0 ? null : src.slice(i, j); };
+    const pkI = src.indexOf('  const shownPid = () =>'), pkE = src.indexOf('  const pkElsewhere = () =>');
+    const pkCode = pkI >= 0 && pkE > pkI ? src.slice(pkI, src.indexOf('\n', pkE)) : null;
+    const helloCase = cut("      case 'hello':", "      case 'x-ticket':"), pkCase = cut("      case 'passkey': ", '\n'), ackCase = cut("      case 'passkey-ack':", '\n'), switchSrc = cut('  function switchTo(profileRef) {', '\n  }\n');
+    let api = null, err = null;
+    const toasts = [];
+    const base0 = { pkRelay: null, pkPid: null, fact: null, target: null, rows: [{ ref: 'bp-A', profileId: 'bp-A', label: 'Work' }], passkeyCancelling: false, dialog: null, watch: null, takeOnOpen: false };
+    try {
+      if (!pkCode || !helloCase || !pkCase || !ackCase || !switchSrc) throw new Error('a slice is missing: ' + JSON.stringify({ pk: !!pkCode, hello: !!helloCase, passkey: !!pkCase, ack: !!ackCase, switchTo: !!switchSrc }));
+      const U = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' ? undefined : U), set: () => true, apply: () => U, construct: () => U });
+      const st = new Proxy(base0, { get: (o, k) => (k in o ? o[k] : U), set: (o, k, v) => { o[k] = v; return true; } });
+      const env = { st, t: (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? p[x] : m)), showToast: (m) => toasts.push(m), H: null };
+      const GLOBALS = new Set(['Object', 'String', 'Number', 'JSON', 'Array', 'Math', 'Boolean', 'Symbol', 'Date', 'Promise', 'Set', 'Map', 'undefined', 'Infinity', 'NaN', 'console']);
+      const scope = new Proxy(env, { has: (o, k) => typeof k === 'string' && !GLOBALS.has(k), get: (o, k) => (k === Symbol.unscopables ? undefined : k in o ? o[k] : U), set: (o, k, v) => { o[k] = v; return true; } }); // `with` reads Symbol.unscopables first — never the stub
+      // eslint-disable-next-line no-new-func
+      api = new Function('scope', `with (scope) { ${pkCode}\n return { pkFactNow, pkElsewhere, onMessage: (m) => { switch (m.type) { ${helloCase}${pkCase}\n${ackCase}\n } }, switchTo: ${switchSrc.replace('function switchTo(', 'function (')}\n  } }; }`)(scope);
+    } catch (e) { err = String(e && e.message); }
+    const OPEN = (pid, rp = 'vercel.com') => ({ state: 'passkey', passkey: { state: 'passkey_open', id: pid + ':7:1', rpId: rp }, headed: false, since: 1, profileId: pid });
+    const r = {};
+    if (api) {
+      api.onMessage({ type: 'passkey', fact: OPEN('bp-A'), profileId: 'bp-A' }); r.banner = !!api.pkFactNow();
+      api.onMessage({ type: 'hello', mode: 'watch', target: { kind: 'human', profileId: 'bp-A' } }); r.afterHello = api.pkFactNow();
+      api.onMessage({ type: 'passkey', fact: OPEN('bp-A'), profileId: 'bp-A' }); api.switchTo('bp-B'); r.afterSwitch = api.pkFactNow();
+      base0.target = { kind: 'attachment', profileId: 'bp-B' }; api.onMessage({ type: 'passkey', fact: null, profileId: 'bp-B' });
+      base0.fact = { stuck: OPEN('bp-A', 'site-a.example') }; r.otherBanner = api.pkFactNow(); r.otherNote = api.pkElsewhere();
+      base0.fact = { stuck: OPEN('bp-B') }; r.ownRow = api.pkFactNow(); r.ownNote = api.pkElsewhere();
+      base0.passkeyCancelling = true; api.onMessage({ type: 'passkey', fact: OPEN('bp-B'), profileId: 'bp-B' });
+      api.onMessage({ type: 'passkey-ack', ok: true, n: 0, ended: true }); r.ack = { cancelling: base0.passkeyCancelling, relay: base0.pkRelay, toast: toasts[toasts.length - 1] || null };
+    }
+    ok(!!api && r.banner && r.afterHello === null && r.afterSwitch === null && r.otherBanner === null && !!r.otherNote && r.otherNote.profileId === 'bp-A' && !!r.ownRow && r.ownRow.profileId === 'bp-B' && r.ownNote === null && r.ack.cancelling === false && r.ack.relay === null && r.ack.toast === 'The passkey wait had already ended',
+      '⑨r2 MAJOR 2 + MINOR (the window\'s own code): a hello on a new socket and a pane switch clear the relay\'s passkey fact; the banner is the SHOWN browser\'s — another browser\'s wait is pkElsewhere (a note), never its banner with a Cancel aimed at the one on show; a Cancel whose wait ended frees the button and says so', err || r);
+    const elseBlock = cut('    } else if (pkElse) {', '    } else if (pkUnknown) {') || '';
+    ok(/dialogBar\.classList\.toggle\('stuck', true\); dialogBar\.classList\.toggle\('blind', false\); \/\/ acceptance r1/.test(src) && !!elseBlock && !/textBtn|passkey-cancel/.test(elseBlock) && /rowBase\(row\)/.test(elseBlock),
+      '⑨r2 the banner: a passkey banner that follows the quiet unknown line drops the quiet look (never an urgent banner painted grey); another browser\'s note names it and carries no button');
   }
 }
 

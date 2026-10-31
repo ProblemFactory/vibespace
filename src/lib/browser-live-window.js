@@ -378,7 +378,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     you: null, mine: false, modeSince: 0, modeCause: null, cursor: null, confirmations: new Map(), confirmSlots: [], confirmTimer: null, wakes: null, lastMoveAt: 0, buttonsDown: 0, // r6: confirmSlots = the card's keyed slots, wakes = what a Hand back wakes
     // lane browser-stuck: the page dialog on show (the bridge's record), the prompt text typed so far, an answer in flight, a Restart in flight
     dialog: null, dialogText: null, dialogAnswering: false, restarting: false,
-    pkRelay: null, // lane passkey-browse-yourself: the relay's passkey fact (a browsing window has no session row — this is its fact)
+    pkRelay: null, pkPid: null, // lane passkey-browse-yourself: the relay's passkey fact (a browsing window has no session row — this is its fact); acceptance r1: + the browser it is of (the one on show)
     // lane browser-surfaces: a kernel's NOTED prompts on show (by id — a held one is `dialog`), the answer whose sheet is open, its typed values
     surfaces: new Map(), sheet: null, sheetVals: {},
     // lane J r2: input feedback + the keyboard — acts sent this takeover, the last ripples, the user's mapped pointer, the echo timer
@@ -407,7 +407,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const wordsNow = () => { const f = st.fact || factNow(); return f ? browserFactWords(f, t) : null; };
   /** lane passkey-browse-yourself: THE passkey fact this view shows — its session's (the row's fact) or, for a window with no
    *  session row (browse yourself), its relay's record: ONE banner below, gated on the fact, never on the road. */
-  const pkFactNow = () => { const s = st.fact && st.fact.stuck; if (s && s.state === 'passkey' && s.passkey) return s; const r = st.pkRelay; return r && r.state === 'passkey' && r.passkey ? r : null; };
+  // acceptance r1 of lane passkey-browse-yourself: the banner is the SHOWN browser's fact only — its relay's record (that browser's),
+  // else the session row's when it names this browser; another browser's wait is a note naming it (pkElsewhere), never a Cancel
+  const shownPid = () => st.pkPid || (st.target && st.target.profileId) || null;
+  const pkRowFact = () => { const s = st.fact && st.fact.stuck; return s && s.state === 'passkey' && s.passkey ? s : null; };
+  const pkFactNow = () => {
+    const r = st.pkRelay && st.pkRelay.state === 'passkey' && st.pkRelay.passkey ? st.pkRelay : null;
+    const s0 = pkRowFact(), s = s0 && (!s0.profileId || !shownPid() || s0.profileId === shownPid()) ? s0 : null;
+    const real = (x) => !!x && x.passkey.state !== 'unknown';
+    return real(r) ? r : real(s) ? s : r || s;
+  };
+  const pkElsewhere = () => { const s = pkRowFact(); return s && s.profileId && shownPid() && s.profileId !== shownPid() && s.passkey.state !== 'unknown' ? s : null; };
   st.fact = factNow();
 
   // ── DOM ──
@@ -1157,6 +1167,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const pk = !d ? pkFactNow() : null;
     const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null, display: pk.display || null }) : null;
     const pkUnknown = pkw && pkw.unknown ? pkw : null; // lane passkey-browse-yourself: the watch cannot see this browser — a quiet line, below every other state
+    const pkElse = !d && !(pkw && !pkUnknown) ? pkElsewhere() : null; // acceptance r1: ANOTHER browser of this conversation waits — a note naming it, never a Cancel aimed at the one on show
     if (pkw && !pkUnknown) {
       const key = String(pk.passkey.id || '') + (pkw.ask ? ':ask:' + pkw.cardId : ''); // lane passkey-ui: passkey_ask = the owner's card inline
       if (dialogBar.dataset.passkey !== key || dialogBar.dataset.pkBusy !== String(!!st.passkeyCancelling)) {
@@ -1168,7 +1179,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         if (pkw.ask) { // lane passkey-ui: the card's choices (Allow once / Always allow / Not now / Never) — the same approve route
           const row = document.createElement('div'); row.className = 'browser-live-dialog-actions browser-live-passkey-ask';
           if (pk.card) patchPasskeyButtons(row, pk.card); dialogBar.append(row);
-          dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true);
+          dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true); dialogBar.classList.toggle('blind', false);
           return;
         }
         const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
@@ -1176,16 +1187,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         b.disabled = !!st.passkeyCancelling;
         acts.append(b); dialogBar.append(acts);
       }
-      dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true);
+      dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true); dialogBar.classList.toggle('blind', false); // acceptance r1: an unknown line before it left the quiet look on (an urgent banner painted grey)
       return;
     }
     if (dialogBar.dataset.passkey) { delete dialogBar.dataset.passkey; st.passkeyCancelling = false; }
     const sv = d && d.kind && d.kind !== 'js-dialog' ? d : !d && !stuck && st.surfaces.size ? [...st.surfaces.values()].pop() : null; // lane browser-surfaces
     if (sv) { renderSurfaceCard(sv); return; }
     dialogBar.textContent = '';
-    dialogBar.style.display = d || stuck || blind || pkUnknown ? '' : 'none';
+    dialogBar.style.display = d || stuck || blind || pkElse || pkUnknown ? '' : 'none';
     dialogBar.classList.toggle('stuck', !!stuck);
-    dialogBar.classList.toggle('blind', !!blind || (!stuck && !!pkUnknown));
+    dialogBar.classList.toggle('blind', !!blind || (!stuck && (!!pkElse || !!pkUnknown)));
     if (d) {
       const w = dialogWords(d, t);
       const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = w.title;
@@ -1217,6 +1228,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (blind) {
       const w = stuckWords(blind, t);
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-blind-line'; line.textContent = w.line; line.title = w.tooltip || '';
+      dialogBar.append(line);
+    } else if (pkElse) { // acceptance r1: another browser's wait — named, the person switches to it (its own banner + Cancel are there)
+      const row = (st.rows || []).find((x) => x && x.profileId === pkElse.profileId);
+      const rp = String((pkElse.passkey && pkElse.passkey.rpId) || '');
+      const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-elsewhere';
+      line.textContent = row ? t('Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer', { label: rowBase(row), rp }) : t('Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer', { rp });
       dialogBar.append(line);
     } else if (pkUnknown) { // lane passkey-browse-yourself (rule 4): never silence — VibeSpace says it cannot see passkey requests here
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-unknown'; line.textContent = pkUnknown.line;
@@ -2140,7 +2157,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         renderMode(); renderViewers(); renderTitle(); renderStrip(); renderBackend(); renderRec(); syncTrace(); renderOwner(); renderBind();
         renderAsk(); if (st.takeOnOpen && !H) { st.takeOnOpen = false; if (!(st.mode === 'takeover' && st.mine)) send({ type: 'takeover' }); } // lane browser-takeover-queue
         st.fitSent = null; reportFit(); renderFit(); // lane S4: this viewer's pane, at once (the bridge sizes the page to the ruling pane)
-        st.dialog = null; st.dialogAnswering = false; renderDialog(); // lane browser-stuck: a (re)connected view is told again by the bridge's replay
+        st.dialog = null; st.dialogAnswering = false; st.pkRelay = null; st.pkPid = null; st.passkeyCancelling = false; renderDialog(); // lane browser-stuck: a (re)connected view is told again by the bridge's replay — acceptance r1 of lane passkey-browse-yourself: the passkey fact too (the bridge sends the CURRENT one right after hello, null included)
         // live-watch-polish G4: the bridge's watch died with the old socket — a view that was watching asks again (the bridge
         // re-judges; a refusal clears the line by name), a view that drives now drops it: the line and the picture tell ONE truth
         if (st.watch) { if (st.mode === 'takeover' && st.mine) st.watch = null; else { st.watch = { ...st.watch, pending: true }; send({ type: 'watch-tab', targetId: st.watch.targetId }); } renderTabRow(); renderWatchLine(); }
@@ -2186,9 +2203,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'page-note': pageNote(m.permission || null); break; // lane browser-ui-prompts-r2: the bar's one line (a permission decided, a print closed)
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
-      case 'passkey': st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact
+      case 'passkey': st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; st.pkPid = typeof m.profileId === 'string' && m.profileId ? m.profileId : (st.pkRelay && st.pkRelay.profileId) || null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact (acceptance r1: + the browser on show)
       case 'surface': onSurfaceRecord(m); break; // lane browser-surfaces: a kernel's NOTED prompt (it never holds the page)
-      case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break; // lane browser-passkey
+      case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } else if (m.ended) { st.passkeyCancelling = false; st.pkRelay = null; renderDialog(); showToast(t('The passkey wait had already ended'), { duration: 3000 }); } break; // lane browser-passkey — acceptance r1 of lane passkey-browse-yourself: a Cancel whose wait is gone says so (the bridge sends the current fact after it)
       case 'dialog-ack': if (!m.ok) { st.dialogAnswering = false; renderDialog(); showToast(t('The dialog could not be answered: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break;
       case 'confirmation-ack': if (!m.ok) showToast(t('Could not answer the confirmation: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); else st.confirmations.delete(m.id), renderConfirms(); break;
       case 'viewers': st.viewers = Number(m.n) || 1; renderViewers(); break;
@@ -2315,7 +2332,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.pkRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

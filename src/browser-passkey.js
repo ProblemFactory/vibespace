@@ -170,7 +170,7 @@ function registerText(state, rpId) {
 /** A verdict as the routes and the CLI carry it (no clock inside; `record` trimmed to what a reader needs). */
 function passkeyBlock(v) {
   if (v && v.state === 'refused') return { state: 'refused', why: v.why, rpId: v.rpId, text: v.text }; // lane passkey-store-core
-  if (v && v.state === 'unknown') return { state: 'unknown', text: UNKNOWN_TEXT }; // lane passkey-browse-yourself: a browser the watch cannot see says so — never a bare state a reader prints as nothing
+  if (v && v.state === 'unknown') return v.why === 'remote' || v.why === 'gave-up' ? { state: 'unknown', why: v.why, text: v.why === 'remote' ? REMOTE_TEXT : GAVE_UP_TEXT } : { state: 'unknown', text: UNKNOWN_TEXT }; // lane passkey-browse-yourself: a browser the watch cannot see says so — never a bare state a reader prints as nothing (acceptance r1: with its true cause when the watch knows one)
   if (!v || (v.state !== PASSKEY_OPEN_CODE && v.state !== PASSKEY_ASK_CODE)) return v ? { state: v.state } : null;
   const r = v.record;
   return { state: v.state, id: r.id, kind: r.kind, rpId: r.rpId, tab: r.tab, startedAt: r.startedAt, text: v.text, ...(r.ask ? { proposal: r.ask } : {}) };
@@ -195,6 +195,9 @@ function cancelText({ n = 0, rpId = '', kernel = false } = {}) {
 }
 const NONE_TEXT = 'No passkey request is waiting on your browser.';
 const UNKNOWN_TEXT = 'VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.';
+// acceptance r1 of lane passkey-browse-yourself: an unwatched browser's TRUE cause, when the watch knows it — never the false «started before»
+const REMOTE_TEXT = 'This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.';
+const GAVE_UP_TEXT = 'VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one (the next action on this browser reconnects).';
 
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
@@ -203,7 +206,7 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 function passkeyWords(b, tIn, { headed = false, card = null, display = null } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line, no button), never nothing
-  if (b && b.state === 'unknown') return { unknown: true, title: '', line: t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '' };
+  if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one (the next action on this browser reconnects).') : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '' };
   if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
   const rp = rpWord(b.rpId) || t('this site');
   if (b.state === PASSKEY_ASK_CODE) {
@@ -321,6 +324,7 @@ function installHook(G, cfg) {
   // taken here — in a new document before any page script — so `retake` and the reports never use what a page replaced later
   const gopd = G.Object.getOwnPropertyDescriptor, defp = G.Object.defineProperty, enc = G.JSON.stringify;
   const AC = G.AbortController, AS = G.AbortSignal;
+  const nowMs = G.Date && typeof G.Date.now === 'function' ? G.Date.now.bind(G.Date) : () => 0; // acceptance r1: a pending ceremony's age (`pending`)
   const reg = new Map();
   let seq = 0, tell = send, key = String(cfg.key || '');
   let busy = null;      // hold mode: a released ceremony in flight (+ the watch's drain) — a later one of this document queues behind it
@@ -349,6 +353,9 @@ function installHook(G, cfg) {
   const control = (verb, id) => {
     if (verb === 'cancel') { let n = 0; for (const r of reg.values()) if (!r.ctl.signal.aborted) { r.cancelled = true; r.ctl.abort(); n++; } return n; }
     if (verb === 'drained') { const f = drainedFn; drainedFn = null; if (f) f(); return 1; }
+    // acceptance r1 of lane passkey-browse-yourself (rule 4): what this document is ALREADY waiting on — a re-armed watch (a new
+    // socket, a restarted hub) records it with its age, so a page waiting since before the arm is said too
+    if (verb === 'pending') { const out = []; for (const [n, r] of reg) if (!r.ctl.signal.aborted && out.length < 8) out.push({ id: n, kind: r.kind, rpId: r.rp, age: Math.max(0, nowMs() - r.at), held: !!r.held }); return out; }
     const r = reg.get(Number(id));
     if (!r || !r.held) return 0;
     if (verb === 'wait') { r.arm(); return 1; }
@@ -387,13 +394,13 @@ function installHook(G, cfg) {
       if (!pk || typeof pk !== 'object' || (mediation === 'conditional' && !cfg.hold)) return Reflect.apply(native, this, args);
       const id = ++seq;
       const ctl = new AC();
-      const rec = { ctl, cancelled: false, held: false };
+      const rec = { ctl, cancelled: false, held: false, kind, rp: rpOf(kind, pk), at: nowMs() };
       const signal = callerSignal ? both(callerSignal, ctl.signal) : ctl.signal;
       const pass = [Object.create(opts, { signal: { value: signal, enumerable: true } }), ...args.slice(1)];
       const ended = (e) => (rec.cancelled ? 'cancelled' : (callerSignal && callerSignal.aborted ? 'aborted-by-page' : (e ? 'error' : 'ok')));
       if (!cfg.hold) {
         reg.set(id, rec);
-        say({ ev: 'start', id, kind, rpId: rpOf(kind, pk) });
+        say({ ev: 'start', id, kind, rpId: rec.rp });
         const done = (outcome, name) => { reg.delete(id); say({ ev: 'end', id, outcome, name }); };
         let p;
         try { p = Reflect.apply(native, this, pass); } catch (e) { done('error', e && e.name); throw e; }
@@ -420,7 +427,7 @@ function installHook(G, cfg) {
         const start = () => {
           if (signal.aborted) { reject(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.')); return; }
           rec.held = true; reg.set(id, rec);
-          say({ ev: 'start', id, kind, rpId: rpOf(kind, pk), ...fields(kind, pk, mediation) });
+          say({ ev: 'start', id, kind, rpId: rec.rp, ...fields(kind, pk, mediation) });
           rec.arm();
         };
         if (busy) busy.then(start, start); else start();
@@ -470,7 +477,7 @@ const HOOK_HOLD_MS = 1500;
 module.exports = {
   passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
-  NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS, DOORS_WORDS,
+  NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, FOR_YOU_WORDS, DOORS_WORDS,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
   loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

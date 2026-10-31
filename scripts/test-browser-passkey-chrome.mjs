@@ -109,7 +109,7 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
   const KEYF = path.join(S, 'k.bin'); fs.writeFileSync(KEYF, crypto.randomBytes(32), { mode: 0o600 });
   const STORE = path.join(S, 'browser-passkeys.json');
   const items = []; let takeover = false;
-  const mk = (Dmod, PSmod) => { const c = PSmod.cipherOf(crypto, fs.readFileSync(KEYF)); return Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: BWS }) }, WebSocketImpl: WSI, log: { warn: () => {}, log: () => {} }, holdersOf: () => [{ browserKey: 'bk-aaaaaaaa', sessionId: 's1' }], takeoverOf: () => takeover, forYou: { add: (pid, it) => { items.push(it); return 'it' + items.length; }, resolve: () => {} }, passkeys: { read: () => (fs.existsSync(STORE) ? JSON.parse(fs.readFileSync(STORE, 'utf8')) : null), write: (o) => { fs.writeFileSync(STORE + '.tmp', JSON.stringify(o), { mode: 0o600 }); fs.renameSync(STORE + '.tmp', STORE); }, cipher: c } }); };
+  const mk = (Dmod, PSmod, o = {}) => { const c = PSmod.cipherOf(crypto, fs.readFileSync(KEYF)); const SF = o.store || STORE; return Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: BWS }) }, WebSocketImpl: WSI, log: { warn: () => {}, log: () => {} }, holdersOf: () => o.holders || [{ browserKey: 'bk-aaaaaaaa', sessionId: 's1' }], takeoverOf: () => takeover, forYou: { add: (pid, it) => { items.push(it); return 'it' + items.length; }, resolve: () => {} }, passkeys: { read: () => (fs.existsSync(SF) ? JSON.parse(fs.readFileSync(SF, 'utf8')) : null), write: (o2) => { fs.writeFileSync(SF + '.tmp', JSON.stringify(o2), { mode: 0o600 }); fs.renameSync(SF + '.tmp', SF); }, cipher: c } }); }; // acceptance r1 of lane passkey-browse-yourself: + the holder rows (the PERSON's watch) and its own store
   const PID = 'bp-pkstore';
   const tab = async (W) => {
     const t = await dcall('Target.createTarget', { url: PAGE }); const tid = t.result.targetId;
@@ -225,6 +225,45 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
     for (let i = 0; i < 8; i++) { const r = await rearmForge(W, T); s10saw = s10saw || r.sawName; s10forged = s10forged || r.forged; }
     ok(!s10saw && !s10forged, 'S10 lens \u2461 residual closed: across 8 live-document re-arms the page never saw the arm binding on its main-world global, and a forged `start` through the (absent) name never landed a record', { sawName: s10saw, forged: s10forged });
     await T.close(); W.shutdown();
+    // S11 acceptance r1 of lane passkey-browse-yourself: the PERSON's watch (only he holds the browser) OBSERVES — no virtual
+    // authenticator, so his passkey request reaches Chrome's OWN window (it waits; the empty authenticator failed it in ms, S1),
+    // and no permission plan (a page's permission is Chrome's own «prompt», never the agent watch's «denied»)
+    {
+      await sleep(300); await dcall('Browser.resetPermissions'); // whatever the agent watch above decided is gone before he browses
+      const HU = [{ browserKey: 'hu-pkstore0', sessionId: null, ephemeral: false, human: true, input: 'user' }], PSTORE = path.join(S, 'person-passkeys.json');
+      const Wp = mk(D, PSx, { holders: HU, store: PSTORE });
+      ok((await Wp.arm(PID, { budgetMs: 5000 })).ok && Wp._watches.get(PID).mode === 'person', 'S11 the PERSON\'s watch armed on the real headed Chrome (only he holds the browser)', Wp._watches.get(PID) && Wp._watches.get(PID).mode);
+      const ptab = async () => {
+        const t = await dcall('Target.createTarget', { url: PAGE }); const tid = t.result.targetId;
+        const a = await dcall('Target.attachToTarget', { targetId: tid, flatten: true }); const sid = a.result.sessionId;
+        await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid); return r.result && r.result.result.value === 'function'; }, 8000);
+        await until(() => { const e = Wp._watches.get(PID).targets.get(tid); return e && e.pk.armed; }, 8000);
+        return { tid, sid, e: () => Wp._watches.get(PID).targets.get(tid), ev: (expr) => dcall('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, sid) };
+      };
+      const P1 = await ptab();
+      const perm = await P1.ev("navigator.permissions.query({name:'geolocation'}).then((p)=>p.state)");
+      let done = null; const t0 = Date.now(); const pend = P1.ev('signin()').then((r) => { done = { v: r && r.result && r.result.result ? r.result.result.value : null, ms: Date.now() - t0 }; return done; });
+      await sleep(PK.PENDING_SAID_MS + 400);
+      const v = Wp.passkeyIn(PID, null);
+      ok(!P1.e().pk.auth && done === null && v.state === 'passkey_open', `S11 his passkey request reaches Chrome's OWN window: no virtual authenticator on his tab, the get still waits after ${PK.PENDING_SAID_MS + 400} ms (the agent's empty authenticator failed it in ms — S1) and the watch says passkey_open`, { auth: P1.e().pk.auth || null, done, v: v.state });
+      ok(perm.result && perm.result.result && perm.result.result.value === 'prompt', 'S11 no permission plan on his browser: a page\'s geolocation permission reads Chrome\'s own «prompt» (the agent watch decides «denied» ahead)', perm.result && perm.result.result);
+      const cn = await Wp.cancelPasskey({ profileId: PID, browserKey: 'hu-pkstore0', ephemeral: true }, { by: 'user' });
+      const r1 = await Promise.race([pend, sleep(3000).then(() => null)]);
+      ok(cn.ok && cn.n === 1 && r1 && r1.v === 'AbortError', 'S11 … and his Cancel ends it (the page sees AbortError)', { cn, r1 });
+      await dcall('Target.closeTarget', { targetId: P1.tid });
+      // S11b the vault key he CHOSE (his «always» on the key S3 stored): an authenticator for THAT ceremony only, Chrome's UI on
+      // (enableUI true), removed when it ends — and what Chrome does with its own sheet then is MEASURED (said in the line)
+      const kept = rows(); let pst = null; for (const rw of kept) pst = PSx.setPolicy(PSx.withRow(pst, PID, rw), PID, rw.credentialId, 'yes');
+      fs.writeFileSync(PSTORE, JSON.stringify(pst), { mode: 0o600 });
+      const P2 = await ptab();
+      const sent = []; const w0 = Wp._watches.get(PID); const send0 = w0.ws.send.bind(w0.ws); w0.ws.send = (raw) => { try { const m = JSON.parse(raw); if (/^WebAuthn\./.test(m.method)) sent.push({ method: m.method, ui: m.params && m.params.enableUI }); } catch { /* */ } return send0(raw); };
+      const t1 = Date.now(); const r2 = await P2.ev('signin()'); const ms2 = Date.now() - t1; await sleep(500);
+      const out2 = r2 && r2.result && r2.result.result ? r2.result.result.value : null;
+      const en = sent.filter((x) => x.method === 'WebAuthn.enable'), add = sent.filter((x) => x.method === 'WebAuthn.addVirtualAuthenticator'), rm = sent.filter((x) => x.method === 'WebAuthn.removeVirtualAuthenticator');
+      ok(kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, removed after — measured: the page's get answered «${out2}» in ${ms2} ms`, { kept: kept.length, sent, out2, ms2 });
+      w0.ws.send = send0;
+      await dcall('Target.closeTarget', { targetId: P2.tid }); Wp.shutdown(); await sleep(300);
+    }
     // CONTROLS — mutant copies (src/server/browser-dialogs.js, src/browser-passkey-store.js) on the same Chrome, a fresh tab each
     const M = path.join(S, 'mut', 'src');
     for (const x of ['browser-stuck.js', 'browser-passkey.js', 'browser-passkey-store.js']) fs.copyFileSync(path.join(REPO, 'src', x), path.join(M, x));
