@@ -1756,7 +1756,7 @@ console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the b
   ok(an.length > 2000 && gate > 0 && toast > gate && call > toast && ap.split('announce(').length === 2 && !/announceWorthy|row\.band === PARKED|policyOf/.test(P) && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(ap), 'RED-able (r11 — 7ec6c6dcf ran its own rule BEFORE the gate and `continue`d past the toast): ONE attention policy — the announce rides the toast rule\'s own gate (toastWorthy(attentionRow, attnPolicy())), AFTER the toast (its words, its history entry, its tap — unchanged); no rule of its own, no dead 搁置 check');
   ok(/w\.element\.classList\.add\('window-waiting', 'window-announce'\);/.test(an) && /w\._notifyChanged\?\.\(\);/.test(an) && !/blink-fade|setInterval\([^)]*window-waiting/.test(an), 'the flash is THE existing waiting blink (`window-waiting` + _notifyChanged: the title bar, the taskbar button, a tab group\'s tab, a hidden desktop\'s tab) — never a second mechanism');
   ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
-  ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: 99999;/.test(ST) && /\[data-popover\], \.chat-input-area, \.ut-announce'\)\) \{/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
+  ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.chat-input-area, \.ut-announce'\)\) \{/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
   ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
   ok(/const order = \[\.\.\.annCards\.values\(\)\]\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
   ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
@@ -1871,6 +1871,58 @@ console.log('㉚ THE BLINK\'S REASONS ARE THE WINDOW\'S (lane needs-card-tail r1
     ok(b.blink && b.why === 'ask', `RED-able (r12 — 9f8b8d846: the CLI's next spinner cleared it): an ask, the turn finished, the CLI working again ⇒ the ask's blink stays until it is seen or answered (reasons ${b.why})`, b);
     ok(!c.blink && c.why === '-' && d1.blink && !d.blink && !e.blink, 'the window SEEN (a press in it, focus) acknowledges every reason; with no ask the terminal\'s own blink is unchanged (idle blinks, working again clears it); an ask alone answered elsewhere ends its blink', { c, d1, d, e });
   }
+}
+
+console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-tail r13 — the .365 runner: its stack stood OVER the tray it points to and over a dialog\'s button) — the tray opened or the phone\'s page shown takes its cards; it stands below every dialog / menu / popover / the tray');
+{
+  // THE REAL togglePopup, showHome and the stack's annDrop / annYield / annLayout (user-todos-panel.js, sliced, over stubs)
+  const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8'), CSS = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+  const UT = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8');
+  const slice = (a, b) => { const i = P.indexOf(a), j = P.indexOf(b, i); return i >= 0 && j > i ? P.slice(i, j) : null; };
+  const run = (src, names, S) => { try { return new Function('scope', `with (scope) { ${src} return { ${names} }; }`)(new Proxy(S, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; } };
+  const cl = (on = new Set()) => ({ on, toggle: (c) => (on.has(c) ? on.delete(c) : on.add(c)), contains: (c) => on.has(c), add: (c) => on.add(c), remove: (c) => on.delete(c) });
+  // ① the tray: an open yields, a close does not
+  let yields = 0;
+  const pop = { classList: cl(new Set(['hidden'])), replaceChildren() {}, scrollTop: 0 };
+  const T = run(slice('  const togglePopup = (anchor) => {', '  btn.onclick = () => togglePopup(btn);'), 'togglePopup', {
+    notePopupHide() {}, popup: pop, tab: '', bands: null, noticesOpen: false, noticeOrder: null, noticeFilter: null, readFilter: () => null, layout: null,
+    renderPanel() {}, anchorFixedPopup() {}, armExitButtons() {}, annYield: () => { yields++; } });
+  let y1 = -1, y2 = -1;
+  if (T.togglePopup) { T.togglePopup({}); y1 = yields; T.togglePopup({}); y2 = yields; }
+  ok(!!T.togglePopup && y1 === 1 && y2 === 1, `RED-able (r13 — 3b8602717: the open left the stack standing over the tray): the tray OPENED takes the announce's cards (${y1} yield), its close takes none (${y2 - y1})`, T.threw || { y1, y2 });
+  // ② the phone's page: shown ⇒ yields
+  let hy = 0, shown = false;
+  const H = run(slice('  const showHome = () => {', '  /** Hide the page'), 'showHome', {
+    home: { classList: cl(new Set(['hidden'])), replaceChildren() {}, scrollTop: 0 }, app: { isMobile: true, viewportClass: () => 'compact', _updateMobileNavTitle() {} },
+    homeShown: () => shown, homeHasRows: () => true, H: { open: new Set() }, document: { body: { classList: cl() } }, noteHomeOn: () => { shown = true; },
+    renderHome() {}, armExitButtons() {}, annYield: () => { hy++; } });
+  const r2 = H.showHome ? H.showHome() : null;
+  ok(!!H.showHome && r2 === true && hy === 1, `RED-able (r13 — 3b8602717): the phone's page SHOWN takes the announce's cards too (${hy} yield)`, H.threw || { r2, hy });
+  // ③ the yield itself: every card goes, the stack leaves the page (the windows' flash is not its business)
+  let removed = 0;
+  const S3 = { annCards: new Map([['a', { el: { remove() {} } }], ['b', { el: { remove() {} } }]]), annStack: { isConnected: true, remove: () => { removed++; } }, annTimer: 7,
+    clearInterval() {}, newestFirst: () => 0, ANN_SHOWN: 3, annPlace() {}, t: (k) => k };
+  const Y = run(slice('  const annDrop = (id) =>', '  const annPaint = (c, it) => {'), 'annYield, annLayout', S3);
+  if (Y.annYield) Y.annYield();
+  ok(!!Y.annYield && S3.annCards.size === 0 && removed === 1 && S3.annStack === null, `RED-able (r13 — 3b8602717 has no yield): the yield empties the stack (${S3.annCards.size} cards left) and takes it off the page (${removed} removed)`, Y.threw || { left: S3.annCards.size, removed });
+  // ③b THE STACK STEPS ASIDE (the .365 runner's test-pair-dialog-ui: 生成新命令 of a FORM in its window — above windows the
+  // stack covered it): the REAL annAside over stubs — a dialog root / a form / a menu where the stack stands ⇒ hidden, its cards
+  // kept; one elsewhere, or on another desktop (visibility:hidden) ⇒ shown
+  const box = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
+  const el = (rect, vis = true) => ({ getClientRects: () => [rect], checkVisibility: () => vis, getBoundingClientRect: () => rect });
+  const asideRun = (els) => { const st = { isConnected: true, style: { visibility: '' }, contains: () => false, getBoundingClientRect: () => box(880, 560, 1260, 760) };
+    const A2 = run(slice('  const annAside = () => {', '  const annDrop = (id) =>'), 'annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: { querySelectorAll: () => els } });
+    if (A2.annAside) A2.annAside(); return A2.threw ? A2.threw : st.style.visibility; };
+  const formOver = asideRun([el(box(340, 120, 940, 700))]), farForm = asideRun([el(box(40, 60, 600, 400))]), hiddenDesk = asideRun([el(box(340, 120, 940, 700), false)]), none = asideRun([]);
+  ok(formOver === 'hidden' && farForm === '' && hiddenDesk === '' && none === '', `RED-able (r13 — 3b8602717 has no step-aside): a form / dialog / menu where the stack stands ⇒ the stack steps aside («${formOver}»); one elsewhere («${farForm}»), on another desktop («${hiddenDesk}»), none («${none}») ⇒ it stands`, { formOver, farForm, hiddenDesk, none });
+  const P2 = P.slice(P.indexOf('  const annPlace = () => {'), P.indexOf('  const annDrop = (id) =>'));
+  ok((P2.match(/annAside\(\)/g) || []).length >= 2 && /\$\{DIALOG_ROOTS\}, \[data-popover\], \.context-menu/.test(P2), 'the placement asks it on both of its roads (anchored, and the centred one with no For-you button) — every second while a card stands (annRefresh → annLayout → annPlace), over THE one dialog predicate (form-yield.js DIALOG_ROOTS)');
+  // ④ the layers: below the palette / a dialog's overlay / menus, popovers, the tray / the toasts — above every window
+  const zOf = (sel) => { const m = CSS.match(new RegExp('(^|\\n)' + sel.replace(/[.#()-]/g, (c) => '\\' + c) + '\\s*\\{[^}]*?z-index:\\s*(\\d+)')); return m ? Number(m[2]) : NaN; };
+  const za = zOf('.ut-announce'), above = { palette: zOf('.palette-overlay'), dialog: zOf('.dialog-overlay'), tray: zOf('.usage-popup'), toasts: Number((CSS.match(/#global-toasts \{[^}]*?z-index:\s*(\d+)/) || [])[1]),
+    popover: Number((UT.match(/pop\.style\.zIndex = '(\d+)'/) || [])[1]) };
+  const under = Object.entries(above).filter(([, z]) => !(za < z));
+  ok(Number.isFinite(za) && Object.values(above).every(Number.isFinite) && !under.length && za > 9990, `RED-able (r13 — 3b8602717: 99999, the tray's own and above a dialog's 99998): the announce's z ${za} stands under ${Object.entries(above).map(([k, z]) => k + ' ' + z).join(', ')} and above every window (≤ 9990)`, { za, above, under });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -94,7 +94,9 @@ const WORK = path.join(stubDir, 'work', 'ops');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('chat-needs-shots');
 for (const d of [stubDir, WORK, SHOTS]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
+/** a leg whose premise is a FONT fact absent here: said BY NAME with what was measured, never assumed (lane needs-card-tail r13) */
+const skip = (n, why) => { skipped++; console.log(`  ○ SKIP ${n} — ${typeof why === 'string' ? why : JSON.stringify(why).slice(0, 1500)}`); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONV = 'fake-poll/fake-poll-ops';
@@ -616,7 +618,15 @@ try {
   if (a3) await A.tapAt(a3.x, a3.y);
   await sleep(400);
   const p2 = await A.evalJs(ACC), t3 = await topOf(A, q(3));
-  check(`375: a tap on a folded row (the third) opens it IN PLACE (its line held under the finger: ${a3 && t3 != null ? Math.round(t3 - a3.top) : '?'} px) and folds the newest — still ONE open, its verbs back`, !!a3 && a3.onRow && openOnes(p2).length === 1 && openOnes(p2)[0].id === q(3) && at(p2, q(3)).verbs > 0 && at(p2, q(6)).fold && Math.abs(t3 - a3.top) <= 2, { a3, t3, p2 });
+  // r13 (the .365 runner, both tries: «-15 px»): THE RULE IS openCard's, MEASURED — the line is held under the finger when the
+  // opened card's verbs fit above the list's bottom; when they would not (the fonts decide its lines: the runner's DejaVu wraps
+  // one more), it moves up by exactly the planned reveal (never past the list's top) — the room is measured here, never assumed
+  const room3 = await A.evalJs(`(() => { const v = ${VIEW}, l = v && v._messageList, el = document.querySelector('.cn-card[data-item="${q(3)}"]'); if (!l || !el) return null; const lr = l.getBoundingClientRect();
+    const vs = [...el.querySelectorAll(':scope > .cn-rows :is(button, textarea)')].filter((b) => b.getClientRects().length); return { listTop: lr.top, listBottom: lr.bottom, low: vs.length ? Math.max(...vs.map((b) => b.getBoundingClientRect().bottom)) : null }; })()`);
+  const moved3 = a3 && t3 != null ? t3 - a3.top : null;
+  const need3 = room3 && room3.low != null && moved3 != null ? Math.max(0, Math.min(Math.ceil(room3.low - moved3 - room3.listBottom), Math.floor(a3.top - room3.listTop))) : null;
+  check(`375: a tap on a folded row (the third) opens it ${need3 ? `with the planned reveal of ${need3} px (its verbs would end ${need3} px under the list at this font — the line moved ${Math.round(moved3)} px, exactly that)` : `IN PLACE (its line held under the finger: ${moved3 != null ? Math.round(moved3) : '?'} px)`} and folds the newest — still ONE open, its verbs back`,
+    !!a3 && a3.onRow && openOnes(p2).length === 1 && openOnes(p2)[0].id === q(3) && at(p2, q(3)).verbs > 0 && at(p2, q(6)).fold && need3 != null && Math.abs(moved3 + need3) <= 2, { a3, t3, moved3, need3, room3, p2 });
   await A.shot('phone-375-accordion-opened.png');
   lap('⑥ 375 done');
 
@@ -805,7 +815,7 @@ try {
   console.log('⑩ A HOLD THE LIST CANNOT HONOUR (acceptance round 5, #1): a transcript that fits its list, two asks — the refusal keyed on the MEASURED landing');
   // the candidates: a desk window's width (the second's question wraps — its chips stand lower) / a phone's height
   const DESK = [560, 640, 480, 760, 900, 420].map((ww) => ({ w: 1280, h: 800, win: { w: ww, h: 720 }, says: `a ${ww} px window` }));
-  const PHONE = [812, 900, 1000, 740, 1100].map((hh) => ({ w: 375, h: hh, win: false, says: `375×${hh}` }));
+  const PHONE = [812, 900, 1000, 740, 1100, 1200, 1300, 1400].map((hh) => ({ w: 375, h: hh, win: false, says: `375×${hh}` }));
   for (const [size, touch, n1, n2, cands] of [['1280 mouse', false, 'q51', 'l52', DESK], ['375 touch', true, 'q53', 'q54', PHONE]]) {
     try {
       const sid = await newConv('fit-' + n1); await sleep(600);
@@ -846,7 +856,8 @@ try {
       const under = s2 ? await twice(A, { ...s2, x: aim.x, y: aim.y }, touch, Q2) : null;
       const t2 = await lineTop(A, Q2);
       const it2 = (await api()).open.find((i) => i.id === Q2), gone = (await api()).resolved.find((i) => i.id === Q2) || null;
-      check(`RED-able (${size}${at ? ', ' + at.says : ', NO geometry found'}): the transcript fits its list (${room && room.sh} ≤ ${room && room.ch} px) and the opened card would fit below its held line (a planned reveal of 0) — a double ${touch ? 'tap' : 'click'} on the second's folded row: the line could not land (${s2 && t2 != null ? Math.round(t2 - s2.top) : aim ? aim.moved : '?'} px), the second press lands on ${under && under.verb ? 'its verb ' + under.verb : aim && aim.verb ? aim.verb : 'no verb'} — REFUSED («moved under the pointer»), nothing answered${gone ? ` (it ANSWERED: ${gone.status}${gone.reply ? ', replied «' + gone.reply.text + '»' : ''})` : ''}`,
+      if (!at) skip(`RED-able (${size}): a transcript that fits its list with the opened card fitting below its held line — NO such geometry at this font (r13: the .365 runner's DejaVu, every candidate measured)`, { tried });
+      else check(`RED-able (${size}${at ? ', ' + at.says : ', NO geometry found'}): the transcript fits its list (${room && room.sh} ≤ ${room && room.ch} px) and the opened card would fit below its held line (a planned reveal of 0) — a double ${touch ? 'tap' : 'click'} on the second's folded row: the line could not land (${s2 && t2 != null ? Math.round(t2 - s2.top) : aim ? aim.moved : '?'} px), the second press lands on ${under && under.verb ? 'its verb ' + under.verb : aim && aim.verb ? aim.verb : 'no verb'} — REFUSED («moved under the pointer»), nothing answered${gone ? ` (it ANSWERED: ${gone.status}${gone.reply ? ', replied «' + gone.reply.text + '»' : ''})` : ''}`,
         !!at && !!room && room.fits && !!s1 && s1.fold && !!s2 && s2.fold && s2.onRow && Math.abs(s2.top - aim.line) < 1 && t2 != null && Math.abs(t2 - s2.top) > 1 && !!under && under.inCard && !!under.verb && /moved under the pointer/.test(under.toast) && !!it2 && !it2.reply && !gone, { tried, room, s1, s2, aim, t2, under, it2: it2 ? { status: it2.status, reply: it2.reply || null } : null, gone: gone ? { status: gone.status, reply: gone.reply || null } : null });
       // ⑩b (a desk) THE LINE HELD, AND STILL A VERB UNDER THE POINTER: Mark done / Dismiss share the question's line at its
       // right end — a double click on the right end of a folded row (the first now folded above the open one) lands its second
@@ -1683,10 +1694,58 @@ try {
   } catch (e) { fail++; console.log('  ✗ ⑲ threw: ' + (e?.message || e)); }
   lap('⑲ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  // ── ⑳ THE ANNOUNCE YIELDS TO THE OWNER'S OWN ACT (lane needs-card-tail r13 — the .365 runner, mirror 41160137202: the stack
+  // stood at z 99999 OVER the tray it points to — test-exit-access-ui's «a real click on 允许» and test-automation-keys-chrome's
+  // press of 一直 landed on the card — and over a dialog's button, the pairing sheet's 生成新命令): the tray opened takes its
+  // cards; the stack stands below every dialog, menu, popover and the tray — above windows only ──
+  console.log('⑳ THE ANNOUNCE YIELDS — an exit ask announced, the tray opened by a real press: its Allow is the topmost thing where a real click lands and the press reaches the answer; a dialog stands above the card');
+  try {
+    await A.front(); await A.device(1280, 800, { mouse: true });
+    const s20 = await newConv('yield'); await sleep(600); sayTo(s20, 'hello'); await sleep(1500);
+    await A.evalJs(`(() => { app.phoneHome?.hide?.(); if (!${CHAT(s20)}) app.attachSession(${J(s20)}, 'yield', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return 1; })()`);
+    await A.waitFor(`!!${CHAT(s20)}`, 8000); await sleep(1000);
+    const KEY20 = await A.evalJs(`(() => { const w = ${CHAT(s20)}; return (app.foryouRows.keysForWin(w.id) || [])[0] || null; })()`);
+    const PUSH20 = (extra, only = false) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${only ? extra : `[...todos.open, ...${extra}]`}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    // THE EXACT EXIT-ACCESS SHAPE: the exit ask the tray's ONLY row (a snapshot of it alone — its Allow then sits low, by the
+    // For-you button, where the stack stands); the page's own snapshot comes back at the end (PUSH20('[]'))
+    const T20 = Date.now(), ex = (id, cmd) => ({ id, sessionKey: KEY20, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: T20, expiresAt: T20 + 300000,
+      text: 'Allow "yield" to run a command on exmac?', detail: cmd, action: { type: 'exit-run-ask', askId: id.slice(-1).repeat(32), machine: 'exmac', cmd } });
+    const STACK = `(() => { const s = document.querySelector('.ut-announce'); return s && s.isConnected ? [...s.querySelectorAll(':scope > .uta-card')].filter((c) => !c.hidden).map((c) => c.dataset.id) : []; })()`;
+    // the exact exit-access shape: THE arrival path (a snapshot through the page's own socket handlers) ⇒ the toast + the announce
+    await A.evalJs(PUSH20(`[${J(ex('ut-r13yield1', 'echo pong'))}]`, true)); await A.waitFor(`${STACK}.includes('ut-r13yield1')`, 6000);
+    const up = await A.evalJs(STACK);
+    await A.evalJs(`(() => { const m = app._inboxModel; window.__ra20 = m.runAction; window.__got20 = []; m.runAction = (rec, answer, extra) => { window.__got20.push({ id: rec && rec.id, answer }); return Promise.resolve(true); }; return 1; })()`);
+    await A.press('#taskbar-user-todos', { touch: false });
+    await A.waitFor(`!!document.querySelector('#user-todos-popup:not(.hidden) .ut-item[data-id="ut-r13yield1"] .ut-exit-allow')`, 6000); await sleep(1100); // (the press arm: an Allow shown under 700 ms ago is not the one read)
+    const ALLOW = '#user-todos-popup .ut-item[data-id="ut-r13yield1"] .ut-exit-allow';
+    await A.evalJs(`(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`); // (the transient arrival toast, as the harness's realClick clears it — the stack is what this leg is about)
+    const hit = await A.evalJs(`(() => { const e = document.querySelector(${J(ALLOW)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(), x = q.left + Math.min(q.width / 2, 40), y = q.top + q.height / 2, h = document.elementFromPoint(x, y);
+      return { x: Math.round(x), y: Math.round(y), rows: document.querySelectorAll('#user-todos-popup .ut-item').length, hits: !!h && (h === e || e.contains(h)), top: h ? (h.className || h.tagName).toString().slice(0, 40) : null, inAnn: !!h && !!h.closest('.ut-announce'), stack: ${STACK} }; })()`);
+    await A.shot('desktop-1280-announce-yields-tray.png');
+    await A.press(ALLOW, { touch: false }); await sleep(500);
+    const got20 = await A.evalJs(`window.__got20 || []`);
+    check(`RED-able (r13 — 3b8602717: the card stood at z 99999 over the tray it points to, the press landed on it): an exit ask announced (${J(up)}), the tray opened by a real press (its ${hit && hit.rows} row${hit && hit.rows === 1 ? '' : 's'}) — the stack yields (${J(hit && hit.stack)} left), the tray's Allow is the topmost thing where a real click lands (${hit && hit.top}), and the press reaches its answer (${J(got20)})`,
+      up.includes('ut-r13yield1') && !!hit && hit.hits && !hit.inAnn && !hit.stack.length && got20.length === 1 && got20[0].id === 'ut-r13yield1' && got20[0].answer === 'allow', { up, hit, got20 });
+    await A.press('#taskbar-user-todos', { touch: false }); await sleep(400);
+    // a DIALOG over a standing card: the dialog's overlay (z 99998) covers the stack — the card never sits above the owner's act
+    await A.evalJs(PUSH20(J([ex('ut-r13yield1', 'echo pong'), ex('ut-r13yield2', 'echo two')]))); await A.waitFor(`${STACK}.includes('ut-r13yield2')`, 6000);
+    await A.evalJs(`(() => { app.showNewSessionDialog(); return 1; })()`); await A.waitFor(`!document.getElementById('dialog-overlay').classList.contains('hidden')`, 6000); await sleep(1300); // (the stack's 1 s tick asks again)
+    await A.evalJs(`(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`); // (the transient arrival toast — once the stack steps aside the toasts no longer keep clear of it)
+    const dlg = await A.evalJs(`(() => { const s = document.querySelector('.ut-announce'), c = document.querySelector('.ut-announce .uta-card[data-id="ut-r13yield2"]'); if (!c) return null; const r = c.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { card: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width) }, aside: getComputedStyle(s).visibility === 'hidden', top: h ? (h.id || h.className || h.tagName).toString().slice(0, 40) : null, inAnn: !!h && !!h.closest('.ut-announce'), inDlg: !!h && !!h.closest('#dialog-overlay') }; })()`);
+    await A.shot('desktop-1280-announce-under-dialog.png');
+    await A.evalJs(`(() => { const o = document.getElementById('dialog-overlay'); (o.querySelector('.dialog-close, [data-close], .btn-cancel') || {}).click?.(); if (!o.classList.contains('hidden')) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1; })()`); await sleep(400);
+    check(`RED-able (r13 — 3b8602717: the card at 99999 over a dialog's overlay at 99998 — the pairing sheet's 生成新命令 under it): a dialog opened while a card stands — the stack steps aside (${dlg && dlg.aside ? 'hidden, its card kept' : 'still shown'}) and at the card's own centre the topmost thing is the dialog's overlay (${dlg && dlg.top}), never the card`,
+      !!dlg && dlg.aside && !dlg.inAnn && dlg.inDlg, dlg);
+    await A.evalJs(`(() => { const m = app._inboxModel; if (window.__ra20) m.runAction = window.__ra20; delete window.__ra20; return 1; })()`);
+    await A.evalJs(PUSH20('[]')); await sleep(600);
+  } catch (e) { fail++; console.log('  ✗ ⑳ threw: ' + (e?.message || e)); }
+  lap('⑳ done');
+
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 
 console.log(`\nshots: ${SHOTS}`);
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

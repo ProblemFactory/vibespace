@@ -27,7 +27,7 @@
 // the conversation (every window open / focus hides the page — window.js's central yield); the back gesture returns to
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
-import { SHEET_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
+import { SHEET_ROOTS, DIALOG_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
@@ -853,6 +853,7 @@ export function installUserTodos(app) {
     // so the first press after an open always read as "moved under the pointer" (reproduced in chrome: sampled at 696 px,
     // pressed at 709 px after 900 ms still). Sample again where the popup now IS: its buttons are armed from the open.
     if (!popup.classList.contains('hidden')) armExitButtons();
+    if (!popup.classList.contains('hidden')) annYield(); // r13: the tray open — the announce's cards go (it points HERE)
   };
   btn.onclick = () => togglePopup(btn);
   if (mBtn) mBtn.onclick = () => {
@@ -1206,6 +1207,7 @@ export function installUserTodos(app) {
     }
     renderHome();
     armExitButtons(); // sampled where the page now IS (the popup's open does the same)
+    if (homeShown()) annYield(); // r13: the phone's page on show — the announce's cards go (the popup's open does the same)
     return homeShown();
   };
   /** Hide the page: its rows leave the DOM with it (a typed reply is kept as a draft first — the popup's rule, verify r7). */
@@ -1312,12 +1314,32 @@ export function installUserTodos(app) {
   const annPlace = () => {
     if (!annStack || !annStack.isConnected) return;
     const a = annAnchor(), Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
-    if (!a) { annStack.style.left = (Math.max(4, (vw - pr.width) / 2) / Z) + 'px'; annStack.style.top = (8 / Z) + 'px'; return; }
+    if (!a) { annStack.style.left = (Math.max(4, (vw - pr.width) / 2) / Z) + 'px'; annStack.style.top = (8 / Z) + 'px'; annAside(); return; }
     const r = a.getBoundingClientRect(), up = r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
     annStack.style.top = (Math.max(4, Math.min(vh - pr.height - 4, up ? r.top - pr.height - 6 : r.bottom + 6)) / Z) + 'px';
     annStack.style.left = (Math.max(4, Math.min(vw - pr.width - 4, r.right - pr.width)) / Z) + 'px';
+    annAside();
+  };
+  /** r13 (the .365 runner: test-pair-dialog-ui's 生成新命令 — a FORM in its window, under a stack that stands above windows):
+   *  THE OWNER'S OWN ACT stands where the stack would — a dialog or a form (DIALOG_ROOTS: a decision's overlay, a form in its
+   *  window), a menu, a popover, the tray — so the stack steps aside: hidden with its cards kept, back once that closes (the
+   *  placement and the 1 s tick ask again; a window on another desktop is visibility:hidden — not the person's act) */
+  const annAside = () => {
+    if (!annStack || !annStack.isConnected) return;
+    const sr = annStack.getBoundingClientRect();
+    const over = [...document.querySelectorAll(`${DIALOG_ROOTS}, [data-popover], .context-menu, .taskbar-context-menu, #user-todos-popup`)].some((el) => {
+      if (annStack.contains(el) || !el.getClientRects().length || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.left < sr.right && r.right > sr.left && r.top < sr.bottom && r.bottom > sr.top;
+    });
+    if (annStack.style.visibility !== (over ? 'hidden' : '')) annStack.style.visibility = over ? 'hidden' : '';
   };
   const annDrop = (id) => { const c = annCards.get(id); if (c) c.el.remove(); annCards.delete(id); };
+  /** r13 (the .365 runner, 2026-10-30: the stack stood OVER the tray it points to — its 允许 / 一直 pressed the card instead —
+   *  and over a dialog's button, the pairing sheet's 生成新命令): THE OWNER OPENED FOR YOU — the tray or the phone's page
+   *  draws every item the stack stood for, so its cards go (a window's flash stays: SEEN is the window's own). Called from
+   *  the popup's open and the page's show (event time — the stack's names are bound by then). */
+  const annYield = () => { if (!annCards.size) return; annCards.clear(); annLayout(); };
   const annLayout = () => {
     if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
     if (!annCards.size) { annStack?.remove(); annStack = null; clearInterval(annTimer); annTimer = 0; return; }
