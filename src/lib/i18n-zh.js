@@ -11719,4 +11719,9 @@ export default {
   "Make this window the one your clicks and keys reach this browser through — your other window then only watches": "让你的点击和按键通过这个窗口送到这个浏览器——你的另一个窗口改为只能看",
   "Open your own tab in this browser — your clicks and keys then reach your window here; the agents keep working in theirs": "在这个浏览器里打开你自己的标签页——之后你的点击和按键会在这里送到你的窗口；agent 照常在它们的窗口里工作",
   "You browse this browser yourself, so your clicks and keys reach your own window here — Chrome's own windows over it included (a passkey prompt, a print dialog); the agents' windows are view only": "你在自己浏览这个浏览器，所以你的点击和按键会在这里送到你自己的窗口——包括它上面 Chrome 自己的窗口（通行密钥提示、打印对话框）；agent 的窗口只能看",
+  // lane needs-card-tail r15: the strip says what a run ask's answers decide on before it offers them
+  "The command is cut — its card holds the whole": "命令被截断了 — 完整命令在它的卡片里",
+  "Too long to show here — what it decides on is on its card": "这里放不下 — 它所依据的信息在它的卡片里",
+  "Too long to show here — what it decides on, and «Always», are on its card": "这里放不下 — 它所依据的信息和「总是允许」都在它的卡片里",
+  "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you": "提问早于本对话现存的记录 — 聊天里没有它的卡片；输入框上方的等待栏只有「允许一次」和「拒绝」—「总是允许」和它所依据的信息在「待你处理」里它的卡片上",
 };

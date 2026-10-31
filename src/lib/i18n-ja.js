@@ -11718,4 +11718,9 @@ export default {
   "Make this window the one your clicks and keys reach this browser through — your other window then only watches": "このウィンドウからクリックとキー入力をこのブラウザーに届けます——別のウィンドウは表示のみになります",
   "Open your own tab in this browser — your clicks and keys then reach your window here; the agents keep working in theirs": "このブラウザーで自分のタブを開きます——その後クリックとキー入力はここで自分のウィンドウに届きます。agent は自分のウィンドウで作業を続けます",
   "You browse this browser yourself, so your clicks and keys reach your own window here — Chrome's own windows over it included (a passkey prompt, a print dialog); the agents' windows are view only": "このブラウザーを自分で閲覧しているので、クリックとキー入力はここで自分のウィンドウに届きます——その上の Chrome 自身のウィンドウ（パスキーの確認、印刷ダイアログ）も含みます。agent のウィンドウは表示のみです",
+  // lane needs-card-tail r15: the strip says what a run ask's answers decide on before it offers them
+  "The command is cut — its card holds the whole": "コマンドは途中で切れています — 全文はカードにあります",
+  "Too long to show here — what it decides on is on its card": "ここには収まりません — 判断材料はカードにあります",
+  "Too long to show here — what it decides on, and «Always», are on its card": "ここには収まりません — 判断材料と「常に許可」はカードにあります",
+  "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you": "この会話の記録が残る前に尋ねられたもの — チャットにカードはありません。入力欄の上の待機バーには「1 回だけ許可」と「拒否」だけがあります — 「常に許可」と判断材料は「あなた宛て」のカードにあります",
 };

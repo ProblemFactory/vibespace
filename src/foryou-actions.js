@@ -963,6 +963,21 @@ function standingCardOf(item, { t = fmt } = {}) {
   const redrawn = open && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;   // r5: its change lines are its «until» row; a card drawn again is marked
   return { headline: t('{who} asks for a standing grant on “{secret}”', { who, secret }), cmd: '', cut: null, again: null, rows, changes: redrawn ? { lines: [], redrawn } : null, always: { offered: false, hint: null }, fold };
 }
+/** lane needs-card-tail r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» for a run
+ *  ask with the hosts, the warning row, the «asked again» line and the cut hidden: A PRESS POINT NEVER SENDS A SCOPE IT DOES NOT
+ *  SHOW): WHAT THE STRIP SAYS BEFORE IT ANSWERS — the facts an answer decides on, from THE card's model (`card` = runCardOf):
+ *  the hosts row (or its «unknown (why)»), every warning row, the «asked again» line, the command's cut. Drawn WHOLE (wrapped,
+ *  never an ellipsis) while their words fit the strip's bound (RUN_STRIP_MAX characters — a strip, not a card) ⇒ `fits`, every
+ *  answer the card offers; else the strip draws none of them and offers what needs none — Allow once / Deny — and says where
+ *  the rest is (its card). → null (no card) | {rows, again, cut, fits} */
+const RUN_STRIP_MAX = 200;
+function runStripOf(card) {
+  if (!card) return null;
+  const words = (segs) => segs.map((x) => (x.code != null ? x.code : x.mono != null ? x.mono : x.aside != null ? ' ' + x.aside : x.text || '')).join('');
+  const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn);
+  const n = rows.reduce((k, r) => k + r.label.length + 1 + r.lines.map(words).join(', ').length, 0) + (card.again ? words(card.again).length : 0);
+  return { rows, again: card.again, cut: !!card.cut, fits: n <= RUN_STRIP_MAX };
+}
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
  *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */
 const FACTS_DROPPED_WORDS = Object.freeze({ 'too-large': i18nKey('The facts were too large to keep — the card shows its text only'), 'not-an-object': i18nKey('The facts could not be read — the card shows its text only') });
@@ -1028,4 +1043,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

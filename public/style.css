@@ -5301,6 +5301,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .chat-attn-dock .cad-rows .ut-body > .ut-ak-scope { flex: 1 1 100%; font-size: 16px !important; line-height: 24px; white-space: normal; }
   .chat-attn-dock .cad-rows :is(.ut-body, .ut-run) > .ut-exit-answer { flex: 1 1 100%; gap: 6px; } /* r14: a run card's answers too */
   .chat-attn-dock .cad-rows .ut-body > .ut-deadline { flex: 1 1 100%; white-space: normal; line-height: 20px; }
+  .chat-attn-dock .cad-rows .ut-run > .ut-run-gist { line-height: 20px; } /* r15: what a run's answers decide on, at the phone's size */
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-act { flex: none; white-space: nowrap; }
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; white-space: normal; line-height: 1.2; padding: 4px 8px; }
   .chat-attn-dock textarea { font-size: 16px !important; }

