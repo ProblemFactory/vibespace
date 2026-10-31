@@ -828,7 +828,7 @@ let announcer = null;
   const hb = await announcer.continueFor({ sessionId: 'sess-r', browserKey: KR, note: hostileNote });
   await sleep(50);
   const st1 = stashed[0] || {};
-  ok(hb.ok && hb.stashed && hb.durable && hb.tookOver && keeperB.inputStateFor(KR, null).input === 'agent', '"Hand back and continue": the takeover ENDS (cause continue) and the words are stashed for the next turn', hb);
+  ok(hb.ok && hb.stashed && hb.durable && hb.tookOver && keeperB.inputStateFor(KR, null).input === 'agent', '"Hand back with a note": the takeover ENDS (cause continue) and the words are stashed for the next turn', hb);
   ok(stashed.length === 1 && st1.cid === 'conv-r' && st1.kind === 'notification' && st1.fromName === 'VibeSpace browser' && /^bres-[0-9a-f]{8}$/.test(st1.ref) && st1.source === 'agent', 'ONE stash entry: the conversation\'s own id, kind notification, the VibeSpace browser sender (the strip words it "a browser handback"), a ref (a failed disk write is said, never "stashed")', st1);
   ok(!CR.carriesFrame(st1.text) && /I logged in/.test(st1.text) && /\(current\)/.test(st1.text) && /same browser/.test(st1.text), 'the frame: the user\'s note (belted — its frame inert), the tabs with the current one, "the same browser"', st1.text);
   ok(cards.length === 1 && /nothing was sent now/.test(cards[0].text) && cards[0].kind === 'notification', 'ONE display-only card in the user\'s chat', cards);

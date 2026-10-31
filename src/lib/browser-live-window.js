@@ -428,9 +428,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // was a second Hand back: its click sent `handback` too, and a no-op in Watch)
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over'); takeBtn.title = t('Take over the controls — the agent pauses until you hand back');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand the controls back to the agent — it is told the current URL'); handBtn.style.display = 'none';
-  // lane browser-resume B (§3.9, the owner's ruling 2): the BETWEEN-TURNS hand-back — your note + the tabs ride the agent's
-  // NEXT turn (nothing is sent now); shown while you drive this browser or after you resumed it
-  const contBtn = document.createElement('button'); contBtn.className = 'file-tool-btn browser-live-continue'; contBtn.textContent = t('Hand back and continue…'); contBtn.title = t('Hand the browser back for the agent’s next turn, with a note — nothing is sent now'); contBtn.style.display = 'none';
+  // lane browser-resume B (§3.9, the owner's ruling 2): the BETWEEN-TURNS hand-back, "Hand back with a note…" — your note +
+  // the tabs ride the agent's NEXT turn (nothing is sent now); shown while you drive this browser or after you resumed it.
+  // Until 2.369.367 it said "Hand back and continue…", read as «continue now» (lane handback-words: the words, not the act)
+  const contBtn = document.createElement('button'); contBtn.className = 'file-tool-btn browser-live-continue'; contBtn.textContent = t('Hand back with a note…'); contBtn.title = t('Hand the browser back for the agent’s next turn, with a note — nothing is sent now'); contBtn.style.display = 'none';
   const urlEl = document.createElement('span'); urlEl.className = 'browser-live-url'; urlEl.textContent = '';
   // the web view's globe (UI_ICONS.globe — the web view's glyph). 2.369.134 spelled the UI set's `web` here, a key only
   // FILE_ICONS has: innerHTML = undefined printed the word "undefined" in every live view (test-architecture §58 census)
@@ -2501,7 +2502,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (st.noteOpen || contBtn.disabled) return;
     st.noteOpen = true;
     if (st.claimed) { releaseHeld(); st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); if (isSink(document.activeElement)) document.activeElement.blur(); kbd.value = ''; renderKbd(); keyboardChanged(); }
-    const note = await showInputDialog({ title: t('Hand the browser back for the agent’s next turn'), label: t('A note for the agent (optional)'), placeholder: t('e.g. I logged in — continue from the cart'), confirmText: t('Hand back') });
+    // lane handback-words: the title says WHEN the agent reads it — short enough to stay WHOLE in the form window's title bar
+    // (316 px measured; a first, longer title was cut in all three languages); showInputDialog has no help slot, so the label's own text
+    // carries the recipe for continuing right away (the strip's Hand over now, or a message). The confirm is the dialog's own
+    // word (zh 交还): plain 'Hand back' is the bar's mid-turn button (zh 交还控制), a press that may start a turn — this starts none
+    const note = await showInputDialog({ title: t('Hand back — the agent reads it when its next turn starts'), label: t('A note for the agent (optional). Nothing is sent now. To have the agent continue right away: hand back, then press “Hand over now” on the strip above the composer (it starts a turn), or send it a message.'), placeholder: t('e.g. I logged in — continue from the cart'), confirmText: tc('handback-note', 'Hand back') });
     st.noteOpen = false;
     if (note === null || st.closed) { renderMode(); return; }
     contBtn.disabled = true;

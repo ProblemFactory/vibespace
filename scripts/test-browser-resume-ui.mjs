@@ -15,12 +15,16 @@
 //      holds again — MID-resume — so "connected with three tabs" is no sign the resume ended; the leg waits for the Resume's
 //      own answer (resumedHere, the POST answered after its last step); RED CONTROL: the switch back HELD in the fake — the
 //      old wait passes while the tab on show is still the last one opened)
-//   ③ "Hand back and continue…" is offered after the Resume; a REAL Take over, a REAL click on it: the note box takes the
-//      typed keys (not one reached the page), a REAL click on Hand back: the takeover ended, ONE card in the chat, the
-//      stash holds "a browser handback", NO billed turn (the spend ledger has no row, the journal says "nothing
+//   ③ "Hand back with a note…" (until 2.369.367 "Hand back and continue…") is offered after the Resume; a REAL Take over,
+//      a REAL click on it: the note box takes the typed keys (not one reached the page); the dialog SAYS what the press does
+//      (its title: when the agent reads it, whole in the title bar; its label: nothing is sent now + how to continue right
+//      away); a REAL click on Hand back: the takeover ended, ONE card in the chat, the stash holds "a browser handback" and
+//      the strip above the composer offers it with "Hand over now · starts a turn" (lane handback-words), NO billed turn (the spend ledger has no row, the journal says "nothing
 //      delivered"), and the agent's next command (the shipped CLI) prints [browser_resumed] naming the current tab
-//   ④ zh + ja: Resume and "Hand back and continue…" in the device's language, whole in a 360 px wide window (Resume never
+//   ④ zh + ja: Resume and "Hand back with a note…" in the device's language, whole in a 360 px wide window (Resume never
 //      folds; the other is on the bar or a ⋯ row with its words)
+//   PNGs where VIBESPACE_TABS_PNG_DIR names a directory: ⑧'s tab row + pane, and (lane handback-words) the hand-back
+//   dialog, the strip after it, and the zh / ja bar at 360 px
 //   ⑤ the agent's own `detach` retires its browser's record: a freshly loaded view (no browser remembered) still offers
 //      Resume off THE fact; a REAL click brings the three tabs back on a new record
 //   ⑥ (lane browser-resume C, the owner's ruling 3) THE TAB ROW: one chip per tab, "The agent's"; while the agent drives no
@@ -203,6 +207,8 @@ else await (async () => {
     const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
     const click = async (pt) => { await mouse('mouseMoved', pt.x, pt.y); await mouse('mousePressed', pt.x, pt.y, { button: 'left', clickCount: 1 }); await mouse('mouseReleased', pt.x, pt.y, { button: 'left', clickCount: 1 }); await sleep(250); };
     const centre = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    const PNG_DIR = process.env.VIBESPACE_TABS_PNG_DIR || '';   // the suite's PNG dir (⑧'s tab row; lane handback-words' dialog, strip, bar)
+    const png = async (name, r) => { const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.left, y: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height), scale: 1 } }); if (shot.result?.data) { fs.writeFileSync(path.join(PNG_DIR, name), Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${path.join(PNG_DIR, name)}`); } };
     let onboarded = false;
     const boot = async () => {
       if (!onboarded) { onboarded = true; await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); } // §47: before every navigate
@@ -249,10 +255,10 @@ else await (async () => {
     ok(seqNeed.every((x) => after.includes(x)) && after.indexOf('open https://a.test/') < after.indexOf('tab new https://b.test/') && after.indexOf('tab new https://c.test/') < after.indexOf(`tab ${bId}`) && !after.some((x) => x.startsWith('tab close')), 'the fake browser was relaunched and reopened the pages IN ORDER, the first into its launch tab, then switched back to the second BY ITS TARGET ID — never a tab close', S(after));
     ok(t2.map((t) => t.url).join() === 'https://a.test/,https://b.test/,https://c.test/' && t2.find((t) => t.active).url === 'https://b.test/', 'the resumed browser shows the SAME three tabs, the SAME one on show', S(t2));
 
-    // ── ③ "Hand back and continue…" — the note box, the card, the stash, no billed turn, the agent's next command ──
-    console.log('— ③ Hand back and continue: a REAL Take over, the note box takes the keys, the card in the chat, nothing billed');
+    // ── ③ "Hand back with a note…" — the note box, its words, the card, the stash + the strip, no billed turn, the agent's next command ──
+    console.log('— ③ Hand back with a note: a REAL Take over, the note box takes the keys and says what the press does, the card in the chat, nothing billed');
     const contOffered = await until(() => ev('return !!L().state().contShown;'), 6000);
-    ok(contOffered, '"Hand back and continue…" is offered after the Resume (the view resumed it — never greyed)', S(await ev('const s = L().state(); return { contShown: s.contShown, fact: row().browserFact && row().browserFact.own };')));
+    ok(contOffered, '"Hand back with a note…" is offered after the Resume (the view resumed it — never greyed)', S(await ev('const s = L().state(); return { contShown: s.contShown, fact: row().browserFact && row().browserFact.own };')));
     await ev('const w = live(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;');
     await sleep(300);
     const tk = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b && b.offsetParent ? rect(b) : null;');
@@ -260,13 +266,26 @@ else await (async () => {
     const driving = await until(() => ev('const s = L().state(); return s.mode === "takeover" && s.mine && s.ownsKeyboard;'), 6000);
     ok(driving, 'a REAL click on Take over: the user drives and the view owns the keyboard');
     const cb = await ev('const b = L().el().querySelector(".browser-live-continue"); return b && b.offsetParent ? rect(b) : null;');
-    ok(!!cb, 'while driving, "Hand back and continue…" is on the bar', S(await ev('return L().state().folded;')));
+    ok(!!cb, 'while driving, "Hand back with a note…" is on the bar', S(await ev('return L().state().folded;')));
     const inputs0 = up.inputs.length;
     if (cb) await click(centre(cb));
     // the note box = the input of the dialog that holds the focus (index.html keeps static dialogs of the same class); lane dialog-yield r2:
     // showInputDialog is a FORM — its root is .dialog-form in its window (it holds the keys of the takeover like the overlay did)
     const dlg = await until(() => ev('const a = document.activeElement; return !!(a && a.tagName === "INPUT" && a.closest(".dialog-overlay, .dialog-form"));'), 5000);
     ok(dlg && (await ev('return L().state().noteOpen && !L().state().ownsKeyboard;')), 'the note box opens WITH the keyboard (the view let the keys go first — a dialog never types into the page)', S(await ev('const a = document.activeElement; return { active: a && a.tagName, cls: a && a.className, st: L().state().noteOpen, owns: L().state().ownsKeyboard };')));
+    // lane handback-words (the owner, 2026-10-31: «继续» read as «continue now»): the dialog SAYS what the press does — its title
+    // when the agent reads it, its label that nothing is sent now and the recipe for continuing right away (the strip's Hand over
+    // now, checked below; or a message). A form window hides the dialog's own header: the title is the window's, and it must be
+    // WHOLE in that bar — the zh / ja titles (never opened here) are read from the dictionaries and measured in the bar's own
+    // font against the same width (the first, longer titles measured 467 / 319 / 418 px in a 316 px bar: cut in all three)
+    const dictWord = (lang, key) => { const l = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8').split('\n').find((x) => x.startsWith('  ' + JSON.stringify(key) + ': ')); return l ? JSON.parse(l.slice(l.indexOf(': ') + 2).replace(/,\s*$/, '')) : null; };
+    const TITLE_EN = 'Hand back — the agent reads it when its next turn starts';
+    const TITLES = { en: TITLE_EN, zh: dictWord('zh', TITLE_EN), ja: dictWord('ja', TITLE_EN) };
+    const dw = await ev(`const a = document.activeElement; const o = a && a.closest('.dialog-overlay, .dialog-form'); const lab = a && a.closest('label'); const fw = o && o.closest('.window'); const tt = fw ? fw.querySelector('.window-titlebar .window-title') : (o && o.querySelector('.dialog-header h3')); const cx = document.createElement('canvas').getContext('2d'); if (tt) cx.font = getComputedStyle(tt).font; const mw = (x) => Math.ceil(cx.measureText(x).width); return { title: tt && tt.textContent, sw: tt && tt.scrollWidth, cw: tt && tt.clientWidth, font: tt && getComputedStyle(tt).font, label: lab && lab.textContent.trim(), ok: o && (o.querySelector('button.btn-create') || {}).textContent, w: Object.fromEntries(Object.entries(${S(TITLES)}).map(([k, x]) => [k, mw(x)])), box: fw ? rect(fw) : (o ? rect(o) : null) };`);
+    ok(dw && dw.title === TITLES.en && dw.sw <= dw.cw + 1, '…the dialog\'s title says when the agent reads it, whole in its window\'s title bar: "' + TITLES.en + '"', S(dw && { title: dw.title, sw: dw.sw, cw: dw.cw }));
+    ok(dw && TITLES.zh && TITLES.ja && dw.w.zh <= dw.cw + 1 && dw.w.ja <= dw.cw + 1, '…and the zh / ja titles fit the same bar in its font (' + S(dw && dw.w) + ' ≤ ' + (dw && dw.cw) + ' px)', S(dw && { w: dw.w, cw: dw.cw, font: dw.font }));
+    ok(dw && dw.label === 'A note for the agent (optional). Nothing is sent now. To have the agent continue right away: hand back, then press “Hand over now” on the strip above the composer (it starts a turn), or send it a message.' && dw.ok === 'Hand back', '…its label says that nothing is sent now and how to make the agent continue right away (the strip\'s Hand over now, or a message); the confirm says Hand back', S(dw && { label: dw.label, ok: dw.ok }));
+    if (PNG_DIR && dw && dw.box) await png('handback-dialog-en.png', dw.box);
     const NOTE = 'I logged in — continue from the cart';
     await send('Input.insertText', { text: NOTE });
     for (const k of [['End', 'End', 35]]) { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k[0], code: k[1], windowsVirtualKeyCode: k[2] }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k[0], code: k[1], windowsVirtualKeyCode: k[2] }); }
@@ -282,6 +301,13 @@ else await (async () => {
     ok(card && cardMsg && cardMsg.n === 1 && cardMsg.text.includes(NOTE) && /nothing was sent now/.test(cardMsg.text) && /on show: Page b\.test\//.test(cardMsg.text) && cardMsg.el, 'ONE card in the chat, drawn: "You handed the browser back for the agent\'s next turn: “…” — 3 tab(s); on show: Page b.test/ … nothing was sent now"', S(cardMsg));
     const stash = await until(() => ev('const r = row(); return !!(r && r.stash && (r.stash.items || []).some((i) => i.kind === "handback"));'), 8000);
     ok(stash, 'the conversation\'s stash holds it: "a browser handback" (the strip above the composer — its next turn reads it)', S(await ev('return row() && row().stash;')));
+    // lane handback-words: the dialog's recipe is TRUE — the strip above the composer offers THIS hand-back with its Hand over now
+    // ("· starts a turn": the agent is idle). Not pressed: the ledger check below proves nothing was billed
+    const STRIP = 'app.sessions.get(chatWin().id)._chatInput._stashStrip.el';
+    const stripUp = await until(() => ev(`const el = ${STRIP}; const go = el && el.querySelector('.chat-stash-go'); return !!(el && !el.hidden && go && !go.disabled && go.querySelector('.chat-stash-go-label').textContent === 'Hand over now');`), 8000);
+    const strip = await ev(`const el = ${STRIP}; const go = el.querySelector('.chat-stash-go'); return { hidden: el.hidden, go: go.textContent, disabled: go.disabled, shown: !!go.offsetParent, parts: el.querySelector('.chat-stash-parts').textContent, box: rect(el) };`);
+    ok(stripUp && strip.shown && strip.go === 'Hand over now · starts a turn' && /a browser handback/.test(strip.parts), 'the strip above the composer offers it: "Hand over now · starts a turn" with "a browser handback" waiting — the dialog\'s recipe holds', S(strip));
+    if (PNG_DIR && strip.box && strip.box.width) { await ev('const w = chatWin(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;'); await sleep(300); await png('handback-strip-en.png', await ev(`return rect(${STRIP});`)); await ev('const w = live(); app.goToWinId ? app.goToWinId(w.id) : wm.focusWindow(w.id); return true;'); await sleep(300); }   // the live view on top again, as ③ left it (④'s REAL clicks land on its bar)
     const ledger = (() => { try { return fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8'); } catch { return ''; } })();
     ok(!/browser-handback/.test(ledger) && /handed back for the next turn — stashed/.test(journal) && !/announced into the conversation/.test(journal), 'NOTHING was billed: no spend-ledger row for a browser handback, the journal says "stashed" and never "announced into the conversation"', S({ ledger: ledger.slice(0, 300), tail: journal.split('\n').filter((l) => /handed back|handback/.test(l)).slice(-4) }));
     const next = await cli(['get', 'url']);
@@ -290,8 +316,8 @@ else await (async () => {
     ok(!/\[browser_resumed\]/.test(next2.stderr), '…and the command after it is told nothing', S(next2.stderr.slice(0, 300)));
 
     // ── ④ zh + ja: the two new controls in the device's language, whole in a 360 px window ──
-    console.log('— ④ zh + ja: Resume and "Hand back and continue…" in the device\'s language, whole at 360 px');
-    for (const [lang, resumeWord, contWord] of [['zh', '恢复', '交还并继续…'], ['ja', '再開', '戻して続ける…']]) {
+    console.log('— ④ zh + ja: Resume and "Hand back with a note…" in the device\'s language, whole at 360 px');
+    for (const [lang, resumeWord, contWord] of [['zh', '恢复', '交还并留言…'], ['ja', '再開', 'メモを添えて戻す…']]) {
       await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
       if (!ok(await boot(), `${lang}: the app booted again in ${lang}`)) continue;
       await sleep(600);
@@ -312,6 +338,7 @@ else await (async () => {
       await sleep(400);
       const zc = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const c = l.el().querySelector(".browser-live-continue"); const onBar = c && c.style.display !== "none" && !s.folded.includes("continue"); return { contShown: s.contShown, contText: s.contText, onBar, fit: onBar ? c.scrollWidth <= c.clientWidth + 1 : null, row: s.foldedRows.find((x) => x.label === s.contText) || null, folded: s.folded };');
       ok(zc.contShown && zc.contText === contWord && (zc.onBar ? zc.fit : !!zc.row), `${lang}: "${contWord}" is offered after the Resume — whole on the bar, or a ⋯ row with its own words when the 360 px bar folds it`, S(zc));
+      if (PNG_DIR) await png(`handback-bar-${lang}.png`, await ev('return rect(L().el().querySelector(".browser-live-bar"));'));
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
 

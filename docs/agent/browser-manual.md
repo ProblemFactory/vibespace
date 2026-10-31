@@ -205,7 +205,7 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   view, your chat's browser card, their Agent browser panel) starts your
   browser with its tabs too; your next command is told once: `note: the user
   resumed your browser — N tab(s), current: <title> — <url> … [browser_resumed]`.
-  When they drove it and press **Hand back and continue…**, their one-line
+  When they drove it and press **Hand back with a note…**, their one-line
   note and the tab list arrive with your NEXT turn as a VibeSpace notice ("The
   user drove your browser and handed it back for your next turn with a note: “…”.
   Its tabs now: … Your next browser command runs in this same browser…") — no

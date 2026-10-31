@@ -631,7 +631,7 @@ function trackedServerSource() {
       // announcer's handback listener RETURNS before announce() for cause `continue` (no turn, no notice); the census above
       // still counts ONE ladder site in this file (the explicit handback)
       const cbody = bsrc.slice(bsrc.indexOf('  async function continueFor('), bsrc.indexOf('  let unsubInput = null'));
-      ok('§2 LANE BROWSER-RESUME: "Hand back and continue" is FREE — continueFor holds no rung, no authorizer, no spend reason (only the stash + the display-only card), the announcer returns before announce() for `continue`, and browser-handback.js still has exactly ONE ladder site',
+      ok('§2 LANE BROWSER-RESUME: "Hand back with a note" is FREE — continueFor holds no rung, no authorizer, no spend reason (only the stash + the display-only card), the announcer returns before announce() for `continue`, and browser-handback.js still has exactly ONE ladder site',
         bh.length === 1 && cbody.length > 400 && !/deliverToConversation|authorizeSpend|spendReason/.test(cbody) && /deliver\.stashFor\(cid, \{ source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text \}\)/.test(cbody) && /emitCard\(sess\.s, card\)/.test(cbody)
           && /if \(ev\.cause === 'continue'\) return;\n      announce\(ev\)/.test(bsrc) && require(path.join(REPO, 'src/browser-takeover.js')).announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false,
         JSON.stringify({ sites: bh.length, body: cbody.length }));

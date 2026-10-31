@@ -68,7 +68,7 @@ console.log('② the state machine');
   const closed = hb.rec;
   ok(['take', 'handback', 'release', 'done', 'withdraw', 'lease-gone'].every((h) => R.transition(closed, h, {}).code === 'closed'), 'CONTROL: a Done on a request already done is refused closed — and so is every other move (a closed request never moves)');
   ok(R.transition(r, 'resolve', {}).code === 'bad_how', 'an unknown move is refused bad_how');
-  eq(['explicit', 'continue', 'idle', 'viewer-left', 'stop', 'detach', 'whatever'].map(R.howOfHandback), ['handback', 'handback', 'release', 'release', 'release', 'release', 'release'], 'a handback the person CHOSE (Hand back, Hand back and continue) ends the request; every other cause releases it');
+  eq(['explicit', 'continue', 'idle', 'viewer-left', 'stop', 'detach', 'whatever'].map(R.howOfHandback), ['handback', 'handback', 'release', 'release', 'release', 'release', 'release'], 'a handback the person CHOSE (Hand back, Hand back with a note) ends the request; every other cause releases it');
 }
 
 console.log('③ one request per lease — a re-ask re-asserts');
