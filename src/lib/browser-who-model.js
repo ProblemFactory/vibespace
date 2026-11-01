@@ -164,7 +164,10 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
     }
     const pk = w.conversationId ? `conversation:${w.conversationId}` : /^cid:/.test(String(w.key || '')) ? `conversation:${String(w.key).slice(4)}` : null;
     const live = rows.find((r) => r.kind === 'agent' && r.live && ((w.conversationId && String(r.id) === String(w.conversationId)) || (w.key && keyOfPick.get(r.key) === w.key)));
-    if (live) { exceptSelected.push(live.key); if (pk) exceptPk.set(live.key, pk); continue; }
+    // lane held-except-doors r3 (主开发's acceptance of r2, MINOR 2): a KEPT exception whose conversation runs is drawn as its
+    // live row but sent back AS STORED (its key) — never re-resolved as a live session (one that stopped while the dialog was
+    // open was a 410 «pick it again from the list» about an exception the owner did not touch)
+    if (live) { exceptSelected.push(live.key); if (pk) exceptPk.set(live.key, pk); if (w.key) exceptWire.set(live.key, { kind: 'session', key: w.key }); continue; }
     const key = `session:x:${w.key}`;
     const name = (w.name && w.live ? w.name : '') || (w.conversationId ? nameOfConversation(w.conversationId) : '') || t('A conversation that is not running now');
     exceptExtra.push({ key, kind: 'agent', id: w.conversationId || w.key, name, live: false, hint: t('not running now'), groupIds: [], groupNames: [] });
@@ -174,7 +177,8 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
   return { rows, selected, remote, wire, keyOfPick, exceptSelected, exceptExtra, exceptWire, exceptPk };
 }
 /** lane grants-unify — «除了»: the picker's exception keys → the PATCH's `except` rows (a live conversation as a live pick —
- *  the server names it by its conversation, never giving it a browser key; a kept row as the key / id it has). */
+ *  the server names it by its conversation, never giving it a browser key; a kept row as the key / id it has — lane
+ *  held-except-doors r3: a kept one whose conversation runs too). */
 export function draftExcept(keys, model) {
   const out = [];
   const m = model || {};

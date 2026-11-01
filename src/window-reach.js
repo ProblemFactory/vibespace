@@ -209,6 +209,12 @@ function recordOfRows(windowId, mode, rows) {
     if (!p || out.rows.some((r) => principalKey(r.principal) === principalKey(p))) continue;
     out.rows.push({ principal: p, grantedAt: Number(e.at) || 0, by: GRANT_ORIGINS.includes(e.origin) ? e.origin : 'user' });
   }
+  // lane held-except-doors r3 (judged — 主开发's acceptance of r2, a low-confidence note): normPrincipal reads a key shaped
+  // `<lowercase>:<rest>` (not `webui:`) as a session key and keeps `<rest>`, so a STORED exception spelled so would be named
+  // `<rest>` by the next write — a permanent except_unnamed. None is ever stored: every writer of this door (the window engine
+  // through rowOfRecord(normRecord(…)), the migration's GM mapper through keyFromSessionKey) maps the key the same way first,
+  // and a conversation id has no colon (claude / codex: a UUID; a pending fork: `webui:<id>`, kept as it is). Only a hand edit
+  // of grants.json could — said here, not legged.
   out.except = n.row.except.map((x) => normPrincipal({ ...fromGrantPrincipal(x), name: x.name })).filter(Boolean);
   return out;
 }

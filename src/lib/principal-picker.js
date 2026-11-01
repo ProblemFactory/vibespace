@@ -47,7 +47,10 @@
 //    left out that is not in the picked Task Group was a raw key «除了：agent:e842a0f6-…»). r2 (主开发's acceptance, BLOCKER):
 //    what a door KEEPS while no Task Group / All agents is picked is DRAWN — «Kept from an earlier grant — left out: Cee ✕»
 //    (`.pp-kept`, its own classes) — and its ✕ takes one away: `api.except({held})` leaves it out, so the door SAYS it and
-//    NAMES it (`exceptRemoved`); a row the owner cannot see is never a Save the writer has to refuse.
+//    NAMES it (`exceptRemoved`); a row the owner cannot see is never a Save the writer has to refuse. r3: a door whose model
+//    has no except-only row (the automation key: an exception lives on its Task Group grant, and an un-picked group's grant
+//    is deleted with it) passes `except.kept: false` — no kept line there (it would say «they stay» over a delete); that door
+//    answers `held: []` and SAYS each one its Save takes away.
 import { t } from './i18n.js';
 import { createPopover } from './utils.js';
 import { icon, el, avatar } from './channel-chrome.js';
@@ -339,6 +342,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   const exRowOf = (k) => (exInner && exInner.knownRows().find((r) => String(r.key) === k)) || byKey().get(k) || known.get(k) || null;
   function drawKept(offered) {
     if (!keptEl) return;
+    if (except && except.kept === false) { keptEl.style.display = 'none'; return; }   // r3: the door keeps no except-only row
     const keys = offered ? [] : PM.exceptSaved(rows, sel, exSel, { held: heldAtOpen.filter((k) => !dropped.has(k)) });
     keptEl.textContent = '';
     keptEl.style.display = keys.length ? '' : 'none';
