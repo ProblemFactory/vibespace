@@ -7299,6 +7299,8 @@ label.chan-cap-row { cursor: default; }
 .pp-kept-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0; }
 .pp-kept-x:hover, .pp-kept-x:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
 .pp-kept-hint { flex-basis: 100%; color: var(--text-dim); }
+/* r4: a list set to «Nobody» — only the kept 除了 line of its picker is drawn */
+.pp.pp-nobody > .pp-chips, .pp.pp-nobody > .pp-input, .pp.pp-nobody > .pp-list, .pp.pp-nobody > .pp-except { display: none !important; }
 
 /* phone (≤480px): targets ≥36px, one-column grids, rows padded 8px 10px */
 @media (max-width: 480px) {
