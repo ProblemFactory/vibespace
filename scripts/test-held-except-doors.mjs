@@ -28,6 +28,9 @@
 // watch, the owner's Approve) lift that member's kept exception BY NAME, and every channel route answers except_conflicts 409;
 // ⑩ a pending fork's `webui:<id>` exception kept / named as STORED and renamed by name (E.rekeyForkExcept); ⑪ «Nobody» sends
 // a kept exception as stored (a stopped conversation is no 410). RED on 3f8134f16 by name.
+// r3 (主开发's acceptance of d4418c363): THE KEPT LINE NEVER LIES — ⑫ the automation key draws none over the group grant its
+// Save deletes and SAYS the exception going; ⑬ the vault door's kept ✕ is said and named; ⑭ the browser door sends a kept
+// exception whose conversation runs by its STORED key (no 410). RED on d4418c363 by name.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,7 +88,7 @@ class FakeEl {
   focus() { } blur() { } select() { } scrollIntoView() { }
   getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
   closest() { return null; } matches() { return false; }
-  get all() { return this.children.flatMap((c) => [c, ...c.all]); }
+  get all() { const out = [], st = this.children.slice().reverse(); while (st.length) { const n = st.pop(); out.push(n); for (let i = n.children.length - 1; i >= 0; i--) st.push(n.children[i]); } return out; }   // pre-order, one array (the fast tier's sum)
   _match(sel) { return sel.startsWith('.') ? sel.slice(1).split('.').every((c) => this._cls.includes(c)) : this.tagName === sel.toUpperCase(); }
   querySelectorAll(sel) { const parts = String(sel).split(',').map((s) => s.trim()); const m = /^:scope\s*>\s*(.+)$/.exec(parts[0]); return m ? this.children.filter((c) => c._match(m[1].trim())) : this.all.filter((c) => parts.some((p) => c._match(p))); }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
@@ -170,7 +173,7 @@ function stubOf(file) {
 async function bundleDoors() {
   const lib = path.join(REPO, 'src/lib');
   // the doors' OWN entry functions only (named — esbuild leaves the rest of the dialog modules' exports out: the fast tier's sum)
-  const NEED = [['browser-who-dialog', ['openWhoDialog']], ['channel-api-dialog', ['showApiAccessDialog']], ['channel-filter-editor', ['grantAccessBody', 'showGrantAccessDialog', 'showNotifyDialog']], ['exit-access-dialog', ['openExitAccessDialog']], ['vault-automation', ['showGrantPicker']]];
+  const NEED = [['browser-who-dialog', ['openWhoDialog']], ['channel-api-dialog', ['showApiAccessDialog']], ['channel-filter-editor', ['grantAccessBody', 'showGrantAccessDialog', 'showNotifyDialog']], ['exit-access-dialog', ['openExitAccessDialog']], ['vault-automation', ['showGrantPicker']], ['browser-who-model', ['pickerRows', 'draftExcept']], ['vault-use-row', ['showUseGrantDialog']]];   // r3: + the browser door's model, the vault «Who may use» door
   const entry = NEED.map(([m, names], i) => `import { ${names.join(', ')} } from ${J(path.join(lib, m + '.js'))};\nexport const D${i} = { ${names.join(', ')} };`).join('\n');
   const stubs = { name: 'page-edge', setup(b) {
     b.onResolve({ filter: /^\.\/(utils|i18n|principal-picker|build-version)\.js$/ }, (a) => (a.importer.startsWith(lib + path.sep) ? { path: path.join(lib, a.path.slice(2)), namespace: 'stub' } : undefined));
@@ -180,7 +183,7 @@ async function bundleDoors() {
   const out = path.join(SCR, 'doors.bundle.mjs');
   await esbuild.build({ stdin: { contents: entry, resolveDir: lib, loader: 'js' }, bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'], outfile: out, plugins: [stubs], logLevel: 'silent', minifyWhitespace: true, legalComments: 'none' });   // r2: whitespace-minified — 3 MB of comment-rich sources parse in less time (the fast tier's sum)
   const M = await import(pathToFileURL(out).href);
-  return { BW: M.D0, CA: M.D1, CF: M.D2, EX: M.D3, VA: M.D4 };
+  return { BW: M.D0, CA: M.D1, CF: M.D2, EX: M.D3, VA: M.D4, WM: M.D5, VU: M.D6 };
 }
 // r2: the channels engine's modules (legs ⑧–⑨) are required WHILE the bundle builds (esbuild works in its own process)
 const D_P = bundleDoors();
@@ -701,6 +704,113 @@ if (RD) {
   ok(!!r && !d.threw && (b.use || {}).mode === 'nobody' && J(((b.use || {}).except || [])) === J([CEE]) && J(exKeys(fw.row())) === J(['conversation:cid-cee']) && J(toOf(fw.row())) === J([]) && !d.refused(), '(a) Nobody + Cee ended meanwhile: the Save sends Cee\'s exception as stored ({kind:conversation, key}) and LANDS (3f8134f16: sent as a live session ⇒ 410 «"Cee" is not running any more», a conversation the owner cannot see under Nobody)', { threw: d.threw, body: b, row: fw.row(), refused: d.refused() });
 }
 for (const e of ENGINES) { try { e.stop(); } catch { } }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r3 — 主开发's acceptance of d4418c363 (held-except-doors/accept-r2-verdict.json): THE KEPT LINE NEVER LIES. A door whose
+// model keeps no except-only row (the automation key) draws no kept line and SAYS the exceptions its Save deletes; a kept
+// line's ✕ is the dialog's state (the vault door saved the ✕-ed one again); a kept exception rides AS STORED in every door
+// (the browser door re-resolved a running one as a live session ⇒ 410 once it stopped). The REAL dialogs + the REAL picker.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const ppOf = (root) => (root ? root.all.find((n) => n._cls.includes('pp') && n._cls.includes('pp-multi') && !n._cls.includes('pp-except-picker')) || null : null);
+
+// ═══ ⑫ MAJOR — the automation key «授权给…»: no kept line over a delete; the Save SAYS what it takes away ═══
+console.log('⑫ r3 MAJOR: automation key «授权给…» — Team un-picked: no kept line (its grant is deleted with its 除了), the dialog SAYS «Cee will no longer be excluded»');
+{
+  const st = GS.create({ memory: true });
+  const GT = 'ag-0000000000t1', GA = 'ag-0000000000a1', KID = 'ak-00000002';
+  const seed = () => { for (const g of [GT, GA]) st.remove('automation-key-use', g, 'user'); st.set('automation-key-use', GT, { to: [TEAM], except: [CEE] }, 'user'); st.set('automation-key-use', GA, { to: [ADA] }, 'user'); };
+  const key = () => ({ id: KID, name: 'deploy', grants: [GT, GA].filter((g) => st.rowsFor('automation-key-use', g).length).map((g) => ({ id: g, subject: g === GT ? 'group:g-team' : 'session:cid-ada', mode: 'always', reach: 'opened', except: [...((st.rowsFor('automation-key-use', g)[0] || {}).except || [])] })) });
+  const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }], sessions: [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ subject: `session:${id}`, name, groupIds: ['g-team'] })) } };
+  // src/server/automation-engine.js: DELETE a grant ⇒ dropRows (its exceptions NAMED — the engine's own road); POST /except
+  const routes = async (url, method, body) => {
+    const del = /^\/api\/automation\/grants\/([^/]+)$/.exec(url);
+    if (del && method === 'DELETE') { const g = del[1]; const held = (st.rowsFor('automation-key-use', g)[0] || {}).except || []; const w = st.set('automation-key-use', g, { to: [], except: [], removeExcept: held }, 'user'); return w.ok ? { ok: true } : { ok: false, code: w.code, error: w.error }; }
+    const ex = /^\/api\/automation\/grants\/([^/]+)\/except$/.exec(url);
+    if (ex && method === 'POST') { const n = GM.normRow(st.rowsFor('automation-key-use', ex[1])[0]); const w = st.set('automation-key-use', ex[1], { to: n.row.to, except: body.except || [], removeExcept: Array.isArray(body.removeExcept) ? body.removeExcept : [] }, 'user'); return w.ok ? { ok: true } : { ok: false, code: w.code, error: w.error }; }
+    if (method !== 'GET') return { ok: true };
+    return undefined;
+  };
+  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); return { P, pp, said: () => { const n = byCls(P.shell.body, 'vw-ak-unexcept'); return shown(n) ? textOf(n) : ''; }, save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  seed();
+  { const { P, pp, said, save } = open();
+    const g = ppRow(pp, 'group:g-team'); if (g) g.click();
+    const k = keptOf(pp), s = said();
+    ok(!!g && !k, '(a) Team un-picked, Ada kept: NO kept line — this door\'s exceptions live on the group grant the Save deletes (d4418c363 drew «Kept from an earlier grant — left out: Cee · They stay…» over the delete)', { kept: k });
+    ok(s === 'Cee will no longer be excluded', '(b) …the dialog SAYS before Save: «Cee will no longer be excluded»', s);
+    await save();
+    const reqs = P.posts.map((x) => `${x.method} ${x.url}`);
+    ok(J(reqs) === J([`DELETE /api/automation/grants/${GT}`]) && !st.rowsFor('automation-key-use', GT).length && J(exKeys(st.rowsFor('automation-key-use', GA)[0])) === J([]) && P.toasts.includes('Saved'), '(c) …the Save deletes Team\'s grant — its exception named by the engine (dropRows) — and nothing else; what was said happened', { reqs, toasts: P.toasts, rows: [GT, GA].map((x) => st.rowsFor('automation-key-use', x)) }); }
+  seed();
+  { const { P, pp, save } = open();
+    const x = exChipX(pp, 'session:cid-cee'); if (x) x.click();
+    await save();
+    const b = (P.posts.find((q) => q.url.endsWith('/except')) || {}).body || {};
+    ok(!!x && J(b.removeExcept) === J(['conversation:cid-cee']) && J(exKeys(st.rowsFor('automation-key-use', GT)[0])) === J([]) && J(toOf(st.rowsFor('automation-key-use', GT)[0])) === J(['group:g-team']), '(d) CONTROL — the ✕ road: Team kept, «除了：Cee» ✕ ⇒ the grant\'s 除了 dropped BY NAME (removeExcept), Team\'s grant kept', { x: !!x, body: b }); }
+}
+
+// ═══ ⑬ MINOR 1 — the vault «Who may use»: the kept line's ✕ is the dialog's state ═══
+console.log('⑬ r3 MINOR 1: vault «Who may use» — the kept line\'s ✕ is SAID in the preview and NAMED on the wire (the REAL dialog + picker)');
+{
+  const ENTRY = 'local:api-key#password';
+  const VU_APP = { sidebar: { _webuiSessions: [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ id: `w-${id}`, backendSessionId: id, name })), _tasks: [{ id: 'g-team', title: 'Team' }], _getSessionTaskGroups: () => [{ id: 'g-team', title: 'Team' }] } };
+  const member = { kind: 'conversation', key: 'cid-ada', principal: 'conversation:cid-ada', name: 'Ada', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com' }] };
+  const row = { id: ENTRY, label: 'API key', run: { use: { to: [member], except: [{ ...CEE, principal: 'conversation:cid-cee', name: 'Cee' }], entryHosts: [] } } };
+  const routes = async (url, method, body) => (url === '/api/vault/use-grants' && method === 'POST' ? { ok: true, use: { to: body.to, except: body.except } } : method !== 'GET' ? { ok: true } : undefined);
+  const P = newPage({ routes });
+  D.VU.showUseGrantDialog(row, { app: VU_APP, refresh: () => { } });
+  const pp = ppOf(P.shell && P.shell.body);
+  const k0 = keptOf(pp);
+  const x = k0 && k0.x('agent:cid-cee'); if (x) x.click();
+  const gone = P.shell.body.all.filter((n) => n._cls.includes('vw-use-except-gone')).map(textOf);
+  await P.shell.opts.unsaved.save(); await tick();
+  const b = (P.posts.find((q) => q.url === '/api/vault/use-grants') || {}).body || {};
+  ok(!!k0 && J(k0.names) === J(['Cee']), '(a) Ada kept, Cee left out from an earlier grant: the kept line draws «Cee»', k0);
+  ok(!!x && J(gone) === J(['Cee will no longer be excluded']), '(b) its ✕ ⇒ the preview SAYS «Cee will no longer be excluded» (d4418c363: nothing — pickToRow put the held one back)', { gone });
+  ok(J(b.except || null) === J([]) && J(b.removeExcept) === J(['conversation:cid-cee']), '(c) …and the Save NAMES it: except [] + removeExcept [conversation:cid-cee] (d4418c363: except [Cee] again, no removeExcept)', b);
+}
+
+// ═══ ⑭ MINOR 2 — the browser «Who can use it»: a kept exception rides AS STORED, a running one too ═══
+console.log('⑭ r3 MINOR 2: browser «Who can use it» — a kept exception whose conversation runs is sent by its STORED key; it stopping before Save is no 410');
+{
+  const view = { use: { mode: 'only', who: [{ kind: 'session', key: 'cid:cid-ada', conversationId: 'cid-ada', live: true, name: 'Ada' }], except: [{ kind: 'session', key: 'cid:cid-cee', conversationId: 'cid-cee', live: true, name: 'Cee' }] } };
+  const sessions = [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ id: `w-${id}`, backendSessionId: id, name }));
+  const model = D.WM.pickerRows(view, { sessions });
+  const sent = D.WM.draftExcept(model.exceptSelected, model);
+  ok(J(model.exceptSelected) === J(['session:w-cid-cee']) && J(sent) === J([{ kind: 'session', key: 'cid:cid-cee' }]), '(a) PURE: a held exception whose conversation runs is drawn as its live row and sent AS STORED ({kind:session, key}) — never {kind:session, session} (d4418c363: a live pick the route re-resolves)', { selected: model.exceptSelected, sent });
+  // the door: «only Ada», Cee left out and running; Cee stops before Save — the route resolves a LIVE pick (session-gone 410) as
+  // src/routes/browser.js resolveExceptRows does, and passes a stored key through
+  const PID = 'bp-0000a003', DOOR = 'browser-profile';
+  const st = GS.create({ memory: true });
+  st.set(DOOR, PID, { to: [ADA], except: [CEE] }, 'user');
+  const SESS = new Set(['w-cid-ada', 'w-cid-cee']);
+  const app = { sidebar: { _webuiSessions: sessions.map((s) => ({ ...s })), _tasks: [{ id: 'g-team', title: 'Team' }], _getSessionTaskGroups: () => [], getCustomName: () => '', _allSessions: [{ sessionId: 'cid-ada', name: 'Ada' }, { sessionId: 'cid-cee', name: 'Cee' }] } };
+  const prof = () => ({ id: PID, label: 'Work', grantUse: B.useOfRows(st.rowsFor(DOOR, PID), { browserKeyOf: () => null }) });
+  const routes = async (url, method, body) => {
+    if (url === `/api/browser/profiles/${PID}/use`) { const p = prof(); const use = B.useDigestOf(p); return { profile: { id: p.id, label: p.label, legacy: false }, use: { ...use, except: (use.except || []).map((w) => (w.conversationId && SESS.has(`w-${w.conversationId}`) ? { ...w, live: true, name: w.conversationId === 'cid-cee' ? 'Cee' : 'Ada' } : w)) }, base: B.useStamp(p), usedBy: [], createdBy: null }; }
+    if (url === `/api/browser/profiles/${PID}` && method === 'PATCH') {
+      const ex = [];
+      for (const r of (body.use && body.use.except) || []) {
+        if (r.kind === 'session' && r.session !== undefined) { if (!SESS.has(r.session)) return { status: 410, error: 'that conversation is not running any more — pick it again from the list', code: 'session-gone' }; ex.push({ kind: 'session', key: `cid:${String(r.session).replace(/^w-/, '')}` }); }
+        else ex.push(r);
+      }
+      const use = { ...body.use, except: ex };
+      const p = prof();
+      const sv = B.useShapeVerdict(use); if (!sv.ok) return { error: sv.error, code: sv.code };
+      const v = B.usePatchVerdict({ profile: p, use, knownTask: (tid) => tid === 'g-team', knownKey: () => false, conversationOf: () => null }); if (!v.ok) return { error: v.error, code: v.code };
+      const w = st.set(DOOR, PID, { to: v.row.to, except: v.row.except, removeExcept: Array.isArray(body.removeExcept) ? body.removeExcept : [] }, 'user');
+      return w.ok ? { ok: true, profile: { id: PID, label: 'Work' }, detached: [] } : { error: w.error, code: w.code };
+    }
+    return undefined;
+  };
+  const P = newPage({ routes });
+  const h = await D.BW.openWhoDialog(app, PID, {});
+  SESS.delete('w-cid-cee');   // Cee's conversation stops while the dialog is open
+  let threw = null; try { await h.save(); } catch (e) { threw = String((e && e.message) || e); }
+  await tick();
+  const b = (P.posts[0] || {}).body || {};
+  const r0 = st.rowsFor(DOOR, PID)[0] || null;
+  ok(!threw && J(((b.use || {}).except) || []) === J([{ kind: 'session', key: 'cid:cid-cee' }]) && J(exKeys(r0)) === J(['conversation:cid-cee']) && !P.toasts.some((m) => /not running any more/.test(m)), '(b) the door: an untouched Save while Cee stopped sends Cee\'s exception AS STORED and LANDS — no 410 «pick it again from the list» (d4418c363: refused)', { threw, body: b, row: r0, toasts: P.toasts });
+}
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

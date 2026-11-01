@@ -319,7 +319,11 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const planOf = () => {
     const typed = hostsIn.value.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
     const hosts = ownBox && ownBox.checked ? [ENTRY_HOSTS] : typed;
-    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except({ held }), { held });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored (lane held-except-doors: the picker's own answer says so too)
+    // r10 (MAJOR): the 除了 the picker does not offer is kept as stored — lane held-except-doors r3 (主开发's acceptance of r2,
+    // MINOR 1): the held list is the picker's OWN answer (the stored one less a kept-line ✕), so pickToRow keeps exactly what the
+    // dialog shows and exceptRemovedOf names the ✕-ed one (passing the stored `held` re-added it — the ✕ did nothing)
+    const exNow = picker.except({ held });
+    const pick = pickToRow(picker.knownRows(), picker.selected(), exNow, { held: exNow });
     const had = new Map((snap ? snap.to : members).map((m) => [keyOfM(m), m]));   // r11: by the principal; the row as it landed
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {

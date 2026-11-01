@@ -601,12 +601,17 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const exRows = () => [...live, ...exPick.extra];
   picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => k === EVERYONE_SUBJECT || live.some((r) => r.key === k)), autofocus: true,
     placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
-    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra }, onChange: () => syncUnexcept() });
+    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra, kept: false }, onChange: () => syncUnexcept() });   // r3: no kept line (below)
   body.append(picker.el);
   // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; each one this Save takes away is SAID
   // here and NAMED on the wire (`removeExcept` — the ONE writer refuses an unnamed drop)
   const exRowOf = (k) => [...picker.knownRows(), ...exRows()].find((r) => String(r.key) === String(k));
-  const exceptPicks = () => picker.except({ held: exPick.except });
+  // lane held-except-doors r3 (主开发's acceptance of r2, MAJOR): THIS door keeps no except-only row — an exception lives on its
+  // Task Group / All agents GRANT (one subject, one use row; the key's grants, verdicts, chips, audit and `vibespace-api keys`
+  // all read a grant as «someone holds this key»), and a group un-picked here is DELETED with its exceptions (automation-engine
+  // dropRows names them). So `held` is none: with no group / All agents picked the Save keeps no exception, and each one it
+  // takes away is SAID («Cee will no longer be excluded») — never a kept line over a delete (r2 said «they stay», then deleted)
+  const exceptPicks = () => picker.except({ held: [] });
   const unexcept = el('div', 'vw-ak-hint vw-ak-unexcept');
   body.append(unexcept);
   function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; }
