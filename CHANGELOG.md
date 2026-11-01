@@ -4,12 +4,20 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.370 — 2026-11-01
 
+### Added
+- A vault login the site could not be seen to accept now shows why it is still pending and a Confirm button; saving the password yourself confirms it too.
+
 ### Fixed
 - A grant you narrowed with “except …” keeps its exceptions when you save its dialog for another reason; removing one is shown before you save.
 - An exception left from an earlier grant now shows under the picker, with ✕ to remove it.
 - A machine's «Who can use it» saves again when a list names a conversation that is not running.
 - Saving a «Who can use it» list this version cannot read repairs it, and the grants history names what it removed.
 - In an automation key's «Grant to…», exclusions apply per grant: saving without changes changes nothing, and the dialog says which grant leaves someone out.
+- Vault sign-in on standard Chrome is back: it checks the page's real address and fills without exposing the password.
+- A new sign-in or password change in your vault is shown as pending until the page submits and accepts the form, not confirmed on a link click.
+
+### Security
+- While a vault password sits in a sign-in tab before submit, reading that tab is blocked while your other tabs keep working.
 
 ## 2.369.369 — 2026-11-01
 
