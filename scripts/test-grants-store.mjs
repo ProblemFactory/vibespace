@@ -340,6 +340,8 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const TOK9 = `ghp_${'B2c3D4e5F6'.repeat(4).slice(0, 36)}`;
   const PW10 = ['hunter', '2-plain-words-', 'not-a-token'].join(''), TOK11 = `ghp_${'C3d4E5f6G7'.repeat(4).slice(0, 36)}`;
   const DEEP11 = Array.from({ length: 9 }).reduce((inner, _, i) => ({ [`l${9 - i}`]: inner }), { t: TOK11 });
+  const PEMBODY12 = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(2), PEM12 = [['-----BEGIN ', 'PRIVATE KEY-----'].join(''), PEMBODY12, ['-----END ', 'PRIVATE KEY-----'].join('')].join('\n');
+  const PW14 = ['s3cr3t', '-netrc-', 'value'].join(''), NETRC14 = `machine h\nlogin u\npassword ${PW14}`;
   const RAW = [
     { door: 'exit', resource: 'h1:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'x' }] },
     { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
@@ -355,6 +357,11 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     // r8: a non-list `except` with a secret BY NAME (no token shape), and a list entry with a token NINE levels down
     { door: 'exit', resource: 'h10:use', to: [G1], except: { list: [CEE], password: PW10, mode: 'newer' } },
     { door: 'exit', resource: 'h11:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', n: DEEP11 }] },
+    // r9: line-shaped secrets (a PEM block, a .netrc «password …») in a non-list `except` and in a list entry
+    { door: 'exit', resource: 'h12:use', to: [G1], except: { list: [CEE], note: PEM12, mode: 'newer' } },
+    { door: 'exit', resource: 'h13:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', note: PEM12 }] },
+    { door: 'exit', resource: 'h14:use', to: [G1], except: { list: [CEE], netrc: NETRC14 } },
+    { door: 'exit', resource: 'h15:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', note: NETRC14 }] },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
@@ -403,6 +410,21 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   ok(s10.ok && d10.length === 1 && /^\(not a list\) /.test(d10[0]) && /"password"/.test(d10[0]) && !d10[0].includes(PW10) && !audit11.includes(PW10), 'a non-list `except` with a secret BY NAME («password», no token shape): masked — nowhere in the audit file in clear (d0b61c909: written in clear)', d10);
   ok(s11.ok && d11.length === 1 && /x-newer/.test(d11[0]) && !audit11.includes(TOK11.slice(0, 12)), 'a dropped list entry with a token NINE levels down: masked — nowhere in the audit file (d0b61c909: below depth 8 written as-is)', d11);
   ok(((lastFor('h1:use') || {}).repaired || {}).dropped.includes('conversation:cid-cee'), 'a dropped entry this release can read is named by its principal key («conversation:cid-cee») — a conversation\'s key is never masked as a secret', (lastFor('h1:use') || {}).repaired);
+  // r9 (主开发's acceptance of r8, MAJOR 1 + MINOR 2): r8 masked the whole JSON text only — a newline there is the two characters
+  // \n, so the line rules (a PEM block, a .netrc «password …») never fired; and «"key": «redacted»» hid which conversations went
+  const audit15 = () => fs.readFileSync(st.auditFile, 'utf-8');
+  for (const [res, to, ex, what] of [['h12:use', [G1], [], 'a PEM block in a non-list `except`'], ['h13:use', [{ kind: 'everyone' }], [CEE], 'a PEM block in a dropped list entry']]) {
+    const w = st.set('exit', res, { to, except: ex });
+    const dd = ((lastFor(res) || {}).repaired || {}).dropped || [];
+    ok(w.ok && dd.length === 1 && /PRIVATE KEY/.test(dd[0]) && !dd[0].includes(PEMBODY12.slice(0, 16)) && !audit15().includes(PEMBODY12.slice(0, 16)), `${what}: the key body MASKED — nowhere in the audit file (dd04ecdae: written in clear)`, dd);
+  }
+  for (const [res, to, ex, what] of [['h14:use', [G1], [], 'a .netrc block in a non-list `except`'], ['h15:use', [{ kind: 'everyone' }], [CEE], 'a .netrc block in a dropped list entry']]) {
+    const w = st.set('exit', res, { to, except: ex });
+    const dd = ((lastFor(res) || {}).repaired || {}).dropped || [];
+    ok(w.ok && dd.length === 1 && /password «redacted»/.test(dd[0]) && !audit15().includes(PW14), `${what}: «password «redacted»» — the password nowhere in the audit file (dd04ecdae: written in clear)`, dd);
+  }
+  const d8k = ((lastFor('h8:use') || {}).repaired || {}).dropped || [];
+  ok(d8k.length === 1 && d8k[0].includes('"key":"cid-cee"'), 'a non-list `except` {list: [Cee], mode: newer}: the audit names the conversation it dropped («"key":"cid-cee"» — an identifier field is no secret name; dd04ecdae: «"key":"«redacted»"»)', d8k);
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');
