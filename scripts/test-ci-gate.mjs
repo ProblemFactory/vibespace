@@ -750,6 +750,114 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     missed.map((r) => `${r.label}: ${r.applied ? 'GREEN — ' + JSON.stringify(r.bad) : 'the edit did not apply'}`).join('\n'));
 }
 
+// ── §2j A SUITE READS NO HISTORY MASTER DOES NOT HAVE (B-4291, lane int361, 2.369.369: test-stash-strip's r5 leg read
+// `git show 280ccd2e:…` — a LANE-BRANCH commit only the production repo had — so the push gate alone ran the leg, red at four
+// pushes in a row and called a flake, while every lane, the runner (depth 1) and each by-hand rerun SKIPPED it and said green) ──
+// Every literal sha a script under scripts/ hands git to READ (show / cat-file / rev-parse / ls-tree) must be an ANCESTOR of HEAD.
+// The reads (r2, the acceptance's blind forms): a quoted sha on a git-read line — single, double or back quotes, `<sha>:path`,
+// `<sha>^{commit}`, a concatenation `'<sha>' + ':'`; a binding `const NAME = '<sha>'` or `= process.env.X || '<sha>'` (?? too)
+// fed to a git-read line (`${NAME}:`, `${NAME}^{commit}`, NAME as an argument or concatenated); and a FUNCTION ARGUMENT — a
+// function whose body hands its parameter to git (`${ref}:…`) called with a literal sha (`fixBaseShaped('f36369057')`).
+// The verdict resolves `<sha>^{commit}` first (a short sha git cannot tell from another commit is AMBIGUOUS — «lengthen it», never
+// «off-master»), then asks `merge-base --is-ancestor` with the full sha (GIT_ENV: no alternates). A full clone holds every
+// ancestor of HEAD, so «absent» and «present but off master» are ONE verdict in every full checkout; a shallow clone (the runner)
+// cannot judge ancestry: it says so and counts nothing — a skip is never a green. The latent reads the guard found are a named
+// ratchet (one backlog row each); a NEW one is red, and so is a ratchet row whose script no longer reads its sha or whose sha
+// reached master — the list only shrinks.
+console.log('\n§2j a suite reads no history master does not have');
+{
+  const READS_OFF_MASTER = Object.freeze({ // sha → the scripts that read it (2026-11-01, B-4291's census — each a backlog row)
+    '296a748f': ['test-windows-device-fs.mjs'], // lane device-upgrade-stuck 2026-10-03: const BASE, cat-file -e `${BASE}^{commit}` [B-8390]
+    '6f1aad6d': ['test-channels-gmail-shape.mjs'], // channels lane R5 verify r3 2026-09-26: its r3-tree control [B-3642]
+    '7b6fa3c7b': ['test-plugin-settings.mjs', 'test-plugins-grammar.mjs'], // the LLM plugin's card row 2026-10-12: the base's plugin file at its old path [B-43a0]
+    '817550d4': ['test-queue-steer.mjs'], // the pre-repair pick commit: a historical positive control [B-4075]
+    'a7321ff0e': ['test-ci-gate.mjs'], // §2e's own control: the wall-clock bound before the rule [B-874f]
+    'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
+  });
+  const HEX = '[0-9a-f]{7,40}', VERB = /['"`](?:show|cat-file|rev-parse|ls-tree)['"`]|\bgit (?:show|cat-file|rev-parse|ls-tree)\b/;
+  const LIT = new RegExp(`['"\`](${HEX})(?=[:'"\`^])`, 'g');
+  const CMD = new RegExp(`\\bgit (?:show|cat-file|rev-parse|ls-tree)(?:\\s+-[-\\w]+)*\\s+(${HEX})(?=[:^\\s\`'"]|$)`, 'g');   // a git command line in a string
+  const BIND = new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:[^;\\n]*?(?:\\|\\||\\?\\?)\\s*)?['"\`](${HEX})['"\`]`);
+  const DEF = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(?\s*([A-Za-z_$][\w$]*)[^=\n]*=>|\bfunction\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*)/;
+  const esc = (n) => n.replace(/\$/g, '\\$');
+  const fedOn = (line, n) => line.includes('${' + n + '}') || new RegExp(`(?:^|[^\\w$.])${esc(n)}\\s*\\+|[,[(]\\s*${esc(n)}\\s*[,\\])+]`).test(line);
+  /** the history reads of one script's text: [{ sha, line, form }] — comment lines are not reads */
+  const historyReadsOf = (text) => {
+    if (!/show|cat-file|rev-parse|ls-tree/.test(text)) return [];   // most scripts read no history: one scan, not a line walk
+    const code = text.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)), out = [], binds = new Map(), readers = new Set();
+    code.forEach((l, i) => {
+      const b = BIND.exec(l); if (b) binds.set(b[1], b[2]);
+      const d = DEF.exec(l); if (d) { const [name, p] = d[1] ? [d[1], d[2]] : [d[3], d[4]]; const body = code.slice(i, i + 8).join('\n'); if (VERB.test(body) && fedOn(body, p)) readers.add(name); }
+    });
+    code.forEach((l, i) => {
+      if (VERB.test(l)) {
+        for (const m of l.matchAll(LIT)) out.push({ sha: m[1], line: i + 1, form: 'literal' });
+        for (const m of l.matchAll(CMD)) if (!out.some((r) => r.line === i + 1 && r.sha === m[1])) out.push({ sha: m[1], line: i + 1, form: 'command string' });
+        for (const [n, sha] of binds) if (fedOn(l, n)) out.push({ sha, line: i + 1, form: 'binding ' + n });
+      }
+      for (const f of readers) for (const m of l.matchAll(new RegExp(`(?:^|[^\\w$.])${esc(f)}\\(\\s*['"\`](${HEX})['"\`]`, 'g'))) out.push({ sha: m[1], line: i + 1, form: 'argument of ' + f });
+    });
+    return out;
+  };
+  /** reads [{file, sha, line}] + a verdict oracle ('on' | 'off' | 'ambiguous') + the ratchet ⇒ { fresh, ambiguous, stale } */
+  const judgeReads = (reads, verdictOf, ratchet) => {
+    const ambiguous = reads.filter((r) => verdictOf(r.sha) === 'ambiguous');
+    const fresh = reads.filter((r) => verdictOf(r.sha) === 'off' && !(ratchet[r.sha] || []).includes(r.file));
+    const stale = Object.entries(ratchet).flatMap(([sha, files]) => files.filter((f) => verdictOf(sha) === 'on' || !reads.some((r) => r.sha === sha && r.file === f)).map((f) => `${sha} ${f}`));
+    return { fresh, ambiguous, stale };
+  };
+  // THE FORMS, each planted (built by concatenation: this file must not read history itself) — each one seen, by name
+  const sh = 'sh' + 'ow', cf = 'cat' + '-file', rp = 'rev' + '-parse', lt = 'ls' + '-tree', S1 = ['abc', '1234'].join('');
+  const FORMS = {
+    'show <sha>:path': `execFileSync('git', ['-C', REPO, '${sh}', '${S1}:src/a.js'])`,
+    'double quotes': `execFileSync("git", ["${sh}", "${S1}:src/a.js"])`,
+    'cat-file -p <sha>:path': `git(['${cf}', '-p', '${S1}:src/a.js'])`,
+    'cat-file -e <sha>^{commit}': `git(['${cf}', '-e', '${S1}^{commit}'])`,
+    'rev-parse … <sha>^{commit}': `git(['${rp}', '--verify', '--quiet', '${S1}^{commit}'])`,
+    'ls-tree <sha>': `git(['${lt}', '-r', '--name-only', '${S1}', 'src/lib'])`,
+    'a code string `git show <sha>:`': `execSync(\`git ${sh} ${S1}:src/a.js\`)`,
+    'a concatenation': `execFileSync('git', ['${sh}', '${S1}' + ':' + p])`,
+    'a const fed to ${NAME}^{commit}': `const BASE = '${S1}';\nexecFileSync('git', ['-C', REPO, '${cf}', '-e', \`\${BASE}^{commit}\`])`,
+    'an env-defaulted const': `const PRE = process.env.X_REF || '${S1}';\nconst t = execFileSync('git', ['${sh}', \`\${PRE}:server.js\`]);`,
+    'a function argument': `const shaped = (ref) => { const t = execFileSync('git', ['-C', repo, '${sh}', \`\${ref}:src/a.js\`]); return t; };\nconst r = shaped('${S1}') ? 1 : 0;`,
+  };
+  const blind = Object.entries(FORMS).filter(([, t]) => !historyReadsOf(t).some((r) => r.sha === S1)).map(([k]) => k);
+  ok(!blind.length && !historyReadsOf(`// git ${sh} ${S1}:src/a.js — a comment names a sha, it reads nothing`).length && !historyReadsOf(`const id = '${S1}'; console.log(id);`).length,
+    `the read forms are seen (${Object.keys(FORMS).join(' · ')}); a comment, a hex id never handed to git: not reads` + (blind.length ? ` — BLIND to: ${blind.join(' · ')}` : ''));
+  // the verdict, on a planted oracle: a new off-master read is red; an ambiguous one is red; a ratchet row no longer read, or whose sha reached master, is red
+  const S2 = ['def', '5678'].join(''), S3 = ['fed', '0987'].join(''), V = { [S1]: 'off', [S2]: 'on', [S3]: 'ambiguous' }, oracle = (sha) => V[sha] || 'off';
+  const v1 = judgeReads([{ file: 't.mjs', sha: S1, line: 3 }, { file: 't.mjs', sha: S2, line: 4 }], oracle, {});
+  const v2 = judgeReads([{ file: 't.mjs', sha: S1, line: 3 }], oracle, { [S1]: ['t.mjs'] });
+  const v3 = judgeReads([], oracle, { [S1]: ['t.mjs'] }), v4 = judgeReads([{ file: 't.mjs', sha: S2, line: 4 }], oracle, { [S2]: ['t.mjs'] });
+  const v5 = judgeReads([{ file: 't.mjs', sha: S3, line: 5 }], oracle, { [S3]: ['t.mjs'] });
+  ok(v1.fresh.length === 1 && v1.fresh[0].sha === S1 && !v1.stale.length && !v2.fresh.length && !v2.stale.length && v3.stale.length === 1 && v4.stale.length === 1 && v5.ambiguous.length === 1,
+    'CONTROL: a NEW off-master read is red; a listed one passes; a ratchet row no longer read is red; a ratchet sha that reached master is red; an AMBIGUOUS short sha is red even when listed («lengthen it», never «off-master»)');
+  // the real tree
+  const shallow = git(REPO, ['rev-parse', '--is-shallow-repository']) === 'true';
+  const reads = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => f.endsWith('.mjs')).sort()
+    .flatMap((f) => historyReadsOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')).map((r) => ({ file: f, ...r })));
+  if (shallow) console.log(`  (§2j NOT JUDGED: a shallow clone cannot tell an ancestor of HEAD — ${reads.length} history reads seen; a full checkout — every lane, the push gate — judges them; nothing is counted here)`);
+  else {
+    const memo = new Map(), run = (args) => spawnSync('git', ['-C', REPO, ...args], { encoding: 'utf8', env: GIT_ENV });
+    const verdictOf = (sha) => {
+      if (!memo.has(sha)) {
+        const c = run(['rev-parse', '--verify', '--quiet', sha + '^{commit}']);
+        if (c.status === 0) memo.set(sha, run(['merge-base', '--is-ancestor', c.stdout.trim(), 'HEAD']).status === 0 ? 'on' : 'off');
+        else memo.set(sha, (run(['rev-parse', '--disambiguate=' + sha]).stdout || '').trim().split('\n').filter(Boolean).length > 1 ? 'ambiguous' : 'off');
+      }
+      return memo.get(sha);
+    };
+    ok(verdictOf(git(REPO, ['rev-parse', 'HEAD'])) === 'on' && verdictOf('0'.repeat(40)) === 'off', 'the oracle: HEAD is on master; an absent object is off master (a full clone holds every ancestor)');
+    const ENV_SITES = ['test-discovery-spawn.mjs 9516bd8d', 'test-fixture-isolation.mjs e87d9893', 'test-mount-providers.mjs b48b26ae4'];
+    const envSeen = ENV_SITES.filter((x) => { const [f, sha] = x.split(' '); return reads.some((r) => r.file === f && r.sha === sha && r.form.startsWith('binding') && verdictOf(sha) === 'on'); });
+    ok(envSeen.length === ENV_SITES.length, `the env-defaulted bindings (process.env.X || '<sha>') are READ and JUDGED on master: ${envSeen.join(' · ')}` + (envSeen.length < ENV_SITES.length ? ` — NOT seen: ${ENV_SITES.filter((x) => !envSeen.includes(x)).join(' · ')}` : ''));
+    const { fresh, ambiguous, stale } = judgeReads(reads, verdictOf, READS_OFF_MASTER);
+    ok(reads.length > 20 && !fresh.length && !ambiguous.length && !stale.length, `every literal sha a script reads is an ancestor of HEAD — ${reads.length} reads of ${new Set(reads.map((r) => r.sha)).size} shas; the ratchet: ${Object.keys(READS_OFF_MASTER).length} named off-master shas` +
+      (fresh.length ? `\n      NEW off-master reads (a lane-branch object exists only where that branch was fetched — the push gate alone would run the leg): ${fresh.map((r) => `${r.file}:${r.line} ${r.sha} (${r.form})`).join(' · ')}` : '') +
+      (ambiguous.length ? `\n      AMBIGUOUS in this repo (lengthen it): ${ambiguous.map((r) => `${r.file}:${r.line} ${r.sha}`).join(' · ')}` : '') +
+      (stale.length ? `\n      stale ratchet rows (remove them): ${stale.join(' · ')}` : ''));
+  }
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

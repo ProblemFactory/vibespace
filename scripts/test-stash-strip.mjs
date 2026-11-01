@@ -1464,21 +1464,15 @@ function producerCensus(src) {
     && orderOf(now.quiet).join(' → ') === '<vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && orderOf(now.manager).join(' → ') === '<vibespace-reminder> → <vibespace-user-instructions> → <vibespace-task-context> → <vibespace-group-manager> → <vibespace-jobs-update> → ### Messages that arrived → <system-reminder>'
     && now.reminder.startsWith('<vibespace-reminder>') && Object.values(now).every((c) => !/context trimmed/.test(c) && B(c) <= AR.INLINE_CAP),
-    'THE ORDER: extra → preamble → cwd notice → context/diff → tools/manager intro → jobs missed → jobs update → stash → notices → nudge — on the full, diff, quiet, manager and reminder shapes; nothing trimmed', Object.fromEntries(Object.entries(now).map(([k, c]) => [k, orderOf(c).join(' → ')])));
-  // r5's own module (the branch's pre-r6 tip): byte-identical where every producer fits — SKIP with evidence where the ref is unavailable (a depth-1 checkout)
-  let r5src = null; try { r5src = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', '280ccd2e:src/agent-routes.js'], { encoding: 'utf-8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { }
-  if (r5src) {
-    const MUTO = mutantCopies('stash-strip-r7-order', REPO);
-    const R5 = MUTO.load('src/agent-routes.js', r5src, 'r5');
-    const then = Object.fromEntries(Object.entries(shapes).map(([k, sh]) => [k, run(R5, sh)]));
-    // lane artifacts-prompt-hint: r5's calls predate `fileTools`, so its Artifacts sentence is the UNNAMED one — that one delta is folded before the identity
-    // lane foryou-attachments: the ask segment now names `[--artifact <path|/p/id>…]` (the brief: the reminder mentions it) — folded the same way
-    const unnamed = (c) => c.replace(/Use your file tools \([^)\n]*\) for files/g, 'Use your file tools for files').split('vibespace-ask "q" [--artifact <path|/p/id>…] — ').join('vibespace-ask "q" — ');
-    const same = Object.keys(shapes).filter((k) => then[k] === unnamed(now[k]));
-    const common = (k) => { const a = orderOf(then[k]), b = orderOf(now[k]); const both = a.filter((t) => b.includes(t)); return a.filter((t) => both.includes(t)).join() === b.filter((t) => both.includes(t)).join(); };
-    ok(same.includes('full') && same.includes('diff') && same.includes('quiet') && same.includes('reminder') && Object.keys(shapes).every(common) && orderOf(then.manager).includes('<vibespace-jobs-missed-while-away>') && !orderOf(now.manager).includes('<vibespace-jobs-missed-while-away>'),
-      `r5's module on the same stores: byte-identical on the full / diff / quiet / reminder shapes; the manager shape differs only by r6's fit decisions (r5 drained the jobs digest with the tail uncounted, r7 holds it) — every section that rides both stands in the same order`, { same, manager: [B(then.manager), B(now.manager)] });
-  } else console.log('  (r5 byte-identity SKIPPED: `git show 280ccd2e` is not available in this checkout — the order pins above stand on their own)');
+    'THE ORDER: extra → preamble → cwd notice → context/diff → tools/manager intro → jobs missed → jobs update → stash → notices → nudge — on the full, diff, quiet, manager and reminder shapes (= r5\'s own order at 280ccd2e, frozen 2026-11-01, but the manager\'s jobs-missed: r6\'s fit); nothing trimmed', Object.fromEntries(Object.entries(now).map(([k, c]) => [k, orderOf(c).join(' → ')])));
+  // r5's own module (280ccd2e, lane channel-jump verify r5, 2026-09-27 — a LANE-BRANCH commit, never on master) drew the SAME section
+  // order as THE ORDER pin above on the full / diff / quiet / reminder shapes, and on the manager shape the same order plus its
+  // jobs-missed section (r6's fit: r5 drained the jobs digest with the tail uncounted; r7 holds it) — computed ONCE from that module
+  // over these same stores (lane int361, 2026-11-01, B-4291). THE ORDER pin is that comparison: ONE pin, no history read. It used to
+  // `git show 280ccd2e` and SKIP where the object was absent — everywhere but the production repo, so the PUSH GATE alone ran it, red
+  // for weeks (2.369.366–.368), and every by-hand rerun «passed» by skipping. THE BYTE-IDENTITY IS RETIRED (B-4291): it pinned r5's
+  // BYTES, and two later product changes legitimately moved them — the reminder's tools line (now src/agent-cli-registry.js) and a
+  // stash entry's stamp (r5 «[01-01T00:00Z]», now the hub's own zone, which follows TZ) — each pinned by its own legs.
 }
 {
   // ── 6. THE BOOT: the stores load synchronously at create, before the server listens and before any session is restored ──
