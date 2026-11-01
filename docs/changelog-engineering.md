@@ -38,6 +38,10 @@ This file is the engineers' record of every release: the lanes, the verification
   - **MINOR — a re-used pointer id stamped the end from an older pointer's bound.** A re-down keeps its id's first place in the Map, so the LAST entry deleted could be an older touch. The end is the latest bound among the pointers dropped.
   - **Gates.** test-dialog-yield ⑩ (the pins) and ⑪ (a press held 2.5 s then released — its quiet; mouse 1, touch 9, mouse 1 again, none released — the newest press's bound). RED on e99db61bc by name.
 
+### int369 — the .369 train's own seams (lane int361; picks on 6aa57dfbc, first-parent, in the pin order: #0 B-4291, #1 needs-card-tail)
+- **Seam 1 — the kb says what B-4291 r2 left.** kb-bugfix-invariants' B-4291 essay still described r1's frozen-literal leg and its controlled-swap RED (r2 removed both: THE ORDER pin is the r5 comparison) and named five ratchet rows; it now names the pin and the six rows by backlog id (B-44c5 included). kb-file-structure's test-stash-strip essay said 2.8 s where its INDEX line and the tier row say 6.5 s.
+- **The fast tier's sum.** 917.69 s < 918 over 527 suites — B-4291 and needs-card-tail r19…r23 add no fast-row time.
+
 ## 2.369.368 — 2026-10-31 (hotfix)
 
 ### hotfix plugin-install-cred — THE INSTALL DIALOG NEVER SAW THE SAVED PLUGIN GIT CREDENTIAL (the owner, 2026-10-31 18:1x PT, installing the custom browser)
