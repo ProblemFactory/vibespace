@@ -4121,10 +4121,15 @@ console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR
       'r8 MINOR I (OTP dropped + whole-node short match + stop/lock clear): OTP never enters rememberFilledSecrets, short PIN/OTP match whole-node only (substrings untouched), and vault lock & browser stop clear remembered secrets',
       realI);
 
-    const redISrc = DSRC0.replace(
-      'try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ }',
-      '/* mutant: skip clearFilledSecretsForProfile on stop */'
-    );
+    const redISrc = DSRC0
+      .replace(
+        'try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ }',
+        '/* mutant: skip clearFilledSecretsForProfile on stop */'
+      )
+      .replace(
+        'LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);',
+        'void persistedTids;'
+      );
     const Dm8I = redISrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redISrc, 'r8-i-no-clear-on-browser-stop') : null;
     const mutI = Dm8I ? await runMinorI(Dm8I) : null;
     ok(Boolean(Dm8I && mutI && mutI.clearedOnBrowserStop === false && realI.clearedOnBrowserStop === true),
@@ -4284,8 +4289,14 @@ console.log('⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       logins.addOwn({ origin: SITE, username: 'short6@example.test', password: PW6 });
       grants.set('browser-login', `${SITE}#short6@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
 
-      // Leg A1 (exact Probe 1 shape: D.create({ logins }) + direct LF.fillVaultLogin + eng.lock() mid-fence + LF.wipeTabTypedInputs with secretValues:[])
-      const wBare = DmodToUse.create({ logins, log: quiet });
+      // Leg A1 (persisted live fence + direct LF.fillVaultLogin + eng.lock() mid-fence + LF.wipeTabTypedInputs with secretValues:[])
+      const wBare = DmodToUse.create({
+        logins, log: quiet,
+        keeper: {
+          _reg: () => ({ loginFences: { 'p-r9-1a': true } }),
+          loginFenceStateOf: () => ({ fences: [{ targetId: 'TAB_R9_1A', origin: SITE, urlAtFill: `${SITE}/login` }], scrubs: [] }),
+        },
+      });
       const domA1 = sharedMakeStubDom([
         { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
         { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
@@ -4436,7 +4447,7 @@ console.log('⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       real1);
 
     const red1R9Src = DSRC0.replace(
-      'LF().clearUnfencedFilledSecrets?.();',
+      /LF\(\)\.clearUnfencedFilledSecrets[^;]*;/,
       'LF().clearAllFilledSecrets();'
     );
     const Dm9_1 = red1R9Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red1R9Src, 'r9-1-vault-lock-wipes-live-short-pw') : null;
@@ -4828,6 +4839,595 @@ console.log('⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3
     ok(Boolean(BKm9_5 && mut5 && !/too much text to check/.test(mut5.unwatchedErr) && !/too much text to check/.test(mut5.rearmedErr) && /too much text to check/.test(real5.rearmedErr)),
       'r9 MINOR 5 RED control [r9-5-keeper-drops-hold-reason]: r8 saveLoginFenceState without holdReason drops "(too much text to check)" after restart',
       { mutRearmed: mut5 && mut5.rearmedErr, realRearmed: real5.rearmedErr });
+  }
+}
+
+// ═══ ⑱ Standard-Chrome r10 adversarial fixup gates (MAJOR + MINOR 1–4 + RED controls 1–5) ═══
+console.log('⑱ Standard-Chrome r10 adversarial fixup gates (MAJOR + MINOR 1–4 + RED controls 1–5)');
+{
+  const LF = require('../src/server/browser-login-fill.js');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const { WebSocketServer } = require('ws');
+  const TOTP = require('../src/totp.js');
+
+  // ── (1) MAJOR: «fenced» is a fact of the LIVE FENCES, not a stored flag — Roads A/A2/B release & lock clears all non-live entries while keeping live mid-fence secrets ──
+  {
+    const runMajorR10 = async (DmodToUse = D, LFmodToUse = LF) => {
+      const dbDir = path.join(ROOT, 'wb10_1-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw10-1-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW10 = pwOf('r10-maj');
+      const PW6 = ('m' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'u1@example.test', password: PW10 });
+      logins.addOwn({ origin: SITE, username: 'short6@example.test', password: PW6 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const runRoad = async (mode) => {
+        LFmodToUse.clearAllFilledSecrets?.();
+        await eng.unlock(vpw).catch(() => {});
+        const pid = 'bp-r10-1-' + mode;
+        const key = 'bk-r10-1-' + mode;
+        const tgt = { profileId: pid, browserKey: key, ephemeral: true };
+        const dom = sharedMakeStubDom([
+          { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+          { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+          { id: 'hm', type: 'hidden', value: '', defaultValue: '', hidden: true },
+        ]);
+        const tid = 'TAB_R10_1_' + mode;
+        const sid = 'SID_R10_1_' + mode;
+        let pageUrl = `${SITE}/login`;
+        let targetPresent = true;
+        const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+        await new Promise((r) => wss.once('listening', r));
+        const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/${mode}`;
+        wss.on('connection', (ws) => {
+          ws.on('message', async (buf) => {
+            const m = JSON.parse(String(buf));
+            const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+            const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+            if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+            if (m.method === 'Target.setDiscoverTargets') {
+              if (targetPresent) send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: pageUrl, title: 'Login' } } });
+              rep({});
+              return;
+            }
+            if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+            if (m.method === 'Target.getTargets') { rep({ targetInfos: targetPresent ? [{ targetId: tid, type: 'page', url: pageUrl, attached: true }] : [] }); return; }
+            if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: pageUrl, securityOrigin: SITE } } }); return; }
+            if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: pageUrl } }); return; }
+            const dr = await dom.call(m.method, m.params || {});
+            rep((dr && dr.result) || {});
+          });
+        });
+        let persisted = { fences: [], scrubs: [] };
+        const w1 = DmodToUse.create({
+          keeper: {
+            cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+            onLease: () => () => {},
+            saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+            loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+          },
+          log: quiet, enableTimeoutMs: 300, liveFillMaxMs: mode === 'mid' ? 220 : 600000,
+          forYou: { add: () => null, resolve() {} },
+          holdersOf: () => [{ browserKey: key, sessionId: 'sess-1', ephemeral: true }],
+          leaseCountOf: () => 1, logins,
+          conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        });
+        try {
+          await w1.arm(pid, { budgetMs: 3000 });
+          await until(() => w1._watches.get(pid)?.targets.get(tid)?.enabled, 1500);
+          if (mode === 'A' || mode === 'A2') {
+            const rf = await w1.fillLogin(tgt, FILL({ user: 'u1@example.test' }));
+            for (const c of wss.clients) c.terminate();
+            await until(() => !w1._watches.get(pid) || w1._watches.get(pid).state === 'down', 1500);
+            if (mode === 'A') pageUrl = `${SITE}/home`;
+            else targetPresent = false;
+            await w1.arm(pid, { budgetMs: 3000 });
+            if (mode === 'A') await until(() => w1._watches.get(pid)?.targets.get(tid)?.enabled, 1500);
+            await sleep(50);
+            const fenceLive = w1.liveFillVerdictFor(tgt, { verb: 'snapshot' }).ok === false;
+            eng.lock();
+            return { fillOk: rf.ok, fenceLive, remAfterVaultLock: LFmodToUse.hasRememberedSecrets(pid) };
+          }
+          if (mode === 'B') {
+            const rf1 = await w1.fillLogin(tgt, FILL({ user: 'u1@example.test' }));
+            const ctx1 = w1._watches.get(pid)?.targets.get(tid)?.liveFill?.isoContextId || 0;
+            dom.inputs[0].val = ''; dom.inputs[1].val = '';
+            const rf2 = await w1.fillLogin(tgt, FILL({ user: 'u1@example.test' }));
+            const ctx2 = w1._watches.get(pid)?.targets.get(tid)?.liveFill?.isoContextId || 0;
+            const oldCtxReleasedOnSupersede = typeof LFmodToUse.hasRememberedContext === 'function' ? LFmodToUse.hasRememberedContext(ctx1) === false : false;
+            pageUrl = `${SITE}/home`;
+            for (const c of wss.clients) c.send(JSON.stringify({ sessionId: sid, method: 'Page.frameNavigated', params: { frame: { id: tid, url: pageUrl } } }));
+            await until(() => w1.liveFillVerdictFor(tgt, { verb: 'snapshot' }).ok === true, 1500);
+            eng.lock();
+            return { fill1Ok: rf1.ok, fill2Ok: rf2.ok, distinctCtx: ctx1 > 0 && ctx2 > ctx1, oldCtxReleasedOnSupersede, remAfterVaultLock: LFmodToUse.hasRememberedSecrets(pid) };
+          }
+          const rf = await w1.fillLogin(tgt, FILL({ user: 'short6@example.test' }));
+          dom.inputs[2].val = PW6;
+          eng.lock();
+          const remRightAfterLock = LFmodToUse.hasRememberedSecrets(pid);
+          await until(() => w1.liveFillVerdictFor(tgt, { verb: 'snapshot' }).ok === true, 1500);
+          return { fillOk: rf.ok, remRightAfterLock, hiddenStillHoldsPw: dom.inputs[2].val === PW6, remAfterCeiling: LFmodToUse.hasRememberedSecrets(pid) };
+        } finally {
+          try { w1.shutdown(); } catch {}
+          for (const c of wss.clients) c.terminate();
+          await new Promise((r) => wss.close(r));
+        }
+      };
+
+      try {
+        const roadA = await runRoad('A');
+        const roadA2 = await runRoad('A2');
+        const roadB = await runRoad('B');
+        const mid = await runRoad('mid');
+        return { roadA, roadA2, roadB, mid };
+      } finally {
+        LFmodToUse.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real1 = await runMajorR10(D, LF);
+    ok(real1.roadA.fillOk === true && real1.roadA.fenceLive === false && real1.roadA.remAfterVaultLock === false &&
+      real1.roadA2.fillOk === true && real1.roadA2.fenceLive === false && real1.roadA2.remAfterVaultLock === false &&
+      real1.roadB.fill1Ok === true && real1.roadB.fill2Ok === true && real1.roadB.distinctCtx === true &&
+      real1.roadB.oldCtxReleasedOnSupersede === true && real1.roadB.remAfterVaultLock === false &&
+      real1.mid.fillOk === true && real1.mid.remRightAfterLock === true && real1.mid.hiddenStillHoldsPw === false && real1.mid.remAfterCeiling === false,
+      'r10 MAJOR (live-fence set at vault lock + every fence-end road releases): socket drop + url-changed (Road A), target-gone (Road A2), and superseded context + nav (Road B) leave 0 remembered secrets after lock, while mid-fence lock still wipes short hidden mirror',
+      real1);
+
+    const red1LfSrc = LFS0
+      .replace('if (liveTgt.has(k)) continue;', 'continue;')
+      .replace('if (liveCtx.has(k)) continue;', 'continue;')
+      .replaceAll('if (cv && cv.targetKey === ctxKey && ck !== normCtx) {', 'if (false && cv && cv.targetKey === ctxKey && ck !== normCtx) {');
+    const red1DSrc = DSRC0
+      .replace('LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);', 'void persistedTids;')
+      .replaceAll('try { LF().clearFilledSecretsForTarget(f.targetId);', 'if (false) try { LF().clearFilledSecretsForTarget(f.targetId);');
+    let mut1 = null;
+    if (red1LfSrc !== LFS0 && red1DSrc !== DSRC0) {
+      const lfMutPath = MUT.write('src/server/browser-login-fill.js', red1LfSrc, 'r10-1-lf');
+      const mLf = require(lfMutPath);
+      const mD = MUT.load(
+        'src/server/browser-dialogs.js',
+        red1DSrc.replace("require('./browser-login-fill.js')", `require(${JSON.stringify(lfMutPath)})`),
+        'r10-1-stale-fence-flag-keeps-ended-secrets'
+      );
+      mut1 = await runMajorR10(mD, mLf);
+    }
+    ok(Boolean(mut1 && mut1.roadA.remAfterVaultLock === true && mut1.roadB.oldCtxReleasedOnSupersede === false && real1.roadA.remAfterVaultLock === false),
+      'r10 MAJOR RED control [r10-1-stale-fence-flag-keeps-ended-secrets]: r9 stale fenceLive flag leaves remembered secrets in memory after Road A reconnect + vault lock and retains superseded context on Road B',
+      { mutRoadARem: mut1 && mut1.roadA.remAfterVaultLock, mutRoadBOldRel: mut1 && mut1.roadB.oldCtxReleasedOnSupersede });
+  }
+
+  // ── (2) MINOR 1: OTP-only fence with vault locked lifts cleanly with 0 notices after wiping its code (while persisted unhydrated OTP fence still fails closed) ──
+  {
+    const runMinor1R10 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb10_2-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw10-2-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const totp = VT.create({ dataDir: dbDir, vault: eng, log: () => {} });
+      const logins = L.create({ vault: eng, grants: () => grants, totpCode: (n, o) => totp.codeForLogin(n, o) });
+      const PW10_2 = pwOf('r10-min1');
+      const seed = T.base32Encode(crypto.randomBytes(20));
+      totp.addEntry({ seed, name: 'shop10' }, { who: 'test' });
+      logins.addOwn({ origin: SITE, username: 'otp@example.test', password: PW10_2, totpName: 'shop10' });
+      grants.set('browser-login', `${SITE}#otp@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'otp', type: 'text', name: 'otp', autocomplete: 'one-time-code' },
+      ]);
+      const tid = 'TAB_R10_2', sid = 'SID_R10_2';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r10_2`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/2fa`, title: '2FA' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/2fa`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/2fa`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/2fa` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = { fences: [], scrubs: [] };
+      const notices = [];
+      const mkWatch = (maxMs) => DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+          onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: maxMs,
+        forYou: { add: (_p, item) => { notices.push(String(item && item.text)); return 'n-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      const w1 = mkWatch(220);
+      let w2 = null;
+      try {
+        await w1.arm(PID, { budgetMs: 3000 });
+        await until(() => w1._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w1.fillLogin(TGT, FILL({ user: 'otp@example.test' }));
+        const otpTyped = dom.inputs[0].val.length;
+        eng.lock();
+        await until(() => w1.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 800);
+        const v1 = w1.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+        const otpLeftInPage = dom.inputs[0].val.length;
+        const noticesLive = notices.slice();
+
+        // Persisted OTP fence after restart while locked (stepOtpValues lost across restart) => still fails closed!
+        await eng.unlock(vpw);
+        await w1.fillLogin(TGT, FILL({ user: 'otp@example.test' }));
+        w1.shutdown();
+        if (persisted.fences && persisted.fences[0]) persisted.fences[0].at = Date.now() - 600000;
+        eng.lock();
+        w2 = mkWatch(220);
+        await w2.arm(PID, { budgetMs: 3000 });
+        await until(() => w2._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await sleep(60);
+        const v2 = w2.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+        return {
+          step: rf.step,
+          otpTyped,
+          otpLeftInPage,
+          fenceLiftedAfterCeiling: v1.ok === true,
+          noticesLive,
+          restartedLockedHeld: v2.ok === false && /the vault was locked while the fill was live/.test(String(v2.error || '')),
+        };
+      } finally {
+        try { w1.shutdown(); } catch {}
+        try { w2?.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+      }
+    };
+
+    const real2 = await runMinor1R10(D);
+    ok(real2.step === 'totp' && real2.otpTyped === 6 && real2.otpLeftInPage === 0 &&
+      real2.fenceLiftedAfterCeiling === true && real2.noticesLive.length === 0 &&
+      real2.restartedLockedHeld === true,
+      'r10 MINOR 1 (OTP-only fence while vault locked): live OTP fence wipes 6-digit code and lifts cleanly with 0 false notices when vault locks, while restarted unhydrated OTP fence still fails closed',
+      real2);
+
+    const red2Src = DSRC0.replace(
+      '      ...(Array.isArray(stepOtpValues) ? stepOtpValues : []),\n',
+      ''
+    );
+    const Dm10_2 = red2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red2Src, 'r10-2-otp-only-locked-false-hold') : null;
+    const mut2 = Dm10_2 ? await runMinor1R10(Dm10_2) : null;
+    ok(Boolean(Dm10_2 && mut2 && mut2.fenceLiftedAfterCeiling === false && mut2.noticesLive.length > 0 && real2.fenceLiftedAfterCeiling === true),
+      'r10 MINOR 1 RED control [r10-2-otp-only-locked-false-hold]: r9 fenceLacksSecretsWhileLocked ignoring stepOtpValues holds wiped OTP-only fence as vault locked and files a false notice',
+      { mutLifted: mut2 && mut2.fenceLiftedAfterCeiling, mutNotices: mut2 && mut2.noticesLive });
+  }
+
+  // ── (3) MINOR 2: pending-body observation is never evicted by chatter while waiting for getRequestPostData ──
+  {
+    const runMinor2R10 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb10_3-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw10-3-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW10_3 = pwOf('r10-min2');
+      logins.addOwn({ origin: SITE, username: 'pend@example.test', password: PW10_3 });
+      grants.set('browser-login', `${SITE}#pend@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const tid = 'TAB_R10_3', sid = 'SID_R10_3';
+      let wsRef = null;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r10_3`;
+      wss.on('connection', (ws) => {
+        wsRef = ws;
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          if (m.method === 'Network.getRequestPostData') {
+            const rid = String(m.params && m.params.requestId);
+            if (rid === 'login-big-xorigin') {
+              setTimeout(() => {
+                send({ id: m.id, sessionId: sid, error: { code: -32000, message: 'No data found for resource with given identifier' } });
+              }, 45);
+              return;
+            }
+            setTimeout(() => {
+              rep({ postData: `chunk=${rid}` });
+            }, 10);
+            return;
+          }
+          if (m.method === 'Input.dispatchKeyEvent' && m.params && m.params.type === 'keyUp') {
+            rep({});
+            // 1 unreadable cross-origin login POST + 130 non-inline readable chunk POSTs
+            send({ sessionId: sid, method: 'Network.requestWillBeSent', params: {
+              requestId: 'login-big-xorigin', frameId: tid, type: 'Fetch',
+              request: { method: 'POST', url: 'https://auth.partner.test/session', hasPostData: true },
+            } });
+            for (let i = 0; i < 130; i++) {
+              const crid = `chunk-${i}`;
+              send({ sessionId: sid, method: 'Network.requestWillBeSent', params: {
+                requestId: crid, frameId: tid, type: 'Fetch',
+                request: { method: 'POST', url: `https://edge.cdn.test/chunk/${i}`, hasPostData: true },
+              } });
+              send({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: crid, frameId: tid, type: 'Fetch', response: { status: 204 } } });
+              send({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: crid } });
+            }
+            return;
+          }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      const w3 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w3.arm(PID, { budgetMs: 3000 });
+        await until(() => w3._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w3.fillLogin(TGT, FILL({ user: 'pend@example.test', submit: true }));
+        const an = w3._watches.get(PID)?.targets.get(tid)?.authNet;
+        const loginObsKept = (an?.observed || []).some((o) => o && o.unreadableBody === true);
+        void wsRef;
+        return { submitted: rf.submitted, reason: rf.submittedReason || null, loginObsKept, observedLen: an?.observed?.length ?? -1 };
+      } finally {
+        w3.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+      }
+    };
+
+    const real3 = await runMinor2R10(D);
+    ok(real3.submitted === 'unknown' && real3.reason === 'the request body was too large to read' &&
+      real3.loginObsKept === true && real3.observedLen <= 256,
+      'r10 MINOR 2 (pending-body observation preserved across chatter flood): cross-origin unreadable login POST + 130 concurrent non-inline chunk POSTs reports submitted:"unknown" ("the request body was too large to read"), never false',
+      real3);
+
+    const red3Src = DSRC0
+      .replace('if (o.pendingPostData) { pendingCount++; continue; }', 'if (o.pendingPostData) { chatters.push(i); continue; }')
+      .replace('if (isCredObs(o) || o.pendingPostData || keepNonCredIdx.has(i)) {', 'if (isCredObs(o) || keepNonCredIdx.has(i)) {')
+      .replace('if (rq.obs.unreadableBody && Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {', 'if (false) {');
+    const Dm10_3 = red3Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red3Src, 'r10-3-evict-pending-obs-loses-unreadable') : null;
+    const mut3 = Dm10_3 ? await runMinor2R10(Dm10_3) : null;
+    ok(Boolean(Dm10_3 && mut3 && mut3.submitted === false && real3.submitted === 'unknown'),
+      'r10 MINOR 2 RED control [r10-3-evict-pending-obs-loses-unreadable]: r9 eviction of pendingPostData entries loses later unreadableBody fact and answers submitted:false',
+      { mutSub: mut3 && mut3.submitted, realSub: real3.submitted });
+  }
+
+  // ── (4) MINOR 3: unlocking vault DURING an async ceiling wipe clears HOLD_VAULT_LOCKED and retries/lifts cleanly ──
+  {
+    const runMinor3R10 = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb10_4-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw10-4-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW6 = ('w' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'midwipe@example.test', password: PW6 });
+      grants.set('browser-login', `${SITE}#midwipe@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm', type: 'hidden', value: '', defaultValue: '', hidden: true },
+      ]);
+      const tid = 'TAB_R10_4', sid = 'SID_R10_4';
+      let slowWipeEval = false;
+      let wipeEvalStarted = false;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r10_4`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          if (m.method === 'Runtime.evaluate' && slowWipeEval) {
+            wipeEvalStarted = true;
+            slowWipeEval = false;
+            await sleep(150);
+          }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      const notices = [];
+      const w4 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 180,
+        forYou: { add: (_p, item) => { notices.push(String(item && item.text)); return 'n-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w4.arm(PID, { budgetMs: 3000 });
+        await until(() => w4._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await w4.fillLogin(TGT, FILL({ user: 'midwipe@example.test' }));
+        dom.inputs[2].val = PW6;
+        // Simulate unhydrated in-memory secrets + locked vault when ceiling fires, then unlock MID-WIPE!
+        LF.clearAllFilledSecrets?.();
+        eng.lock();
+        slowWipeEval = true;
+        await until(() => wipeEvalStarted, 1000);
+        await sleep(30);
+        await eng.unlock(vpw); // unlock happens WHILE wipeTabTypedInputs is awaiting Runtime.evaluate!
+        await until(() => w4.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 1200);
+        const v = w4.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+        return {
+          fenceLiftedAfterUnlock: v.ok === true,
+          verdictErr: v.error || null,
+          hiddenCleared: dom.inputs[2].val === '',
+          notices,
+        };
+      } finally {
+        w4.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real4 = await runMinor3R10(D);
+    ok(real4.fenceLiftedAfterUnlock === true && real4.hiddenCleared === true && real4.notices.length === 0,
+      'r10 MINOR 3 (unlock during async ceiling wipe): unlocking vault while wipe Runtime.evaluate is in flight clears HOLD_VAULT_LOCKED, re-wipes hidden mirror, and lifts fence with 0 false notices',
+      real4);
+
+    const red4Src = DSRC0
+      .replace('if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;\n', '')
+      .replace('const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));', 'const unlockedMidWipe = false;');
+    const Dm10_4 = red4Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red4Src, 'r10-4-unlock-mid-wipe-stuck-hold') : null;
+    const mut4 = Dm10_4 ? await runMinor3R10(Dm10_4) : null;
+    ok(Boolean(Dm10_4 && mut4 && mut4.fenceLiftedAfterUnlock === false && /vault was locked/.test(String(mut4.verdictErr || '')) && real4.fenceLiftedAfterUnlock === true),
+      'r10 MINOR 3 RED control [r10-4-unlock-mid-wipe-stuck-hold]: r9 setting HOLD_VAULT_LOCKED only after await leaves fence permanently held with no timer when unlocked mid-wipe',
+      { mutLifted: mut4 && mut4.fenceLiftedAfterUnlock, mutErr: mut4 && mut4.verdictErr });
+  }
+
+  // ── (5) MINOR 4: saved HOLD_VAULT_LOCKED re-evaluates vault state at re-arm (unlocked => no locked hold, retry timer armed); HOLD_TOO_MUCH_TEXT survives with retry ──
+  {
+    const runMinor4R10 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb10_5-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw10-5-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW10_5 = pwOf('r10-min4');
+      const lid = `web-login:${SITE}#savedhold@example.test`;
+      logins.addOwn({ origin: SITE, username: 'savedhold@example.test', password: PW10_5 });
+      grants.set('browser-login', `${SITE}#savedhold@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username', value: 'savedhold@example.test' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password', value: PW10_5 },
+      ]);
+      const tid = 'TAB_R10_5', sid = 'SID_R10_5';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r10_5`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      // Fence saved < liveFillMaxMs ago carrying stale HOLD_VAULT_LOCKED while vault is UNLOCKED at re-arm
+      let persisted = {
+        fences: [{
+          targetId: tid, urlAtFill: `${SITE}/login`, origin: SITE, loginId: lid,
+          browserKey: KEY, mode: 'login', at: Date.now() - 80,
+          secretFieldIds: [], userFieldIds: [], holdReason: BL.HOLD_VAULT_LOCKED,
+        }],
+        scrubs: [{ name: lid, at: Date.now() - 80 }],
+      };
+      const w5 = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+          onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 300,
+        forYou: { add: () => null, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w5.arm(PID, { budgetMs: 3000 });
+        await until(() => w5._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await sleep(30);
+        const e5 = w5._watches.get(PID)?.targets.get(tid);
+        const vRearm = w5.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+        const blamesLockedWhileUnlocked = /the vault was locked while the fill was live/.test(String(vRearm.error || ''));
+        const hasTimer = Boolean(e5 && e5.liveFillTimer);
+        await sleep(340);
+        const stillHeldAfterRetry = Boolean(e5 && e5.liveFill);
+        return { heldAfterRearm: vRearm.ok === false, blamesLockedWhileUnlocked, hasTimer, stillHeldAfterRetry };
+      } finally {
+        w5.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+      }
+    };
+
+    const real5 = await runMinor4R10(D);
+    ok(real5.heldAfterRearm === true && real5.blamesLockedWhileUnlocked === false &&
+      real5.hasTimer === true && real5.stillHeldAfterRetry === false,
+      'r10 MINOR 4 (saved HOLD_VAULT_LOCKED re-evaluated at re-arm): persisted HOLD_VAULT_LOCKED re-armed while vault is unlocked clears stale locked reason, arms ceiling timer, and lifts on ceiling wipe',
+      real5);
+
+    const red5Src = DSRC0
+      .replace(
+        "      const savedHold = f.holdReason === BL().HOLD_VAULT_LOCKED\n        ? (isLoginVaultLocked(f.loginId) ? BL().HOLD_VAULT_LOCKED : '')\n        : (f.holdReason || '');",
+        "      const savedHold = f.holdReason || '';"
+      )
+      .replace(
+        'if (!noTimer && lf.holdReason !== BL().HOLD_VAULT_LOCKED) {',
+        'if (!noTimer && !lf.holdReason) {'
+      );
+    const Dm10_5 = red5Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red5Src, 'r10-5-saved-locked-hold-permanent') : null;
+    const mut5 = Dm10_5 ? await runMinor4R10(Dm10_5) : null;
+    ok(Boolean(Dm10_5 && mut5 && mut5.blamesLockedWhileUnlocked === true && mut5.hasTimer === false && mut5.stillHeldAfterRetry === true && real5.stillHeldAfterRetry === false),
+      'r10 MINOR 4 RED control [r10-5-saved-locked-hold-permanent]: r9 rearmLoginFences reusing saved HOLD_VAULT_LOCKED verbatim arms no timer and holds forever even when vault is unlocked',
+      { mutBlames: mut5 && mut5.blamesLockedWhileUnlocked, mutTimer: mut5 && mut5.hasTimer, mutStillHeld: mut5 && mut5.stillHeldAfterRetry });
   }
 }
 

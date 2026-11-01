@@ -149,6 +149,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const scrubNamesByProfile = new Map();  // profileId → [{name, at}] (persisted through keeper's ONE writer until the browser stops)
   const scrubCompiledByProfile = new Map(); // profileId → compiled scrubber fn | null (built ONCE per scrub-set change)
   const activeTabByProfile = new Map();   // profileId → Map(parentKey → {tid, at}) (per-tab CLI fence aim)
+  const knownFenceProfiles = new Set();   // profileIds whose live/persisted login fences this watch instance tracks
   const fenceAuditLines = [];             // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
   let unparseableScrubFrames = 0;         // CDP frames that failed JSON.parse in scrubCdpFrame (scrubbed via fn.spelled and counted)
   let oversizeScrubFrames = 0;            // legacy counter (0 in r7: parsed frames of any size walk)
@@ -244,6 +245,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   // ── the socket ──
   function newWatch(profileId, url) {
+    if (profileId) knownFenceProfiles.add(String(profileId));
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
       pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
@@ -307,6 +309,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     w.open.clear();
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
     for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; } if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); } }
+    try {
+      const persistedTids = new Set();
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        const st = keeper.loginFenceStateOf(w.profileId);
+        for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
+          if (f && f.targetId) persistedTids.add(String(f.targetId));
+        }
+      }
+      LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);
+    } catch { /* */ }
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
     if (why === SOCKET_CLOSED && w.openedAt && now() - w.openedAt >= REARM_HEALTHY * rearmMs) { const r = rearms.get(w.profileId); if (r && !r.t) rearms.delete(w.profileId); } // a healthy socket's close starts the backoff over
@@ -384,7 +396,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!e) return;
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
+        const closedCtxId = e.liveFill ? (e.liveFill.isoContextId || 0) : 0;
         if (e.liveFill) clearLiveFillOnTab(w, e, 'tab-closed', { audit: false });
+        try { LF().clearFilledSecretsForTarget(tid, closedCtxId); } catch { /* */ }
         if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
         dropActiveTarget(w.profileId, tid);
         e.pendingLoginConfirm = null;
@@ -423,7 +437,46 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // sign-in (paused until the user answers in the live view), every other paused Document request continued at once
       case 'Page.fileChooserOpened': return onPrompt(w, m, 'file', p);
       case 'Fetch.authRequired': return onPrompt(w, m, 'http-auth', p);
-      case 'Fetch.requestPaused': { call(w, 'Fetch.continueRequest', { requestId: String(p.requestId || '') }, m.sessionId ? String(m.sessionId) : null); return; }
+      case 'Fetch.requestPaused': {
+        const sid = m.sessionId ? String(m.sessionId) : null;
+        const reqId = String(p.requestId || '');
+        const e = tabOf(w, m);
+        const isRespStage = p.responseStatusCode != null || Boolean(p.responseErrorReason);
+        if (isRespStage && e && e.authNet) {
+          const status = Number(p.responseStatusCode) || 0;
+          const netId = p.networkId ? String(p.networkId) : '';
+          const reqUrl = String((p.request && p.request.url) || '');
+          const an = e.authNet;
+          const rq = netId ? an.reqs.get(netId) : null;
+          const reqMethod = String((p.request && p.request.method) || (rq && rq.method) || '').toUpperCase();
+          const isCand = isCredCandidateReq(rq) || ['POST', 'PUT', 'PATCH'].includes(reqMethod) || Boolean(extractAuthHeader(p.request && p.request.headers));
+          const clHdr = Array.isArray(p.responseHeaders) ? p.responseHeaders.find((h) => h && String(h.name || '').toLowerCase() === 'content-length') : null;
+          const clBytes = clHdr ? Number(clHdr.value) : NaN;
+          const withinCap = !Number.isFinite(clBytes) || clBytes <= 1048576;
+          if (isCand && withinCap && !p.responseErrorReason && status >= 200 && status < 300 && status !== 204 && status !== 205) {
+            call(w, 'Fetch.getResponseBody', { requestId: reqId }, sid, 800)
+              .then((rb) => {
+                if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
+                  const approxBytes = rb.result.base64Encoded ? Math.floor((rb.result.body.length * 3) / 4) : Buffer.byteLength(rb.result.body, 'utf8');
+                  if (approxBytes <= 1048576) {
+                    if (!an.preReadBodies) an.preReadBodies = new Map();
+                    const entry = { body: rb.result.body, base64Encoded: !!rb.result.base64Encoded, method: reqMethod, url: reqUrl, at: now() };
+                    const key = netId || `u:${++w.seq}`;
+                    an.preReadBodies.delete(key);
+                    an.preReadBodies.set(key, entry);
+                    while (an.preReadBodies.size > 32) an.preReadBodies.delete(an.preReadBodies.keys().next().value);
+                  }
+                }
+              }, () => {})
+              .finally(() => {
+                call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+              });
+            return;
+          }
+        }
+        call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+        return;
+      }
       case 'Page.javascriptDialogOpening': return onOpen(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       case 'Page.javascriptDialogClosed': return onClosed(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
@@ -1930,10 +1983,29 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ≤ 5 ms and the page runs on; the CLI's own `upload` (DOM.setFileInputFiles on ITS session) still lands while we intercept.
   // Fetch pauses DOCUMENT requests only (a sub-resource never waits on this socket; on '*' a 100-image page cost +12 ms); a
   // sign-in on a sub-resource is not caught (named in the kb table).
+  function syncLoginFetchIntercept(w, e) {
+    if (!w || !e || !e.sid || w.kernel || w.mode === 'person') return Promise.resolve();
+    const watchOrigin = loginWatchOriginOf(e) || '';
+    if (e.fetchInterceptArmed && (e.fetchWatchOrigin || '') === watchOrigin) return Promise.resolve();
+    e.fetchInterceptArmed = true;
+    e.fetchWatchOrigin = watchOrigin;
+    const patterns = [{ urlPattern: '*', resourceType: 'Document', requestStage: 'Request' }];
+    if (watchOrigin) {
+      patterns.push(
+        { urlPattern: `${watchOrigin}/*`, resourceType: 'Fetch', requestStage: 'Response' },
+        { urlPattern: `${watchOrigin}/*`, resourceType: 'XHR', requestStage: 'Response' },
+      );
+    }
+    return call(w, 'Fetch.enable', { patterns, handleAuthRequests: true }, e.sid, 800).then((r) => {
+      if (r && r.error) say('auth:' + r.error.message, `${w.profileId}: HTTP sign-ins were not hooked — ${r.error.message}`);
+    }, () => {});
+  }
   function armPrompts(w, e) {
     if (!e.sid) return;
     call(w, 'Page.setInterceptFileChooserDialog', { enabled: true }, e.sid).then((r) => { if (r && r.error) say('fc:' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });
-    call(w, 'Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Document', requestStage: 'Request' }], handleAuthRequests: true }, e.sid).then((r) => { if (r && r.error) say('auth:' + r.error.message, `${w.profileId}: HTTP sign-ins were not hooked — ${r.error.message}`); });
+    e.fetchInterceptArmed = false;
+    e.fetchWatchOrigin = '';
+    syncLoginFetchIntercept(w, e);
     const geo = [...w.grants.values()].find((g) => g.kind === 'geolocation' && g.setting === 'granted'); if (geo) call(w, 'Emulation.setGeolocationOverride', geo.position || {}, e.sid); // lane browser-ui-prompts-r2
   }
   function onPrompt(w, m, type, p) {
@@ -2619,6 +2691,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   function syncPersistedLoginFences(profileId) {
     const pid = String(profileId || '');
+    if (pid) knownFenceProfiles.add(pid);
     if (!pid || !keeper || typeof keeper.saveLoginFenceState !== 'function') return;
     const w = watches.get(pid);
     let fences = [];
@@ -2809,16 +2882,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return Boolean(r && r.code === 'vault_locked');
     } catch { return false; }
   }
-  function fenceLacksSecretsWhileLocked(targetId, contextId, credSigs, svs, loginId) {
-    if (LF().hasFilledSecretsForTarget?.(targetId, contextId || 0)) return false;
+  function fenceLacksSecretsWhileLocked(targetId, contextId, credSigs, svs, loginId, stepOtpValues = null) {
     if (!isLoginVaultLocked(loginId)) return false;
+    const availVals = [
+      ...(Array.isArray(svs) ? svs : []),
+      ...(Array.isArray(stepOtpValues) ? stepOtpValues : []),
+      ...(LF().valuesForTarget?.(targetId, contextId || 0) || []),
+    ];
     const sigs = Array.isArray(credSigs) ? credSigs : [];
-    const vals = Array.isArray(svs) ? svs : [];
     if (sigs.length > 0) {
-      const valSigs = vals.map(credSigOf).filter(Boolean);
+      const valSigs = availVals.map(credSigOf).filter(Boolean);
       return !sigs.every((sg) => sg && valSigs.some((vs) => vs.len === sg.len && vs.sha256 === sg.sha256));
     }
-    return vals.length === 0;
+    return availVals.length === 0;
   }
   function fileCeilingWipeNotice(w, e, lf) {
     if (!lf || lf.ceilingNoticed || !forYou || typeof forYou.add !== 'function') return;
@@ -2847,7 +2923,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!e || !e.liveFill) return;
     const lf = e.liveFill;
     e.liveFill = null;
-    try { LF().setTargetFenceLive?.(e.targetId, false, w.profileId, lf.isoContextId || 0); } catch { /* */ }
+    try { LF().clearFilledSecretsForTarget(e.targetId, lf.isoContextId || 0); } catch { /* */ }
     if (Array.isArray(lf.stepOtpValues)) lf.stepOtpValues.length = 0;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
     if (lf.ceilingNoticeId) { try { forYou?.resolve?.(lf.ceilingNoticeId); } catch { /* */ } }
@@ -2859,6 +2935,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // back/forward cache and `Network.getRequestPostData` still retain the filled credential after navigation.
     if (persist) syncPersistedLoginFences(w.profileId);
     wakeSubmitWaiters(e);
+    syncLoginFetchIntercept(w, e);
   }
   function expireLiveFillCeiling(w, e) {
     const lf = e && e.liveFill;
@@ -2873,7 +2950,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (w.state === 'open' && !loginSinks(w) && e.sid) {
           const fids = [...(lf.secretFieldIds || []), ...(lf.userFieldIds || [])];
           const svs = scrubValuesForLogin(w.profileId, lf.loginId);
-          const lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId);
+          const lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId, lf.stepOtpValues);
+          if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;
           const wr = await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn), targetId: e.targetId, contextId: lf.isoContextId || 0, fieldIds: fids, secretValues: svs, wholeOnlyValues: lf.stepOtpValues || null, maxScanPositions: wipeMaxScanPositions }).catch(() => null);
           wipedEmpty = !lockedDrop && Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
           wipeTooMuch = Boolean(wr && wr.tooMuchText);
@@ -2882,8 +2960,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       } finally {
         if (e.liveFill === lf) {
           lf.wiping = false;
+          const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));
+          lf.recheckAfterWipe = false;
           if (wipedEmpty) {
             clearLiveFillOnTab(w, e, 'ceiling', { audit: true, persist: true });
+          } else if (unlockedMidWipe) {
+            if (lf.holdReason === BL().HOLD_VAULT_LOCKED) lf.holdReason = '';
+            syncPersistedLoginFences(w.profileId);
+            expireLiveFillCeiling(w, e);
           } else if (wipeTooMuch) {
             lf.holdReason = BL().HOLD_TOO_MUCH_TEXT;
             fileCeilingWipeNotice(w, e, lf);
@@ -2895,6 +2979,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_VAULT_LOCKED);
             syncPersistedLoginFences(w.profileId);
           } else {
+            if (lf.holdReason === BL().HOLD_VAULT_LOCKED && !isLoginVaultLocked(lf.loginId)) lf.holdReason = '';
             fileCeilingWipeNotice(w, e, lf);
             const retryMs = Math.max(1000, Math.min(liveFillMaxMs, 30000));
             const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, retryMs);
@@ -2905,7 +2990,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
     })();
   }
-  function armLiveFillOnTab(w, e, info, { persist = true, recordHistory = true, noTimer = false } = {}) {
+  function armLiveFillOnTab(w, e, info, { persist = true, recordHistory = true, noTimer = false, retryMs = null } = {}) {
     if (!w || !e) return;
     if (e.liveFill && Array.isArray(e.liveFill.stepOtpValues)) e.liveFill.stepOtpValues.length = 0;
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
@@ -2926,11 +3011,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       stepOtpValues: Array.isArray(info.stepOtpValues) ? [...info.stepOtpValues] : [],
       holdReason: info.holdReason ? String(info.holdReason) : '',
       wiping: false,
+      recheckAfterWipe: false,
       ceilingNoticed: false,
       ceilingNoticeId: null,
     };
     e.liveFill = lf;
-    try { LF().setTargetFenceLive?.(e.targetId, true, w.profileId, lf.isoContextId || 0); } catch { /* */ }
     if (recordHistory && lf.urlAtFill && lf.origin) {
       if (!e.fillHistory) e.fillHistory = new Map();
       const uKey = stripHash(lf.urlAtFill);
@@ -2947,13 +3032,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       });
       while (e.fillHistory.size > 8) e.fillHistory.delete(e.fillHistory.keys().next().value);
     }
-    if (!noTimer && !lf.holdReason) {
-      const left = Math.max(0, liveFillMaxMs - (now() - lf.at));
+    if (!noTimer && lf.holdReason !== BL().HOLD_VAULT_LOCKED) {
+      const left = retryMs != null ? Math.max(0, Number(retryMs) || 0) : Math.max(0, liveFillMaxMs - (now() - lf.at));
       const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
       if (timer.unref) timer.unref();
       e.liveFillTimer = timer;
     }
     if (persist) syncPersistedLoginFences(w.profileId);
+    syncLoginFetchIntercept(w, e);
   }
   function credSigOf(sv) {
     if (typeof sv !== 'string' || !sv) return null;
@@ -2980,8 +3066,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (!f || !f.targetId || !f.origin) continue;
       const tid = resolveKnownTargetId(w, f.targetId);
       const e = tid ? w.targets.get(tid) : null;
-      if (!e) { recordFenceAudit(w.profileId, f, 'target-gone'); continue; }
-      if (stripHash(e.url) !== stripHash(f.urlAtFill)) { recordFenceAudit(w.profileId, f, 'url-changed'); continue; }
+      if (!e) {
+        try { LF().clearFilledSecretsForTarget(f.targetId); if (tid) LF().clearFilledSecretsForTarget(tid); } catch { /* */ }
+        recordFenceAudit(w.profileId, f, 'target-gone');
+        continue;
+      }
+      if (stripHash(e.url) !== stripHash(f.urlAtFill)) {
+        try { LF().clearFilledSecretsForTarget(f.targetId); LF().clearFilledSecretsForTarget(e.targetId); } catch { /* */ }
+        recordFenceAudit(w.profileId, f, 'url-changed');
+        continue;
+      }
       let hydratedSigs = [];
       let hydratedVals = [];
       if (f.loginId && logins && typeof logins.scrubSecretsOf === 'function') {
@@ -2992,6 +3086,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           hydratedSigs = hydratedVals.map(credSigOf).filter(Boolean);
         } catch { hydratedSigs = []; hydratedVals = []; }
       }
+      const savedHold = f.holdReason === BL().HOLD_VAULT_LOCKED
+        ? (isLoginVaultLocked(f.loginId) ? BL().HOLD_VAULT_LOCKED : '')
+        : (f.holdReason || '');
       if (now() - (Number(f.at) || 0) >= liveFillMaxMs) {
         let wipedEmpty = false;
         let wipeTooMuch = false;
@@ -3005,19 +3102,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           wipeTooMuch = Boolean(wr && wr.tooMuchText);
         }
         if (wipedEmpty) {
+          try { LF().clearFilledSecretsForTarget(f.targetId); LF().clearFilledSecretsForTarget(e.targetId); } catch { /* */ }
           recordFenceAudit(w.profileId, f, 'ceiling');
           continue;
         }
         await ensureLoginNet(w, e);
-        const nextHold = wipeTooMuch ? BL().HOLD_TOO_MUCH_TEXT : (lockedDrop ? BL().HOLD_VAULT_LOCKED : (f.holdReason || ''));
-        armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, holdReason: nextHold, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false, noTimer: Boolean(wipeTooMuch || lockedDrop) });
+        const nextHold = wipeTooMuch ? BL().HOLD_TOO_MUCH_TEXT : (lockedDrop ? BL().HOLD_VAULT_LOCKED : savedHold);
+        const retryDelay = Math.max(1000, Math.min(liveFillMaxMs, 30000));
+        armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, holdReason: nextHold, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false, noTimer: Boolean(wipeTooMuch || lockedDrop), retryMs: retryDelay });
         if (lockedDrop && !wipeTooMuch) recordFenceAudit(w.profileId, e.liveFill, 'ceiling-hold:' + BL().HOLD_VAULT_LOCKED);
         fileCeilingWipeNotice(w, e, e.liveFill);
         if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
         continue;
       }
       await ensureLoginNet(w, e);
-      armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
+      armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, holdReason: savedHold, navSeq0: e.navSeq || 0, netMark: (e.authNet && e.authNet.seq) || 0 }, { persist: false });
       if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
     }
     syncPersistedLoginFences(w.profileId);
@@ -3040,6 +3139,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     for (const f of active) recordFenceAudit(pid, f, 'browser-stop');
     try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ }
+    knownFenceProfiles.delete(String(pid));
     scrubByProfile.delete(pid);
     scrubNamesByProfile.delete(pid);
     scrubCompiledByProfile.delete(pid);
@@ -3081,7 +3181,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           const pf = wantTid && wantTid !== '__UNKNOWN__'
             ? fences.find((f) => String(f.targetId || '').toUpperCase() === wantTid || (wantTid.length >= 4 && String(f.targetId || '').toUpperCase().startsWith(wantTid)))
             : fences.find((f) => !f.browserKey || !bk || parentKey(f.browserKey) === bk);
-          if (pf) return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: pf.origin, holdReason: pf.holdReason || '' });
+          if (pf) {
+            const pfHold = pf.holdReason === BL().HOLD_VAULT_LOCKED && !isLoginVaultLocked(pf.loginId) ? '' : (pf.holdReason || '');
+            return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: pf.origin, holdReason: pfHold });
+          }
         }
       }
       return { ok: true };
@@ -3236,7 +3339,6 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   const MAX_OBSERVED_TOTAL = 256;
   const MAX_UNREADABLE_OBS = 64;
-  const MAX_PENDING_OBS = 64;
   const MAX_CHATTER_OBS = 64;
   const UNREADABLE_MAX_AGE_MS = 10 * 60 * 1000;
   function isCredObs(o) {
@@ -3255,17 +3357,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     an.nonCredSinceTrim = 0;
     an.lastTrimAt = tNow;
     let credCount = 0;
+    let pendingCount = 0;
     const unreads = [];
-    const pendings = [];
     const chatters = [];
     for (let i = 0; i < len; i++) {
       const o = an.observed[i];
       if (!o) continue;
       if (isCredObs(o)) { credCount++; continue; }
+      if (o.pendingPostData) { pendingCount++; continue; }
       const expired = o.at && (tNow - o.at > UNREADABLE_MAX_AGE_MS);
       if (expired) continue;
       if (isUnreadableObs(o)) unreads.push(i);
-      else if (o.pendingPostData) pendings.push(i);
       else chatters.push(i);
     }
     an.credObsCount = credCount;
@@ -3275,21 +3377,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       for (let j = start; j < arr.length; j++) keepNonCredIdx.add(arr[j]);
     };
     addTail(unreads, MAX_UNREADABLE_OBS);
-    addTail(pendings, MAX_PENDING_OBS);
     addTail(chatters, MAX_CHATTER_OBS);
-    const nonCredBudget = Math.max(0, MAX_OBSERVED_TOTAL - credCount);
+    const nonCredBudget = Math.max(0, MAX_OBSERVED_TOTAL - credCount - pendingCount);
     if (keepNonCredIdx.size > nonCredBudget) {
       const sorted = [...keepNonCredIdx].sort((a, b) => a - b);
       const dropExtra = sorted.length - nonCredBudget;
       for (let j = 0; j < dropExtra; j++) keepNonCredIdx.delete(sorted[j]);
     }
-    if (credCount + keepNonCredIdx.size === len) return;
+    if (credCount + pendingCount + keepNonCredIdx.size === len) return;
     const next = [];
     let droppedNow = 0;
     for (let i = 0; i < len; i++) {
       const o = an.observed[i];
       if (!o) continue;
-      if (isCredObs(o) || keepNonCredIdx.has(i)) {
+      if (isCredObs(o) || o.pendingPostData || keepNonCredIdx.has(i)) {
         next.push(o);
       } else {
         droppedNow++;
@@ -3451,7 +3552,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function confirmPendingLogin(w, e, pc, outcome) {
     if (!pc || pc.confirmed || !logins) return;
     pc.confirmed = true;
-    if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+    if (e.pendingLoginConfirm === pc) {
+      e.pendingLoginConfirm = null;
+      syncLoginFetchIntercept(w, e);
+    }
     try {
       const sr = logins.submitted({
         origin: pc.origin, usernameHint: pc.user,
@@ -3623,6 +3727,24 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function isCredCandidateReq(rq) {
     return Boolean(rq && rq.type !== 'Ping' && (['POST', 'PUT', 'PATCH'].includes(rq.method) || rq.hasAuthHeader || rq.carriesCred || rq.carriesPending || rq.carriesOtherCred));
   }
+  function takePreReadBody(an, rid, rq) {
+    if (!an || !an.preReadBodies || !an.preReadBodies.size) return null;
+    if (rid && an.preReadBodies.has(rid)) {
+      const hit = an.preReadBodies.get(rid);
+      an.preReadBodies.delete(rid);
+      return hit;
+    }
+    if (rq && rq.url) {
+      const tNow = now();
+      for (const [k, v] of an.preReadBodies.entries()) {
+        if (v && tNow - (v.at || 0) <= 5000 && v.url === rq.url && (!rq.method || v.method === rq.method)) {
+          an.preReadBodies.delete(k);
+          return v;
+        }
+      }
+    }
+    return null;
+  }
   function onLoginNetEvent(w, method, e, p) {
     const an = e.authNet;
     if (!an) return;
@@ -3723,6 +3845,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
                   rq.obs.pendingPostData = false;
                   rq.postDataP = null;
                   if (an.finishing) an.finishing.delete(pData);
+                  if (rq.obs.unreadableBody && Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {
+                    an.observed.push(rq.obs);
+                  }
                   an.nonCredSinceTrim = (an.nonCredSinceTrim || 0) + 1;
                   trimObserved(w, an);
                   wakeSubmitWaiters(e);
@@ -3793,6 +3918,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
                   rq.obs.pendingPostData = false;
                   rq.postDataP = null;
                   if (an.finishing) an.finishing.delete(pData);
+                  if (rq.obs.sameOrigin && rq.obs.beaconUnreadable && Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {
+                    an.observed.push(rq.obs);
+                  }
                   an.nonCredSinceTrim = (an.nonCredSinceTrim || 0) + 1;
                   trimObserved(w, an);
                   wakeSubmitWaiters(e);
@@ -3881,6 +4009,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (!rq.carriesCred && !rq.carriesPending) return;
           let bodyRead = rq.status === 204 || rq.status === 205;
           let errBody = false;
+          const preRb = !bodyRead ? takePreReadBody(an, rid, rq) : null;
+          if (preRb && typeof preRb.body === 'string') {
+            bodyRead = true;
+            const rawBody = preRb.base64Encoded ? Buffer.from(preRb.body, 'base64').toString('utf8') : preRb.body;
+            errBody = isJsonErrorBody(rawBody);
+          }
           if (!bodyRead && w.state === 'open' && e.sid) {
             const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
             if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
@@ -3892,6 +4026,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (!bodyRead) {
             if (rq.obs) {
               rq.obs.respUnreadable = true;
+              if (Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {
+                an.observed.push(rq.obs);
+              }
               an.nonCredSinceTrim = (an.nonCredSinceTrim || 0) + 1;
               trimObserved(w, an);
             }
@@ -3969,6 +4106,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const sameUrl = stripHash(navUrl) === stripHash(pc.urlAtFill);
       if (agentNavInFlight(w.profileId)) {
         e.pendingLoginConfirm = null;
+        syncLoginFetchIntercept(w, e);
       } else if (!sameUrl) {
         const markRef = pc.subMark != null ? pc.subMark : pc.netMark;
         const settleJudge = () => {
@@ -3982,7 +4120,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             recordObservedCredOrigins(pc.name, an, markRef);
             const pWhy = answerLargeReasonFromNet(an, markRef) || pendingReasonFromNet(an, markRef);
             if (pWhy && logins && typeof logins.notePendingReason === 'function') logins.notePendingReason(pc.name, pWhy);
-            if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+            if (e.pendingLoginConfirm === pc) {
+              e.pendingLoginConfirm = null;
+              syncLoginFetchIntercept(w, e);
+            }
           }
           wakeSubmitWaiters(e);
         };
@@ -3999,7 +4140,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           let done = false;
           const finish = () => { if (done) return; done = true; clearTimeout(tm); if (e.submitWaiters) e.submitWaiters.delete(onW); resolve(); };
           const onW = () => { if (check()) finish(); };
-          const tm = setTimeout(finish, 150);
+          const tm = setTimeout(finish, 1500);
           if (tm.unref) tm.unref();
           e.submitWaiters.add(onW);
         });
@@ -4134,6 +4275,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, subMark: netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
         e.pendingLoginConfirm = pc;
       }
+      syncLoginFetchIntercept(w, e);
       const cf = await LF().fillVaultLogin({
         call: (m, p) => call(w, m, p, e.sid),
         browserCall: (m, p) => call(w, m, p, null, 2000),
@@ -4156,13 +4298,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       });
       if (cf && cf.contextId && e.liveFill) {
         e.liveFill.isoContextId = cf.contextId;
-        try { LF().setTargetFenceLive?.(e.targetId, true, pid, cf.contextId); } catch { /* */ }
       }
       if (!cf || !cf.ok) {
         kerr = (cf && cf.code) || 'eval_failed';
         kerrMsg = cf && cf.error ? String(cf.error) : null;
         if (!cf || !cf.attemptedInsert) clearLiveFillOnTab(w, e, 'fill-aborted', { audit: false });
-        if (e.pendingLoginConfirm === pc) e.pendingLoginConfirm = null;
+        if (e.pendingLoginConfirm === pc) {
+          e.pendingLoginConfirm = null;
+          syncLoginFetchIntercept(w, e);
+        }
       } else {
         chromeStep = cf.step || plan.form.step || null;
         sawChromeSub = !!cf.submitted;
@@ -4225,7 +4369,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function loginFenceStats() { return { unparseableScrubFrames, oversizeScrubFrames, cutScrubFrames, droppedObserved, fenceAuditLines: [...fenceAuditLines] }; }
 
   // the keeper's own lease seam: a browser that starts again or stops starts a fresh watch and a fresh verdict
-  let unsubLease = null, unsubVaultOpen = null, unsubVaultLock = null;
+  let unsubLease = null, unsubVaultOpen = null, unsubVaultLock = null, unsubFenceRefSource = null, disposed = false;
   if (keeper && typeof keeper.onLease === 'function') {
     unsubLease = keeper.onLease((ev) => {
       if (!ev || !ev.profileId) return null;
@@ -4244,11 +4388,45 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return null;
     });
   }
+  function collectLiveFenceRefs({ rememberedProfileIds = null } = {}) {
+    const liveTargetIds = new Set();
+    const liveContextIds = new Set();
+    if (disposed) return { liveTargetIds, liveContextIds };
+    const openPids = new Set();
+    for (const [pid, w] of watches) {
+      if (!w || w.state !== 'open') continue;
+      openPids.add(pid);
+      for (const e of w.targets.values()) {
+        if (!e || !e.liveFill) continue;
+        if (e.targetId) liveTargetIds.add(String(e.targetId));
+        const cid = Number(e.liveFill.isoContextId) || 0;
+        if (cid > 0) liveContextIds.add(cid);
+      }
+    }
+    if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+      const pids = new Set(knownFenceProfiles);
+      if (rememberedProfileIds && typeof rememberedProfileIds[Symbol.iterator] === 'function') {
+        for (const k of rememberedProfileIds) if (k) pids.add(String(k));
+      }
+      for (const pid of pids) {
+        if (openPids.has(pid)) continue;
+        let st = null;
+        try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
+          if (f && f.targetId) liveTargetIds.add(String(f.targetId));
+        }
+      }
+    }
+    return { liveTargetIds, liveContextIds };
+  }
   if (logins && typeof logins.onVaultOpen === 'function') {
     unsubVaultOpen = logins.onVaultOpen(() => {
+      if (disposed) return;
       for (const pid of scrubNamesByProfile.keys()) hydratePersistedScrubs(pid);
+      const openPids = new Set();
       for (const [pid, w] of watches) {
         if (!w || w.state !== 'open') continue;
+        openPids.add(pid);
         let synced = false;
         for (const e of w.targets.values()) {
           if (!e || !e.liveFill || e.liveFill.holdReason !== BL().HOLD_VAULT_LOCKED) continue;
@@ -4267,22 +4445,38 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             } catch { /* */ }
           }
           synced = true;
-          if (now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs) expireLiveFillCeiling(w, e);
+          if (e.liveFill.wiping) {
+            e.liveFill.recheckAfterWipe = true;
+          } else if (now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs) {
+            expireLiveFillCeiling(w, e);
+          } else if (!e.liveFillTimer) {
+            const left = Math.max(0, liveFillMaxMs - (now() - (Number(e.liveFill.at) || 0)));
+            const lf = e.liveFill;
+            const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
+            if (timer.unref) timer.unref();
+            e.liveFillTimer = timer;
+          }
         }
         if (synced) syncPersistedLoginFences(pid);
+      }
+      if (keeper && typeof keeper.loginFenceStateOf === 'function' && typeof keeper.saveLoginFenceState === 'function') {
+        for (const pid of knownFenceProfiles) {
+          if (openPids.has(pid)) continue;
+          let st = null;
+          try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+          if (!st || !Array.isArray(st.fences) || !st.fences.some((f) => f && f.holdReason === BL().HOLD_VAULT_LOCKED)) continue;
+          const nextFences = st.fences.map((f) => (f && f.holdReason === BL().HOLD_VAULT_LOCKED ? { ...f, holdReason: '' } : f));
+          try { keeper.saveLoginFenceState(pid, { fences: nextFences, scrubs: st.scrubs || [] }); } catch { /* */ }
+        }
       }
     });
   }
   if (logins && typeof logins.onVaultLock === 'function') {
+    try { unsubFenceRefSource = LF().registerFenceRefSource?.(collectLiveFenceRefs) || null; } catch { unsubFenceRefSource = null; }
     unsubVaultLock = logins.onVaultLock(() => {
+      if (disposed) return;
       try {
-        for (const [pid, w] of watches) {
-          if (!w || w.state !== 'open') continue;
-          for (const e of w.targets.values()) {
-            if (e && e.liveFill) LF().setTargetFenceLive?.(e.targetId, true, pid, e.liveFill.isoContextId || 0);
-          }
-        }
-        LF().clearUnfencedFilledSecrets?.();
+        LF().clearUnfencedFilledSecrets();
       } catch { /* */ }
     });
   }
@@ -4301,7 +4495,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
     fillLogin, loginForms, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, // lane browser-login + vault-login-chrome r3..r5
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
-    shutdown: () => { for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } try { unsubVaultOpen?.(); } catch { /* */ } try { unsubVaultLock?.(); } catch { /* */ } }, _watches: watches };
+    shutdown: () => { disposed = true; for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubFenceRefSource?.(); } catch { /* */ } try { unsubLease?.(); } catch { /* */ } try { unsubVaultOpen?.(); } catch { /* */ } try { unsubVaultLock?.(); } catch { /* */ } }, _watches: watches };
 }
 
 /** lane passkey-browse-yourself r4 — THE HOLDER ROWS the watch judges WHO holds a browser on (its mode, a ceremony's owner): the

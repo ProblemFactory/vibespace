@@ -188,6 +188,7 @@ async function world(tag, { Dmod = D } = {}) {
   const dialogs = Dmod.create({
     keeper: kk,
     log: { warn: (l) => logs.push(String(l)), log: (l) => logs.push(String(l)) },
+    forYou: { add: (pid, it) => { fy.push({ pid, it }); return 'fy-' + fy.length; }, resolve() { } },
     leaseCountOf: (pid) => new Set(((kk.list().leases) || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => l.browserKey)).size,
     holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-' + tag }],
     logins,
@@ -688,7 +689,7 @@ try {
       ok(rRej.code === 0 && gotRej && gotRej.body.match === true && recRej && recRej.pending === 'register' && recRej.submittedAt === null,
         'HTTP 400 rejected signup: both new-password fields matched at submit, and entry stays pending (not confirmed)', { pending: recRej && recRej.pending, submittedAt: recRej && recRej.submittedAt });
 
-      // 7b. Unsubmitted signup stays pending past 250 ms (no blind 60 ms timer), then confirms when clicked and accepted
+      // 7b. Unsubmitted signup stays pending past 250 ms (no blind 60 ms timer), then confirms when clicked and accepted (×3 consecutive signups — r10 flake gate)
       pages.clear();
       await run(['open', `${SITE}/signup-check`]);
       const rWait = await run(['login', SITE, '--new-user', 'wait@example.test', '--generate']);
@@ -696,11 +697,25 @@ try {
       const recBeforeClick = readLoginRec('wait@example.test');
       ok(rWait.code === 0 && recBeforeClick && recBeforeClick.pending === 'register' && recBeforeClick.submittedAt === null,
         'signup without --submit stays pending after 250 ms (no unconditional 60 ms confirmation timer)', { pending: recBeforeClick && recBeforeClick.pending });
-      const rClick = await run(['click', 'button[type=submit]']);
-      const confirmedNav = await until(() => { const rec = readLoginRec('wait@example.test'); return rec && !rec.pending && rec.submittedAt > 0 ? rec : null; }, 4000);
-      const gotWait = pages.received().find((x) => x.path === '/done/signup-check' && x.body.email === 'wait@example.test');
-      ok(rClick.code === 0 && !!confirmedNav && gotWait && gotWait.body.password === confirmedNav.password,
-        'submitting via `click` to 200 + /welcome navigation confirms the pending vault-minted login', { confirmed: !!confirmedNav });
+      const clickRepResults = [];
+      for (const [idx, waitUser] of ['wait@example.test', 'wait-rep2@example.test', 'wait-rep3@example.test'].entries()) {
+        if (idx > 0) {
+          await run(['open', `${SITE}/signup-check`]);
+          const rf = await run(['login', SITE, '--new-user', waitUser, '--generate']);
+          if (rf.code !== 0) { clickRepResults.push({ waitUser, fillCode: rf.code, confirmed: false }); continue; }
+        }
+        const rClick = await run(['click', 'button[type=submit]']);
+        const confirmedNav = await until(() => { const rec = readLoginRec(waitUser); return rec && !rec.pending && rec.submittedAt > 0 ? rec : null; }, 4000);
+        const gotWait = pages.received().find((x) => x.path === '/done/signup-check' && x.body.email === waitUser);
+        clickRepResults.push({
+          waitUser,
+          clickCode: rClick.code,
+          confirmed: Boolean(confirmedNav),
+          pwMatched: Boolean(confirmedNav && gotWait && gotWait.body.password === confirmedNav.password),
+        });
+      }
+      ok(clickRepResults.length === 3 && clickRepResults.every((x) => x.clickCode === 0 && x.confirmed && x.pwMatched),
+        'submitting via `click` to 200 + /welcome navigation confirms the pending vault-minted login (×3)', { reps: clickRepResults });
 
       // 7c. SPA signup (?spa=1: 200 POST + form unmount in-DOM without URL navigation) confirms automatically
       pages.clear();
@@ -1251,6 +1266,118 @@ try {
         ok(rLcR9.code === 0 && jLcR9?.data?.submitted === true && Boolean(gotLcR9) && gotLcR9.body.password === lcPwR9,
           'r9 MINOR 3 (real Chrome): input handler lowercasing mixed-case email on each keystroke fills & submits cleanly',
           { code: rLcR9.code, sub: jLcR9?.data, gotUser: gotLcR9 && gotLcR9.body.username });
+      }
+
+      // 7u. r10 MAJOR + MINOR 1 (real Chrome)
+      {
+        const LF = require('../src/server/browser-login-fill.js');
+
+        // r10 MAJOR: Road B (superseded isolated-world context on the same tab across document reload) releases old context immediately, and Road A (socket drop down() + url-changed re-arm + vault lock) leaves 0 remembered secrets
+        await run(['open', `${SITE}/one?r10=1`]);
+        const rMaj10_1 = await run(['login', SITE, '--user', USER]);
+        const findOneTarget = () => {
+          const wt = w.dialogs._watches.get(w.prof.id);
+          if (!wt) return null;
+          for (const e of wt.targets.values()) {
+            if (e && e.liveFill && String(e.url || '').includes('/one')) return e;
+          }
+          return null;
+        };
+        const tEntry1 = findOneTarget();
+        const oneTid = tEntry1 ? tEntry1.targetId : '';
+        const ctx1 = Number(tEntry1?.liveFill?.isoContextId) || 0;
+        const ctx1Remembered = ctx1 > 0 && LF.hasRememberedContext(ctx1) === true;
+
+        // Drop watch socket (down()), navigate same tab to /one?r10=2 so Chrome mints a new isolated-world context on the next login
+        w.dialogs._watches.get(w.prof.id)?.ws?.close();
+        await until(() => !w.dialogs._watches.has(w.prof.id), 1500);
+        const rawMaj10 = await openCdpRpc(await upstreamWsUrl());
+        try {
+          if (oneTid) {
+            const att = await rawMaj10.call('Target.attachToTarget', { targetId: oneTid, flatten: true });
+            const sid = att.msg.result && att.msg.result.sessionId;
+            await rawMaj10.call('Runtime.evaluate', { expression: `location.href = ${JSON.stringify(`${SITE}/one?r10=2`)}` }, sid);
+            await sleep(180);
+            await rawMaj10.call('Target.detachFromTarget', { sessionId: sid });
+          }
+        } finally {
+          await rawMaj10.close();
+        }
+        const rMaj10_2 = await run(['login', SITE, '--user', USER]);
+        const ctx2 = Number(findOneTarget()?.liveFill?.isoContextId) || 0;
+        const oldCtxReleased = ctx1Remembered && ctx2 > ctx1 && LF.hasRememberedContext(ctx1) === false && LF.hasRememberedContext(ctx2) === true;
+
+        // Road A: drop watch socket (down()), navigate tab away to /plain while unwatched, re-arm (url-changed), then lock vault -> 0 remembered secrets
+        w.dialogs._watches.get(w.prof.id)?.ws?.close();
+        await until(() => !w.dialogs._watches.has(w.prof.id), 1500);
+        const rawMaj10b = await openCdpRpc(await upstreamWsUrl());
+        try {
+          if (oneTid) {
+            const att = await rawMaj10b.call('Target.attachToTarget', { targetId: oneTid, flatten: true });
+            const sid = att.msg.result && att.msg.result.sessionId;
+            await rawMaj10b.call('Runtime.evaluate', { expression: `location.href = ${JSON.stringify(`${SITE}/plain`)}` }, sid);
+            await sleep(180);
+            await rawMaj10b.call('Target.detachFromTarget', { sessionId: sid });
+          }
+        } finally {
+          await rawMaj10b.close();
+        }
+        await w.dialogs.arm(w.prof.id, { budgetMs: 3000 });
+        w.eng.lock();
+        const remAfterLock = LF.hasRememberedSecrets(w.prof.id) || LF.hasRememberedContext(ctx2);
+        await w.eng.unlock(w.VPW);
+        ok(rMaj10_1.code === 0 && rMaj10_2.code === 0 && oldCtxReleased && remAfterLock === false,
+          'r10 MAJOR (real Chrome): second login on same tab releases superseded isolated-world context immediately, and socket-drop + url-changed + vault lock clears all remembered secrets',
+          { c1: rMaj10_1.code, c2: rMaj10_2.code, ctx1, ctx2, oldCtxReleased, remAfterLock });
+
+        // r10 MINOR 1: OTP-only fence on /totp with vault locked wipes #totpPin at ceiling and lifts with 0 false notices
+        const otpSeedR10 = crypto.randomBytes(20);
+        const otpSeedB32R10 = T.base32Encode(otpSeedR10);
+        const otpPwR10 = pwOf('r10-otp-chrome');
+        trackedSecrets.push(otpSeedB32R10, otpPwR10);
+        w.totp.addEntry({ seed: otpSeedB32R10, name: 'totp-r10' }, { who: 'owner' });
+        w.logins.addOwn({ origin: SITE, username: 'otpr10@example.test', password: otpPwR10, totpName: 'totp-r10' });
+        w.logins.grant(`web-login:${SITE}#otpr10@example.test`, 'this-account', 'session:conv-1');
+
+        const fyBeforeOtp10 = w.fy.length;
+        await run(['open', `${SITE}/totp`]);
+        const rOtpFill10 = await run(['login', SITE, '--user', 'otpr10@example.test']);
+        const snapHeld10 = await run(['snapshot']);
+        const otpFenceHeldBefore = snapHeld10.code === 1 && /\[login_fill_live\]/.test(snapHeld10.err);
+        let otpDomLenBefore = -1, otpFenceLifted = false, otpDomLenAfter = -1, snapAfter10 = null;
+        try {
+          const rawOtp = await openCdpRpc(await upstreamWsUrl());
+          try {
+            const tl = await rawOtp.call('Target.getTargets');
+            const tg = ((tl.msg.result && tl.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/totp'));
+            const sid = tg ? (await rawOtp.call('Target.attachToTarget', { targetId: tg.targetId, flatten: true })).msg?.result?.sessionId : null;
+            if (sid) {
+              const ev0 = await rawOtp.call('Runtime.evaluate', { expression: 'document.getElementById("totpPin").value.length', returnByValue: true }, sid);
+              otpDomLenBefore = ev0.msg?.result?.result?.value ?? -1;
+            }
+            const wtOtp = w.dialogs._watches.get(w.prof.id);
+            for (const e of (wtOtp ? wtOtp.targets.values() : [])) {
+              if (e && e.liveFill && String(e.url || '').includes('/totp')) e.liveFill.at = Date.now() - (10 * 60 * 1000 + 1000);
+            }
+            w.eng.lock();
+            otpFenceLifted = Boolean(await until(() => w.dialogs.liveFillVerdictFor({ profileId: w.prof.id, browserKey: w.KEY }, { verb: 'snapshot' }).ok === true, 2000));
+            if (sid) {
+              const ev1 = await rawOtp.call('Runtime.evaluate', { expression: 'document.getElementById("totpPin").value.length', returnByValue: true }, sid);
+              otpDomLenAfter = ev1.msg?.result?.result?.value ?? -1;
+              await rawOtp.call('Target.detachFromTarget', { sessionId: sid });
+            }
+          } finally {
+            await rawOtp.close();
+          }
+          snapAfter10 = await run(['snapshot']);
+        } finally {
+          await w.eng.unlock(w.VPW);
+          await run(['open', `${SITE}/plain`]);
+        }
+        const otpNoticesCount = w.fy.length - fyBeforeOtp10;
+        ok(Boolean(rOtpFill10.code === 0 && otpFenceHeldBefore === true && otpDomLenBefore === 6 && otpFenceLifted === true && otpDomLenAfter === 0 && snapAfter10 && snapAfter10.code === 0 && otpNoticesCount === 0),
+          'r10 MINOR 1 (real Chrome): OTP-only fence on /totp with vault locked wipes #totpPin at ceiling and lifts cleanly with 0 false notices',
+          { fillCode: rOtpFill10.code, otpFenceHeldBefore, otpDomLenBefore, otpFenceLifted, otpDomLenAfter, snapAfterCode: snapAfter10 && snapAfter10.code, notices: otpNoticesCount });
       }
     }
 

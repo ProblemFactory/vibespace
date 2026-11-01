@@ -34,8 +34,9 @@ const TOO_MUCH_TEXT_REASON = BL.HOLD_TOO_MUCH_TEXT || 'too much text to check';
 const SUB_LEN_BUCKETS = Object.freeze([[3, 7], [8, 15], [16, 31], [32, 63], [64, 128], [129, 512], [513, 4096]]);
 const WHOLE_LEN_BUCKETS = Object.freeze([[1, 7], [8, 15], [16, 31], [32, 63], [64, 128], [129, 512], [513, 4096]]);
 const lastContextByTarget = new Map(); // targetId|sessionId → {profileId, ctxId}
-const filledSecretsByTarget = new Map(); // targetId|sessionId → {profileId, values: string[]} (bounded to 64 entries)
-const filledSecretsByCtx = new Map();    // contextId → {profileId, values: string[]} (bounded to 64 entries)
+const filledSecretsByTarget = new Map(); // targetId|sessionId → {profileId, ctxId, values: string[]} (bounded to 64 entries)
+const filledSecretsByCtx = new Map();    // contextId → {profileId, targetKey, values: string[]} (bounded to 64 entries)
+const fenceRefSources = new Set();       // () => { liveTargetIds: Set|string[], liveContextIds: Set|number[] }
 
 function bucketOfCharLen(charLen, whole = false) {
   const n = Math.max(1, Number(charLen) || 1);
@@ -71,13 +72,19 @@ function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
     filledSecretsByTarget.set(ctxKey, {
       profileId: pid || (prevEntry && prevEntry.profileId) || '',
       ctxId: normCtx || (prevEntry && prevEntry.ctxId) || 0,
-      fenceLive: true,
-      clearOnFenceEnd: false,
       values: merged,
     });
     while (filledSecretsByTarget.size > 64) filledSecretsByTarget.delete(filledSecretsByTarget.keys().next().value);
   }
   if (normCtx > 0) {
+    if (ctxKey) {
+      for (const [ck, cv] of [...filledSecretsByCtx.entries()]) {
+        if (cv && cv.targetKey === ctxKey && ck !== normCtx) {
+          if (Array.isArray(cv.values)) cv.values.length = 0;
+          filledSecretsByCtx.delete(ck);
+        }
+      }
+    }
     const prevEntry = filledSecretsByCtx.get(normCtx);
     const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
@@ -85,11 +92,41 @@ function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
     filledSecretsByCtx.set(normCtx, {
       profileId: pid || (prevEntry && prevEntry.profileId) || '',
       targetKey: ctxKey || (prevEntry && prevEntry.targetKey) || '',
-      fenceLive: true,
-      clearOnFenceEnd: false,
       values: merged,
     });
     while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
+  }
+}
+
+function supersedeTargetContext(targetId, contextId, profileId = '') {
+  const ctxKey = String(targetId || '');
+  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+  if (!ctxKey || normCtx <= 0) return;
+  const pid = String(profileId || '');
+  const carried = [];
+  for (const [ck, cv] of [...filledSecretsByCtx.entries()]) {
+    if (cv && cv.targetKey === ctxKey && ck !== normCtx) {
+      if (Array.isArray(cv.values)) {
+        for (const s of cv.values) if (typeof s === 'string' && s) carried.push(s);
+        cv.values.length = 0;
+      }
+      filledSecretsByCtx.delete(ck);
+    }
+  }
+  const tv = filledSecretsByTarget.get(ctxKey);
+  if (tv) {
+    tv.ctxId = normCtx;
+    if (pid && !tv.profileId) tv.profileId = pid;
+    const merged = [...new Set([...(Array.isArray(tv.values) ? tv.values : []), ...carried])].slice(-16);
+    if (merged.length) {
+      filledSecretsByCtx.delete(normCtx);
+      filledSecretsByCtx.set(normCtx, {
+        profileId: pid || tv.profileId || '',
+        targetKey: ctxKey,
+        values: merged,
+      });
+      while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
+    }
   }
 }
 
@@ -124,66 +161,94 @@ function clearFilledSecretsForTarget(targetId, contextId = 0) {
   }
 }
 
-function setTargetFenceLive(targetId, live, profileId = '', contextId = 0) {
-  const ctxKey = String(targetId || '');
-  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
-  const tv = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
-  const cv = normCtx > 0 ? filledSecretsByCtx.get(normCtx) : (tv && tv.ctxId ? filledSecretsByCtx.get(tv.ctxId) : null);
-  if (live) {
-    if (tv) {
-      tv.fenceLive = true;
-      if (profileId && !tv.profileId) tv.profileId = String(profileId);
-    }
-    if (cv) {
-      cv.fenceLive = true;
-      if (profileId && !cv.profileId) cv.profileId = String(profileId);
-    }
-    return;
-  }
-  if (tv) tv.fenceLive = false;
-  if (cv) cv.fenceLive = false;
-  if ((tv && tv.clearOnFenceEnd) || (cv && cv.clearOnFenceEnd)) {
-    clearFilledSecretsForTarget(ctxKey, normCtx || (tv && tv.ctxId) || 0);
-  }
+function registerFenceRefSource(fn) {
+  if (typeof fn !== 'function') return () => {};
+  fenceRefSources.add(fn);
+  return () => { fenceRefSources.delete(fn); };
 }
 
-function clearUnfencedFilledSecrets(onlyProfileIds = null) {
-  const pidSet = Array.isArray(onlyProfileIds) || onlyProfileIds instanceof Set
-    ? new Set([...onlyProfileIds].map(String).filter(Boolean))
-    : null;
-  for (const [k, v] of [...filledSecretsByTarget.entries()]) {
-    if (pidSet && v && v.profileId && !pidSet.has(v.profileId)) continue;
-    if (v && v.fenceLive) {
-      v.clearOnFenceEnd = true;
-      continue;
+function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = null } = {}) {
+  const liveTgt = new Set(
+    liveTargetIds instanceof Set ? [...liveTargetIds].map(String).filter(Boolean)
+      : (Array.isArray(liveTargetIds) ? liveTargetIds.map(String).filter(Boolean) : [])
+  );
+  const liveCtx = new Set(
+    liveContextIds instanceof Set ? [...liveContextIds].map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : (Array.isArray(liveContextIds) ? liveContextIds.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [])
+  );
+  const rememberedProfileIds = new Set();
+  for (const v of filledSecretsByTarget.values()) {
+    if (v && v.profileId) rememberedProfileIds.add(String(v.profileId));
+  }
+  for (const src of fenceRefSources) {
+    let refs = null;
+    try { refs = src({ rememberedProfileIds }); } catch { refs = null; }
+    if (!refs || typeof refs !== 'object') continue;
+    const rt = refs.liveTargetIds;
+    const rc = refs.liveContextIds;
+    if (rt && typeof rt[Symbol.iterator] === 'function') {
+      for (const t of rt) if (t) liveTgt.add(String(t));
     }
+    if (rc && typeof rc[Symbol.iterator] === 'function') {
+      for (const c of rc) {
+        const n = Number(c);
+        if (Number.isInteger(n) && n > 0) liveCtx.add(n);
+      }
+    }
+  }
+  for (const [k, v] of [...filledSecretsByTarget.entries()]) {
+    if (liveTgt.has(k)) continue;
     if (v && Array.isArray(v.values)) v.values.length = 0;
     filledSecretsByTarget.delete(k);
     lastContextByTarget.delete(k);
   }
   for (const [k, v] of [...filledSecretsByCtx.entries()]) {
-    if (pidSet && v && v.profileId && !pidSet.has(v.profileId)) continue;
-    if (v && v.fenceLive) {
-      v.clearOnFenceEnd = true;
-      continue;
-    }
+    if (liveCtx.has(k)) continue;
     if (v && Array.isArray(v.values)) v.values.length = 0;
     filledSecretsByCtx.delete(k);
   }
 }
 
-function hasFilledSecretsForTarget(targetId = null, contextId = 0) {
-  const ctxKey = String(targetId || '');
-  if (ctxKey) {
-    const tv = filledSecretsByTarget.get(ctxKey);
-    if (tv && Array.isArray(tv.values) && tv.values.length > 0) return true;
-  }
+function valuesForTarget(targetId = null, contextId = 0, sessionId = undefined) {
+  const ctxKey = String(targetId || sessionId || '');
+  const byCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? filledSecretsByCtx.get(Number(contextId)) : null;
+  const byTgt = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
+  return [...new Set([
+    ...((byCtx && Array.isArray(byCtx.values)) ? byCtx.values : []),
+    ...((byTgt && Array.isArray(byTgt.values)) ? byTgt.values : []),
+  ])];
+}
+
+function hasRememberedContext(contextId = 0) {
   const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
-  if (normCtx > 0) {
-    const cv = filledSecretsByCtx.get(normCtx);
-    if (cv && Array.isArray(cv.values) && cv.values.length > 0) return true;
+  if (normCtx <= 0) return false;
+  const cv = filledSecretsByCtx.get(normCtx);
+  return Boolean(cv && Array.isArray(cv.values) && cv.values.length > 0);
+}
+
+function clearFilledSecretsForProfileExcept(profileId, keepTargetIds = null) {
+  const pid = String(profileId || '');
+  if (!pid) return;
+  const keepTgt = keepTargetIds instanceof Set
+    ? keepTargetIds
+    : new Set(Array.isArray(keepTargetIds) ? keepTargetIds.map(String).filter(Boolean) : []);
+  for (const [k, v] of [...filledSecretsByTarget.entries()]) {
+    if (v && v.profileId === pid && !keepTgt.has(k)) {
+      if (Array.isArray(v.values)) v.values.length = 0;
+      filledSecretsByTarget.delete(k);
+    }
   }
-  return false;
+  for (const [k, v] of [...filledSecretsByCtx.entries()]) {
+    if (!v || !v.profileId || v.profileId === pid) {
+      if (v && Array.isArray(v.values)) v.values.length = 0;
+      filledSecretsByCtx.delete(k);
+    }
+  }
+  for (const [k, v] of [...lastContextByTarget.entries()]) {
+    if (!v || typeof v !== 'object' || !v.profileId || v.profileId === pid) {
+      lastContextByTarget.delete(k);
+    }
+  }
 }
 
 function clearFilledSecretsForProfile(profileId) {
@@ -1407,8 +1472,8 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
     }
   }
   const verifiedEmpty = totalRem === 0 && !anyTooMuch;
-  if (verifiedEmpty) {
-    setTargetFenceLive(ctxKey, false, '', savedCtx);
+  if (verifiedEmpty && targets.length > 0) {
+    clearFilledSecretsForTarget(ctxKey, savedCtx);
   }
   return {
     ok: true,
@@ -1486,6 +1551,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
     lastContextByTarget.delete(ctxKey);
     lastContextByTarget.set(ctxKey, { profileId: pidStr, ctxId });
     while (lastContextByTarget.size > 64) lastContextByTarget.delete(lastContextByTarget.keys().next().value);
+    supersedeTargetContext(ctxKey, ctxId, pidStr);
   }
   // Remember ONLY password / new-password values (never username or short-lived 6-digit OTPs, which drop after their step).
   rememberFilledSecrets(ctxKey, ctxId, entries.filter(([fid]) => plannedRoles[fid] === 'password' || plannedRoles[fid] === 'new-password').map(([, v]) => v), pidStr);
@@ -1591,10 +1657,12 @@ module.exports = {
   buildFilledTargets,
   filledTargetSrc,
   targetsForTab,
+  valuesForTarget,
   clearFilledSecretsForTarget,
-  setTargetFenceLive,
+  clearFilledSecretsForProfileExcept,
+  registerFenceRefSource,
   clearUnfencedFilledSecrets,
-  hasFilledSecretsForTarget,
+  hasRememberedContext,
   clearFilledSecretsForProfile,
   clearAllFilledSecrets,
   hasRememberedSecrets,
