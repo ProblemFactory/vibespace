@@ -338,6 +338,8 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const d = dirOf('repair');
   const CEE = { kind: 'conversation', key: 'cid-cee' };
   const TOK9 = `ghp_${'B2c3D4e5F6'.repeat(4).slice(0, 36)}`;
+  const PW10 = ['hunter', '2-plain-words-', 'not-a-token'].join(''), TOK11 = `ghp_${'C3d4E5f6G7'.repeat(4).slice(0, 36)}`;
+  const DEEP11 = Array.from({ length: 9 }).reduce((inner, _, i) => ({ [`l${9 - i}`]: inner }), { t: TOK11 });
   const RAW = [
     { door: 'exit', resource: 'h1:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'x' }] },
     { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
@@ -350,6 +352,9 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     { door: 'exit', resource: 'h8:use', to: [G1], except: { list: [CEE], mode: 'newer', note: `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}` } },
     // r7: a LIST entry from a newer release with a token-shaped field (built here, never a literal)
     { door: 'exit', resource: 'h9:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'v', token: TOK9 }] },
+    // r8: a non-list `except` with a secret BY NAME (no token shape), and a list entry with a token NINE levels down
+    { door: 'exit', resource: 'h10:use', to: [G1], except: { list: [CEE], password: PW10, mode: 'newer' } },
+    { door: 'exit', resource: 'h11:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', n: DEEP11 }] },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
@@ -388,6 +393,16 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const d9 = ((lastFor('h9:use') || {}).repaired || {}).dropped || [];
   const audit9 = fs.readFileSync(st.auditFile, 'utf-8');
   ok(s9.ok && d9.length === 1 && /agent-from-newer-release/.test(d9[0]) && /"token"/.test(d9[0]) && !d9[0].includes(TOK9.slice(0, 12)) && !audit9.includes(TOK9.slice(0, 12)) && d9[0].length <= 120, 'a repair that drops a LIST entry with a token-shaped field names the entry with the token MASKED — nowhere in the audit file in clear (e9fbc8a2c: written in clear to grants-audit.jsonl)', d9);
+  // r8 (主开发's acceptance of r7, MINOR): r7's per-string masker wrote a secret BY NAME in clear (redactSecrets' name rules need the
+  // field next to its value) and skipped anything below depth 8 — the whole text is masked, a readable entry named by its key
+  const s10 = st.set('exit', 'h10:use', { to: [G1], except: [] });
+  const d10 = ((lastFor('h10:use') || {}).repaired || {}).dropped || [];
+  const s11 = st.set('exit', 'h11:use', { to: [{ kind: 'everyone' }], except: [CEE] });
+  const d11 = ((lastFor('h11:use') || {}).repaired || {}).dropped || [];
+  const audit11 = fs.readFileSync(st.auditFile, 'utf-8');
+  ok(s10.ok && d10.length === 1 && /^\(not a list\) /.test(d10[0]) && /"password"/.test(d10[0]) && !d10[0].includes(PW10) && !audit11.includes(PW10), 'a non-list `except` with a secret BY NAME («password», no token shape): masked — nowhere in the audit file in clear (d0b61c909: written in clear)', d10);
+  ok(s11.ok && d11.length === 1 && /x-newer/.test(d11[0]) && !audit11.includes(TOK11.slice(0, 12)), 'a dropped list entry with a token NINE levels down: masked — nowhere in the audit file (d0b61c909: below depth 8 written as-is)', d11);
+  ok(((lastFor('h1:use') || {}).repaired || {}).dropped.includes('conversation:cid-cee'), 'a dropped entry this release can read is named by its principal key («conversation:cid-cee») — a conversation\'s key is never masked as a secret', (lastFor('h1:use') || {}).repaired);
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');

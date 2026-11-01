@@ -1062,7 +1062,8 @@ const R7 = (() => {
     };
   };
   /** The effective state the person sees: the picks, every exception drawn (chips and own kept lines, by principal), the reach. */
-  const stateOf = (d) => J([d.picked(), [...new Set([...d.chips(), ...d.own().map((o) => o.key)].map(pkOfKey))].sort(), d.reach()]);
+  const words = (s) => String(s || '').split(' · ').filter(Boolean).sort();
+  const stateOf = (d) => J([d.picked(), [...new Set([...d.chips(), ...d.own().map((o) => o.key)].map(pkOfKey))].sort(), d.reach(), words(d.only()), d.own().map((o) => o.text).sort(), words(d.said())]);   // r8: the words too — the same members with another per-grant plan read differently
   /** A key's world on the ONE store, its routes the automation engine's writes (addGrants / dropRows / setExcept) over it. */
   const world = (KID) => {
     const DOOR = 'automation-key-use';
@@ -1096,7 +1097,20 @@ const R7 = (() => {
     };
     return { st, grants, writes, key, add, routes, rowOf, DOOR };
   };
-  return { GROUPS, MEMBERS, NAMES, data, SUBJECTS, byName, pkOfKey, principalOf, groupishS, open, stateOf, world };
+  const rngOf = (seed) => { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+  const CONVS = Object.keys(MEMBERS).map((id) => `session:${id}`);
+  const covers = (k, m) => k === 'everyone:*' || (String(k).startsWith('group:') ? MEMBERS[m].includes(String(k).slice('group:'.length)) : k === `session:${m}`);
+  const seedWorld = (W, rnd) => {
+    const n = 1 + Math.floor(rnd() * 3);
+    const subs = SUBJECTS.slice().sort(() => rnd() - 0.5).slice(0, n);
+    if (rnd() < 0.4 && !subs.includes('everyone:*')) subs.unshift('everyone:*');   // the shapes the rounds found: All agents beside a group
+    for (const s of subs) {
+      const pool = s === 'everyone:*' ? [...CONVS, 'group:g-team', 'group:g-two', 'group:g-ops'] : s.startsWith('group:') ? CONVS.filter((c) => covers(s, c.slice('session:'.length))) : [];
+      const ex = pool.filter(() => rnd() < 0.35);
+      W.add(s, ex.map(principalOf));
+    }
+  };
+  return { GROUPS, MEMBERS, NAMES, data, SUBJECTS, byName, pkOfKey, principalOf, groupishS, open, stateOf, world, rngOf, CONVS, covers, seedWorld };
 })();
 
 console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant\'s 除了: it lives until ITS ✕, whatever happens to its subject\'s pick; a sequence that cancels out is no change');
@@ -1105,14 +1119,15 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
   const reqs = (P) => P.posts.filter((q) => q.url.startsWith('/api/automation')).map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
   const seed = (rows) => { const W = world('ak-00000007'); for (const [s, ex] of rows) W.add(s, ex.map(principalOf)); return W; };
   const exOf = (W, s) => { const g = W.grants.find((x) => x.subject === s); return g ? ((W.rowOf(g.id) || {}).except || []).map(pkOf).sort() : null; };
-  // (a) All agents (除了 Team) + Team's own grant: Team un-picked ⇒ the line STAYS; the Save deletes Team's grant only
+  // (a) All agents (除了 Team) + Team's own grant: Team un-picked ⇒ the exception STAYS (r8: drawn as a chip now that Team is not
+  // picked — one set, a view); the Save deletes Team's grant only
   { const W = seed([['everyone:*', ['group:g-team']], ['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
     const t = d.row('group:g-team'); if (t) t.click();
-    const own = d.own().map((o) => o.text), said = d.said(), dirty = d.dirty();
+    const own = d.own().map((o) => o.text), chips = d.chips(), said = d.said(), dirty = d.dirty();
     await d.save();
     const r = reqs(d.P);
-    ok(!!t && J(own) === J(['Team is left out of All agents']) && said === 'Cee will no longer be excluded' && dirty && r.length === 1 && /^DELETE \/grants\/ag-p\d+ /.test(r[0]) && J(exOf(W, 'everyone:*')) === J(['group:g-team']) && !W.grants.some((g) => g.subject === 'group:g-team'), '(a) All agents (除了 Team) + Team, Team UN-PICKED (to revoke Team\'s own grant): «Team is left out of All agents ✕» stays (only Team\'s OWN 除了 Cee is said to go, with its grant); the Save posts ONLY the DELETE of Team\'s grant — All agents still leaves Team out (e9fbc8a2c: the line died, removeExcept [group:g-team] — Team got the key through All agents)', { own, said, dirty, reqs: r, all: exOf(W, 'everyone:*') }); }
+    ok(!!t && J(own) === J([]) && chips.includes('group:g-team') && said === 'Cee will no longer be excluded' && dirty && r.length === 1 && /^DELETE \/grants\/ag-p\d+ /.test(r[0]) && J(exOf(W, 'everyone:*')) === J(['group:g-team']) && !W.grants.some((g) => g.subject === 'group:g-team'), '(a) All agents (除了 Team) + Team, Team UN-PICKED (to revoke Team\'s own grant): All agents\' «除了 Team» stays — the kept line is drawn as the chip «除了：Team» (r8: one set, the line a view; only Team\'s OWN 除了 Cee is said to go, with its grant); the Save posts ONLY the DELETE of Team\'s grant — All agents still leaves Team out (e9fbc8a2c: the line died, removeExcept [group:g-team] — Team got the key through All agents)', { own, chips, said, dirty, reqs: r, all: exOf(W, 'everyone:*') }); }
   // (b) …and picked again: back to what was opened — not dirty, nothing posted
   { const W = seed([['everyone:*', ['group:g-team']], ['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
@@ -1120,24 +1135,24 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
     const own = d.own().map((o) => o.text), dirty = d.dirty();
     await d.save();
     ok(!!t && J(own) === J(['Team is left out of All agents']) && !dirty && !reqs(d.P).length, '(b) Team un-picked and picked again: the line is there, the dialog is NOT dirty, the Save posts nothing', { own, dirty, reqs: reqs(d.P) }); }
-  // (c) the line's ✕ still works with its subject un-picked: said, and the Save names it
+  // (c) the exception's ✕ (its chip, Team un-picked): said, and the Save names it
   { const W = seed([['everyone:*', ['group:g-team']], ['group:g-team', []]]);
     const d = open(W.key(), W.routes);
     const t = d.row('group:g-team'); if (t) t.click();
-    const x = d.ownX('group:g-team'); if (x) x.click();
+    const x = d.chipX('group:g-team'); if (x) x.click();
     const said = d.said();
     await d.save();
     const all = d.P.posts.find((q) => /\/except$/.test(q.url));
-    ok(!!x && said === 'Team will no longer be excluded' && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && J(exOf(W, 'everyone:*')) === J([]) && d.P.posts.some((q) => q.method === 'DELETE'), '(c) …its ✕ (Team un-picked) ⇒ said «Team will no longer be excluded», the Save takes Team out of All agents\' 除了 BY NAME and deletes Team\'s grant', { said, reqs: reqs(d.P) }); }
-  // (d) Team (除了 Cee): Cee picked ITSELF ⇒ its own line; Cee un-picked ⇒ the line stays, not dirty, nothing posted
+    ok(!!x && said === 'Team will no longer be excluded' && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && J(exOf(W, 'everyone:*')) === J([]) && d.P.posts.some((q) => q.method === 'DELETE'), '(c) …its ✕ (Team un-picked: the chip «除了：Team») ⇒ said «Team will no longer be excluded», the Save takes Team out of All agents\' 除了 BY NAME and deletes Team\'s grant', { said, reqs: reqs(d.P) }); }
+  // (d) Team (除了 Cee): Cee picked ITSELF ⇒ its own line; Cee un-picked ⇒ the chip again (r8: a view), not dirty, nothing posted
   { const W = seed([['group:g-team', ['session:cid-cee']]]);
     const d = open(W.key(), W.routes);
     const c = d.row('session:cid-cee'); if (c) c.click();
     const own1 = d.own().map((o) => o.text), d1 = d.dirty();
     if (c) c.click();
-    const own2 = d.own().map((o) => o.text), d2 = d.dirty(), said = d.said();
+    const own2 = d.own().map((o) => o.text), chips2 = d.chips(), d2 = d.dirty(), said = d.said();
     await d.save();
-    ok(!!c && J(own1) === J(['Cee is left out of Team']) && d1 && J(own2) === J(['Cee is left out of Team']) && !d2 && !said && !reqs(d.P).length && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']), '(d) Team (除了 Cee): Cee picked itself ⇒ «Cee is left out of Team ✕»; Cee un-picked ⇒ the line stays, NOT dirty, the Save posts nothing — Team still leaves Cee out (e9fbc8a2c: dirty, removeExcept [conversation:cid-cee])', { own1, own2, d1, d2, said, reqs: reqs(d.P) }); }
+    ok(!!c && J(own1) === J(['Cee is left out of Team']) && d1 && J(own2) === J([]) && J(chips2) === J(['session:cid-cee']) && !d2 && !said && !reqs(d.P).length && J(exOf(W, 'group:g-team')) === J(['conversation:cid-cee']), '(d) Team (除了 Cee): Cee picked itself ⇒ «Cee is left out of Team ✕»; Cee un-picked ⇒ «除了：Cee» again (the same member, drawn as a chip), NOT dirty, the Save posts nothing — Team still leaves Cee out (e9fbc8a2c: dirty, removeExcept [conversation:cid-cee])', { own1, own2, chips2, d1, d2, said, reqs: reqs(d.P) }); }
   // (e) Team (除了 Cee) + Two (除了 Dee): Team un-picked and picked again ⇒ «Cee» back at its OLD place, not dirty
   { const W = seed([['group:g-team', ['session:cid-cee']], ['group:g-two', ['session:cid-dee']]]);
     const d = open(W.key(), W.routes);
@@ -1169,10 +1184,7 @@ console.log('⑳ r7 MAJOR: automation key — the own kept line is ANOTHER grant
 // ═══ ㉑ THE PROPERTY LEG — a seeded random walk; the invariants after EVERY step and at every Save ═══
 console.log('㉑ r7 THE PROPERTY LEG: a seeded walk over the REAL automation-key dialog + picker on the REAL store (3 seeds × 200 steps) — what the person did is what is saved');
 {
-  const { MEMBERS, SUBJECTS, byName, pkOfKey, principalOf, groupishS, open, stateOf, world } = R7;
-  const rngOf = (seed) => { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
-  const CONVS = Object.keys(MEMBERS).map((id) => `session:${id}`);
-  const covers = (k, m) => k === 'everyone:*' || (String(k).startsWith('group:') ? MEMBERS[m].includes(String(k).slice('group:'.length)) : k === `session:${m}`);
+  const { MEMBERS, SUBJECTS, byName, pkOfKey, groupishS, open, stateOf, world, rngOf, covers, seedWorld } = R7;
   const splitLines = (s) => String(s || '').split(' · ').filter(Boolean);
   /** What the dialog's WORDS promise, per member: granted by a picked subject that does not leave it out (a chip leaves it out of
    *  every picked group / All agents grant unless its «… only» line names fewer; an own kept line, of the grants it names). */
@@ -1183,21 +1195,11 @@ console.log('㉑ r7 THE PROPERTY LEG: a seeded walk over the REAL automation-key
     const E = (S) => [...pre.chips.filter((k) => !onlyOf.has(k) || onlyOf.get(k).includes(S)), ...ownOf.filter((o) => o.grants.includes(S)).map((o) => o.key)];
     return (m) => pre.picked.some((S) => covers(S, m) && !(groupishS(S) && E(S).some((x) => covers(x, m))));
   };
-  const seedWorld = (W, R, rnd) => {
-    const n = 1 + Math.floor(rnd() * 3);
-    const subs = SUBJECTS.slice().sort(() => rnd() - 0.5).slice(0, n);
-    if (rnd() < 0.4 && !subs.includes('everyone:*')) subs.unshift('everyone:*');   // the shapes the rounds found: All agents beside a group
-    for (const s of subs) {
-      const pool = s === 'everyone:*' ? [...CONVS, 'group:g-team', 'group:g-two', 'group:g-ops'] : s.startsWith('group:') ? CONVS.filter((c) => covers(s, c.slice('session:'.length))) : [];
-      const ex = pool.filter(() => rnd() < 0.35);
-      W.add(s, ex.map(principalOf));
-    }
-  };
   const walk = async (seed, STEPS) => {
     const rnd = rngOf(seed), R = (a) => a[Math.floor(rnd() * a.length)];
     const log = [];
     let W = world('ak-0000000p'), d = null, S0 = '', pressed = null, saves = 0;
-    seedWorld(W, R, rnd);
+    seedWorld(W, rnd);
     const reopen = () => { d = open(W.key(), W.routes); S0 = stateOf(d); pressed = new Set(); log.push(`open ${J(W.key().grants.map((g) => [g.subject, g.except.map(pkOf)]))}`); };
     reopen();
     const red = (inv, detail) => ({ seed, inv, detail, steps: log.slice() });
@@ -1237,7 +1239,8 @@ console.log('㉑ r7 THE PROPERTY LEG: a seeded walk over the REAL automation-key
         if (pre.st === S0 && posts.length) return red('(a) the state the dialog opened with is saved as nothing', { posts: posts.map((q) => q.url) });
         const refused = writes.find((w) => !w.ok);
         if (refused) return red('(d) the ONE writer accepts every write the Save makes (no except_unnamed)', refused);
-        for (const q of posts) if (/\/keys\/[^/]+\/grants$/.test(q.url) && J((q.body.except || []).map(pkOf).sort()) !== J(pre.chips.map(pkOfKey).sort())) return red('(c) a grant the Save adds carries exactly the chips shown', { body: q.body, chips: pre.chips });
+        const setPk = [...new Set([...pre.chips, ...pre.own.map((o) => o.key)].map(pkOfKey))];   // r8: (c) THE SET — chips and kept lines alike (chips-only was the hole)
+        for (const q of posts) if (/\/keys\/[^/]+\/grants$/.test(q.url)) for (const s of (q.body.subjects || []).filter(groupishS)) if (J((q.body.except || []).map(pkOf).sort()) !== J(setPk.filter((pk) => pk !== pkOfKey(s)).sort())) return red('(c) a grant the Save adds carries exactly the SET drawn (chips and kept lines; never its own subject)', { body: q.body, chips: pre.chips, own: pre.own });
         for (const [id, was] of pre.rows) {   // (b) a kept grant loses only what the person ✕-ed
           const now = W.rowOf(id); if (!now) continue;
           const lost = was.filter((pk) => !(now.except || []).map(pkOf).includes(pk) && !pressed.has(pk));
@@ -1252,7 +1255,7 @@ console.log('㉑ r7 THE PROPERTY LEG: a seeded walk over the REAL automation-key
           if (!!got.ok !== want(m)) return red('(d) every member\'s verdict after the Save is the one the dialog\'s words promised', { member: m, promised: want(m), got: got.ok ? 'ok' : got.code, rows: rows.map((x) => [x.to.map(pkOf), (x.except || []).map(pkOf)]) });
         }
         const seen = pre.st;
-        if (rnd() < 0.2 || !W.grants.length) { W = world('ak-0000000p'); seedWorld(W, R, rnd); reopen(); continue; }
+        if (rnd() < 0.2 || !W.grants.length) { W = world('ak-0000000p'); seedWorld(W, rnd); reopen(); continue; }
         reopen();
         if (J(JSON.parse(stateOf(d)).slice(0, 2)) !== J(JSON.parse(seen).slice(0, 2))) return red('(d) opened again, the dialog shows what it saved', { saved: seen, reopened: stateOf(d) });
         continue;
@@ -1273,6 +1276,107 @@ console.log('㉑ r7 THE PROPERTY LEG: a seeded walk over the REAL automation-key
     const v = await walk(s, 200);
     if (v.inv) console.log(`    RED seed ${v.seed} — ${v.inv}\n    ${J(v.detail)}\n    steps (${v.steps.length}):\n      ${v.steps.join('\n      ')}`);   // the whole list, never cut
     ok(!v.inv, `seed ${s}: 200 steps (picks, pick+unpick pairs, chip adds / ✕ / add+✕ pairs, own-line ✕, reach) — (a) cancel-out ⇒ not dirty, nothing posted; (b) no exception lifted without its ✕ from a grant still picked; (c) an added grant carries the chips shown; (d) the writer accepts every write and every member's verdict is the one the words promised${v.inv ? '' : ` — ${v.saves} Saves`}`, v.inv ? `seed ${v.seed}: ${v.inv} — the step list above` : undefined);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r8 — 主开发's acceptance of d0b61c909 (held-except-doors/accept-r7-verdict.json), the structural round: ONE STATE, ONE VIEW. The
+// automation key's «除了» is ONE set (held at open + the person's adds − the person's ✕); picks only change which grants exist,
+// the chips and kept lines are a view of (set, picks), a grant the Save adds takes the WHOLE set. ㉒ the two MAJORs by name;
+// ㉓ THE DIFFERENTIAL WALK — the same action list with and without pick + un-pick pairs, compared by the posts and GM.admits.
+// (The audit's masker: test-grants-store ⑨.)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('㉒ r8 MAJORS: a pick + un-pick moves nothing between chips and kept lines — a grant added later takes the whole set; a carrier\'s pair never loses a chip');
+{
+  const { open, world, principalOf } = R7;
+  const reqs = (P) => P.posts.filter((q) => q.url.startsWith('/api/automation')).map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
+  const seed = (rows) => { const W = world('ak-00000008'); for (const [s, ex] of rows) W.add(s, ex.map(principalOf)); return W; };
+  const exOf = (W, s) => { const g = W.grants.find((x) => x.subject === s); return g ? ((W.rowOf(g.id) || {}).except || []).map(pkOf).sort() : null; };
+  const verdict = (W, m, groupIds) => { const v = GM.admits(W.grants.map((g) => W.rowOf(g.id)).filter(Boolean), { conversationKey: m, groupIds }); return v.ok ? 'ok' : v.code; };
+  const added = (P) => P.posts.filter((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
+  // (a) MAJOR 1 — All agents (除了 Cee): Cee clicked by mistake and clicked again, then Team Two granted ⇒ Two takes «除了 Cee»
+  { const W = seed([['everyone:*', ['session:cid-cee']]]);
+    const d = open(W.key(), W.routes);
+    const c = d.row('session:cid-cee'); if (c) { c.click(); c.click(); }
+    const chips = d.chips(), own = d.own().map((o) => o.text), dirty = d.dirty();
+    const two = d.row('group:g-two'); if (two) two.click();
+    const nl = d.line('vw-ak-except-new');
+    await d.save();
+    const add = added(d.P)[0];
+    ok(!!c && !!two && J(chips) === J(['session:cid-cee']) && J(own) === J([]) && !dirty && nl === 'Cee will be left out of Two too' && !!add && J((add.body.except || []).map(pkOf)) === J(['conversation:cid-cee']) && J(exOf(W, 'group:g-two')) === J(['conversation:cid-cee']) && verdict(W, 'cid-cee', ['g-team', 'g-two']) !== 'ok', '(a) MAJOR 1 — All agents (除了 Cee), Cee picked and un-picked (a stray click): «除了：Cee» is still a chip, not dirty; Team Two then granted ⇒ «Cee will be left out of Two too», Two is written WITH except [Cee] and Cee is refused (d0b61c909: the chip became a line for good, Two written with none — Cee in through Two)', { chips, own, dirty, line: nl, reqs: reqs(d.P), cee: verdict(W, 'cid-cee', ['g-team', 'g-two']) }); }
+  // (b) …and with Cee STILL picked (a kept line) when Two is added: the new grant takes the whole set, the line included
+  { const W = seed([['everyone:*', ['session:cid-cee']]]);
+    const d = open(W.key(), W.routes);
+    const c = d.row('session:cid-cee'), two = d.row('group:g-two');
+    if (c && two) { c.click(); two.click(); }
+    const own = d.own().map((o) => o.text), nl = d.line('vw-ak-except-new');
+    await d.save();
+    ok(!!c && !!two && J(own) === J(['Cee is left out of All agents, Two']) && nl === 'Cee will be left out of Two too' && J(exOf(W, 'group:g-two')) === J(['conversation:cid-cee']) && J(exOf(W, 'everyone:*')) === J(['conversation:cid-cee']), '(b) Cee picked itself (its kept line) and Team Two added: the line names both grants, the new-grant line says it, Two is written with except [Cee] — a new grant takes chips AND kept lines (what the person sees is what is saved)', { own, line: nl, reqs: reqs(d.P) }); }
+  // (c) MAJOR 2 — All agents + Team (除了 Cee): Team revoked, «除了 Cee» added to All agents, Cee picked, Team on + off, Cee un-picked
+  { const W = seed([['everyone:*', []], ['group:g-team', ['session:cid-cee']]]);
+    const d = open(W.key(), W.routes);
+    const t = d.row('group:g-team'); if (t) t.click();
+    const r = d.innerRows().find((n) => n.dataset.key === 'session:cid-cee'); if (r) r.click();
+    const c = d.row('session:cid-cee');
+    if (t && c) { c.click(); t.click(); t.click(); c.click(); }
+    const chips = d.chips(), said = d.said();
+    await d.save();
+    const all = d.P.posts.find((q) => /\/except$/.test(q.url));
+    ok(!!t && !!r && !!c && J(chips) === J(['session:cid-cee']) && !said && !!all && J(all.body.except.map(pkOf)) === J(['conversation:cid-cee']) && J(exOf(W, 'everyone:*')) === J(['conversation:cid-cee']) && !W.grants.some((g) => g.subject === 'group:g-team') && verdict(W, 'cid-cee', ['g-team', 'g-two']) !== 'ok', '(c) MAJOR 2 — Team (除了 Cee) revoked, «除了 Cee» added to All agents, Cee picked, Team picked + un-picked, Cee un-picked: the chip is there, nothing said; the Save deletes Team and writes All agents except [Cee] — Cee refused (d0b61c909: the chip lost, «Cee will no longer be excluded», Cee in through All agents)', { chips, said, reqs: reqs(d.P), cee: verdict(W, 'cid-cee', ['g-team', 'g-two']) }); }
+  // (d) a grant never takes its own subject: «除了：Ops» added to All agents, Ops granted ⇒ Ops written with none, All agents with Ops
+  { const W = seed([['everyone:*', []]]);
+    const d = open(W.key(), W.routes);
+    const r = d.innerRows().find((n) => n.dataset.key === 'group:g-ops'); if (r) r.click();
+    const o = d.row('group:g-ops'); if (o) o.click();
+    const own = d.own().map((x) => x.text);
+    await d.save();
+    ok(!!r && !!o && J(own) === J(['Ops is left out of All agents']) && J(exOf(W, 'group:g-ops')) === J([]) && J(exOf(W, 'everyone:*')) === J(['group:g-ops']) && !W.writes.some((w) => !w.ok), '(d) «除了：Ops» added under All agents, then Ops granted itself: «Ops is left out of All agents ✕»; Ops\' new grant is written WITHOUT itself, All agents with Ops — the writer accepts both', { own, reqs: reqs(d.P), writes: W.writes }); }
+}
+
+console.log('㉓ r8 THE DIFFERENTIAL WALK: the same action list with and without pick + un-pick pairs (subjects AND carriers) — the posts and every member\'s verdict after each Save are the same');
+{
+  const { MEMBERS, SUBJECTS, CONVS, open, world, rngOf, seedWorld } = R7;
+  const EX = [...CONVS, 'group:g-team', 'group:g-two', 'group:g-ops'];
+  const actionsOf = (rnd, n) => {
+    const R = (a) => a[Math.floor(rnd() * a.length)], out = [];
+    for (let i = 0; i < n; i++) {
+      const r = rnd();
+      out.push(r < 0.34 ? { op: 'pick', k: R(SUBJECTS) } : r < 0.6 ? { op: 'add', k: R(EX) } : r < 0.72 ? { op: 'x', k: R(EX) } : r < 0.8 ? { op: 'xown', k: R(EX) } : r < 0.86 ? { op: 'reach', v: R(['opened', 'instance']) } : { op: 'save' });
+    }
+    out.push({ op: 'save' });
+    return out;
+  };
+  const withPairs = (acts, rnd) => { const R = (a) => a[Math.floor(rnd() * a.length)], out = []; for (const a of acts) { if (rnd() < 0.2) out.push({ op: 'pair', k: R(SUBJECTS) }); out.push(a); } return out; };
+  const run = async (seed, acts) => {
+    const W = world('ak-0000000d'); seedWorld(W, rngOf(seed ^ 0x5eed));
+    let d = open(W.key(), W.routes);
+    const saves = [], log = [];
+    for (const a of acts) {
+      log.push(a.op === 'reach' ? `reach ${a.v}` : a.op === 'save' ? 'save' : `${a.op} ${a.k}`);
+      if (a.op === 'pick') { const n = d.row(a.k); if (n) n.click(); }
+      else if (a.op === 'pair') { const n = d.row(a.k); if (n) { n.click(); d.row(a.k).click(); } }
+      else if (a.op === 'add') { const n = d.innerRows().find((x) => x.dataset.key === a.k && !x._cls.includes('pp-disabled') && !x._cls.includes('pp-on')); if (n) n.click(); }
+      else if (a.op === 'x') { const x = d.chipX(a.k); if (x) x.click(); }
+      else if (a.op === 'xown') { const x = d.ownX(a.k); if (x) x.click(); }
+      else if (a.op === 'reach') d.setReach(a.v);
+      else {
+        const n0 = d.P.posts.length;
+        const res = await d.save();
+        const posts = d.P.posts.slice(n0).filter((q) => q.url.startsWith('/api/automation')).map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
+        const rows = W.grants.map((g) => W.rowOf(g.id)).filter(Boolean);
+        saves.push({ posts, verdicts: Object.keys(MEMBERS).map((m) => { const v = GM.admits(rows, { conversationKey: m, groupIds: MEMBERS[m] }); return `${m}:${v.ok ? 'ok' : v.code}`; }) });
+        if (res !== false) d = open(W.key(), W.routes);
+      }
+    }
+    return { saves, log };
+  };
+  for (const s of [11, 2027, 4242]) {
+    const acts = actionsOf(rngOf(s), 150);
+    const A = await run(s, acts), B = await run(s, withPairs(acts, rngOf(s * 7 + 1)));
+    const at = A.saves.findIndex((x, i) => J(x) !== J(B.saves[i]));
+    const bad = at >= 0 || A.saves.length !== B.saves.length;
+    if (bad) console.log(`    RED seed ${s} — save #${at} differs\n    without pairs: ${J(A.saves[at])}\n    with pairs:    ${J(B.saves[at])}\n    steps with pairs (${B.log.length}):\n      ${B.log.join('\n      ')}`);   // the whole list, never cut
+    ok(!bad, `seed ${s}: 150 actions, then the same list with ${B.log.length - A.log.length} pick + un-pick pairs inserted — (e) every Save posts the same and every member's verdict (GM.admits over the stored rows) is the same${bad ? '' : ` — ${A.saves.length} Saves compared`}`, bad ? `seed ${s}: save #${at} differs — the step list above` : undefined);
   }
 }
 
