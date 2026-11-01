@@ -345,6 +345,8 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     // r5: the audit names EXACTLY what a repair drops — 25 readable + 1 newer-release entry (Cee kept), and Cee + 1 (Cee kept)
     { door: 'exit', resource: 'h6:use', to: [{ kind: 'everyone' }], except: [CEE, ...Array.from({ length: 24 }, (_, i) => ({ kind: 'conversation', key: `cid-x${i + 1}` })), { kind: 'agent-from-newer-release', id: 'z' }] },
     { door: 'exit', resource: 'h7:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'w' }] },
+    // r6: an `except` that is not a list at all (a newer release's shape), a token-shaped value inside it
+    { door: 'exit', resource: 'h8:use', to: [G1], except: { list: [CEE], mode: 'newer', note: `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}` } },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
@@ -374,6 +376,10 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const s7 = st.set('exit', 'h7:use', { to: [{ kind: 'everyone' }], except: [CEE] });
   const d7 = ((lastFor('h7:use') || {}).repaired || {}).dropped || [];
   ok(s7.ok && d7.length === 1 && /agent-from-newer-release/.test(d7[0]), 'a repair that keeps Cee names ONLY the newer-release entry it drops', d7);
+  // r6 (主开发's acceptance of r5, 3): a non-list `except` is dropped WHOLE — named as its raw shape, bounded, a secret masked
+  const s8 = st.set('exit', 'h8:use', { to: [G1], except: [] });
+  const d8 = ((lastFor('h8:use') || {}).repaired || {}).dropped || [];
+  ok(s8.ok && d8.length === 1 && /^\(not a list\) /.test(d8[0]) && /"list"/.test(d8[0]) && /newer/.test(d8[0]) && !/ghp_A1b2/.test(d8[0]) && d8[0].length <= 214, 'a repair over an `except` that is NOT a list names it «(not a list) {…}» — bounded, the token masked (ddd6a46c2: dropped [] — every exception in it discarded, named nowhere)', d8);
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');

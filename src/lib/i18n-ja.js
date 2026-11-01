@@ -11697,6 +11697,8 @@ export default {
   // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
   "Kept from an earlier grant — left out:": "以前の許可から残っている除外：",
   "Stop leaving {name} out": "{name} を除外しない",
+  "{name} is left out of {grants}": "{name} は {grants} から除外されています",
+  "{names} will be left out of {grant} too": "{names} は {grant} からも除外されます",
   "{name} is left out of {grants} only": "{name} は {grants} からのみ除外されています",
   "They stay left out of any Task Group or All agents picked here later.": "このあとここで選ぶタスクグループやすべてのエージェントからも、引き続き除外されます。",
   // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)

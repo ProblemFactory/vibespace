@@ -36,6 +36,8 @@
 // posts nothing). The writer's REPAIR of an unreadable row: test-grants-store ⑨. RED on fb98bebee by name.
 // r5 (主开发's acceptance of 6f68c1a1d): ⑱ the automation key — what the person SEES is what is saved: a grant the Save adds takes
 // the 除了 shown, the line counts it, a last carrier un-picked is said. RED on 6f68c1a1d by name.
+// r6 (主开发's acceptance of ddd6a46c2): ⑲ nothing the person did not do is a change — a chip leaves with its last carrier and a
+// re-pick is new; a group picked itself keeps its 除了 as its own kept line; a new grant says it takes the chips shown.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,11 +64,20 @@ const PMpath = path.join(REPO, 'src/lib/principal-picker-model.js');
 const PM = await import(pathToFileURL(PMpath).href);
 
 // ── a fake element tree: what the dialogs touch, nothing more ──
+// the fake DOM's shared halves (r6 — the fast tier's sum: a style object with three closures per element, and a new classList
+// object per access, were most of the allocation the real picker's draws made)
+const STYLE_PROTO = { setProperty(k, v) { this[k] = String(v); }, removeProperty(k) { delete this[k]; }, getPropertyValue(k) { return this[k] || ''; } };
+const CLASSLIST_PROTO = {
+  add(...a) { const c = this.el._cls; for (const x of a) if (!c.includes(x)) c.push(x); },
+  remove(...a) { const c = this.el._cls; for (const x of a) { const i = c.indexOf(x); if (i >= 0) c.splice(i, 1); } },
+  contains(x) { return this.el._cls.includes(x); },
+  toggle(x, on) { const c = this.el._cls; const has = c.includes(x); const want = on === undefined ? !has : !!on; if (want && !has) c.push(x); if (!want && has) c.splice(c.indexOf(x), 1); return want; },
+};
 class FakeEl {
-  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parentElement = null; this.dataset = {}; this.style = { setProperty(k, v) { this[k] = String(v); }, removeProperty(k) { delete this[k]; }, getPropertyValue(k) { return this[k] || ''; } }; this._text = ''; this._cls = []; this._ls = {}; this.attrs = {}; this.value = ''; this.checked = false; this.disabled = false; this.hidden = false; this.title = ''; this.type = ''; this.name = ''; this.id = ''; this.innerHTML = ''; }
+  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parentElement = null; this.dataset = {}; this.style = Object.create(STYLE_PROTO); this._text = ''; this._cls = []; this._ls = {}; this.attrs = {}; this.value = ''; this.checked = false; this.disabled = false; this.hidden = false; this.title = ''; this.type = ''; this.name = ''; this.id = ''; this.innerHTML = ''; }
   get className() { return this._cls.join(' '); }
   set className(v) { this._cls = String(v).split(/\s+/).filter(Boolean); }
-  get classList() { const c = this._cls; return { add: (...a) => a.forEach((x) => { if (!c.includes(x)) c.push(x); }), remove: (...a) => a.forEach((x) => { const i = c.indexOf(x); if (i >= 0) c.splice(i, 1); }), contains: (x) => c.includes(x), toggle: (x, on) => { const has = c.includes(x); const want = on === undefined ? !has : !!on; if (want && !has) c.push(x); if (!want && has) c.splice(c.indexOf(x), 1); return want; } }; }
+  get classList() { if (!this._cl || this._cl.el !== this) this._cl = Object.assign(Object.create(CLASSLIST_PROTO), { el: this }); return this._cl; }   // one per element (the fast tier's sum)
   get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join('') : this._text; }
   set textContent(v) { this.children.forEach((c) => { c.parentElement = null; }); this.children = []; this._text = v == null ? '' : String(v); }
   get parentNode() { return this.parentElement; }
@@ -109,7 +120,8 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() { }, removeE
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
 if (!globalThis.navigator) globalThis.navigator = { language: 'en', userAgent: 'node' };
 const textOf = (n) => (n ? n.textContent : '');
-const byCls = (root, cls) => (root ? root.all.find((n) => n._cls.includes(cls)) || null : null);
+const findDeep = (root, pred) => { if (!root) return null; const st = root.children.slice().reverse(); while (st.length) { const n = st.pop(); if (pred(n)) return n; for (let i = n.children.length - 1; i >= 0; i--) st.push(n.children[i]); } return null; };   // pre-order, stops at the first (the fast tier's sum)
+const byCls = (root, cls) => findDeep(root, (n) => n._cls.includes(cls));
 const shown = (n) => !!n && n.style.display !== 'none' && !n.hidden;
 
 // ── THE PAGE: what a dialog reaches outside its own module (one page record per dialog) ──
@@ -717,7 +729,7 @@ for (const e of ENGINES) { try { e.stop(); } catch { } }
 // line's ✕ is the dialog's state (the vault door saved the ✕-ed one again); a kept exception rides AS STORED in every door
 // (the browser door re-resolved a running one as a live session ⇒ 410 once it stopped). The REAL dialogs + the REAL picker.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-const ppOf = (root) => (root ? root.all.find((n) => n._cls.includes('pp') && n._cls.includes('pp-multi') && !n._cls.includes('pp-except-picker')) || null : null);
+const ppOf = (root) => findDeep(root, (n) => n._cls.includes('pp') && n._cls.includes('pp-multi') && !n._cls.includes('pp-except-picker'));
 
 // ═══ ⑫ MAJOR — the automation key «授权给…»: no kept line over a delete; the Save SAYS what it takes away ═══
 console.log('⑫ r3 MAJOR: automation key «授权给…» — Team un-picked: no kept line (its grant is deleted with its 除了), the dialog SAYS «Cee will no longer be excluded»');
@@ -957,6 +969,52 @@ console.log('⑱ r5 MAJOR: automation key «授权给…» — a grant the Save 
   { const { P, save } = open(keyOf([[GT, 'group:g-team', [CEE]], [GW, 'group:g-two', []]]));
     await save();
     ok(!P.posts.length, '(d) CONTROL: an untouched Save posts nothing (no grant narrowed, none widened)', reqs(P)); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r6 — 主开发's acceptance of ddd6a46c2 (held-except-doors/accept-r5-verdict.json): the automation key — NOTHING THE PERSON DID
+// NOT DO IS A CHANGE. A chip leaves the row with its last carrier (said) and a chip added after that is new; an exception the
+// picker cannot draw as a chip (its group is picked itself) is its own kept line with a ✕, never «taken away» by the picker's
+// drop; a grant the Save adds says it takes the chips shown. (The repair audit of a non-list `except`: test-grants-store ⑨.)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('⑲ r6: automation key — a chip leaves with its last carrier; re-adding it is new; a group picked itself keeps its 除了 as its own line');
+{
+  const GT = 'ag-00000000r6t1', GW = 'ag-00000000r6w2', GA = 'ag-00000000r6a3', KID = 'ak-00000006';
+  const GROUP_TEAM = { kind: 'group', id: 'g-team' }, GROUP_OPS = { kind: 'group', id: 'g-ops' };
+  const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: 'group:g-ops', name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
+  const keyOf = (grants) => ({ id: KID, name: 'deploy', grants: grants.map(([id, subject, except]) => ({ id, subject, mode: 'always', reach: 'opened', except })) });
+  const routes = async (url, method) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
+  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, line, said: () => line('vw-ak-unexcept'), dirty: () => P.shell.opts.unsaved.isDirty(), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const reqs = (P) => P.posts.map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
+  const innerRow = (pp, key) => { const w = kidOf(pp, 'pp-except'); const tg = w && kidOf(w, 'pp-except-toggle'); const inner = w && w.all.find((n) => n._cls.includes('pp-except-picker')); if (inner && !shown(inner) && tg) tg.click(); const l = inner && kidOf(inner, 'pp-list'); return l ? l.children.find((n) => n.dataset.key === key) || null : null; };
+  // (1) Team (除了 Cee) + Two (none, Cee in both): Team un-picked ⇒ the chip LEAVES (said); Cee picked again ⇒ NEW: Two takes it
+  { const { P, pp, said, save } = open(keyOf([[GT, 'group:g-team', [CEE]], [GW, 'group:g-two', []]]));
+    const g = ppRow(pp, 'group:g-team'); if (g) g.click();
+    const chips1 = exChipsOf(pp), s1 = said();
+    ok(!!g && J(chips1) === J([]) && s1 === 'Cee will no longer be excluded', '(a) Team — Cee\'s last carrier — un-picked: the «Cee» chip LEAVES the row and the line says why (ddd6a46c2: the chip stayed beside «…no longer excluded»)', { chips: chips1, said: s1 });
+    const r = innerRow(pp, 'session:cid-cee'); if (r) r.click();
+    const chips2 = exChipsOf(pp), s2 = said();
+    await save();
+    const two = P.posts.find((q) => q.url.endsWith(`/grants/${GW}/except`));
+    ok(!!r && J(chips2) === J(['Cee']) && !s2 && !!two && J(two.body.except.map((x) => x.key)) === J(['cid-cee']) && P.posts.some((q) => q.method === 'DELETE' && q.url.endsWith(`/grants/${GT}`)), '(b) Cee picked again after that is NEW: Two takes it (POST Two except [Cee]) and Team is deleted — nothing said goes (ddd6a46c2: the re-pick ignored, only DELETE Team)', { chips: chips2, said: s2, reqs: reqs(P) }); }
+  // (2) All agents (除了 Team) + Team (除了 Cee): the picker cannot draw «Team» as a chip (Team is picked itself) — its own kept line
+  { const { P, pp, line, dirty, save } = open(keyOf([[GA, 'everyone:*', [GROUP_TEAM]], [GT, 'group:g-team', [CEE]]]));
+    const own = line('vw-ak-own-kept'), d0 = dirty();
+    await save();
+    ok(/^Team is left out of All agents/.test(own) && !d0 && !P.posts.length, '(c) All agents (除了 Team) + Team picked: «Team is left out of All agents ✕» is drawn; the dialog is not dirty and an untouched Save posts NOTHING (ddd6a46c2: posted All agents\' removeExcept [group:g-team] — a silent widening)', { own, dirty: d0, reqs: reqs(P) }); }
+  { const { P, said, dirty, save } = open(keyOf([[GA, 'everyone:*', [GROUP_TEAM]], [GT, 'group:g-team', [CEE]]]));
+    const x = P.shell.body.all.find((n) => n._cls.includes('vw-ak-own-x')); if (x) x.click();
+    const s = said(), d1 = dirty();
+    await save();
+    const all = P.posts.find((q) => q.url.endsWith(`/grants/${GA}/except`));
+    ok(!!x && s === 'Team will no longer be excluded' && d1 && !!all && J(all.body.except) === J([]) && J(all.body.removeExcept) === J(['group:g-team']) && !P.posts.some((q) => q.url.endsWith(`/grants/${GT}/except`)), '(d) its ✕ ⇒ said, the dialog dirty, and the Save takes Team out of All agents\' 除了 BY NAME — Team\'s own grant untouched', { said: s, dirty: d1, reqs: reqs(P) }); }
+  // (3) the design note: a grant the Save ADDS takes every chip shown — SAID before the Save
+  { const { P, pp, line, save } = open(keyOf([[GA, 'everyone:*', [GROUP_OPS]]]));
+    const t0 = ppRow(pp, 'group:g-team'); if (t0) t0.click();
+    const nl = line('vw-ak-except-new');
+    await save();
+    const add = P.posts.find((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
+    ok(!!t0 && nl === 'Ops will be left out of Team too' && !!add && J(add.body.subjects) === J(['group:g-team']) && J(add.body.except.map((x) => x.id)) === J(['g-ops']), '(e) Team added next to «All agents 除了 Ops»: the dialog SAYS «Ops will be left out of Team too» before the Save, and the new grant carries it (the row is one list — what you see is what is saved)', { line: nl, reqs: reqs(P) }); }
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
