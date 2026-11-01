@@ -157,12 +157,18 @@ export function installFormHost(app) {
       // held it: the forms already open moved under the press): a crossing a press holds is NOT run by an open — this form is
       // hosted where the viewport is now (the class read fresh) and the crossing goes when the press does; a crossing nothing
       // holds is settled now, as r19
+      // r25 (the .369 mirror: test-exit-access-ui's page was a BACKGROUND tab — no resize reached it, so its viewport switch never
+      // started a crossing; the open's settle ran one anyway, enterPhone at 360 px and enterDesktop at 1280 px — the desktop closed
+      // the sidebar the next click needed): an open settles ONLY a crossing the switch has heard (`seen` — its timer set) and no
+      // press holds; any other pending class (a crossing no resize has told the page of, or one a press holds) hosts THIS form by
+      // the class read fresh and runs nothing — the page's crossing is its own switch's
       let freshPhone = null;
       try {
         const vs = app && app._viewportSwitch;
         if (vs && typeof vs.pending === 'function' && vs.pending()) {
-          if (typeof app.crossingWait === 'function' && app.crossingWait() > 0 && typeof vs.classNow === 'function') freshPhone = isPhoneClass(vs.classNow());
-          else vs.settleNow();
+          const seen = typeof vs.seen === 'function' ? vs.seen() : true, held = typeof app.crossingWait === 'function' && app.crossingWait() > 0;
+          if (seen && !held) vs.settleNow();
+          else if (typeof vs.classNow === 'function') freshPhone = isPhoneClass(vs.classNow());
         }
       } catch { /* the switch's own failure is its own — the verdict reads what is */ }
       const phone = !wm || (freshPhone !== null ? freshPhone : phoneNow()), blocked = blockedNow();

@@ -119,5 +119,7 @@ export function installViewportSwitch(app) {
   // `pending` (lane needs-card-tail r19, for the form host): the class the page acts on is stale — a crossing seen and not yet
   // settled, or one the viewport already made and no resize has told yet (read fresh: the same reading the settle makes)
   // `classNow` (r21, for the form host): the class the viewport reads now — a form opening inside a crossing a press holds is hosted by it
-  return { settleNow: () => { clearTimeout(timer); settle(true); }, pending: () => timer !== null || readViewportClass(app._vc) !== app._vc, classNow: () => readViewportClass(app._vc) };
+  // `seen` (r25, for the form host): a crossing this switch has HEARD (its settle timer set) — an open may settle that one; a
+  // crossing no resize has told the page of is not the open's to run (a background tab hears none — the .369 mirror's red)
+  return { settleNow: () => { clearTimeout(timer); settle(true); }, pending: () => timer !== null || readViewportClass(app._vc) !== app._vc, classNow: () => readViewportClass(app._vc), seen: () => timer !== null };
 }
