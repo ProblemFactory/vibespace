@@ -126,6 +126,25 @@ const shown = (n) => !!n && n.style.display !== 'none' && !n.hidden;
 
 // ── THE PAGE: what a dialog reaches outside its own module (one page record per dialog) ──
 const PAGE = { cur: null };
+// r11 (the .370 mirror's FAST red, run 41359602824): A PAGE'S TIMERS DIE WITH THE PAGE. The Notify editor's debounced estimate
+// (250 ms, never cancelled on close) fired into whichever page was current by then — 90–180 pages later on this box, an early
+// automation / browser leg on a runner 3× slower — and that leg's exact request list read a request it never made. Each timer is
+// owned by the page current when it was set; the next page's creation clears every one still pending (a page never receives a
+// request from another leg's dialog).
+const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout, realSetInterval = globalThis.setInterval, realClearInterval = globalThis.clearInterval;
+globalThis.setTimeout = (fn, ms, ...a) => { const P = PAGE.cur; const id = realSetTimeout((...x) => { if (P) P.timers.delete(id); fn(...x); }, ms, ...a); if (P) P.timers.add(id); return id; };
+globalThis.setInterval = (fn, ms, ...a) => { const P = PAGE.cur; const id = realSetInterval(fn, ms, ...a); if (P) P.timers.add(id); return id; };
+const disposePage = (P) => { if (!P) return; for (const id of P.timers) { realClearTimeout(id); realClearInterval(id); } P.timers.clear(); P.gone = true; };
+/** r11: a Save is looked at once IT has settled — every request its page made has answered and the continuations ran (a
+ *  setImmediate turn after the last one; never a timer's tick), bounded by the harness's budget: past it the page is marked
+ *  `unsettled` and the leg reads that, never a silent pass. */
+async function settledOf(P, budgetMs = 5000) {
+  const t0 = Date.now();
+  do { await new Promise((r) => setImmediate(r)); } while (P.inflight > 0 && Date.now() - t0 < budgetMs);
+  if (P.inflight > 0) P.unsettled = true;
+  return !P.unsettled;
+}
+const saved = async (P, p) => { const r = await p; await settledOf(P); return r; };
 const tWords = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : String(s));
 globalThis.__hx = {
   t: tWords,
@@ -139,8 +158,11 @@ globalThis.__hx = {
 /** A page for ONE dialog: `routes(url, opts, body)` answers its requests (each recorded); the pickers it builds are the
  *  stub below — their state set by the test, their arithmetic the REAL model's (PM.exceptSaved, as the picker calls it). */
 function newPage({ routes, roster = [] }) {
-  const P = { posts: [], toasts: [], closed: 0, shell: null, pickers: [], rosterRows: roster };
-  P.fetch = async (url, o) => { let body = {}; try { body = o && o.body ? JSON.parse(o.body) : {}; } catch { body = {}; } const method = (o && o.method) || 'GET'; if (method !== 'GET') P.posts.push({ url, method, body }); const r = await routes(url, method, body); return JSON.parse(J(r === undefined ? { error: 'no route', code: 'not-found' } : r)); };
+  const starve = Number(process.env.HX_STARVE_MS || 0);   // r11 CONTROL: a starved loop (a slow runner) — each page busy-waits this long
+  if (starve > 0) { const t0 = Date.now(); while (Date.now() - t0 < starve) { /* the loop held, as on a loaded runner */ } }
+  disposePage(PAGE.cur);
+  const P = { posts: [], toasts: [], closed: 0, shell: null, pickers: [], rosterRows: roster, timers: new Set(), inflight: 0 };
+  P.fetch = async (url, o) => { P.inflight++; try { let body = {}; try { body = o && o.body ? JSON.parse(o.body) : {}; } catch { body = {}; } const method = (o && o.method) || 'GET'; if (method !== 'GET') P.posts.push({ url, method, body }); const r = await routes(url, method, body); return JSON.parse(J(r === undefined ? { error: 'no route', code: 'not-found' } : r)); } finally { P.inflight--; } };
   P.picker = (o) => {
     const raw = () => (typeof o.items === 'function' ? o.items() : o.items) || [];
     const allRow = o.everyone && typeof o.everyone === 'object' ? PM.everyoneRow({ key: o.everyone.key || 'everyone:*', name: 'All agents' }) : null;
@@ -245,21 +267,21 @@ console.log('① browser profile «Who can use it» (browser-who-dialog.js → B
   const said = (P) => { const n = note(P); return shown(n) ? textOf(n) : ''; };
   // (a) CONTROL
   seed();
-  { const { P, h } = await open(); await h.save(); const b = (P.posts[0] || {}).body || {};
+  { const { P, h } = await open(); await saved(P, h.save()); const b = (P.posts[0] || {}).body || {};
     ok(J(exKeys(row())) === J(['conversation:cid-cee']) && J(((b.use || {}).except || []).map((x) => x.key)) === J(['cid:cid-cee']) && !said(P), '(a) CONTROL: an untouched Save keeps the exception (the body carries it, the row keeps it, nothing said)', { body: b, row: row() }); }
   // (b) THE (d) SHAPE: Team un-picked, Ada kept — the 除了 row is no longer offered
   seed();
-  { const { P, h, pk } = await open(); pk.pick(['session:bk:cid:cid-ada']); const sawNote = said(P); await h.save(); const b = (P.posts[0] || {}).body || {};
+  { const { P, h, pk } = await open(); pk.pick(['session:bk:cid:cid-ada']); const sawNote = said(P); await saved(P, h.save()); const b = (P.posts[0] || {}).body || {};
     ok(J(((b.use || {}).except || []).map((x) => x.key)) === J(['cid:cid-cee']) && !b.removeExcept, '(b) Team un-picked, Ada kept: the Save still SENDS the exception it never showed as removed (nothing named)', b);
     ok(J(exKeys(row())) === J(['conversation:cid-cee']) && J((row() || {}).to || []) === J([ADA]) && !sawNote, '(b) …the stored row keeps it — {to: Ada, except: Cee}; the dialog said nothing went', { row: row(), sawNote }); }
   // (c) Team picked again later: Cee is still left out
-  { const { P, h, pk } = await open(); pk.pick(['task:g-team', 'session:bk:cid:cid-ada']); await h.save();
+  { const { P, h, pk } = await open(); pk.pick(['task:g-team', 'session:bk:cid:cid-ada']); await saved(P, h.save());
     const v = admitsCee(st.rowsFor(DOOR, PID));
     ok(P.posts.length === 1 && v.code === 'excepted' && J(exKeys(row())) === J(['conversation:cid-cee']), '(c) Team picked again in a later dialog: Cee is still excluded (GM.admits: excepted)', { v, row: row() }); }
   // (d) a removal through the picker (the chip's ✕) ⇒ said, named, written
   seed();
   let dBody = null;
-  { const { P, h, pk } = await open(); pk.unexcept('session:x:cid:cid-cee'); const s = said(P); await h.save(); dBody = (P.posts[0] || {}).body || {};
+  { const { P, h, pk } = await open(); pk.unexcept('session:x:cid:cid-cee'); const s = said(P); await saved(P, h.save()); dBody = (P.posts[0] || {}).body || {};
     ok(s === 'Cee will no longer be excluded', '(d) the ✕ on «除了：Cee» is SAID before Save: «Cee will no longer be excluded»', s);
     ok(J(dBody.removeExcept) === J(['conversation:cid-cee']) && J(exKeys(row())) === J([]) && admitsCee(st.rowsFor(DOOR, PID)).ok === true, '(d) …and NAMED on the wire (removeExcept) — the writer takes it: Cee is admitted again', { body: dBody, row: row() }); }
   // (e) the same Save with its name stripped (a forged / older page) ⇒ refused by name, nothing written
@@ -291,7 +313,7 @@ console.log('② channel API access (channel-api-dialog.js → F.apiGrant → CG
     }
     return undefined;
   };
-  const open = async () => { const P = newPage({ routes, roster: CH_ROSTER }); await D.CA.showApiAccessDialog(CH_APP, CRED); return { P, pk: P.pickers[0], save: () => P.shell.opts.unsaved.save() }; };
+  const open = async () => { const P = newPage({ routes, roster: CH_ROSTER }); await D.CA.showApiAccessDialog(CH_APP, CRED); return { P, pk: P.pickers[0], save: () => saved(P, P.shell.opts.unsaved.save()) }; };
   const row = () => st.rowsFor(DOOR, CRED)[0] || null;
   const said = (P) => { const n = byCls(P.shell && P.shell.dialog, 'chan-api-unexcept'); return shown(n) ? textOf(n) : ''; };
   seed();
@@ -330,17 +352,17 @@ const grainView = (CG) => ({ access: CG.accessOf(CH_RES).map((r) => ({ principal
   const row = () => st.rowsFor('channel-reach', CH_RES)[0] || null;
   const said = (P) => { const n = byCls(P.shell.dialog, 'chan-access-unexcept'); return shown(n) ? textOf(n) : ''; };
   seed();
-  { const { P, part } = open(); await part.save(); const b = (P.posts[0] || {}).body || {};
+  { const { P, part } = open(); await saved(P, part.save()); const b = (P.posts[0] || {}).body || {};
     ok(J(exKeys(row())) === J(['conversation:cid-cee']) && J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !said(P), '(a) CONTROL: an untouched Save keeps the exception', { body: b, row: row() }); }
   seed();
-  { const { P, part, pk } = open(); pk.pick(['agent:cid-ada']); const s0 = said(P); await part.save(); const b = (P.posts[0] || {}).body || {};
+  { const { P, part, pk } = open(); pk.pick(['agent:cid-ada']); const s0 = said(P); await saved(P, part.save()); const b = (P.posts[0] || {}).body || {};
     ok(J((b.except || []).map(pkOf)) === J(['conversation:cid-cee']) && !b.removeExcept && !s0, '(b) Team un-picked, Ada kept: the Save still sends the exception (nothing said, nothing named)', b);
     ok(J(exKeys(row())) === J(['conversation:cid-cee']), '(b) …the stored access row keeps it (no Task Group left, the exception held — never «none left ⇒ the list goes»)', row()); }
-  { const { P, part, pk } = open(); pk.pick(['agent:cid-ada', 'group:g-team']); await part.save();
+  { const { P, part, pk } = open(); pk.pick(['agent:cid-ada', 'group:g-team']); await saved(P, part.save());
     ok(P.posts.length === 1 && admitsCee(st.rowsFor('channel-reach', CH_RES)).code === 'excepted', '(c) Team given access again later: Cee is still excluded', row()); }
   seed();
   let dBody = null;
-  { const { P, part, pk } = open(); pk.unexcept('agent:cid-cee'); const s = said(P); await part.save(); dBody = (P.posts[0] || {}).body || {};
+  { const { P, part, pk } = open(); pk.unexcept('agent:cid-cee'); const s = said(P); await saved(P, part.save()); dBody = (P.posts[0] || {}).body || {};
     ok(s === 'Cee will no longer be excluded', '(d) the ✕ on «除了：Cee» is SAID under the picker', s);
     ok(J(dBody.removeExcept) === J(['conversation:cid-cee']) && J(exKeys(row())) === J([]), '(d) …and NAMED (removeExcept) — written', { body: dBody, row: row() }); }
   seed();
@@ -358,7 +380,7 @@ console.log('④ channel «Notify…» (channel-filter-editor.js showNotifyDialo
     if (url === '/api/channels/a1/c1/watchers' && method === 'PUT') { const w = CG.setGrainRows(CH_RES, { watchers: body.watchers, ...(body.except !== undefined ? { watchExcept: body.except } : {}), ...(Array.isArray(body.removeExcept) ? { watchRemoveExcept: body.removeExcept } : {}) }, 'user'); return w.ok ? { ok: true } : { ok: false, code: w.code, error: w.error }; }
     return undefined;
   };
-  const open = async () => { const P = newPage({ routes, roster: CH_ROSTER }); await D.CF.showNotifyDialog(CH_APP, { kind: 'conversation', conv: { adapterId: 'a1', id: 'c1' } }); const ex = P.pickers.find((p) => p.o.cls === 'pp-except-only'); return { P, ex, save: () => P.shell.opts.unsaved.save() }; };
+  const open = async () => { const P = newPage({ routes, roster: CH_ROSTER }); await D.CF.showNotifyDialog(CH_APP, { kind: 'conversation', conv: { adapterId: 'a1', id: 'c1' } }); const ex = P.pickers.find((p) => p.o.cls === 'pp-except-only'); return { P, ex, save: () => saved(P, P.shell.opts.unsaved.save()) }; };
   const row = () => st.rowsFor('channel-watch', CH_RES)[0] || null;
   const said = (P) => { const n = byCls(P.shell && P.shell.dialog, 'chan-watch-unexcept'); return shown(n) ? textOf(n) : ''; };
   // the Team notification's ✕ (its row's own remove button)
@@ -397,7 +419,7 @@ console.log('⑤ machine «Who can use it» (exit-access-dialog.js → E.patchVe
   };
   globalThis.fetch = async (url, o = {}) => { const r = await PAGE.cur.fetch(String(url), { ...o, method: o.method || 'GET' }); const status = r && r.status ? r.status : 200; return { ok: status < 400, status, json: async () => r }; };
   const roster = [{ key: 'group:g-team', kind: 'group', id: 'g-team', name: 'Team', groupIds: [], groupNames: [] }];
-  const open = async () => { const P = newPage({ routes, roster }); await D.EX.openExitAccessDialog({ sidebar: {} }, { hostId: H, name: 'Box' }); const pk = P.pickers[0]; const save = byCls(P.shell && P.shell.body, 'exit-access-save'); return { P, pk, save: async () => { try { await save.click(); } catch (e) { P.threw = String((e && e.message) || e); } await tick(); } }; };   // (c0faf8120's Save threw «extra is not defined» on a list naming a conversation that is not running — said by the leg)
+  const open = async () => { const P = newPage({ routes, roster }); await D.EX.openExitAccessDialog({ sidebar: {} }, { hostId: H, name: 'Box' }); const pk = P.pickers[0]; const save = byCls(P.shell && P.shell.body, 'exit-access-save'); return { P, pk, save: async () => { try { await save.click(); } catch (e) { P.threw = String((e && e.message) || e); } await settledOf(P); } }; };   // (c0faf8120's Save threw «extra is not defined» on a list naming a conversation that is not running — said by the leg)
   const useRow = () => st.rowsFor('exit', `${H}:use`)[0] || null;
   const said = (P) => { const secs = P.shell.body.all.filter((n) => n._cls.includes('exit-access-unexcept')); const n = secs[0]; return shown(n) ? textOf(n) : ''; };
   const radio = (P, grant, m) => P.shell.body.all.find((n) => n.tagName === 'INPUT' && n.name === `exit-${grant}-mode` && n.value === m);
@@ -545,7 +567,7 @@ const openAcct = async (w) => {
   const P = newPage({ routes: acctRoutes(w) });
   await RD.CF.showGrantAccessDialog(E_APP, { kind: 'account', adapter: { id: w.A } });
   const pp = byCls(P.shell && P.shell.body, 'chan-access-pick');
-  return { P, pp, said: () => { const n = byCls(P.shell && P.shell.body, 'chan-access-unexcept'); return shown(n) ? textOf(n) : ''; }, save: async () => { await P.shell.opts.unsaved.save(); await tick(); }, lastPut: () => (P.posts.filter((p) => p.method === 'PUT').slice(-1)[0] || {}).body || null };
+  return { P, pp, said: () => { const n = byCls(P.shell && P.shell.body, 'chan-access-unexcept'); return shown(n) ? textOf(n) : ''; }, save: async () => { await saved(P, P.shell.opts.unsaved.save()); }, lastPut: () => (P.posts.filter((p) => p.method === 'PUT').slice(-1)[0] || {}).body || null };
 };
 const exOf = (r) => ((r && r.except) || []).map(pkOf).sort();
 const toOf = (r) => ((r && r.to) || []).map(pkOf).sort();
@@ -686,7 +708,7 @@ const forkWorld = (H, seedRow) => {
     }
     return undefined;
   };
-  const open = async () => { const P = newPage({ routes }); globalThis.fetch = async (url, o = {}) => { const r = await PAGE.cur.fetch(String(url), { ...o, method: o.method || 'GET' }); const status = r && r.status ? r.status : 200; return { ok: status < 400, status, json: async () => r }; }; await RD.EX.openExitAccessDialog({ sidebar }, { hostId: H, name: 'Box' }); const pp = P.shell.body.all.find((n) => n._cls.includes('pp') && n.parentElement && n.parentElement._cls.includes('exit-access-picker')); const btn = byCls(P.shell && P.shell.body, 'exit-access-save'); return { P, pp, save: async () => { try { await btn.click(); } catch (e) { P.threw = String((e && e.message) || e); } await tick(); await tick(); }, said: () => { const n = byCls(P.shell.body, 'exit-access-unexcept'); return shown(n) ? textOf(n) : ''; }, refused: () => textOf(byCls(P.shell.body, 'exit-access-refuse')), lastPatch: () => (P.posts.filter((p) => p.method === 'PATCH').slice(-1)[0] || {}).body || null }; };
+  const open = async () => { const P = newPage({ routes }); globalThis.fetch = async (url, o = {}) => { const r = await PAGE.cur.fetch(String(url), { ...o, method: o.method || 'GET' }); const status = r && r.status ? r.status : 200; return { ok: status < 400, status, json: async () => r }; }; await RD.EX.openExitAccessDialog({ sidebar }, { hostId: H, name: 'Box' }); const pp = P.shell.body.all.find((n) => n._cls.includes('pp') && n.parentElement && n.parentElement._cls.includes('exit-access-picker')); const btn = byCls(P.shell && P.shell.body, 'exit-access-save'); return { P, pp, save: async () => { try { await btn.click(); } catch (e) { P.threw = String((e && e.message) || e); } await settledOf(P); }, said: () => { const n = byCls(P.shell.body, 'exit-access-unexcept'); return shown(n) ? textOf(n) : ''; }, refused: () => textOf(byCls(P.shell.body, 'exit-access-refuse')), lastPatch: () => (P.posts.filter((p) => p.method === 'PATCH').slice(-1)[0] || {}).body || null }; };
   const radio = (P, grant, m) => P.shell.body.all.find((n) => n.tagName === 'INPUT' && n.name === `exit-${grant}-mode` && n.value === m);
   return { st, seed, SESS, sidebar, open, radio, row: () => st.rowsFor('exit', `${H}:use`)[0] || null };
 };
@@ -748,7 +770,7 @@ console.log('⑫ r3 MAJOR: automation key «授权给…» — Team un-picked: n
     if (method !== 'GET') return { ok: true };
     return undefined;
   };
-  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); return { P, pp, said: () => { const n = byCls(P.shell.body, 'vw-ak-unexcept'); return shown(n) ? textOf(n) : ''; }, save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); return { P, pp, said: () => { const n = byCls(P.shell.body, 'vw-ak-unexcept'); return shown(n) ? textOf(n) : ''; }, save: async () => { await saved(P, P.shell.opts.unsaved.save()); } }; };
   seed();
   { const { P, pp, said, save } = open();
     const g = ppRow(pp, 'group:g-team'); if (g) g.click();
@@ -780,7 +802,7 @@ console.log('⑬ r3 MINOR 1: vault «Who may use» — the kept line\'s ✕ is S
   const k0 = keptOf(pp);
   const x = k0 && k0.x('agent:cid-cee'); if (x) x.click();
   const gone = P.shell.body.all.filter((n) => n._cls.includes('vw-use-except-gone')).map(textOf);
-  await P.shell.opts.unsaved.save(); await tick();
+  await saved(P, P.shell.opts.unsaved.save());
   const b = (P.posts.find((q) => q.url === '/api/vault/use-grants') || {}).body || {};
   ok(!!k0 && J(k0.names) === J(['Cee']), '(a) Ada kept, Cee left out from an earlier grant: the kept line draws «Cee»', k0);
   ok(!!x && J(gone) === J(['Cee will no longer be excluded']), '(b) its ✕ ⇒ the preview SAYS «Cee will no longer be excluded» (d4418c363: nothing — pickToRow put the held one back)', { gone });
@@ -824,7 +846,7 @@ console.log('⑭ r3 MINOR 2: browser «Who can use it» — a kept exception who
   const h = await D.BW.openWhoDialog(app, PID, {});
   SESS.delete('w-cid-cee');   // Cee's conversation stops while the dialog is open
   let threw = null; try { await h.save(); } catch (e) { threw = String((e && e.message) || e); }
-  await tick();
+  await settledOf(P);
   const b = (P.posts[0] || {}).body || {};
   const r0 = st.rowsFor(DOOR, PID)[0] || null;
   ok(!threw && J(((b.use || {}).except) || []) === J([{ kind: 'session', key: 'cid:cid-cee' }]) && J(exKeys(r0)) === J(['conversation:cid-cee']) && !P.toasts.some((m) => /not running any more/.test(m)), '(b) the door: an untouched Save while Cee stopped sends Cee\'s exception AS STORED and LANDS — no 410 «pick it again from the list» (d4418c363: refused)', { threw, body: b, row: r0, toasts: P.toasts });
@@ -896,7 +918,7 @@ console.log('⑯ r4 MINOR 2: browser «Who can use it» — a conversation stopp
   for (const fn of listeners) fn({ type: 'active-sessions' });
   await tick(); await tick();
   let threw = null; try { await h.save(); } catch (e) { threw = String((e && e.message) || e); }
-  await tick();
+  await settledOf(P);
   const b = (P.posts[0] || {}).body || {};
   const r0 = st.rowsFor(DOOR, PID)[0] || null;
   ok(listeners.length > 0 && !threw && J(((b.use || {}).except) || []) === J([{ kind: 'session', key: 'cid:cid-cee' }]) && J(exKeys(r0)) === J(['conversation:cid-cee']) && !P.toasts.some((m) => /changed while the dialog was open|not running any more/.test(m)), '(a) the stop broadcast between open and an untouched Save: the body carries Cee\'s STORED key, the Save lands, Cee still excepted (fb98bebee: the re-drawn model dropped it ⇒ except_unnamed, «This grant changed…»)', { listeners: listeners.length, threw, body: b.use, row: r0, toasts: P.toasts });
@@ -913,7 +935,7 @@ console.log('⑰ r4 MINOR 3: automation key «授权给…» — G1 (除了 Cee)
   const key = () => ({ id: KID, name: 'deploy', grants: [[G1, 'group:g-team'], [G2, 'group:g-two']].map(([g, subject]) => ({ id: g, subject, mode: 'always', reach: 'opened', except: [...((st.rowsFor('automation-key-use', g)[0] || {}).except || [])] })) });
   const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: G3S, name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
   const routes = async (url, method, body) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
-  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); return { P, pp: ppOf(P.shell && P.shell.body), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); return { P, pp: ppOf(P.shell && P.shell.body), save: async () => { await saved(P, P.shell.opts.unsaved.save()); } }; };
   { const { P, save } = open();
     const note = byCls(P.shell.body, 'vw-ak-except-of');
     const said = shown(note) ? textOf(note) : '';
@@ -940,7 +962,7 @@ console.log('⑱ r5 MAJOR: automation key «授权给…» — a grant the Save 
   const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: 'group:g-ops', name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
   const keyOf = (grants) => ({ id: KID, name: 'deploy', grants: grants.map(([id, subject, except]) => ({ id, subject, mode: 'always', reach: 'opened', except })) });
   const routes = async (url, method) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
-  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, said: () => line('vw-ak-unexcept'), only: () => line('vw-ak-except-of'), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, said: () => line('vw-ak-unexcept'), only: () => line('vw-ak-except-of'), save: async () => { await saved(P, P.shell.opts.unsaved.save()); } }; };
   const reqs = (P) => P.posts.map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
   const exOf = (q) => ((q && q.body && q.body.except) || []).map((x) => `${x.kind}:${x.key || x.id}`);
   // (a) Team (除了 Cee) — All agents picked: the new grant takes «除了：Cee» as shown
@@ -984,7 +1006,7 @@ console.log('⑲ r6: automation key — a chip leaves with its last carrier; re-
   const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: 'group:g-ops', name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
   const keyOf = (grants) => ({ id: KID, name: 'deploy', grants: grants.map(([id, subject, except]) => ({ id, subject, mode: 'always', reach: 'opened', except })) });
   const routes = async (url, method) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
-  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, line, said: () => line('vw-ak-unexcept'), dirty: () => P.shell.opts.unsaved.isDirty(), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, line, said: () => line('vw-ak-unexcept'), dirty: () => P.shell.opts.unsaved.isDirty(), save: async () => { await saved(P, P.shell.opts.unsaved.save()); } }; };
   const reqs = (P) => P.posts.map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
   const innerRow = (pp, key) => { const w = kidOf(pp, 'pp-except'); const tg = w && kidOf(w, 'pp-except-toggle'); const inner = w && w.all.find((n) => n._cls.includes('pp-except-picker')); if (inner && !shown(inner) && tg) tg.click(); const l = inner && kidOf(inner, 'pp-list'); return l ? l.children.find((n) => n.dataset.key === key) || null : null; };
   // (1) Team (除了 Cee) + Two (none, Cee in both): Team un-picked ⇒ the chip LEAVES (said); Cee picked again ⇒ NEW: Two takes it
@@ -1049,7 +1071,7 @@ const R7 = (() => {
       said: () => line('vw-ak-unexcept'),
       only: () => line('vw-ak-except-of'),
       dirty: () => P.shell.opts.unsaved.isDirty(),
-      save: async () => { const r = await P.shell.opts.unsaved.save(); await new Promise((ok_) => setImmediate(ok_)); return r; },   // the routes answer at once — no timer's 1 ms floor per Save (the fast tier's sum)
+      save: () => saved(P, P.shell.opts.unsaved.save()),   // r11: the Save settled (its own requests answered), never a timer's tick
       picked: () => { const l = kidOf(pp, 'pp-list'); return l ? l.children.filter((n) => n._cls.includes('pp-on')).map((n) => n.dataset.key).sort() : []; },
       chips: () => { const i = inner(); return shown(exWrap()) && shown(i) ? i.all.filter((n) => n._cls.includes('pp-chip')).map((c) => c.dataset.key) : []; },
       own: () => { const n = ownBox(); return shown(n) ? n.children.filter((c) => c._cls.includes('vw-ak-own-item')).map((c) => ({ key: c.dataset.key, text: textOf(c).replace(/✕$/, '') })) : []; },
@@ -1469,6 +1491,28 @@ console.log('㉔ r9: a re-add reaches the kept grants it belongs to; a member sa
     const dirty = d.dirty(), only = d.only();
     await d.save();
     ok(!!x && back && !dirty && only === 'Cee is left out of Team only' && !reqs(d.P).length, '(e) CONTROL: Cee ✕-ed and added back while Team (which stores it) is picked: as stored — «Cee is left out of Team only», not dirty, nothing posted', { dirty, only, reqs: reqs(d.P) }); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r11 — the .370 mirror (run 41359602824): the FAST job red on ⑫(c) at runner load 6.4→6.8 (int361: 8 of 30 under 6 parallel —
+// ⑫(c), ⑯(a), (b)s — every one a leg that reads its page's exact request list after a Save). The cause, measured: the Notify
+// editor's debounced estimate (250 ms, never cancelled on close) fired into whichever page was current — on a slow runner an
+// early automation / browser leg's. ㉕ pins the harness's own isolation; the starved-loop CONTROL runs the whole suite with
+// HX_STARVE_MS swept (logs/r11/starve-*.log).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('㉕ r11: the harness — a page never receives a request another leg\'s dialog left behind; a Save is looked at once it settled');
+{
+  const A = newPage({ routes: async () => ({ ok: true }) });
+  setTimeout(() => { globalThis.__hx.fetchJson('/api/channels/a1/c1/estimate', { method: 'POST', body: '{}' }); }, 5);   // a debounced request the dialog never cancels
+  const B = newPage({ routes: async () => ({ ok: true }) });
+  { const t0 = Date.now(); while (Date.now() - t0 < 15) { /* the loop held past the debounce, as on a loaded runner */ } }
+  await new Promise((r) => realSetTimeout(r, 10));
+  await settledOf(B);
+  ok(A.gone && !A.posts.length && !B.posts.length, '(a) a timer page A left behind (a 5 ms debounced request) is cleared when page B opens — B never receives it, even with the loop held past it (88d8189cd: it reached B — the mirror\'s ⑫(c))', { a: A.posts.map((q) => q.url), b: B.posts.map((q) => q.url) });
+  const C = newPage({ routes: async (url) => { for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r)); return { ok: true, url }; } });
+  const late = (async () => { await new Promise((r) => setImmediate(r)); return globalThis.__hx.fetchJson('/api/automation/grants/ag-x', { method: 'DELETE' }); })();
+  const done = await settledOf(C);
+  ok(done && C.posts.length === 1 && C.inflight === 0 && !!(await late), '(b) settledOf waits for the Save\'s OWN requests — one that answers three turns later is recorded and answered before the leg looks (one timer tick was the old wait)', { posts: C.posts.map((q) => q.url), inflight: C.inflight });
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);
