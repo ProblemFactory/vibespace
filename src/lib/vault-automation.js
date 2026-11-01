@@ -620,17 +620,40 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   body.append(exceptOf);
   const groupish = (g) => String(g.subject).startsWith('group:') || g.subject === EVERYONE_SUBJECT;
   const xKeyOf = (x) => (x && x.kind === 'group' ? `group:${x.id}` : x && x.kind === 'conversation' ? `conversation:${x.key}` : null);
+  // lane held-except-doors r5 (主开发's acceptance of r4, MAJOR) — WHAT THE PERSON SEES IS WHAT IS SAVED: ONE plan of every picked
+  // grant's «除了» after this Save, read by the Save AND by the two lines. A KEPT group / All agents grant keeps its own and takes
+  // only what the person changed (r4 — an untouched Save posts nothing); a grant this Save ADDS takes every chip shown (r4 posted
+  // it with none: «除了：Cee» on screen, Cee granted); a held one no grant carries after the Save — taken away, or its last
+  // carrier un-picked — is SAID («Cee will no longer be excluded»)
+  const planExcept = () => {
+    const sel = new Set(picker.selected());
+    const shown = exceptPicks().map(String);
+    const was = new Set(exPick.except.map(String)), now = new Set(shown);
+    const entryOf = (k) => principalOfRow(exRowOf(k));
+    const takenPk = new Set([...was].filter((k) => !now.has(k)).map(entryOf).filter(Boolean).map(xKeyOf));
+    const added = [...now].filter((k) => !was.has(k)).map(entryOf).filter(Boolean);
+    const shownEntries = shown.map(entryOf).filter(Boolean);
+    const kept = always.filter((g) => sel.has(g.subject) && groupish(g)).map((g) => {
+      const cur = g.except || [];
+      const next = [...cur.filter((x) => !takenPk.has(xKeyOf(x))), ...added.filter((a) => !cur.some((x) => xKeyOf(x) === xKeyOf(a)))];
+      return { ...g, next, removeExcept: cur.map(xKeyOf).filter((k) => k && takenPk.has(k)) };
+    });
+    const fresh = [...sel].filter((s) => !had.has(s) && groupish({ subject: s })).map((s) => ({ subject: s, next: shownEntries }));
+    const carried = new Set([...kept, ...fresh].flatMap((g) => g.next.map(xKeyOf)));
+    const gone = exPick.except.map(String).filter((k) => { const p = entryOf(k); return !p || !carried.has(xKeyOf(p)); });
+    return { sel, shown, shownEntries, kept, fresh, gone };
+  };
   const syncExceptOf = () => {
-    const on = always.filter((g) => groupish(g) && picker.selected().includes(g.subject));
+    const pl = planExcept(), on = [...pl.kept, ...pl.fresh];   // r5: the grants this Save ADDS count too
     const lines = [];
-    for (const k of exceptPicks()) {
+    for (const k of pl.shown) {
       const p = principalOfRow(exRowOf(k)); const pk = p ? xKeyOf(p) : null;
-      const carriers = pk ? on.filter((g) => (g.except || []).some((x) => xKeyOf(x) === pk)) : [];
+      const carriers = pk ? on.filter((g) => g.next.some((x) => xKeyOf(x) === pk)) : [];
       if (carriers.length && carriers.length < on.length) lines.push(t('{name} is left out of {grants} only', { name: (exRowOf(k) || {}).name || picker.nameOf(k), grants: carriers.map((g) => grantName(g, data)).join(', ') }));
     }
     exceptOf.textContent = lines.join(' · '); exceptOf.style.display = lines.length ? '' : 'none';
   };
-  function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; syncExceptOf(); }
+  function syncUnexcept() { const gone = planExcept().gone; unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; syncExceptOf(); }
   syncUnexcept();
   // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
   body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
@@ -638,7 +661,6 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
   const exceptNow = () => exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
-  const pkOf = (p) => (p.kind === 'group' ? `group:${p.id}` : p.kind === 'conversation' ? `conversation:${p.key}` : 'everyone');
   const drawn = () => JSON.stringify([picker.selected().slice().sort(), rows.value(), exceptNow()]);
   const base = drawn();
   const f = el('div', 'dialog-footer');
@@ -652,19 +674,11 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     const drop = [...had.keys()].filter((k) => !sel.has(k)).map((k) => had.get(k));
     const reach = rows.value();
     if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
-    // «除了» — lane held-except-doors r4 (MINOR 3): PER GRANT. The row draws the grants' exceptions together; a Save applies only
-    // what the person CHANGED there — each one taken away leaves every grant that carries it (named), each one added joins
-    // every kept group / All agents grant — so an untouched Save posts nothing (r3 posted the merged list to every grant: a
-    // grant with no exception was silently narrowed), and a grant this Save adds takes only what it adds
-    const was = new Set(exPick.except.map(String)), now = new Set(exceptPicks().map(String));
-    const takenPk = new Set([...was].filter((k) => !now.has(k)).map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOf));
-    const added = [...now].filter((k) => !was.has(k)).map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
-    const except = added;
-    const exceptOn = always.filter((g) => sel.has(g.subject) && groupish(g)).map((g) => {
-      const cur = g.except || [];
-      const next = [...cur.filter((x) => !takenPk.has(xKeyOf(x))), ...added.filter((a) => !cur.some((x) => xKeyOf(x) === pkOf(a)))];
-      return { ...g, next, removeExcept: cur.map(xKeyOf).filter((k) => k && takenPk.has(k)) };
-    }).filter((o) => JSON.stringify(o.next.map(xKeyOf).sort()) !== JSON.stringify((o.except || []).map(xKeyOf).sort()));
+    // «除了» — lane held-except-doors r4 (MINOR 3): PER GRANT; r5: THE plan the lines drew (planExcept) — a kept grant written only
+    // where it changed (what it loses NAMED), a grant this Save adds takes every chip shown
+    const pl = planExcept();
+    const except = pl.shownEntries;
+    const exceptOn = pl.kept.filter((o) => JSON.stringify(o.next.map(xKeyOf).sort()) !== JSON.stringify((o.except || []).map(xKeyOf).sort()));
     // lane key-grant-everyone: the reach rows are the reach of the grants this save ADDS — changed while it adds none, the
     // save said 已保存 and wrote nothing (the owner's 「没有办法保存给整个 vibespace」). Refused by name, the dialog kept —
     // r2: only when the save changes NOTHING but the reach; a removal or a «除了» edit goes through and says the reach was not used

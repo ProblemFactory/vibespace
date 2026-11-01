@@ -342,12 +342,15 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
     { door: 'exit', resource: 'h3:use', to: [G1], except: [{ kind: 'everyone' }] },
     { door: 'exit', resource: 'h4:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'y' }] },
+    // r5: the audit names EXACTLY what a repair drops — 25 readable + 1 newer-release entry (Cee kept), and Cee + 1 (Cee kept)
+    { door: 'exit', resource: 'h6:use', to: [{ kind: 'everyone' }], except: [CEE, ...Array.from({ length: 24 }, (_, i) => ({ kind: 'conversation', key: `cid-x${i + 1}` })), { kind: 'agent-from-newer-release', id: 'z' }] },
+    { door: 'exit', resource: 'h7:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'w' }] },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
   const lines = () => { try { return fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const lastFor = (res) => lines().filter((l) => l.resource === res).pop() || null;
-  ok(RAW.every((r) => GM.normRow(r).ok === false) && RAW.every((r) => st.rowsFor('exit', r.resource).length === 1 && GM.publicRow(st.rowsFor('exit', r.resource)[0]).unknown === true), 'setup: four exit rows this release cannot read — kept as they are, published as unknown (no exception any door could show)');
+  ok(RAW.every((r) => GM.normRow(r).ok === false) && RAW.every((r) => st.rowsFor('exit', r.resource).length === 1 && GM.publicRow(st.rowsFor('exit', r.resource)[0]).unknown === true), 'setup: the exit rows this release cannot read — kept as they are, published as unknown (no exception any door could show)');
   const s1 = st.set('exit', 'h1:use', { to: [G1], except: [] });
   const l1 = lastFor('h1:use');
   ok(s1.ok && J(st.rowsFor('exit', 'h1:use')[0].to) === J([G1]) && !!l1 && !!l1.repaired && /repaired an unreadable row/.test(l1.repaired.note) && l1.repaired.dropped.some((x) => /cid-cee/.test(x)) && l1.repaired.dropped.some((x) => /agent-from-newer-release/.test(x)), 'set over an unreadable row (an entry from a newer release) LANDS — a repair; its audit line names what it dropped (fb98bebee: except_unnamed for ever)', { s1, l1 });
@@ -364,6 +367,13 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const v = E.patchVerdict(acc, { use: { mode: 'nobody' }, run: { mode: 'nobody' } }, { now: 9, by: 'user' });
   const w = v.ok ? st.setMany(E.exitRows(v.access, 'h4', v.removeExcept), 'user') : v;
   ok(v.ok && w.ok && !st.rowsFor('exit', 'h4:use').length && !!(lastFor('h4:use') || {}).repaired, 'the machine dialog\'s Save road over its unreadable list (Nobody, «save it again») LANDS — repaired, the drop named', { v: v.ok ? 'ok' : v, w });
+  // r5 (主开发's acceptance of r4, MINOR): `dropped` = exactly what the write does not keep — never a kept one; past 20, «and N more»
+  const s6 = st.set('exit', 'h6:use', { to: [{ kind: 'everyone' }], except: [CEE] });
+  const d6 = ((lastFor('h6:use') || {}).repaired || {}).dropped || [];
+  ok(s6.ok && d6.length === 21 && !d6.some((x) => /cid-cee/.test(x)) && d6[20] === 'and 5 more', 'a repair that keeps Cee and drops 25 lists 20 of them + «and 5 more» — never Cee (6f68c1a1d: the raw list cut at 20, Cee in it, no count)', d6);
+  const s7 = st.set('exit', 'h7:use', { to: [{ kind: 'everyone' }], except: [CEE] });
+  const d7 = ((lastFor('h7:use') || {}).repaired || {}).dropped || [];
+  ok(s7.ok && d7.length === 1 && /agent-from-newer-release/.test(d7[0]), 'a repair that keeps Cee names ONLY the newer-release entry it drops', d7);
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');

@@ -34,6 +34,8 @@
 // r4 (主开发's acceptance of fb98bebee): ⑮ the machine dialog's «Nobody» draws the kept 除了 and honours its ✕; ⑯ the browser door
 // rides the keys captured at open through a stop broadcast; ⑰ the automation key's exceptions are per grant (an untouched Save
 // posts nothing). The writer's REPAIR of an unreadable row: test-grants-store ⑨. RED on fb98bebee by name.
+// r5 (主开发's acceptance of 6f68c1a1d): ⑱ the automation key — what the person SEES is what is saved: a grant the Save adds takes
+// the 除了 shown, the line counts it, a last carrier un-picked is said. RED on 6f68c1a1d by name.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -910,7 +912,51 @@ console.log('⑰ r4 MINOR 3: automation key «授权给…» — G1 (除了 Cee)
     const g3 = ppRow(pp, G3S); if (g3) g3.click();
     await save();
     const add = P.posts.find((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
-    ok(!!g3 && !!add && J(add.body.subjects) === J([G3S]) && J(add.body.except) === J([]) && !P.posts.some((q) => /\/except$/.test(q.url)), '(c) adding Ops: its grant posts except [] (never the other grants\' 除了), and no other grant is written', P.posts.map((q) => `${q.method} ${q.url} ${J(q.body)}`)); }
+    ok(!!g3 && !!add && J(add.body.subjects) === J([G3S]) && J((add.body.except || []).map((x) => x.key)) === J(['cid-cee']) && !P.posts.some((q) => /\/except$/.test(q.url)), '(c) adding Ops: its grant takes the «除了» SHOWN (r5 — what the person sees is what is saved; r4 posted except []), and no other grant is written', P.posts.map((q) => `${q.method} ${q.url} ${J(q.body)}`)); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r5 — 主开发's acceptance of 6f68c1a1d (held-except-doors/accept-r4-verdict.json): the automation key — WHAT THE PERSON SEES
+// IS WHAT IS SAVED. A grant this Save adds takes every «除了» chip shown (r4 posted it with none: Cee granted under «除了：Cee»);
+// the per-grant line counts the grants it adds; a held exception whose last carrier is un-picked is SAID before the Save.
+// (The repair audit's exact `dropped`: test-grants-store ⑨.) The REAL dialog + the REAL picker; RED on 6f68c1a1d by name.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('⑱ r5 MAJOR: automation key «授权给…» — a grant the Save ADDS takes the 除了 shown; the line counts it; a last carrier un-picked is said');
+{
+  const GT = 'ag-00000000r5t1', GW = 'ag-00000000r5w2', KID = 'ak-00000005';
+  const TWO = { kind: 'group', id: 'g-two' };
+  const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: 'group:g-ops', name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
+  const keyOf = (grants) => ({ id: KID, name: 'deploy', grants: grants.map(([id, subject, except]) => ({ id, subject, mode: 'always', reach: 'opened', except })) });
+  const routes = async (url, method) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
+  const open = (k) => { const P = newPage({ routes }); D.VA.showGrantPicker(k, data, { refresh: () => { } }); const pp = ppOf(P.shell && P.shell.body); const line = (cls) => { const n = byCls(P.shell.body, cls); return shown(n) ? textOf(n) : ''; }; return { P, pp, said: () => line('vw-ak-unexcept'), only: () => line('vw-ak-except-of'), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  const reqs = (P) => P.posts.map((q) => `${q.method} ${q.url.replace(/^\/api\/automation/, '')} ${J(q.body)}`);
+  const exOf = (q) => ((q && q.body && q.body.except) || []).map((x) => `${x.kind}:${x.key || x.id}`);
+  // (a) Team (除了 Cee) — All agents picked: the new grant takes «除了：Cee» as shown
+  { const { P, pp, only, save } = open(keyOf([[GT, 'group:g-team', [CEE]]]));
+    const all = ppRow(pp, 'everyone:*'); if (all) all.click();
+    const chips = exChipsOf(pp), line = only();
+    await save();
+    const add = P.posts.find((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
+    ok(!!all && J(chips) === J(['Cee']) && !line && !!add && J(add.body.subjects) === J(['everyone:*']) && J(exOf(add)) === J(['conversation:cid-cee']) && !P.posts.some((q) => /\/except$/.test(q.url)), '(a) Team (除了 Cee) + All agents picked: «除了：Cee» shown ⇒ the new All agents grant is posted WITH except [Cee] (6f68c1a1d: except [] — Cee granted under «除了：Cee»)', { chips, line, reqs: reqs(P) }); }
+  // (b) Team (除了 Cee) + Two (none, Cee its member) — Team un-picked: the exception's LAST carrier goes ⇒ said before the Save
+  { const { P, pp, said, only, save } = open(keyOf([[GT, 'group:g-team', [CEE]], [GW, 'group:g-two', []]]));
+    const line0 = only();
+    const g = ppRow(pp, 'group:g-team'); if (g) g.click();
+    const s = said();
+    await save();
+    ok(line0 === 'Cee is left out of Team only', '(b) setup: «Cee is left out of Team only» (Two carries none)', line0);
+    ok(!!g && s === 'Cee will no longer be excluded' && J(reqs(P).map((x) => x.split(' ').slice(0, 2).join(' '))) === J([`DELETE /grants/${GT}`]), '(b) Team — the last grant carrying Cee — un-picked: the dialog SAYS «Cee will no longer be excluded» before the Save; the Save deletes Team only (6f68c1a1d: nothing said)', { said: s, reqs: reqs(P) }); }
+  // (c) Team (除了 Cee) + Two (none) — Ops ADDED: it takes «除了：Cee» as shown, and the line counts it
+  { const { P, pp, only, save } = open(keyOf([[GT, 'group:g-team', [CEE]], [GW, 'group:g-two', []]]));
+    const o = ppRow(pp, 'group:g-ops'); if (o) o.click();
+    const line = only();
+    await save();
+    const add = P.posts.find((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
+    ok(!!o && line === 'Cee is left out of Team, Ops only' && !!add && J(add.body.subjects) === J(['group:g-ops']) && J(exOf(add)) === J(['conversation:cid-cee']) && !P.posts.some((q) => /\/except$/.test(q.url)), '(c) Ops added beside Team (除了 Cee) and Two: the new grant takes except [Cee] and the line counts it — «Cee is left out of Team, Ops only»; Two is not written (6f68c1a1d: «…Team only», Ops posted with except [])', { line, reqs: reqs(P) }); }
+  // (d) CONTROL: the untouched Save still posts nothing
+  { const { P, save } = open(keyOf([[GT, 'group:g-team', [CEE]], [GW, 'group:g-two', []]]));
+    await save();
+    ok(!P.posts.length, '(d) CONTROL: an untouched Save posts nothing (no grant narrowed, none widened)', reqs(P)); }
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);

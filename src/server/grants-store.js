@@ -162,7 +162,13 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     const removing = !v.row.to.length && !v.row.except.length;
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except }) === JSON.stringify({ to: v.row.to, except: v.row.except }))) return { ok: true, change: null, row: was, was };
     const d = { to: diff(keysOf(was && was.to), removing ? [] : keysOf(v.row.to)), except: diff(keysOf(was && was.except), removing ? [] : keysOf(v.row.except)) };
-    const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped: (Array.isArray(raw.except) ? raw.except : []).slice(0, 20).map((x) => { try { return JSON.stringify(x).slice(0, 120); } catch { return String(x).slice(0, 120); } }) } : null;
+    // r5 (主开发's acceptance of r4, MINOR): `dropped` = exactly the stored entries this write does NOT keep (by principal key, else
+    // by their raw shape) — never a kept one — the first 20, then «and N more»
+    const shapeOf = (x) => { try { return JSON.stringify(x); } catch { return String(x); } };
+    const pkSafe = (x) => { try { return GM.principalKey(x) || null; } catch { return null; } };
+    const keptKeys = new Set(v.row.except.map(pkSafe).filter(Boolean)), keptShapes = new Set(v.row.except.map(shapeOf));
+    const gone = raw ? (Array.isArray(raw.except) ? raw.except : []).filter((x) => { const pk = pkSafe(x); return !(pk && keptKeys.has(pk)) && !keptShapes.has(shapeOf(x)); }) : [];
+    const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped: [...gone.slice(0, 20).map((x) => shapeOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])] } : null;
     return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except, ...(repaired ? { repaired } : {}) } } };
   }
 
