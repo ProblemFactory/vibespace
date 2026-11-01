@@ -28,7 +28,7 @@
 // Every form gets a HANDLE here (its shape — 'sheet' | 'window' — moves; the shell asks the handle, never the shape).
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { setFormHost } from './utils.js';
-import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, rehostWaitVerdict, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
+import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, rehostWaitVerdict, PRESS_MAX_MS, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
 import { VC_PHONE_MEDIA, isPhoneClass } from '../viewport-class.js'; // the phone paths' ONE media list — a crossing into it turns the open forms into sheets
 
 registerWindowType({ type: 'form', icon: svgIcon16('<rect x="2.5" y="2" width="11" height="12" rx="1.5"/><path d="M5 5.5h6M5 8h6M5 10.5h3.5"/>'), label: 'Form', persist: false });
@@ -42,10 +42,16 @@ const blockedNow = () => { try { return [...document.querySelectorAll(BLOCKING_L
 const LAYERED = `${BLOCKING_LAYERS}, .form-sheet`;
 let pressAt = null, typedAt = null, typedEl = null, lastTabAt = 0;
 let pressDownAt = 0, pressEnd = 0; // r19: the press a crossing waits for (rehostWaitVerdict) — r20: its start too (bounded)
-// r21 (the r20 acceptance, MINORS 3 + 4): the press is EACH POINTER's — a Set of the pointer ids down (two fingers: the first one
-// lifting leaves the press on) — and its stamps are the MONOTONIC clock (a wall clock stepping back never holds a crossing)
-const pressIds = new Set();
+// r21 (the r20 acceptance, MINORS 3 + 4): the press is EACH POINTER's — the pointer ids down (two fingers: the first one
+// lifting leaves the press on) — and its stamps are the MONOTONIC clock (a wall clock stepping back never holds a crossing).
+// r22 (the r21 acceptance, MINOR 1 — one stale touch kept the r21 Set non-empty, every later press inherited its old stamp and
+// the guard answered 0): THE NEWEST PRESS OWNS THE WAIT (pressDownAt re-stamped at every pointerdown, r20's rule); the ids
+// only say when the press ends, each with the time it went down, and one down past PRESS_MAX_MS with no release is LOST —
+// dropped (prunePress), so a lost release never keeps «the press» on nor swallows the next press's quiet
+const pressIds = new Map();   // pointerId → when it went down (monotonic)
 const monoNow = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+/** r22: a pointer down PRESS_MAX_MS with no release is lost — dropped; the set emptied so stamps its end at its bound */
+const prunePress = () => { const now = monoNow(); for (const [id, at] of pressIds) if (now - at >= PRESS_MAX_MS) { pressIds.delete(id); if (!pressIds.size) pressEnd = Math.max(pressEnd, at + PRESS_MAX_MS); } };
 const EDIT_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Backspace', 'Delete', 'Process', 'Dead', 'Compose', 'Unidentified']);
 /** THE PRESS OF THIS TASK (round 3): a token naming whether the person's press landed inside a blocking layer — judged AT the
  *  press; it lives for the task that dispatched it (its handler and that handler's microtasks), a caller that awaits first
@@ -76,8 +82,8 @@ export function installFormHost(app) {
     // r19 (lane needs-card-tail, a cross-fix — rehostWaitVerdict): a press in flight, and when it ended — a crossing waits for it.
     // r20 (the r19 acceptance, MINOR 2): a press is BOUNDED — a move with no button down, the page losing the focus or going
     // hidden ends one whose release never came (and rehostWaitVerdict ends it at PRESS_MAX_MS whatever happens)
-    const pressOver = (id) => { if (!pressIds.size) return; if (id === undefined) pressIds.clear(); else pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow(); };
-    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { if (!pressIds.size) pressDownAt = monoNow(); pressIds.add(e.pointerId); } }, true);
+    const pressOver = (id) => { prunePress(); if (!pressIds.size) return; if (id === undefined) pressIds.clear(); else pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow(); };
+    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { prunePress(); pressDownAt = monoNow(); pressIds.set(e.pointerId, pressDownAt); } }, true);
     for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, (e) => { if (e.isTrusted) pressOver(e.pointerId); }, true);
     // (a move with no button down ends a MOUSE's press only — a finger or a pen hovering beside a held finger ends nothing)
     document.addEventListener('pointermove', (e) => { if (pressIds.has(e.pointerId) && e.isTrusted && e.buttons === 0 && e.pointerType === 'mouse') pressOver(e.pointerId); }, true);
@@ -107,9 +113,13 @@ export function installFormHost(app) {
   //    when it fires and re-hosts to what the viewport IS (a round trip inside one press ends where it started)
   // r21 (the r20 acceptance, MINOR 1 — r20 held EVERY tier crossing for a press, no form open: the page's own layout stayed the
   // old tier up to 2.3 s): the guard protects forms — with none open the crossing never waits
-  app.crossingWait = () => (OPEN.size ? rehostWaitVerdict({ pressing: pressIds.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow() }) : 0);
+  app.crossingWait = () => { if (!OPEN.size) return 0; prunePress(); return rehostWaitVerdict({ pressing: pressIds.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow() }); };
   let retry = 0;
-  const rehost = () => { clearTimeout(retry); retry = 0; const ms = app.crossingWait(); if (ms > 0) { retry = setTimeout(rehost, ms); return; } if (phoneNow()) app.formsToSheets(); else app.sheetsToForms(); };
+  // r22 (the r21 acceptance, MINOR 2 — the retry read app.isMobile, still the phone's under a held phone → desktop crossing, and
+  // closed the window a form had just opened in, then enterDesktop built it a new one): the retry re-hosts to what the VIEWPORT
+  // is — the same fresh class an open reads (classNow) — so the order of its timer and the held settle no longer matters
+  const viewportPhone = () => { try { const vs = app._viewportSwitch; if (vs && typeof vs.classNow === 'function') return isPhoneClass(vs.classNow()); } catch { /* the class unread: what the page says */ } return phoneNow(); };
+  const rehost = () => { clearTimeout(retry); retry = 0; const ms = app.crossingWait(); if (ms > 0) { retry = setTimeout(rehost, ms); return; } if (viewportPhone()) app.formsToSheets(); else app.sheetsToForms(); };
   try { phoneMq = window.matchMedia(VC_PHONE_MEDIA); phoneMq.addEventListener('change', () => rehost()); } catch { /* no matchMedia: no crossing */ }
   // a resize re-fits every open form window — and on the phone tier re-hosts it as its sheet (the crossing's second door)
   try { window.addEventListener('resize', () => { if (!phoneNow()) for (const h of [...OPEN]) h.refit(); rehost(); }, { passive: true }); } catch { /* no window: no resize */ }

@@ -389,11 +389,12 @@ console.log('⑩ r19 (lane needs-card-tail, a cross-fix — .367: test-automatio
   ok(!!mDown && !!mQuiet && !!mBound && !!mCap && runRW(mDown).includes(RW[0][2]) && runRW(mQuiet).includes(RW[0][2]) && runRW(mBound).includes(RW[3][2]) && runRW(mCap).includes(RW[4][2]), 'MUTANTS: «a press down is no reason to wait», «no quiet after the press», «a press without a bound» and (r21) «no cap» each go RED on their rows', { mDown: runRW(mDown), mQuiet: runRW(mQuiet), mBound: runRW(mBound), mCap: runRW(mCap) });
   // the wiring: the press in flight is tracked; BOTH crossings ask the verdict; the open settles a crossing still pending first
   const FW8 = read('src/lib/form-window.js'), VS8 = read('src/lib/viewport-switch.js');
-  ok(/document\.addEventListener\('pointerdown', \(e\) => \{ if \(e\.isTrusted\) \{ if \(!pressIds\.size\) pressDownAt = monoNow\(\); pressIds\.add\(e\.pointerId\); \} \}, true\);/.test(FW8) && /for \(const type of \['pointerup', 'pointercancel'\]\) document\.addEventListener\(type, \(e\) => \{ if \(e\.isTrusted\) pressOver\(e\.pointerId\); \}, true\);/.test(FW8)
+  ok(/document\.addEventListener\('pointerdown', \(e\) => \{ if \(e\.isTrusted\) \{ prunePress\(\); pressDownAt = monoNow\(\); pressIds\.set\(e\.pointerId, pressDownAt\); \} \}, true\);/.test(FW8) && /for \(const type of \['pointerup', 'pointercancel'\]\) document\.addEventListener\(type, \(e\) => \{ if \(e\.isTrusted\) pressOver\(e\.pointerId\); \}, true\);/.test(FW8)
+      && /const prunePress = \(\) => \{ const now = monoNow\(\); for \(const \[id, at\] of pressIds\) if \(now - at >= PRESS_MAX_MS\) \{ pressIds\.delete\(id\); if \(!pressIds\.size\) pressEnd = Math\.max\(pressEnd, at \+ PRESS_MAX_MS\); \} \};/.test(FW8)
       && /document\.addEventListener\('pointermove', \(e\) => \{ if \(pressIds\.has\(e\.pointerId\) && e\.isTrusted && e\.buttons === 0 && e\.pointerType === 'mouse'\) pressOver\(e\.pointerId\); \}, true\);/.test(FW8) && /document\.addEventListener\('visibilitychange', \(\) => \{ if \(document\.hidden\) pressOver\(\); \}\);/.test(FW8) && /window\.addEventListener\('blur', \(\) => pressOver\(\)\);/.test(FW8)
       && /const monoNow = \(\) => \(typeof performance !== 'undefined' && typeof performance\.now === 'function' \? performance\.now\(\) : Date\.now\(\)\);/.test(FW8)
-      && /app\.crossingWait = \(\) => \(OPEN\.size \? rehostWaitVerdict\(\{ pressing: pressIds\.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow\(\) \}\) : 0\);/.test(FW8)
-      && /const rehost = \(\) => \{ clearTimeout\(retry\); retry = 0; const ms = app\.crossingWait\(\); if \(ms > 0\) \{ retry = setTimeout\(rehost, ms\); return; \} if \(phoneNow\(\)\) app\.formsToSheets\(\); else app\.sheetsToForms\(\); \};/.test(FW8)
+      && /app\.crossingWait = \(\) => \{ if \(!OPEN\.size\) return 0; prunePress\(\); return rehostWaitVerdict\(\{ pressing: pressIds\.size > 0, pressAt: pressDownAt, pressEnd, now: monoNow\(\) \}\); \};/.test(FW8)
+      && /const rehost = \(\) => \{ clearTimeout\(retry\); retry = 0; const ms = app\.crossingWait\(\); if \(ms > 0\) \{ retry = setTimeout\(rehost, ms\); return; \} if \(viewportPhone\(\)\) app\.formsToSheets\(\); else app\.sheetsToForms\(\); \};/.test(FW8) && /return isPhoneClass\(vs\.classNow\(\)\);/.test(FW8)
       && /phoneMq\.addEventListener\('change', \(\) => rehost\(\)\);/.test(FW8) && /window\.addEventListener\('resize', \(\) => \{ if \(!phoneNow\(\)\) for \(const h of \[\.\.\.OPEN\]\) h\.refit\(\); rehost\(\); \}, \{ passive: true \}\);/.test(FW8)
       && /const wait = !now && switchVerdict\(app\._vc, next\)\.act === 'tier' && typeof app\.crossingWait === 'function' \? app\.crossingWait\(\) : 0;\n    if \(wait > 0\) \{ timer = setTimeout\(settle, wait\); return; \}\n    applyViewportClass\(app, next\);/.test(VS8),
     'RED-able (r20 — b4271577f deferred the FORMS alone, each direction on its own timer, with an unbounded press; r21 — 7a01f4626: one boolean for every pointer, wall-clock stamps, a wait with no form open): the host tracks a BOUNDED press PER POINTER on the MONOTONIC clock (down adds its id, up / cancel removes it; a mouse\'s move with no button, a blur, the page hidden end it); the WHOLE tier crossing waits on app.crossingWait — only while a form is open — in the viewport switch\'s settle (settleNow never waits); the other doors re-host through ONE retry that re-reads the tier');
@@ -417,14 +418,15 @@ console.log('⑪ r20 (lane needs-card-tail, the r19 acceptance) — the REAL for
   const vsCopy = swap(read('src/lib/viewport-switch.js'), [["from '../viewport-class.js'", `from ${J(VC_URL)}`], ["from './mobile-nav.js'", "from './st-nav.mjs'"], ["from './mobile-back.js'", "from './st-back.mjs'"], ["from './session-palette.js'", "from './st-pal.mjs'"]]);
   // the child: a fake DOM enough for installFormHost + installViewportSwitch, a fake clock, ONE scenario → JSON
   const HARNESS = String.raw`
-const [, , FW, VS, SCEN] = process.argv;
+const [, , FW, VS, SCEN0] = process.argv;
+const [SCEN, MOD] = String(SCEN0).split(':'), TIE = MOD === 'lifo' ? -1 : 1;   // (r22: same-deadline timers in the other order)
 let now = 1000000, width = 1280, tid = 0; const timers = [];
 let wallOffset = 0;
 Object.defineProperty(globalThis, 'performance', { value: { now: () => now }, configurable: true, writable: true });   // (r21: the MONOTONIC clock)
 globalThis.setTimeout = (f, ms = 0) => { const id = ++tid; timers.push({ id, at: now + Math.max(0, ms | 0), f }); return id; };
 globalThis.clearTimeout = (id) => { const k = timers.findIndex((t) => t.id === id); if (k >= 0) timers.splice(k, 1); };
 Date.now = () => now + wallOffset;   // (the wall clock — r21's leg steps it back)
-const advance = (ms) => { const end = now + ms; for (;;) { timers.sort((x, y) => x.at - y.at || x.id - y.id); const t = timers[0]; if (!t || t.at > end) break; timers.shift(); now = t.at; t.f(); } now = end; };
+const advance = (ms) => { const end = now + ms; for (;;) { timers.sort((x, y) => x.at - y.at || TIE * (x.id - y.id)); const t = timers[0]; if (!t || t.at > end) break; timers.shift(); now = t.at; t.f(); } now = end; };
 const L = {}, W = {}, MQ = [], log = [];
 const mqm = (q) => { if (/max-width: 768px\), \(pointer: coarse\)/.test(q)) return width <= 768; let m; if ((m = /\(max-width: (\d+)px\)/.exec(q)) && !/min/.test(q)) return width <= +m[1]; if ((m = /\(min-width: (\d+)px\)/.exec(q))) return width >= +m[1]; return false; };
 const el = (tag = 'div') => { const e = { tag, className: '', style: {}, dataset: {}, parentNode: null, isConnected: true, scrollTop: 0, scrollLeft: 0, classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
@@ -446,7 +448,7 @@ globalThis.scrollX = 0; globalThis.scrollY = 0;
 let wid = 0;
 const forms = () => [...wm.windows.values()].filter((w) => w.type === 'form').map((w) => w.id).join(',') || 'none';
 const wm = { windows: new Map(), activeWindowId: null,
-  createWindow({ title, type }) { const id = 'w' + (++wid); const w = { id, type, title, element: el('window'), content: el('content'), isMinimized: false }; this.windows.set(id, w); this.activeWindowId = id; return w; },
+  createWindow({ title, type }) { const id = 'w' + (++wid); const w = { id, type, title, element: el('window'), content: el('content'), isMinimized: false }; this.windows.set(id, w); this.activeWindowId = id; log.push('createWindow ' + id); return w; },
   closeWindow(id) { this.windows.delete(id); if (this.activeWindowId === id) this.activeWindowId = null; log.push('closeWindow ' + id); },
   placeBehind() {}, markArrived() {}, setFixedSize() {}, setTitle() {}, revealWindow() {}, focusWindow() {},
   refitForViewport(phone) { log.push('refit(' + phone + ') forms=' + forms()); }, _mobileLayout: () => width <= 768 };
@@ -472,6 +474,12 @@ else if (SCEN === 'no-press') { crossTo(390); advance(300); }
 else if (SCEN === 'noform-held') { fire('pointerdown'); advance(20); crossTo(390); advance(200); out.at200 = { vc: app._vc, log: log.slice() }; fire('pointerup'); advance(500); }
 else if (SCEN === 'code-open-held') { fire('pointerdown'); advance(20); crossTo(390); advance(200); const h2 = globalThis.__fwHost.open({ id: 'f2', title: 'F2', opener: 'system' }); h2.adopt(el('root2')); out.atOpen = { f1: h.mode(), f2: h2.mode(), vc: app._vc, log: log.slice() }; advance(300); out.held = { f1: h.mode(), f2: h2.mode(), log: log.slice() }; fire('pointerup'); advance(700); out.f2 = h2.mode(); }
 else if (SCEN === 'wall-steps-back') { fire('pointerdown'); fire('pointerup'); wallOffset -= 60000; advance(50); crossTo(390); advance(600); }
+else if (SCEN === 'stale-touch-held') { fire('pointerdown', { pointerId: 7, pointerType: 'touch' }); advance(3000); fire('pointerdown', { pointerId: 1 }); crossTo(390); advance(200); out.held = { mode: h.mode(), vc: app._vc, log: log.slice() }; fire('pointerup', { pointerId: 1 }); advance(700); }
+else if (SCEN === 'lost-then-click') { fire('pointerdown', { pointerId: 7, pointerType: 'touch' }); advance(3000); fire('pointerdown', { pointerId: 1 }); fire('pointerup', { pointerId: 1 }); crossTo(390); advance(100); out.held = { mode: h.mode(), vc: app._vc, log: log.slice() }; advance(700); }
+else if (SCEN === 'thumb-resting') { fire('pointerdown', { pointerId: 5, pointerType: 'touch' }); advance(5000); fire('pointerdown', { pointerId: 6, pointerType: 'touch' }); crossTo(390); advance(1000); out.held = { mode: h.mode(), vc: app._vc, log: log.slice() }; advance(1500); }
+else if (SCEN === 'code-open-desktop-held') { crossTo(390); advance(500); out.phone = { f1: h.mode(), vc: app._vc }; fire('pointerdown', { pointerId: 1 }); advance(20); crossTo(1280); advance(200);
+  const before = new Set(wm.windows.keys()); const h2 = globalThis.__fwHost.open({ id: 'f2', title: 'F2', opener: 'system' }); h2.adopt(el('root2')); const w2 = [...wm.windows.keys()].find((k) => !before.has(k)) || null;
+  out.atOpen = { f2: h2.mode(), w2, vc: app._vc }; fire('pointerup', { pointerId: 1 }); advance(700); out.end = { f2: h2.mode(), w2Alive: !!w2 && wm.windows.has(w2), closedW2: log.includes('closeWindow ' + w2), f1: h.mode(), vc: app._vc }; }
 else if (SCEN === 'two-fingers') { fire('pointerdown', { pointerId: 2, pointerType: 'touch' }); fire('pointerdown', { pointerId: 3, pointerType: 'touch' }); advance(20); crossTo(390); advance(300); fire('pointerup', { pointerId: 2, pointerType: 'touch' }); fire('pointermove', { pointerId: 4, pointerType: 'pen', buttons: 0 }); advance(600); out.held = { mode: h.mode(), log: log.slice() }; fire('pointerup', { pointerId: 3, pointerType: 'touch' }); advance(700); }
 out.mode = h.mode(); out.vc = app._vc; out.width = width; out.log = log; out.pending = timers.length;
 console.log(JSON.stringify(out));
@@ -510,6 +518,15 @@ process.exit(0);
     `RED-able (r21 — 7a01f4626 stamped the press on the wall clock: a step back of 60 s held the crossing ~60 s): a click, the wall clock steps back 60 s, the viewport crosses ⇒ the crossing goes after the press's quiet, forms first (${J(WS.log)})`, WS);
   ok(!TF.threw && !!TF.held && TF.held.mode === 'window' && !TF.held.log.some((x) => /setPhoneMode|refit/.test(x)) && firstOk(TF) && TF.mode === 'sheet',
     `RED-able (r21 — 7a01f4626: one boolean — the first finger lifting ended the press): two fingers down, the viewport crosses, the FIRST lifts and a pen hovers by ⇒ still held (${J(TF.held)}); the second lifts ⇒ the crossing, forms first (${J(TF.log)})`, TF);
+  // r22 (the r21 acceptance's two minors)
+  const STT = scenOf(fwCopy, vsCopy, 'stale-touch-held'), LTC = scenOf(fwCopy, vsCopy, 'lost-then-click'), THR = scenOf(fwCopy, vsCopy, 'thumb-resting');
+  const quietHeld = (r) => !r.threw && !!r.held && r.held.mode === 'window' && r.held.vc === 'desktop' && !r.held.log.some((x) => /setPhoneMode|refit|closeWindow/.test(x)) && firstOk(r) && r.mode === 'sheet';
+  ok(quietHeld(STT), `RED-able (r22 — d973c5711: a stale touch kept the Set non-empty, the held mouse press inherited its old stamp and the guard answered 0 — the form closed into a sheet under it): a touch down and never released, 3 s later a mouse press HELD, the viewport crosses ⇒ held (${J(STT.held)}); the press up ⇒ the crossing, forms first`, STT);
+  ok(quietHeld(LTC), `RED-able (r22 — d973c5711: the click's release stamped no quiet while the lost touch stayed in the Set): a lost touch release, 3 s later a click, the viewport crosses at once ⇒ still a window 100 ms later — the click's quiet (${J(LTC.held)}); then the crossing, forms first`, LTC);
+  ok(quietHeld(THR), `RED-able (r22 — d973c5711: a thumb resting 5 s made the second press's wait 0): a thumb resting 5 s, a second finger down, the viewport crosses ⇒ held 1 s on the second press's own bound (${J(THR.held)}); after its 2 s + the quiet ⇒ the crossing, forms first`, THR);
+  const CDF = scenOf(fwCopy, vsCopy, 'code-open-desktop-held'), CDL = scenOf(fwCopy, vsCopy, 'code-open-desktop-held:lifo');
+  const keeps = (r) => !r.threw && !!r.phone && r.phone.f1 === 'sheet' && !!r.atOpen && r.atOpen.f2 === 'window' && !!r.atOpen.w2 && !!r.end && r.end.f2 === 'window' && r.end.w2Alive && !r.end.closedW2 && r.end.f1 === 'window' && r.end.vc === 'desktop';
+  ok(keeps(CDF) && keeps(CDL), `RED-able (r22 — d973c5711: the retry read app.isMobile, closed the window the form had just opened in and enterDesktop built another): on the phone, a press held across the crossing back to 1280, a SYSTEM form opens as its window ${CDF.atOpen && CDF.atOpen.w2} ⇒ the press up and the crossing: it stays in that window (${J(CDF.end)}; the same-deadline timers in the other order: ${J(CDL.end)})`, { CDF, CDL });
   // the control: r19's shape — the forms deferred ALONE (the strict first rule's mutant) — breaks the first rule
   const r19ish = fwCopy && fwCopy.replace('app.formsToSheets = () => { for (const h of [...OPEN]) h.toSheet(); };', "app.formsToSheets = () => { if (app.crossingWait() > 0) { setTimeout(() => app.formsToSheets(), app.crossingWait()); return; } for (const h of [...OPEN]) h.toSheet(); };");
   const vsNoWait = vsCopy && vsCopy.replace("if (wait > 0) { timer = setTimeout(settle, wait); return; }", '');
