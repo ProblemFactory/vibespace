@@ -35,7 +35,7 @@
 const fs = require('fs');
 const path = require('path');
 const GM = require('../grant-model.js');
-const { redactSecrets } = require('../secret-shapes.js');   // lane held-except-doors r6: a repaired row's raw `except` is named masked
+const { redactSecrets, secretName, REDACTED } = require('../secret-shapes.js');   // lane held-except-doors r6: a repaired row's raw `except` is named masked
 const { SyncStore } = require('../sync-store.js');
 
 const AUDIT_ROTATE_BYTES = 4 * 1024 * 1024;
@@ -162,7 +162,9 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     if (unnamed) return { ok: false, code: 'except_unnamed', error: GM.EXCEPT_UNNAMED_WORDS, principal: unnamed };
     const removing = !v.row.to.length && !v.row.except.length;
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except }) === JSON.stringify({ to: v.row.to, except: v.row.except }))) return { ok: true, change: null, row: was, was };
-    const d = { to: diff(keysOf(was && was.to), removing ? [] : keysOf(v.row.to)), except: diff(keysOf(was && was.except), removing ? [] : keysOf(v.row.except)) };
+    // r9: the audit's own key lists pass the masker too, by value (a token-shaped conversation key is never written in clear)
+    const byValue = (dd) => ({ added: dd.added.map((x) => redactSecrets(String(x)).text), removed: dd.removed.map((x) => redactSecrets(String(x)).text) });
+    const d = { to: byValue(diff(keysOf(was && was.to), removing ? [] : keysOf(v.row.to))), except: byValue(diff(keysOf(was && was.except), removing ? [] : keysOf(v.row.except))) };
     // r5 (主开发's acceptance of r4, MINOR): `dropped` = exactly the stored entries this write does NOT keep (by principal key, else
     // by their raw shape) — never a kept one — the first 20, then «and N more»
     const shapeOf = (x) => { try { return JSON.stringify(x); } catch { return String(x); } };
@@ -172,13 +174,23 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     // r6 (主开发's acceptance of r5, 3): an `except` that is NOT a list (a newer release's shape) is dropped WHOLE — named as its
     // raw shape, bounded (≤ 200 characters) and with every secret-shaped value masked (src/secret-shapes.js)
     const notList = raw && raw.except !== undefined && !Array.isArray(raw.except);
-    // r7 / r8 (主开发's acceptance of r6 / r7): every string the repair audit writes goes through the ONE masker — a dropped entry
-    // this release can name is written as its principal key, masked by value (a conversation's key names it, never a secret); any
-    // other shape (an entry from a newer release, a non-list `except`) as its WHOLE JSON text through redactSecrets: the name rules
-    // (`"password": …`, `token=…`) and the shapes, at any depth (r7 masked each string alone — a secret by NAME was written in
-    // clear and nothing below depth 8 was looked at; r6 masked only the non-list branch); `why` too (it can quote a door's name)
-    const nameOf = (x) => redactSecrets(pkSafe(x) || shapeOf(x)).text;
-    const dropped = notList ? [`(not a list) ${redactSecrets(shapeOf(raw.except)).text.slice(0, 200)}`] : [...gone.slice(0, 20).map((x) => nameOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])];
+    // r7–r9 (主开发's acceptance of r6 / r7 / r8): every string the repair audit writes goes through the ONE masker. A dropped entry
+    // this release can name is written as its principal key, masked by value. Any other shape (an entry from a newer release, a
+    // non-list `except`) is masked BOTH ways and the two unioned: (1) every raw string value and field name on its own — real
+    // newlines, so the line rules fire (a PEM block, a .netrc «password …»; r8's JSON text held them as the two characters \n and
+    // wrote both in clear) — and a value under a secret NAME masked whole; (2) the whole JSON text — the name rules over every pair.
+    // The identifier fields (key, id, principal, kind) are no secret names: an exception's conversation key stays readable (r8 wrote
+    // «"key": «redacted»» — the audit no longer said which conversations it dropped). No depth cutoff: a shape too deep for the
+    // walk is written as one masked word, never in clear (r7 skipped below depth 8)
+    const ID_FIELDS = ['key', 'id', 'principal', 'kind'];
+    const maskShape = (x) => {
+      try {
+        const walk = (y) => (typeof y === 'string' ? redactSecrets(y).text : Array.isArray(y) ? y.map(walk) : y && typeof y === 'object' ? Object.fromEntries(Object.entries(y).map(([f, z]) => (ID_FIELDS.includes(f) ? [`\u0001${f}`, walk(z)] : [redactSecrets(f).text, secretName(f) ? REDACTED : walk(z)]))) : y);
+        return redactSecrets(JSON.stringify(walk(x))).text.replace(/"\\u0001(key|id|principal|kind)":/g, '"$1":');
+      } catch { return `${REDACTED} (a shape too deep to read)`; }
+    };
+    const nameOf = (x) => { const pk = pkSafe(x); return pk ? redactSecrets(pk).text : maskShape(x); };
+    const dropped = notList ? [`(not a list) ${maskShape(raw.except).slice(0, 200)}`] : [...gone.slice(0, 20).map((x) => nameOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])];
     const repaired = raw ? { note: 'repaired an unreadable row', why: redactSecrets(String(nw.why || nw.code || 'unreadable')).text.slice(0, 120), dropped } : null;
     return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except, ...(repaired ? { repaired } : {}) } } };
   }

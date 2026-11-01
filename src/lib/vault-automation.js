@@ -636,18 +636,21 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const added = [], ownX = new Set(), addedFromX = new Set();   // `added` in the order made — a chip's place
   const pkOfKey = (k) => { const p = principalOfRow(exRowOf(k)); return p ? xKeyOf(p) : null; };
   const entryOf = (k) => principalOfRow(exRowOf(k));
-  const inSet = (k) => added.includes(k) || (held.includes(k) && !ownX.has(k));
   const storedPk = (g) => new Set((g.except || []).map(xKeyOf).filter(Boolean));
+  // r9: a held member counts while a picked KEPT grant still STORES it — one whose storing grants all went is SAID going («Cee will
+  // no longer be excluded») and no new grant takes it (r8 moved it onto any group granted next — a member nobody placed there,
+  // that grant's «除了» list would never have offered); it rejoins with its storing grant, or when the person adds it
+  const storedOn = (k, sel) => { const pk = pkOfKey(k); return !!pk && always.some((g) => groupish(g) && sel.includes(g.subject) && g.subject !== k && storedPk(g).has(pk)); };
   // the grants a Save adds, in the picker's row order — never the order of the clicks (an un-pick + re-pick changes no request)
   const rowOrder = [EVERYONE_SUBJECT, ...live.map((r) => String(r.key))];
   const canon = (keys) => keys.slice().sort((p, q) => rowOrder.indexOf(p) - rowOrder.indexOf(q));
   const view = () => {
     const sel = picker.selected().map(String);
-    const set = [...held.filter((k) => !ownX.has(k)), ...added.filter((k) => !held.includes(k))];
+    const set = [...new Set([...held.filter((k) => !ownX.has(k) && storedOn(k, sel)), ...added])];
     const xPk = new Set([...ownX].map(pkOfKey).filter(Boolean));
     const keptG = always.filter((g) => groupish(g) && sel.includes(g.subject));
     const freshG = canon(sel.filter((s) => !had.has(s) && groupish({ subject: s }))).map((s) => ({ subject: s }));
-    const carriersOf = (k) => { const pk = pkOfKey(k); if (!pk || !inSet(k)) return []; return [...keptG.filter((g) => g.subject !== k && (added.includes(k) || storedPk(g).has(pk))), ...freshG.filter((g) => g.subject !== k)]; };
+    const carriersOf = (k) => { const pk = pkOfKey(k); if (!pk || !set.includes(k)) return []; return [...keptG.filter((g) => g.subject !== k && (added.includes(k) || storedPk(g).has(pk))), ...freshG.filter((g) => g.subject !== k)]; };
     const carriers = new Map(set.map((k) => [k, carriersOf(k)]));
     const shown = set.filter((k) => carriers.get(k).length);
     const kept = keptG.map((g) => {
@@ -661,8 +664,8 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   // the person's acts on the set: a chip added or ✕-ed in the «除了» row, a kept line's ✕ — nothing else changes it
   let lastChips = picker.except({ held: [] }).map(String);
   const drawnNow = (k) => (view().carriers.get(k) || []).length > 0;
-  function putIn(k) {   // an add: a held one ✕-ed and added back is as stored — or, with no grant storing it picked, a NEW add
-    if (ownX.has(k)) { ownX.delete(k); if (!drawnNow(k)) { added.push(k); addedFromX.add(k); } }
+  function putIn(k) {   // an add: a held one ✕-ed and added back is as stored while a picked grant STORES it — else a NEW add, onto every picked grant
+    if (ownX.has(k)) { ownX.delete(k); if (!storedOn(k, picker.selected().map(String))) { added.push(k); addedFromX.add(k); } }   // r9: a new grant alone is no «as stored» (r8 counted it — the kept grants never took the re-add)
     else if (!added.includes(k)) added.push(k);
   }
   function takeOut(k) {   // a ✕: the member leaves the set — named (ownX) when a stored grant leaves it out; an add ✕-ed is undone
