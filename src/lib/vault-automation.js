@@ -601,7 +601,7 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const exRows = () => [...live, ...exPick.extra];
   picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => k === EVERYONE_SUBJECT || live.some((r) => r.key === k)), autofocus: true,
     placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
-    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra, kept: false, onChange: () => onExceptEdit() }, onChange: () => { reconcileChips(); syncUnexcept(); } });   // r3: no kept line (below); r6: the person's 除了 edits tracked, a pick reconciles the chips
+    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra, kept: false, onChange: () => onExceptEdit() }, onChange: () => { noteOwn(); reconcileChips(); syncUnexcept(); } });   // r3: no kept line (below); r6: the person's 除了 edits tracked, a pick reconciles the chips
   body.append(picker.el);
   // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; each one this Save takes away is SAID
   // here and NAMED on the wire (`removeExcept` — the ONE writer refuses an unnamed drop)
@@ -631,31 +631,62 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   // drops the chip, a member cannot be both) — is drawn as its own kept line («Team is left out of All agents ✕») and kept unless
   // that ✕ is pressed (r5 counted the picker's drop as «taken away»: an untouched Save widened All agents)
   const userAdded = new Set(), autoGone = new Set(), ownX = new Set();
-  let lastShown = picker.except({ held: [] }).map(String);
+  // r7 (主开发's acceptance of r6, 1): an own kept line is a fact about ANOTHER grant (All agents' «除了 Team») — it lives until ITS
+  // ✕, whatever happens to its subject's own pick (r6 tied it to the pick: un-picking Team to revoke Team's OWN grant lifted
+  // Team's exception from All agents). `ownSeen` = the held exceptions the picker dropped because their subject was picked —
+  // at open, and whenever a pick drops a chip (never the person's ✕)
+  const ownSeen = new Set(exPick.except.map(String).filter((k) => picker.selected().includes(k)));
   const pkOfKey = (k) => { const p = principalOfRow(exRowOf(k)); return p ? xKeyOf(p) : null; };
   const pickedKept = () => always.filter((g) => groupish(g) && picker.selected().includes(g.subject));
   const carriedPk = () => new Set(pickedKept().flatMap((g) => (g.except || []).map(xKeyOf)).filter(Boolean));
-  const ownKept = () => exPick.except.map(String).filter((k) => picker.selected().includes(k) && carriedPk().has(pkOfKey(k)));
+  const ownKept = () => [...ownSeen].filter((k) => !ownX.has(k) && carriedPk().has(pkOfKey(k)));
+  // the picker's own «除了» list as the dialog last knew it — KEPT while the row is not offered (no group / All agents picked: the
+  // picker keeps its list then too, and still drops a member picked itself — r7's walk: Eve picked while the row was hidden, then
+  // All agents picked again ⇒ her exception lifted, never ✕-ed)
+  const offeredNow = () => picker.selected().some((s) => groupish({ subject: s }));
+  let lastShown = exPick.except.map(String).filter((k) => !picker.selected().includes(k));
+  const chipsNow = () => (offeredNow() ? picker.except({ held: [] }).map(String) : lastShown.filter((k) => !picker.selected().includes(k)));
+  // a pick that drops a chip (its subject picked itself): one a picked grant carries becomes its own kept line; one no picked grant
+  // carries waits — its own kept line once a carrier is picked while its subject still is, else a chip again once the subject is
+  // un-picked (a pick + un-pick changes nothing)
+  const pickDropped = new Set();
+  function noteOwn() {
+    const now = chipsNow(), sel = picker.selected(), carried = carriedPk();
+    for (const k of lastShown) if (!now.includes(k) && sel.includes(k)) { if (carried.has(pkOfKey(k))) { ownSeen.add(k); ownX.delete(k); } else pickDropped.add(k); }
+  }
   function onExceptEdit() {
     const now = picker.except({ held: [] }).map(String);
-    for (const k of now) if (!lastShown.includes(k)) { userAdded.add(k); autoGone.delete(k); }
+    for (const k of now) if (!lastShown.includes(k)) userAdded.add(k);   // r7: a held one the person adds while its carrier is away still returns with it
     for (const k of lastShown) if (!now.includes(k)) userAdded.delete(k);
     lastShown = now;
   }
   function reconcileChips() {
-    const carried = carriedPk(), sel = picker.selected();
-    const shown = picker.except({ held: [] }).map(String);
+    const carried = carriedPk(), sel = picker.selected(), offered = offeredNow();
+    const shown = offered ? picker.except({ held: [] }).map(String) : [];
     let next = shown.slice();
     for (const k of shown) if (exPick.except.includes(k) && !userAdded.has(k) && !carried.has(pkOfKey(k))) { next = next.filter((x) => x !== k); autoGone.add(k); }
-    for (const k of [...autoGone]) if (carried.has(pkOfKey(k)) && !next.includes(k) && !sel.includes(k)) { next.push(k); autoGone.delete(k); }
-    if (JSON.stringify(shown.slice().sort()) !== JSON.stringify(next.slice().sort())) picker.setExcept(next);
-    lastShown = picker.except({ held: [] }).map(String);
+    // r7: a chip whose carrier is picked again comes back — at its OLD place (2: un-pick + re-pick reads as no change), or as its
+    // own kept line when its subject is picked meanwhile (1: never lifted without a ✕)
+    const at = (k) => { const i = exPick.except.indexOf(k); return i < 0 ? exPick.except.length : i; };
+    const putBack = (k) => { if (next.includes(k)) return; const i = next.findIndex((x) => at(x) > at(k)); if (i < 0) next.push(k); else next.splice(i, 0, k); };
+    for (const k of [...autoGone]) {
+      if (!carried.has(pkOfKey(k))) continue;
+      autoGone.delete(k);
+      if (sel.includes(k)) ownSeen.add(k); else putBack(k);
+    }
+    for (const k of [...pickDropped]) {
+      if (sel.includes(k)) { if (carried.has(pkOfKey(k))) { pickDropped.delete(k); ownSeen.add(k); ownX.delete(k); } }
+      // (a row not offered keeps the picker's own list, never written over; a held one no picked grant carries waits for its carrier)
+      else if (offered) { pickDropped.delete(k); if (exPick.except.includes(k) && !userAdded.has(k) && !carried.has(pkOfKey(k))) autoGone.add(k); else putBack(k); }
+    }
+    if (offered && JSON.stringify(shown) !== JSON.stringify(next)) picker.setExcept(next);
+    lastShown = chipsNow();
   }
   const planExcept = () => {
     const sel = new Set(picker.selected());
     const shown = exceptPicks().map(String);
     const entryOf = (k) => principalOfRow(exRowOf(k));
-    const own = ownKept().filter((k) => !ownX.has(k));
+    const own = ownKept();
     const showPk = new Set([...shown, ...own].map(pkOfKey).filter(Boolean));
     const wasPk = carriedPk();
     const takenPk = new Set([...wasPk].filter((k) => !showPk.has(k)));
@@ -712,8 +743,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const rows = reachRows(null, data, { id: 'picker' });
   body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
-  const exceptNow = () => exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
-  const drawn = () => JSON.stringify([picker.selected().slice().sort(), rows.value(), exceptNow(), [...ownX].sort()]);   // r6: a kept line's ✕ is a change (the picker's own drop at open is not)
+  // r6 / r7 (2): what the dialog would save — the picks and the EFFECTIVE exceptions (the chips and the own kept lines) as SETS,
+  // never in order: a sequence that cancels out (an un-pick and its re-pick, a pick of a subject and its un-pick) is no change
+  const effPk = () => [...new Set([...exceptPicks().map(String), ...ownKept()].map(pkOfKey).filter(Boolean))].sort();
+  const drawn = () => JSON.stringify([picker.selected().slice().sort(), rows.value(), effPk()]);
   const base = drawn();
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));

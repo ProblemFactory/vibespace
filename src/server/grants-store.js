@@ -172,7 +172,11 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     // r6 (主开发's acceptance of r5, 3): an `except` that is NOT a list (a newer release's shape) is dropped WHOLE — named as its
     // raw shape, bounded (≤ 200 characters) and with every secret-shaped value masked (src/secret-shapes.js)
     const notList = raw && raw.except !== undefined && !Array.isArray(raw.except);
-    const dropped = notList ? [`(not a list) ${redactSecrets(shapeOf(raw.except)).text.slice(0, 200)}`] : [...gone.slice(0, 20).map((x) => shapeOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])];
+    // r7 (主开发's acceptance of r6, 3): EVERY string the audit writes goes through the one masker BY VALUE — each string value and
+    // each field name on its own, before the shape is written (a dropped list entry with a token-shaped field was written in
+    // clear; a masker over the whole JSON text would also hide an exception's own `key`, which names a conversation, not a secret)
+    const masked = (x, depth = 0) => (typeof x === 'string' ? redactSecrets(x).text : depth > 8 || !x || typeof x !== 'object' ? x : Array.isArray(x) ? x.map((y) => masked(y, depth + 1)) : Object.fromEntries(Object.entries(x).map(([f, y]) => [redactSecrets(f).text, masked(y, depth + 1)])));
+    const dropped = notList ? [`(not a list) ${shapeOf(masked(raw.except)).slice(0, 200)}`] : [...gone.slice(0, 20).map((x) => shapeOf(masked(x)).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])];
     const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped } : null;
     return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except, ...(repaired ? { repaired } : {}) } } };
   }
