@@ -84,13 +84,15 @@ export function installFormHost(app) {
     // r19 (lane needs-card-tail, a cross-fix — rehostWaitVerdict): a press in flight, and when it ended — a crossing waits for it.
     // r20 (the r19 acceptance, MINOR 2): a press is BOUNDED — a move with no button down, the page losing the focus or going
     // hidden ends one whose release never came (and rehostWaitVerdict ends it at PRESS_MAX_MS whatever happens)
-    // r23 (the r22 acceptance, MINOR 1 — pressOver pruned FIRST: a press held past the bound was dropped as lost there and its
-    // real release stamped no quiet): the RELEASED pointer is handled first and a real release always stamps now; only then
-    // are the others pruned (prunePress cannot tell a lost pointer from one whose release is arriving — the order decides)
+    // r23 → r24 (the r22 / r23 acceptances): a real release (a trusted pointerup / pointercancel) ALWAYS starts the quiet when it
+    // leaves the press empty — r22 returned early and r23 stamped only when the release ALONE emptied the map, so a lost pointer
+    // still in it (a touch whose lift never came) made the release stamp nothing, and its pruning stamped the lost one's bound
+    // instead. What decides is not the order but WHEN the emptiness is judged: after the released id is deleted AND the lost
+    // ones are pruned; then the end is now (never earlier than an end already stamped)
     const pressOver = (id) => {
       if (id === undefined) { if (pressIds.size) { pressIds.clear(); pressEnd = monoNow(); } return; }
-      pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow();
-      prunePress();
+      pressIds.delete(id); prunePress();
+      if (!pressIds.size) pressEnd = Math.max(pressEnd, monoNow());
     };
     document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { prunePress(); pressDownAt = monoNow(); pressIds.set(e.pointerId, pressDownAt); } }, true);
     for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, (e) => { if (e.isTrusted) pressOver(e.pointerId); }, true);
