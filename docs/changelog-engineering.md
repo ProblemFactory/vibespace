@@ -43,7 +43,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### int369 — the .369 train's own seams (lane int361; picks on 6aa57dfbc, first-parent, in the pin order: #0 B-4291, #1 needs-card-tail)
 - **Seam 1 — the kb says what B-4291 r2 left.** kb-bugfix-invariants' B-4291 essay still described r1's frozen-literal leg and its controlled-swap RED (r2 removed both: THE ORDER pin is the r5 comparison) and named five ratchet rows; it now names the pin and the six rows by backlog id (B-44c5 included). kb-file-structure's test-stash-strip essay said 2.8 s where its INDEX line and the tier row say 6.5 s.
-- **The fast tier's sum.** 917.69 s < 918 over 527 suites — B-4291 and needs-card-tail r19…r23 add no fast-row time.
+- **The fast tier's sum.** 917.69 s < 918 over 527 suites — B-4291 and needs-card-tail r19…r24 add no fast-row time.
 
 ## 2.369.368 — 2026-10-31 (hotfix)
 
