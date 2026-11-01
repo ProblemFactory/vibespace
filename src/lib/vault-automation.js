@@ -614,7 +614,23 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const exceptPicks = () => picker.except({ held: [] });
   const unexcept = el('div', 'vw-ak-hint vw-ak-unexcept');
   body.append(unexcept);
-  function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; }
+  // lane held-except-doors r4 (主开发's acceptance of r3, MINOR 3): an exception is its GRANT's — the «除了» row draws them
+  // together, so one that only some of the picked group grants carry is SAID per grant («Cee is left out of Team only»)
+  const exceptOf = el('div', 'vw-ak-hint vw-ak-except-of');
+  body.append(exceptOf);
+  const groupish = (g) => String(g.subject).startsWith('group:') || g.subject === EVERYONE_SUBJECT;
+  const xKeyOf = (x) => (x && x.kind === 'group' ? `group:${x.id}` : x && x.kind === 'conversation' ? `conversation:${x.key}` : null);
+  const syncExceptOf = () => {
+    const on = always.filter((g) => groupish(g) && picker.selected().includes(g.subject));
+    const lines = [];
+    for (const k of exceptPicks()) {
+      const p = principalOfRow(exRowOf(k)); const pk = p ? xKeyOf(p) : null;
+      const carriers = pk ? on.filter((g) => (g.except || []).some((x) => xKeyOf(x) === pk)) : [];
+      if (carriers.length && carriers.length < on.length) lines.push(t('{name} is left out of {grants} only', { name: (exRowOf(k) || {}).name || picker.nameOf(k), grants: carriers.map((g) => grantName(g, data)).join(', ') }));
+    }
+    exceptOf.textContent = lines.join(' · '); exceptOf.style.display = lines.length ? '' : 'none';
+  };
+  function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; syncExceptOf(); }
   syncUnexcept();
   // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
   body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
@@ -635,11 +651,20 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     const add = [...sel].filter((k) => !had.has(k));
     const drop = [...had.keys()].filter((k) => !sel.has(k)).map((k) => had.get(k));
     const reach = rows.value();
-    const except = exceptNow();
     if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
-    // «除了» on the Task Group / All-agents grants this save keeps — written only where it changed
-    const wire = JSON.stringify(except);
-    const exceptOn = always.filter((g) => sel.has(g.subject) && (g.subject.startsWith('group:') || g.subject === EVERYONE_SUBJECT) && JSON.stringify(g.except || []) !== wire);
+    // «除了» — lane held-except-doors r4 (MINOR 3): PER GRANT. The row draws the grants' exceptions together; a Save applies only
+    // what the person CHANGED there — each one taken away leaves every grant that carries it (named), each one added joins
+    // every kept group / All agents grant — so an untouched Save posts nothing (r3 posted the merged list to every grant: a
+    // grant with no exception was silently narrowed), and a grant this Save adds takes only what it adds
+    const was = new Set(exPick.except.map(String)), now = new Set(exceptPicks().map(String));
+    const takenPk = new Set([...was].filter((k) => !now.has(k)).map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOf));
+    const added = [...now].filter((k) => !was.has(k)).map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
+    const except = added;
+    const exceptOn = always.filter((g) => sel.has(g.subject) && groupish(g)).map((g) => {
+      const cur = g.except || [];
+      const next = [...cur.filter((x) => !takenPk.has(xKeyOf(x))), ...added.filter((a) => !cur.some((x) => xKeyOf(x) === pkOf(a)))];
+      return { ...g, next, removeExcept: cur.map(xKeyOf).filter((k) => k && takenPk.has(k)) };
+    }).filter((o) => JSON.stringify(o.next.map(xKeyOf).sort()) !== JSON.stringify((o.except || []).map(xKeyOf).sort()));
     // lane key-grant-everyone: the reach rows are the reach of the grants this save ADDS — changed while it adds none, the
     // save said 已保存 and wrote nothing (the owner's 「没有办法保存给整个 vibespace」). Refused by name, the dialog kept —
     // r2: only when the save changes NOTHING but the reach; a removal or a «除了» edit goes through and says the reach was not used
@@ -648,9 +673,8 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     let bad = null;
     if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach, except }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
-    for (const g of exceptOn) {
-      const keep = new Set(except.map(pkOf)), removeExcept = (g.except || []).map(pkOf).filter((k) => !keep.has(k));   // lane held-except-doors: this grant's 除了 taken away, named
-      const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except, ...(removeExcept.length ? { removeExcept } : {}) }); if (!r || !r.ok) bad = r || {};
+    for (const g of exceptOn) {   // lane held-except-doors: this grant's 除了 — what it loses NAMED (r4: per grant)
+      const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except: g.next, ...(g.removeExcept.length ? { removeExcept: g.removeExcept } : {}) }); if (!r || !r.ok) bad = r || {};
     }
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(reachUnused ? t('Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant\'s reach on its chip') : t('Saved'));
     close();

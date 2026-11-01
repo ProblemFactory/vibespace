@@ -87,6 +87,12 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   rowsNow();
   const initial = model.selected.slice();
   const initialExcept = model.exceptSelected.slice();   // lane grants-unify: the members left out, as they were read
+  // lane held-except-doors r4 (主开发's acceptance of r3, MINOR 2): each kept exception's STORED key and principal key, captured
+  // at open — the dialog's own state. A conversation that stops meanwhile re-draws the model (its live row goes, the stored
+  // one comes back under another picker key) — a broadcast may re-draw a chip's name, never the key a Save sends or names
+  const keptWire = new Map(initialExcept.filter((k) => model.exceptWire.has(k)).map((k) => [k, model.exceptWire.get(k)]));
+  const keptPk = new Map(initialExcept.filter((k) => model.exceptPk.has(k)).map((k) => [k, model.exceptPk.get(k)]));
+  const exceptModel = () => ({ ...model, exceptWire: new Map([...model.exceptWire, ...keptWire]), exceptPk: new Map([...model.exceptPk, ...keptPk]) });
   const pickWrap = el('div', 'bwho-pick');
   const picker = principalPicker({
     items: () => rowsNow(), app, multi: true, selected: initial,
@@ -126,7 +132,8 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     const keys = sel.map((k) => model.keyOfPick.get(k)).filter(Boolean);
     const taskIds = who.filter((w) => w.kind === 'task').map((w) => w.id);
     const exceptPicks = picker.except({ held: initialExcept });   // lane held-except-doors: the stored 除了 rides while its row is not offered
-    const exceptKeys = exceptPicks.map((k) => model.keyOfPick.get(k) || (model.exceptWire.get(k) || {}).key).filter(Boolean);   // lane grants-unify
+    const xm = exceptModel();
+    const exceptKeys = exceptPicks.map((k) => model.keyOfPick.get(k) || (xm.exceptWire.get(k) || {}).key).filter(Boolean);   // lane grants-unify
     const removed = exceptRemoved(initialExcept, exceptPicks);
     return { sel, who, keys, taskIds, exceptPicks, exceptKeys, removed };
   }
@@ -157,8 +164,9 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   async function doSave() {
     const d = draft();
     const use0 = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
-    const except = draftExcept(d.exceptPicks, model);   // lane grants-unify: «除了» (lane held-except-doors: the stored ones kept unless shown as removed)
-    const removeExcept = d.removed.map((k) => model.exceptPk.get(k)).filter(Boolean);   // …and each one taken away NAMED (the writer refuses an unnamed drop)
+    const xm = exceptModel();   // r4: the kept ones by the keys captured at open
+    const except = draftExcept(d.exceptPicks, xm);   // lane grants-unify: «除了» (lane held-except-doors: the stored ones kept unless shown as removed)
+    const removeExcept = d.removed.map((k) => xm.exceptPk.get(k)).filter(Boolean);   // …and each one taken away NAMED (the writer refuses an unnamed drop)
     const use = use0 && except.length ? { ...use0, except } : use0;
     if (!use) {
       noteText(refusal, refusalWords({ code: 'empty_list' }, t));

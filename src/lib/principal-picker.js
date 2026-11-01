@@ -339,11 +339,15 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   let heldAtOpen = exSel.slice();
   const dropped = new Set();
   let keptEl = null;
+  // lane held-except-doors r4 (主开发's acceptance of r3, MINOR 1): «Nobody» — a door whose list is set to nobody keeps its 除了
+  // (it holds again when someone is picked); the picker then shows ONLY the kept line (its chips, box, list and «除了» row hidden:
+  // `pp-nobody`) and answers `except({held, nobody: true})` — the held ones less every one the person took away
+  let nobody = false;
   const exRowOf = (k) => (exInner && exInner.knownRows().find((r) => String(r.key) === k)) || byKey().get(k) || known.get(k) || null;
   function drawKept(offered) {
     if (!keptEl) return;
     if (except && except.kept === false) { keptEl.style.display = 'none'; return; }   // r3: the door keeps no except-only row
-    const keys = offered ? [] : PM.exceptSaved(rows, sel, exSel, { held: heldAtOpen.filter((k) => !dropped.has(k)) });
+    const keys = nobody ? heldAtOpen.filter((k) => !dropped.has(k)) : offered ? [] : PM.exceptSaved(rows, sel, exSel, { held: heldAtOpen.filter((k) => !dropped.has(k)) });
     keptEl.textContent = '';
     keptEl.style.display = keys.length ? '' : 'none';
     if (!keys.length) return;
@@ -395,7 +399,8 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     exInner = principalPicker({
       items: () => { const cand = PM.exceptCandidates(source(), sel, { ownHint: t('has its own grant') }); const seen = new Set(cand.map((r) => String(r.key))); const left = (r) => r && !seen.has(String(r.key)) && exSel.includes(String(r.key)) && (seen.add(String(r.key)), true); return [...cand, ...(source() || []).filter((r) => !PM.isEveryone(r) && left(r)), ...extra().filter(left)]; },   // lane held-except-doors (e): one left out from outside the picked groups is named by its roster row
       multi: true, selected: exSel, placeholder: t('Search members to leave out…'), label: t('Except (optional)'), emptyText: t('No member of the picked Task Groups is running'),
-      cls: 'pp-except-picker', chipPrefix: t('Except: '), onChange: (keys) => { exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
+      // r4: a held one ✕-ed on its chip is TAKEN AWAY (it stays away when the row folds or the list turns to Nobody)
+      cls: 'pp-except-picker', chipPrefix: t('Except: '), onChange: (keys) => { for (const k of exSel) if (!keys.includes(k) && heldAtOpen.includes(k)) dropped.add(k); for (const k of keys) dropped.delete(k); exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
     });
     exWrap.append(exToggle, exInner.el);
     keptEl = el('div', 'pp-kept');
@@ -422,7 +427,9 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     refresh: () => { rows = source() || []; noteRows(); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     /** «除了»: the exceptions a save writes — PURE `exceptSaved`; while no Task Group / All agents is picked, `held` (the stored
      *  row's exception keys) VERBATIM (lane held-except-doors — every caller passes it). */
-    except: ({ held = null } = {}) => PM.exceptSaved(rows, sel, exSel, { held: Array.isArray(held) ? held.filter((k) => !dropped.has(String(k))) : held }),   // r2: less the ones ✕-ed on the kept line
+    except: ({ held = null, nobody: nb = false } = {}) => (nb ? (Array.isArray(held) ? held.map(String).filter((k) => !dropped.has(k)) : []) : PM.exceptSaved(rows, sel, exSel, { held: Array.isArray(held) ? held.filter((k) => !dropped.has(String(k))) : held })),   // r2: less the ones ✕-ed on the kept line; r4: «Nobody» — the held ones less every one taken away
+    /** r4: the door's list is «Nobody» — only the kept line is drawn (the rest of the picker hidden), until it is someone again. */
+    setNobody: (on) => { nobody = !!on; root.classList.toggle('pp-nobody', nobody); syncExcept(); },
     setExcept: (keys) => { exSel = (keys || []).map(String); heldAtOpen = exSel.slice(); dropped.clear(); if (exInner) exInner.setSelected(exSel); syncExcept(); },   // r2: the stored row re-drawn (window-share) — the kept line follows it
     /** The rows this picker has seen (live + the caller's extra) — what `PM.pickToRow` maps keys through. */
     knownRows: () => { const m = new Map(known); if (exInner) for (const r of exInner.knownRows()) if (!m.has(String(r.key))) m.set(String(r.key), r); return [...m.values()]; },

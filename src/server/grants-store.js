@@ -151,12 +151,19 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     if (!v.ok) return v;
     const k = keyOf(door, v.row.resource);
     const was = rows.get(k) || null;
-    const unnamed = named ? GM.exceptUnnamed(was, v.row.except, removeExcept) : null;
+    // lane held-except-doors r4 (主开发's acceptance of r3, MAJOR): a row this release cannot read (kept «judged as it is» at load)
+    // holds NO exception a door could have shown (GM.publicRow publishes none for it) — so none can be named, and the Save
+    // that replaces it is a REPAIR (the dialogs promise it: «save it again»). The writer accepts it and names what it drops
+    // ITSELF, in the audit line (`repaired`); never a refusal (r3 refused every repair except_unnamed, for ever)
+    const nw = was ? GM.normRow(was) : null;
+    const raw = nw && !nw.ok ? was : null;
+    const unnamed = named && !raw ? GM.exceptUnnamed(was, v.row.except, removeExcept) : null;
     if (unnamed) return { ok: false, code: 'except_unnamed', error: GM.EXCEPT_UNNAMED_WORDS, principal: unnamed };
     const removing = !v.row.to.length && !v.row.except.length;
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except }) === JSON.stringify({ to: v.row.to, except: v.row.except }))) return { ok: true, change: null, row: was, was };
     const d = { to: diff(keysOf(was && was.to), removing ? [] : keysOf(v.row.to)), except: diff(keysOf(was && was.except), removing ? [] : keysOf(v.row.except)) };
-    return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except } } };
+    const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped: (Array.isArray(raw.except) ? raw.except : []).slice(0, 20).map((x) => { try { return JSON.stringify(x).slice(0, 120); } catch { return String(x).slice(0, 120); } }) } : null;
+    return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except, ...(repaired ? { repaired } : {}) } } };
   }
 
   /**

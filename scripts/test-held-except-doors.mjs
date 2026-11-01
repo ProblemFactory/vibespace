@@ -31,6 +31,9 @@
 // r3 (主开发's acceptance of d4418c363): THE KEPT LINE NEVER LIES — ⑫ the automation key draws none over the group grant its
 // Save deletes and SAYS the exception going; ⑬ the vault door's kept ✕ is said and named; ⑭ the browser door sends a kept
 // exception whose conversation runs by its STORED key (no 410). RED on d4418c363 by name.
+// r4 (主开发's acceptance of fb98bebee): ⑮ the machine dialog's «Nobody» draws the kept 除了 and honours its ✕; ⑯ the browser door
+// rides the keys captured at open through a stop broadcast; ⑰ the automation key's exceptions are per grant (an untouched Save
+// posts nothing). The writer's REPAIR of an unreadable row: test-grants-store ⑨. RED on fb98bebee by name.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -140,7 +143,8 @@ function newPage({ routes, roster = [] }) {
       selectedRows: () => st.sel.map((k) => known.get(k)).filter(Boolean),
       setSelected: (keys) => { st.sel = (keys || []).map(String); st.ex = st.ex.filter((k) => !st.sel.includes(k)); },
       refresh: () => { note(); },
-      except: (...a) => PM.exceptSaved(source(), st.sel, st.ex, ...a),   // THE real picker's answer (src/lib/principal-picker.js api.except)
+      except: (o = {}) => (o && o.nobody ? (Array.isArray(o.held) ? o.held.map(String) : []) : PM.exceptSaved(source(), st.sel, st.ex, o)),   // THE real picker's answer (src/lib/principal-picker.js api.except; r4: «Nobody» — the held ones)
+      setNobody() { },
       setExcept: (keys) => { st.ex = (keys || []).map(String); },
       knownRows: () => { note(); return [...known.values()]; },
       nameOf: (k) => (known.get(k) || {}).name || k,
@@ -810,6 +814,103 @@ console.log('⑭ r3 MINOR 2: browser «Who can use it» — a kept exception who
   const b = (P.posts[0] || {}).body || {};
   const r0 = st.rowsFor(DOOR, PID)[0] || null;
   ok(!threw && J(((b.use || {}).except) || []) === J([{ kind: 'session', key: 'cid:cid-cee' }]) && J(exKeys(r0)) === J(['conversation:cid-cee']) && !P.toasts.some((m) => /not running any more/.test(m)), '(b) the door: an untouched Save while Cee stopped sends Cee\'s exception AS STORED and LANDS — no 410 «pick it again from the list» (d4418c363: refused)', { threw, body: b, row: r0, toasts: P.toasts });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// r4 — 主开发's acceptance of fb98bebee (held-except-doors/accept-r3-verdict.json): the machine dialog's «Nobody» keeps, shows
+// and lets the person take away a kept 除了 (never writes back what was ✕-ed); the browser door's kept exceptions ride by the
+// keys captured at OPEN (a stop broadcast re-draws, never drops); the automation key's exceptions are PER GRANT (an untouched
+// Save narrows nothing). (The writer's REPAIR of an unreadable row is test-grants-store ⑨.) RED on fb98bebee by name.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ═══ ⑮ MINOR 1 — the machine dialog under «Nobody»: the kept line is drawn there, and its ✕ is honoured ═══
+console.log('⑮ r4 MINOR 1: the machine dialog — «Nobody» shows the kept 除了 and honours its ✕ (said, named, never written back)');
+{
+  const fw = forkWorld('h-nobody2', { to: [ADA], except: [CEE] });
+  fw.seed();
+  const d = await fw.open();
+  const k0 = keptOf(d.pp);
+  const x = k0 && k0.x('agent:cid-cee'); if (x) x.click();
+  const s0 = d.said();
+  const r = fw.radio(d.P, 'use', 'nobody'); if (r) { r.checked = true; r.onchange(); }
+  const s1 = d.said();
+  await d.save();
+  const b = d.lastPatch() || {};
+  ok(!!x && s0 === 'Cee will no longer be excluded' && s1 === 'Cee will no longer be excluded', '(a) the kept line\'s ✕ on Cee is SAID — and still said once the list is switched to Nobody', { kept: k0, s0, s1 });
+  ok(!!r && (b.use || {}).mode === 'nobody' && J((b.use || {}).except || []) === J([]) && J((b.use || {}).removeExcept) === J(['conversation:cid-cee']) && J(exKeys(fw.row())) === J([]), '(b) …Save under Nobody sends except [] + removeExcept [Cee] — the ✕ honoured (fb98bebee: wrote Cee back as stored)', { body: b.use, row: fw.row() });
+  fw.seed();
+  const d2 = await fw.open();
+  const r2 = fw.radio(d2.P, 'use', 'nobody'); if (r2) { r2.checked = true; r2.onchange(); }
+  const k2 = keptOf(d2.pp);
+  const seenUp = (n) => { for (let p = n; p; p = p.parentElement) if ((p.style && p.style.display === 'none') || p.hidden) return false; return !!n; };
+  const keptNode = kidOf(d2.pp, 'pp-kept');
+  ok(!!r2 && !!k2 && J(k2.names) === J(['Cee']) && seenUp(keptNode), '(c) under Nobody the list\'s kept 除了 is DRAWN and SEEN («Kept from an earlier grant — left out: Cee ✕», nothing above it hidden) — never invisible (fb98bebee: the picker\'s wrap hidden under Nobody)', { k2, seen: seenUp(keptNode) });
+}
+
+// ═══ ⑯ MINOR 2 — the browser door: a stop broadcast between open and Save never drops a kept exception ═══
+console.log('⑯ r4 MINOR 2: browser «Who can use it» — a conversation stopping while the dialog is open re-draws the model; the kept exception rides by the key captured at open');
+{
+  const PID = 'bp-0000a004', DOOR = 'browser-profile';
+  const st = GS.create({ memory: true });
+  st.set(DOOR, PID, { to: [ADA], except: [CEE] }, 'user');
+  const SESS = new Set(['w-cid-ada', 'w-cid-cee']);
+  const listeners = [];
+  const sessions = [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ id: `w-${id}`, backendSessionId: id, name }));
+  const app = { ws: { onGlobal: (fn) => listeners.push(fn), offGlobal: () => { } }, sidebar: { _webuiSessions: sessions.map((s) => ({ ...s })), _tasks: [{ id: 'g-team', title: 'Team' }], _getSessionTaskGroups: () => [], getCustomName: () => '', _allSessions: [{ sessionId: 'cid-ada', name: 'Ada' }, { sessionId: 'cid-cee', name: 'Cee' }] } };
+  const prof = () => ({ id: PID, label: 'Work', grantUse: B.useOfRows(st.rowsFor(DOOR, PID), { browserKeyOf: () => null }) });
+  const routes = async (url, method, body) => {
+    if (url === `/api/browser/profiles/${PID}/use`) { const p = prof(); const use = B.useDigestOf(p); return { profile: { id: p.id, label: p.label, legacy: false }, use: { ...use, except: (use.except || []).map((w) => (w.conversationId && SESS.has(`w-${w.conversationId}`) ? { ...w, live: true, name: 'Cee' } : w)) }, base: B.useStamp(p), usedBy: [], createdBy: null }; }
+    if (url === `/api/browser/profiles/${PID}` && method === 'PATCH') {
+      const ex = [];
+      for (const r of (body.use && body.use.except) || []) {
+        if (r.kind === 'session' && r.session !== undefined) { if (!SESS.has(r.session)) return { status: 410, error: 'that conversation is not running any more — pick it again from the list', code: 'session-gone' }; ex.push({ kind: 'session', key: `cid:${String(r.session).replace(/^w-/, '')}` }); }
+        else ex.push(r);
+      }
+      const use = { ...body.use, except: ex };
+      const p = prof();
+      const v = B.usePatchVerdict({ profile: p, use, knownTask: (tid) => tid === 'g-team', knownKey: () => false, conversationOf: () => null }); if (!v.ok) return { error: v.error, code: v.code };
+      const w = st.set(DOOR, PID, { to: v.row.to, except: v.row.except, removeExcept: Array.isArray(body.removeExcept) ? body.removeExcept : [] }, 'user');
+      return w.ok ? { ok: true, profile: { id: PID, label: 'Work' }, detached: [] } : { error: w.error, code: w.code };
+    }
+    return undefined;
+  };
+  const P = newPage({ routes });
+  const h = await D.BW.openWhoDialog(app, PID, {});
+  // Cee's conversation STOPS: server.js broadcasts the new active list, the picker re-reads its rows (the model is rebuilt)
+  SESS.delete('w-cid-cee');
+  app.sidebar._webuiSessions = app.sidebar._webuiSessions.filter((s) => s.id !== 'w-cid-cee');
+  for (const fn of listeners) fn({ type: 'active-sessions' });
+  await tick(); await tick();
+  let threw = null; try { await h.save(); } catch (e) { threw = String((e && e.message) || e); }
+  await tick();
+  const b = (P.posts[0] || {}).body || {};
+  const r0 = st.rowsFor(DOOR, PID)[0] || null;
+  ok(listeners.length > 0 && !threw && J(((b.use || {}).except) || []) === J([{ kind: 'session', key: 'cid:cid-cee' }]) && J(exKeys(r0)) === J(['conversation:cid-cee']) && !P.toasts.some((m) => /changed while the dialog was open|not running any more/.test(m)), '(a) the stop broadcast between open and an untouched Save: the body carries Cee\'s STORED key, the Save lands, Cee still excepted (fb98bebee: the re-drawn model dropped it ⇒ except_unnamed, «This grant changed…»)', { listeners: listeners.length, threw, body: b.use, row: r0, toasts: P.toasts });
+}
+
+// ═══ ⑰ MINOR 3 — the automation key: the exceptions are PER GRANT; an untouched Save narrows nothing ═══
+console.log('⑰ r4 MINOR 3: automation key «授权给…» — G1 (除了 Cee) + G2 (none, Cee its member): an untouched Save posts NOTHING; the dialog says whose 除了 it is');
+{
+  const st = GS.create({ memory: true });
+  const G1 = 'ag-0000000000g1', G2 = 'ag-0000000000g2', G3S = 'group:g-ops', KID = 'ak-00000003';
+  const OPS = { kind: 'group', id: 'g-two' };
+  st.set('automation-key-use', G1, { to: [TEAM], except: [CEE] }, 'user');
+  st.set('automation-key-use', G2, { to: [OPS] }, 'user');
+  const key = () => ({ id: KID, name: 'deploy', grants: [[G1, 'group:g-team'], [G2, 'group:g-two']].map(([g, subject]) => ({ id: g, subject, mode: 'always', reach: 'opened', except: [...((st.rowsFor('automation-key-use', g)[0] || {}).except || [])] })) });
+  const data = { subjects: { groups: [{ subject: 'group:g-team', name: 'Team' }, { subject: 'group:g-two', name: 'Two' }, { subject: G3S, name: 'Ops' }], sessions: [['cid-ada', 'Ada', ['g-team']], ['cid-cee', 'Cee', ['g-team', 'g-two']]].map(([id, name, groupIds]) => ({ subject: `session:${id}`, name, groupIds })) } };
+  const routes = async (url, method, body) => (method !== 'GET' ? { ok: true, ...(url.endsWith('/grants') ? { grants: [] } : {}) } : undefined);
+  const open = () => { const P = newPage({ routes }); D.VA.showGrantPicker(key(), data, { refresh: () => { } }); return { P, pp: ppOf(P.shell && P.shell.body), save: async () => { await P.shell.opts.unsaved.save(); await tick(); } }; };
+  { const { P, save } = open();
+    const note = byCls(P.shell.body, 'vw-ak-except-of');
+    const said = shown(note) ? textOf(note) : '';
+    await save();
+    ok(said === 'Cee is left out of Team only', '(a) the dialog SAYS whose 除了 it is: «Cee is left out of Team only» (the row draws both grants\' exceptions together)', said);
+    ok(!P.posts.some((q) => /\/except$/.test(q.url)), '(b) an UNTOUCHED Save posts no «除了» at all — Two\'s grant is not narrowed to leave Cee out (fb98bebee: posted Two\'s except [Cee], «Saved»)', P.posts.map((q) => `${q.method} ${q.url} ${J(q.body)}`)); }
+  { const { P, pp, save } = open();
+    const g3 = ppRow(pp, G3S); if (g3) g3.click();
+    await save();
+    const add = P.posts.find((q) => /\/keys\/[^/]+\/grants$/.test(q.url));
+    ok(!!g3 && !!add && J(add.body.subjects) === J([G3S]) && J(add.body.except) === J([]) && !P.posts.some((q) => /\/except$/.test(q.url)), '(c) adding Ops: its grant posts except [] (never the other grants\' 除了), and no other grant is written', P.posts.map((q) => `${q.method} ${q.url} ${J(q.body)}`)); }
 }
 
 console.log(`\n${fail ? "FAILED" : "ALL PASS"} (${pass} passed, ${fail} failed) — ${Date.now() - T0} ms`);

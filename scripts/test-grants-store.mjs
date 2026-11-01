@@ -331,5 +331,43 @@ console.log('⑧ «除了» leaves by name only (lane held-except-doors): the ON
   ok(plant !== BW && pc.bad.length === 1 && /browser-who-dialog\.js:\d+ \.except\(\)/.test(pc.bad[0]), 'CONTROL: the browser door\'s Save planted back without `held` is red by name (its file:line)', pc.bad);
 }
 
+console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane held-except-doors r4): it lands, and the audit names what it dropped');
+{
+  // three rows a newer release (or a hand edit) left: an entry from a newer release, a bad key, `everyone` among the exceptions —
+  // kept «judged as it is» at load, published with no exception (no door can show one, so none can name one)
+  const d = dirOf('repair');
+  const CEE = { kind: 'conversation', key: 'cid-cee' };
+  const RAW = [
+    { door: 'exit', resource: 'h1:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'x' }] },
+    { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
+    { door: 'exit', resource: 'h3:use', to: [G1], except: [{ kind: 'everyone' }] },
+    { door: 'exit', resource: 'h4:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'y' }] },
+  ];
+  fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
+  const st = GS.create({ dataDir: d, now: () => 9 });
+  const lines = () => { try { return fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const lastFor = (res) => lines().filter((l) => l.resource === res).pop() || null;
+  ok(RAW.every((r) => GM.normRow(r).ok === false) && RAW.every((r) => st.rowsFor('exit', r.resource).length === 1 && GM.publicRow(st.rowsFor('exit', r.resource)[0]).unknown === true), 'setup: four exit rows this release cannot read — kept as they are, published as unknown (no exception any door could show)');
+  const s1 = st.set('exit', 'h1:use', { to: [G1], except: [] });
+  const l1 = lastFor('h1:use');
+  ok(s1.ok && J(st.rowsFor('exit', 'h1:use')[0].to) === J([G1]) && !!l1 && !!l1.repaired && /repaired an unreadable row/.test(l1.repaired.note) && l1.repaired.dropped.some((x) => /cid-cee/.test(x)) && l1.repaired.dropped.some((x) => /agent-from-newer-release/.test(x)), 'set over an unreadable row (an entry from a newer release) LANDS — a repair; its audit line names what it dropped (fb98bebee: except_unnamed for ever)', { s1, l1 });
+  const s2 = st.setMany([{ door: 'exit', resource: 'h2:use', to: [], except: [] }, { door: 'exit', resource: 'h2:run', to: [G1], except: [] }]);
+  const l2 = lastFor('h2:use');
+  ok(s2.ok && !st.rowsFor('exit', 'h2:use').length && !!l2 && !!l2.repaired && l2.repaired.dropped.some((x) => /-bad-key/.test(x)), 'setMany over an unreadable row (a bad key) LANDS with the other row — the audit names the drop', { s2, l2 });
+  const s3 = st.remove('exit', 'h3:use');
+  const l3 = lastFor('h3:use');
+  ok(s3.ok && !st.rowsFor('exit', 'h3:use').length && !!l3 && !!l3.repaired && l3.repaired.dropped.some((x) => /everyone/.test(x)), 'remove over an unreadable row (`everyone` among the exceptions) lands — the audit names the drop', { s3, l3 });
+  // THE DOOR: the machine dialog's own Save road for a list it could not read («save it again») — exitAccessOf → patchVerdict →
+  // exitRows → setMany, as exit-proxy setAccess runs it
+  const E = require('../src/exit-reach.js');
+  const acc = E.exitAccessOf({ exit: { ask: false } }, { use: st.rowsFor('exit', 'h4:use'), run: st.rowsFor('exit', 'h4:run') });
+  const v = E.patchVerdict(acc, { use: { mode: 'nobody' }, run: { mode: 'nobody' } }, { now: 9, by: 'user' });
+  const w = v.ok ? st.setMany(E.exitRows(v.access, 'h4', v.removeExcept), 'user') : v;
+  ok(v.ok && w.ok && !st.rowsFor('exit', 'h4:use').length && !!(lastFor('h4:use') || {}).repaired, 'the machine dialog\'s Save road over its unreadable list (Nobody, «save it again») LANDS — repaired, the drop named', { v: v.ok ? 'ok' : v, w });
+  // CONTROL: a row this release CAN read still refuses an exception left out unnamed
+  st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
+  ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');
+}
+
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

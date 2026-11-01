@@ -159,7 +159,8 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const held = pick.except;
       const items = () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))];
       const pickerWrap = el('div', 'exit-access-picker');
-      pickerWrap.appendChild(el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.')));
+      const pickNote = el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.'));
+      pickerWrap.appendChild(pickNote);
       const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, onChange: () => { refuseLine.textContent = ''; syncCount(); },
         except: { selected: pick.except, extra } });   // «除了» — members left out of a picked Task Group / All agents
       pickerWrap.appendChild(picker.el);
@@ -185,7 +186,11 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       sec.appendChild(unexceptLine);
       body.appendChild(sec);
       const syncSec = () => {
-        pickerWrap.style.display = mode === 'only' ? '' : 'none';
+        // lane held-except-doors r4 (主开发's acceptance of r3, MINOR 1): under «Nobody» the list KEEPS its 除了 — its picker shows
+        // only the kept line (its ✕ said and named like anywhere), so an exception that survives «Nobody» is seen and removable
+        picker.setNobody(mode === 'nobody');
+        pickNote.style.display = mode === 'only' ? '' : 'none';
+        pickerWrap.style.display = mode === 'only' || held.length ? '' : 'none';
         // naive-user N-greyed: under Nobody there is nothing to ask about — the switch is NOT SHOWN (it used to sit there
         // greyed out and did nothing when clicked: the owner's no-greyed-controls rule); its ticked state is kept
         if (askLab) { askLab.style.display = mode === 'nobody' ? 'none' : ''; askNote.style.display = askLab.style.display; }
@@ -196,8 +201,8 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const syncCount = () => {
         const used = (d.usedBy && d.usedBy[grant]) || [];
         const sel = new Set(picker.selected());
-        const out = new Set(picker.except({ held }));
-        const gone = mode === 'only' ? exceptRemoved(held, [...out]) : [];
+        const out = new Set(picker.except({ held, nobody: mode === 'nobody' }));
+        const gone = exceptRemoved(held, [...out]);   // r4: said under «Nobody» too
         unexceptLine.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: ([...items(), ...picker.knownRows()].find((x) => x.key === k) || {}).name || picker.nameOf(k) })).join(' · ');
         unexceptLine.style.display = gone.length ? '' : 'none';
         const covered = (sid) => {
@@ -298,7 +303,14 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
           g.except = ex.map(wireEx).filter(Boolean);
           const gone = exceptRemoved(s.held, ex).map(pkOf).filter(Boolean);
           if (gone.length) g.removeExcept = gone;
-        } else if (s.held.length) g.except = s.held.map(kept).filter(Boolean);   // lane held-except-doors: Nobody keeps the list's 除了 (r2: as stored)
+        } else if (s.held.length) {
+          // lane held-except-doors: Nobody keeps the list's 除了 (r2: as stored) — r4: the picker's answer (a ✕ on the kept line or
+          // on a chip TAKES one away: named, never written back)
+          const ex = s.picker.except({ held: s.held, nobody: true });
+          g.except = ex.map(kept).filter(Boolean);
+          const gone = exceptRemoved(s.held, ex).map(pkOf).filter(Boolean);
+          if (gone.length) g.removeExcept = gone;
+        }
         if (grant === 'run') g.ask = !!(s.askBox && s.askBox.checked);
         out[grant] = g;
       }

@@ -214,7 +214,10 @@ function recordOfRows(windowId, mode, rows) {
   // `<rest>` by the next write — a permanent except_unnamed. None is ever stored: every writer of this door (the window engine
   // through rowOfRecord(normRecord(…)), the migration's GM mapper through keyFromSessionKey) maps the key the same way first,
   // and a conversation id has no colon (claude / codex: a UUID; a pending fork: `webui:<id>`, kept as it is). Only a hand edit
-  // of grants.json could — said here, not legged.
+  // of grants.json could — said here, not legged. r4 (主开发's CHECK): the ids looked at — claude and codex (UUIDs), a pending
+  // fork (`webui:<id>`, kept whole by keyFromSessionKey); an ACP agent's session id is the AGENT's choice (opaque here) — one
+  // carrying a colon (`acp:sess:123` stored as `sess:123`) would read back as `123`: not seen in a shipped agent, not proven
+  // impossible — not fixed in this round (the record would have to mark a key it already mapped; a follow-up).
   out.except = n.row.except.map((x) => normPrincipal({ ...fromGrantPrincipal(x), name: x.name })).filter(Boolean);
   return out;
 }
