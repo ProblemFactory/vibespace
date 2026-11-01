@@ -47,7 +47,8 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### int369 — the .369 train's own seams (lane int361; picks on 6aa57dfbc, first-parent, in the pin order: #0 B-4291, #1 needs-card-tail)
 - **Seam 1 — the kb says what B-4291 r2 left.** kb-bugfix-invariants' B-4291 essay still described r1's frozen-literal leg and its controlled-swap RED (r2 removed both: THE ORDER pin is the r5 comparison) and named five ratchet rows; it now names the pin and the six rows by backlog id (B-44c5 included). kb-file-structure's test-stash-strip essay said 2.8 s where its INDEX line and the tier row say 6.5 s.
-- **The fast tier's sum.** 917.69 s < 918 over 527 suites — B-4291 and needs-card-tail r19…r24 add no fast-row time.
+- **The fast tier's sum.** 917.69 s < 918 over 527 suites — B-4291 and needs-card-tail r19…r25 add no fast-row time.
+- **The train's own mirror caught r19's open-time settle (test-exit-access-ui, heavy 5/6, red ×2 on the r23 cut's mirror).** On the train tip the suite failed at its THIRD open of the dialog (:271, a null `.checked` after a click that silently missed) — 2 of 2 locally, the base 6aa57dfbc 126/0 twice: r19's open settled a crossing the viewport switch had never heard (the suite's page is a background tab — no resize), so an open ran enterPhone / enterDesktop on the whole page. needs-card-tail r25: an open settles only a crossing its switch heard; otherwise it hosts the form by the fresh class and runs nothing. The r23 / r24 cuts (3a4f20644, f1f9eda74) did not ship.
 
 ## 2.369.368 — 2026-10-31 (hotfix)
 
