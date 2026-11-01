@@ -35,6 +35,7 @@
 const fs = require('fs');
 const path = require('path');
 const GM = require('../grant-model.js');
+const { redactSecrets } = require('../secret-shapes.js');   // lane held-except-doors r6: a repaired row's raw `except` is named masked
 const { SyncStore } = require('../sync-store.js');
 
 const AUDIT_ROTATE_BYTES = 4 * 1024 * 1024;
@@ -168,7 +169,11 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     const pkSafe = (x) => { try { return GM.principalKey(x) || null; } catch { return null; } };
     const keptKeys = new Set(v.row.except.map(pkSafe).filter(Boolean)), keptShapes = new Set(v.row.except.map(shapeOf));
     const gone = raw ? (Array.isArray(raw.except) ? raw.except : []).filter((x) => { const pk = pkSafe(x); return !(pk && keptKeys.has(pk)) && !keptShapes.has(shapeOf(x)); }) : [];
-    const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped: [...gone.slice(0, 20).map((x) => shapeOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])] } : null;
+    // r6 (主开发's acceptance of r5, 3): an `except` that is NOT a list (a newer release's shape) is dropped WHOLE — named as its
+    // raw shape, bounded (≤ 200 characters) and with every secret-shaped value masked (src/secret-shapes.js)
+    const notList = raw && raw.except !== undefined && !Array.isArray(raw.except);
+    const dropped = notList ? [`(not a list) ${redactSecrets(shapeOf(raw.except)).text.slice(0, 200)}`] : [...gone.slice(0, 20).map((x) => shapeOf(x).slice(0, 120)), ...(gone.length > 20 ? [`and ${gone.length - 20} more`] : [])];
+    const repaired = raw ? { note: 'repaired an unreadable row', why: String(nw.why || nw.code || 'unreadable').slice(0, 120), dropped } : null;
     return { ok: true, row: removing ? null : v.row, was, change: { k, next: removing ? null : v.row, line: { at, by, op: removing ? 'remove' : 'set', door, resource: v.row.resource, to: d.to, except: d.except, ...(repaired ? { repaired } : {}) } } };
   }
 
