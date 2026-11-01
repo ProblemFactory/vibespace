@@ -454,16 +454,18 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return w && w.ok ? { ok: true, removed: true } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
 
-  /** lane vault-login-chrome r4: open a login entry's secret values (>= minBytes) solely to re-hydrate in-memory output scrubbing or DOM verification after a hub restart. */
-  function scrubSecretsOf(name, { minBytes = 8 } = {}) {
+  /** lane vault-login-chrome r4 + r11: open a login entry's secret values (>= minBytes) solely to re-hydrate in-memory output scrubbing or DOM verification after a hub restart (`includePrevious: false` when hydrating a login/signup fence's `credSigs`, where `previous.password` was never typed). */
+  function scrubSecretsOf(name, { minBytes = 8, includePrevious = true } = {}) {
     const n = str(name);
     if (!BL.parseName(n)) return { ok: false, code: 'bad_name', values: [] };
     if (vstate() !== 'unlocked') return { ok: false, code: 'vault_locked', values: [] };
     const o = open(n);
     if (!o.ok || !o.rec) return { ok: false, code: o.code || 'login_no_entry', values: [] };
     const floor = Number.isFinite(Number(minBytes)) && Number(minBytes) > 0 ? Number(minBytes) : 8;
-    const values = [o.rec.password, o.rec.previous && o.rec.previous.password]
-      .filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= floor);
+    const raw = includePrevious === false
+      ? [o.rec.password]
+      : [o.rec.password, o.rec.previous && o.rec.previous.password];
+    const values = raw.filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= floor);
     return { ok: true, values };
   }
   function onVaultOpen(fn) {

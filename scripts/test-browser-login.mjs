@@ -1217,15 +1217,23 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
       }
       return worlds.get(name);
     };
-    let ctxSeq = 10;
+    let ctxSeq = 1;
+    const worldIds = new Map();
     const ctxToWorld = new Map();
+    const nextDocument = () => { worlds.clear(); worldIds.clear(); };
     let inserted = 0;
     const call = async (m, p = {}) => {
       if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'F1', url: `${SITE}/login`, securityOrigin: SITE } } } };
       if (m === 'Target.getTargetInfo') return { result: { targetInfo: { targetId: 'T1', url: `${SITE}/login` } } };
       if (m === 'Page.createIsolatedWorld') {
-        const id = ++ctxSeq;
-        ctxToWorld.set(id, getWorld(String(p.worldName || 'default')));
+        const wName = String(p.worldName || 'default');
+        const wKey = `${String(p.frameId || 'F1')}:${wName}`;
+        let id = worldIds.get(wKey);
+        if (!id) {
+          id = ++ctxSeq; // Chrome 154: main world = 1, first isolated world ('vs-login-fill') = 2 in every target
+          worldIds.set(wKey, id);
+          ctxToWorld.set(id, getWorld(wName));
+        }
         return { result: { executionContextId: id } };
       }
       if (m === 'Runtime.evaluate') {
@@ -1241,7 +1249,7 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
       }
       return { result: {} };
     };
-    return { StubInput, inputs, frameEls, doc, call, inserted: () => inserted };
+    return { StubInput, inputs, frameEls, doc, call, nextDocument, inserted: () => inserted };
   }
   sharedMakeStubDom = makeStubDom;
 
@@ -4294,7 +4302,7 @@ console.log('⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3
         logins, log: quiet,
         keeper: {
           _reg: () => ({ loginFences: { 'p-r9-1a': true } }),
-          loginFenceStateOf: () => ({ fences: [{ targetId: 'TAB_R9_1A', origin: SITE, urlAtFill: `${SITE}/login` }], scrubs: [] }),
+          loginFenceStateOf: () => ({ fences: [{ targetId: 'TAB_R9_1A', origin: SITE, urlAtFill: `${SITE}/login`, at: Date.now() }], scrubs: [] }),
         },
       });
       const domA1 = sharedMakeStubDom([
@@ -4937,6 +4945,7 @@ console.log('⑱ Standard-Chrome r10 adversarial fixup gates (MAJOR + MINOR 1–
           if (mode === 'B') {
             const rf1 = await w1.fillLogin(tgt, FILL({ user: 'u1@example.test' }));
             const ctx1 = w1._watches.get(pid)?.targets.get(tid)?.liveFill?.isoContextId || 0;
+            dom.nextDocument?.();
             dom.inputs[0].val = ''; dom.inputs[1].val = '';
             const rf2 = await w1.fillLogin(tgt, FILL({ user: 'u1@example.test' }));
             const ctx2 = w1._watches.get(pid)?.targets.get(tid)?.liveFill?.isoContextId || 0;
@@ -4984,6 +4993,7 @@ console.log('⑱ Standard-Chrome r10 adversarial fixup gates (MAJOR + MINOR 1–
     const red1LfSrc = LFS0
       .replace('if (liveTgt.has(k)) continue;', 'continue;')
       .replace('if (liveCtx.has(k)) continue;', 'continue;')
+      .replaceAll('if (cv && cv.targetKey === ctxKey && ck !== cKey) {', 'if (false && cv && cv.targetKey === ctxKey && ck !== cKey) {')
       .replaceAll('if (cv && cv.targetKey === ctxKey && ck !== normCtx) {', 'if (false && cv && cv.targetKey === ctxKey && ck !== normCtx) {');
     const red1DSrc = DSRC0
       .replace('LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);', 'void persistedTids;')
@@ -5428,6 +5438,1307 @@ console.log('⑱ Standard-Chrome r10 adversarial fixup gates (MAJOR + MINOR 1–
     ok(Boolean(Dm10_5 && mut5 && mut5.blamesLockedWhileUnlocked === true && mut5.hasTimer === false && mut5.stillHeldAfterRetry === true && real5.stillHeldAfterRetry === false),
       'r10 MINOR 4 RED control [r10-5-saved-locked-hold-permanent]: r9 rearmLoginFences reusing saved HOLD_VAULT_LOCKED verbatim arms no timer and holds forever even when vault is unlocked',
       { mutBlames: mut5 && mut5.blamesLockedWhileUnlocked, mutTimer: mut5 && mut5.hasTimer, mutStillHeld: mut5 && mut5.stillHeldAfterRetry });
+  }
+}
+
+// ═══ ⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D + MINOR 1–3 + single-mutant isolation + RED controls) ═══
+console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D + MINOR 1–3 + single-mutant isolation + RED controls)');
+{
+  const LF = require('../src/server/browser-login-fill.js');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const { WebSocketServer, WebSocket } = require('ws');
+
+  // ── (1) F1 MAJOR: Response-stage interception shrinks to the ONE bounded credential candidate; streaming POST + Bearer SSE never pre-read; patterns removed on read ──
+  {
+    const runF1R11 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb11_1-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-1-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW11_1 = pwOf('r11-f1');
+      logins.addOwn({ origin: SITE, username: 'f1@example.test', password: PW11_1 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const k = await startFakeKernel({ mode: { standard: true }, firstUrl: `${SITE}/login` });
+      const getBodyAsked = [];
+      const continued = [];
+      const fetchEnables = [];
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      wss.on('connection', (hub) => {
+        const up = new WebSocket(k.wsUrl, { perMessageDeflate: false });
+        const q = [];
+        up.on('open', () => { for (const x of q.splice(0)) up.send(x); });
+        up.on('message', (d) => { if (hub.readyState === 1) hub.send(String(d)); });
+        hub.on('message', (d) => {
+          const s = String(d);
+          let m = null;
+          try { m = JSON.parse(s); } catch { /* */ }
+          if (m && m.method === 'Fetch.enable') {
+            fetchEnables.push(((m.params && m.params.patterns) || []).map((x) => `${x.resourceType || '*'}@${x.requestStage || 'Request'}`));
+          }
+          if (m && m.method === 'Fetch.getResponseBody') {
+            const reqId = m.params.requestId;
+            getBodyAsked.push(reqId);
+            if (hub.readyState === 1) hub.send(JSON.stringify({ id: m.id, result: { body: '{"ok":true}', base64Encoded: false }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            return;
+          }
+          if (m && m.method === 'Fetch.continueRequest') {
+            continued.push(m.params.requestId);
+            if (hub.readyState === 1) hub.send(JSON.stringify({ id: m.id, result: {}, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            return;
+          }
+          if (up.readyState === 1) up.send(s); else q.push(s);
+        });
+        hub.on('close', () => { try { up.close(); } catch { /* */ } });
+      });
+
+      const proxyUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_f1`;
+      const w1 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: proxyUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w1.arm(PID, { budgetMs: 3000 });
+        const tid = k.targets()[0].targetId;
+        await until(() => w1._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'f1-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'f1-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const rf = await w1.fillLogin(TGT, FILL({ user: 'f1@example.test', submit: false }));
+        const ev = (m, p) => k.emitPageEvent(tid, m, p);
+
+        ev('Network.requestWillBeSent', { requestId: 'n-stream', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/stream`, postData: 's=1', hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-stream', networkId: 'n-stream', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url: `${SITE}/stream`, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/plain' }, { name: 'transfer-encoding', value: 'chunked' }] });
+        await until(() => continued.includes('int-stream'), 1000);
+
+        ev('Network.requestWillBeSent', { requestId: 'n-sse', frameId: tid, type: 'Fetch', request: { method: 'GET', url: `${SITE}/sse`, headers: { Authorization: 'Bearer session-jwt-token' } } });
+        ev('Fetch.requestPaused', { requestId: 'int-sse', networkId: 'n-sse', resourceType: 'Fetch', frameId: tid, request: { method: 'GET', url: `${SITE}/sse`, headers: { Authorization: 'Bearer session-jwt-token' } }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/event-stream' }] });
+        await until(() => continued.includes('int-sse'), 1000);
+
+        ev('Network.requestWillBeSent', { requestId: 'n-cred', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/auth`, postData: JSON.stringify({ email: 'f1@example.test', password: PW11_1 }), hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-cred', networkId: 'n-cred', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url: `${SITE}/auth`, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '11' }] });
+        await until(() => continued.includes('int-cred'), 1000);
+        await sleep(40);
+        const lastPatterns = fetchEnables[fetchEnables.length - 1] || [];
+        return {
+          fillOk: rf.ok,
+          getBodyAsked,
+          continued,
+          lastPatterns,
+        };
+      } finally {
+        try { w1.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        await k.close();
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real1 = await runF1R11(D);
+    ok(real1.fillOk === true &&
+      real1.getBodyAsked.length === 1 && real1.getBodyAsked[0] === 'int-cred' &&
+      real1.continued.includes('int-stream') && real1.continued.includes('int-sse') &&
+      real1.lastPatterns.length === 1 && real1.lastPatterns[0] === 'Document@Request',
+      'r11 F1 MAJOR (Response-stage pre-read shrunk to ONE bounded credential candidate): streaming POST + Bearer SSE continue immediately without Fetch.getResponseBody, bounded credential POST is pre-read once, and Response patterns are removed on read',
+      real1);
+
+    const redF1Src = DSRC0
+      .replace("const watchOrigin = (e.awaitingCredPreRead && loginWatchOriginOf(e)) || '';", "const watchOrigin = loginWatchOriginOf(e) || '';")
+      .replace('if (isRespStage && e && e.authNet && e.awaitingCredPreRead) {', 'if (isRespStage && e && e.authNet) {')
+      .replace('hasDeclaredBoundedIdentityBody(p.responseHeaders) && isAwaitedCredPreReadReq(e, rq, p.request, watchOrigin)', "(['POST', 'PUT', 'PATCH'].includes(reqMethod) || Boolean(extractAuthHeader(p.request && p.request.headers)))");
+    const Dm11_1 = redF1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redF1Src, 'r11-1-broad-response-preread') : null;
+    const mut1 = Dm11_1 ? await runF1R11(Dm11_1) : null;
+    ok(Boolean(Dm11_1 && mut1 && mut1.getBodyAsked.includes('int-stream') && mut1.getBodyAsked.includes('int-sse') && mut1.lastPatterns.length > 1),
+      'r11 F1 MAJOR RED control [r11-1-broad-response-preread]: r10 broad Response-stage interception reads streaming POST + Bearer SSE and leaves Response patterns armed',
+      { mutAsked: mut1 && mut1.getBodyAsked, mutPatterns: mut1 && mut1.lastPatterns });
+  }
+
+  // ── (2) F2 MAJOR + F3 minor: 20 MiB chunked + 20 MiB gzipped-small responses skip Fetch.getResponseBody (watch stays open), and preReadBodies clears on fence end, pending clear, and down() ──
+  {
+    const runF2F3R11 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb11_2-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-2-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW11_2 = pwOf('r11-f2');
+      logins.addOwn({ origin: SITE, username: 'f2@example.test', password: PW11_2 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const k = await startFakeKernel({ mode: { standard: true }, firstUrl: `${SITE}/login` });
+      const bigDecoded20M = 'x'.repeat(20 * 1048576);
+      const getBodyAsked = [];
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0, maxPayload: 64 * 1048576 });
+      await new Promise((r) => wss.once('listening', r));
+      wss.on('connection', (hub) => {
+        const up = new WebSocket(k.wsUrl, { perMessageDeflate: false });
+        const q = [];
+        up.on('open', () => { for (const x of q.splice(0)) up.send(x); });
+        up.on('message', (d) => { if (hub.readyState === 1) hub.send(String(d)); });
+        hub.on('message', (d) => {
+          const s = String(d);
+          let m = null;
+          try { m = JSON.parse(s); } catch { /* */ }
+          if (m && m.method === 'Fetch.getResponseBody') {
+            const reqId = m.params.requestId;
+            getBodyAsked.push(reqId);
+            const body = (reqId === 'int-chunk20' || reqId === 'int-gzip20') ? bigDecoded20M : '{"ok":true}';
+            if (hub.readyState === 1) hub.send(JSON.stringify({ id: m.id, result: { body, base64Encoded: false }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            return;
+          }
+          if (m && m.method === 'Fetch.continueRequest') {
+            if (hub.readyState === 1) hub.send(JSON.stringify({ id: m.id, result: {}, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            return;
+          }
+          if (up.readyState === 1) up.send(s); else q.push(s);
+        });
+        hub.on('close', () => { try { up.close(); } catch { /* */ } });
+      });
+
+      const proxyUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_f2`;
+      const w2 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: proxyUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w2.arm(PID, { budgetMs: 3000 });
+        const tid = k.targets()[0].targetId;
+        await until(() => w2._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'f2-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'f2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const rf = await w2.fillLogin(TGT, FILL({ user: 'f2@example.test', submit: false }));
+        const ev = (m, p) => k.emitPageEvent(tid, m, p);
+        const credBody = JSON.stringify({ email: 'f2@example.test', password: PW11_2 });
+
+        ev('Network.requestWillBeSent', { requestId: 'n-chunk20', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/auth-chunk`, postData: credBody, hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-chunk20', networkId: 'n-chunk20', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url: `${SITE}/auth-chunk`, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'transfer-encoding', value: 'chunked' }] });
+        await sleep(60);
+        const watchAfterChunk20 = w2._watches.get(PID)?.state || 'gone';
+
+        if (watchAfterChunk20 === 'open') {
+          ev('Network.requestWillBeSent', { requestId: 'n-gzip20', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/auth-gzip`, postData: credBody, hasPostData: true } });
+          ev('Fetch.requestPaused', { requestId: 'int-gzip20', networkId: 'n-gzip20', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url: `${SITE}/auth-gzip`, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-encoding', value: 'gzip' }, { name: 'content-length', value: '20420' }] });
+          await sleep(60);
+        }
+        const watchAfterGzip20 = w2._watches.get(PID)?.state || 'gone';
+        const fenceStillInMemory = Boolean(w2._watches.get(PID)?.targets.get(tid)?.liveFill);
+
+        // Pre-read small bounded candidate, then end fence via navigation => preReadBodies.size === 0
+        let preReadAfterFenceEnd = -1, preReadAfterPendingClear = -1, preReadAfterDown = -1;
+        if (watchAfterGzip20 === 'open') {
+          ev('Network.requestWillBeSent', { requestId: 'n-cred-s1', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/auth-s1`, postData: credBody, hasPostData: true } });
+          ev('Fetch.requestPaused', { requestId: 'int-cred-s1', networkId: 'n-cred-s1', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url: `${SITE}/auth-s1`, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '11' }] });
+          await sleep(40);
+          ev('Page.frameNavigated', { frame: { id: tid, url: `${SITE}/welcome` } });
+          await sleep(30);
+          preReadAfterFenceEnd = w2._watches.get(PID)?.targets.get(tid)?.authNet?.preReadBodies?.size ?? 0;
+
+          // Pending signup clear => preReadBodies.size === 0
+          k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, noAutoSubmitNet: true,
+            buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+            fields: [
+              { fieldId: 'f2-su', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+              { fieldId: 'f2-sp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+            ],
+          }, tid);
+          await w2.fillLogin(TGT, FILL({ newUser: 'pendf3@example.test', generate: true, submit: false }));
+          const eTab = w2._watches.get(PID)?.targets.get(tid);
+          if (eTab && eTab.authNet) {
+            if (!eTab.authNet.preReadBodies) eTab.authNet.preReadBodies = new Map();
+            eTab.authNet.preReadBodies.set('synthetic-pc', { body: '{}', base64Encoded: false, at: Date.now() });
+          }
+          ev('Page.frameNavigated', { frame: { id: tid, url: `${SITE}/other` } });
+          await sleep(30);
+          preReadAfterPendingClear = eTab?.authNet?.preReadBodies?.size ?? 0;
+
+          // down() => preReadBodies.size === 0 on captured target reference
+          if (eTab && eTab.authNet) {
+            if (!eTab.authNet.preReadBodies) eTab.authNet.preReadBodies = new Map();
+            eTab.authNet.preReadBodies.set('synthetic-down', { body: '{}', base64Encoded: false, at: Date.now() });
+          }
+          for (const c of wss.clients) c.terminate();
+          await until(() => !w2._watches.get(PID) || w2._watches.get(PID).state === 'down', 1500);
+          preReadAfterDown = eTab?.authNet?.preReadBodies?.size ?? 0;
+        }
+        return {
+          fillOk: rf.ok, watchAfterChunk20, watchAfterGzip20, fenceStillInMemory, getBodyAsked,
+          preReadAfterFenceEnd, preReadAfterPendingClear, preReadAfterDown,
+        };
+      } finally {
+        try { w2.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        await k.close();
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real2 = await runF2F3R11(D);
+    ok(real2.fillOk === true && real2.watchAfterChunk20 === 'open' && real2.watchAfterGzip20 === 'open' &&
+      real2.fenceStillInMemory === true && !real2.getBodyAsked.includes('int-chunk20') && !real2.getBodyAsked.includes('int-gzip20') &&
+      real2.preReadAfterFenceEnd === 0 && real2.preReadAfterPendingClear === 0 && real2.preReadAfterDown === 0,
+      'r11 F2 MAJOR + F3 minor (declared identity Content-Length <= 1 MiB + preReadBodies cleanup): 20 MiB chunked & 20 MiB gzipped-small responses are never pre-read (watch stays open), and preReadBodies clears to 0 on fence end, pending clear, and down()',
+      real2);
+
+    const redF2Src = DSRC0
+      .replace('hasDeclaredBoundedIdentityBody(p.responseHeaders)', 'true')
+      .replace('if (e && e.authNet && e.authNet.preReadBodies) e.authNet.preReadBodies.clear();', 'void e;');
+    const Dm11_2 = redF2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redF2Src, 'r11-2-chunked-gzip-preread-and-leak') : null;
+    const mut2 = Dm11_2 ? await runF2F3R11(Dm11_2) : null;
+    ok(Boolean(Dm11_2 && mut2 && mut2.watchAfterChunk20 !== 'open' && mut2.getBodyAsked.includes('int-chunk20')),
+      'r11 F2/F3 RED control [r11-2-chunked-gzip-preread-and-leak]: r10 pre-read without declared identity Content-Length guard reads 20 MiB chunked response and drops watch socket (1006)',
+      { mutWatch: mut2 && mut2.watchAfterChunk20, mutAsked: mut2 && mut2.getBodyAsked });
+  }
+
+  // ── (3) F-B MAJOR: takePreReadBody matches by requestId ONLY (never URL+method fallback across same-URL GraphQL requests) ──
+  {
+    const runFBR11 = async (DmodToUse = D) => {
+      const dbDir = path.join(ROOT, 'wb11_3-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-3-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW11_3 = pwOf('r11-fb');
+      logins.addOwn({ origin: SITE, username: 'fb@example.test', password: PW11_3 });
+      grants.set('browser-login', `${SITE}#fb@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const k = await startFakeKernel({ mode: { standard: true }, firstUrl: `${SITE}/login` });
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      wss.on('connection', (hub) => {
+        const up = new WebSocket(k.wsUrl, { perMessageDeflate: false });
+        const q = [];
+        up.on('open', () => { for (const x of q.splice(0)) up.send(x); });
+        up.on('message', (d) => { if (hub.readyState === 1) hub.send(String(d)); });
+        hub.on('message', (d) => {
+          const s = String(d);
+          let m = null;
+          try { m = JSON.parse(s); } catch { /* */ }
+          if (m && m.method === 'Fetch.getResponseBody') {
+            if (m.params.requestId === 'int-q1') {
+              hub.send(JSON.stringify({ id: m.id, result: { body: '{"data":{"viewer":{"id":"1"}}}', base64Encoded: false }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            } else {
+              // Simulate missing/failed pre-read on int-login so Network.getResponseBody is consulted
+              hub.send(JSON.stringify({ id: m.id, error: { code: -32000, message: 'No data' }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            }
+            return;
+          }
+          if (up.readyState === 1) up.send(s); else q.push(s);
+        });
+        hub.on('close', () => { try { up.close(); } catch { /* */ } });
+      });
+
+      const proxyUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_fb`;
+      const w3 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: proxyUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w3.arm(PID, { budgetMs: 3000 });
+        const tid = k.targets()[0].targetId;
+        await until(() => w3._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'fb-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'fb-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        k.setResponseBody(tid, 'login-1', '{"errors":[{"message":"Invalid credentials"}]}');
+        const rf = await w3.fillLogin(TGT, FILL({ user: 'fb@example.test', submit: false }));
+        const e = w3._watches.get(PID)?.targets.get(tid);
+        const ev = (m, p) => k.emitPageEvent(tid, m, p);
+        const url = `${SITE}/graphql`;
+
+        ev('Network.requestWillBeSent', { requestId: 'q-1', frameId: tid, type: 'Fetch', request: { method: 'POST', url, postData: '{"query":"{viewer{id}}"}', hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-q1', networkId: 'q-1', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '30' }] });
+        await sleep(30);
+        ev('Network.responseReceived', { requestId: 'q-1', frameId: tid, type: 'Fetch', response: { url, status: 200 } });
+        ev('Network.loadingFinished', { requestId: 'q-1' });
+        await sleep(30);
+
+        const mark = e?.authNet?.seq || 0;
+        ev('Network.requestWillBeSent', { requestId: 'login-1', frameId: tid, type: 'Fetch', request: { method: 'POST', url, postData: JSON.stringify({ email: 'fb@example.test', password: PW11_3 }), hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-login', networkId: 'login-1', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '47' }] });
+        await sleep(40);
+        ev('Network.responseReceived', { requestId: 'login-1', frameId: tid, type: 'Fetch', response: { url, status: 200 } });
+        ev('Network.loadingFinished', { requestId: 'login-1' });
+        await sleep(60);
+
+        const an = e?.authNet || {};
+        const okCredAfterLogin = (an.okCredSeq || 0) > mark;
+        const failCredAfterLogin = (an.failCredSeq || 0) > mark;
+        return {
+          fillOk: rf.ok,
+          okCredAfterLogin,
+          failCredAfterLogin,
+          verdict: (an.okCredSeq || 0) > (an.failCredSeq || 0) ? 'accepted' : 'rejected',
+        };
+      } finally {
+        try { w3.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        await k.close();
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real3 = await runFBR11(D);
+    ok(real3.fillOk === true && real3.okCredAfterLogin === false && real3.failCredAfterLogin === true && real3.verdict === 'rejected',
+      'r11 F-B MAJOR (requestId-only pre-read matching): earlier same-URL /graphql 2xx response never masks a rejected credential POST when pre-read misses',
+      real3);
+
+    const redFBSrc = DSRC0
+      .replace('isAwaitedCredPreReadReq(e, rq, p.request, watchOrigin)', 'true')
+      .replace('e.awaitingCredPreRead = false;', '/* keep armed */')
+      .replace('const preRb = !bodyRead ? takePreReadBody(an, rid) : null;', 'const preRb = !bodyRead ? takePreReadBody(an, rid, rq) : null;')
+      .replace(
+        '  function takePreReadBody(an, rid) {\n    if (!an || !an.preReadBodies || !an.preReadBodies.size || !rid) return null;\n    if (!an.preReadBodies.has(rid)) return null;\n    const hit = an.preReadBodies.get(rid);\n    an.preReadBodies.delete(rid);\n    return hit;\n  }',
+        '  function takePreReadBody(an, rid, rq) {\n    if (!an || !an.preReadBodies || !an.preReadBodies.size) return null;\n    if (rid && an.preReadBodies.has(rid)) { const hit = an.preReadBodies.get(rid); an.preReadBodies.delete(rid); return hit; }\n    if (rq && rq.url) { for (const [k, v] of an.preReadBodies.entries()) { if (v && v.url === rq.url && (!rq.method || v.method === rq.method)) { an.preReadBodies.delete(k); return v; } } }\n    return null;\n  }'
+      );
+    const Dm11_3 = redFBSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redFBSrc, 'r11-3-url-method-fallback') : null;
+    const mut3 = Dm11_3 ? await runFBR11(Dm11_3) : null;
+    ok(Boolean(Dm11_3 && mut3 && mut3.okCredAfterLogin === true && mut3.verdict === 'accepted' && real3.verdict === 'rejected'),
+      'r11 F-B MAJOR RED control [r11-3-url-method-fallback]: r10 URL+method fallback hands earlier /graphql 2xx body to rejected login POST and marks it accepted',
+      { mutVerdict: mut3 && mut3.verdict, realVerdict: real3.verdict });
+  }
+
+  // ── (4) MAJOR F-D: filledSecretsByCtx keyed by target + context (Chrome-like executionContextId = 2 in every target; never merges across targets) ──
+  {
+    const runFDR11 = async (DmodToUse = D, LFmodToUse = LF) => {
+      LFmodToUse.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_4-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw11-4-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW6P = ('p' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      const PW6Q = ('q' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'p@example.test', password: PW6P });
+      logins.addOwn({ origin: SITE, username: 'q@example.test', password: PW6Q });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const mkTabDom = () => sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm', type: 'hidden', value: '', defaultValue: '', hidden: true },
+      ]);
+      const mkBrowser = async (tabs) => {
+        const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+        await new Promise((r) => wss.once('listening', r));
+        const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_fd`;
+        wss.on('connection', (ws) => {
+          ws.on('message', async (buf) => {
+            const m = JSON.parse(String(buf));
+            const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+            const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+            const t = tabs.find((x) => x.sid === m.sessionId);
+            if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+            if (m.method === 'Target.setDiscoverTargets') {
+              for (const x of tabs) send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: x.tid, type: 'page', url: x.url, title: 'Login' } } });
+              rep({});
+              return;
+            }
+            if (m.method === 'Target.attachToTarget') { const hit = tabs.find((x) => x.tid === (m.params || {}).targetId); rep({ sessionId: hit ? hit.sid : 'NOSID' }); return; }
+            if (m.method === 'Target.getTargets') { rep({ targetInfos: tabs.map((x) => ({ targetId: x.tid, type: 'page', url: x.url, attached: true })) }); return; }
+            if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: t ? t.tid : 'X', url: t ? t.url : '', securityOrigin: SITE } } }); return; }
+            if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: t ? t.tid : 'X', type: 'page', url: t ? t.url : '' } }); return; }
+            if (!t) { rep({}); return; }
+            const dr = await t.dom.call(m.method, m.params || {});
+            rep((dr && dr.result) || {});
+          });
+        });
+        return { wsUrl, close: async () => { for (const c of wss.clients) c.terminate(); await new Promise((r) => wss.close(r)); } };
+      };
+
+      const fbP = await mkBrowser([{ tid: 'TAB_R11_P', sid: 'SID_R11_P', url: `${SITE}/login`, dom: mkTabDom() }]);
+      const fbQ = await mkBrowser([
+        { tid: 'TAB_R11_QA', sid: 'SID_R11_QA', url: `${SITE}/login`, dom: mkTabDom() },
+        { tid: 'TAB_R11_QB', sid: 'SID_R11_QB', url: `${SITE}/login`, dom: mkTabDom() },
+      ]);
+      const leaseRef = {};
+      const persisted = new Map();
+      const w4 = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async (pid) => ({ ok: true, url: pid === 'bp-r11-p' ? fbP.wsUrl : fbQ.wsUrl }),
+          onLease: (fn) => { leaseRef.fn = fn; return () => {}; },
+          saveLoginFenceState: (pid, st) => { persisted.set(pid, JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] }))); return true; },
+          loginFenceStateOf: (pid) => JSON.parse(JSON.stringify(persisted.get(pid) || { fences: [], scrubs: [] })),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 600000,
+        holdersOf: (pid) => [{ browserKey: pid === 'bp-r11-p' ? 'bk-r11-p' : 'bk-r11-q', sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        const TP = { profileId: 'bp-r11-p', browserKey: 'bk-r11-p', ephemeral: true };
+        const TQ = { profileId: 'bp-r11-q', browserKey: 'bk-r11-q', ephemeral: true };
+        await w4.arm('bp-r11-p', { budgetMs: 3000 });
+        await w4.arm('bp-r11-q', { budgetMs: 3000 });
+        await until(() => w4._watches.get('bp-r11-p')?.targets.get('TAB_R11_P')?.enabled, 1500);
+        await until(() => w4._watches.get('bp-r11-q')?.targets.get('TAB_R11_QA')?.enabled && w4._watches.get('bp-r11-q')?.targets.get('TAB_R11_QB')?.enabled, 1500);
+
+        await w4.fillLogin(TP, FILL({ user: 'p@example.test' }));
+        w4.noteActiveTarget('bp-r11-q', 'bk-r11-q', 'TAB_R11_QA');
+        await w4.fillLogin(TQ, FILL({ user: 'q@example.test' }));
+        const ctxP = w4._watches.get('bp-r11-p').targets.get('TAB_R11_P').liveFill?.isoContextId || 0;
+        const ctxQA = w4._watches.get('bp-r11-q').targets.get('TAB_R11_QA').liveFill?.isoContextId || 0;
+        await leaseRef.fn?.({ kind: 'browser-stopped', profileId: 'bp-r11-p' });
+        const pLeakIntoQAfterStop = LFmodToUse.valuesForTarget('TAB_R11_QA', ctxQA).includes(PW6P);
+        eng.lock();
+        const pLeakIntoQAfterLock = LFmodToUse.valuesForTarget('TAB_R11_QA', ctxQA).includes(PW6P);
+        const qaKeptAfterLock = LFmodToUse.valuesForTarget('TAB_R11_QA', ctxQA).includes(PW6Q);
+
+        await eng.unlock(vpw);
+        w4.noteActiveTarget('bp-r11-q', 'bk-r11-q', 'TAB_R11_QB');
+        await w4.fillLogin(TQ, FILL({ user: 'p@example.test' }));
+        const eQB = w4._watches.get('bp-r11-q').targets.get('TAB_R11_QB');
+        const ctxQB = eQB.liveFill?.isoContextId || 0;
+        if (eQB.liveFillTimer) { clearTimeout(eQB.liveFillTimer); eQB.liveFillTimer = null; }
+        eQB.liveFill = null; // QB's fence gone with no clear road
+        eng.lock();
+        const qbClearedOnLock = !LFmodToUse.valuesForTarget('TAB_R11_QB', ctxQB).includes(PW6P) && !LFmodToUse.valuesForTarget('TAB_R11_QA', ctxQA).includes(PW6P);
+        const qaStillKept = LFmodToUse.valuesForTarget('TAB_R11_QA', ctxQA).includes(PW6Q);
+        return { ctxP, ctxQA, ctxQB, pLeakIntoQAfterStop, pLeakIntoQAfterLock, qaKeptAfterLock, qbClearedOnLock, qaStillKept };
+      } finally {
+        try { w4.shutdown(); } catch {}
+        await fbP.close();
+        await fbQ.close();
+        LFmodToUse.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real4 = await runFDR11(D, LF);
+    ok(real4.ctxP === 2 && real4.ctxQA === 2 && real4.ctxQB === 2 &&
+      real4.pLeakIntoQAfterStop === false && real4.pLeakIntoQAfterLock === false &&
+      real4.qaKeptAfterLock === true && real4.qbClearedOnLock === true && real4.qaStillKept === true,
+      'r11 MAJOR F-D (target + context composite key under Chrome-like colliding executionContextId = 2): stopping profile P never leaves P password in Q ctx 2, and two tabs on Q at ctx 2 clear unfenced QB at lock while keeping QA',
+      real4);
+
+    const redFDLfSrc = LFS0
+      .replace('return tk && normCtx > 0 ? `${tk}:${normCtx}` : \'\';', 'return normCtx > 0 ? String(normCtx) : \'\';')
+      .replace("return /^.+:\\d+$/.test(s) ? s : '';", "return /^.+:\\d+$/.test(s) ? s.split(':').pop() : '';");
+    let mut4 = null;
+    if (redFDLfSrc !== LFS0) {
+      const lfMutPath = MUT.write('src/server/browser-login-fill.js', redFDLfSrc, 'r11-4-lf');
+      const mLf = require(lfMutPath);
+      const mD = MUT.load(
+        'src/server/browser-dialogs.js',
+        DSRC0.replace("require('./browser-login-fill.js')", `require(${JSON.stringify(lfMutPath)})`),
+        'r11-4-bare-ctx-id-merge'
+      );
+      mut4 = await runFDR11(mD, mLf);
+    }
+    ok(Boolean(mut4 && mut4.pLeakIntoQAfterStop === true && mut4.qbClearedOnLock === false && real4.pLeakIntoQAfterStop === false),
+      'r11 MAJOR F-D RED control [r11-4-bare-ctx-id-merge]: r10 bare executionContextId map merges P password into Q ctx 2 across browser stop and keeps unfenced QB across vault lock',
+      { mutLeakStop: mut4 && mut4.pLeakIntoQAfterStop, mutQbCleared: mut4 && mut4.qbClearedOnLock });
+  }
+
+  // ── (5) MINOR 1: unwatched persisted fence counts as live ONLY within its own ceiling (x3 locks) ──
+  {
+    const runMinor1R11 = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_5-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw11-5-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW11_5 = pwOf('r11-m1');
+      logins.addOwn({ origin: SITE, username: 'm1@example.test', password: PW11_5 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const tid = 'TAB_R11_M1', sid = 'SID_R11_M1';
+      let tabPresent = true;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_m1`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            if (tabPresent) send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: tabPresent ? [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] : [] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = { fences: [], scrubs: [] };
+      const w5 = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 220,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w5.arm(PID, { budgetMs: 3000 });
+        await until(() => w5._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w5.fillLogin(TGT, FILL({ user: 'm1@example.test' }));
+        for (const c of wss.clients) c.terminate();
+        await until(() => !w5._watches.get(PID) || w5._watches.get(PID).state === 'down', 1500);
+        tabPresent = false;
+
+        eng.lock();
+        const remAfterLock1 = LF.hasRememberedSecrets(PID);
+        await eng.unlock(vpw);
+        await sleep(280);
+
+        eng.lock();
+        const remAfterLock2PastCeiling = LF.hasRememberedSecrets(PID);
+        await eng.unlock(vpw);
+
+        eng.lock();
+        const remAfterLock3 = LF.hasRememberedSecrets(PID);
+        return { fillOk: rf.ok, remAfterLock1, remAfterLock2PastCeiling, remAfterLock3 };
+      } finally {
+        try { w5.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real5 = await runMinor1R11(D);
+    ok(real5.fillOk === true && real5.remAfterLock1 === true && real5.remAfterLock2PastCeiling === false && real5.remAfterLock3 === false,
+      'r11 MINOR 1 (unwatched persisted fence bounded by ceiling at vault lock, x3 locks): kept before ceiling (Lock 1), cleared once past ceiling (Lock 2 & Lock 3)',
+      real5);
+
+    const redM1Src = DSRC0.replace(
+      'if (fAt > 0 && tNow - fAt < liveFillMaxMs) liveTargetIds.add(String(f.targetId));',
+      'liveTargetIds.add(String(f.targetId));'
+    );
+    const Dm11_5 = redM1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redM1Src, 'r11-5-unwatched-past-ceiling-kept') : null;
+    const mut5 = Dm11_5 ? await runMinor1R11(Dm11_5) : null;
+    ok(Boolean(Dm11_5 && mut5 && mut5.remAfterLock2PastCeiling === true && mut5.remAfterLock3 === true && real5.remAfterLock2PastCeiling === false),
+      'r11 MINOR 1 RED control [r11-5-unwatched-past-ceiling-kept]: r10 unbounded unwatched persisted fence keeps plaintext across locks past ceiling',
+      { mutLock2: mut5 && mut5.remAfterLock2PastCeiling, mutLock3: mut5 && mut5.remAfterLock3 });
+  }
+
+  // ── (6) MINOR 2: vault lock in reconnect window (state === 'open', Target.getTargets held before rearmLoginFences completes) treats open-unrearmed like down ──
+  {
+    const runMinor2R11 = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_6-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw11-6-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW6 = ('s' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'm2short@example.test', password: PW6 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm', type: 'hidden', value: '', defaultValue: '', hidden: true },
+      ]);
+      const tid = 'TAB_R11_M2', sid = 'SID_R11_M2';
+      let getTargetsDelayMs = 0;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_m2`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { if (getTargetsDelayMs) await sleep(getTargetsDelayMs); rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = { fences: [], scrubs: [] };
+      const notices = [];
+      const w6 = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 520,
+        forYou: { add: (_p, it) => { notices.push(String((it && it.text) || 'n')); return 'fy-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w6.arm(PID, { budgetMs: 3000 });
+        await until(() => w6._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w6.fillLogin(TGT, FILL({ user: 'm2short@example.test' }));
+        dom.inputs[2].val = PW6;
+        for (const c of wss.clients) c.terminate();
+        await until(() => !w6._watches.get(PID) || w6._watches.get(PID).state === 'down', 1500);
+
+        getTargetsDelayMs = 220;
+        const armP = w6.arm(PID, { budgetMs: 3000 });
+        await until(() => w6._watches.get(PID)?.state === 'open', 1500);
+        await sleep(30);
+        const stateAtLock = w6._watches.get(PID)?.state || null;
+        const reArmedAtLock = Boolean(w6._watches.get(PID)?.targets.get(tid)?.liveFill);
+        eng.lock();
+        const remRightAfterLock = LF.hasRememberedSecrets(PID);
+        await armP;
+
+        await sleep(420);
+        const fenceLifted = w6.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true;
+        const hiddenLenAfterCeiling = dom.inputs[2].val.length;
+        return {
+          fillOk: rf.ok, stateAtLock, reArmedAtLock, remRightAfterLock,
+          fenceLifted, hiddenLenAfterCeiling, noticesCount: notices.length,
+        };
+      } finally {
+        try { w6.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real6 = await runMinor2R11(D);
+    ok(real6.fillOk === true && real6.stateAtLock === 'open' && real6.reArmedAtLock === false &&
+      real6.remRightAfterLock === true && real6.fenceLifted === true && real6.hiddenLenAfterCeiling === 0 && real6.noticesCount === 0,
+      'r11 MINOR 2 (vault lock during reconnect window with held Target.getTargets): open-but-not-yet-rearmed watch counts persisted fences as live, wiping 6-char hidden mirror at ceiling with 0 false notices',
+      real6);
+
+    const redM2Src = DSRC0.replace(
+      'if (w.fencesRearmed) rearmedOpenPids.add(pid);',
+      'rearmedOpenPids.add(pid);'
+    );
+    const Dm11_6 = redM2Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redM2Src, 'r11-6-open-unrearmed-skips-persisted') : null;
+    const mut6 = Dm11_6 ? await runMinor2R11(Dm11_6) : null;
+    ok(Boolean(Dm11_6 && mut6 && mut6.remRightAfterLock === false && mut6.hiddenLenAfterCeiling === 6 && mut6.fenceLifted === false && mut6.noticesCount > 0),
+      'r11 MINOR 2 RED control [r11-6-open-unrearmed-skips-persisted]: r10 skipping persisted fences as soon as state==="open" drops 6-char secret during held Target.getTargets and leaves hidden mirror intact',
+      { mutRem: mut6 && mut6.remRightAfterLock, mutHiddenLen: mut6 && mut6.hiddenLenAfterCeiling, mutNotices: mut6 && mut6.noticesCount });
+  }
+
+  // ── (7) MINOR 3: rotated < 8-byte previous.password excluded from credSigs across rearmLoginFences & onVaultOpen ──
+  {
+    const runMinor3R11 = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_7-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw11-7-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PREV6 = ('r' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      const CUR = pwOf('r11-m3-cur');
+      logins.addOwn({ origin: SITE, username: 'rot@example.test', password: PREV6 });
+      logins.addOwn({ origin: SITE, username: 'rot@example.test', password: CUR });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const tid = 'TAB_R11_M3', sid = 'SID_R11_M3';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_m3`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = { fences: [], scrubs: [] };
+      const notices = [];
+      const w7 = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 320,
+        forYou: { add: (_p, it) => { notices.push(String((it && it.text) || 'n')); return 'fy-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w7.arm(PID, { budgetMs: 3000 });
+        await until(() => w7._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w7.fillLogin(TGT, FILL({ user: 'rot@example.test' }));
+        for (const c of wss.clients) c.terminate();
+        await until(() => !w7._watches.get(PID) || w7._watches.get(PID).state === 'down', 1500);
+
+        LF.clearAllFilledSecrets?.();
+        await w7.arm(PID, { budgetMs: 3000 });
+        await until(() => w7._watches.get(PID)?.targets.get(tid)?.liveFill, 1500);
+        const sigsAfterRearm = (w7._watches.get(PID)?.targets.get(tid)?.liveFill?.credSigs || []).length;
+
+        eng.lock();
+        await sleep(420);
+        const fenceLifted = w7.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true;
+        const typedFieldEmpty = dom.inputs[1].val === '';
+        return { fillOk: rf.ok, sigsAfterRearm, fenceLifted, noticesCount: notices.length, typedFieldEmpty };
+      } finally {
+        try { w7.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real7 = await runMinor3R11(D);
+    ok(real7.fillOk === true && real7.sigsAfterRearm === 1 && real7.fenceLifted === true && real7.noticesCount === 0 && real7.typedFieldEmpty === true,
+      'r11 MINOR 3 (credSigs holds only values typed into THIS tab): rotated <8-byte previous.password never enters credSigs on re-arm, so locked ceiling wipes typed field and lifts with 0 notices',
+      real7);
+
+    const redM3Src = DSRC0.replace(
+      'const includePrevious = mode === \'change\' && (!Array.isArray(secretFieldIds) || secretFieldIds.length > 1);',
+      'const includePrevious = true;'
+    );
+    const Dm11_7 = redM3Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redM3Src, 'r11-7-rotated-previous-password-sig') : null;
+    const mut7 = Dm11_7 ? await runMinor3R11(Dm11_7) : null;
+    ok(Boolean(Dm11_7 && mut7 && mut7.sigsAfterRearm === 2 && mut7.fenceLifted === false && mut7.noticesCount > 0 && real7.fenceLifted === true),
+      'r11 MINOR 3 RED control [r11-7-rotated-previous-password-sig]: r10 hydrating previous.password into credSigs holds emptied page as vault_locked and files a false notice',
+      { mutSigs: mut7 && mut7.sigsAfterRearm, mutLifted: mut7 && mut7.fenceLifted, mutNotices: mut7 && mut7.noticesCount });
+  }
+
+  // ── (8) Single-mutant isolation legs (claim 1 finding 4 + claim 2 M2/M3: each single mutant goes RED on its own) ──
+  {
+    // (8a & 8b) Throwing watch source fails closed + no source registered fails closed
+    const runSourceIsolation = (LFmod) => {
+      LFmod.clearAllFilledSecrets?.();
+      const unsub = LFmod.registerFenceRefSource(() => { throw new Error('broken-watch-row'); });
+      let clearedOnThrow = false;
+      try {
+        // Seed via fillVaultLogin stub so internal maps hold a secret
+        clearedOnThrow = true;
+      } finally {
+        unsub();
+      }
+      return clearedOnThrow;
+    };
+    void runSourceIsolation;
+
+    const probeLfSources = async (LFmod) => {
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const form = await LFmod.inspectTabLoginForm({ call: dom.call, targetId: 'TAB_ISO_SRC', trackedUrl: `${SITE}/login` });
+      await LFmod.fillVaultLogin({
+        call: dom.call, targetId: 'TAB_ISO_SRC', profileId: 'bp-iso-src', trackedUrl: `${SITE}/login`,
+        origin: SITE, loginId: `web-login:${SITE}#iso`, form,
+        values: { [form.fields[0].fieldId]: 'iso', [form.fields[1].fieldId]: 's12345' }, submit: false,
+      });
+      // (i) No source registered => clearUnfencedFilledSecrets keeps NOTHING
+      LFmod.clearUnfencedFilledSecrets();
+      const keptWithNoSource = LFmod.hasRememberedSecrets('bp-iso-src');
+
+      // (ii) Throwing source registered => clearUnfencedFilledSecrets fails closed (keeps NOTHING)
+      dom.inputs[0].val = ''; dom.inputs[1].val = '';
+      await LFmod.fillVaultLogin({
+        call: dom.call, targetId: 'TAB_ISO_SRC2', profileId: 'bp-iso-throw', trackedUrl: `${SITE}/login`,
+        origin: SITE, loginId: `web-login:${SITE}#iso`, form,
+        values: { [form.fields[0].fieldId]: 'iso', [form.fields[1].fieldId]: 's12345' }, submit: false,
+      });
+      const unsub = LFmod.registerFenceRefSource(() => { throw new Error('watch-targets-threw'); });
+      try {
+        LFmod.clearUnfencedFilledSecrets();
+      } finally {
+        unsub();
+      }
+      const keptOnThrow = LFmod.hasRememberedSecrets('bp-iso-throw');
+      LFmod.clearAllFilledSecrets?.();
+      return { keptWithNoSource, keptOnThrow };
+    };
+
+    const lfCleanIso = MUT.load('src/server/browser-login-fill.js', LFS0, 'r11-8-clean-lf');
+    const realIsoSrc = await probeLfSources(lfCleanIso);
+    const lfMutThrowKeep = MUT.load(
+      'src/server/browser-login-fill.js',
+      LFS0.replace('try { refs = src({ rememberedProfileIds }); } catch { refs = null; }', 'try { refs = src({ rememberedProfileIds }); } catch { return; }'),
+      'r11-8a-throw-keeps-all'
+    );
+    const mutThrowKeep = await probeLfSources(lfMutThrowKeep);
+    const lfMutNoSrcKeep = MUT.load(
+      'src/server/browser-login-fill.js',
+      LFS0.replace('function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = null } = {}) {', 'function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = null } = {}) {\n  if (fenceRefSources.size === 0) return;'),
+      'r11-8b-nosrc-keeps-all'
+    );
+    const mutNoSrcKeep = await probeLfSources(lfMutNoSrcKeep);
+    ok(realIsoSrc.keptWithNoSource === false && realIsoSrc.keptOnThrow === false &&
+      mutThrowKeep.keptOnThrow === true && mutNoSrcKeep.keptWithNoSource === true,
+      'r11 single-mutant isolation [r11-8a/8b] (throwing source & zero registered sources fail closed): both clear all remembered secrets, while keep-on-throw and keep-when-unregistered single mutants each go RED alone',
+      { realIsoSrc, mutThrowKeep, mutNoSrcKeep });
+
+    // (8c & 8d) Single supersedeTargetContext removal AND single down() clear removal without lock
+    const probeSupersedeAndDown = async (DmodToUse, LFmodToUse) => {
+      LFmodToUse.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_8cd-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-8cd-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      logins.addOwn({ origin: SITE, username: 'iso8@example.test', password: ('z' + crypto.randomBytes(3).toString('hex')).slice(0, 6) });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const tid = 'TAB_R11_8CD', sid = 'SID_R11_8CD';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_8cd`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+      // Keeper WITHOUT loginFenceStateOf (non-persisted fence) => down() WITHOUT any lock must clear immediately!
+      const w8 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w8.arm(PID, { budgetMs: 3000 });
+        await until(() => w8._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await w8.fillLogin(TGT, FILL({ user: 'iso8@example.test' }));
+        const ctx1 = w8._watches.get(PID)?.targets.get(tid)?.liveFill?.isoContextId || 0;
+        dom.nextDocument?.();
+        dom.inputs[0].val = ''; dom.inputs[1].val = '';
+        await w8.fillLogin(TGT, FILL({ user: 'iso8@example.test' }));
+        const ctx2 = w8._watches.get(PID)?.targets.get(tid)?.liveFill?.isoContextId || 0;
+        const oldCtxGoneImmediately = ctx2 > ctx1 && LFmodToUse.hasRememberedContext(ctx1) === false && LFmodToUse.hasRememberedContext(ctx2) === true;
+
+        // Now drop socket (down()) WITHOUT locking vault => non-persisted fence entries must be gone immediately
+        for (const c of wss.clients) c.terminate();
+        await until(() => !w8._watches.get(PID) || w8._watches.get(PID).state === 'down', 1500);
+        const remAfterDownNoLock = LFmodToUse.hasRememberedSecrets(PID);
+        return { oldCtxGoneImmediately, remAfterDownNoLock };
+      } finally {
+        try { w8.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LFmodToUse.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const real8cd = await probeSupersedeAndDown(D, LF);
+    // Single mutant 8c: ONLY supersedeTargetContext call removed
+    const lfNoSupersedePath = MUT.write('src/server/browser-login-fill.js', LFS0.replace('supersedeTargetContext(ctxKey, ctxId, pidStr);', 'void pidStr;'), 'r11-8c-lf');
+    const mLfNoSup = require(lfNoSupersedePath);
+    const mDNoSup = MUT.load('src/server/browser-dialogs.js', DSRC0.replace("require('./browser-login-fill.js')", `require(${JSON.stringify(lfNoSupersedePath)})`), 'r11-8c-no-supersede');
+    const mut8c = await probeSupersedeAndDown(mDNoSup, mLfNoSup);
+    // Single mutant 8d: ONLY down()'s clearFilledSecretsForProfileExcept removed
+    const mDNoDownClear = MUT.load('src/server/browser-dialogs.js', DSRC0.replace('LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);', 'void persistedTids;'), 'r11-8d-no-down-clear');
+    const mut8d = await probeSupersedeAndDown(mDNoDownClear, LF);
+    ok(real8cd.oldCtxGoneImmediately === true && real8cd.remAfterDownNoLock === false &&
+      mut8c.oldCtxGoneImmediately === false && mut8d.remAfterDownNoLock === true,
+      'r11 single-mutant isolation [r11-8c/8d] (supersedeTargetContext alone & down() clear without lock alone): removing supersedeTargetContext alone leaves old ctx alive; removing down() clear alone leaves non-persisted secrets in memory without lock',
+      { real8cd, mut8c, mut8d });
+
+    // (8i) Single mutant (d): ONLY browser-login-fill.js lock-time liveTgt/liveCtx computation replaced by r9 stored fenceLive:true flag (browser-dialogs.js untouched!)
+    const probeTwoNoRoad = async (DmodToUse, LFmodToUse) => {
+      LFmodToUse.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_8i-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-8i-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const pwA = ('a' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      const pwB = ('b' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'taba@example.test', password: pwA });
+      logins.addOwn({ origin: SITE, username: 'tabb@example.test', password: pwB });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const domA = sharedMakeStubDom([{ id: 'u', type: 'email', name: 'email', autocomplete: 'username' }, { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' }]);
+      const domB = sharedMakeStubDom([{ id: 'u', type: 'email', name: 'email', autocomplete: 'username' }, { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' }]);
+      // Give Tab B a distinct context id too so composite-key vs bare-key is orthogonal to mutant (d)
+      domB.nextDocument?.();
+      const tabs = [
+        { tid: 'TAB_8I_A', sid: 'SID_8I_A', url: `${SITE}/login`, dom: domA },
+        { tid: 'TAB_8I_B', sid: 'SID_8I_B', url: `${SITE}/login`, dom: domB },
+      ];
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_8i`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          const t = tabs.find((x) => x.sid === m.sessionId);
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            for (const x of tabs) send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: x.tid, type: 'page', url: x.url, title: 'Login' } } });
+            rep({}); return;
+          }
+          if (m.method === 'Target.attachToTarget') { const hit = tabs.find((x) => x.tid === (m.params || {}).targetId); rep({ sessionId: hit ? hit.sid : 'NOSID' }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: tabs.map((x) => ({ targetId: x.tid, type: 'page', url: x.url, attached: true })) }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: t ? t.tid : 'X', url: t ? t.url : '', securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: t ? t.tid : 'X', type: 'page', url: t ? t.url : '' } }); return; }
+          if (!t) { rep({}); return; }
+          const dr = await t.dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+      const w8i = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 600000,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w8i.arm(PID, { budgetMs: 3000 });
+        await until(() => w8i._watches.get(PID)?.targets.get('TAB_8I_A')?.enabled && w8i._watches.get(PID)?.targets.get('TAB_8I_B')?.enabled, 1500);
+        w8i.noteActiveTarget(PID, KEY, 'TAB_8I_A');
+        await w8i.fillLogin(TGT, FILL({ user: 'taba@example.test' }));
+        w8i.noteActiveTarget(PID, KEY, 'TAB_8I_B');
+        await w8i.fillLogin(TGT, FILL({ user: 'tabb@example.test' }));
+        const eB = w8i._watches.get(PID).targets.get('TAB_8I_B');
+        const ctxB = eB.liveFill?.isoContextId || 0;
+        const ctxA = w8i._watches.get(PID).targets.get('TAB_8I_A').liveFill?.isoContextId || 0;
+        if (eB.liveFillTimer) { clearTimeout(eB.liveFillTimer); eB.liveFillTimer = null; }
+        eB.liveFill = null; // B has NO end road (no clearLiveFillOnTab / nav / close)
+        eng.lock();
+        const aKept = LFmodToUse.valuesForTarget('TAB_8I_A', ctxA).includes(pwA);
+        const bKept = LFmodToUse.valuesForTarget('TAB_8I_B', ctxB).includes(pwB);
+        return { aKept, bKept };
+      } finally {
+        try { w8i.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LFmodToUse.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+    const real8i = await probeTwoNoRoad(D, LF);
+    const lfStoredFlagOnlyPath = MUT.write(
+      'src/server/browser-login-fill.js',
+      LFS0
+        .replace('if (liveTgt.has(k)) continue;', 'continue;')
+        .replace('if (liveCtx.has(k)) continue;', 'continue;'),
+      'r11-8i-lf-stored-flag-only'
+    );
+    const mLf8i = require(lfStoredFlagOnlyPath);
+    const mD8i = MUT.load('src/server/browser-dialogs.js', DSRC0.replace("require('./browser-login-fill.js')", `require(${JSON.stringify(lfStoredFlagOnlyPath)})`), 'r11-8i-d');
+    const mut8i = await probeTwoNoRoad(mD8i, mLf8i);
+    ok(real8i.aKept === true && real8i.bKept === false && mut8i.bKept === true,
+      'r11 single-mutant isolation [r11-8i] (two tabs on one profile, B with no end road => B cleared at lock): replacing lock-time live-fence computation alone with stored flag keeps Tab B at lock while untouched end roads stay unmodified',
+      { real8i, mut8i });
+
+    // (8e & 8f) M2 single-mutant isolation: trimProtectAlone vs repushAlone
+    const probeM2Isolated = async (DmodToUse, shape) => {
+      const dbDir = path.join(ROOT, 'wb11_8ef-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw11-8ef-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      logins.addOwn({ origin: SITE, username: 'm2iso@example.test', password: pwOf('r11-m2iso') });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ]);
+      const tid = 'TAB_R11_8EF', sid = 'SID_R11_8EF';
+      let keptWhilePending = false;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_8ef`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          if (m.method === 'Network.getRequestPostData') {
+            const rid = String(m.params && m.params.requestId);
+            if (rid === 'login-pend') {
+              setTimeout(() => {
+                send({ id: m.id, sessionId: sid, error: { code: -32000, message: 'No data' } });
+              }, 50);
+              return;
+            }
+            setTimeout(() => rep({ postData: 'c=1' }), 10);
+            return;
+          }
+          if (m.method === 'Input.dispatchKeyEvent' && m.params && m.params.type === 'keyUp') {
+            rep({});
+            if (shape === 'trim') {
+              // 1 pending POST followed by 260 inline cross-origin chatters (> MAX_OBSERVED_TOTAL=256): check an.observed WHILE pending!
+              send({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: 'login-pend', frameId: tid, type: 'Fetch', request: { method: 'POST', url: 'https://auth.partner.test/session', hasPostData: true } } });
+              for (let i = 0; i < 260; i++) {
+                const crid = `in-${i}`;
+                send({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: crid, frameId: tid, type: 'Fetch', request: { method: 'POST', url: `https://edge.cdn.test/in/${i}`, postData: 'x=1', hasPostData: true } } });
+                send({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: crid, frameId: tid, type: 'Fetch', response: { status: 204 } } });
+                send({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: crid } });
+              }
+              setTimeout(() => {
+                const an = w8ef._watches.get(PID)?.targets.get(tid)?.authNet;
+                keptWhilePending = Boolean(an && (an.observed || []).some((o) => o && o.rid === 'login-pend' && o.pendingPostData === true));
+              }, 15);
+            } else {
+              // 256 pending chatters fill MAX_OBSERVED_TOTAL so 257th login-pend is trimmed at arrival before pendingPostData=true; ONLY finally re-push recovers it!
+              for (let i = 0; i < 256; i++) {
+                const crid = `p-${i}`;
+                send({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: crid, frameId: tid, type: 'Fetch', request: { method: 'POST', url: `https://edge.cdn.test/p/${i}`, hasPostData: true } } });
+                send({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: crid, frameId: tid, type: 'Fetch', response: { status: 204 } } });
+                send({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: crid } });
+              }
+              send({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: 'login-pend', frameId: tid, type: 'Fetch', request: { method: 'POST', url: 'https://auth.partner.test/session', hasPostData: true } } });
+            }
+            return;
+          }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+      const w8ef = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w8ef.arm(PID, { budgetMs: 3000 });
+        await until(() => w8ef._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w8ef.fillLogin(TGT, FILL({ user: 'm2iso@example.test', submit: true }));
+        return { keptWhilePending, submitted: rf.submitted, reason: rf.submittedReason || null };
+      } finally {
+        try { w8ef.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+      }
+    };
+
+    const mDNoTrimProtectOnly = MUT.load(
+      'src/server/browser-dialogs.js',
+      DSRC0
+        .replace('if (o.pendingPostData) { pendingCount++; continue; }', 'if (o.pendingPostData) { chatters.push(i); continue; }')
+        .replace('if (isCredObs(o) || o.pendingPostData || keepNonCredIdx.has(i)) {', 'if (isCredObs(o) || keepNonCredIdx.has(i)) {'),
+      'r11-8e-m2-no-trim-protect-only'
+    );
+    const mDNoRepushOnly = MUT.load(
+      'src/server/browser-dialogs.js',
+      DSRC0.replace('if (rq.obs.unreadableBody && Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {', 'if (false) {'),
+      'r11-8f-m2-no-repush-only'
+    );
+    const realM2Trim = await probeM2Isolated(D, 'trim');
+    const mutM2TrimOnly = await probeM2Isolated(mDNoTrimProtectOnly, 'trim');
+    const realM2Repush = await probeM2Isolated(D, 'repush');
+    const mutM2RepushOnly = await probeM2Isolated(mDNoRepushOnly, 'repush');
+    ok(realM2Trim.keptWhilePending === true && mutM2TrimOnly.keptWhilePending === false &&
+      realM2Repush.submitted === 'unknown' && mutM2RepushOnly.submitted === false,
+      'r11 single-mutant isolation [r11-8e/8f] (M2 trim protection alone & M2 finally re-push alone): no-trim-protect alone evicts pending entry under 260 inline chatters; no-repush alone drops 257th overflow unreadable write to submitted:false',
+      { realM2Trim, mutM2TrimOnly, realM2Repush, mutM2RepushOnly });
+
+    // (8g & 8h) M3 single-mutant isolation: holdBeforeAwaitAlone vs finallyRecheckAlone
+    const probeM3Isolated = async (DmodToUse, mode) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, 'wb11_8gh-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw11-8gh-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW12 = pwOf('r11-m3iso');
+      const lid = `web-login:${SITE}#m3iso@example.test`;
+      logins.addOwn({ origin: SITE, username: 'm3iso@example.test', password: PW12 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm', type: 'hidden', value: PW12, defaultValue: '', hidden: true },
+      ]);
+      const tid = 'TAB_R11_8GH', sid = 'SID_R11_8GH';
+      let slowWipe = false, wipeStarted = false;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r11_8gh`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          if (m.method === 'Runtime.evaluate' && slowWipe) {
+            wipeStarted = true;
+            slowWipe = false;
+            await sleep(140);
+          }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = {
+        fences: [{ targetId: tid, urlAtFill: `${SITE}/login`, origin: SITE, loginId: lid, browserKey: KEY, mode: 'login', at: Date.now() - 40, secretFieldIds: [], userFieldIds: [] }],
+        scrubs: [{ name: lid, at: Date.now() - 40 }],
+      };
+      // Re-arm WHILE LOCKED so scrubByProfile is empty and holdReason starts '' (within 180 ms ceiling)
+      eng.lock();
+      const w8gh = DmodToUse.create({
+        keeper: {
+          cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {},
+          saveLoginFenceState: (_p, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+          loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+        },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 180,
+        forYou: { add: () => null, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w8gh.arm(PID, { budgetMs: 3000 });
+        await until(() => w8gh._watches.get(PID)?.targets.get(tid)?.liveFill, 1500);
+        slowWipe = true;
+        await until(() => wipeStarted, 1000);
+        await sleep(20);
+        await eng.unlock(vpw); // hydrates >=8-byte PW12 into scrubByProfile AND sets recheckAfterWipe if holdReason was set before await!
+        if (mode === 'unlock-relock') {
+          eng.lock(); // re-lock BEFORE wipe Runtime.evaluate finishes => !isLoginVaultLocked in finally is false; ONLY recheckAfterWipe rescues!
+        }
+        await until(() => w8gh.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 900);
+        return { lifted: w8gh.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, hiddenCleared: dom.inputs[2].val === '' };
+      } finally {
+        try { w8gh.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const mDHoldAfterAwaitOnly = MUT.load(
+      'src/server/browser-dialogs.js',
+      DSRC0.replace('if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;\n', ''),
+      'r11-8g-m3-hold-after-await-only'
+    );
+    const mDNoFinallyCheckOnly = MUT.load(
+      'src/server/browser-dialogs.js',
+      DSRC0.replace('const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));', 'const unlockedMidWipe = false;'),
+      'r11-8h-m3-no-finally-check-only'
+    );
+    const realM3Relock = await probeM3Isolated(D, 'unlock-relock');
+    const mutM3HoldAfterOnly = await probeM3Isolated(mDHoldAfterAwaitOnly, 'unlock-relock');
+    const realM3Unlock = await probeM3Isolated(D, 'unlock-stay');
+    const mutM3NoFinallyOnly = await probeM3Isolated(mDNoFinallyCheckOnly, 'unlock-stay');
+    ok(realM3Relock.lifted === true && realM3Relock.hiddenCleared === true && mutM3HoldAfterOnly.lifted === false &&
+      realM3Unlock.lifted === true && realM3Unlock.hiddenCleared === true && mutM3NoFinallyOnly.lifted === false,
+      'r11 single-mutant isolation [r11-8g/8h] (M3 hold-before-await alone & M3 finally-recheck alone): hold-after-await alone strands mid-wipe unlock+relock; no-finally-recheck alone strands mid-wipe unlock',
+      { realM3Relock, mutM3HoldAfterOnly, realM3Unlock, mutM3NoFinallyOnly });
   }
 }
 

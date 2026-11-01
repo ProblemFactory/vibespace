@@ -35,8 +35,14 @@ const SUB_LEN_BUCKETS = Object.freeze([[3, 7], [8, 15], [16, 31], [32, 63], [64,
 const WHOLE_LEN_BUCKETS = Object.freeze([[1, 7], [8, 15], [16, 31], [32, 63], [64, 128], [129, 512], [513, 4096]]);
 const lastContextByTarget = new Map(); // targetId|sessionId → {profileId, ctxId}
 const filledSecretsByTarget = new Map(); // targetId|sessionId → {profileId, ctxId, values: string[]} (bounded to 64 entries)
-const filledSecretsByCtx = new Map();    // contextId → {profileId, targetKey, values: string[]} (bounded to 64 entries)
-const fenceRefSources = new Set();       // () => { liveTargetIds: Set|string[], liveContextIds: Set|number[] }
+const filledSecretsByCtx = new Map();    // `${targetKey}:${ctxId}` → {profileId, targetKey, ctxId, values: string[]} (bounded to 64 entries)
+const fenceRefSources = new Set();       // () => { liveTargetIds: Set|string[], liveContextIds: Set|string[] }
+
+function ctxEntryKeyOf(targetKey, contextId) {
+  const tk = String(targetKey || '');
+  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+  return tk && normCtx > 0 ? `${tk}:${normCtx}` : '';
+}
 
 function bucketOfCharLen(charLen, whole = false) {
   const n = Math.max(1, Number(charLen) || 1);
@@ -61,37 +67,32 @@ function rollingPow(w, base) {
 
 function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
   const pid = String(profileId || '');
+  const tk = String(ctxKey || '');
   const clean = [...new Set((Array.isArray(secretVals) ? secretVals : []).filter((s) => typeof s === 'string' && s.length > 0))];
   if (!clean.length) return;
   const normCtx = Number.isInteger(ctxId) && ctxId > 0 ? ctxId : 0;
-  if (ctxKey) {
-    const prevEntry = filledSecretsByTarget.get(ctxKey);
+  if (tk) {
+    const prevEntry = filledSecretsByTarget.get(tk);
     const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
-    filledSecretsByTarget.delete(ctxKey);
-    filledSecretsByTarget.set(ctxKey, {
+    filledSecretsByTarget.delete(tk);
+    filledSecretsByTarget.set(tk, {
       profileId: pid || (prevEntry && prevEntry.profileId) || '',
       ctxId: normCtx || (prevEntry && prevEntry.ctxId) || 0,
       values: merged,
     });
     while (filledSecretsByTarget.size > 64) filledSecretsByTarget.delete(filledSecretsByTarget.keys().next().value);
   }
-  if (normCtx > 0) {
-    if (ctxKey) {
-      for (const [ck, cv] of [...filledSecretsByCtx.entries()]) {
-        if (cv && cv.targetKey === ctxKey && ck !== normCtx) {
-          if (Array.isArray(cv.values)) cv.values.length = 0;
-          filledSecretsByCtx.delete(ck);
-        }
-      }
-    }
-    const prevEntry = filledSecretsByCtx.get(normCtx);
+  const cKey = ctxEntryKeyOf(tk, normCtx);
+  if (cKey) {
+    const prevEntry = filledSecretsByCtx.get(cKey);
     const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
-    filledSecretsByCtx.delete(normCtx);
-    filledSecretsByCtx.set(normCtx, {
+    filledSecretsByCtx.delete(cKey);
+    filledSecretsByCtx.set(cKey, {
       profileId: pid || (prevEntry && prevEntry.profileId) || '',
-      targetKey: ctxKey || (prevEntry && prevEntry.targetKey) || '',
+      targetKey: tk,
+      ctxId: normCtx,
       values: merged,
     });
     while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
@@ -101,11 +102,12 @@ function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
 function supersedeTargetContext(targetId, contextId, profileId = '') {
   const ctxKey = String(targetId || '');
   const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
-  if (!ctxKey || normCtx <= 0) return;
+  const cKey = ctxEntryKeyOf(ctxKey, normCtx);
+  if (!cKey) return;
   const pid = String(profileId || '');
   const carried = [];
   for (const [ck, cv] of [...filledSecretsByCtx.entries()]) {
-    if (cv && cv.targetKey === ctxKey && ck !== normCtx) {
+    if (cv && cv.targetKey === ctxKey && ck !== cKey) {
       if (Array.isArray(cv.values)) {
         for (const s of cv.values) if (typeof s === 'string' && s) carried.push(s);
         cv.values.length = 0;
@@ -114,15 +116,23 @@ function supersedeTargetContext(targetId, contextId, profileId = '') {
     }
   }
   const tv = filledSecretsByTarget.get(ctxKey);
-  if (tv) {
-    tv.ctxId = normCtx;
-    if (pid && !tv.profileId) tv.profileId = pid;
-    const merged = [...new Set([...(Array.isArray(tv.values) ? tv.values : []), ...carried])].slice(-16);
+  if (tv || carried.length) {
+    if (tv) {
+      tv.ctxId = normCtx;
+      if (pid && !tv.profileId) tv.profileId = pid;
+    }
+    const existingCur = filledSecretsByCtx.get(cKey);
+    const merged = [...new Set([
+      ...((tv && Array.isArray(tv.values)) ? tv.values : []),
+      ...((existingCur && Array.isArray(existingCur.values)) ? existingCur.values : []),
+      ...carried,
+    ])].slice(-16);
     if (merged.length) {
-      filledSecretsByCtx.delete(normCtx);
-      filledSecretsByCtx.set(normCtx, {
-        profileId: pid || tv.profileId || '',
+      filledSecretsByCtx.delete(cKey);
+      filledSecretsByCtx.set(cKey, {
+        profileId: pid || (tv && tv.profileId) || (existingCur && existingCur.profileId) || '',
         targetKey: ctxKey,
+        ctxId: normCtx,
         values: merged,
       });
       while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
@@ -144,11 +154,12 @@ function clearFilledSecretsForTarget(targetId, contextId = 0) {
     if (!linkedCtx && lc && typeof lc === 'object' && lc.ctxId) linkedCtx = lc.ctxId;
     lastContextByTarget.delete(ctxKey);
   }
-  if (linkedCtx > 0) {
-    const cv = filledSecretsByCtx.get(linkedCtx);
+  const cKey = ctxEntryKeyOf(ctxKey, linkedCtx);
+  if (cKey) {
+    const cv = filledSecretsByCtx.get(cKey);
     if (cv) {
       if (Array.isArray(cv.values)) cv.values.length = 0;
-      filledSecretsByCtx.delete(linkedCtx);
+      filledSecretsByCtx.delete(cKey);
     }
   }
   if (ctxKey) {
@@ -167,18 +178,26 @@ function registerFenceRefSource(fn) {
   return () => { fenceRefSources.delete(fn); };
 }
 
+function normCompositeCtxKey(c) {
+  const s = typeof c === 'string' ? c : '';
+  return /^.+:\d+$/.test(s) ? s : '';
+}
+
 function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = null } = {}) {
   const liveTgt = new Set(
     liveTargetIds instanceof Set ? [...liveTargetIds].map(String).filter(Boolean)
       : (Array.isArray(liveTargetIds) ? liveTargetIds.map(String).filter(Boolean) : [])
   );
   const liveCtx = new Set(
-    liveContextIds instanceof Set ? [...liveContextIds].map(Number).filter((n) => Number.isInteger(n) && n > 0)
-      : (Array.isArray(liveContextIds) ? liveContextIds.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [])
+    liveContextIds instanceof Set ? [...liveContextIds].map(normCompositeCtxKey).filter(Boolean)
+      : (Array.isArray(liveContextIds) ? liveContextIds.map(normCompositeCtxKey).filter(Boolean) : [])
   );
   const rememberedProfileIds = new Set();
   for (const v of filledSecretsByTarget.values()) {
     if (v && v.profileId) rememberedProfileIds.add(String(v.profileId));
+  }
+  for (const cv of filledSecretsByCtx.values()) {
+    if (cv && cv.profileId) rememberedProfileIds.add(String(cv.profileId));
   }
   for (const src of fenceRefSources) {
     let refs = null;
@@ -191,8 +210,8 @@ function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = nul
     }
     if (rc && typeof rc[Symbol.iterator] === 'function') {
       for (const c of rc) {
-        const n = Number(c);
-        if (Number.isInteger(n) && n > 0) liveCtx.add(n);
+        const ck = normCompositeCtxKey(c);
+        if (ck) liveCtx.add(ck);
       }
     }
   }
@@ -211,7 +230,8 @@ function clearUnfencedFilledSecrets({ liveTargetIds = null, liveContextIds = nul
 
 function valuesForTarget(targetId = null, contextId = 0, sessionId = undefined) {
   const ctxKey = String(targetId || sessionId || '');
-  const byCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? filledSecretsByCtx.get(Number(contextId)) : null;
+  const cKey = ctxEntryKeyOf(ctxKey, contextId);
+  const byCtx = cKey ? filledSecretsByCtx.get(cKey) : null;
   const byTgt = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
   return [...new Set([
     ...((byCtx && Array.isArray(byCtx.values)) ? byCtx.values : []),
@@ -219,11 +239,19 @@ function valuesForTarget(targetId = null, contextId = 0, sessionId = undefined) 
   ])];
 }
 
-function hasRememberedContext(contextId = 0) {
-  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+function hasRememberedContext(targetOrCtx = null, contextId = undefined) {
+  if (contextId !== undefined) {
+    const cKey = ctxEntryKeyOf(targetOrCtx, contextId);
+    if (!cKey) return false;
+    const cv = filledSecretsByCtx.get(cKey);
+    return Boolean(cv && Array.isArray(cv.values) && cv.values.length > 0);
+  }
+  const normCtx = Number.isInteger(Number(targetOrCtx)) && Number(targetOrCtx) > 0 ? Number(targetOrCtx) : 0;
   if (normCtx <= 0) return false;
-  const cv = filledSecretsByCtx.get(normCtx);
-  return Boolean(cv && Array.isArray(cv.values) && cv.values.length > 0);
+  for (const cv of filledSecretsByCtx.values()) {
+    if (cv && cv.ctxId === normCtx && Array.isArray(cv.values) && cv.values.length > 0) return true;
+  }
+  return false;
 }
 
 function clearFilledSecretsForProfileExcept(profileId, keepTargetIds = null) {
@@ -332,7 +360,8 @@ function buildFilledTargets(secretValues, { wholeOnlyValues = null } = {}) {
 
 function targetsForTab(targetId = null, contextId = 0, extraSecrets = null, sessionId = undefined, { wholeOnlyValues = null } = {}) {
   const ctxKey = String(targetId || sessionId || '');
-  const byCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? filledSecretsByCtx.get(Number(contextId)) : null;
+  const cKey = ctxEntryKeyOf(ctxKey, contextId);
+  const byCtx = cKey ? filledSecretsByCtx.get(cKey) : null;
   const byTgt = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
   const list = [
     ...(Array.isArray(extraSecrets) ? extraSecrets : []),

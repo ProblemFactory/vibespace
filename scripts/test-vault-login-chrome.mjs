@@ -233,6 +233,7 @@ try {
   if (w) {
     const SITE = pages.origin;
     const SITE2 = pages2.origin;
+    const allowedUseOrigins = new Set([SITE]);
     const USER = 'alice@example.test';
     const USER2 = 'bob@example.test';
     const PW = pwOf('chrome-pw');
@@ -1379,6 +1380,198 @@ try {
           'r10 MINOR 1 (real Chrome): OTP-only fence on /totp with vault locked wipes #totpPin at ceiling and lifts cleanly with 0 false notices',
           { fillCode: rOtpFill10.code, otpFenceHeldBefore, otpDomLenBefore, otpFenceLifted, otpDomLenAfter, snapAfterCode: snapAfter10 && snapAfter10.code, notices: otpNoticesCount });
       }
+
+      // 7v. r11 F1/F2/F3 + F-D (real Chrome: streaming POST + Bearer SSE while fenced, 20 MiB chunked + gzipped-small watch stays open, preReadBodies 0 after fence, colliding executionContextId = 2 across two tabs)
+      {
+        const zlib = require('zlib');
+        const LF = require('../src/server/browser-login-fill.js');
+        const gz20M = zlib.gzipSync(Buffer.alloc(20 * 1048576, 0x41));
+        const oneMb = Buffer.alloc(1048576, 0x61);
+        let streamRes = null, streamEnded = false, sawChunkWhileStreamOpen = false;
+        let sseOpen = false, sawSseWhileOpen = false;
+        const r11Srv = http.createServer((req, res) => {
+          const u = new URL(req.url || '/', 'http://127.0.0.1');
+          if (u.pathname === '/login') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end('<!doctype html><form action="/auth" method="post"><input id="u" name="email" type="email" autocomplete="username"><input id="p" name="password" type="password" autocomplete="current-password"><button id="go" type="submit">Sign in</button></form>');
+            return;
+          }
+          if (u.pathname === '/plain') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end('<!doctype html><h1>Plain</h1>');
+            return;
+          }
+          if (u.pathname === '/stream') {
+            streamEnded = false;
+            streamRes = res;
+            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+            res.flushHeaders?.();
+            res.write('chunk-0\n');
+            const safety = setTimeout(() => { streamEnded = true; try { res.end('timeout\n'); } catch {} }, 2500);
+            if (safety.unref) safety.unref();
+            res.on('close', () => clearTimeout(safety));
+            return;
+          }
+          if (u.pathname === '/stream-seen') {
+            if (streamRes && !streamEnded) {
+              sawChunkWhileStreamOpen = true;
+              streamEnded = true;
+              try { streamRes.end('chunk-1\n'); } catch {}
+            }
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          if (u.pathname === '/sse') {
+            sseOpen = true;
+            res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+            res.flushHeaders?.();
+            res.write('data: ping-r11\n\n');
+            res.on('close', () => { sseOpen = false; });
+            return;
+          }
+          if (u.pathname === '/sse-seen') {
+            if (sseOpen) sawSseWhileOpen = true;
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          if (u.pathname === '/chunk20') {
+            req.resume();
+            res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Transfer-Encoding': 'chunked' });
+            let sent = 0;
+            const pump = () => {
+              while (sent < 20) {
+                sent++;
+                if (!res.write(oneMb)) { res.once('drain', pump); return; }
+              }
+              res.end();
+            };
+            pump();
+            return;
+          }
+          if (u.pathname === '/gzip20') {
+            req.resume();
+            res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Encoding': 'gzip', 'Content-Length': String(gz20M.length) });
+            res.end(gz20M);
+            return;
+          }
+          req.resume();
+          const body = '{"ok":true}';
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) });
+          res.end(body);
+        });
+        const r11Port = await freePort();
+        await new Promise((r) => r11Srv.listen(r11Port, '127.0.0.1', r));
+        const r11Origin = `http://127.0.0.1:${r11Port}`;
+        const r11OriginB = `http://localhost:${r11Port}`;
+        allowedUseOrigins.add(r11Origin);
+        allowedUseOrigins.add(r11OriginB);
+        const pwR11A = pwOf('r11a-chrome');
+        const pwR11B = pwOf('r11b-chrome');
+        trackedSecrets.push(pwR11A, pwR11B);
+        w.logins.addOwn({ origin: r11Origin, username: 'r11a@example.test', password: pwR11A });
+        w.logins.addOwn({ origin: r11OriginB, username: 'r11b@example.test', password: pwR11B });
+        w.logins.grant(`web-login:${r11Origin}#r11a@example.test`, 'this-account', 'session:conv-1');
+        w.logins.grant(`web-login:${r11OriginB}#r11b@example.test`, 'this-account', 'session:conv-1');
+
+        try {
+          let pageProbe = null, ctxA = 0, ctxB = 0, bClearedOnLock = false, aKeptOnLock = false, preReadAfterEnd = -1;
+          let tidA = '', tidB = '', origTid = '';
+          let rFillR11A = { code: 1 }, rFillB = { code: 1 };
+          const rawR11 = await openCdpRpc(await upstreamWsUrl());
+          try {
+            const origTargets = ((await rawR11.call('Target.getTargets')).msg?.result?.targetInfos || []).filter((t) => t.type === 'page');
+            origTid = String(origTargets[0]?.targetId || '');
+
+            // Two fresh tabs via `tab new` across cross-site origins on the same browser profile => Site Isolation gives both ctxId === 2
+            await run(['tab', 'new', `${r11Origin}/login?tab=a`]);
+            await sleep(150);
+            rFillR11A = await run(['login', r11Origin, '--user', 'r11a@example.test']);
+            const wt11 = w.dialogs._watches.get(w.prof.id);
+            let eTabA = null;
+            for (const e of (wt11 ? wt11.targets.values() : [])) {
+              if (e && e.liveFill && String(e.url || '').includes('?tab=a')) { eTabA = e; break; }
+            }
+            tidA = eTabA ? eTabA.targetId : '';
+            ctxA = Number(eTabA?.liveFill?.isoContextId) || 0;
+
+            if (tidA) {
+              const attA = await rawR11.call('Target.attachToTarget', { targetId: tidA, flatten: true });
+              const sidA = attA.msg?.result?.sessionId;
+              const expr = `(async () => {
+                const sr = await fetch('/stream', { method: 'POST', body: 's=1' });
+                const rdr = sr.body.getReader();
+                const c0 = await rdr.read();
+                const firstText = new TextDecoder().decode(c0.value || new Uint8Array());
+                await fetch('/stream-seen', { method: 'POST' });
+                while (!(await rdr.read()).done) {}
+
+                const ac = new AbortController();
+                const er = await fetch('/sse', { headers: { Authorization: 'Bearer tok-r11' }, signal: ac.signal });
+                const erdr = er.body.getReader();
+                const e0 = await erdr.read();
+                const sseText = new TextDecoder().decode(e0.value || new Uint8Array());
+                await fetch('/sse-seen', { method: 'POST' });
+                ac.abort();
+
+                const bChunk = (await (await fetch('/chunk20', { method: 'POST', body: 'c=1' })).arrayBuffer()).byteLength;
+                const bGzip = (await (await fetch('/gzip20', { method: 'POST', body: 'g=1' })).arrayBuffer()).byteLength;
+                return { firstText: firstText.trim(), sseOk: sseText.includes('ping-r11'), bChunk, bGzip };
+              })()`;
+              const evRes = await rawR11.call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, sidA);
+              pageProbe = evRes.msg?.result?.result?.value || null;
+              await rawR11.call('Target.detachFromTarget', { sessionId: sidA });
+            }
+            const watchOpenAfterBig = w.dialogs._watches.get(w.prof.id)?.state === 'open';
+            const fenceAliveAfterBig = Boolean(w.dialogs._watches.get(w.prof.id)?.targets.get(tidA)?.liveFill);
+
+            await run(['tab', 'new', `${r11OriginB}/login?tab=b`]);
+            await sleep(150);
+            rFillB = await run(['login', r11OriginB, '--user', 'r11b@example.test']);
+            let eTabB = null;
+            for (const e of (wt11 ? wt11.targets.values() : [])) {
+              if (e && e.liveFill && String(e.url || '').includes('?tab=b')) { eTabB = e; break; }
+            }
+            tidB = eTabB ? eTabB.targetId : '';
+            ctxB = Number(eTabB?.liveFill?.isoContextId) || 0;
+            if (eTabB && eTabB.liveFillTimer) { clearTimeout(eTabB.liveFillTimer); eTabB.liveFillTimer = null; }
+            if (eTabB) eTabB.liveFill = null; // Tab B has no fence-end clear road -> lock must clear Tab B despite colliding ctxId!
+            w.eng.lock();
+            bClearedOnLock = !LF.valuesForTarget(tidB, ctxB).includes(pwR11B) && !LF.valuesForTarget(tidA, ctxA).includes(pwR11B);
+            aKeptOnLock = LF.valuesForTarget(tidA, ctxA).includes(pwR11A);
+            await w.eng.unlock(w.VPW);
+            if (tidB) await run(['tab', 'close', tidB]);
+            if (tidA) {
+              await run(['tab', tidA]);
+              await run(['open', `${r11Origin}/plain`]);
+              preReadAfterEnd = eTabA?.authNet?.preReadBodies?.size ?? 0;
+            }
+            if (origTid) await run(['tab', origTid]);
+            if (tidA) await run(['tab', 'close', tidA]);
+
+            ok(Boolean(
+              rFillR11A.code === 0 && rFillB.code === 0 &&
+              pageProbe && pageProbe.firstText === 'chunk-0' && sawChunkWhileStreamOpen === true &&
+              pageProbe.sseOk === true && sawSseWhileOpen === true &&
+              pageProbe.bChunk === 20 * 1048576 && pageProbe.bGzip === 20 * 1048576 &&
+              watchOpenAfterBig === true && fenceAliveAfterBig === true &&
+              ctxA > 0 && ctxB === ctxA && bClearedOnLock === true && aKeptOnLock === true &&
+              preReadAfterEnd === 0
+            ), 'r11 F1/F2/F3 + F-D (real Chrome): streaming POST + Bearer SSE deliver while open during fence, 20 MiB chunked + gzipped-small keep watch open, preReadBodies clears to 0, and colliding executionContextId across two tabs isolates & clears unfenced tab on lock', {
+              fillA: rFillR11A.code, fillB: rFillB.code, pageProbe, sawChunkWhileStreamOpen, sawSseWhileOpen,
+              watchOpenAfterBig, fenceAliveAfterBig, ctxA, ctxB, bClearedOnLock, aKeptOnLock, preReadAfterEnd,
+            });
+          } finally {
+            await rawR11.close();
+          }
+        } finally {
+          await w.eng.unlock(w.VPW).catch(() => {});
+          r11Srv.closeIdleConnections?.();
+          r11Srv.closeAllConnections?.();
+          await new Promise((r) => r11Srv.close(() => r()));
+        }
+      }
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');
@@ -1399,7 +1592,7 @@ try {
         `ZERO LEAKAGE: 0 occurrences across ${uniqueSecrets.length} secrets + ${uniqueShort.length} TOTP codes over CLI, hub logs, dialog trace, browser audit, vault-audit.jsonl, and ${Object.keys(dataFiles).length} data/ files`, hits);
 
       const useRows = w.vaultAudit().filter((l) => l.event === 'vault-use' && l.door === 'browser-login' && l.outcome === 'ok');
-      ok(useRows.length >= 10 && useRows.every((l) => /^vr-[0-9a-f]{12}$/.test(l.receipt || '') && String(l.purpose || '').includes(SITE)),
+      ok(useRows.length >= 10 && useRows.every((l) => /^vr-[0-9a-f]{12}$/.test(l.receipt || '') && [...allowedUseOrigins].some((orig) => String(l.purpose || '').includes(orig))),
         `THE USE LAW: all ${useRows.length} successful fills recorded a vault-use line with purpose + receipt`, useRows.length);
 
       // RED mutant control: a copy of browser-login-fill.js that includes the secret value in its return object is caught by sweepSurfaces

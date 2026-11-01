@@ -246,7 +246,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     if (profileId) knownFenceProfiles.add(String(profileId));
-    const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
+    const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, fencesRearmed: false, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
       pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
@@ -284,7 +284,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // verify r4 #3: the persisted witness is pruned to the tabs this browser HAS — a healed browser's or a restart's dead ids
       // named nothing (a ghost-only scope read as attributed: the named refusal never fired, `stop` said "nothing of yours")
       if (keeper && typeof keeper.pruneOwnTabs === 'function') { try { const n = keeper.pruneOwnTabs(w.profileId, infos.filter((t) => t && t.type === 'page' && t.targetId).map((t) => String(t.targetId))); if (n) say('prune:' + w.profileId + ':' + now(), `${w.profileId}: ${n} persisted tab witness(es) named tabs this browser does not have — dropped`); } catch (err) { say('prune-err:' + (err && err.message), `${w.profileId}: the persisted tab witness was not pruned — ${err && err.message}`); } }
-      await rearmLoginFences(w); // lane vault-login-chrome r4: re-arm persisted live-fill fences + scrub secrets before ready()
+      try {
+        await rearmLoginFences(w); // lane vault-login-chrome r4: re-arm persisted live-fill fences + scrub secrets before ready()
+      } finally {
+        if (w.state === 'open') w.fencesRearmed = true;
+      }
       w.readySeen = true; // lane site-reset: tabs tracked from here on appeared while watched
       // lane mirror-green-222: ready = the tabs enabled here carry the passkey hook — `arm` resolved between Page.enable and
       // the hook's last CDP answer, so a verb's first fact read the tab as `unknown` (the mirror's red, run 37419676410)
@@ -299,6 +303,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function down(w, why, { keepNotices = false } = {}) {
     if (w.state === 'down') return;
     w.state = 'down';
+    w.fencesRearmed = false;
     for (const id of w.pkForYou.values()) { try { forYou?.resolve?.(id); } catch { /* the tray's own failure */ } } w.pkForYou.clear(); // lane browser-passkey
     for (const rec of [...w.prompts.values()]) dropPrompt(w, rec, 'down'); // lane browser-ui-prompts: a gone socket's paused sign-in is Chrome's again
     w.ready();
@@ -308,14 +313,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const rec of w.surf.values()) { surfaceAskDone(w, rec); if (!open.includes(rec)) open.push(rec); } w.surf.clear(); // lane browser-surfaces: a NOTED one is in the live view's bar too
     w.open.clear();
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
-    for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; } if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); } }
+    for (const e of w.targets.values()) { e.awaitingCredPreRead = false; clearTabPreReadBodies(e); if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; } if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); } }
     try {
       const persistedTids = new Set();
       if (keeper && typeof keeper.loginFenceStateOf === 'function') {
-        const st = keeper.loginFenceStateOf(w.profileId);
-        for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
-          if (f && f.targetId) persistedTids.add(String(f.targetId));
-        }
+        try {
+          const st = keeper.loginFenceStateOf(w.profileId);
+          for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
+            if (f && f.targetId) persistedTids.add(String(f.targetId));
+          }
+        } catch { /* keeper fence state unreadable — fail closed (keep nothing) */ }
       }
       LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);
     } catch { /* */ }
@@ -402,6 +409,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
         dropActiveTarget(w.profileId, tid);
         e.pendingLoginConfirm = null;
+        e.awaitingCredPreRead = false;
+        clearTabPreReadBodies(e);
         if (e.submitWaiters) { for (const fn of [...e.submitWaiters]) fn(); e.submitWaiters.clear(); }
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
         if (w.prompts.has(tid)) dropPrompt(w, w.prompts.get(tid), 'tab-closed'); // lane browser-ui-prompts
@@ -442,35 +451,37 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const reqId = String(p.requestId || '');
         const e = tabOf(w, m);
         const isRespStage = p.responseStatusCode != null || Boolean(p.responseErrorReason);
-        if (isRespStage && e && e.authNet) {
+        if (isRespStage && e && e.authNet && e.awaitingCredPreRead) {
           const status = Number(p.responseStatusCode) || 0;
           const netId = p.networkId ? String(p.networkId) : '';
           const reqUrl = String((p.request && p.request.url) || '');
           const an = e.authNet;
           const rq = netId ? an.reqs.get(netId) : null;
           const reqMethod = String((p.request && p.request.method) || (rq && rq.method) || '').toUpperCase();
-          const isCand = isCredCandidateReq(rq) || ['POST', 'PUT', 'PATCH'].includes(reqMethod) || Boolean(extractAuthHeader(p.request && p.request.headers));
-          const clHdr = Array.isArray(p.responseHeaders) ? p.responseHeaders.find((h) => h && String(h.name || '').toLowerCase() === 'content-length') : null;
-          const clBytes = clHdr ? Number(clHdr.value) : NaN;
-          const withinCap = !Number.isFinite(clBytes) || clBytes <= 1048576;
-          if (isCand && withinCap && !p.responseErrorReason && status >= 200 && status < 300 && status !== 204 && status !== 205) {
+          const watchOrigin = loginWatchOriginOf(e);
+          if (!p.responseErrorReason && status >= 200 && status < 300 && status !== 204 && status !== 205 && netId && hasDeclaredBoundedIdentityBody(p.responseHeaders) && isAwaitedCredPreReadReq(e, rq, p.request, watchOrigin)) {
+            e.awaitingCredPreRead = false;
             call(w, 'Fetch.getResponseBody', { requestId: reqId }, sid, 800)
               .then((rb) => {
-                if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
+                if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string' && (e.liveFill || hasActivePendingConfirm(e))) {
                   const approxBytes = rb.result.base64Encoded ? Math.floor((rb.result.body.length * 3) / 4) : Buffer.byteLength(rb.result.body, 'utf8');
                   if (approxBytes <= 1048576) {
                     if (!an.preReadBodies) an.preReadBodies = new Map();
                     const entry = { body: rb.result.body, base64Encoded: !!rb.result.base64Encoded, method: reqMethod, url: reqUrl, at: now() };
-                    const key = netId || `u:${++w.seq}`;
-                    an.preReadBodies.delete(key);
-                    an.preReadBodies.set(key, entry);
-                    while (an.preReadBodies.size > 32) an.preReadBodies.delete(an.preReadBodies.keys().next().value);
+                    an.preReadBodies.delete(netId);
+                    an.preReadBodies.set(netId, entry);
+                    while (an.preReadBodies.size > 4) an.preReadBodies.delete(an.preReadBodies.keys().next().value);
                   }
                 }
               }, () => {})
               .finally(() => {
                 call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+                syncLoginFetchIntercept(w, e);
               });
+            return;
+          }
+          if (rq && rq.streamReadyP) {
+            rq.streamReadyP.finally(() => call(w, 'Fetch.continueRequest', { requestId: reqId }, sid));
             return;
           }
         }
@@ -498,7 +509,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
       case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
       case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
-      case 'Network.requestWillBeSent': case 'Network.requestWillBeSentExtraInfo': case 'Network.responseReceived': case 'Network.loadingFinished': case 'Network.loadingFailed': { const e = tabOf(w, m); if (e && e.authNet) onLoginNetEvent(w, m.method, e, p); return; }
+      case 'Network.requestWillBeSent': case 'Network.requestWillBeSentExtraInfo': case 'Network.responseReceived': case 'Network.dataReceived': case 'Network.loadingFinished': case 'Network.loadingFailed': { const e = tabOf(w, m); if (e && e.authNet) onLoginNetEvent(w, m.method, e, p); return; }
       default: return;
     }
   }
@@ -1978,14 +1989,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function stats() { return [...watches.values()].map((w) => ({ profileId: w.profileId, state: w.state, tabs: w.targets.size, enabled: [...w.targets.values()].filter((e) => e.enabled).length, held: [...w.targets.values()].filter((e) => e.heldAt).length, open: [...w.open.values()].map((d) => ({ id: d.id, type: d.type })), answered: w.answered.length, loops: [...w.targets.values()].filter((e) => e.loop).length, kernel: w.kernel ? { protocol: w.kernel.protocol, features: w.kernel.features } : w.kernel, surfaces: [...w.surf.values()].map((x) => ({ id: x.id, kind: x.kind, cls: x.cls })), nativeIgnored: w.nativeIgnored })); } // lane browser-surfaces
   function shutdown() { for (const w of [...watches.values()]) { try { LF().clearFilledSecretsForProfile(w.profileId); } catch { /* */ } try { w.ws && w.ws.close(1001); } catch { /* */ } down(w, 'the server is restarting', { keepNotices: true }); } for (const x of waiters) x.resolve(null); waiters.clear(); }
 
-  // ── lane browser-ui-prompts (B-ebfc): THE BROWSER'S OWN PROMPTS — hooked on every enabled tab of this socket ──
+  // ── lane browser-ui-prompts (B-ebfc) + vault-login r11: THE BROWSER'S OWN PROMPTS — hooked on every enabled tab ──
   // MEASURED (0.38.1 + Chrome 154, headless and the hidden window): intercepted, a chooser reports `Page.fileChooserOpened` in
   // ≤ 5 ms and the page runs on; the CLI's own `upload` (DOM.setFileInputFiles on ITS session) still lands while we intercept.
-  // Fetch pauses DOCUMENT requests only (a sub-resource never waits on this socket; on '*' a 100-image page cost +12 ms); a
-  // sign-in on a sub-resource is not caught (named in the kb table).
+  // Fetch pauses DOCUMENT requests at Request stage; the ONE sub-resource exception is while a fence or pending confirm awaits
+  // its watched-origin credential candidate: that candidate's own response (when identity Content-Length ≤ 1 MiB is declared)
+  // may wait ≤ 800 ms on this socket to pre-read before navigation, and nothing else ever does (a sign-in on a sub-resource is
+  // not caught, named in the kb table).
   function syncLoginFetchIntercept(w, e) {
     if (!w || !e || !e.sid || w.kernel || w.mode === 'person') return Promise.resolve();
-    const watchOrigin = loginWatchOriginOf(e) || '';
+    const watchOrigin = (e.awaitingCredPreRead && loginWatchOriginOf(e)) || '';
     if (e.fetchInterceptArmed && (e.fetchWatchOrigin || '') === watchOrigin) return Promise.resolve();
     e.fetchInterceptArmed = true;
     e.fetchWatchOrigin = watchOrigin;
@@ -2704,6 +2717,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           origin: String(e.liveFill.origin || ''),
           at: Number(e.liveFill.at) || now(),
           loginId: e.liveFill.loginId || null,
+          mode: String(e.liveFill.mode || 'login'),
           browserKey: e.liveFill.browserKey || null,
           ...(Array.isArray(e.liveFill.secretFieldIds) && e.liveFill.secretFieldIds.length ? { secretFieldIds: e.liveFill.secretFieldIds } : {}),
           ...(Array.isArray(e.liveFill.userFieldIds) && e.liveFill.userFieldIds.length ? { userFieldIds: e.liveFill.userFieldIds } : {}),
@@ -2919,6 +2933,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       lf.ceilingNoticeId = forYou.add(w.profileId, { origin: 'browser', kind: 'notice', urgency: 'normal', text, detail, i18n: { text: { key: textKey, params: { tab: tabLabel } }, detail: [{ key: detail }] } }) || null;
     } catch { /* optional */ }
   }
+  function clearTabPreReadBodies(e) {
+    if (e && e.authNet && e.authNet.preReadBodies) e.authNet.preReadBodies.clear();
+    if (e && e.authNet && e.authNet.reqs) {
+      for (const rq of e.authNet.reqs.values()) {
+        if (rq && Array.isArray(rq.streamChunks)) rq.streamChunks.length = 0;
+      }
+    }
+  }
+  function hasActivePendingConfirm(e) {
+    return Boolean(e && e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed);
+  }
   function clearLiveFillOnTab(w, e, why, { audit = false, persist = true } = {}) {
     if (!e || !e.liveFill) return;
     const lf = e.liveFill;
@@ -2933,6 +2958,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (audit) recordFenceAudit(w.profileId, lf, why);
     // Rule (r6 MAJOR A'): the scrub set lives until the browser stops (`clearProfileLoginFencesOnStop`), because Chrome's
     // back/forward cache and `Network.getRequestPostData` still retain the filled credential after navigation.
+    if (!hasActivePendingConfirm(e)) {
+      e.awaitingCredPreRead = false;
+      clearTabPreReadBodies(e);
+    }
     if (persist) syncPersistedLoginFences(w.profileId);
     wakeSubmitWaiters(e);
     syncLoginFetchIntercept(w, e);
@@ -2970,11 +2999,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             expireLiveFillCeiling(w, e);
           } else if (wipeTooMuch) {
             lf.holdReason = BL().HOLD_TOO_MUCH_TEXT;
+            if (!hasActivePendingConfirm(e)) { e.awaitingCredPreRead = false; syncLoginFetchIntercept(w, e); }
             fileCeilingWipeNotice(w, e, lf);
             recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_TOO_MUCH_TEXT);
             syncPersistedLoginFences(w.profileId);
           } else if (wipeLockedHold) {
             lf.holdReason = BL().HOLD_VAULT_LOCKED;
+            if (!hasActivePendingConfirm(e)) { e.awaitingCredPreRead = false; syncLoginFetchIntercept(w, e); }
             fileCeilingWipeNotice(w, e, lf);
             recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_VAULT_LOCKED);
             syncPersistedLoginFences(w.profileId);
@@ -3016,6 +3047,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       ceilingNoticeId: null,
     };
     e.liveFill = lf;
+    e.awaitingCredPreRead = !lf.holdReason || hasActivePendingConfirm(e);
     if (recordHistory && lf.urlAtFill && lf.origin) {
       if (!e.fillHistory) e.fillHistory = new Map();
       const uKey = stripHash(lf.urlAtFill);
@@ -3044,6 +3076,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function credSigOf(sv) {
     if (typeof sv !== 'string' || !sv) return null;
     return { len: sv.length, sha256: crypto.createHash('sha256').update(sv, 'utf8').digest('hex') };
+  }
+  function hydrateTabFenceSecrets(targetId, loginId, mode = 'login', secretFieldIds = null) {
+    const rem = (LF().valuesForTarget?.(targetId, 0) || []).filter((x) => typeof x === 'string' && x);
+    if (rem.length > 0) {
+      return { values: rem, sigs: rem.map(credSigOf).filter(Boolean) };
+    }
+    if (loginId && logins && typeof logins.scrubSecretsOf === 'function') {
+      try {
+        const includePrevious = mode === 'change' && (!Array.isArray(secretFieldIds) || secretFieldIds.length > 1);
+        const vals = logins.scrubSecretsOf(loginId, { minBytes: 1, includePrevious });
+        const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
+        const clean = arr.filter((x) => typeof x === 'string' && x);
+        return { values: clean, sigs: clean.map(credSigOf).filter(Boolean) };
+      } catch { /* */ }
+    }
+    return { values: [], sigs: [] };
   }
   async function rearmLoginFences(w) {
     if (!w || !keeper || typeof keeper.loginFenceStateOf !== 'function') return;
@@ -3076,16 +3124,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         recordFenceAudit(w.profileId, f, 'url-changed');
         continue;
       }
-      let hydratedSigs = [];
-      let hydratedVals = [];
-      if (f.loginId && logins && typeof logins.scrubSecretsOf === 'function') {
-        try {
-          const vals = logins.scrubSecretsOf(f.loginId, { minBytes: 1 });
-          const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
-          hydratedVals = arr.filter((x) => typeof x === 'string' && x);
-          hydratedSigs = hydratedVals.map(credSigOf).filter(Boolean);
-        } catch { hydratedSigs = []; hydratedVals = []; }
-      }
+      const hydrated = hydrateTabFenceSecrets(e.targetId, f.loginId, f.mode || 'login', f.secretFieldIds);
+      const hydratedSigs = hydrated.sigs;
+      const hydratedVals = hydrated.values;
       const savedHold = f.holdReason === BL().HOLD_VAULT_LOCKED
         ? (isLoginVaultLocked(f.loginId) ? BL().HOLD_VAULT_LOCKED : '')
         : (f.holdReason || '');
@@ -3127,6 +3168,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       for (const e of w.targets.values()) {
         if (e.fillHistory) e.fillHistory.clear();
         e.lastFillSigs = null;
+        e.awaitingCredPreRead = false;
+        clearTabPreReadBodies(e);
         if (!e.liveFill) continue;
         active.push(e.liveFill);
         if (Array.isArray(e.liveFill.stepOtpValues)) e.liveFill.stepOtpValues.length = 0;
@@ -3554,6 +3597,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     pc.confirmed = true;
     if (e.pendingLoginConfirm === pc) {
       e.pendingLoginConfirm = null;
+      if (!e.liveFill || e.liveFill.holdReason) e.awaitingCredPreRead = false;
+      clearTabPreReadBodies(e);
       syncLoginFetchIntercept(w, e);
     }
     try {
@@ -3720,30 +3765,68 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (timer.unref) timer.unref();
   }
   function loginWatchOriginOf(e) {
-    if (e.pendingLoginConfirm && e.pendingLoginConfirm.origin) return e.pendingLoginConfirm.origin;
+    if (e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && e.pendingLoginConfirm.origin) return e.pendingLoginConfirm.origin;
     if (e.liveFill && e.liveFill.origin) return e.liveFill.origin;
     return null;
   }
   function isCredCandidateReq(rq) {
     return Boolean(rq && rq.type !== 'Ping' && (['POST', 'PUT', 'PATCH'].includes(rq.method) || rq.hasAuthHeader || rq.carriesCred || rq.carriesPending || rq.carriesOtherCred));
   }
-  function takePreReadBody(an, rid, rq) {
-    if (!an || !an.preReadBodies || !an.preReadBodies.size) return null;
-    if (rid && an.preReadBodies.has(rid)) {
-      const hit = an.preReadBodies.get(rid);
-      an.preReadBodies.delete(rid);
-      return hit;
-    }
-    if (rq && rq.url) {
-      const tNow = now();
-      for (const [k, v] of an.preReadBodies.entries()) {
-        if (v && tNow - (v.at || 0) <= 5000 && v.url === rq.url && (!rq.method || v.method === rq.method)) {
-          an.preReadBodies.delete(k);
-          return v;
-        }
+  function hasDeclaredBoundedIdentityBody(responseHeaders) {
+    if (!Array.isArray(responseHeaders) || !responseHeaders.length) return false;
+    let clBytes = -1;
+    for (const h of responseHeaders) {
+      if (!h || !h.name) continue;
+      const k = String(h.name).toLowerCase().trim();
+      const v = String(h.value == null ? '' : h.value).trim();
+      if (k === 'transfer-encoding') {
+        if (v && v.toLowerCase() !== 'identity') return false;
+      } else if (k === 'content-encoding') {
+        if (v && v.toLowerCase() !== 'identity') return false;
+      } else if (k === 'content-length') {
+        if (!/^\d+$/.test(v)) return false;
+        const n = Number(v);
+        if (!Number.isSafeInteger(n) || n < 0 || n > 1048576) return false;
+        if (clBytes !== -1 && clBytes !== n) return false;
+        clBytes = n;
       }
     }
-    return null;
+    return clBytes >= 0 && clBytes <= 1048576;
+  }
+  function isAwaitedCredPreReadReq(e, rq, reqObj, watchOrigin) {
+    if (!e || !e.awaitingCredPreRead || !watchOrigin || !rq) return false;
+    if (rq.type === 'Ping' || rq.type === 'Document' || rq.origin !== watchOrigin) return false;
+    if (!(rq.carriesCred || rq.carriesPending) && reqObj && typeof reqObj === 'object') {
+      const inlineBody = extractInlinePostData(reqObj);
+      if (inlineBody && Buffer.byteLength(inlineBody, 'utf8') <= 1048576) markReqCredential(e, rq, inlineBody, watchOrigin);
+      const ah = extractAuthHeader(reqObj.headers);
+      if (ah) checkAuthHeaderCredential(e, rq, ah, watchOrigin);
+    }
+    return Boolean(rq.carriesCred || rq.carriesPending);
+  }
+  function armCredStreamIfNeeded(w, e, rid, rq, watchOrigin) {
+    if (!w || w.state !== 'open' || !e || !e.sid || !e.awaitingCredPreRead || !rid || !rq || rq.streamArmed) return;
+    if (rq.type === 'Ping' || rq.type === 'Document' || !watchOrigin || rq.origin !== watchOrigin) return;
+    if (!rq.carriesCred && !rq.carriesPending) return;
+    rq.streamArmed = true;
+    rq.streamChunks = [];
+    rq.streamBytes = 0;
+    rq.streamOverflow = false;
+    rq.streamReadyP = call(w, 'Network.streamResourceContent', { requestId: rid }, e.sid, 300).then((ans) => {
+      if (ans && !ans.error && !ans.timeout && ans.result && typeof ans.result.bufferedData === 'string' && ans.result.bufferedData && !rq.streamOverflow) {
+        const b = Buffer.from(ans.result.bufferedData, 'base64');
+        rq.streamBytes += b.length;
+        if (rq.streamBytes <= 1048576) rq.streamChunks.push(b);
+        else { rq.streamOverflow = true; rq.streamChunks.length = 0; }
+      }
+    }, () => {}).finally(() => { rq.streamReadyP = null; });
+  }
+  function takePreReadBody(an, rid) {
+    if (!an || !an.preReadBodies || !an.preReadBodies.size || !rid) return null;
+    if (!an.preReadBodies.has(rid)) return null;
+    const hit = an.preReadBodies.get(rid);
+    an.preReadBodies.delete(rid);
+    return hit;
   }
   function onLoginNetEvent(w, method, e, p) {
     const an = e.authNet;
@@ -3820,6 +3903,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             const inlineBytes = inlineBody ? Buffer.byteLength(inlineBody, 'utf8') : 0;
             if (inlineBody && inlineBytes < 65536) markReqCredential(e, rq, inlineBody, watchOrigin);
             else if (inlineBody) markReqCredential(e, rq, inlineBody, watchOrigin);
+            armCredStreamIfNeeded(w, e, rid, rq, watchOrigin);
             const matched = rq.carriesCred || rq.carriesPending || rq.carriesOtherCred;
             if (!matched && (!inlineBody || inlineBytes >= 65536) && p.request.hasPostData) {
               if (!e.sid) {
@@ -3832,7 +3916,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
                   const hasStr = Boolean(r && !r.timeout && !r.error && r.result && typeof r.result.postData === 'string');
                   const b = hasStr ? r.result.postData : '';
                   if (hasStr) {
-                    if (b) markReqCredential(e, rq, b, watchOrigin);
+                    if (b) {
+                      markReqCredential(e, rq, b, watchOrigin);
+                      armCredStreamIfNeeded(w, e, rid, rq, watchOrigin);
+                    }
                     if (!rq.carriesCred && !rq.carriesPending && !rq.carriesOtherCred && Buffer.byteLength(b, 'utf8') > 1048576) {
                       rq.obs.unreadableBody = true;
                     }
@@ -3861,6 +3948,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
               trimObserved(w, an);
             }
           }
+          armCredStreamIfNeeded(w, e, rid, rq, watchOrigin);
           wakeSubmitWaiters(e);
         } else if (reqType === 'Ping' && watchOrigin) {
           const inlineBody = extractInlinePostData(p.request);
@@ -3969,6 +4057,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           trimObserved(w, an);
         }
         checkAuthHeaderCredential(e, rq, authHdr, watchOrigin);
+        armCredStreamIfNeeded(w, e, rid, rq, watchOrigin);
         if (rq.obs.sameOrigin || rq.carriesCred || rq.carriesPending || rq.carriesOtherCred) {
           an.seq++;
           an.writeSentSeq = an.seq;
@@ -4000,6 +4089,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       return;
     }
+    if (method === 'Network.dataReceived') {
+      const rq = rid ? an.reqs.get(rid) : null;
+      if (rq && rq.streamArmed && !rq.streamOverflow && typeof p.data === 'string' && p.data) {
+        const b = Buffer.from(p.data, 'base64');
+        rq.streamBytes = (rq.streamBytes || 0) + b.length;
+        if (rq.streamBytes <= 1048576) rq.streamChunks.push(b);
+        else { rq.streamOverflow = true; rq.streamChunks.length = 0; }
+      }
+      return;
+    }
     if (method === 'Network.loadingFinished') {
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
@@ -4009,19 +4108,30 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (!rq.carriesCred && !rq.carriesPending) return;
           let bodyRead = rq.status === 204 || rq.status === 205;
           let errBody = false;
-          const preRb = !bodyRead ? takePreReadBody(an, rid, rq) : null;
+          const preRb = !bodyRead ? takePreReadBody(an, rid) : null;
           if (preRb && typeof preRb.body === 'string') {
             bodyRead = true;
             const rawBody = preRb.base64Encoded ? Buffer.from(preRb.body, 'base64').toString('utf8') : preRb.body;
             errBody = isJsonErrorBody(rawBody);
           }
-          if (!bodyRead && w.state === 'open' && e.sid) {
+          if (!bodyRead && rq.streamArmed && !rq.streamOverflow && rq.streamBytes > 0 && Array.isArray(rq.streamChunks) && rq.streamChunks.length > 0) {
+            bodyRead = true;
+            const rawBody = Buffer.concat(rq.streamChunks).toString('utf8');
+            rq.streamChunks.length = 0;
+            errBody = isJsonErrorBody(rawBody);
+          }
+          if (!bodyRead && !rq.streamOverflow && w.state === 'open' && e.sid) {
             const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
             if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
               bodyRead = true;
               const rawBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
               errBody = isJsonErrorBody(rawBody);
             }
+          }
+          if (Array.isArray(rq.streamChunks)) rq.streamChunks.length = 0;
+          if ((bodyRead || rq.streamOverflow) && e.awaitingCredPreRead) {
+            e.awaitingCredPreRead = false;
+            syncLoginFetchIntercept(w, e);
           }
           if (!bodyRead) {
             if (rq.obs) {
@@ -4106,6 +4216,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const sameUrl = stripHash(navUrl) === stripHash(pc.urlAtFill);
       if (agentNavInFlight(w.profileId)) {
         e.pendingLoginConfirm = null;
+        if (!e.liveFill || e.liveFill.holdReason) e.awaitingCredPreRead = false;
+        clearTabPreReadBodies(e);
         syncLoginFetchIntercept(w, e);
       } else if (!sameUrl) {
         const markRef = pc.subMark != null ? pc.subMark : pc.netMark;
@@ -4122,6 +4234,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             if (pWhy && logins && typeof logins.notePendingReason === 'function') logins.notePendingReason(pc.name, pWhy);
             if (e.pendingLoginConfirm === pc) {
               e.pendingLoginConfirm = null;
+              if (!e.liveFill || e.liveFill.holdReason) e.awaitingCredPreRead = false;
+              clearTabPreReadBodies(e);
               syncLoginFetchIntercept(w, e);
             }
           }
@@ -4259,9 +4373,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           secretFieldIds.push(fid);
           const sg = credSigOf(sv);
           if (sg) {
-            credSigs.push(sg);
+            if (!credSigs.some((x) => x.len === sg.len && x.sha256 === sg.sha256)) credSigs.push(sg);
             const isNewPwField = f.type === 'new-password';
-            if (isNewPwField) newPwSigs.push(sg);
+            if (isNewPwField && !newPwSigs.some((x) => x.len === sg.len && x.sha256 === sg.sha256)) newPwSigs.push(sg);
           }
         }
       }
@@ -4274,6 +4388,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (plan.mode === 'signup' || plan.mode === 'change') {
         pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, subMark: netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
         e.pendingLoginConfirm = pc;
+        e.awaitingCredPreRead = true;
       }
       syncLoginFetchIntercept(w, e);
       const cf = await LF().fillVaultLogin({
@@ -4305,6 +4420,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!cf || !cf.attemptedInsert) clearLiveFillOnTab(w, e, 'fill-aborted', { audit: false });
         if (e.pendingLoginConfirm === pc) {
           e.pendingLoginConfirm = null;
+          if (!e.liveFill || e.liveFill.holdReason) e.awaitingCredPreRead = false;
+          clearTabPreReadBodies(e);
           syncLoginFetchIntercept(w, e);
         }
       } else {
@@ -4392,15 +4509,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const liveTargetIds = new Set();
     const liveContextIds = new Set();
     if (disposed) return { liveTargetIds, liveContextIds };
-    const openPids = new Set();
+    const tNow = now();
+    const rearmedOpenPids = new Set();
     for (const [pid, w] of watches) {
       if (!w || w.state !== 'open') continue;
-      openPids.add(pid);
+      if (w.fencesRearmed) rearmedOpenPids.add(pid);
       for (const e of w.targets.values()) {
         if (!e || !e.liveFill) continue;
-        if (e.targetId) liveTargetIds.add(String(e.targetId));
+        const tid = e.targetId ? String(e.targetId) : '';
+        if (tid) liveTargetIds.add(tid);
         const cid = Number(e.liveFill.isoContextId) || 0;
-        if (cid > 0) liveContextIds.add(cid);
+        if (tid && cid > 0) liveContextIds.add(`${tid}:${cid}`);
       }
     }
     if (keeper && typeof keeper.loginFenceStateOf === 'function') {
@@ -4409,11 +4528,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         for (const k of rememberedProfileIds) if (k) pids.add(String(k));
       }
       for (const pid of pids) {
-        if (openPids.has(pid)) continue;
+        if (rearmedOpenPids.has(pid)) continue;
         let st = null;
         try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
         for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
-          if (f && f.targetId) liveTargetIds.add(String(f.targetId));
+          if (!f || !f.targetId) continue;
+          const fAt = Number(f.at) || 0;
+          if (fAt > 0 && tNow - fAt < liveFillMaxMs) liveTargetIds.add(String(f.targetId));
         }
       }
     }
@@ -4436,13 +4557,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ }
             e.liveFill.ceilingNoticeId = null;
           }
-          if (e.liveFill.loginId && typeof logins.scrubSecretsOf === 'function') {
-            try {
-              const vals = logins.scrubSecretsOf(e.liveFill.loginId, { minBytes: 1 });
-              const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
-              const sigs = arr.filter((x) => typeof x === 'string' && x).map(credSigOf).filter(Boolean);
-              if (sigs.length) e.liveFill.credSigs = sigs;
-            } catch { /* */ }
+          if (!Array.isArray(e.liveFill.credSigs) || e.liveFill.credSigs.length === 0) {
+            const hydrated = hydrateTabFenceSecrets(e.targetId, e.liveFill.loginId, e.liveFill.mode || 'login', e.liveFill.secretFieldIds);
+            if (hydrated.sigs.length) e.liveFill.credSigs = hydrated.sigs;
           }
           synced = true;
           if (e.liveFill.wiping) {
