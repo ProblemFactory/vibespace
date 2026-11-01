@@ -1442,7 +1442,7 @@ function normalizeRegistry(doc) {
       key: v.key, profileId: k, since: Number(v.since) || 0, launched: v.launched === true, ownTab: /^[0-9A-Fa-f]{32}$/.test(String(v.ownTab || '')) ? String(v.ownTab) : null,
       adopted: (Array.isArray(v.adopted) ? v.adopted : []).map(String).filter((x) => /^[0-9A-Fa-f]{32}$/.test(x)).slice(-32), // verify r2: the orphan tabs he took
       state: v.state === 'driving' ? 'driving' : 'away', awaySince: Number(v.awaySince) || 0 }])),
-    // lane vault-login-chrome r4 / r9 MINOR 5: persisted live-fill tab fences (`{targetId, urlAtFill, origin, loginId, mode, at, browserKey?, holdReason?, secretFieldIds?, userFieldIds?}`)
+    // lane vault-login-chrome r4 / r9 MINOR 5 / r12 MINOR: persisted live-fill tab fences (`{targetId, urlAtFill, origin, loginId, mode, at, browserKey?, holdReason?, typedPrevious?, secretFieldIds?, userFieldIds?}`)
     // and scrub entry names (`{name, at}` — NEVER a secret value) per profile so hub/watch restarts re-arm both layers
     loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => {
       const fences = (Array.isArray(v.fences) ? v.fences : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => ({
@@ -1454,6 +1454,7 @@ function normalizeRegistry(doc) {
         at: Number(f.at) || 0,
         ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
         ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
+        ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
         ...(Array.isArray(f.secretFieldIds) && f.secretFieldIds.length ? { secretFieldIds: f.secretFieldIds.filter((x) => typeof x === 'string' && x).slice(0, 16).map((x) => x.slice(0, 64)) } : {}),
         ...(Array.isArray(f.userFieldIds) && f.userFieldIds.length ? { userFieldIds: f.userFieldIds.filter((x) => typeof x === 'string' && x).slice(0, 16).map((x) => x.slice(0, 64)) } : {}),
       }));

@@ -480,6 +480,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
               });
             return;
           }
+          if (!p.responseErrorReason && status >= 200 && status < 300 && status !== 204 && status !== 205 && netId && rq && isAwaitedCredPreReadReq(e, rq, p.request, watchOrigin)) {
+            armCredStreamIfNeeded(w, e, netId, rq, watchOrigin);
+          }
           if (rq && rq.streamReadyP) {
             rq.streamReadyP.finally(() => call(w, 'Fetch.continueRequest', { requestId: reqId }, sid));
             return;
@@ -2721,6 +2724,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           browserKey: e.liveFill.browserKey || null,
           ...(Array.isArray(e.liveFill.secretFieldIds) && e.liveFill.secretFieldIds.length ? { secretFieldIds: e.liveFill.secretFieldIds } : {}),
           ...(Array.isArray(e.liveFill.userFieldIds) && e.liveFill.userFieldIds.length ? { userFieldIds: e.liveFill.userFieldIds } : {}),
+          ...(e.liveFill.typedPrevious ? { typedPrevious: true } : {}),
           ...(e.liveFill.holdReason ? { holdReason: String(e.liveFill.holdReason) } : {}),
         });
       }
@@ -2937,7 +2941,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (e && e.authNet && e.authNet.preReadBodies) e.authNet.preReadBodies.clear();
     if (e && e.authNet && e.authNet.reqs) {
       for (const rq of e.authNet.reqs.values()) {
-        if (rq && Array.isArray(rq.streamChunks)) rq.streamChunks.length = 0;
+        if (!rq) continue;
+        rq.streamDead = true;
+        rq.streamPrefix = null;
+        rq.streamPrefixBytes = 0;
+        if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+        rq.streamTailBytes = 0;
       }
     }
   }
@@ -2994,7 +3003,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (wipedEmpty) {
             clearLiveFillOnTab(w, e, 'ceiling', { audit: true, persist: true });
           } else if (unlockedMidWipe) {
-            if (lf.holdReason === BL().HOLD_VAULT_LOCKED) lf.holdReason = '';
+            if (lf.holdReason === BL().HOLD_VAULT_LOCKED || lf.holdReason === BL().HOLD_TOO_MUCH_TEXT) lf.holdReason = '';
             syncPersistedLoginFences(w.profileId);
             expireLiveFillCeiling(w, e);
           } else if (wipeTooMuch) {
@@ -3040,6 +3049,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       secretFieldIds: Array.isArray(info.secretFieldIds) ? info.secretFieldIds : [],
       userFieldIds: Array.isArray(info.userFieldIds) ? info.userFieldIds : [],
       stepOtpValues: Array.isArray(info.stepOtpValues) ? [...info.stepOtpValues] : [],
+      typedPrevious: Boolean(info.typedPrevious),
       holdReason: info.holdReason ? String(info.holdReason) : '',
       wiping: false,
       recheckAfterWipe: false,
@@ -3061,6 +3071,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         credSigs: lf.credSigs,
         secretFieldIds: lf.secretFieldIds,
         userFieldIds: lf.userFieldIds,
+        typedPrevious: lf.typedPrevious,
       });
       while (e.fillHistory.size > 8) e.fillHistory.delete(e.fillHistory.keys().next().value);
     }
@@ -3077,14 +3088,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (typeof sv !== 'string' || !sv) return null;
     return { len: sv.length, sha256: crypto.createHash('sha256').update(sv, 'utf8').digest('hex') };
   }
-  function hydrateTabFenceSecrets(targetId, loginId, mode = 'login', secretFieldIds = null) {
+  function hydrateTabFenceSecrets(targetId, loginId, typedPrevious = false) {
     const rem = (LF().valuesForTarget?.(targetId, 0) || []).filter((x) => typeof x === 'string' && x);
     if (rem.length > 0) {
       return { values: rem, sigs: rem.map(credSigOf).filter(Boolean) };
     }
     if (loginId && logins && typeof logins.scrubSecretsOf === 'function') {
       try {
-        const includePrevious = mode === 'change' && (!Array.isArray(secretFieldIds) || secretFieldIds.length > 1);
+        const includePrevious = Boolean(typedPrevious);
         const vals = logins.scrubSecretsOf(loginId, { minBytes: 1, includePrevious });
         const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
         const clean = arr.filter((x) => typeof x === 'string' && x);
@@ -3124,7 +3135,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         recordFenceAudit(w.profileId, f, 'url-changed');
         continue;
       }
-      const hydrated = hydrateTabFenceSecrets(e.targetId, f.loginId, f.mode || 'login', f.secretFieldIds);
+      const hydrated = hydrateTabFenceSecrets(e.targetId, f.loginId, Boolean(f.typedPrevious));
       const hydratedSigs = hydrated.sigs;
       const hydratedVals = hydrated.values;
       const savedHold = f.holdReason === BL().HOLD_VAULT_LOCKED
@@ -3470,6 +3481,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (typeof obj.code === 'number' && obj.code >= 400) return true;
     return false;
   }
+  function judgeCredResponseBody(raw, respMime = '', { sawBodyBytes = false } = {}) {
+    if (typeof raw !== 'string') return { complete: false, errBody: false };
+    const mime = String(respMime || '').trim().toLowerCase();
+    const isJsonMime = Boolean(mime && /json/i.test(mime));
+    const isExplicitNonJson = Boolean(mime && !isJsonMime);
+    const s = raw.trim();
+    if (!s) {
+      if (!isJsonMime && !sawBodyBytes) return { complete: true, errBody: false };
+      return { complete: false, errBody: false };
+    }
+    if (!isExplicitNonJson || s[0] === '{' || s[0] === '[') {
+      try { JSON.parse(s); } catch { return { complete: false, errBody: false }; }
+      return { complete: true, errBody: isJsonErrorBody(s) };
+    }
+    return { complete: true, errBody: false };
+  }
   function markReqCredential(e, rq, bodyText, watchOrigin = null) {
     if (!e || !rq || !bodyText) return;
     const an = e.authNet;
@@ -3804,22 +3831,81 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     return Boolean(rq.carriesCred || rq.carriesPending);
   }
+  function recordRespMetaOnReq(rq, resp) {
+    if (!rq || !resp || typeof resp !== 'object') return;
+    if (resp.fromServiceWorker) rq.respFromServiceWorker = true;
+    if (typeof resp.mimeType === 'string' && resp.mimeType) rq.respMime = resp.mimeType.trim().toLowerCase();
+    const hdrEnc = Number(resp.encodedDataLength);
+    if (Number.isFinite(hdrEnc) && hdrEnc > 0) rq.respHeaderEncodedBytes = hdrEnc;
+    const h = resp.headers;
+    if (!h || typeof h !== 'object') return;
+    const entries = Array.isArray(h)
+      ? h.filter((x) => x && x.name).map((x) => [String(x.name), String(x.value == null ? '' : x.value)])
+      : Object.entries(h).map(([k, v]) => [String(k), String(v == null ? '' : v)]);
+    for (const [rawK, rawV] of entries) {
+      const k = rawK.toLowerCase().trim();
+      const v = rawV.trim();
+      if (k === 'content-type' && !rq.respMime && v) {
+        rq.respMime = v.split(';')[0].trim().toLowerCase();
+      } else if (k === 'content-encoding' && v && v.toLowerCase() !== 'identity') {
+        rq.respHasContentEncoding = true;
+      } else if (k === 'transfer-encoding' && v && v.toLowerCase() !== 'identity') {
+        rq.respIsChunked = true;
+      } else if (k === 'content-length') {
+        if (/^\d+$/.test(v)) {
+          const n = Number(v);
+          if (Number.isSafeInteger(n) && n >= 0) {
+            rq.respContentLength = n;
+            if (n > 0) rq.sawBodyBytes = true;
+          }
+        } else if (v) {
+          rq.respContentLength = -1;
+        }
+      }
+    }
+  }
   function armCredStreamIfNeeded(w, e, rid, rq, watchOrigin) {
-    if (!w || w.state !== 'open' || !e || !e.sid || !e.awaitingCredPreRead || !rid || !rq || rq.streamArmed) return;
+    if (!w || w.state !== 'open' || !e || !e.sid || !e.awaitingCredPreRead || !rid || !rq || rq.streamArmed || rq.streamDead) return;
     if (rq.type === 'Ping' || rq.type === 'Document' || !watchOrigin || rq.origin !== watchOrigin) return;
     if (!rq.carriesCred && !rq.carriesPending) return;
     rq.streamArmed = true;
-    rq.streamChunks = [];
-    rq.streamBytes = 0;
+    rq.streamAnsLanded = false;
     rq.streamOverflow = false;
-    rq.streamReadyP = call(w, 'Network.streamResourceContent', { requestId: rid }, e.sid, 300).then((ans) => {
-      if (ans && !ans.error && !ans.timeout && ans.result && typeof ans.result.bufferedData === 'string' && ans.result.bufferedData && !rq.streamOverflow) {
-        const b = Buffer.from(ans.result.bufferedData, 'base64');
-        rq.streamBytes += b.length;
-        if (rq.streamBytes <= 1048576) rq.streamChunks.push(b);
-        else { rq.streamOverflow = true; rq.streamChunks.length = 0; }
+    rq.streamPrefix = null;
+    rq.streamPrefixBytes = 0;
+    if (!Array.isArray(rq.streamTailChunks)) rq.streamTailChunks = [];
+    const initP = call(w, 'Network.streamResourceContent', { requestId: rid }, e.sid, 300).then((ans) => {
+      if (rq.streamDead) return;
+      if (!ans || ans.error || ans.timeout || !ans.result || typeof ans.result !== 'object') {
+        rq.streamDead = true;
+        rq.streamPrefix = null;
+        rq.streamPrefixBytes = 0;
+        if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+        rq.streamTailBytes = 0;
+        return;
       }
-    }, () => {}).finally(() => { rq.streamReadyP = null; });
+      rq.streamAnsLanded = true;
+      if (typeof ans.result.bufferedData === 'string' && ans.result.bufferedData.length > 0) {
+        const b = Buffer.from(ans.result.bufferedData, 'base64');
+        if (b.length > 0) rq.sawBodyBytes = true;
+        rq.streamPrefixBytes = b.length;
+        if (rq.streamPrefixBytes + (rq.streamTailBytes || 0) <= 1048576 && !rq.streamOverflow) {
+          rq.streamPrefix = b;
+        } else {
+          rq.streamOverflow = true;
+          rq.streamPrefix = null;
+          if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+        }
+      }
+    }, () => {
+      rq.streamDead = true;
+      rq.streamPrefix = null;
+      rq.streamPrefixBytes = 0;
+      if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+      rq.streamTailBytes = 0;
+    }).finally(() => { rq.streamReadyP = null; });
+    rq.streamReadyP = initP;
+    rq.streamInitP = initP;
   }
   function takePreReadBody(an, rid) {
     if (!an || !an.preReadBodies || !an.preReadBodies.size || !rid) return null;
@@ -3864,6 +3950,26 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           bumpedOtherSent: !!(prev && prev.bumpedOtherSent),
           postDataP: null,
           obs: (prev && prev.obs) || null,
+          streamArmed: !!(prev && !p.redirectResponse && prev.streamArmed),
+          streamDead: !!(prev && !p.redirectResponse && prev.streamDead),
+          streamAnsLanded: !!(prev && !p.redirectResponse && prev.streamAnsLanded),
+          streamOverflow: !!(prev && !p.redirectResponse && prev.streamOverflow),
+          streamIncomplete: !!(prev && !p.redirectResponse && prev.streamIncomplete),
+          streamPrefix: (prev && !p.redirectResponse && prev.streamPrefix) || null,
+          streamPrefixBytes: (prev && !p.redirectResponse && prev.streamPrefixBytes) || 0,
+          streamTailChunks: (prev && !p.redirectResponse && prev.streamTailChunks) || null,
+          streamTailBytes: (prev && !p.redirectResponse && prev.streamTailBytes) || 0,
+          unstreamedDataBytes: (prev && !p.redirectResponse && prev.unstreamedDataBytes) || 0,
+          streamedExpectedBytes: (prev && !p.redirectResponse && prev.streamedExpectedBytes) || 0,
+          sawBodyBytes: !!(prev && !p.redirectResponse && prev.sawBodyBytes),
+          streamReadyP: (prev && !p.redirectResponse && prev.streamReadyP) || null,
+          streamInitP: (prev && !p.redirectResponse && prev.streamInitP) || null,
+          respMime: '',
+          respContentLength: null,
+          respHasContentEncoding: false,
+          respIsChunked: false,
+          respHeaderEncodedBytes: 0,
+          respFromServiceWorker: false,
         };
         an.reqs.set(rid, rq);
         if (an.reqs.size > 64) an.reqs.delete(an.reqs.keys().next().value);
@@ -4074,6 +4180,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (isCredCandidateReq(rq)) {
         rq.status = status;
         rq.type = type || rq.type;
+        recordRespMetaOnReq(rq, p.response);
         if (watchOrigin && rq.origin === watchOrigin) {
           an.lastMutationStatus = status;
           if (type === 'Document' && status >= 200 && status < 400 && (rq.carriesCred || rq.carriesPending)) {
@@ -4091,45 +4198,125 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     if (method === 'Network.dataReceived') {
       const rq = rid ? an.reqs.get(rid) : null;
-      if (rq && rq.streamArmed && !rq.streamOverflow && typeof p.data === 'string' && p.data) {
-        const b = Buffer.from(p.data, 'base64');
-        rq.streamBytes = (rq.streamBytes || 0) + b.length;
-        if (rq.streamBytes <= 1048576) rq.streamChunks.push(b);
-        else { rq.streamOverflow = true; rq.streamChunks.length = 0; }
+      if (!rq || !isCredCandidateReq(rq)) return;
+      const hasData = typeof p.data === 'string' && p.data.length > 0;
+      const declLen = Number.isFinite(Number(p.dataLength)) && Number(p.dataLength) >= 0 ? Number(p.dataLength) : null;
+      if ((declLen !== null && declLen > 0) || hasData) rq.sawBodyBytes = true;
+      if (!hasData) {
+        if (declLen !== null && declLen > 0) rq.unstreamedDataBytes = (rq.unstreamedDataBytes || 0) + declLen;
+        return;
+      }
+      const b = (!rq.streamDead && rq.streamArmed && !rq.streamOverflow) ? Buffer.from(p.data, 'base64') : null;
+      const chunkBytes = b ? b.length : Buffer.byteLength(p.data, 'base64');
+      const expectedChunk = declLen !== null ? declLen : chunkBytes;
+      rq.streamedExpectedBytes = (rq.streamedExpectedBytes || 0) + expectedChunk;
+      if (!b) return;
+      if (declLen !== null && declLen !== b.length) {
+        rq.streamDead = true;
+        rq.streamPrefix = null;
+        if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+        rq.streamTailBytes = 0;
+        return;
+      }
+      rq.streamTailBytes = (rq.streamTailBytes || 0) + b.length;
+      if ((rq.streamPrefixBytes || 0) + rq.streamTailBytes <= 1048576) {
+        if (!Array.isArray(rq.streamTailChunks)) rq.streamTailChunks = [];
+        rq.streamTailChunks.push(b);
+      } else {
+        rq.streamOverflow = true;
+        rq.streamPrefix = null;
+        if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
       }
       return;
     }
     if (method === 'Network.loadingFinished') {
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
+      const finEncodedLen = Number.isFinite(Number(p && p.encodedDataLength)) && Number(p.encodedDataLength) >= 0 ? Number(p.encodedDataLength) : null;
+      if (rq && finEncodedLen !== null && finEncodedLen > (rq.respHeaderEncodedBytes || 0)) rq.sawBodyBytes = true;
       if (isCredCandidateReq(rq) && rq.type !== 'Document' && rq.status >= 200 && rq.status < 300 && watchOrigin && rq.origin === watchOrigin) {
         const finP = (async () => {
           if (rq.postDataP) await rq.postDataP;
           if (!rq.carriesCred && !rq.carriesPending) return;
+          if (rq.streamInitP) await rq.streamInitP;
           let bodyRead = rq.status === 204 || rq.status === 205;
           let errBody = false;
           const preRb = !bodyRead ? takePreReadBody(an, rid) : null;
           if (preRb && typeof preRb.body === 'string') {
-            bodyRead = true;
-            const rawBody = preRb.base64Encoded ? Buffer.from(preRb.body, 'base64').toString('utf8') : preRb.body;
-            errBody = isJsonErrorBody(rawBody);
-          }
-          if (!bodyRead && rq.streamArmed && !rq.streamOverflow && rq.streamBytes > 0 && Array.isArray(rq.streamChunks) && rq.streamChunks.length > 0) {
-            bodyRead = true;
-            const rawBody = Buffer.concat(rq.streamChunks).toString('utf8');
-            rq.streamChunks.length = 0;
-            errBody = isJsonErrorBody(rawBody);
-          }
-          if (!bodyRead && !rq.streamOverflow && w.state === 'open' && e.sid) {
-            const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
-            if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
-              bodyRead = true;
-              const rawBody = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64').toString('utf8') : rb.result.body;
-              errBody = isJsonErrorBody(rawBody);
+            const preBuf = preRb.base64Encoded ? Buffer.from(preRb.body, 'base64') : Buffer.from(preRb.body, 'utf8');
+            const preLenOk = rq.respContentLength === null || rq.respHasContentEncoding || (rq.respContentLength >= 0 && preBuf.length === rq.respContentLength);
+            if (preLenOk) {
+              const rawBody = preBuf.toString('utf8');
+              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || preBuf.length > 0 });
+              if (verdict.complete) {
+                bodyRead = true;
+                errBody = verdict.errBody;
+              } else {
+                rq.streamIncomplete = true;
+              }
+            } else {
+              rq.streamIncomplete = true;
             }
           }
-          if (Array.isArray(rq.streamChunks)) rq.streamChunks.length = 0;
-          if ((bodyRead || rq.streamOverflow) && e.awaitingCredPreRead) {
+          const expectedDecodedBytes = Math.max(rq.streamPrefixBytes || 0, rq.unstreamedDataBytes || 0) + (rq.streamedExpectedBytes || 0);
+          const assembledBytes = (rq.streamPrefixBytes || 0) + (rq.streamTailBytes || 0);
+          if (!bodyRead && rq.streamArmed && !rq.streamDead && !rq.streamOverflow && !rq.streamIncomplete && rq.streamAnsLanded && (assembledBytes > 0 || expectedDecodedBytes > 0 || rq.sawBodyBytes)) {
+            let byteComplete = assembledBytes > 0
+              && (rq.streamPrefixBytes || 0) >= (rq.unstreamedDataBytes || 0)
+              && (rq.streamTailBytes || 0) === (rq.streamedExpectedBytes || 0)
+              && assembledBytes === expectedDecodedBytes;
+            if (byteComplete && !rq.respHasContentEncoding && rq.respContentLength !== null) {
+              byteComplete = rq.respContentLength >= 0 && assembledBytes === rq.respContentLength;
+            }
+            if (byteComplete && !rq.respHasContentEncoding && finEncodedLen !== null && finEncodedLen > 0) {
+              byteComplete = finEncodedLen >= assembledBytes;
+            }
+            if (byteComplete && rq.respHasContentEncoding && rq.respContentLength !== null && finEncodedLen !== null && finEncodedLen > 0) {
+              byteComplete = rq.respContentLength >= 0 && finEncodedLen >= rq.respContentLength;
+            }
+            if (byteComplete && !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0) {
+              byteComplete = assembledBytes === finEncodedLen;
+            }
+            if (byteComplete) {
+              const parts = rq.streamPrefix
+                ? [rq.streamPrefix, ...(rq.streamTailChunks || [])]
+                : [...(rq.streamTailChunks || [])];
+              const rawBody = Buffer.concat(parts).toString('utf8');
+              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: true });
+              if (verdict.complete) {
+                bodyRead = true;
+                errBody = verdict.errBody;
+              } else {
+                rq.streamIncomplete = true;
+              }
+            } else {
+              rq.streamIncomplete = true;
+            }
+          }
+          if (!bodyRead && !rq.streamOverflow && !rq.streamIncomplete && w.state === 'open' && e.sid) {
+            const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
+            if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
+              const rbBuf = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64') : Buffer.from(rb.result.body, 'utf8');
+              let rbByteOk = expectedDecodedBytes === 0 || rbBuf.length >= expectedDecodedBytes;
+              if (rbByteOk && !rq.respHasContentEncoding && rq.respContentLength !== null) {
+                rbByteOk = rq.respContentLength >= 0 && rbBuf.length === rq.respContentLength;
+              }
+              if (rbByteOk && !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0) {
+                rbByteOk = rbBuf.length === finEncodedLen;
+              }
+              if (rbByteOk) {
+                const rawBody = rbBuf.toString('utf8');
+                const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes });
+                if (verdict.complete) {
+                  bodyRead = true;
+                  errBody = verdict.errBody;
+                }
+              }
+            }
+          }
+          rq.streamPrefix = null;
+          if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+          if (e.awaitingCredPreRead) {
             e.awaitingCredPreRead = false;
             syncLoginFetchIntercept(w, e);
           }
@@ -4168,7 +4355,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     if (method === 'Network.loadingFailed') {
       const rq = rid ? an.reqs.get(rid) : null;
-      if (rid) an.reqs.delete(rid);
+      if (rid) {
+        an.reqs.delete(rid);
+        if (an.preReadBodies) an.preReadBodies.delete(rid);
+      }
+      if (rq) {
+        rq.streamDead = true;
+        rq.streamPrefix = null;
+        if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+      }
       if (isCredCandidateReq(rq) && watchOrigin && rq.origin === watchOrigin && (rq.carriesCred || rq.carriesPending)) {
         an.seq++; an.failCredSeq = an.seq;
       }
@@ -4355,6 +4550,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       subNetMark = netMark;
       if (e.authNet) e.authNet.lastDocStatus = 0;
       const credSigs = [], newPwSigs = [], secretFieldIds = [], userFieldIds = [], stepOtpValues = [];
+      let typedPrevious = false;
       for (const f of (plan.form && plan.form.fields) || []) {
         if (!f) continue;
         const fid = f.fieldId || f.id;
@@ -4364,6 +4560,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         }
         const sv = fid && plan.values && typeof plan.values[fid] === 'string' ? plan.values[fid] : '';
         if (sv) {
+          if (plan.mode === 'change' && f.type === 'password') typedPrevious = true;
           if (f.type === 'otp') {
             stepOtpValues.push(sv);
           } else {
@@ -4383,7 +4580,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (hasSecret) {
         hadLiveFill = true;
         noteActiveTarget(pid, browserKey, e.targetId);
-        armLiveFillOnTab(w, e, { urlAtFill: String(e.url || ''), origin: plan.origin, loginId: plan.name, browserKey: parentKey(browserKey), mode: plan.mode, at: now(), navSeq0, netMark, credSigs, secretFieldIds, userFieldIds, stepOtpValues });
+        armLiveFillOnTab(w, e, { urlAtFill: String(e.url || ''), origin: plan.origin, loginId: plan.name, browserKey: parentKey(browserKey), mode: plan.mode, at: now(), navSeq0, netMark, credSigs, secretFieldIds, userFieldIds, stepOtpValues, typedPrevious });
       }
       if (plan.mode === 'signup' || plan.mode === 'change') {
         pc = { origin: plan.origin, user: plan.user, name: plan.name, mode: plan.mode, conv, actor, urlAtFill: String(e.url || ''), at: now(), navSeq0, netMark, subMark: netMark, submitAsked: !!submit, pendingSigs: newPwSigs.length ? newPwSigs : credSigs, confirmed: false };
@@ -4558,7 +4755,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             e.liveFill.ceilingNoticeId = null;
           }
           if (!Array.isArray(e.liveFill.credSigs) || e.liveFill.credSigs.length === 0) {
-            const hydrated = hydrateTabFenceSecrets(e.targetId, e.liveFill.loginId, e.liveFill.mode || 'login', e.liveFill.secretFieldIds);
+            const hydrated = hydrateTabFenceSecrets(e.targetId, e.liveFill.loginId, Boolean(e.liveFill.typedPrevious));
             if (hydrated.sigs.length) e.liveFill.credSigs = hydrated.sigs;
           }
           synced = true;

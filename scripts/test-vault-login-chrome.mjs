@@ -1389,11 +1389,42 @@ try {
         const oneMb = Buffer.alloc(1048576, 0x61);
         let streamRes = null, streamEnded = false, sawChunkWhileStreamOpen = false;
         let sseOpen = false, sawSseWhileOpen = false;
+        let streamCredReqCount = 0;
         const r11Srv = http.createServer((req, res) => {
           const u = new URL(req.url || '/', 'http://127.0.0.1');
           if (u.pathname === '/login') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end('<!doctype html><form action="/auth" method="post"><input id="u" name="email" type="email" autocomplete="username"><input id="p" name="password" type="password" autocomplete="current-password"><button id="go" type="submit">Sign in</button></form>');
+            return;
+          }
+          if (u.pathname === '/signup-stream') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+            res.end(`<!doctype html><form id="f" action="/api/reg-stream" method="post"><input id="u" name="email" type="email" autocomplete="username"><input id="p" name="password" type="password" autocomplete="new-password"><button id="go" type="submit">Create account</button></form><script>document.getElementById('f').addEventListener('submit',async(ev)=>{ev.preventDefault();const uEl=document.getElementById('u'),pEl=document.getElementById('p');const body=JSON.stringify({email:uEl.value,password:pEl.value});uEl.value='';pEl.value='';const r=await fetch('/api/reg-stream'+location.search,{method:'POST',headers:{'Content-Type':'application/json'},body});await r.text();});</script>`);
+            return;
+          }
+          if (u.pathname === '/api/reg-stream') {
+            streamCredReqCount++;
+            req.resume();
+            const enc = u.searchParams.get('enc') || 'chunked';
+            const verdict = u.searchParams.get('verdict') || 'reject';
+            const [part1, part2] = verdict === 'accept'
+              ? ['{"ok":true,', '"user":"accepted"}']
+              : ['{"errors":[{"mes', 'sage":"Invalid credentials"}]}'];
+            if (enc === 'gzip') {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
+              res.flushHeaders?.();
+              const gz = zlib.createGzip();
+              gz.pipe(res);
+              gz.write(part1);
+              gz.flush(zlib.constants.Z_SYNC_FLUSH, () => {
+                setTimeout(() => { try { gz.end(part2); } catch {} }, 20);
+              });
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
+              res.flushHeaders?.();
+              res.write(part1);
+              setTimeout(() => { try { res.end(part2); } catch {} }, 20);
+            }
             return;
           }
           if (u.pathname === '/plain') {
@@ -1473,6 +1504,7 @@ try {
         w.logins.addOwn({ origin: r11Origin, username: 'r11a@example.test', password: pwR11A });
         w.logins.addOwn({ origin: r11OriginB, username: 'r11b@example.test', password: pwR11B });
         w.logins.grant(`web-login:${r11Origin}#r11a@example.test`, 'this-account', 'session:conv-1');
+        w.logins.grant(`web-login:${r11Origin}#r11a@example.test`, 'any-account', 'session:conv-1');
         w.logins.grant(`web-login:${r11OriginB}#r11b@example.test`, 'this-account', 'session:conv-1');
 
         try {
@@ -1562,6 +1594,52 @@ try {
               fillA: rFillR11A.code, fillB: rFillB.code, pageProbe, sawChunkWhileStreamOpen, sawSseWhileOpen,
               watchOpenAfterBig, fenceAliveAfterBig, ctxA, ctxB, bClearedOnLock, aKeptOnLock, preReadAfterEnd,
             });
+
+            // r12 MAJOR (real Chrome ×2): credential sign-up POSTs over the streamResourceContent + dataReceived road
+            // (two-flush chunked JSON & two-flush Z_SYNC_FLUSH gzip JSON, both a rejected error body and an accepted ok body)
+            await run(['tab', 'new', `${r11Origin}/plain`]);
+            await sleep(120);
+            const curTargetsR12 = ((await rawR11.call('Target.getTargets')).msg?.result?.targetInfos || []).filter((t) => t.type === 'page' && String(t.url || '').startsWith(r11Origin));
+            const tidR12 = String(curTargetsR12[0]?.targetId || '');
+            for (let rep = 1; rep <= 2; rep++) {
+              const runCredStreamCase = async (enc, verdict) => {
+                const uName = `r12-${enc}-${verdict}-${rep}@example.test`;
+                const entryName = `web-login:${r11Origin}#${uName}`;
+                await run(['open', `${r11Origin}/signup-stream?enc=${enc}&verdict=${verdict}&rep=${rep}`]);
+                const rSub = await run(['login', r11Origin, '--new-user', uName, '--generate', '--submit']);
+                const g0 = w.eng.secretGet(entryName);
+                const rec0 = g0 && g0.value ? BL.recordOf(g0.value.toString('utf8')) : null;
+                if (rec0 && rec0.password) trackedSecrets.push(rec0.password);
+                if (verdict === 'accept') {
+                  await until(() => {
+                    const g = w.eng.secretGet(entryName);
+                    const rec = g && g.value ? BL.recordOf(g.value.toString('utf8')) : null;
+                    return Boolean(rec && !rec.pending);
+                  }, 2500);
+                } else {
+                  await sleep(200); // > checkSpaFinish 60 ms window: rejected stream body must keep pending:'register'
+                }
+                const gEnd = w.eng.secretGet(entryName);
+                const recEnd = gEnd && gEnd.value ? BL.recordOf(gEnd.value.toString('utf8')) : null;
+                await run(['open', `${r11Origin}/plain`]);
+                return { code: rSub.code, pending: (recEnd && recEnd.pending) || null };
+              };
+              const cRej = await runCredStreamCase('chunked', 'reject');
+              const cAcc = await runCredStreamCase('chunked', 'accept');
+              const gRej = await runCredStreamCase('gzip', 'reject');
+              const gAcc = await runCredStreamCase('gzip', 'accept');
+              ok(Boolean(
+                cRej.code === 0 && cRej.pending === 'register' &&
+                cAcc.code === 0 && cAcc.pending === null &&
+                gRej.code === 0 && gRej.pending === 'register' &&
+                gAcc.code === 0 && gAcc.pending === null &&
+                streamCredReqCount >= rep * 4
+              ), `r12 MAJOR §7v.${rep}/2 (real Chrome streamResourceContent + dataReceived credential road): two-flush chunked & gzip JSON answers reject error bodies (pending kept) and confirm ok bodies`, {
+                rep, cRej, cAcc, gRej, gAcc, streamCredReqCount,
+              });
+            }
+            if (origTid) await run(['tab', origTid]);
+            if (tidR12 && tidR12 !== origTid) await run(['tab', 'close', tidR12]);
           } finally {
             await rawR11.close();
           }

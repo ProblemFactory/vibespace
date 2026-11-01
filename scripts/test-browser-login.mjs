@@ -5742,7 +5742,7 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
           let m = null;
           try { m = JSON.parse(s); } catch { /* */ }
           if (m && m.method === 'Fetch.getResponseBody') {
-            if (m.params.requestId === 'int-q1') {
+            if (m.params.requestId === 'int-q1' || m.params.requestId === 'int-login0') {
               hub.send(JSON.stringify({ id: m.id, result: { body: '{"data":{"viewer":{"id":"1"}}}', base64Encoded: false }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
             } else {
               // Simulate missing/failed pre-read on int-login so Network.getResponseBody is consulted
@@ -5788,9 +5788,15 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
         ev('Network.loadingFinished', { requestId: 'q-1' });
         await sleep(30);
 
+        // Concurrent/stalled credential request login-0 populates preReadBodies with a 2xx body for the same /graphql URL;
+        // retry login-1 finishes first with an error JSON and must NOT steal login-0's pre-read body via URL+method fallback.
+        ev('Network.requestWillBeSent', { requestId: 'login-0', frameId: tid, type: 'Fetch', request: { method: 'POST', url, postData: JSON.stringify({ email: 'fb@example.test', password: PW11_3, attempt: 0 }), hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-login0', networkId: 'login-0', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '30' }] });
+        await sleep(30);
+
         const mark = e?.authNet?.seq || 0;
-        ev('Network.requestWillBeSent', { requestId: 'login-1', frameId: tid, type: 'Fetch', request: { method: 'POST', url, postData: JSON.stringify({ email: 'fb@example.test', password: PW11_3 }), hasPostData: true } });
-        ev('Fetch.requestPaused', { requestId: 'int-login', networkId: 'login-1', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '47' }] });
+        ev('Network.requestWillBeSent', { requestId: 'login-1', frameId: tid, type: 'Fetch', request: { method: 'POST', url, postData: JSON.stringify({ email: 'fb@example.test', password: PW11_3, attempt: 1 }), hasPostData: true } });
+        ev('Fetch.requestPaused', { requestId: 'int-login', networkId: 'login-1', resourceType: 'Fetch', frameId: tid, request: { method: 'POST', url, headers: {} }, responseStatusCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/json' }, { name: 'content-length', value: '46' }] });
         await sleep(40);
         ev('Network.responseReceived', { requestId: 'login-1', frameId: tid, type: 'Fetch', response: { url, status: 200 } });
         ev('Network.loadingFinished', { requestId: 'login-1' });
@@ -5821,8 +5827,6 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
       real3);
 
     const redFBSrc = DSRC0
-      .replace('isAwaitedCredPreReadReq(e, rq, p.request, watchOrigin)', 'true')
-      .replace('e.awaitingCredPreRead = false;', '/* keep armed */')
       .replace('const preRb = !bodyRead ? takePreReadBody(an, rid) : null;', 'const preRb = !bodyRead ? takePreReadBody(an, rid, rq) : null;')
       .replace(
         '  function takePreReadBody(an, rid) {\n    if (!an || !an.preReadBodies || !an.preReadBodies.size || !rid) return null;\n    if (!an.preReadBodies.has(rid)) return null;\n    const hit = an.preReadBodies.get(rid);\n    an.preReadBodies.delete(rid);\n    return hit;\n  }',
@@ -6271,7 +6275,7 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
       real7);
 
     const redM3Src = DSRC0.replace(
-      'const includePrevious = mode === \'change\' && (!Array.isArray(secretFieldIds) || secretFieldIds.length > 1);',
+      /const includePrevious = [^;]+;/,
       'const includePrevious = true;'
     );
     const Dm11_7 = redM3Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redM3Src, 'r11-7-rotated-previous-password-sig') : null;
@@ -6683,10 +6687,15 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
       });
 
       let persisted = {
-        fences: [{ targetId: tid, urlAtFill: `${SITE}/login`, origin: SITE, loginId: lid, browserKey: KEY, mode: 'login', at: Date.now() - 40, secretFieldIds: [], userFieldIds: [] }],
+        fences: [{
+          targetId: tid, urlAtFill: `${SITE}/login`, origin: SITE, loginId: lid, browserKey: KEY, mode: 'login', at: Date.now() - 40,
+          secretFieldIds: [], userFieldIds: [],
+          ...(mode === 'prior-too-much-unlock' ? { holdReason: BL.HOLD_TOO_MUCH_TEXT } : {}),
+        }],
         scrubs: [{ name: lid, at: Date.now() - 40 }],
       };
-      // Re-arm WHILE LOCKED so scrubByProfile is empty and holdReason starts '' (within 180 ms ceiling)
+      const notices = [];
+      // Re-arm WHILE LOCKED so scrubByProfile is empty (within 180 ms ceiling)
       eng.lock();
       const w8gh = DmodToUse.create({
         keeper: {
@@ -6695,7 +6704,7 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
           loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
         },
         log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 180,
-        forYou: { add: () => null, resolve() {} },
+        forYou: { add: (_p, it) => { notices.push(String((it && it.text) || 'n')); return 'fy-' + notices.length; }, resolve() {} },
         holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
         leaseCountOf: () => 1, logins,
         conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
@@ -6706,12 +6715,12 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
         slowWipe = true;
         await until(() => wipeStarted, 1000);
         await sleep(20);
-        await eng.unlock(vpw); // hydrates >=8-byte PW12 into scrubByProfile AND sets recheckAfterWipe if holdReason was set before await!
+        await eng.unlock(vpw); // hydrates >=8-byte PW12 into scrubByProfile; when prior holdReason was HOLD_TOO_MUCH_TEXT, onVaultOpen skips setting recheckAfterWipe so ONLY finally's (wipeLockedHold && !isLoginVaultLocked) rescues!
         if (mode === 'unlock-relock') {
           eng.lock(); // re-lock BEFORE wipe Runtime.evaluate finishes => !isLoginVaultLocked in finally is false; ONLY recheckAfterWipe rescues!
         }
         await until(() => w8gh.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 900);
-        return { lifted: w8gh.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, hiddenCleared: dom.inputs[2].val === '' };
+        return { lifted: w8gh.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, hiddenCleared: dom.inputs[2].val === '', noticesCount: notices.length };
       } finally {
         try { w8gh.shutdown(); } catch {}
         for (const c of wss.clients) c.terminate();
@@ -6728,17 +6737,382 @@ console.log('⑲ Standard-Chrome r11 adversarial fixup gates (F1/F2/F3/F-B/F-D +
     );
     const mDNoFinallyCheckOnly = MUT.load(
       'src/server/browser-dialogs.js',
-      DSRC0.replace('const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));', 'const unlockedMidWipe = false;'),
+      DSRC0.replace('const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));', 'const unlockedMidWipe = Boolean(lf.recheckAfterWipe);'),
       'r11-8h-m3-no-finally-check-only'
     );
     const realM3Relock = await probeM3Isolated(D, 'unlock-relock');
-    const mutM3HoldAfterOnly = await probeM3Isolated(mDHoldAfterAwaitOnly, 'unlock-relock');
-    const realM3Unlock = await probeM3Isolated(D, 'unlock-stay');
-    const mutM3NoFinallyOnly = await probeM3Isolated(mDNoFinallyCheckOnly, 'unlock-stay');
-    ok(realM3Relock.lifted === true && realM3Relock.hiddenCleared === true && mutM3HoldAfterOnly.lifted === false &&
-      realM3Unlock.lifted === true && realM3Unlock.hiddenCleared === true && mutM3NoFinallyOnly.lifted === false,
-      'r11 single-mutant isolation [r11-8g/8h] (M3 hold-before-await alone & M3 finally-recheck alone): hold-after-await alone strands mid-wipe unlock+relock; no-finally-recheck alone strands mid-wipe unlock',
-      { realM3Relock, mutM3HoldAfterOnly, realM3Unlock, mutM3NoFinallyOnly });
+    const realM3PriorTooMuchUnlock = await probeM3Isolated(D, 'prior-too-much-unlock');
+    ok(realM3Relock.lifted === true && realM3Relock.hiddenCleared === true &&
+      realM3PriorTooMuchUnlock.lifted === true && realM3PriorTooMuchUnlock.hiddenCleared === true && realM3PriorTooMuchUnlock.noticesCount === 0,
+      'r11 single-mutant behaviour [r11-8g/8h] (M3 hold-before-await & M3 finally-recheck): mid-wipe unlock+relock AND mid-wipe unlock under prior too-much-text hold both wipe hidden mirror and lift cleanly',
+      { realM3Relock, realM3PriorTooMuchUnlock });
+    const mutM3HoldAfterOnly = mDHoldAfterAwaitOnly ? await probeM3Isolated(mDHoldAfterAwaitOnly, 'unlock-relock') : null;
+    const mutM3NoFinallyOnly = mDNoFinallyCheckOnly ? await probeM3Isolated(mDNoFinallyCheckOnly, 'prior-too-much-unlock') : null;
+    ok(Boolean(mutM3HoldAfterOnly && mutM3HoldAfterOnly.lifted === false && mutM3NoFinallyOnly && mutM3NoFinallyOnly.lifted === false),
+      'r11 single-mutant RED controls [r11-8g/8h-mut]: hold-after-await alone strands mid-wipe unlock+relock; finally !isLoginVaultLocked removed alone strands mid-wipe unlock under prior too-much-text hold',
+      { mutM3HoldAfterOnly, mutM3NoFinallyOnly });
+  }
+}
+
+// ═══ ⑳ Standard-Chrome r12 adversarial fixup gates (complete/ordered streamResourceContent road + persisted typedPrevious fact) ═══
+console.log('⑳ Standard-Chrome r12 adversarial fixup gates (complete/ordered streamResourceContent road + persisted typedPrevious fact)');
+{
+  const LF = require('../src/server/browser-login-fill.js');
+  const BK = require('../src/server/browser-keeper.js');
+  const { WebSocketServer, WebSocket } = require('ws');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const BKSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const BPSRC0 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+
+  // ── (1) r12 MAJOR: stream road judges ONLY complete & ordered credential bodies; fragments/timeouts/clears/truncations/parse-errors => 'unknown' or rejected (pending kept) ──
+  {
+    const runStreamR12 = async (shape, DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const dbDir = path.join(ROOT, `wb12_s_${shape.replace(/[^a-z0-9]/g, '')}_` + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw12-s-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const k = await startFakeKernel({ mode: { standard: true }, firstUrl: `${SITE}/signup` });
+      let streamCall = null;
+      let hubRef = null;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      wss.on('connection', (hub) => {
+        hubRef = hub;
+        const up = new WebSocket(k.wsUrl, { perMessageDeflate: false });
+        const q = [];
+        up.on('open', () => { for (const x of q.splice(0)) up.send(x); });
+        up.on('message', (d) => { if (hub.readyState === 1) hub.send(String(d)); });
+        hub.on('message', (d) => {
+          const s = String(d);
+          let m = null;
+          try { m = JSON.parse(s); } catch { /* */ }
+          if (m && m.method === 'Network.streamResourceContent') {
+            streamCall = m;
+            return;
+          }
+          if (m && m.method === 'Network.getResponseBody') {
+            hub.send(JSON.stringify({ id: m.id, error: { code: -32000, message: 'No resource with given identifier found' }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }));
+            return;
+          }
+          if (up.readyState === 1) up.send(s); else q.push(s);
+        });
+        hub.on('close', () => { try { up.close(); } catch { /* */ } });
+      });
+
+      const proxyUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r12_${shape}`;
+      const w = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: proxyUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      const signupFields = [
+        { fieldId: 'r12-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+        { fieldId: 'r12-p', tag: 'input', domType: 'password', type: 'new-password', autocomplete: 'new-password', visible: true },
+      ];
+      try {
+        await w.arm(PID, { budgetMs: 3000 });
+        const tid = k.targets()[0].targetId;
+        await until(() => w._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+          fields: signupFields,
+        }, tid);
+        const user = `r12-${shape.replace(/[^a-z0-9]/g, '')}@example.test`;
+        const rf = await w.fillLogin(TGT, FILL({ newUser: user, generate: true, submit: false }));
+        const entryName = `web-login:${SITE}#${user}`;
+        const rec0 = BL.recordOf(eng.secretGet(entryName).value.toString('utf8'));
+        const pw = rec0.password;
+        const pendingBefore = rec0.pending || null;
+
+        k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false, noAutoSubmitNet: true, buttons: [], fields: [] }, tid);
+        const e = w._watches.get(PID)?.targets.get(tid);
+        const mark = e?.authNet?.seq || 0;
+        const rid = `reg12-${shape}`;
+        const url = `${SITE}/api/register`;
+        const ev = (m, p) => k.emitPageEvent(tid, m, p);
+        const b64 = (str) => Buffer.from(str, 'utf8').toString('base64');
+        const answerStream = (payload) => {
+          if (!streamCall || !hubRef || hubRef.readyState !== 1) return;
+          hubRef.send(JSON.stringify({ id: streamCall.id, ...payload, ...(streamCall.sessionId ? { sessionId: streamCall.sessionId } : {}) }));
+        };
+
+        ev('Network.requestWillBeSent', {
+          requestId: rid, frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url, postData: JSON.stringify({ email: user, password: pw }), hasPostData: true },
+        });
+        await until(() => streamCall !== null, 1000);
+        const respMime = shape === 'after-clear' ? 'text/plain' : 'application/json';
+        ev('Network.responseReceived', {
+          requestId: rid, frameId: tid, type: 'Fetch',
+          response: { url, status: 200, mimeType: respMime, headers: { 'content-type': respMime, 'content-encoding': 'gzip' } },
+        });
+
+        if (shape === 'after-two-frames') {
+          const pfx = '{"errors":[{"mes', f1 = 'sage":"Invalid ', f2 = 'credentials"}]}';
+          ev('Network.dataReceived', { requestId: rid, dataLength: f1.length, data: b64(f1) });
+          ev('Network.dataReceived', { requestId: rid, dataLength: f2.length, data: b64(f2) });
+          answerStream({ result: { bufferedData: b64(pfx) } });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: pfx.length + f1.length + f2.length });
+          await sleep(110);
+        } else if (shape === 'after-two-frames-errored') {
+          const f1 = 'sage":"Invalid ', f2 = 'credentials"}]}';
+          ev('Network.dataReceived', { requestId: rid, dataLength: f1.length, data: b64(f1) });
+          ev('Network.dataReceived', { requestId: rid, dataLength: f2.length, data: b64(f2) });
+          answerStream({ error: { code: -32000, message: 'Request with the provided ID has already finished loading' } });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: 46 });
+          await sleep(110);
+        } else if (shape === 'timed-out') {
+          const sfx = 'sage":"Invalid credentials"}]}';
+          ev('Network.dataReceived', { requestId: rid, dataLength: sfx.length, data: b64(sfx) });
+          await sleep(340);
+          answerStream({ result: { bufferedData: b64('{"errors":[{"mes') } });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: 46 });
+          await sleep(110);
+        } else if (shape === 'after-clear') {
+          answerStream({ result: { bufferedData: b64('{"errors":[{"mes') } });
+          await sleep(20);
+          k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false, noAutoSubmitNet: true, failInsertText: true,
+            buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+            fields: signupFields,
+          }, tid);
+          await w.fillLogin(TGT, FILL({ newUser: 'abort-' + user, generate: true, submit: false }));
+          k.setStandardPage({
+            securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false, noAutoSubmitNet: true, failInsertText: false,
+            buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+            fields: [
+              { fieldId: 'li-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+              { fieldId: 'li-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+            ],
+          }, tid);
+          await w.fillLogin(TGT, FILL({ user, submit: false }));
+          k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: false, noAutoSubmitNet: true, buttons: [], fields: [] }, tid);
+          const tail = 'sage":"Invalid credentials"}]}';
+          ev('Network.dataReceived', { requestId: rid, dataLength: tail.length, data: b64(tail) });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: 46 });
+          await sleep(110);
+        } else if (shape === 'truncated') {
+          const part = '{"user":"ok"}';
+          answerStream({ result: { bufferedData: b64(part.slice(0, 6)) } });
+          await sleep(15);
+          ev('Network.dataReceived', { requestId: rid, dataLength: part.length - 6, data: b64(part.slice(6)) });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: 46 });
+          await sleep(110);
+        } else if (shape === 'ordered-full') {
+          const pfx = '{"ok":', f1 = 'true,', f2 = '"id":"u1"}';
+          answerStream({ result: { bufferedData: b64(pfx) } });
+          await sleep(15);
+          ev('Network.dataReceived', { requestId: rid, dataLength: f1.length, data: b64(f1) });
+          ev('Network.dataReceived', { requestId: rid, dataLength: f2.length, data: b64(f2) });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: pfx.length + f1.length + f2.length });
+          await sleep(110);
+        } else if (shape === 'ordered-after-two-frames-ok') {
+          const pfx = '{"ok":', f1 = 'true,', f2 = '"id":"u2"}';
+          ev('Network.dataReceived', { requestId: rid, dataLength: f1.length, data: b64(f1) });
+          ev('Network.dataReceived', { requestId: rid, dataLength: f2.length, data: b64(f2) });
+          answerStream({ result: { bufferedData: b64(pfx) } });
+          ev('Network.loadingFinished', { requestId: rid, encodedDataLength: pfx.length + f1.length + f2.length });
+          await sleep(110);
+        }
+
+        const an = e?.authNet || {};
+        const recAfter = BL.recordOf(eng.secretGet(entryName).value.toString('utf8'));
+        const pendingAfter = recAfter.pending || null;
+        const obs = (an.observed || []).find((o) => o && o.rid === rid) || null;
+        const okCred = (an.okCredSeq || 0) > mark;
+        const okPending = (an.okPendingSeq || 0) > mark;
+        const failCred = (an.failCredSeq || 0) > mark;
+        const respUnreadable = Boolean(obs && obs.respUnreadable);
+        const verdict = okCred || okPending ? 'confirmed' : (respUnreadable ? 'unknown' : (failCred ? 'rejected' : 'none'));
+        return { fillOk: rf.ok, pendingBefore, pendingAfter, okCred, okPending, failCred, respUnreadable, verdict, liveFenceKept: Boolean(e?.liveFill) };
+      } finally {
+        try { w.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        await k.close();
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const sAfter2 = await runStreamR12('after-two-frames');
+    const sAfter2Err = await runStreamR12('after-two-frames-errored');
+    ok(sAfter2.fillOk && sAfter2.pendingAfter === 'register' && !sAfter2.okPending && sAfter2.failCred && sAfter2.verdict === 'rejected' &&
+      sAfter2Err.fillOk && sAfter2Err.pendingAfter === 'register' && !sAfter2Err.okPending && sAfter2Err.respUnreadable && sAfter2Err.verdict === 'unknown',
+      'r12 MAJOR [r12-1a] (streamResourceContent answer arriving after two dataReceived frames): bufferedData placed FIRST rejects error JSON, and an errored stream answer fails closed as unknown (pending kept)',
+      { sAfter2, sAfter2Err });
+
+    const sTimedOut = await runStreamR12('timed-out');
+    ok(sTimedOut.fillOk && sTimedOut.pendingAfter === 'register' && !sTimedOut.okPending && sTimedOut.failCred && sTimedOut.respUnreadable && sTimedOut.verdict === 'unknown',
+      'r12 MAJOR [r12-1b] (streamResourceContent answer timed out): stream road marked dead => falls back to getResponseBody then unknown, keeping pending:register',
+      sTimedOut);
+
+    const sAfterClear = await runStreamR12('after-clear');
+    ok(sAfterClear.fillOk && sAfterClear.pendingAfter === 'register' && !sAfterClear.okCred && !sAfterClear.okPending && sAfterClear.failCred && sAfterClear.respUnreadable && sAfterClear.verdict === 'unknown' && sAfterClear.liveFenceKept,
+      'r12 MAJOR [r12-1c] (dataReceived frames after clearTabPreReadBodies): cleared candidate marked dead and later chunks ignored => unknown, live fence and pending kept',
+      sAfterClear);
+
+    const sTrunc = await runStreamR12('truncated');
+    ok(sTrunc.fillOk && sTrunc.pendingAfter === 'register' && !sTrunc.okPending && sTrunc.failCred && sTrunc.respUnreadable && sTrunc.verdict === 'unknown',
+      'r12 MAJOR [r12-1d] (truncated stream body vs encodedDataLength): incomplete byte count fails closed as unknown even when prefix parses as JSON, keeping pending:register',
+      sTrunc);
+
+    const sFull = await runStreamR12('ordered-full');
+    const sFullReord = await runStreamR12('ordered-after-two-frames-ok');
+    ok(sFull.fillOk && sFull.pendingAfter === null && sFull.verdict === 'confirmed' &&
+      sFullReord.fillOk && sFullReord.pendingAfter === null && sFullReord.verdict === 'confirmed',
+      'r12 MAJOR [r12-1e] (complete ordered stream body): prefix + frames confirm pending registration regardless of whether streamResourceContent answer lands before or after frames',
+      { sFull, sFullReord });
+
+    const redStreamOrderSrc = DSRC0
+      .replace('[rq.streamPrefix, ...(rq.streamTailChunks || [])]', '[...(rq.streamTailChunks || []), rq.streamPrefix]')
+      .replace('try { JSON.parse(s); } catch { return { complete: false, errBody: false }; }', '/* r11 parse-fail-open */');
+    const Dm12Stream = redStreamOrderSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redStreamOrderSrc, 'r12-1-out-of-order-fail-open') : null;
+    const mutAfter2 = Dm12Stream ? await runStreamR12('after-two-frames', Dm12Stream) : null;
+    ok(Boolean(Dm12Stream && mutAfter2 && mutAfter2.pendingAfter === null && mutAfter2.verdict === 'confirmed'),
+      'r12 MAJOR RED control [r12-1-mut]: r11 appending bufferedData after dataReceived + ignoring JSON.parse failure falsely confirms rejected signup',
+      mutAfter2);
+  }
+
+  // ── (2) r12 MINOR: persisted typedPrevious fact (New + Confirm => 1 sig, lifts, 0 notices; Current + New + Confirm => 2 sigs, held) ──
+  {
+    const runChangeMinorR12 = async (formKind, DmodToUse = D, BKmodToUse = BK) => {
+      LF.clearAllFilledSecrets?.();
+      const kDir = path.join(ROOT, `wb12_m_${formKind}_` + crypto.randomBytes(3).toString('hex'));
+      const vDir = path.join(kDir, 'vault');
+      fs.mkdirSync(vDir, { recursive: true });
+      const eng = VE.create({ dataDir: vDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vpw12-m-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const OLD6 = ('q' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+      logins.addOwn({ origin: SITE, username: 'r12chg@example.test', password: OLD6 });
+      grants.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const specs = formKind === 'new-confirm'
+        ? [
+          { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+          { id: 'np1', type: 'password', name: 'new_password', autocomplete: 'new-password' },
+          { id: 'np2', type: 'password', name: 'confirm_password', autocomplete: 'new-password' },
+        ]
+        : [
+          { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+          { id: 'cp', type: 'password', name: 'current_password', autocomplete: 'current-password' },
+          { id: 'np1', type: 'password', name: 'new_password', autocomplete: 'new-password' },
+          { id: 'np2', type: 'password', name: 'confirm_password', autocomplete: 'new-password' },
+        ];
+      const dom = sharedMakeStubDom(specs);
+      const tid = '0123456789ABCDEF0123456789ABCD12', sid = 'SID_R12_MIN';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r12_min_${formKind}`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') { send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Password' } } }); rep({}); return; }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      const wrapKeeper = (rk) => ({
+        cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+        onLease: () => () => {},
+        saveLoginFenceState: (pid, st) => rk.saveLoginFenceState(pid, st),
+        loginFenceStateOf: (pid) => rk.loginFenceStateOf(pid),
+      });
+      const notices = [];
+      const keeper1 = BKmodToUse.create({ dataDir: kDir, grants: () => grants, install: false, tickMs: 3600e3, log: quiet });
+      const w1 = DmodToUse.create({
+        keeper: wrapKeeper(keeper1), log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 900,
+        forYou: { add: (_p, it) => { notices.push(String((it && it.text) || 'n')); return 'fy-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      let keeper2 = null, w2 = null;
+      try {
+        await w1.arm(PID, { budgetMs: 3000 });
+        await until(() => w1._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w1.fillLogin(TGT, FILL({ user: 'r12chg@example.test', generate: true, submit: false }));
+        w1.shutdown();
+
+        LF.clearAllFilledSecrets?.();
+        keeper2 = BKmodToUse.create({ dataDir: kDir, grants: () => grants, install: false, tickMs: 3600e3, log: quiet });
+        const savedFence = (keeper2.loginFenceStateOf(PID).fences || [])[0] || null;
+        w2 = DmodToUse.create({
+          keeper: wrapKeeper(keeper2), log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 700,
+          forYou: { add: (_p, it) => { notices.push(String((it && it.text) || 'n')); return 'fy-' + notices.length; }, resolve() {} },
+          holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+          leaseCountOf: () => 1, logins,
+          conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        });
+        await w2.arm(PID, { budgetMs: 3000 });
+        await until(() => w2._watches.get(PID)?.targets.get(tid)?.liveFill, 1500);
+        const sigsAfterRearm = (w2._watches.get(PID)?.targets.get(tid)?.liveFill?.credSigs || []).length;
+
+        eng.lock();
+        await sleep(920);
+        const lf = w2._watches.get(PID)?.targets.get(tid)?.liveFill || null;
+        const fenceLifted = w2.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true;
+        return {
+          fillOk: rf.ok, fillMode: rf.mode,
+          persistedTypedPrevious: Boolean(savedFence?.typedPrevious),
+          sigsAfterRearm, fenceLifted,
+          holdReason: lf ? lf.holdReason : null,
+          noticesCount: notices.length,
+          allEmpty: dom.inputs.every((x) => x.val === ''),
+        };
+      } finally {
+        try { w1.shutdown(); } catch {}
+        try { w2?.shutdown(); } catch {}
+        try { keeper1.shutdown?.(); } catch {}
+        try { keeper2?.shutdown?.(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        LF.clearAllFilledSecrets?.();
+        eng.close();
+      }
+    };
+
+    const rNewConfirm = await runChangeMinorR12('new-confirm');
+    const rCurNewConfirm = await runChangeMinorR12('current-new-confirm');
+    ok(rNewConfirm.fillOk && rNewConfirm.fillMode === 'change' && !rNewConfirm.persistedTypedPrevious &&
+      rNewConfirm.sigsAfterRearm === 1 && rNewConfirm.fenceLifted === true && rNewConfirm.noticesCount === 0 && rNewConfirm.allEmpty &&
+      rCurNewConfirm.fillOk && rCurNewConfirm.persistedTypedPrevious === true && rCurNewConfirm.sigsAfterRearm === 2 &&
+      rCurNewConfirm.fenceLifted === false && /vault was locked/.test(String(rCurNewConfirm.holdReason || '')) && rCurNewConfirm.noticesCount === 1,
+      'r12 MINOR [r12-2] (persisted typedPrevious fact): New + Confirm change form (no current-password field) hydrates 1 sig, wipes and lifts cleanly while locked with 0 notices; Current + New + Confirm persists typedPrevious:true and hydrates 2 sigs',
+      { rNewConfirm, rCurNewConfirm });
+
+    const redCountHeurSrc = DSRC0.replace('const includePrevious = Boolean(typedPrevious);', 'const includePrevious = true;');
+    const Dm12Minor = redCountHeurSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redCountHeurSrc, 'r12-2-count-hydrates-untyped-prev') : null;
+    const mutNewConfirm = Dm12Minor ? await runChangeMinorR12('new-confirm', Dm12Minor, BK) : null;
+
+    const bpDropTypedPrevPath = MUT.write('src/browser-profiles.js', BPSRC0.replace('...(f.typedPrevious === true ? { typedPrevious: true } : {}),', ''), 'r12-2-bp-drops-typedprev', { esm: false });
+    const bkDropTypedPrevSrc = BKSRC0
+      .replace("require('../browser-profiles.js')", `require(${JSON.stringify(bpDropTypedPrevPath)})`)
+      .replace('...(f.typedPrevious === true ? { typedPrevious: true } : {}),', '');
+    const BKm12 = bkDropTypedPrevSrc !== BKSRC0 ? MUT.load('src/server/browser-keeper.js', bkDropTypedPrevSrc, 'r12-2-keeper-drops-typedprev') : null;
+    const mutDroppedPrev = BKm12 ? await runChangeMinorR12('current-new-confirm', D, BKm12) : null;
+    ok(Boolean(Dm12Minor && mutNewConfirm && mutNewConfirm.sigsAfterRearm === 2 && mutNewConfirm.fenceLifted === false && mutNewConfirm.noticesCount === 1 &&
+      BKm12 && mutDroppedPrev && mutDroppedPrev.sigsAfterRearm === 1),
+      'r12 MINOR RED control [r12-2-mut]: r11 count heuristic falsely holds New + Confirm with 2 sigs & 1 notice, and dropping typedPrevious from keeper/normalizeRegistry loses the current-password sig across restart',
+      { mutNewConfirm, mutDroppedPrev });
   }
 }
 

@@ -6762,6 +6762,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       at: Number(f.at) || 0,
       ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
       ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
+      ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
       ...(Array.isArray(f.secretFieldIds) && f.secretFieldIds.length ? { secretFieldIds: f.secretFieldIds.filter((x) => typeof x === 'string' && x).slice(0, 16).map((x) => x.slice(0, 64)) } : {}),
       ...(Array.isArray(f.userFieldIds) && f.userFieldIds.length ? { userFieldIds: f.userFieldIds.filter((x) => typeof x === 'string' && x).slice(0, 16).map((x) => x.slice(0, 64)) } : {}),
     }));
