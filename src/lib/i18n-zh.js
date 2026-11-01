@@ -11742,6 +11742,7 @@ export default {
   "Last login filled the pending password.": "上次登录填写的是待确认密码。",
   "a filled password could not be cleared on {tab} — reload it": "无法清除 {tab} 里已填入的密码 — 请刷新该标签页",
   "a filled password could not be cleared on {tab} (too much text to check) — reload it": "无法清除 {tab} 里已填入的密码（待检查文本过多）— 请刷新该标签页",
+  "a filled password could not be cleared on {tab} (the vault was locked while the fill was live) — reload it": "无法清除 {tab} 里已填入的密码（填充生效期间保险库已被锁定）— 请刷新该标签页",
   "Open the browser live view or reload that tab so the typed credential leaves the page.": "请打开浏览器实时视图或刷新该标签页，让已填入的凭据离开页面。",
   "Why not auto-confirmed: the request body was too large to read — confirm here if the site accepted it.": "未能自动确认的原因：请求体过大无法读取 — 如果站点已接受，请在此手动确认。",
   "Why not auto-confirmed: the site's request did not carry the password in a readable form — confirm here if the site accepted it.": "未能自动确认的原因：站点的请求未以可读形式携带该密码 — 如果站点已接受，请在此手动确认。",

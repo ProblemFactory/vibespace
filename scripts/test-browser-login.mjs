@@ -2512,8 +2512,8 @@ console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MIN
         'r6 MINOR D\' (owner save confirms pending login): addOwn clears pending + lastFilledPassword, sets source:\'owner\', and later logins report confirmed password',
         { recAfter: { pending: recAfter.pending, source: recAfter.source, lastFilledPassword: recAfter.lastFilledPassword }, rowAfter, afterUsed: afterSaveFill.usedPassword });
 
-      const redDSrc = LSRC0.replaceAll(
-        'const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;\n      void pending; void pendingReason; void lastFilledPassword;',
+      const redDSrc = LSRC0.replace(
+        /const \{ pending, pendingReason, lastFilledPassword(?:, beaconUnreadable)?, \.\.\.cleanEx \} = ex\.rec;\n\s*void pending; void pendingReason; void lastFilledPassword;(?: void beaconUnreadable;)?/g,
         'const cleanEx = ex.rec;'
       );
       const LmD6 = redDSrc !== LSRC0 ? MUT.load('src/server/browser-logins.js', redDSrc, 'r6-d-spread-keeps-pending') : null;
@@ -2885,7 +2885,7 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
         `r7 MAJOR 2 (>2 MiB numeric secret + 3 MB raw quoted digit secret + time-bounded walk): 2.35 MB parsed frame (${walk2m3Ms.toFixed(1)} ms) & 3 MB unparseable blob mask 12-digit (plain, line-wrapped, JSON-escaped) and all-digit-hex secrets in strings while leaving bare JSON numbers intact; walk cut redacts [vault:scrub-cut]`,
         { bytes2m3: Buffer.byteLength(frame2m3), walk2m3Ms, pinString: parsed2m3 && parsed2m3.result.pinString, wrappedPin: parsed2m3 && parsed2m3.result.wrappedPin, unicodePin: parsed2m3 && parsed2m3.result.unicodePin, hexEcho: parsed2m3 && parsed2m3.result.hexEcho, cutWorked });
 
-      // RED 2 (r8 MINOR K non-equivalent 1-file mutant): routing > 2 MiB parseable frames to `fn.spelled(frameStr)` fails to decode JSON `\n` / `\u003X` escapes and leaks `wrappedPin` & `unicodePin` in clear!
+      // RED 2 (r8 MINOR K non-equivalent 1-file mutant): routing > 2 MiB parseable frames to `fn.spelled(frameStr)` fails on `wrappedPin` because `VIEWS.escape` and `VIEWS.wrap` do not compose in `fn.spelled` (JSON `\n` escape on the line-wrapped 12-digit secret leaks `wrappedPin` in clear)!
       const red2DSrc = DSRC0.replace(
         'let parsed;\n    try { parsed = JSON.parse(frameStr); }',
         'if (Buffer.byteLength(frameStr, \'utf8\') > 2 * 1024 * 1024) return fn.spelled(frameStr);\n    let parsed;\n    try { parsed = JSON.parse(frameStr); }'
@@ -3310,7 +3310,7 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       { m7Err70k, m7Ok70k, m7Unreadable1m5 });
 
     const red7Src = DSRC0.replace(
-      'if (!bodyRead) {\n            if (rq.obs) rq.obs.respUnreadable = true;\n            an.seq++;\n            an.failCredSeq = an.seq;\n            return;\n          }',
+      /if \(!bodyRead\) \{[\s\S]*?an\.failCredSeq = an\.seq;\s*return;\s*\}/,
       'if (!bodyRead) { /* fail-open on unreadable response */ }'
     );
     const Dm7_7 = red7Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red7Src, 'r7-7-unreadable-response-confirms') : null;
@@ -3887,7 +3887,7 @@ console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR
         });
         Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
           requestId: 'ping-blind', frameId: tid, type: 'Ping',
-          request: { method: 'POST', url: 'https://blind-beacon.test/b', hasPostData: true }, // fake-kernel getRequestPostData errors -> beaconUnreadable
+          request: { method: 'POST', url: `${SITE}/blind-beacon`, hasPostData: true }, // watched-origin Ping whose getRequestPostData errors -> beaconUnreadable
         });
         const rFc = await pFc;
         const rowFc = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#fuser3`);
@@ -4016,11 +4016,11 @@ console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR
 
     const redGSrc = DSRC0
       .replace(
-        'if (writes.some((o) => o.unreadableBody)) {',
+        /if \(writes\.some\(\(o\) => o\.unreadableBody\)[^\n]*\{/,
         'if (writes.length === 1 && writes[0].unreadableBody) {'
       )
       .replace(
-        'if ((writes.some((o) => o.unreadableBody) || since.some((o) => o.beaconUnreadable)) && (an.writeSentSeq || 0) <= m) {',
+        /if \(\(writes\.some\(\(o\) => o\.unreadableBody\)[^\n]*&& \(an\.writeSentSeq \|\| 0\) <= m\) \{/,
         'if (writes.length === 1 && writes[0].unreadableBody && (an.writeSentSeq || 0) <= m) {'
       );
     const Dm8G = redGSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redGSrc, 'r8-g-sole-write-false-negative') : null;
@@ -4087,6 +4087,8 @@ console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR
         Si.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'i-pw', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] }, tid);
         await Si.w.fillLogin(TGT, FILL({ user: 'otpuser' }));
         const rememberedAfterPw = hasRem(PID);
+        Si.k.navigate(tid, `${SITE}/after-pw`);
+        await sleep(20);
         Si.eng.lock();
         const clearedOnVaultLock = hasRem(PID) === false;
         await Si.eng.unlock(Si.VPW);
@@ -4254,6 +4256,578 @@ console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR
     ok(PW21.length === 21 && evalExprsK.length >= 4 && leakedExactLen21 === false && sawBucket16to31 === true,
       'r8 MINOR K (bucketed secret length in Runtime.evaluate): 21-char password uses [16,31] length bucket and sends 0 exact secret lengths in finalize, SPA probe, or ceiling wipe',
       { evalCount: evalExprsK.length, leakedExactLen21, sawBucket16to31 });
+  }
+}
+
+// ═══ ⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3/4/5 + RED controls 1–5) ═══
+console.log('⑰ Standard-Chrome r9 adversarial fixup gates (MAJOR 1/2 + MINOR 3/4/5 + RED controls 1–5)');
+{
+  const LF = require('../src/server/browser-login-fill.js');
+  const BK = require('../src/server/browser-keeper.js');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const KPSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const { WebSocketServer } = require('ws');
+
+  // ── (1) MAJOR 1: vault lock keeps per-tab filled secrets while a fence is live (wiping short <8 B hidden mirror at ceiling), fails closed if locked & unhydrated after restart, and clears on lock after fence ended ──
+  {
+    const runMajor1R9 = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const PW6 = ('s' + crypto.randomBytes(3).toString('hex')).slice(0, 6); // 6-char short password (< MIN_MASK_BYTES = 8 B)
+      const dbDir = path.join(ROOT, 'wb9_1-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      const vpw = 'vpw9-' + crypto.randomBytes(4).toString('hex');
+      await eng.setup(vpw);
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      logins.addOwn({ origin: SITE, username: 'short6@example.test', password: PW6 });
+      grants.set('browser-login', `${SITE}#short6@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      // Leg A1 (exact Probe 1 shape: D.create({ logins }) + direct LF.fillVaultLogin + eng.lock() mid-fence + LF.wipeTabTypedInputs with secretValues:[])
+      const wBare = DmodToUse.create({ logins, log: quiet });
+      const domA1 = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm', type: 'hidden', value: PW6, defaultValue: '', hidden: true },
+      ]);
+      const formA1 = await LF.inspectTabLoginForm({ call: domA1.call, targetId: 'TAB_R9_1A', trackedUrl: `${SITE}/login` });
+      await LF.fillVaultLogin({
+        call: domA1.call, targetId: 'TAB_R9_1A', profileId: 'p-r9-1a', trackedUrl: `${SITE}/login`,
+        origin: SITE, loginId: `web-login:${SITE}#short6@example.test`, form: formA1,
+        values: { [formA1.fields[0].fieldId]: 'short6@example.test', [formA1.fields[1].fieldId]: PW6 }, submit: false,
+      });
+      eng.lock();
+      const wipeA1 = await LF.wipeTabTypedInputs({
+        call: domA1.call, targetId: 'TAB_R9_1A',
+        fieldIds: formA1.fields.map((f) => f.fieldId), secretValues: [],
+      });
+      const hiddenStillHoldsPwA1 = domA1.inputs[2].val === PW6;
+      const clearedAfterWipeA1 = typeof LF.hasRememberedSecrets === 'function' ? LF.hasRememberedSecrets('p-r9-1a') === false : false;
+      wBare.shutdown();
+      await eng.unlock(vpw);
+
+      // Leg A2 + Leg B + Leg C over watched CDP socket
+      const domB = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'hm2', type: 'hidden', value: '', defaultValue: '', hidden: true },
+      ]);
+      const tid = 'TAB_R9_1B';
+      const sid = 'SID_R9_1B';
+      let pageUrl = `${SITE}/login`;
+      let wsRef = null;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r9_1`;
+      wss.on('connection', (ws) => {
+        wsRef = ws;
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: pageUrl, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: pageUrl, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: pageUrl, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: pageUrl } }); return; }
+          const dr = await domB.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let persisted = { fences: [], scrubs: [] };
+      const notices = [];
+      const fakeKeeper = {
+        cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+        onLease: () => () => {},
+        saveLoginFenceState: (_pid, st) => { persisted = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
+        loginFenceStateOf: () => JSON.parse(JSON.stringify(persisted)),
+      };
+      const mkWatch = (maxMs) => DmodToUse.create({
+        keeper: fakeKeeper, log: quiet, enableTimeoutMs: 300, liveFillMaxMs: maxMs,
+        forYou: { add: (_pid, item) => { notices.push(item); return 'n-' + notices.length; }, resolve() {} },
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+
+      const w1 = mkWatch(220);
+      let w2 = null;
+      try {
+        await w1.arm(PID, { budgetMs: 3000 });
+        await until(() => w1._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await w1.fillLogin(TGT, FILL({ user: 'short6@example.test' }));
+        domB.inputs[2].val = PW6; // page blur/change copied short PW6 into hidden mirror
+        eng.lock(); // lock MID-FENCE before 220 ms ceiling
+        await until(() => w1.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 1500);
+        const hiddenStillHoldsPwA2 = domB.inputs[2].val === PW6;
+        const fenceLiftedA2 = w1.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true;
+        const clearedAfterFenceEndA2 = typeof LF.hasRememberedSecrets === 'function' ? LF.hasRememberedSecrets(PID) === false : false;
+
+        // Leg B: Re-armed fence after restart where in-memory map was lost while vault is locked => FAILS CLOSED naming "the vault was locked while the fill was live"
+        await eng.unlock(vpw);
+        domB.inputs[0].val = ''; domB.inputs[1].val = ''; domB.inputs[2].val = PW6;
+        await w1.fillLogin(TGT, FILL({ user: 'short6@example.test' }));
+        w1.shutdown();
+        LF.clearAllFilledSecrets?.();
+        if (persisted.fences && persisted.fences[0]) persisted.fences[0].at = Date.now() - 600000;
+        eng.lock();
+        w2 = mkWatch(220);
+        await w2.arm(PID, { budgetMs: 3000 });
+        await until(() => w2._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await sleep(60);
+        const lockedHoldVerdict = w2.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+        const lockedHoldNamed = Boolean(
+          lockedHoldVerdict && lockedHoldVerdict.ok === false &&
+          /the vault was locked while the fill was live/.test(String(lockedHoldVerdict.error || '')) &&
+          notices.some((n) => /the vault was locked while the fill was live/.test(String(n && n.text)))
+        );
+
+        // Unlock vault => HOLD_VAULT_LOCKED releases and ceiling wipes hidden mirror & lifts!
+        await eng.unlock(vpw);
+        await until(() => w2.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 1500);
+        const unlockedWipedHidden = domB.inputs[2].val === '';
+
+        // Leg C: Lock AFTER the fence ended (navigate away first, then lock) => cleared!
+        await w2.fillLogin(TGT, FILL({ user: 'short6@example.test' }));
+        const remBeforeNav = typeof LF.hasRememberedSecrets === 'function' ? LF.hasRememberedSecrets(PID) : false;
+        pageUrl = `${SITE}/after`;
+        if (wsRef && wsRef.readyState === 1) {
+          wsRef.send(JSON.stringify({ sessionId: sid, method: 'Page.frameNavigated', params: { frame: { id: tid, url: pageUrl } } }));
+        }
+        await until(() => w2.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 1500);
+        eng.lock();
+        const clearedAfterPostFenceLock = typeof LF.hasRememberedSecrets === 'function' ? LF.hasRememberedSecrets(PID) === false : false;
+
+        return {
+          wipeA1Ok: Boolean(wipeA1 && wipeA1.verifiedEmpty === true),
+          hiddenStillHoldsPwA1,
+          clearedAfterWipeA1,
+          hiddenStillHoldsPwA2,
+          fenceLiftedA2,
+          clearedAfterFenceEndA2,
+          lockedHoldNamed,
+          unlockedWipedHidden,
+          remBeforeNav,
+          clearedAfterPostFenceLock,
+        };
+      } finally {
+        try { w1.shutdown(); } catch {}
+        try { w2?.shutdown(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real1 = await runMajor1R9(D);
+    ok(real1.wipeA1Ok === true && real1.hiddenStillHoldsPwA1 === false && real1.clearedAfterWipeA1 === true &&
+      real1.hiddenStillHoldsPwA2 === false && real1.fenceLiftedA2 === true && real1.clearedAfterFenceEndA2 === true &&
+      real1.lockedHoldNamed === true && real1.unlockedWipedHidden === true &&
+      real1.remBeforeNav === true && real1.clearedAfterPostFenceLock === true,
+      'r9 MAJOR 1 (vault lock vs live short-password fence): lock mid-fence keeps per-tab target so ceiling wipes 6-char hidden mirror & then clears; locked unhydrated re-arm fails closed ("the vault was locked while the fill was live"); lock after fence end clears',
+      real1);
+
+    const red1R9Src = DSRC0.replace(
+      'LF().clearUnfencedFilledSecrets?.();',
+      'LF().clearAllFilledSecrets();'
+    );
+    const Dm9_1 = red1R9Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red1R9Src, 'r9-1-vault-lock-wipes-live-short-pw') : null;
+    const mut1 = Dm9_1 ? await runMajor1R9(Dm9_1) : null;
+    ok(Boolean(Dm9_1 && mut1 && mut1.hiddenStillHoldsPwA1 === true && mut1.hiddenStillHoldsPwA2 === true && real1.hiddenStillHoldsPwA1 === false),
+      'r9 MAJOR 1 RED control [r9-1-vault-lock-wipes-live-short-pw]: r8 clearAllFilledSecrets on vault lock lifts fence with 6-char password still in hidden mirror',
+      { mut1HiddenA1: mut1 && mut1.hiddenStillHoldsPwA1, mut1HiddenA2: mut1 && mut1.hiddenStillHoldsPwA2 });
+  }
+
+  // ── (2) MAJOR 2: unreadable third-party beacon leaves blocked press false & row clean; same-origin unreadable beacon reports unknown & flags row until next confirmed submission / owner save ──
+  {
+    const runMajor2R9 = async (DmodToUse = D) => {
+      const S2 = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = S2.k.targets()[0].targetId;
+        const PW9_2 = pwOf('r9-maj2');
+        S2.logins.addOwn({ origin: SITE, username: 'buser@example.test', password: PW9_2 });
+        S2.logins.grant(`web-login:${SITE}#buser@example.test`, 'this-account', 'session:conv-1');
+        const fields = [
+          { fieldId: 'b2-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'b2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ];
+
+        // Leg A: third-party unreadable beacon + client-blocked press, AND same-origin 0-byte body-less sendBeacon(url) (`postData: ""`) + blocked press => submitted: false + "press its button" + row NOT flagged
+        S2.k.navigate(tid, `${SITE}/login-b3p`);
+        await sleep(20);
+        S2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, postDataByReq: { 'b9-same-empty': '' }, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields }, tid);
+        const mA = S2.k.mark();
+        const pA = S2.w.fillLogin(TGT, FILL({ user: 'buser@example.test', submit: true }));
+        await until(() => S2.k.calls().slice(mA).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S2.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'b9-3p-unread', frameId: tid, type: 'Ping',
+          request: { method: 'POST', url: 'https://analytics.vendor.test/b', hasPostData: true },
+        });
+        S2.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'b9-same-empty', frameId: tid, type: 'Ping',
+          request: { method: 'POST', url: `${SITE}/ping-empty`, hasPostData: true, postDataEntries: [{ bytes: '' }] },
+        });
+        const r3p = await pA;
+        const row3p = S2.logins.list().entries.find((e) => e.name === `web-login:${SITE}#buser@example.test`);
+
+        // Leg B: watched-origin unreadable beacon as sole write => submitted: 'unknown' + 'a beacon could not be read' + row flagged
+        S2.k.navigate(tid, `${SITE}/login-bsame`);
+        await sleep(20);
+        S2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields }, tid);
+        const mB = S2.k.mark();
+        const pB = S2.w.fillLogin(TGT, FILL({ user: 'buser@example.test', submit: true }));
+        await until(() => S2.k.calls().slice(mB).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S2.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'b9-same-unread', frameId: tid, type: 'Ping',
+          request: { method: 'POST', url: `${SITE}/beacon-login`, hasPostData: true },
+        });
+        const rSame = await pB;
+        const rowSame = S2.logins.list().entries.find((e) => e.name === `web-login:${SITE}#buser@example.test`);
+
+        // Leg C1: next confirmed submission clears `beaconUnreadable`!
+        S2.k.navigate(tid, `${SITE}/login-bclean`);
+        await sleep(20);
+        S2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields }, tid);
+        const rClean = await S2.w.fillLogin(TGT, FILL({ user: 'buser@example.test', submit: true }));
+        const rowAfterClean = S2.logins.list().entries.find((e) => e.name === `web-login:${SITE}#buser@example.test`);
+        const metaAfterClean = S2.eng.secretNames().find((s) => s.name === `web-login:${SITE}#buser@example.test`);
+        const vrowAfterClean = metaAfterClean ? VI.rowOf('secrets', VI.secretRowOf(metaAfterClean)) : null;
+
+        // Leg C2: owner save (`addOwn`) also clears `beaconUnreadable`!
+        S2.logins.noteBeaconUnreadable(`web-login:${SITE}#buser@example.test`, true);
+        const flaggedBeforeOwner = Boolean(S2.logins.list().entries.find((e) => e.name === `web-login:${SITE}#buser@example.test`)?.beaconUnreadable);
+        S2.logins.addOwn({ origin: SITE, username: 'buser@example.test', password: PW9_2 });
+        const rowAfterOwner = S2.logins.list().entries.find((e) => e.name === `web-login:${SITE}#buser@example.test`);
+
+        return {
+          r3p, r3pText: BL.loginText(r3p), row3pFlag: Boolean(row3p?.beaconUnreadable),
+          rSame, rSameText: BL.loginText(rSame), rowSameFlag: Boolean(rowSame?.beaconUnreadable),
+          rClean, clearedByNextSub: !rowAfterClean?.beaconUnreadable && !vrowAfterClean?.beaconUnreadable,
+          flaggedBeforeOwner, clearedByOwnerSave: !rowAfterOwner?.beaconUnreadable,
+        };
+      } finally { await S2.close(); }
+    };
+
+    const real2 = await runMajor2R9(D);
+    ok(real2.r3p.submitted === false && !real2.r3p.submittedReason && /press its button/.test(real2.r3pText) && real2.row3pFlag === false &&
+      real2.rSame.submitted === 'unknown' && real2.rSame.submittedReason === 'a beacon could not be read' && /a beacon could not be read/.test(real2.rSameText) && real2.rowSameFlag === true &&
+      real2.rClean.submitted === true && real2.clearedByNextSub === true &&
+      real2.flaggedBeforeOwner === true && real2.clearedByOwnerSave === true,
+      'r9 MAJOR 2 (third-party vs watched-origin unreadable beacon + per-submission flag): 3p unreadable beacon + blocked press => false ("press its button") & unflagged row; same-origin unreadable beacon => unknown + beacon words & flagged row; cleared on next confirmed submit & owner save',
+      real2);
+
+    const red2R9Src = DSRC0
+      .replaceAll('if (rq.obs.sameOrigin) rq.obs.beaconUnreadable = true;', 'rq.obs.beaconUnreadable = true;')
+      .replaceAll('else if (rq.obs.sameOrigin) {\n                    rq.obs.beaconUnreadable = true;', 'else {\n                    rq.obs.beaconUnreadable = true;')
+      .replaceAll('o.sameOrigin && o.beaconUnreadable', 'o.beaconUnreadable');
+    const Dm9_2 = red2R9Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red2R9Src, 'r9-2-third-party-unreadable-beacon-poisons') : null;
+    const mut2 = Dm9_2 ? await runMajor2R9(Dm9_2) : null;
+    ok(Boolean(Dm9_2 && mut2 && mut2.r3p.submitted === 'unknown' && mut2.row3pFlag === true && real2.r3p.submitted === false),
+      'r9 MAJOR 2 RED control [r9-2-third-party-unreadable-beacon-poisons]: r8 origin-blind Ping branch turns blocked press with 3p analytics beacon into submitted:"unknown" and flags vault row',
+      { mut3pSub: mut2 && mut2.r3p.submitted, mut3pFlag: mut2 && mut2.row3pFlag });
+  }
+
+  // ── (3) MINOR 3: salted SHA-256 guards secret fields while username keeps length check (lowercasing / NBSP-reformatting username succeeds) ──
+  {
+    const runMinor3R9 = async (LFmodToUse = LF) => {
+      const PW9_3 = pwOf('r9-min3'); // length > 16
+      const evalExprs = [];
+      const runCase = async ({ userVal, transformUser = null, transformPw = null }) => {
+        const dom = sharedMakeStubDom([
+          { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+          { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        ]);
+        const call = async (method, params = {}) => {
+          if (method === 'Runtime.evaluate' && params.expression) evalExprs.push(String(params.expression));
+          const r = await dom.call(method, params);
+          if (method === 'Input.insertText') {
+            if (transformUser && dom.inputs[0].val === userVal) dom.inputs[0].val = transformUser(dom.inputs[0].val);
+            if (transformPw && dom.inputs[1].val === PW9_3) dom.inputs[1].val = transformPw(dom.inputs[1].val);
+          }
+          return r;
+        };
+        const form = await LFmodToUse.inspectTabLoginForm({ call, targetId: 'TAB_R9_3', trackedUrl: `${SITE}/login` });
+        const res = await LFmodToUse.fillVaultLogin({
+          call, targetId: 'TAB_R9_3', profileId: 'p-r9-3', trackedUrl: `${SITE}/login`,
+          origin: SITE, loginId: `web-login:${SITE}#alice`, form,
+          values: { [form.fields[0].fieldId]: userVal, [form.fields[1].fieldId]: PW9_3 }, submit: false,
+        });
+        return { res, finalUser: dom.inputs[0].val, finalPw: dom.inputs[1].val };
+      };
+      const lower = await runCase({ userVal: 'Alice.Smith@Example.TEST', transformUser: (s) => s.toLowerCase() });
+      const nbsp = await runCase({ userVal: 'Alice Smith', transformUser: (s) => s.replace(/ /g, '\u00A0') });
+      const truncUser = await runCase({ userVal: 'Alice.Smith@Example.TEST', transformUser: () => 'alice' });
+      const mutatedPw = await runCase({ userVal: 'alice@example.test', transformPw: (s) => 'X' + s.slice(1) });
+      const leakedSecretLen = evalExprs.some((ex) => new RegExp(`\\bwantUserLen\\s*=\\s*${PW9_3.length}\\b`).test(ex));
+      LFmodToUse.clearAllFilledSecrets?.();
+      return { lower, nbsp, truncUser, mutatedPw, leakedSecretLen };
+    };
+
+    const real3 = await runMinor3R9(LF);
+    ok(real3.lower.res.ok === true && real3.lower.finalUser === 'alice.smith@example.test' &&
+      real3.nbsp.res.ok === true && real3.nbsp.finalUser === 'Alice\u00A0Smith' &&
+      real3.truncUser.res.ok === false && real3.truncUser.res.code === 'login_failed' && real3.truncUser.finalPw === '' &&
+      real3.mutatedPw.res.ok === false && real3.mutatedPw.res.code === 'login_failed' && real3.mutatedPw.finalUser === '' &&
+      real3.leakedSecretLen === false,
+      'r9 MINOR 3 (username length check vs secret salted SHA-256): lowercasing & NBSP-reformatting username inputs succeed while truncated username and altered same-length password fail closed and wipe',
+      { lowerOk: real3.lower.res.ok, nbspOk: real3.nbsp.res.ok, truncCode: real3.truncUser.res.code, mutPwCode: real3.mutatedPw.res.code });
+
+    const red3R9Src = LFS0.replace(
+      'const isSecretField = expectedRole !== \'username\';',
+      'const isSecretField = true;'
+    );
+    const LFm9_3 = red3R9Src !== LFS0 ? MUT.load('src/server/browser-login-fill.js', red3R9Src, 'r9-3-hash-on-username-rejects-lowercase') : null;
+    const mut3 = LFm9_3 ? await runMinor3R9(LFm9_3) : null;
+    ok(Boolean(LFm9_3 && mut3 && mut3.lower.res.ok === false && mut3.lower.res.code === 'login_failed' && real3.lower.res.ok === true),
+      'r9 MINOR 3 RED control [r9-3-hash-on-username-rejects-lowercase]: r8 SHA-256 check on username rejects React lowercasing email input with login_failed (field_cleared)',
+      { mutLower: mut3 && mut3.lower.res, realLowerOk: real3.lower.res.ok });
+  }
+
+  // ── (4) MINOR 4: `an.observed` bounded (`<= 256`), never evicts credential-carrying entries, caps unreadable/beacon by age & count, and records + logs dropped count ──
+  {
+    const runMinor4R9 = async (DmodToUse = D) => {
+      let tClock = 1_762_000_000_000;
+      const warnLines = [];
+      const k4 = await startFakeKernel({ mode: { standard: true }, firstUrl: `${SITE}/login` });
+      const dbDir = path.join(ROOT, 'wb9_4-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(dbDir, { recursive: true });
+      const eng = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vault-r9-4-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants, now: () => tClock });
+      const PW9_4 = pwOf('r9-min4');
+      logins.addOwn({ origin: SITE, username: 'obs@example.test', password: PW9_4 });
+      grants.set('browser-login', `${SITE}#obs@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const w4 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: k4.wsUrl }), onLease: () => () => {} },
+        log: { log() {}, warn(m) { warnLines.push(String(m)); }, error() {} },
+        now: () => tClock,
+        enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w4.arm(PID, { budgetMs: 3000 });
+        const tid = k4.targets()[0].targetId;
+        await until(() => w4._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        k4.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'm4-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'm4-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const m4 = k4.mark();
+        const pFill = w4.fillLogin(TGT, FILL({ user: 'obs@example.test', submit: true }));
+        await until(() => k4.calls().slice(m4).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+
+        for (const [rid, url] of [
+          ['m4-cred-x1', 'https://exfil-m4-1.test/steal'],
+          ['m4-cred-x2', 'https://exfil-m4-2.test/steal'],
+          ['m4-cred-same', `${SITE}/api/login`],
+        ]) {
+          k4.emitPageEvent(tid, 'Network.requestWillBeSent', {
+            requestId: rid, frameId: tid, type: 'Fetch',
+            request: { method: 'POST', url, postData: JSON.stringify({ password: PW9_4 }), hasPostData: true },
+          });
+          k4.emitPageEvent(tid, 'Network.responseReceived', { requestId: rid, frameId: tid, type: 'Fetch', response: { status: 200 } });
+          k4.emitPageEvent(tid, 'Network.loadingFinished', { requestId: rid });
+        }
+        // 400 unreadable writes + 80 chatter writes
+        for (let i = 0; i < 400; i++) {
+          const rid = `m4-unr-${i}`;
+          k4.emitPageEvent(tid, 'Network.requestWillBeSent', {
+            requestId: rid, frameId: tid, type: 'Fetch',
+            request: { method: 'POST', url: `https://chunks.vendor.test/u/${i}`, hasPostData: true },
+          });
+          k4.emitPageEvent(tid, 'Network.responseReceived', { requestId: rid, frameId: tid, type: 'Fetch', response: { status: 204 } });
+          k4.emitPageEvent(tid, 'Network.loadingFinished', { requestId: rid });
+        }
+        for (let i = 0; i < 80; i++) {
+          const rid = `m4-chat-${i}`;
+          k4.emitPageEvent(tid, 'Network.requestWillBeSent', {
+            requestId: rid, frameId: tid, type: 'Fetch',
+            request: { method: 'POST', url: `https://analytics.vendor.test/c/${i}`, postData: `n=${i}`, hasPostData: true },
+          });
+          k4.emitPageEvent(tid, 'Network.responseReceived', { requestId: rid, frameId: tid, type: 'Fetch', response: { status: 204 } });
+          k4.emitPageEvent(tid, 'Network.loadingFinished', { requestId: rid });
+        }
+        const rFill = await pFill;
+        await sleep(40);
+        const an = w4._watches.get(PID)?.targets.get(tid)?.authNet;
+        const obsLenAfterFlood = an?.observed?.length ?? -1;
+        const credKeptAfterFlood = (an?.observed || []).filter((o) => o && (o.carriesSameCred || o.carriesOtherCred)).length;
+
+        // Advance clock > 10 minutes + 1 push => age cap evicts expired unreadable/chatter while keeping all 3 credential entries!
+        tClock += 11 * 60 * 1000;
+        k4.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'm4-after-age', frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url: 'https://analytics.vendor.test/late', postData: 'late=1', hasPostData: true },
+        });
+        await sleep(20);
+        const obsLenAfterAge = an?.observed?.length ?? -1;
+        const credKeptAfterAge = (an?.observed || []).filter((o) => o && (o.carriesSameCred || o.carriesOtherCred)).length;
+        const row = logins.list().entries.find((e) => e.name === `web-login:${SITE}#obs@example.test`);
+        const stats = w4.loginFenceStats();
+        return {
+          submitted: rFill.submitted,
+          obsLenAfterFlood,
+          credKeptAfterFlood,
+          obsLenAfterAge,
+          credKeptAfterAge,
+          origins: row?.origins || [],
+          droppedObserved: stats.droppedObserved ?? 0,
+          warnSaidDrop: warnLines.some((l) => /dropped \d+/i.test(l)),
+        };
+      } finally {
+        w4.shutdown();
+        await k4.close();
+        eng.close();
+      }
+    };
+
+    const real4 = await runMinor4R9(D);
+    ok(real4.submitted === true &&
+      real4.obsLenAfterFlood > 0 && real4.obsLenAfterFlood <= 256 &&
+      real4.credKeptAfterFlood === 3 &&
+      real4.obsLenAfterAge === 4 && real4.credKeptAfterAge === 3 &&
+      real4.origins.includes('https://exfil-m4-1.test') && real4.origins.includes('https://exfil-m4-2.test') &&
+      real4.droppedObserved > 300 && real4.warnSaidDrop === true,
+      'r9 MINOR 4 (bounded an.observed <= 256 + age/count cap + credential preservation): 400 unreadable + 80 chatter writes stay <= 256, keep all 3 credential entries, evict >10m entries, and count + log drops',
+      real4);
+
+    const red4R9Src = DSRC0
+      .replace('const MAX_OBSERVED_TOTAL = 256;', 'const MAX_OBSERVED_TOTAL = 10000;')
+      .replace('const MAX_UNREADABLE_OBS = 64;', 'const MAX_UNREADABLE_OBS = 10000;')
+      .replace('const MAX_PENDING_OBS = 64;', 'const MAX_PENDING_OBS = 10000;');
+    const Dm9_4 = red4R9Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red4R9Src, 'r9-4-unbounded-observed-list') : null;
+    const mut4 = Dm9_4 ? await runMinor4R9(Dm9_4) : null;
+    ok(Boolean(Dm9_4 && mut4 && mut4.obsLenAfterFlood > 256 && real4.obsLenAfterFlood <= 256),
+      'r9 MINOR 4 RED control [r9-4-unbounded-observed-list]: mutant without unreadable observation cap grows an.observed past 256 under 400 unreadable writes',
+      { mutObsLen: mut4 && mut4.obsLenAfterFlood, realObsLen: real4.obsLenAfterFlood });
+  }
+
+  // ── (5) MINOR 5: real `keeper.saveLoginFenceState` + `browser-profiles.js` disk round-trip preserves `holdReason` across hub restart ──
+  {
+    const runMinor5R9 = async (BKmodToUse = BK) => {
+      const kDir = path.join(ROOT, 'wb9_5-' + crypto.randomBytes(3).toString('hex'));
+      fs.mkdirSync(kDir, { recursive: true });
+      const dom5 = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        { id: 'big', tag: 'TEXTAREA', value: 'z'.repeat(2048), defaultValue: 'z'.repeat(2048) },
+      ]);
+      const tid = '0123456789ABCDEF0123456789ABCDEF';
+      const sid = 'SID_R9_5';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r9_5`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE } } }); return; }
+          if (m.method === 'Target.getTargetInfo') { rep({ targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login` } }); return; }
+          const dr = await dom5.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      const vDir = path.join(kDir, 'vault');
+      fs.mkdirSync(vDir, { recursive: true });
+      const eng = VE.create({ dataDir: vDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng.setup('vault-r9-5-' + crypto.randomBytes(4).toString('hex'));
+      const grants = GS.create({ memory: true });
+      const logins = L.create({ vault: eng, grants: () => grants });
+      const PW9_5 = pwOf('r9-min5');
+      logins.addOwn({ origin: SITE, username: 'hold@example.test', password: PW9_5 });
+      grants.set('browser-login', `${SITE}#hold@example.test`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+
+      const wrapKeeper = (rk) => ({
+        cdpEndpointFor: async () => ({ ok: true, url: wsUrl }),
+        onLease: () => () => {},
+        saveLoginFenceState: (pid, st) => rk.saveLoginFenceState(pid, st),
+        loginFenceStateOf: (pid) => rk.loginFenceStateOf(pid),
+      });
+      const keeper1 = BKmodToUse.create({ dataDir: kDir, grants: () => grants, install: false, tickMs: 3600e3, log: quiet });
+      const w1 = D.create({
+        keeper: wrapKeeper(keeper1), log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 160, wipeMaxScanPositions: 256,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      let keeper2 = null, w2 = null;
+      try {
+        await w1.arm(PID, { budgetMs: 3000 });
+        await until(() => w1._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await w1.fillLogin(TGT, FILL({ user: 'hold@example.test' }));
+        await until(() => /too much text to check/.test(String(w1.liveFillVerdictFor(TGT, { verb: 'snapshot' }).error || '')), 1500);
+        const beforeRestartErr = String(w1.liveFillVerdictFor(TGT, { verb: 'snapshot' }).error || '');
+        w1.shutdown();
+
+        // Simulate full hub restart: brand-new keeper2 loads `browser-profiles.json` from disk!
+        keeper2 = BKmodToUse.create({ dataDir: kDir, grants: () => grants, install: false, tickMs: 3600e3, log: quiet });
+        w2 = D.create({
+          keeper: wrapKeeper(keeper2), log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 60000, wipeMaxScanPositions: 256,
+          holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+          leaseCountOf: () => 1, logins,
+          conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        });
+        const unwatchedErr = String(w2.liveFillVerdictFor(TGT, { verb: 'snapshot' }).error || '');
+        await w2.arm(PID, { budgetMs: 3000 });
+        await until(() => w2._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rearmedErr = String(w2.liveFillVerdictFor(TGT, { verb: 'snapshot' }).error || '');
+        return { beforeRestartErr, unwatchedErr, rearmedErr };
+      } finally {
+        try { w1.shutdown(); } catch {}
+        try { w2?.shutdown(); } catch {}
+        try { keeper1.shutdown?.(); } catch {}
+        try { keeper2?.shutdown?.(); } catch {}
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng.close();
+        LF.clearAllFilledSecrets?.();
+      }
+    };
+
+    const real5 = await runMinor5R9(BK);
+    ok(/\(too much text to check\)/.test(real5.beforeRestartErr) &&
+      /\(too much text to check\)/.test(real5.unwatchedErr) &&
+      /\(too much text to check\)/.test(real5.rearmedErr),
+      'r9 MINOR 5 (persisted holdReason across keeper + registry reload): "(too much text to check)" survives saveLoginFenceState + browser-profiles disk reload on both unwatched and re-armed fences',
+      real5);
+
+    const red5R9Src = KPSRC0.replace(
+      "      ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),\n",
+      ''
+    );
+    const BKm9_5 = red5R9Src !== KPSRC0 ? MUT.load('src/server/browser-keeper.js', red5R9Src, 'r9-5-keeper-drops-hold-reason') : null;
+    const mut5 = BKm9_5 ? await runMinor5R9(BKm9_5) : null;
+    ok(Boolean(BKm9_5 && mut5 && !/too much text to check/.test(mut5.unwatchedErr) && !/too much text to check/.test(mut5.rearmedErr) && /too much text to check/.test(real5.rearmedErr)),
+      'r9 MINOR 5 RED control [r9-5-keeper-drops-hold-reason]: r8 saveLoginFenceState without holdReason drops "(too much text to check)" after restart',
+      { mutRearmed: mut5 && mut5.rearmedErr, realRearmed: real5.rearmedErr });
   }
 }
 

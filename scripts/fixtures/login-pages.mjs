@@ -375,6 +375,38 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   document.getElementById('st').textContent = 'Done ' + mode;
 });`);
   },
+  '/r9-short-lock': () => page('Sign in — short password mirror', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><input id="hm" type="hidden" name="pw_mirror"><button type="submit">Sign in</button></form>`,
+    `const p = document.getElementById('p');
+const hm = document.getElementById('hm');
+const syncMirror = () => { if (p.value) { hm.value = p.value; hm.setAttribute('value', p.value); } };
+p.addEventListener('change', syncMirror);
+p.addEventListener('blur', syncMirror);`),
+  '/r9-beacon': (url) => {
+    const mode = url.searchParams.get('mode') || 'empty3p';
+    const o2 = url.searchParams.get('o2') || '';
+    return page('Sign in — r9 beacon modes', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><input id="fb" type="file" style="display:none"><button type="submit">Sign in</button><div id="st"></div></form>`,
+      `const mode = ${JSON.stringify(mode)};
+const o2 = ${JSON.stringify(o2)};
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = document.getElementById('fb').files && document.getElementById('fb').files[0];
+  if (mode === 'empty3p') {
+    navigator.sendBeacon(o2 + '/done/b-empty-3p');
+    navigator.sendBeacon('/done/b-empty-same');
+  } else if (mode === 'file3p') {
+    navigator.sendBeacon(o2 + '/done/b-file-3p', f || 'fallback');
+  } else if (mode === 'filesame') {
+    navigator.sendBeacon('/done/b-file-same', f || 'fallback');
+  }
+  document.getElementById('st').textContent = 'Blocked ' + mode;
+});`);
+  },
+  '/r9-lowercase-user': () => page('Sign in — lowercasing username', `<form id="f" method="POST" action="/done/one"><input id="u" type="email" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+    `const u = document.getElementById('u');
+u.addEventListener('input', () => {
+  const low = u.value.toLowerCase();
+  if (u.value !== low) u.value = low;
+});`),
 };
 
 export function startLoginPages() {

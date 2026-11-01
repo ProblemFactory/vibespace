@@ -207,7 +207,15 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       recent.push(t); typedAt.set(o, recent); if (typedAt.size > 256) typedAt.delete(typedAt.keys().next().value);
     }
     const next = BL.nextRecord(v, { existing: ex.rec, origin: o, username, password, now: now(), conversation: convName || conv });
-    if (!next) return { state: v.state, name: n, ...(v.why ? { why: v.why } : {}) };
+    if (!next) {
+      if (v.state === 'same' && ex.rec && ex.rec.beaconUnreadable === true) {
+        const { beaconUnreadable, ...cleanSame } = ex.rec;
+        void beaconUnreadable;
+        const metaSame = names().find((x) => x.name === n) || null;
+        writeEntry(n, BL.recordOf(cleanSame), { actor: (metaSame && metaSame.actor) || null, owner: (metaSame && metaSame.owner) || null });
+      }
+      return { state: v.state, name: n, ...(v.why ? { why: v.why } : {}) };
+    }
     const meta = names().find((x) => x.name === n) || null;
     const w = writeEntry(n, next, { actor: convName || conv || (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) { say(`[browser-login] ${n}: the submission was not saved — ${w.error}`); return { state: 'none', name: n, why: w.code }; }
@@ -260,8 +268,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     let rec;
     let pwChanged = true;
     if (ex.rec) {
-      const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
-      void pending; void pendingReason; void lastFilledPassword;
+      const { pending, pendingReason, lastFilledPassword, beaconUnreadable, ...cleanEx } = ex.rec;
+      void pending; void pendingReason; void lastFilledPassword; void beaconUnreadable;
       pwChanged = ex.rec.password !== c.password;
       rec = BL.recordOf({ ...cleanEx, ...(pwChanged ? { by: 'owner', source: 'owner', strength: 'unknown', submittedAt: now(), previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : { submittedAt: ex.rec.submittedAt || now() }), password: c.password });
     } else {
@@ -298,8 +306,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     let rec;
     let pwChanged = true;
     if (ex.rec) {
-      const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
-      void pending; void pendingReason; void lastFilledPassword;
+      const { pending, pendingReason, lastFilledPassword, beaconUnreadable, ...cleanEx } = ex.rec;
+      void pending; void pendingReason; void lastFilledPassword; void beaconUnreadable;
       pwChanged = ex.rec.password !== password;
       rec = BL.recordOf({ ...cleanEx, ...(pwChanged ? { by: 'owner', source: 'owner', strength: 'unknown', submittedAt: now(), previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : { submittedAt: ex.rec.submittedAt || now() }), username: str(username).trim(), password, ...(totpName ? { totpName } : {}) });
     } else {
@@ -319,8 +327,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     if (!ex.ok) return ex;
     if (!ex.rec) return named('not_found', 'no such web login');
     if (!ex.rec.pending) return named('login_not_pending', 'that web login is not waiting for confirmation');
-    const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
-    void pending; void pendingReason; void lastFilledPassword;
+    const { pending, pendingReason, lastFilledPassword, beaconUnreadable, ...cleanEx } = ex.rec;
+    void pending; void pendingReason; void lastFilledPassword; void beaconUnreadable;
     const rec = BL.recordOf({ ...cleanEx, submittedAt: ex.rec.submittedAt || now() });
     const meta = names().find((x) => x.name === n) || null;
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
@@ -357,10 +365,22 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     return w && w.ok ? { ok: true, name: n, origins: rec.origins || nextOrigins } : { ok: false, code: (w && w.code) || 'not_written' };
   }
-  /** Record that a `sendBeacon` (`Ping`) with a body fired during submission whose body CDP could not read (`rec.beaconUnreadable`). */
-  function noteBeaconUnreadable(name) {
+  /** Record (or clear on the next confirmed submission) whether a watched-origin `sendBeacon` (`Ping`) had an unreadable body (`rec.beaconUnreadable`). */
+  function noteBeaconUnreadable(name, unreadable = true) {
     const n = str(name);
     if (!BL.parseName(n)) return { ok: false, code: 'bad_name' };
+    if (!unreadable) {
+      const curMeta = names().find((x) => x.name === n) || null;
+      if (!curMeta || !curMeta.beaconUnreadable) return { ok: true, name: n, beaconUnreadable: false };
+      const ex = open(n);
+      if (!ex.ok || !ex.rec) return { ok: false, code: (ex && ex.code) || 'not_found' };
+      if (!ex.rec.beaconUnreadable) return { ok: true, name: n, beaconUnreadable: false };
+      const { beaconUnreadable, ...cleanEx } = ex.rec;
+      void beaconUnreadable;
+      const rec = BL.recordOf(cleanEx);
+      const w = writeEntry(n, rec, { actor: curMeta.actor || null, owner: curMeta.owner || null });
+      return w && w.ok ? { ok: true, name: n, beaconUnreadable: false } : { ok: false, code: (w && w.code) || 'not_written' };
+    }
     const ex = open(n);
     if (!ex.ok || !ex.rec) return { ok: false, code: (ex && ex.code) || 'not_found' };
     if (ex.rec.beaconUnreadable === true) return { ok: true, name: n, beaconUnreadable: true };

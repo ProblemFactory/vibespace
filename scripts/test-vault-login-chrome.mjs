@@ -222,7 +222,7 @@ async function world(tag, { Dmod = D } = {}) {
     srv.closeAllConnections?.();
     await new Promise((r) => srv.close(() => r()));
   };
-  return { W, KEY, mediator, kk, prof, eng, grants, totp, logins, fy, dialogs, cli, logs, traced, audited, vaultAuditRaw, vaultAudit, close };
+  return { W, KEY, VPW, mediator, kk, prof, eng, grants, totp, logins, fy, dialogs, cli, logs, traced, audited, vaultAuditRaw, vaultAudit, close };
 }
 
 try {
@@ -1127,6 +1127,130 @@ try {
           h8.data?.submitted === false && !h8.data?.submittedReason,
           'r8 MINOR F + G + H (real Chrome): 70 KB 3p exfil, 70-POST analytics flood, and sendBeacon record destination (never evicted); 1.15 MB unreadable 3p write + analytics reports unknown/too-large; 3p widget Authorization keeps blocked submit false',
           { f8a: { sub: f8a.data, origins: f8a.row?.origins }, f8b: { sub: f8b.data, origins: f8b.row?.origins }, f8c: { sub: f8c.data, origins: f8c.row?.origins, beaconUnreadable: f8c.row?.beaconUnreadable, gotBeacon }, g8: g8.data, h8: h8.data });
+      }
+
+      // 7t. r9 MAJOR 1 + MAJOR 2 + MINOR 3 (real Chrome)
+      {
+        const LF = require('../src/server/browser-login-fill.js');
+
+        // r9 MAJOR 1: 6-char short password (< 8 B) + <input type="hidden"> mirror + vault lock mid-fence => hidden mirror still wiped & then cleared
+        const pw6R9 = ('k' + crypto.randomBytes(3).toString('hex')).slice(0, 6);
+        trackedShortTokens.push(pw6R9);
+        w.logins.addOwn({ origin: SITE, username: 'short6r9@example.test', password: pw6R9 });
+        w.logins.grant(`web-login:${SITE}#short6r9@example.test`, 'this-account', 'session:conv-1');
+        await run(['open', `${SITE}/r9-short-lock`]);
+        const rShortR9 = await run(['login', SITE, '--user', 'short6r9@example.test']);
+        w.eng.lock(); // lock vault WHILE the short-password fence on /r9-short-lock is live!
+        const rawR9_1 = await openCdpRpc(await upstreamWsUrl());
+        const tListR9_1 = await rawR9_1.call('Target.getTargets');
+        const tgtR9_1 = ((tListR9_1.msg.result && tListR9_1.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/r9-short-lock'));
+        let hmLenBefore = -1, wipeR9_1 = null, hmCheckAfter = null, remClearedAfterWipe = false;
+        if (tgtR9_1) {
+          const att = await rawR9_1.call('Target.attachToTarget', { targetId: tgtR9_1.targetId, flatten: true });
+          const sid = att.msg.result && att.msg.result.sessionId;
+          const pre = await rawR9_1.call('Runtime.evaluate', { expression: 'document.getElementById("hm").value.length', returnByValue: true }, sid);
+          hmLenBefore = pre.msg?.result?.result?.value ?? -1;
+          const lf1 = w.dialogs.liveFillOnTarget(w.prof.id, tgtR9_1.targetId);
+          const fids1 = [...(lf1?.secretFieldIds || []), ...(lf1?.userFieldIds || [])];
+          wipeR9_1 = await LF.wipeTabTypedInputs({
+            call: async (m, p) => (await rawR9_1.call(m, p, sid)).msg,
+            targetId: tgtR9_1.targetId,
+            fieldIds: fids1,
+            secretValues: [], // locked vault returns []
+          });
+          const post = await rawR9_1.call('Runtime.evaluate', {
+            expression: '({ hmLen: document.getElementById("hm").value.length, hmAttr: document.getElementById("hm").getAttribute("value") })',
+            returnByValue: true,
+          }, sid);
+          hmCheckAfter = post.msg?.result?.result?.value || null;
+          remClearedAfterWipe = LF.hasRememberedSecrets(w.prof.id) === false;
+          await rawR9_1.call('Target.detachFromTarget', { sessionId: sid });
+        }
+        await rawR9_1.close();
+        await w.eng.unlock(w.VPW);
+        await run(['open', `${SITE}/plain`]);
+        ok(rShortR9.code === 0 && hmLenBefore === 6 && wipeR9_1 && wipeR9_1.ok === true && wipeR9_1.verifiedEmpty === true && wipeR9_1.wiped >= 3 &&
+          hmCheckAfter && hmCheckAfter.hmLen === 0 && !hmCheckAfter.hmAttr && remClearedAfterWipe === true,
+          'r9 MAJOR 1 (real Chrome): vault lock mid-fence retains per-tab target so 6-char hidden mirror is wiped at ceiling (hmLen 6 -> 0) and then cleared',
+          { hmLenBefore, wipeR9_1, hmCheckAfter, remClearedAfterWipe });
+
+        // r9 MAJOR 2: 0-byte body-less & disk-File 3p unreadable beacons leave blocked submit false & row clean; same-origin unreadable disk-File beacon => unknown + row flagged until next confirmed login
+        const bPwR9 = pwOf('r9-beacon-chrome');
+        trackedSecrets.push(bPwR9);
+        const bUserR9 = 'beaconr9@example.test';
+        const bNameR9 = `web-login:${SITE}#${bUserR9}`;
+        w.logins.addOwn({ origin: SITE, username: bUserR9, password: bPwR9 });
+        w.logins.grant(bNameR9, 'this-account', 'session:conv-1');
+        const dummyBeaconFile = path.join(w.W, 'beacon-dummy.bin');
+        fs.writeFileSync(dummyBeaconFile, 'beacon-disk-file-payload');
+
+        const attachBeaconFile = async () => {
+          const raw = await openCdpRpc(await upstreamWsUrl());
+          try {
+            const tl = await raw.call('Target.getTargets');
+            const tg = ((tl.msg.result && tl.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/r9-beacon'));
+            if (tg) {
+              const att = await raw.call('Target.attachToTarget', { targetId: tg.targetId, flatten: true });
+              const sid = att.msg.result && att.msg.result.sessionId;
+              await raw.call('DOM.enable', {}, sid);
+              const doc = await raw.call('DOM.getDocument', {}, sid);
+              const q = await raw.call('DOM.querySelector', { nodeId: doc.msg.result.root.nodeId, selector: '#fb' }, sid);
+              await raw.call('DOM.setFileInputFiles', { nodeId: q.msg.result.nodeId, files: [dummyBeaconFile] }, sid);
+              await raw.call('Target.detachFromTarget', { sessionId: sid });
+            }
+          } finally { await raw.close(); }
+        };
+
+        pages.clear(); pages2.clear();
+        await run(['open', `${SITE}/r9-beacon?mode=empty3p&o2=${encodeURIComponent(SITE2)}`]);
+        const rBEmpty = await run(['login', SITE, '--user', bUserR9, '--submit', '--json']);
+        const jBEmpty = (() => { try { return JSON.parse(rBEmpty.out.trim().split('\n').pop()); } catch { return null; } })();
+        await sleep(150);
+        const rowAfterEmpty = w.logins.list().entries.find((e) => e.name === bNameR9);
+
+        await run(['open', `${SITE}/r9-beacon?mode=file3p&o2=${encodeURIComponent(SITE2)}`]);
+        await attachBeaconFile();
+        const rB3p = await run(['login', SITE, '--user', bUserR9, '--submit', '--json']);
+        const jB3p = (() => { try { return JSON.parse(rB3p.out.trim().split('\n').pop()); } catch { return null; } })();
+        await sleep(150);
+        const rowAfter3p = w.logins.list().entries.find((e) => e.name === bNameR9);
+
+        await run(['open', `${SITE}/r9-beacon?mode=filesame&o2=${encodeURIComponent(SITE2)}`]);
+        await attachBeaconFile();
+        const rBSame = await run(['login', SITE, '--user', bUserR9, '--submit', '--json']);
+        const jBSame = (() => { try { return JSON.parse(rBSame.out.trim().split('\n').pop()); } catch { return null; } })();
+        await sleep(150);
+        const rowAfterSame = w.logins.list().entries.find((e) => e.name === bNameR9);
+
+        pages.clear();
+        await run(['open', `${SITE}/one`]);
+        const rBClean = await run(['login', SITE, '--user', bUserR9, '--submit', '--json']);
+        const jBClean = (() => { try { return JSON.parse(rBClean.out.trim().split('\n').pop()); } catch { return null; } })();
+        await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+        const rowAfterClean = w.logins.list().entries.find((e) => e.name === bNameR9);
+        await run(['open', `${SITE}/plain`]);
+
+        ok(jBEmpty?.data?.submitted === false && !jBEmpty?.data?.submittedReason && !rowAfterEmpty?.beaconUnreadable &&
+          jB3p?.data?.submitted === false && !jB3p?.data?.submittedReason && !rowAfter3p?.beaconUnreadable &&
+          jBSame?.data?.submitted === 'unknown' && jBSame?.data?.submittedReason === 'a beacon could not be read' && rowAfterSame?.beaconUnreadable === true &&
+          jBClean?.data?.submitted === true && !rowAfterClean?.beaconUnreadable,
+          'r9 MAJOR 2 (real Chrome): 0-byte & 3p unreadable File beacons keep blocked submit false & row clean; same-origin unreadable File beacon reports unknown + beaconUnreadable:true, cleared on next confirmed login',
+          { empty: jBEmpty?.data, b3p: jB3p?.data, bSame: jBSame?.data, rowSame: rowAfterSame?.beaconUnreadable, rowClean: rowAfterClean?.beaconUnreadable });
+
+        // r9 MINOR 3: lowercasing username input on real Chrome fills & submits cleanly without field_cleared
+        const lcPwR9 = pwOf('r9-lc-user');
+        trackedSecrets.push(lcPwR9);
+        w.logins.addOwn({ origin: SITE, username: 'Alice.MixedR9@Example.TEST', password: lcPwR9 });
+        w.logins.grant(`web-login:${SITE}#alice.mixedr9@example.test`, 'this-account', 'session:conv-1');
+        pages.clear();
+        await run(['open', `${SITE}/r9-lowercase-user`]);
+        const rLcR9 = await run(['login', SITE, '--user', 'Alice.MixedR9@Example.TEST', '--submit', '--json']);
+        const jLcR9 = (() => { try { return JSON.parse(rLcR9.out.trim().split('\n').pop()); } catch { return null; } })();
+        const gotLcR9 = await until(() => pages.received().find((x) => x.path === '/done/one' && x.body.username === 'alice.mixedr9@example.test'), 4000);
+        await run(['open', `${SITE}/plain`]);
+        ok(rLcR9.code === 0 && jLcR9?.data?.submitted === true && Boolean(gotLcR9) && gotLcR9.body.password === lcPwR9,
+          'r9 MINOR 3 (real Chrome): input handler lowercasing mixed-case email on each keystroke fills & submits cleanly',
+          { code: rLcR9.code, sub: jLcR9?.data, gotUser: gotLcR9 && gotLcR9.body.username });
       }
     }
 

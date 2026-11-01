@@ -49,7 +49,13 @@ const ROWS = {
   'src/browser-passkey.js': [['VibeSpace\'s saved passkeys cannot be opened right now', 'agent', 'lane passkey-sink: a kernel ceremony refused webauthn_key_locked — said to the agent\'s next verbs (PK.refusedText)']],
   // lane browser-login: a web login the custom kernel would fill — the agent's `vibespace-browser login` refused vault_locked (the fill, a
   // signup the vault would mint for); the person's own save doors (the Vault window's 网站登录…, the save-login card) say it as a field verdict
-  'src/browser-login.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then', 'agent', 'lane browser-login: LOCKED — `vibespace-browser login` refused vault_locked (BL.LOCKED, the fill verdict\'s words)']],
+  'src/browser-login.js': [
+    ['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then', 'agent', 'lane browser-login: LOCKED — `vibespace-browser login` refused vault_locked (BL.LOCKED, the fill verdict\'s words)'],
+    ['the vault was locked while the fill was live', 'label', 'lane vault-login-r3 r9: HOLD_VAULT_LOCKED — parenthetical cause inside 409 login_fill_live when a re-armed tab fence hit its 10-min ceiling while locked; the remedy asked is to reload the tab, while vault-hooks\'s own item tells the lock'],
+  ],
+  'src/server/browser-dialogs.js': [
+    ['(the vault was locked while the fill was live) — reload it', 'label', 'lane vault-login-r3 r9: the ceiling-hold For-you reload notice when a re-armed tab fence could not hydrate a short target while locked — the notice asks to reload the tab, while vault-hooks\'s own item tells the lock', { count: 2 }],
+  ],
   'src/server/browser-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered', 'agent', 'lane browser-login: a signup the vault could not seal before the fill (vault_locked) — nothing filled, no account made'],
     ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }]],
   'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],

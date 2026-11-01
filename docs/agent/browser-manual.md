@@ -391,9 +391,11 @@ previously filled sign-in page from the browser's back/forward cache), **reading
 `vibespace-browser login --submit` or `click` / `press` its submit button, or `reload` / `open` another page first. Your other
 tabs remain readable (`tab new` / `tab <id>`). At the 10-minute ceiling, VibeSpace wipes typed inputs in the main document and any
 control in any frame holding a filled value (preserving unrelated editor/comment drafts inside iframes, and matching `< 8`-byte
-values only as whole control values rather than substrings; OTPs are dropped as soon as their step ends, and per-tab filled-value
-memory is cleared on browser stop and vault lock); if a page holds more text than the wipe's scan budget can verify, the fence
-stays up with `(too much text to check)` until you reload or navigate away. Across navigations, filled secrets of `>= 8` bytes (up
+values only as whole untrimmed control values rather than substrings; OTPs are dropped as soon as their step ends, and per-tab
+filled-value memory is kept while a fence on that tab is live and cleared when the fence ends, on browser stop, or on vault lock
+once unfenced); if a page holds more text than the wipe's scan budget can verify or the vault was locked before a re-armed fence
+could hydrate its target, the fence stays up with `(too much text to check)` or `(the vault was locked while the fill was live)`
+until you reload or navigate away. Across navigations, filled secrets of `>= 8` bytes (up
 to the 32 most recent in that profile) stay masked as `[vault:<loginId>]` in CLI output and mediated CDP frames until **the
 browser stops**: parsed JSON frames of any size (including `> 2 MiB`, bounded by a `250 ms` walk budget that preserves the CDP
 envelope and object keys while redacting remaining strings of `>= 8` UTF-8 bytes as `[vault:scrub-cut]`) mask every string and
@@ -409,8 +411,10 @@ lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser
   followed by the form's navigation, winning over unrelated third-party analytics writes — `submitted: 'unknown'` with
   `submittedReason` when whether the site took the submission could not be verified, e.g. client-side password hashing or an
   opaque `Authorization` header to the watched origin including on a `GET` (`"the site's request did not carry the password in a
-  readable form"`, while unrelated third-party widget `Authorization` chatter is ignored) or an unreadable / `> 64 KB` request
-  body (`"the request body was too large to read"`), and `submitted: false` only when no submission happened;
+  readable form"`, while unrelated third-party widget `Authorization` chatter is ignored), an unreadable / `> 64 KB` request
+  body (`"the request body was too large to read"`), or an unreadable `sendBeacon` to the watched origin as the sole write
+  (`"a beacon could not be read"`, while unreadable third-party analytics beacons do not turn a blocked press into `'unknown'`),
+  and `submitted: false` only when no submission happened;
   `usedPassword: 'pending'` if a site's password change is still unconfirmed, since no CLI verb lists web logins) and a
   receipt. Refusals by name:
   `login_no_form` (open the sign-in page first), `login_in_frame` (the sign-in form is inside a frame — open that frame's
@@ -424,7 +428,8 @@ lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser
   confirms the entry (sending the owner one notice) only when a verifiable same-origin submission and readable non-error
   response succeed — clicking a link without submitting, a site whose request hashes the password or cannot be read, a
   cross-origin credential API or `sendBeacon` (whose destination is recorded on the row as `Submitted to <origin>`, or flagged
-  `"a beacon could not be read"` when the browser drops a `sendBeacon` body), or an unreadable / `> 1 MiB` response
+  per submission as `"a beacon could not be read"` when the browser drops a watched-origin `sendBeacon` body and cleared on the
+  next confirmed submission or owner save), or an unreadable / `> 1 MiB` response
   (`"the site's answer was too large to read"`) leaves the entry pending in the vault as `"Registration not yet confirmed by the
   site"` (or `"Password change not yet confirmed"` on `--generate` password changes), where the owner can press `Confirm`
   (`409 login_not_pending` if already confirmed) or re-save the password (re-saving the same password preserves agent provenance).

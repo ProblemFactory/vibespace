@@ -11741,6 +11741,7 @@ export default {
   "Last login filled the pending password.": "前回のログインでは未確認パスワードを入力しました。",
   "a filled password could not be cleared on {tab} — reload it": "{tab} に入力されたパスワードを消去できませんでした — 再読み込みしてください",
   "a filled password could not be cleared on {tab} (too much text to check) — reload it": "{tab} に入力されたパスワードを消去できませんでした（確認対象のテキストが多すぎます）— 再読み込みしてください",
+  "a filled password could not be cleared on {tab} (the vault was locked while the fill was live) — reload it": "{tab} に入力されたパスワードを消去できませんでした（入力有効中に保管庫がロックされました）— 再読み込みしてください",
   "Open the browser live view or reload that tab so the typed credential leaves the page.": "ブラウザのライブビューを開くかタブを再読み込みして、入力済みの認証情報をページから消去してください。",
   "Why not auto-confirmed: the request body was too large to read — confirm here if the site accepted it.": "自動確認できなかった理由：リクエスト本文が大きすぎて読み取れませんでした — サイトで受理された場合はここで確認してください。",
   "Why not auto-confirmed: the site's request did not carry the password in a readable form — confirm here if the site accepted it.": "自動確認できなかった理由：サイトのリクエストに読み取り可能な形式でパスワードが含まれていませんでした — サイトで受理された場合はここで確認してください。",

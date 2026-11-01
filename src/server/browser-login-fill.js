@@ -62,22 +62,128 @@ function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
   const pid = String(profileId || '');
   const clean = [...new Set((Array.isArray(secretVals) ? secretVals : []).filter((s) => typeof s === 'string' && s.length > 0))];
   if (!clean.length) return;
+  const normCtx = Number.isInteger(ctxId) && ctxId > 0 ? ctxId : 0;
   if (ctxKey) {
     const prevEntry = filledSecretsByTarget.get(ctxKey);
     const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
     filledSecretsByTarget.delete(ctxKey);
-    filledSecretsByTarget.set(ctxKey, { profileId: pid || (prevEntry && prevEntry.profileId) || '', values: merged });
+    filledSecretsByTarget.set(ctxKey, {
+      profileId: pid || (prevEntry && prevEntry.profileId) || '',
+      ctxId: normCtx || (prevEntry && prevEntry.ctxId) || 0,
+      fenceLive: true,
+      clearOnFenceEnd: false,
+      values: merged,
+    });
     while (filledSecretsByTarget.size > 64) filledSecretsByTarget.delete(filledSecretsByTarget.keys().next().value);
   }
-  if (Number.isInteger(ctxId) && ctxId > 0) {
-    const prevEntry = filledSecretsByCtx.get(ctxId);
+  if (normCtx > 0) {
+    const prevEntry = filledSecretsByCtx.get(normCtx);
     const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
-    filledSecretsByCtx.delete(ctxId);
-    filledSecretsByCtx.set(ctxId, { profileId: pid || (prevEntry && prevEntry.profileId) || '', values: merged });
+    filledSecretsByCtx.delete(normCtx);
+    filledSecretsByCtx.set(normCtx, {
+      profileId: pid || (prevEntry && prevEntry.profileId) || '',
+      targetKey: ctxKey || (prevEntry && prevEntry.targetKey) || '',
+      fenceLive: true,
+      clearOnFenceEnd: false,
+      values: merged,
+    });
     while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
   }
+}
+
+function clearFilledSecretsForTarget(targetId, contextId = 0) {
+  const ctxKey = String(targetId || '');
+  let linkedCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+  if (ctxKey) {
+    const v = filledSecretsByTarget.get(ctxKey);
+    if (v) {
+      if (!linkedCtx && v.ctxId) linkedCtx = v.ctxId;
+      if (Array.isArray(v.values)) v.values.length = 0;
+      filledSecretsByTarget.delete(ctxKey);
+    }
+    const lc = lastContextByTarget.get(ctxKey);
+    if (!linkedCtx && lc && typeof lc === 'object' && lc.ctxId) linkedCtx = lc.ctxId;
+    lastContextByTarget.delete(ctxKey);
+  }
+  if (linkedCtx > 0) {
+    const cv = filledSecretsByCtx.get(linkedCtx);
+    if (cv) {
+      if (Array.isArray(cv.values)) cv.values.length = 0;
+      filledSecretsByCtx.delete(linkedCtx);
+    }
+  }
+  if (ctxKey) {
+    for (const [ck, cv] of [...filledSecretsByCtx.entries()]) {
+      if (cv && cv.targetKey === ctxKey) {
+        if (Array.isArray(cv.values)) cv.values.length = 0;
+        filledSecretsByCtx.delete(ck);
+      }
+    }
+  }
+}
+
+function setTargetFenceLive(targetId, live, profileId = '', contextId = 0) {
+  const ctxKey = String(targetId || '');
+  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+  const tv = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
+  const cv = normCtx > 0 ? filledSecretsByCtx.get(normCtx) : (tv && tv.ctxId ? filledSecretsByCtx.get(tv.ctxId) : null);
+  if (live) {
+    if (tv) {
+      tv.fenceLive = true;
+      if (profileId && !tv.profileId) tv.profileId = String(profileId);
+    }
+    if (cv) {
+      cv.fenceLive = true;
+      if (profileId && !cv.profileId) cv.profileId = String(profileId);
+    }
+    return;
+  }
+  if (tv) tv.fenceLive = false;
+  if (cv) cv.fenceLive = false;
+  if ((tv && tv.clearOnFenceEnd) || (cv && cv.clearOnFenceEnd)) {
+    clearFilledSecretsForTarget(ctxKey, normCtx || (tv && tv.ctxId) || 0);
+  }
+}
+
+function clearUnfencedFilledSecrets(onlyProfileIds = null) {
+  const pidSet = Array.isArray(onlyProfileIds) || onlyProfileIds instanceof Set
+    ? new Set([...onlyProfileIds].map(String).filter(Boolean))
+    : null;
+  for (const [k, v] of [...filledSecretsByTarget.entries()]) {
+    if (pidSet && v && v.profileId && !pidSet.has(v.profileId)) continue;
+    if (v && v.fenceLive) {
+      v.clearOnFenceEnd = true;
+      continue;
+    }
+    if (v && Array.isArray(v.values)) v.values.length = 0;
+    filledSecretsByTarget.delete(k);
+    lastContextByTarget.delete(k);
+  }
+  for (const [k, v] of [...filledSecretsByCtx.entries()]) {
+    if (pidSet && v && v.profileId && !pidSet.has(v.profileId)) continue;
+    if (v && v.fenceLive) {
+      v.clearOnFenceEnd = true;
+      continue;
+    }
+    if (v && Array.isArray(v.values)) v.values.length = 0;
+    filledSecretsByCtx.delete(k);
+  }
+}
+
+function hasFilledSecretsForTarget(targetId = null, contextId = 0) {
+  const ctxKey = String(targetId || '');
+  if (ctxKey) {
+    const tv = filledSecretsByTarget.get(ctxKey);
+    if (tv && Array.isArray(tv.values) && tv.values.length > 0) return true;
+  }
+  const normCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? Number(contextId) : 0;
+  if (normCtx > 0) {
+    const cv = filledSecretsByCtx.get(normCtx);
+    if (cv && Array.isArray(cv.values) && cv.values.length > 0) return true;
+  }
+  return false;
 }
 
 function clearFilledSecretsForProfile(profileId) {
@@ -746,13 +852,18 @@ function prepareFieldExpr(fieldId, expectedRole) {
 }
 
 /** Verify in the isolated world AFTER `Input.insertText` that focus stayed on `el`, its type did not flip, and the salted SHA-256 of `.value` matches (never sends secret bytes or exact length). */
-function finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole) {
+/** Verify focus stayed on `el`, its role did not flip, and the value stuck before/after `change` (salted SHA-256 for secret fields so exact secret lengths never travel in clear; length check for `username` so lowercasing / NBSP site inputs succeed). */
+function finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole, wantUserLen = null) {
   const role = String(expectedRole || '');
+  const isUser = role === 'username';
+  const checkExpr = isUser
+    ? `lenOfNode(el) === ${Number.isInteger(wantUserLen) && wantUserLen >= 0 ? wantUserLen : 0}`
+    : `_sha256Hex(_vsFinSalt + ':' + valOfNode(el)) === _vsWantHash`;
   return `(() => {
     ${RESOLVE_EL_SRC}
-    ${SHA256_HELPER_SRC}
+    ${isUser ? '' : `${SHA256_HELPER_SRC}
     const _vsFinSalt = ${JSON.stringify(String(fSalt || ''))};
-    const _vsWantHash = ${JSON.stringify(String(wantHash || ''))};
+    const _vsWantHash = ${JSON.stringify(String(wantHash || ''))};`}
     const got = resolveEl(${JSON.stringify(String(fieldId))});
     const el = got && got.el;
     if (!el || !el.isConnected) { wipeNode(document.activeElement); return { ok: false, code: 'field_gone' }; }
@@ -765,14 +876,14 @@ function finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole) {
       return { ok: false, code: 'role_changed' };
     }
     const activeOk = document.activeElement === el;
-    const matchBefore = _sha256Hex(_vsFinSalt + ':' + valOfNode(el)) === _vsWantHash;
+    const matchBefore = ${checkExpr};
     if (!activeOk || !matchBefore) {
       wipeNode(el);
       if (document.activeElement && document.activeElement !== el) wipeNode(document.activeElement);
       return { ok: false, code: !activeOk ? 'focus_moved' : 'field_cleared' };
     }
     if (el.dispatchEvent) el.dispatchEvent(new Event('change', { bubbles: true }));
-    const matchAfter = _sha256Hex(_vsFinSalt + ':' + valOfNode(el)) === _vsWantHash;
+    const matchAfter = ${checkExpr};
     if (!matchAfter) {
       wipeNode(el);
       return { ok: false, code: 'field_cleared' };
@@ -1295,10 +1406,14 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
       }
     }
   }
+  const verifiedEmpty = totalRem === 0 && !anyTooMuch;
+  if (verifiedEmpty) {
+    setTargetFenceLive(ctxKey, false, '', savedCtx);
+  }
   return {
     ok: true,
     wiped: totalWiped,
-    verifiedEmpty: totalRem === 0 && !anyTooMuch,
+    verifiedEmpty,
     ...(anyTooMuch ? { tooMuchText: true, reason: TOO_MUCH_TEXT_REASON } : {}),
   };
 }
@@ -1381,6 +1496,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
   try {
     const ver = await evalInWorld(send, ctxId, verifyPlanAndArmExpr(entries.map(([k]) => k)));
     if (!ver || !ver.ok || !Array.isArray(ver.fields) || ver.fields.length !== entries.length) {
+      clearFilledSecretsForTarget(ctxKey, ctxId);
       return { ok: false, code: 'login_form_changed', error: 'the sign-in form changed before filling — nothing was typed' };
     }
     const pwPlan = Object.values(plannedRoles).some((t) => t === 'password' || t === 'new-password')
@@ -1388,6 +1504,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
     for (const desc of ver.fields) {
       const wantRole = desc && plannedRoles[desc.fieldId];
       if (!roleMatchesPlan(wantRole, desc, { hasPassword: pwPlan })) {
+        clearFilledSecretsForTarget(ctxKey, ctxId);
         const plainPw = (wantRole === 'password' || wantRole === 'new-password') && desc && String(desc.domType || desc.type || '').toLowerCase() === 'text';
         return {
           ok: false,
@@ -1408,6 +1525,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
       const prep = await evalInWorld(send, ctxId, prepareFieldExpr(fieldId, expectedRole));
       if (!prep || !prep.ok) {
         val = '';
+        if (!attemptedInsert) clearFilledSecretsForTarget(ctxKey, ctxId);
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         const why = (prep && prep.code) || 'field_gone';
         if (why === 'role_changed' && !attemptedInsert) {
@@ -1416,17 +1534,21 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
         return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `could not prepare sign-in field (${why}) — nothing was submitted`, attemptedInsert, contextId: ctxId };
       }
       touched.push(fieldId);
-      if (expectedRole !== 'username') attemptedInsert = true;
-      const fSalt = crypto.randomBytes(12).toString('hex');
-      const wantHash = crypto.createHash('sha256').update(`${fSalt}:${val}`, 'utf8').digest('hex');
+      const isSecretField = expectedRole !== 'username';
+      if (isSecretField) attemptedInsert = true;
+      const fSalt = isSecretField ? crypto.randomBytes(12).toString('hex') : '';
+      const wantHash = isSecretField ? crypto.createHash('sha256').update(`${fSalt}:${val}`, 'utf8').digest('hex') : '';
+      const wantUserLen = isSecretField ? null : val.length;
       const ins = await send('Input.insertText', { text: val });
       val = '';
       if (!ins || ins.timeout || ins.error) {
+        if (!attemptedInsert) clearFilledSecretsForTarget(ctxKey, ctxId);
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         return { ok: false, code: 'login_failed', error: 'Chrome rejected typing into the sign-in field — nothing was submitted', attemptedInsert, contextId: ctxId };
       }
-      const fin = await evalInWorld(send, ctxId, finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole));
+      const fin = await evalInWorld(send, ctxId, finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole, wantUserLen));
       if (!fin || !fin.ok) {
+        if (!attemptedInsert) clearFilledSecretsForTarget(ctxKey, ctxId);
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         const why = (fin && fin.code) || 'field_cleared';
         return { ok: false, code: why === 'role_changed' ? 'login_form_changed' : 'login_failed', error: `sign-in field rejected typed input (${why}) — nothing was submitted`, attemptedInsert, contextId: ctxId };
@@ -1469,6 +1591,10 @@ module.exports = {
   buildFilledTargets,
   filledTargetSrc,
   targetsForTab,
+  clearFilledSecretsForTarget,
+  setTargetFenceLive,
+  clearUnfencedFilledSecrets,
+  hasFilledSecretsForTarget,
   clearFilledSecretsForProfile,
   clearAllFilledSecrets,
   hasRememberedSecrets,

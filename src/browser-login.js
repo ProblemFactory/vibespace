@@ -61,6 +61,7 @@ const BODY_LARGE_BOUND = 'the request body was too large to read';
 const ANSWER_LARGE_BOUND = 'the site\'s answer was too large to read';
 const BEACON_UNREADABLE_BOUND = 'a beacon could not be read';
 const HOLD_TOO_MUCH_TEXT = 'too much text to check';
+const HOLD_VAULT_LOCKED = 'the vault was locked while the fill was live';
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
 const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live', 'login_not_pending']);
 /** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
@@ -173,8 +174,8 @@ function newRecord({ origin, username, password, totpName = null, source = 'owne
 function changedRecord(rec, password, { now = 0, conversation = null } = {}) {
   const r = recordOf(rec);
   if (!r) return null;
-  const { pendingReason, ...base } = r;
-  void pendingReason;
+  const { pendingReason, beaconUnreadable, ...base } = r;
+  void pendingReason; void beaconUnreadable;
   return recordOf({ ...base, password, source: 'vault-minted', strength: 'generated', submittedAt: null, pending: 'change', previous: { password: r.password, source: r.source, strength: r.strength, replacedAt: now }, ...(conversation ? { createdIn: r.createdIn || { conversation, at: now } } : {}) });
 }
 
@@ -473,9 +474,9 @@ function saveVerdict({ existing = null, password = null, outcome = 'navigated', 
 function nextRecord(v, { existing = null, origin, username, password = null, now = 0, conversation = null } = {}) {
   const rec = existing ? recordOf(existing) : null;
   if (!v || v.state === 'same' || v.state === 'none' || v.state === 'owner-card') return null;
-  if (v.confirm && rec) { const { pending, pendingReason, lastFilledPassword, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; return recordOf({ ...rest, submittedAt: now }); }
+  if (v.confirm && rec) { const { pending, pendingReason, lastFilledPassword, beaconUnreadable, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; void beaconUnreadable; return recordOf({ ...rest, submittedAt: now }); }
   if (v.state === 'agent-typed') return newRecord({ origin, username, password, source: 'agent-typed', now, conversation });
-  if (v.state === 'update' && rec && password) { const { pending, pendingReason, lastFilledPassword, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; return recordOf({ ...rest, password, source: 'agent-typed', strength: 'unknown', submittedAt: now, previous: { password: rec.password, source: rec.source, strength: rMapStrength(rec), replacedAt: now } }); }
+  if (v.state === 'update' && rec && password) { const { pending, pendingReason, lastFilledPassword, beaconUnreadable, ...rest } = rec; void pending; void pendingReason; void lastFilledPassword; void beaconUnreadable; return recordOf({ ...rest, password, source: 'agent-typed', strength: 'unknown', submittedAt: now, previous: { password: rec.password, source: rec.source, strength: rMapStrength(rec), replacedAt: now } }); }
   return null;
 }
 function rMapStrength(rec) { return rec && STRENGTHS.includes(rec.strength) ? rec.strength : 'unknown'; }
@@ -573,7 +574,7 @@ function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
-  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND, BEACON_UNREADABLE_BOUND, HOLD_TOO_MUCH_TEXT,
+  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND, BEACON_UNREADABLE_BOUND, HOLD_TOO_MUCH_TEXT, HOLD_VAULT_LOCKED,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   pendingReasonOf, recordOf, textOf, publicOf, newRecord, changedRecord,
