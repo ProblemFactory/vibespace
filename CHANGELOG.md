@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.368 — 2026-10-31
+
+### Fixed
+- «Install plugin…» now sees the Plugin Git credential you saved in Integrations, so a private repository can be chosen; before, it always read «not set».
+
 ## 2.369.367 — 2026-10-31
 
 ### Added

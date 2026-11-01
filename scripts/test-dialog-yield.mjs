@@ -347,5 +347,27 @@ console.log('⑦ round 5 — a key names the subject a caller PREFILLS; every ro
   ok(J(runS(r6state)) === J([SEQ[0][3], SEQ[1][3]]), "MUTANT (f2c3b9c2's onState — 'empty' drops nothing): an emptied box's words come back on the next repaint — RED", runS(r6state));
 }
 
+// ── hotfix 2.369.368 — the «Install plugin…» dialog's credential option (the owner, 2026-10-31, installing the custom
+// browser: the saved Plugin Git credential always read «not set — Set up…»). /api/integrations/:id answers
+// `{ integration: view }`; readCred had read `c.values` / `c.set` off that ENVELOPE. ONE pure reader now
+// (src/plugin-cred-state.js), the wiring pinned both ways.
+console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential through ONE pure reader (hotfix 2.369.368)');
+{
+  const PC = (await import(pathToFileURL(path.join(repo, 'src/plugin-cred-state.js')).href)).default;
+  const view = { id: 'plugin-git', values: { host: 'github.com', username: 'x-access-token' }, set: { host: true, username: true, token: true, deployKey: false }, masked: { token: '••••vpxB' } };
+  ok(J(PC.pluginGitCredOf({ integration: view })) === J({ ready: true, host: 'github.com', kind: 'token' }), "the route's envelope { integration: view } ⇒ ready · github.com · token", PC.pluginGitCredOf({ integration: view }));
+  ok(J(PC.pluginGitCredOf(view)) === J({ ready: true, host: 'github.com', kind: 'token' }), 'a bare view ⇒ the same (one shape, one reader)');
+  ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true, token: false, deployKey: true } } }).kind === 'deployKey', 'a deploy key names its kind');
+  ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true } } }).ready === false, 'a host with no sealed secret ⇒ not ready');
+  ok(PC.pluginGitCredOf({ integration: { ...view, values: {}, set: {} } }).ready === false, 'a locked vault (the view answers values {} / set {}) ⇒ not ready — never «ready» over a secret nobody can open');
+  ok(PC.pluginGitCredOf(null).ready === false && PC.pluginGitCredOf({ error: 'unauthorized' }).ready === false && PC.pluginGitCredOf('x').ready === false, 'no answer / a refusal / junk ⇒ not ready, never a throw');
+  // the bug, reproduced: the shipped reading over the real envelope
+  const pre = (c) => { const host = c && c.values ? String(c.values.host || '') : ''; return !!(c && host && c.set && (c.set.token || c.set.deployKey)); };
+  ok(pre({ integration: view }) === false && pre(view) === true, 'CONTROL (the shipped reading, 2.369.3xx–.367): c.values off the ENVELOPE ⇒ never ready — the defect the owner hit');
+  const PU9 = read('src/lib/plugins-ui.js'), IR9 = read('src/routes/integrations.js');
+  ok(/const st = pluginGitCredOf\(c\);/.test(PU9) && /import \{ pluginGitCredOf \} from '\.\.\/plugin-cred-state\.js'/.test(PU9) && !/c\.values\s*\?\s*String\(c\.values\.host/.test(PU9), 'WIRING: readCred reads through pluginGitCredOf — the envelope reading is gone from plugins-ui.js');
+  ok(/res\.json\(\{ integration: store\(\)\.publicView\(req\.params\.id\) \}\)/.test(IR9), 'the route still answers { integration: view } — the shape the reader unwraps (a change here changes the reader)');
+}
+
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);
 process.exit(fail ? 1 : 0);

@@ -8,6 +8,7 @@ import { t } from './i18n.js';
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
+import { pluginGitCredOf } from '../plugin-cred-state.js'; // hotfix 2.369.368: the ONE reader of /api/integrations/plugin-git's answer shape ({ integration: view })
 const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON body SAYS it is JSON — fetch's default for a string body is text/plain, which express.json() skips, so the route read an EMPTY body and refused «source must be …» (the owner, installing the custom browser plugin)
 
 // lane decision-vendor-hygiene: the LLM plugin row's STOPS (decision-model rowStopOf — no call until the key or the
@@ -474,10 +475,11 @@ export function installPluginsUI(App) {
       if (credRead) return; credRead = true;
       const c = await fetchJson('/api/integrations/plugin-git').catch(() => null);
       const opt = credSel.querySelector('option[value="plugin-git"]');
-      const host = c && c.values ? String(c.values.host || '') : '';
-      const ready = !!(c && host && c.set && (c.set.token || c.set.deployKey));
-      opt.textContent = ready ? t('Plugin Git credential — {host} ({kind})', { host, kind: c.set.token ? t('token') : t('deploy key') }) : t('Plugin Git credential (not set — Set up…)');
-      opt.disabled = !ready;
+      // hotfix 2.369.368: the route answers `{ integration: view }` — read the VIEW through the ONE pure reader (the
+      // dialog had read `c.values` off the envelope and so never saw a saved credential: «not set» on every instance)
+      const st = pluginGitCredOf(c);
+      opt.textContent = st.ready ? t('Plugin Git credential — {host} ({kind})', { host: st.host, kind: st.kind === 'token' ? t('token') : t('deploy key') }) : t('Plugin Git credential (not set — Set up…)');
+      opt.disabled = !st.ready;
     };
     const sync = () => { const s = SOURCES.find((x) => x.value === srcSel.value); val.placeholder = s?.placeholder || ''; fileRow.classList.toggle('hidden', srcSel.value !== 'zip'); valRow.classList.toggle('hidden', srcSel.value === 'zip'); const git = srcSel.value === 'git'; refRow.classList.toggle('hidden', !git); credRow.classList.toggle('hidden', !git); credHint.classList.toggle('hidden', !git); if (git) readCred(); };
     srcSel.onchange = sync; sync();

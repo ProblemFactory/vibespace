@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.368 — 2026-10-31 (hotfix)
+
+### hotfix plugin-install-cred — THE INSTALL DIALOG NEVER SAW THE SAVED PLUGIN GIT CREDENTIAL (the owner, 2026-10-31 18:1x PT, installing the custom browser)
+- **The defect.** src/lib/plugins-ui.js readCred read `c.values` / `c.set` off the ROUTE'S ENVELOPE: /api/integrations/:id answers `{ integration: publicView }` (src/routes/integrations.js:53; integrations-window.js unwraps `r.integration`), so `host` was always '' and the option read «Plugin Git credential (not set — Set up…)», disabled, on every instance since the engine-distribution lane — a private Git install was impossible from the UI. Three screenshots: the integration page with the token saved (masked), the dialog reopened still «未设置».
+- **The fix.** ONE pure reader src/plugin-cred-state.js `pluginGitCredOf(answer)` → `{ready, host, kind}` (the envelope or a bare view; a locked vault's `values {}` / `set {}` ⇒ not ready; never throws); readCred goes through it. Legs in test-dialog-yield ⑨ (the envelope, a bare view, a deploy key, no secret, a locked vault, junk; the CONTROL = the shipped reading over the envelope ⇒ never ready; the WIRING pinned both ways: the reader in plugins-ui.js, the route's shape). B-3b8e (the dialog reads the status once per open; the Test needs a repository) stays for the next train.
+- **Gates.** test-dialog-yield, the build (i18n unchanged, test-architecture), test-changelog-style, secret-scan; the cut's full fast tier + the ci/ mirror by int361; the heavy tier is unaffected (a client-only change).
+
 ## 2.369.367 — 2026-10-31
 
 ### int361 dst-job-model (.367 pin #0) — A CRON CREATED IN THE REPEATED HOUR FIRED AT EVERY TICK; THE GATE READ THE REAL CLOCK (test-job-model red on master c0faf8120 from 2026-10-31, the eve of the fall-back)
