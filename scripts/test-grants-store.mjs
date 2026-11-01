@@ -342,6 +342,9 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const DEEP11 = Array.from({ length: 9 }).reduce((inner, _, i) => ({ [`l${9 - i}`]: inner }), { t: TOK11 });
   const PEMBODY12 = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(2), PEM12 = [['-----BEGIN ', 'PRIVATE KEY-----'].join(''), PEMBODY12, ['-----END ', 'PRIVATE KEY-----'].join('')].join('\n');
   const PW14 = ['s3cr3t', '-netrc-', 'value'].join(''), NETRC14 = `machine h\nlogin u\npassword ${PW14}`;
+  const BS_N = String.fromCharCode(92) + 'n';   // the two characters \ and n
+  const PEM16 = PEM12.split('\n').join(BS_N), PW18 = ['an0ther', '-netrc-', 'value'].join(''), NETRC18 = ['machine h', 'login u', `password ${PW18}`].join(BS_N);
+  const KEY19 = ['plain', '-words-', 'config-key-value'].join('');
   const RAW = [
     { door: 'exit', resource: 'h1:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'x' }] },
     { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
@@ -362,6 +365,12 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     { door: 'exit', resource: 'h13:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', note: PEM12 }] },
     { door: 'exit', resource: 'h14:use', to: [G1], except: { list: [CEE], netrc: NETRC14 } },
     { door: 'exit', resource: 'h15:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', note: NETRC14 }] },
+    // r10: the same spelled with LITERAL backslash-n (a .env line, JSON-in-a-string), and a `key` that is not a conversation's own
+    { door: 'exit', resource: 'h16:use', to: [G1], except: { list: [CEE], note: PEM16, mode: 'newer' } },
+    { door: 'exit', resource: 'h17:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', note: PEM16 }] },
+    { door: 'exit', resource: 'h18:use', to: [G1], except: { list: [CEE], netrc: NETRC18 } },
+    { door: 'exit', resource: 'h19:use', to: [G1], except: { list: [CEE], config: { key: KEY19 }, mode: 'newer' } },
+    { door: 'exit', resource: 'h20:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'x-newer', key: KEY19 }] },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
@@ -422,6 +431,13 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     const w = st.set('exit', res, { to, except: ex });
     const dd = ((lastFor(res) || {}).repaired || {}).dropped || [];
     ok(w.ok && dd.length === 1 && /password «redacted»/.test(dd[0]) && !audit15().includes(PW14), `${what}: «password «redacted»» — the password nowhere in the audit file (dd04ecdae: written in clear)`, dd);
+  }
+  // r10 (主开发's acceptance of r9): a PEM / .netrc spelled with LITERAL \n — the line rules split on real newlines only (r9 and
+  // the base wrote both in clear); and r9's identifier exemption held at every depth (a nested config `key` was written in clear)
+  for (const [res, to, ex, what, secret] of [['h16:use', [G1], [], 'a PEM block spelled with literal \\n in a non-list `except`', PEMBODY12.slice(0, 16)], ['h17:use', [{ kind: 'everyone' }], [CEE], 'a PEM block spelled with literal \\n in a dropped list entry', PEMBODY12.slice(0, 16)], ['h18:use', [G1], [], 'a .netrc block spelled with literal \\n', PW18], ['h19:use', [G1], [], 'a nested `config.key` (not a conversation\'s own key)', KEY19], ['h20:use', [{ kind: 'everyone' }], [CEE], 'a `key` on a newer release\'s entry (not a conversation\'s own key)', KEY19]]) {
+    const w = st.set('exit', res, { to, except: ex });
+    const dd = ((lastFor(res) || {}).repaired || {}).dropped || [];
+    ok(w.ok && dd.length === 1 && !dd[0].includes(secret) && !audit15().includes(secret) && (res !== 'h19:use' || dd[0].includes('"key":"cid-cee"')) && (res !== 'h18:use' || /password «redacted»/.test(dd[0])), `${what}: MASKED — nowhere in the audit file${res === 'h19:use' ? ' (Cee\'s own key still named)' : ''} (c8e4d101b: written in clear)`, dd);
   }
   const d8k = ((lastFor('h8:use') || {}).repaired || {}).dropped || [];
   ok(d8k.length === 1 && d8k[0].includes('"key":"cid-cee"'), 'a non-list `except` {list: [Cee], mode: newer}: the audit names the conversation it dropped («"key":"cid-cee"» — an identifier field is no secret name; dd04ecdae: «"key":"«redacted»"»)', d8k);

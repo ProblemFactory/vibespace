@@ -179,14 +179,17 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     // non-list `except`) is masked BOTH ways and the two unioned: (1) every raw string value and field name on its own — real
     // newlines, so the line rules fire (a PEM block, a .netrc «password …»; r8's JSON text held them as the two characters \n and
     // wrote both in clear) — and a value under a secret NAME masked whole; (2) the whole JSON text — the name rules over every pair.
-    // The identifier fields (key, id, principal, kind) are no secret names: an exception's conversation key stays readable (r8 wrote
-    // «"key": «redacted»» — the audit no longer said which conversations it dropped). No depth cutoff: a shape too deep for the
-    // walk is written as one masked word, never in clear (r7 skipped below depth 8)
-    const ID_FIELDS = ['key', 'id', 'principal', 'kind'];
+    // An exception's own conversation key stays readable (r8 wrote «"key": «redacted»» — the audit no longer said which
+    // conversations it dropped): r10 — ONLY `key` inside an object whose `kind` is 'conversation' (r9 exempted key / id / principal /
+    // kind at every depth, and its \u0001 name hid them from the whole-text pass too: a nested config `key` was written in clear).
+    // A value that spells its newlines as the two characters \n (a PEM or a .netrc kept in a .env line or JSON-in-a-string) is
+    // masked again with them read as newlines, in both passes — union (r9 and the base wrote it in clear: the line rules split on
+    // real newlines only). No depth cutoff: a shape too deep for the walk is written as one masked word, never in clear
+    const maskStr = (s) => { const a = redactSecrets(s).text; if (!/\\n/.test(a)) return a; const b = redactSecrets(a.replace(/\\r\\n|\\n/g, '\n')); return b.redacted ? b.text : a; };
     const maskShape = (x) => {
       try {
-        const walk = (y) => (typeof y === 'string' ? redactSecrets(y).text : Array.isArray(y) ? y.map(walk) : y && typeof y === 'object' ? Object.fromEntries(Object.entries(y).map(([f, z]) => (ID_FIELDS.includes(f) ? [`\u0001${f}`, walk(z)] : [redactSecrets(f).text, secretName(f) ? REDACTED : walk(z)]))) : y);
-        return redactSecrets(JSON.stringify(walk(x))).text.replace(/"\\u0001(key|id|principal|kind)":/g, '"$1":');
+        const walk = (y) => (typeof y === 'string' ? maskStr(y) : Array.isArray(y) ? y.map(walk) : y && typeof y === 'object' ? Object.fromEntries(Object.entries(y).map(([f, z]) => (f === 'key' && y.kind === 'conversation' ? ['\u0001key', walk(z)] : [maskStr(f), secretName(f) ? REDACTED : walk(z)]))) : y);
+        return maskStr(JSON.stringify(walk(x))).replace(/"\\u0001key":/g, '"key":');
       } catch { return `${REDACTED} (a shape too deep to read)`; }
     };
     const nameOf = (x) => { const pk = pkSafe(x); return pk ? redactSecrets(pk).text : maskShape(x); };
