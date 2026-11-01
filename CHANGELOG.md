@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.369 — 2026-11-01
+
+### Fixed
+- A form that opens just as the window grows from phone size to desktop size opens in its own window at once, and no form moves while you are clicking it.
+
 ## 2.369.368 — 2026-10-31
 
 ### Fixed
