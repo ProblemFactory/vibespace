@@ -70,6 +70,7 @@
   "test-browser-identity": 22759,
   "test-browser-kept": 22964,
   "test-browser-live-fit": 103,
+  "test-browser-login-kernel": 116000,
   "test-browser-mediation": 13319,
   "test-browser-mediation-chrome": 5007,
   "test-browser-multiview": 31094,

@@ -47,15 +47,26 @@ export function loginExtras(row, data, { refresh, show } = {}) {
     const baseNote = pending === 'register'
       ? t('Registration not yet confirmed by the site — login fills this pending password.')
       : t('Password change not yet confirmed — login fills the pending password (previous password kept in reserve).');
+    const incMatch = typeof pendingReason === 'string'
+      ? /^the site's answer was incomplete \((\d{1,10}) of (\d{1,10}) bytes\)$/.exec(pendingReason)
+      : null;
     const reasonWords = pendingReason === 'the request body was too large to read'
       ? t('Why not auto-confirmed: the request body was too large to read — confirm here if the site accepted it.')
       : pendingReason === 'the site\'s request did not carry the password in a readable form'
         ? t('Why not auto-confirmed: the site\'s request did not carry the password in a readable form — confirm here if the site accepted it.')
         : pendingReason === 'the site\'s answer was too large to read'
           ? t('Why not auto-confirmed: the site\'s answer was too large to read — confirm here if the site accepted it.')
-          : pendingReason === 'a beacon could not be read'
-            ? t('Why not auto-confirmed: a beacon could not be read — confirm here if the site accepted it.')
-            : '';
+          : incMatch
+            ? t('Why not auto-confirmed: the site\'s answer was incomplete ({got} of {total} bytes) — confirm here if the site accepted it.', { got: incMatch[1], total: incMatch[2] })
+            : pendingReason === 'the stream ended before the answer'
+              ? t('Why not auto-confirmed: the stream ended before the answer — confirm here if the site accepted it.')
+              : pendingReason === 'the site\'s answer was not valid JSON'
+                ? t('Why not auto-confirmed: the site\'s answer was not valid JSON — confirm here if the site accepted it.')
+                : pendingReason === 'the site\'s answer was empty'
+                  ? t('Why not auto-confirmed: the site\'s answer was empty — confirm here if the site accepted it.')
+                  : pendingReason === 'a beacon could not be read'
+                    ? t('Why not auto-confirmed: a beacon could not be read — confirm here if the site accepted it.')
+                    : '';
     const filledNote = entry.lastFilledPassword === 'pending' ? ` · ${t('Last login filled the pending password.')}` : '';
     box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + (reasonWords ? ` ${reasonWords}` : '') + filledNote));
     confirmB = el('button', 'vw-btn vw-login-confirm', t('Confirm'));

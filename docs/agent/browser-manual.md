@@ -429,8 +429,10 @@ lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser
   response succeed — clicking a link without submitting, a site whose request hashes the password or cannot be read, a
   cross-origin credential API or `sendBeacon` (whose destination is recorded on the row as `Submitted to <origin>`, or flagged
   per submission as `"a beacon could not be read"` when the browser drops a watched-origin `sendBeacon` body and cleared on the
-  next confirmed submission or owner save), or an unreadable / `> 1 MiB` response
-  (`"the site's answer was too large to read"`) leaves the entry pending in the vault as `"Registration not yet confirmed by the
+  next confirmed submission or owner save), or an incomplete / unparseable / `> 1 MiB` response
+  (`"the site's answer was too large to read"`, `"the site's answer was incomplete (N of M bytes)"`,
+  `"the stream ended before the answer"`, `"the site's answer was not valid JSON"`, or `"the site's answer was empty"`,
+  shown in both the Vault row and a For-you notice) leaves the entry pending in the vault as `"Registration not yet confirmed by the
   site"` (or `"Password change not yet confirmed"` on `--generate` password changes), where the owner can press `Confirm`
   (`409 login_not_pending` if already confirmed) or re-save the password (re-saving the same password preserves agent provenance).
   Use this instead of typing a password yourself — a password you type is saved too, but marked as one you know.

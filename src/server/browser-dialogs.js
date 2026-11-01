@@ -155,6 +155,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   let oversizeScrubFrames = 0;            // legacy counter (0 in r7: parsed frames of any size walk)
   let cutScrubFrames = 0;                 // parsed CDP frames whose walk hit scrubWalkBudgetMs and redacted remaining strings
   let droppedObserved = 0;                // non-credential network observations evicted by trimObserved's age/count bound (r9 MINOR 4)
+  const credBodyRoads = { preRead: 0, stream: 0, getResponseBody: 0, statusEmpty: 0 };
+  let lastCredBodyRoad = null;
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
   const told = new Map();          // browserKey → Set(answered id) — a note is told once
@@ -3452,7 +3454,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!expired) {
           if (o.isWrite && !o.isPing && o.unreadableBody) an.droppedUnreadableWriteSeq = Math.max(an.droppedUnreadableWriteSeq || 0, o.seq || 0);
           if (o.sameOrigin && o.beaconUnreadable) an.droppedSameBeaconSeq = Math.max(an.droppedSameBeaconSeq || 0, o.seq || 0);
-          if (o.respUnreadable) an.droppedRespUnreadableSeq = Math.max(an.droppedRespUnreadableSeq || 0, o.seq || 0);
+          if (o.respUnreadable && (o.seq || 0) >= (an.droppedRespUnreadableSeq || 0)) {
+            an.droppedRespUnreadableSeq = o.seq || 0;
+            an.droppedRespReason = o.respReason || BL().ANSWER_LARGE_BOUND;
+          }
           if (o.sameOrigin && (o.isWrite || o.hasAuthHeader)) an.droppedSameWriteSeq = Math.max(an.droppedSameWriteSeq || 0, o.seq || 0);
         }
       }
@@ -3466,36 +3471,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
   }
   function isJsonErrorBody(raw) {
-    if (typeof raw !== 'string') return false;
-    const s = raw.trim();
-    if (!s || (s[0] !== '{' && s[0] !== '[')) return false;
-    let obj;
-    try { obj = JSON.parse(s); } catch { return false; }
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
-    if (obj.ok === false || obj.success === false || obj.authenticated === false || obj.valid === false) return true;
-    if (obj.error !== undefined && obj.error !== null && obj.error !== false && obj.error !== '') return true;
-    if (Array.isArray(obj.errors) && obj.errors.length > 0) return true;
-    if (obj.errors && typeof obj.errors === 'object' && !Array.isArray(obj.errors) && Object.keys(obj.errors).length > 0) return true;
-    if (typeof obj.status === 'number' && obj.status >= 400) return true;
-    if (typeof obj.status === 'string' && /^(?:error|fail|failed|invalid|denied|rejected)$/i.test(obj.status.trim())) return true;
-    if (typeof obj.code === 'number' && obj.code >= 400) return true;
-    return false;
+    return BL().isJsonErrorBody(raw);
   }
-  function judgeCredResponseBody(raw, respMime = '', { sawBodyBytes = false } = {}) {
-    if (typeof raw !== 'string') return { complete: false, errBody: false };
-    const mime = String(respMime || '').trim().toLowerCase();
-    const isJsonMime = Boolean(mime && /json/i.test(mime));
-    const isExplicitNonJson = Boolean(mime && !isJsonMime);
-    const s = raw.trim();
-    if (!s) {
-      if (!isJsonMime && !sawBodyBytes) return { complete: true, errBody: false };
-      return { complete: false, errBody: false };
-    }
-    if (!isExplicitNonJson || s[0] === '{' || s[0] === '[') {
-      try { JSON.parse(s); } catch { return { complete: false, errBody: false }; }
-      return { complete: true, errBody: isJsonErrorBody(s) };
-    }
-    return { complete: true, errBody: false };
+  function judgeCredResponseBody(raw, respMime = '', opts = {}) {
+    return BL().judgeCredResponseBody(raw, respMime, { ...opts, isErrorFn: isJsonErrorBody });
   }
   function markReqCredential(e, rq, bodyText, watchOrigin = null) {
     if (!e || !rq || !bodyText) return;
@@ -3572,10 +3551,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     return null;
   }
-  function answerLargeReasonFromNet(an, markSeq) {
+  function answerReasonFromNet(an, markSeq) {
     if (!an || !Array.isArray(an.observed)) return null;
     const m = Number(markSeq) || 0;
-    return (an.observed.some((o) => o && o.seq > m && o.respUnreadable) || (an.droppedRespUnreadableSeq || 0) > m) ? BL().ANSWER_LARGE_BOUND : null;
+    for (let i = an.observed.length - 1; i >= 0; i--) {
+      const o = an.observed[i];
+      if (o && o.seq > m && o.respUnreadable) {
+        return BL().pendingReasonOf(o.respReason) || BL().ANSWER_LARGE_BOUND;
+      }
+    }
+    if ((an.droppedRespUnreadableSeq || 0) > m) {
+      return BL().pendingReasonOf(an.droppedRespReason) || BL().ANSWER_LARGE_BOUND;
+    }
+    return null;
   }
   function otherCredOriginsForNet(an, markSeq) {
     if (!an || !Array.isArray(an.observed)) return [];
@@ -3863,6 +3851,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         }
       }
     }
+    if (rq.respContentLength !== null && rq.respContentLength > 1048576) {
+      rq.streamOverflow = true;
+      rq.streamPrefix = null;
+      if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
+    }
   }
   function armCredStreamIfNeeded(w, e, rid, rq, watchOrigin) {
     if (!w || w.state !== 'open' || !e || !e.sid || !e.awaitingCredPreRead || !rid || !rq || rq.streamArmed || rq.streamDead) return;
@@ -3884,8 +3877,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         rq.streamTailBytes = 0;
         return;
       }
+      if (typeof ans.result.bufferedData !== 'string') {
+        rq.streamArmed = false;
+        return;
+      }
       rq.streamAnsLanded = true;
-      if (typeof ans.result.bufferedData === 'string' && ans.result.bufferedData.length > 0) {
+      if (ans.result.bufferedData.length > 0) {
         const b = Buffer.from(ans.result.bufferedData, 'base64');
         if (b.length > 0) rq.sawBodyBytes = true;
         rq.streamPrefixBytes = b.length;
@@ -4233,83 +4230,162 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const rq = rid ? an.reqs.get(rid) : null;
       if (rid) an.reqs.delete(rid);
       const finEncodedLen = Number.isFinite(Number(p && p.encodedDataLength)) && Number(p.encodedDataLength) >= 0 ? Number(p.encodedDataLength) : null;
-      if (rq && finEncodedLen !== null && finEncodedLen > (rq.respHeaderEncodedBytes || 0)) rq.sawBodyBytes = true;
       if (isCredCandidateReq(rq) && rq.type !== 'Document' && rq.status >= 200 && rq.status < 300 && watchOrigin && rq.origin === watchOrigin) {
         const finP = (async () => {
           if (rq.postDataP) await rq.postDataP;
           if (!rq.carriesCred && !rq.carriesPending) return;
           if (rq.streamInitP) await rq.streamInitP;
           let bodyRead = rq.status === 204 || rq.status === 205;
+          if (bodyRead) {
+            credBodyRoads.statusEmpty++;
+            lastCredBodyRoad = 'statusEmpty';
+          }
           let errBody = false;
           const preRb = !bodyRead ? takePreReadBody(an, rid) : null;
           if (preRb && typeof preRb.body === 'string') {
-            const preBuf = preRb.base64Encoded ? Buffer.from(preRb.body, 'base64') : Buffer.from(preRb.body, 'utf8');
-            const preLenOk = rq.respContentLength === null || rq.respHasContentEncoding || (rq.respContentLength >= 0 && preBuf.length === rq.respContentLength);
-            if (preLenOk) {
-              const rawBody = preBuf.toString('utf8');
-              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || preBuf.length > 0 });
+            if (preRb.base64Encoded) {
+              const preBuf = Buffer.from(preRb.body, 'base64');
+              const preLenOk = rq.respContentLength === null || rq.respHasContentEncoding || (rq.respContentLength >= 0 && preBuf.length === rq.respContentLength);
+              if (preLenOk) {
+                const rawBody = preBuf.toString('utf8');
+                const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || preBuf.length > 0, expectedBytes: preBuf.length });
+                if (verdict.complete) {
+                  bodyRead = true;
+                  errBody = verdict.errBody;
+                  credBodyRoads.preRead++;
+                  lastCredBodyRoad = 'preRead';
+                } else {
+                  rq.streamIncomplete = true;
+                  rq.respReason = verdict.reason;
+                }
+              } else {
+                rq.streamIncomplete = true;
+                rq.respReason = BL().answerIncompleteReason(preBuf.length, rq.respContentLength);
+              }
+            } else {
+              const rawBody = preRb.body;
+              const nonZeroExpected = (!rq.respHasContentEncoding && rq.respContentLength !== null && rq.respContentLength > 0) ? rq.respContentLength : 0;
+              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || rawBody.length > 0, expectedBytes: nonZeroExpected });
               if (verdict.complete) {
                 bodyRead = true;
                 errBody = verdict.errBody;
+                credBodyRoads.preRead++;
+                lastCredBodyRoad = 'preRead';
               } else {
                 rq.streamIncomplete = true;
+                rq.respReason = verdict.reason;
               }
-            } else {
-              rq.streamIncomplete = true;
             }
           }
           const expectedDecodedBytes = Math.max(rq.streamPrefixBytes || 0, rq.unstreamedDataBytes || 0) + (rq.streamedExpectedBytes || 0);
           const assembledBytes = (rq.streamPrefixBytes || 0) + (rq.streamTailBytes || 0);
-          if (!bodyRead && rq.streamArmed && !rq.streamDead && !rq.streamOverflow && !rq.streamIncomplete && rq.streamAnsLanded && (assembledBytes > 0 || expectedDecodedBytes > 0 || rq.sawBodyBytes)) {
+          const declaredIdentityNonZero = !rq.respHasContentEncoding && rq.respContentLength !== null && rq.respContentLength > 0;
+          if (!bodyRead && ((rq.respContentLength !== null && rq.respContentLength > 1048576) || expectedDecodedBytes > 1048576 || (finEncodedLen !== null && finEncodedLen > 1048576))) {
+            rq.streamOverflow = true;
+          }
+          if (!bodyRead && rq.streamArmed && !rq.streamDead && !rq.streamOverflow && !rq.streamIncomplete && rq.streamAnsLanded && (assembledBytes > 0 || expectedDecodedBytes > 0 || declaredIdentityNonZero)) {
+            let gotBytes = assembledBytes;
+            let wantBytes = expectedDecodedBytes > 0 ? expectedDecodedBytes : (declaredIdentityNonZero ? rq.respContentLength : 0);
             let byteComplete = assembledBytes > 0
               && (rq.streamPrefixBytes || 0) >= (rq.unstreamedDataBytes || 0)
               && (rq.streamTailBytes || 0) === (rq.streamedExpectedBytes || 0)
               && assembledBytes === expectedDecodedBytes;
             if (byteComplete && !rq.respHasContentEncoding && rq.respContentLength !== null) {
               byteComplete = rq.respContentLength >= 0 && assembledBytes === rq.respContentLength;
+              if (!byteComplete) wantBytes = rq.respContentLength;
             }
             if (byteComplete && !rq.respHasContentEncoding && finEncodedLen !== null && finEncodedLen > 0) {
               byteComplete = finEncodedLen >= assembledBytes;
+              if (!byteComplete) wantBytes = finEncodedLen;
             }
             if (byteComplete && rq.respHasContentEncoding && rq.respContentLength !== null && finEncodedLen !== null && finEncodedLen > 0) {
               byteComplete = rq.respContentLength >= 0 && finEncodedLen >= rq.respContentLength;
+              if (!byteComplete) { gotBytes = finEncodedLen; wantBytes = rq.respContentLength; }
             }
             if (byteComplete && !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0) {
               byteComplete = assembledBytes === finEncodedLen;
+              if (!byteComplete) wantBytes = finEncodedLen;
             }
             if (byteComplete) {
               const parts = rq.streamPrefix
                 ? [rq.streamPrefix, ...(rq.streamTailChunks || [])]
                 : [...(rq.streamTailChunks || [])];
               const rawBody = Buffer.concat(parts).toString('utf8');
-              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: true });
+              const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: true, expectedBytes: assembledBytes });
               if (verdict.complete) {
                 bodyRead = true;
                 errBody = verdict.errBody;
+                credBodyRoads.stream++;
+                lastCredBodyRoad = 'stream';
               } else {
                 rq.streamIncomplete = true;
+                rq.respReason = verdict.reason;
               }
             } else {
               rq.streamIncomplete = true;
+              rq.respReason = BL().answerIncompleteReason(gotBytes, wantBytes);
+            }
+          }
+          const headerlessNonZeroFin = !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0;
+          if (!bodyRead && rq.streamArmed && !rq.streamDead && !rq.streamOverflow && !rq.streamIncomplete && rq.streamAnsLanded && assembledBytes === 0 && expectedDecodedBytes === 0 && !declaredIdentityNonZero && !headerlessNonZeroFin) {
+            if (!rq.sawBodyBytes) {
+              const verdict = judgeCredResponseBody('', rq.respMime, { sawBodyBytes: false, expectedBytes: 0 });
+              if (verdict.complete) {
+                bodyRead = true;
+                errBody = verdict.errBody;
+                credBodyRoads.stream++;
+                lastCredBodyRoad = 'stream';
+              } else {
+                rq.streamIncomplete = true;
+                rq.respReason = verdict.reason;
+              }
+            } else {
+              rq.streamIncomplete = true;
+              rq.respReason = BL().ANSWER_EMPTY_BOUND;
             }
           }
           if (!bodyRead && !rq.streamOverflow && !rq.streamIncomplete && w.state === 'open' && e.sid) {
             const rb = await call(w, 'Network.getResponseBody', { requestId: rid }, e.sid, 1000).catch(() => null);
             if (rb && !rb.timeout && !rb.error && rb.result && typeof rb.result.body === 'string') {
-              const rbBuf = rb.result.base64Encoded ? Buffer.from(rb.result.body, 'base64') : Buffer.from(rb.result.body, 'utf8');
-              let rbByteOk = expectedDecodedBytes === 0 || rbBuf.length >= expectedDecodedBytes;
-              if (rbByteOk && !rq.respHasContentEncoding && rq.respContentLength !== null) {
-                rbByteOk = rq.respContentLength >= 0 && rbBuf.length === rq.respContentLength;
-              }
-              if (rbByteOk && !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0) {
-                rbByteOk = rbBuf.length === finEncodedLen;
-              }
-              if (rbByteOk) {
-                const rawBody = rbBuf.toString('utf8');
-                const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes });
+              if (rb.result.base64Encoded) {
+                const rbBuf = Buffer.from(rb.result.body, 'base64');
+                let rbByteOk = expectedDecodedBytes === 0 || rbBuf.length >= expectedDecodedBytes;
+                let rbWant = expectedDecodedBytes;
+                if (rbByteOk && !rq.respHasContentEncoding && rq.respContentLength !== null) {
+                  rbByteOk = rq.respContentLength >= 0 && rbBuf.length === rq.respContentLength;
+                  if (!rbByteOk) rbWant = rq.respContentLength;
+                }
+                if (rbByteOk && !rq.respFromServiceWorker && (rq.respHeaderEncodedBytes || 0) === 0 && finEncodedLen !== null && finEncodedLen > 0) {
+                  rbByteOk = rbBuf.length === finEncodedLen;
+                  if (!rbByteOk) rbWant = finEncodedLen;
+                }
+                if (rbByteOk) {
+                  const rawBody = rbBuf.toString('utf8');
+                  const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || rbBuf.length > 0, expectedBytes: rbBuf.length });
+                  if (verdict.complete) {
+                    bodyRead = true;
+                    errBody = verdict.errBody;
+                    credBodyRoads.getResponseBody++;
+                    lastCredBodyRoad = 'getResponseBody';
+                  } else {
+                    rq.respReason = verdict.reason;
+                  }
+                } else {
+                  rq.respReason = BL().answerIncompleteReason(rbBuf.length, rbWant);
+                }
+              } else {
+                const rawBody = rb.result.body;
+                const nonZeroExpected = (!rq.respHasContentEncoding && rq.respContentLength !== null && rq.respContentLength > 0)
+                  ? rq.respContentLength
+                  : (expectedDecodedBytes > 0 ? expectedDecodedBytes : 0);
+                const verdict = judgeCredResponseBody(rawBody, rq.respMime, { sawBodyBytes: rq.sawBodyBytes || rawBody.length > 0, expectedBytes: nonZeroExpected });
                 if (verdict.complete) {
                   bodyRead = true;
                   errBody = verdict.errBody;
+                  credBodyRoads.getResponseBody++;
+                  lastCredBodyRoad = 'getResponseBody';
+                } else {
+                  rq.respReason = verdict.reason;
                 }
               }
             }
@@ -4321,13 +4397,24 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             syncLoginFetchIntercept(w, e);
           }
           if (!bodyRead) {
+            const failWhy = rq.respReason
+              || ((rq.streamOverflow || (rq.respContentLength !== null && rq.respContentLength > 1048576) || (finEncodedLen !== null && finEncodedLen > 1048576)) ? BL().ANSWER_LARGE_BOUND : null)
+              || (rq.streamDead ? BL().ANSWER_STREAM_ENDED_BOUND : null)
+              || (declaredIdentityNonZero ? BL().answerIncompleteReason(0, rq.respContentLength) : null)
+              || (expectedDecodedBytes > 0 ? BL().answerIncompleteReason(0, expectedDecodedBytes) : null)
+              || (headerlessNonZeroFin ? BL().answerIncompleteReason(0, finEncodedLen) : null)
+              || BL().ANSWER_LARGE_BOUND;
             if (rq.obs) {
               rq.obs.respUnreadable = true;
+              rq.obs.respReason = failWhy;
               if (Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {
                 an.observed.push(rq.obs);
               }
               an.nonCredSinceTrim = (an.nonCredSinceTrim || 0) + 1;
               trimObserved(w, an);
+            }
+            if (rq.carriesPending && e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && logins && typeof logins.notePendingReason === 'function') {
+              logins.notePendingReason(e.pendingLoginConfirm.name, failWhy, { notify: true, profileId: w.profileId, conversation: e.pendingLoginConfirm.actor || '' });
             }
             an.seq++;
             an.failCredSeq = an.seq;
@@ -4365,6 +4452,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (Array.isArray(rq.streamTailChunks)) rq.streamTailChunks.length = 0;
       }
       if (isCredCandidateReq(rq) && watchOrigin && rq.origin === watchOrigin && (rq.carriesCred || rq.carriesPending)) {
+        if (rq.obs) {
+          rq.obs.respUnreadable = true;
+          rq.obs.respReason = BL().ANSWER_STREAM_ENDED_BOUND;
+          if (Array.isArray(an.observed) && !an.observed.includes(rq.obs)) {
+            an.observed.push(rq.obs);
+          }
+          an.nonCredSinceTrim = (an.nonCredSinceTrim || 0) + 1;
+          trimObserved(w, an);
+        }
+        if (rq.carriesPending && e.pendingLoginConfirm && !e.pendingLoginConfirm.confirmed && logins && typeof logins.notePendingReason === 'function') {
+          logins.notePendingReason(e.pendingLoginConfirm.name, BL().ANSWER_STREAM_ENDED_BOUND, { notify: true, profileId: w.profileId, conversation: e.pendingLoginConfirm.actor || '' });
+        }
         an.seq++; an.failCredSeq = an.seq;
       }
       wakeSubmitWaiters(e);
@@ -4425,8 +4524,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             recordObservedCredOrigins(pc.name, an, markRef, { clearCleanBeacon: true });
           } else {
             recordObservedCredOrigins(pc.name, an, markRef);
-            const pWhy = answerLargeReasonFromNet(an, markRef) || pendingReasonFromNet(an, markRef);
-            if (pWhy && logins && typeof logins.notePendingReason === 'function') logins.notePendingReason(pc.name, pWhy);
+            const ansWhy = answerReasonFromNet(an, markRef);
+            const pWhy = ansWhy || pendingReasonFromNet(an, markRef);
+            if (pWhy && logins && typeof logins.notePendingReason === 'function') {
+              logins.notePendingReason(pc.name, pWhy, { notify: Boolean(ansWhy), profileId: w.profileId, conversation: pc.actor || '' });
+            }
             if (e.pendingLoginConfirm === pc) {
               e.pendingLoginConfirm = null;
               if (!e.liveFill || e.liveFill.holdReason) e.awaitingCredPreRead = false;
@@ -4656,8 +4758,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const an = e && e.authNet;
         const credAny = !!(an && ((an.credSentSeq || 0) > subNetMark || (an.credAnyOriginSeq || 0) > subNetMark));
         const unloaded = !!(sawChromeSub && (e.navSeq || 0) > subNavSeq0);
+        const ansWhy = pc && !pc.confirmed ? answerReasonFromNet(an, subNetMark) : null;
         const pWhy = pc && !pc.confirmed
-          ? pendingReasonFromNet(an, subNetMark)
+          ? (ansWhy || pendingReasonFromNet(an, subNetMark))
           : null;
         if (pc && !pc.confirmed && pWhy) {
           subState = 'unknown';
@@ -4673,14 +4776,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     if (!loginSinks(w) && submit && pc && !pc.confirmed && logins && typeof logins.notePendingReason === 'function') {
       const an = e && e.authNet;
-      const rowWhy = answerLargeReasonFromNet(an, subNetMark) || pendingReasonFromNet(an, subNetMark);
-      if (rowWhy) logins.notePendingReason(pc.name, rowWhy);
+      const ansWhy = answerReasonFromNet(an, subNetMark);
+      const rowWhy = ansWhy || pendingReasonFromNet(an, subNetMark);
+      if (rowWhy) logins.notePendingReason(pc.name, rowWhy, { notify: Boolean(ansWhy), profileId: w.profileId, conversation: actor || '' });
     }
     return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: subState, ...(subReason ? { submittedReason: subReason } : {}), receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}), ...(plan.usedPassword ? { usedPassword: plan.usedPassword } : {}) };
   }
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
   function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }
-  function loginFenceStats() { return { unparseableScrubFrames, oversizeScrubFrames, cutScrubFrames, droppedObserved, fenceAuditLines: [...fenceAuditLines] }; }
+  function loginFenceStats() { return { unparseableScrubFrames, oversizeScrubFrames, cutScrubFrames, droppedObserved, credBodyRoads: { ...credBodyRoads }, lastCredBodyRoad, fenceAuditLines: [...fenceAuditLines] }; }
 
   // the keeper's own lease seam: a browser that starts again or stops starts a fresh watch and a fresh verdict
   let unsubLease = null, unsubVaultOpen = null, unsubVaultLock = null, unsubFenceRefSource = null, disposed = false;

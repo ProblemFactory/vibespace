@@ -1606,6 +1606,7 @@ try {
                 const uName = `r12-${enc}-${verdict}-${rep}@example.test`;
                 const entryName = `web-login:${r11Origin}#${uName}`;
                 await run(['open', `${r11Origin}/signup-stream?enc=${enc}&verdict=${verdict}&rep=${rep}`]);
+                const roads0 = w.dialogs.loginFenceStats().credBodyRoads || { preRead: 0, stream: 0, getResponseBody: 0 };
                 const rSub = await run(['login', r11Origin, '--new-user', uName, '--generate', '--submit']);
                 const g0 = w.eng.secretGet(entryName);
                 const rec0 = g0 && g0.value ? BL.recordOf(g0.value.toString('utf8')) : null;
@@ -1619,22 +1620,31 @@ try {
                 } else {
                   await sleep(200); // > checkSpaFinish 60 ms window: rejected stream body must keep pending:'register'
                 }
+                const st1 = w.dialogs.loginFenceStats();
+                const roads1 = st1.credBodyRoads || { preRead: 0, stream: 0, getResponseBody: 0 };
+                const roadDeltas = {
+                  stream: (roads1.stream || 0) - (roads0.stream || 0),
+                  getResponseBody: (roads1.getResponseBody || 0) - (roads0.getResponseBody || 0),
+                  preRead: (roads1.preRead || 0) - (roads0.preRead || 0),
+                };
+                const lastRoad = st1.lastCredBodyRoad;
                 const gEnd = w.eng.secretGet(entryName);
                 const recEnd = gEnd && gEnd.value ? BL.recordOf(gEnd.value.toString('utf8')) : null;
                 await run(['open', `${r11Origin}/plain`]);
-                return { code: rSub.code, pending: (recEnd && recEnd.pending) || null };
+                return { code: rSub.code, pending: (recEnd && recEnd.pending) || null, roadDeltas, lastRoad };
               };
               const cRej = await runCredStreamCase('chunked', 'reject');
               const cAcc = await runCredStreamCase('chunked', 'accept');
               const gRej = await runCredStreamCase('gzip', 'reject');
               const gAcc = await runCredStreamCase('gzip', 'accept');
+              const viaStreamOnly = (x) => Boolean(x && x.roadDeltas && x.roadDeltas.stream === 1 && x.roadDeltas.getResponseBody === 0 && x.roadDeltas.preRead === 0 && x.lastRoad === 'stream');
               ok(Boolean(
-                cRej.code === 0 && cRej.pending === 'register' &&
-                cAcc.code === 0 && cAcc.pending === null &&
-                gRej.code === 0 && gRej.pending === 'register' &&
-                gAcc.code === 0 && gAcc.pending === null &&
+                cRej.code === 0 && cRej.pending === 'register' && viaStreamOnly(cRej) &&
+                cAcc.code === 0 && cAcc.pending === null && viaStreamOnly(cAcc) &&
+                gRej.code === 0 && gRej.pending === 'register' && viaStreamOnly(gRej) &&
+                gAcc.code === 0 && gAcc.pending === null && viaStreamOnly(gAcc) &&
                 streamCredReqCount >= rep * 4
-              ), `r12 MAJOR §7v.${rep}/2 (real Chrome streamResourceContent + dataReceived credential road): two-flush chunked & gzip JSON answers reject error bodies (pending kept) and confirm ok bodies`, {
+              ), `r12+r13 MAJOR §7v.${rep}/2 (real Chrome streamResourceContent + dataReceived credential road): two-flush chunked & gzip JSON answers read via stream road (0 getResponseBody / preRead fallback), rejecting error bodies and confirming ok bodies`, {
                 rep, cRej, cAcc, gRej, gAcc, streamCredReqCount,
               });
             }

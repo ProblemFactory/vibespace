@@ -45,10 +45,19 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
   if (!vault) throw new TypeError('browser-logins: a vault is required');
   const store = () => { const g = typeof grants === 'function' ? grants() : grants; return g || require('./grants-store.js').store(); };
   const cards = new Map();   // card id → {id, name, origin, username, password, existing, at, item, timer} — a person's own submission only
+  const pendingNotices = new Map(); // entry name → {id, reason} — ONE For-you notice per unverified pending submission, resolved on confirm / drop
   const held = [];           // submissions that met a locked vault: [{name, origin, username, password, by, conv, convName, profileId, at}]
   const typedAt = new Map(); // origin → the instants its NEW agent-typed logins were saved (the flood guard)
   const vstate = () => { try { return vault.state(); } catch { return 'locked'; } };
   const say = (m) => { try { log(m); } catch { /* the journal's own failure */ } };
+  function resolvePendingNotice(name) {
+    const prev = pendingNotices.get(str(name));
+    if (!prev) return;
+    pendingNotices.delete(str(name));
+    if (prev.id && forYou && typeof forYou.resolve === 'function') {
+      try { forYou.resolve(prev.id); } catch { /* the tray's own failure */ }
+    }
+  }
 
   /** The vault's web-login NAMES → [{name, origin, user, at, source, actor, owner, pending, pendingReason?, lastFilledPassword?}] (no entry is opened). */
   function names() {
@@ -148,6 +157,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       const rec = BL.newRecord({ origin: v.origin, username: str(newUser).trim(), password: g.password, source: 'vault-minted', now: now(), conversation: actor || conv, pending: 'register' });
       const w = writeEntry(v.name, rec, { actor: actor || conv });   // SEALED FIRST — the kernel sees no byte the vault could not keep
       if (!w.ok) { if (w.code === 'vault_locked') blocked(actor, v.origin); return named(w.code === 'vault_locked' ? 'vault_locked' : 'not_written', w.code === 'vault_locked' ? 'the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered (do not ask them to)' : `the new login could not be saved (${w.error}) — nothing was filled, so no account is made with a password nobody keeps`); }
+      resolvePendingNotice(v.name);
       const { values, filled } = BL.valuesOf(v, { username: rec.username, newPassword: g.password });
       return { ...base, values, filled, length: g.length };
     }
@@ -157,6 +167,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const next = BL.changedRecord(o.rec, g.password, { now: now(), conversation: actor || conv });
     const w = writeEntry(v.name, next, { actor: (meta && meta.actor) || actor || conv, owner: (meta && meta.owner) || null });
     if (!w.ok) return named(w.code === 'vault_locked' ? 'vault_locked' : 'not_written', `the new password could not be saved (${w.error}) — nothing was filled`);
+    resolvePendingNotice(v.name);
     const { values, filled } = BL.valuesOf(v, { username: o.rec.username, password: o.rec.password, newPassword: g.password });
     return { ...base, values, filled, length: g.length };
   }
@@ -176,8 +187,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return use(plan.name, { conv, actor, outcome, purpose: plan.purpose });
   }
 
-  function notice(state, { origin, username, conversation, profileId }) {
-    const w = BL.noticeWords(state, { origin, username, conversation });
+  function notice(state, { origin, username, conversation, profileId, reason = '' }) {
+    const w = BL.noticeWords(state, { origin, username, conversation, reason });
     if (!w || !forYou || typeof forYou.add !== 'function') return null;
     try { return forYou.add(profileId, { origin: 'browser', kind: 'notice', urgency: 'normal', text: w.text, detail: w.detail, i18n: w.i18n }); } catch (e) { say(`[browser-login] the notice was not filed — ${e && e.message}`); return null; }
   }
@@ -219,6 +230,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const meta = names().find((x) => x.name === n) || null;
     const w = writeEntry(n, next, { actor: convName || conv || (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) { say(`[browser-login] ${n}: the submission was not saved — ${w.error}`); return { state: 'none', name: n, why: w.code }; }
+    if (!next.pending) resolvePendingNotice(n);
     const fy = notice(v.state, { origin: o, username: next.username, conversation: convName || '', profileId });
     return { state: v.state, name: n, ...(v.confirm ? { confirm: true } : {}), notice: fy };
   }
@@ -278,6 +290,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const meta = !pwChanged ? (names().find((x) => x.name === c.name) || null) : null;
     const w = writeEntry(c.name, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) return w;
+    resolvePendingNotice(c.name);
     dropCard(c.id);
     return { ok: true, saved: true, name: c.name, updated: !!ex.rec };
   }
@@ -316,6 +329,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const meta = !pwChanged ? (names().find((x) => x.name === n) || null) : null;
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) return w;
+    resolvePendingNotice(n);
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, updated: !!ex.rec };
   }
@@ -333,21 +347,43 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const meta = names().find((x) => x.name === n) || null;
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) return w;
+    resolvePendingNotice(n);
     try { vault.audit?.('vault-web-login-confirmed', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, confirmed: true };
   }
-  /** Stamp the unverified-submission bound on a still-pending entry so the Vault window row explains why it stayed pending. */
-  function notePendingReason(name, reason) {
+  /** Stamp the unverified-submission bound on a still-pending entry so the Vault window row (and, when `notify` is true, ONE For-you line) explains why it stayed pending. */
+  function notePendingReason(name, reason, { notify = false, profileId = null, conversation = '' } = {}) {
     const n = str(name);
     const pr = BL.pendingReasonOf(reason);
     if (!BL.parseName(n) || !pr) return { ok: false, code: 'bad_reason' };
     const ex = open(n);
     if (!ex.ok || !ex.rec || !ex.rec.pending) return { ok: false, code: (ex && ex.code) || 'not_pending' };
-    if (ex.rec.pendingReason === pr) return { ok: true, name: n, pendingReason: pr };
-    const rec = BL.recordOf({ ...ex.rec, pendingReason: pr });
-    const meta = names().find((x) => x.name === n) || null;
-    const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
-    return w && w.ok ? { ok: true, name: n, pendingReason: pr } : { ok: false, code: (w && w.code) || 'not_written' };
+    if (ex.rec.pendingReason !== pr) {
+      const rec = BL.recordOf({ ...ex.rec, pendingReason: pr });
+      const meta = names().find((x) => x.name === n) || null;
+      const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
+      if (!w || !w.ok) return { ok: false, code: (w && w.code) || 'not_written' };
+    }
+    let fyId = null;
+    if (notify) {
+      const prev = pendingNotices.get(n);
+      if (prev && prev.reason === pr) {
+        fyId = prev.id;
+      } else {
+        if (prev) resolvePendingNotice(n);
+        const state = ex.rec.pending === 'change' ? 'pending-change' : 'pending-register';
+        const conv = str(conversation) || (ex.rec.createdIn && ex.rec.createdIn.conversation) || '';
+        fyId = notice(state, { origin: ex.rec.origin, username: ex.rec.username, conversation: conv, profileId, reason: pr });
+        if (fyId) {
+          if (pendingNotices.size >= 64) {
+            const oldest = pendingNotices.keys().next().value;
+            if (oldest) pendingNotices.delete(oldest);
+          }
+          pendingNotices.set(n, { id: fyId, reason: pr });
+        }
+      }
+    }
+    return { ok: true, name: n, pendingReason: pr, ...(fyId ? { notice: fyId } : {}) };
   }
   /** Record a cross-origin destination that CARRIED the credential as a fact on the entry (`rec.origins`), never as a pendingReason. */
   function noteCredentialOrigin(name, destOrigin) {
@@ -421,6 +457,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     if (!p) return named('not_found', 'no such web login');
     const r = vault.secretDrop(name);
     if (r && r.ok === false) return named(r.code || 'not_written', r.error || 'not removed');
+    resolvePendingNotice(name);
     try { const g = store(); if (g && g.rowsFor(BL.DOOR, `${p.origin}#${p.user}`).length) g.remove(BL.DOOR, `${p.origin}#${p.user}`, 'user'); } catch (e) { say(`[browser-login] ${name}: its grant row was not removed — ${e && e.message}`); }
     try { vault.audit?.('vault-web-login-removed', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name };

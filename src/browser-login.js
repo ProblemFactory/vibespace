@@ -34,9 +34,9 @@
  *   · THE WORDS — the agent's (loginText: origins, user names and closed words — never a value, never a page's own text) and
  *     the owner's notice (noticeWords: i18n keys + params).
  *
- * Gate: scripts/test-browser-login.mjs (fast — every row here + the fake kernel's credentialFormDetected → fillCredential →
- * credentialSubmitted leg; the standard-Chrome stub's refusal with its CDP calls counted) + scripts/test-vault-login-chrome.mjs
- * (heavy — real Chrome: refused by name, 0 vault reads, nothing typed).
+ * Gate: scripts/test-browser-login.mjs (fast — PURE model, scrubber, body judge and stub-DOM fence rows) +
+ * scripts/test-browser-login-kernel.mjs (heavy — fake-kernel integration, stream road, re-arm roads, external mutants) +
+ * scripts/test-vault-login-chrome.mjs (heavy — real Chrome).
  */
 const GM = require('./grant-model.js');
 
@@ -59,6 +59,10 @@ const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owne
 const READABLE_BOUND = 'the site\'s request did not carry the password in a readable form';
 const BODY_LARGE_BOUND = 'the request body was too large to read';
 const ANSWER_LARGE_BOUND = 'the site\'s answer was too large to read';
+const ANSWER_STREAM_ENDED_BOUND = 'the stream ended before the answer';
+const ANSWER_NOT_JSON_BOUND = 'the site\'s answer was not valid JSON';
+const ANSWER_EMPTY_BOUND = 'the site\'s answer was empty';
+const ANSWER_INCOMPLETE_RE = /^the site's answer was incomplete \((\d{1,10}) of (\d{1,10}) bytes\)$/;
 const BEACON_UNREADABLE_BOUND = 'a beacon could not be read';
 const HOLD_TOO_MUCH_TEXT = 'too much text to check';
 const HOLD_VAULT_LOCKED = 'the vault was locked while the fill was live';
@@ -122,10 +126,84 @@ const resourceOk = (r) => GM.resourceShapeOk(DOOR, r);
 function scopeOf(resource) { const r = str(resource); if (r === '*') return 'any-site'; if (/#\*$/.test(r)) return 'any-account'; return resourceOk(r) ? 'this-account' : null; }
 
 // ── the record ─────────────────────────────────────────────────────────────
+function answerIncompleteReason(got, total) {
+  const g = Number.isFinite(Number(got)) && Number(got) >= 0 ? Math.floor(Number(got)) : 0;
+  const t = Number.isFinite(Number(total)) && Number(total) >= 0 ? Math.floor(Number(total)) : 0;
+  return `the site's answer was incomplete (${g} of ${t} bytes)`;
+}
+function parseAnswerIncomplete(raw) {
+  const m = ANSWER_INCOMPLETE_RE.exec(str(raw).trim());
+  return m ? { got: Number(m[1]), total: Number(m[2]) } : null;
+}
 function pendingReasonOf(raw) {
   const s = str(raw).trim();
-  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND || s === ANSWER_LARGE_BOUND || s === BEACON_UNREADABLE_BOUND) return s;
+  if (
+    s === READABLE_BOUND
+    || s === BODY_LARGE_BOUND
+    || s === ANSWER_LARGE_BOUND
+    || s === ANSWER_STREAM_ENDED_BOUND
+    || s === ANSWER_NOT_JSON_BOUND
+    || s === ANSWER_EMPTY_BOUND
+    || s === BEACON_UNREADABLE_BOUND
+  ) return s;
+  if (ANSWER_INCOMPLETE_RE.test(s)) return s;
   return null;
+}
+function stripUtf8Bom(raw) {
+  if (typeof raw !== 'string' || !raw) return '';
+  return raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+}
+function isJsonErrorBody(raw) {
+  if (typeof raw !== 'string') return false;
+  const s = stripUtf8Bom(raw).trim();
+  if (!s || (s[0] !== '{' && s[0] !== '[')) return false;
+  let obj;
+  try { obj = JSON.parse(s); } catch { return false; }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  if (obj.ok === false || obj.success === false || obj.authenticated === false || obj.valid === false) return true;
+  if (obj.error !== undefined && obj.error !== null && obj.error !== false && obj.error !== '') return true;
+  if (Array.isArray(obj.errors) && obj.errors.length > 0) return true;
+  if (obj.errors && typeof obj.errors === 'object' && !Array.isArray(obj.errors) && Object.keys(obj.errors).length > 0) return true;
+  if (typeof obj.status === 'number' && obj.status >= 400) return true;
+  if (typeof obj.status === 'string' && /^(?:error|fail|failed|invalid|denied|rejected)$/i.test(obj.status.trim())) return true;
+  if (typeof obj.code === 'number' && obj.code >= 400) return true;
+  return false;
+}
+function claimsJsonMime(respMime) {
+  const m = str(respMime).trim().toLowerCase().split(';')[0].trim();
+  if (!m) return false;
+  return m === 'application/json' || /\/json$|\+json$/.test(m);
+}
+/** Judge a byte-complete 2xx credential response body (r13 MAJOR 1 + MINOR 1 + MINOR 2):
+ *  completeness is byte-based (an empty 0-byte body is complete); JSON-ness decides error-vs-ok when the body parses as JSON;
+ *  fail closed ONLY when a body that claims JSON (`application/json` / `*+json`) has bytes that are blank (`empty`) or do not parse (`not valid JSON`). */
+function judgeCredResponseBody(raw, respMime = '', { sawBodyBytes = false, expectedBytes = null, isErrorFn = isJsonErrorBody } = {}) {
+  if (typeof raw !== 'string') return { complete: false, errBody: false, reason: ANSWER_EMPTY_BOUND };
+  const claimsJson = claimsJsonMime(respMime);
+  const s = stripUtf8Bom(raw).trim();
+  if (!s) {
+    const expNum = expectedBytes !== null && Number.isFinite(Number(expectedBytes)) ? Number(expectedBytes) : 0;
+    const hadBytes = raw.length > 0 || sawBodyBytes || expNum > 0;
+    if ((claimsJson && hadBytes) || (raw.length === 0 && expNum > 4)) {
+      return { complete: false, errBody: false, reason: ANSWER_EMPTY_BOUND };
+    }
+    return { complete: true, errBody: false, reason: null };
+  }
+  if (s[0] === '{' || s[0] === '[') {
+    try { JSON.parse(s); } catch {
+      return claimsJson
+        ? { complete: false, errBody: false, reason: ANSWER_NOT_JSON_BOUND }
+        : { complete: true, errBody: false, reason: null };
+    }
+    return { complete: true, errBody: Boolean(isErrorFn(s)), reason: null };
+  }
+  if (claimsJson) {
+    try { JSON.parse(s); } catch {
+      return { complete: false, errBody: false, reason: ANSWER_NOT_JSON_BOUND };
+    }
+    return { complete: true, errBody: false, reason: null };
+  }
+  return { complete: true, errBody: false, reason: null };
 }
 function prevOf(p) {
   if (!p || typeof p !== 'object' || typeof p.password !== 'string' || !p.password) return null;
@@ -514,8 +592,50 @@ const NOTICE = Object.freeze({
   'agent-typed': { text: 'An agent signed up {user} on {site} with a password it typed itself — saved to the vault, marked «typed by the agent»', detail: 'The vault did not make this password, so its strength is unknown and the agent knows it. It is in the Vault under Web logins — change it on the site if you want one only the vault knows.' },
   update: { text: 'The login {user} on {site} was updated — its password changed', detail: 'The previous password is kept in the entry for one revision (Vault → Web logins).' },
 });
+const PENDING_NOTICE_DETAIL = Object.freeze({
+  'pending-register': 'The vault saved this pending password under Web logins. Confirm it there if the site created the account.',
+  'pending-change': 'The vault saved the pending password under Web logins (previous password kept in reserve). Confirm it there if the site accepted the change.',
+});
+const PENDING_NOTICE_TEXT = Object.freeze({
+  'pending-register': Object.freeze({
+    [ANSWER_LARGE_BOUND]: 'An agent submitted {user} on {site}, but the site\'s answer was too large to read — confirm in Vault if accepted',
+    incomplete: 'An agent submitted {user} on {site}, but the site\'s answer was incomplete ({got} of {total} bytes) — confirm in Vault if accepted',
+    [ANSWER_STREAM_ENDED_BOUND]: 'An agent submitted {user} on {site}, but the stream ended before the answer — confirm in Vault if accepted',
+    [ANSWER_NOT_JSON_BOUND]: 'An agent submitted {user} on {site}, but the site\'s answer was not valid JSON — confirm in Vault if accepted',
+    [ANSWER_EMPTY_BOUND]: 'An agent submitted {user} on {site}, but the site\'s answer was empty — confirm in Vault if accepted',
+    [BODY_LARGE_BOUND]: 'An agent submitted {user} on {site}, but the request body was too large to read — confirm in Vault if accepted',
+    [READABLE_BOUND]: 'An agent submitted {user} on {site}, but the site\'s request did not carry the password in a readable form — confirm in Vault if accepted',
+    [BEACON_UNREADABLE_BOUND]: 'An agent submitted {user} on {site}, but a beacon could not be read — confirm in Vault if accepted',
+  }),
+  'pending-change': Object.freeze({
+    [ANSWER_LARGE_BOUND]: 'An agent submitted a password change for {user} on {site}, but the site\'s answer was too large to read — confirm in Vault if accepted',
+    incomplete: 'An agent submitted a password change for {user} on {site}, but the site\'s answer was incomplete ({got} of {total} bytes) — confirm in Vault if accepted',
+    [ANSWER_STREAM_ENDED_BOUND]: 'An agent submitted a password change for {user} on {site}, but the stream ended before the answer — confirm in Vault if accepted',
+    [ANSWER_NOT_JSON_BOUND]: 'An agent submitted a password change for {user} on {site}, but the site\'s answer was not valid JSON — confirm in Vault if accepted',
+    [ANSWER_EMPTY_BOUND]: 'An agent submitted a password change for {user} on {site}, but the site\'s answer was empty — confirm in Vault if accepted',
+    [BODY_LARGE_BOUND]: 'An agent submitted a password change for {user} on {site}, but the request body was too large to read — confirm in Vault if accepted',
+    [READABLE_BOUND]: 'An agent submitted a password change for {user} on {site}, but the site\'s request did not carry the password in a readable form — confirm in Vault if accepted',
+    [BEACON_UNREADABLE_BOUND]: 'An agent submitted a password change for {user} on {site}, but a beacon could not be read — confirm in Vault if accepted',
+  }),
+});
 const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
-function noticeWords(state, { origin = '', username = '', conversation = '' } = {}) {
+function noticeWords(state, { origin = '', username = '', conversation = '', reason = '' } = {}) {
+  if (state === 'pending-register' || state === 'pending-change') {
+    const pr = pendingReasonOf(reason);
+    if (!pr) return null;
+    const inc = parseAnswerIncomplete(pr);
+    const tbl = PENDING_NOTICE_TEXT[state];
+    const textKey = inc ? tbl.incomplete : tbl[pr];
+    const detailKey = PENDING_NOTICE_DETAIL[state];
+    if (!textKey || !detailKey) return null;
+    const params = {
+      user: str(username).slice(0, 120),
+      site: hostOf(origin) || str(origin).slice(0, 120),
+      ...(inc ? { got: String(inc.got), total: String(inc.total) } : {}),
+    };
+    const conv = str(conversation).slice(0, 80);
+    return { text: fill(textKey, params) + (conv ? ` — ${conv}` : ''), detail: detailKey, i18n: { text: { key: textKey, params }, detail: [{ key: detailKey }] } };
+  }
   const w = NOTICE[state];
   if (!w) return null;
   const params = { user: str(username).slice(0, 120), site: hostOf(origin) || str(origin).slice(0, 120) };
@@ -574,10 +694,10 @@ function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
-  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND, BEACON_UNREADABLE_BOUND, HOLD_TOO_MUCH_TEXT, HOLD_VAULT_LOCKED,
-  NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
+  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND, ANSWER_STREAM_ENDED_BOUND, ANSWER_NOT_JSON_BOUND, ANSWER_EMPTY_BOUND, ANSWER_INCOMPLETE_RE, BEACON_UNREADABLE_BOUND, HOLD_TOO_MUCH_TEXT, HOLD_VAULT_LOCKED,
+  NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, PENDING_NOTICE_TEXT, PENDING_NOTICE_DETAIL, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
-  pendingReasonOf, recordOf, textOf, publicOf, newRecord, changedRecord,
+  answerIncompleteReason, parseAnswerIncomplete, pendingReasonOf, stripUtf8Bom, isJsonErrorBody, claimsJsonMime, judgeCredResponseBody, recordOf, textOf, publicOf, newRecord, changedRecord,
   formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, isSubmitControl, liveFillAllowsVerb, liveFillVerdict, planOf, constraintsFor, roadOf, roadVerdict, fillVerdict, valuesOf,
   generatePassword, patternOf, saveVerdict, nextRecord, loginText, noticeWords,
 };
