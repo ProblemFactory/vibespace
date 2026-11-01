@@ -337,6 +337,7 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   // kept «judged as it is» at load, published with no exception (no door can show one, so none can name one)
   const d = dirOf('repair');
   const CEE = { kind: 'conversation', key: 'cid-cee' };
+  const TOK9 = `ghp_${'B2c3D4e5F6'.repeat(4).slice(0, 36)}`;
   const RAW = [
     { door: 'exit', resource: 'h1:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'x' }] },
     { door: 'exit', resource: 'h2:use', to: [G1], except: [{ kind: 'conversation', key: '-bad-key' }] },
@@ -347,6 +348,8 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
     { door: 'exit', resource: 'h7:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'w' }] },
     // r6: an `except` that is not a list at all (a newer release's shape), a token-shaped value inside it
     { door: 'exit', resource: 'h8:use', to: [G1], except: { list: [CEE], mode: 'newer', note: `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}` } },
+    // r7: a LIST entry from a newer release with a token-shaped field (built here, never a literal)
+    { door: 'exit', resource: 'h9:use', to: [{ kind: 'everyone' }], except: [CEE, { kind: 'agent-from-newer-release', id: 'v', token: TOK9 }] },
   ];
   fs.writeFileSync(path.join(d, 'grants.json'), J({ v: 1, rows: RAW, syncVersion: 1 }));
   const st = GS.create({ dataDir: d, now: () => 9 });
@@ -380,6 +383,11 @@ console.log('⑨ a Save over a row this release cannot read is a REPAIR (lane he
   const s8 = st.set('exit', 'h8:use', { to: [G1], except: [] });
   const d8 = ((lastFor('h8:use') || {}).repaired || {}).dropped || [];
   ok(s8.ok && d8.length === 1 && /^\(not a list\) /.test(d8[0]) && /"list"/.test(d8[0]) && /newer/.test(d8[0]) && !/ghp_A1b2/.test(d8[0]) && d8[0].length <= 214, 'a repair over an `except` that is NOT a list names it «(not a list) {…}» — bounded, the token masked (ddd6a46c2: dropped [] — every exception in it discarded, named nowhere)', d8);
+  // r7 (主开发's acceptance of r6, 3): a dropped LIST entry goes through the same masker — every string the audit writes, by value
+  const s9 = st.set('exit', 'h9:use', { to: [{ kind: 'everyone' }], except: [CEE] });
+  const d9 = ((lastFor('h9:use') || {}).repaired || {}).dropped || [];
+  const audit9 = fs.readFileSync(st.auditFile, 'utf-8');
+  ok(s9.ok && d9.length === 1 && /agent-from-newer-release/.test(d9[0]) && /"token"/.test(d9[0]) && !d9[0].includes(TOK9.slice(0, 12)) && !audit9.includes(TOK9.slice(0, 12)) && d9[0].length <= 120, 'a repair that drops a LIST entry with a token-shaped field names the entry with the token MASKED — nowhere in the audit file in clear (e9fbc8a2c: written in clear to grants-audit.jsonl)', d9);
   // CONTROL: a row this release CAN read still refuses an exception left out unnamed
   st.set('exit', 'h5:use', { to: [G1], except: [CEE] });
   ok(st.set('exit', 'h5:use', { to: [G1], except: [] }).code === 'except_unnamed', 'CONTROL: over a readable row an exception left out unnamed is still refused except_unnamed');
