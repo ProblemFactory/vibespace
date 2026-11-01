@@ -50,8 +50,10 @@ let pressDownAt = 0, pressEnd = 0; // r19: the press a crossing waits for (rehos
 // dropped (prunePress), so a lost release never keeps «the press» on nor swallows the next press's quiet
 const pressIds = new Map();   // pointerId → when it went down (monotonic)
 const monoNow = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
-/** r22: a pointer down PRESS_MAX_MS with no release is lost — dropped; the set emptied so stamps its end at its bound */
-const prunePress = () => { const now = monoNow(); for (const [id, at] of pressIds) if (now - at >= PRESS_MAX_MS) { pressIds.delete(id); if (!pressIds.size) pressEnd = Math.max(pressEnd, at + PRESS_MAX_MS); } };
+/** r22: a pointer down PRESS_MAX_MS with no release is lost — dropped; the set emptied so stamps its end at its bound. r23 (the
+ *  r22 acceptance, MINOR 2 — a re-used id kept its first place in the Map, so the LAST pointer deleted was an older one and
+ *  its bound became the end): the end is the LATEST bound among the pointers dropped */
+const prunePress = () => { const now = monoNow(); let end = -Infinity; for (const [id, at] of pressIds) if (now - at >= PRESS_MAX_MS) { pressIds.delete(id); end = Math.max(end, at + PRESS_MAX_MS); } if (end > -Infinity && !pressIds.size) pressEnd = Math.max(pressEnd, end); };
 const EDIT_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Backspace', 'Delete', 'Process', 'Dead', 'Compose', 'Unidentified']);
 /** THE PRESS OF THIS TASK (round 3): a token naming whether the person's press landed inside a blocking layer — judged AT the
  *  press; it lives for the task that dispatched it (its handler and that handler's microtasks), a caller that awaits first
@@ -82,7 +84,14 @@ export function installFormHost(app) {
     // r19 (lane needs-card-tail, a cross-fix — rehostWaitVerdict): a press in flight, and when it ended — a crossing waits for it.
     // r20 (the r19 acceptance, MINOR 2): a press is BOUNDED — a move with no button down, the page losing the focus or going
     // hidden ends one whose release never came (and rehostWaitVerdict ends it at PRESS_MAX_MS whatever happens)
-    const pressOver = (id) => { prunePress(); if (!pressIds.size) return; if (id === undefined) pressIds.clear(); else pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow(); };
+    // r23 (the r22 acceptance, MINOR 1 — pressOver pruned FIRST: a press held past the bound was dropped as lost there and its
+    // real release stamped no quiet): the RELEASED pointer is handled first and a real release always stamps now; only then
+    // are the others pruned (prunePress cannot tell a lost pointer from one whose release is arriving — the order decides)
+    const pressOver = (id) => {
+      if (id === undefined) { if (pressIds.size) { pressIds.clear(); pressEnd = monoNow(); } return; }
+      pressIds.delete(id); if (!pressIds.size) pressEnd = monoNow();
+      prunePress();
+    };
     document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { prunePress(); pressDownAt = monoNow(); pressIds.set(e.pointerId, pressDownAt); } }, true);
     for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, (e) => { if (e.isTrusted) pressOver(e.pointerId); }, true);
     // (a move with no button down ends a MOUSE's press only — a finger or a pen hovering beside a held finger ends nothing)
