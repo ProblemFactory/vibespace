@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A machine's «Who can use it» saves again when a list names a conversation that is not running.
 - Saving a «Who can use it» list this version cannot read repairs it, and the grants history names what it removed.
 - In an automation key's «Grant to…», exclusions apply per grant: saving without changes changes nothing, and the dialog says which grant leaves someone out.
+- The dialog that asks you to enable a plugin with extra powers now shows its explanation and the list of powers at a readable size, with the right spacing.
 
 ## 2.369.369 — 2026-11-01
 
