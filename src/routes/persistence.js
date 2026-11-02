@@ -990,13 +990,19 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   })().catch((e) => { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); }));
 
   router.post('/api/config/import', (req, res) => {
-    const { file, sections = [], includeSensitive = [], passphrase } = req.body || {};
+    const { file, sections: sectionsAsked = [], includeSensitive: sensitiveAsked = [], passphrase } = req.body || {};
     if (!file || file.app !== 'vibespace-config' || typeof file.sections !== 'object') {
       return res.status(400).json({ error: 'Not a VibeSpace config file' });
     }
+    // lane engine-spi-egress L1b r3: the section lists read ONCE — a name ⇒ [name], a list of names as it is, anything else refused by
+    // name — and every reader below (the bearer's guard, apply(), the sensitive items) reads THIS value: one body shape, one truth
+    // (a string `"settings"` passed `.includes('settings')` in apply() while the guard asked Array.isArray and skipped)
+    const namesOf = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : null);
+    const sections = namesOf(sectionsAsked), includeSensitive = namesOf(sensitiveAsked);
+    if (!sections || !includeSensitive) return res.status(400).json({ error: `${!sections ? 'sections' : 'includeSensitive'} must be a section name or a list of section names`, code: 'import_sections_invalid' });
     // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
     // list row is refused WHOLE — all or nothing: no section of it is applied
-    if (Array.isArray(sections) && sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
+    if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

@@ -1286,6 +1286,18 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   ok(c1.status === 200 && w1.status === 403 && /engine_row_owner_only/.test(w1.body) && st1[UROW] === PROG && st1[EROWU] === 'listed.test' && w2.status === 200 && st2['browser.headed'] === false && st2[UROW] === PROG && st2[EROWU] === 'listed.test'
     && w3.status === 403 && w4.status === 200 && i1.status === 403 && i2.status === 403 && !bm1 && st3[UROW] === PROG && st3[EROWU] === 'listed.test' && i3.status === 200 && i4.status === 200 && st4[UROW] === path.join(UD, 'imported'),
     'V3 r2: a bearer\'s whole-file POST that OMITS the rows ⇒ 403 (they stay); the rows carried VERBATIM with another change ⇒ 200 (no false refusal); a bearer\'s PATCH dropping one ⇒ 403, naming its stored value again ⇒ 200; a bearer\'s config IMPORT setting or dropping one ⇒ 403 and NOTHING of it applied (all or nothing — its bookmarks too); an import without settings ⇒ 200; the owner\'s import lands', { c1: c1.status, w1: w1.status, w2: w2.status, w3: w3.status, w4: w4.status, i1: i1.status, i2: i2.status, bm1, i3: i3.status, i4: i4.status });
+  // L1b r3: the import's section list is read ONCE — a NAME (a string) is the list of that one name for the guard and apply() alike;
+  // any other shape is refused by name before anything is read
+  const impS = (settings, sections) => ({ file: { app: 'vibespace-config', sections: { settings } }, sections });
+  const s5a = readP();
+  const i5 = await preq('POST', '/api/config/import', impS({ ...readP(), [UROW]: '/tmp/agent-chosen' }, 'settings'), 'vsst_agent');
+  const st5 = readP();
+  const i6 = await Promise.all([42, {}, [1], null].map((sv) => preq('POST', '/api/config/import', impS({ 'browser.headed': true }, sv), 'vsst_agent')));
+  const st6 = readP();
+  const i7 = await preq('POST', '/api/config/import', impS({ ...readP(), 'browser.headed': true }, 'settings'));
+  const st7 = readP();
+  ok(i5.status === 403 && /engine_row_owner_only/.test(i5.body) && st5[UROW] === s5a[UROW] && JSON.stringify(st5) === JSON.stringify(s5a) && i6.every((r) => r.status === 400 && /import_sections_invalid/.test(r.body)) && JSON.stringify(st6) === JSON.stringify(s5a) && i7.status === 200 && st7['browser.headed'] === true && st7[UROW] === s5a[UROW],
+    'V3 r3: a bearer\'s import naming its sections as a STRING ("settings") is judged like the list — 403, nothing written; sections 42 / {} / [1] / null ⇒ 400 import_sections_invalid by name, nothing read; the owner\'s cookie import with a string still lands', { i5: i5.status, i6: i6.map((r) => r.status), i7: i7.status });
   // V7: consent covers the row — a version that DROPS it drifts (switched off until re-enabled)
   const MANU = path.join(UROOT, 'data', 'plugins', UID, 'vibespace-plugin.json'), manU = fs.readFileSync(MANU, 'utf8');
   const mU = JSON.parse(manU);
@@ -1369,6 +1381,38 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const rootRun = typeof process.getuid === 'function' && process.getuid() === 0; // root reads any file: the 0111 leg has no meaning there
   ok((rootRun || (prX.ok && prX.fact.userBinary && prX.fact.userBinary.why === 'unreadable' && /can't read the file to check it — give it read permission/.test(prX.fact.userBinary.error) && !prX.fact.userBinary.error.includes(UD))) && mF.ok === false && mF.error === 'printed more than 64 KB for --version',
     `L1b r2 LOW: an execute-only program (mode 0111) is refused as UNREADABLE («VibeSpace can't read the file to check it — give it read permission»), never «another platform's build»; a --version past the 64 KB cap is said «printed more than 64 KB for --version»${rootRun ? ' (the 0111 half skipped: running as root)' : ''}`, { x: prX.ok ? prX.fact.userBinary : prX, mF });
+  // ── L1b r3: THE LAUNCHER SWITCHES — a plugin never names the program it runs through a launch switch either ──
+  // PURE: the closed census (adding a row = editing this list), each refused BY NAME in every spelling Chromium reads as that switch; a
+  // longer name / a value holding the text is not the switch; the real CloakBrowser wrapper's args (ce45ad8) pass; the two later walls
+  const LSW = ENGN.LAUNCHER_SWITCHES || [];
+  const LEXPECT = ['browser-subprocess-path', 'renderer-cmd-prefix', 'utility-cmd-prefix', 'gpu-launcher', 'zygote-cmd-prefix', 'plugin-launcher', 'ppapi-plugin-launcher', 'nacl-loader-cmd-prefix', 'nacl-gdb', 'ppapi-flash-path', 'register-pepper-plugins', 'screen-ai-binary', 'translate-kit-binary-path'];
+  const lvL = (args) => ENGN.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args } }, { id: UID, label: 'Fixture User Engine' });
+  const spellL = (n) => [`--${n}=/tmp/other-program`, `--${n}`, `-${n}=/tmp/other-program`, `--${n.toUpperCase()}=/tmp/other-program`];
+  const missL = LEXPECT.flatMap((n) => spellL(n).map((a) => [a, lvL(['--no-sandbox', a])])).filter(([a, r]) => !(r.ok === false && r.code === 'browser_engine_protocol' && r.launcher === a.split('=')[0] && String(r.error).includes(`launch names another program through ${a.split('=')[0]}; a plugin never names the program it runs`))).map(([a, r]) => [a, r.code || 'ok']);
+  const passL = [['--no-sandbox', '--fingerprint=1234567'], ['--browser-subprocess-pathx=/x'], ['--my-gpu-launcher=/x'], ['--fingerprint=--browser-subprocess-path=/x'], ['--lang=--renderer-cmd-prefix'], ['--gpu-launcher-y']].filter((a) => lvL(a).ok !== true);
+  const wallW = ENGN.engineWrapperText({ program: '/k/chrome', args: ['--gpu-launcher=/x'] }) || {}, wallA = { names: (ENGN.launcherArgsOf || (() => []))(['--x', '--Renderer-Cmd-Prefix=/x', '-nacl-gdb']) };
+  const realW = ENGN.engineWrapperText({ program: '/k/chrome', args: ['--no-sandbox', '--fingerprint=1234567'] }) || {}, realA = { names: (ENGN.launcherArgsOf || (() => ['?']))(['--no-sandbox', '--fingerprint=1234567']) };
+  ok(JSON.stringify(LSW.map((r) => r.name)) === JSON.stringify(LEXPECT) && Object.isFrozen(LSW) && LSW.every((r) => /^(program|library)$/.test(r.kind) && String(r.why).length > 20) && !missL.length && !passL.length
+    && wallW.ok === false && /name another program through --gpu-launcher/.test(String(wallW.error)) && wallA.names.join() === '--Renderer-Cmd-Prefix,-nacl-gdb' && realW.ok === true && realA.names.length === 0,
+    'L1b r3 PURE: THE LAUNCHER SWITCHES — a closed census of 13 (each with its kind + why); each refused BY NAME in the launch verdict as --x=v, --x, -x=v and any case («… names another program through <switch>; a plugin never names the program it runs»); --x-longer / a value holding the text pass; the real wrapper\'s --no-sandbox --fingerprint pass; the wrapper writer refuses them too, and launcherArgsOf (the attach road\'s wall in the keeper) names them', { missL, passL, wallW: wallW.error, wallA: wallA.names });
+  // THE REAL registry + keeper: the user source (the fixture's launch answer bent to name one) ⇒ refused by name, NOTHING launched, the
+  // For-you words name the switch; the download source (⑦'s fixture engine, its kernel in place) ⇒ the same refusal
+  fs.mkdirSync(path.dirname(MODEU), { recursive: true }); fs.writeFileSync(MODEU, JSON.stringify({ launch: { args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }));
+  settingsU[UROW] = PROG;
+  const loU = await ENGRU.launchOptions(UID, { profileId: 'bp-00000000', binaryPath: PROG });
+  const pLn = ku.createProfile({ label: 'Launcher named', browser: { kind: 'plugin', id: UID } }, { engine: await ku.engineFactOf(UID) });
+  const nLn = fake.launches().length;
+  const eLn = await thr(() => ku.start(pLn.id, { why: 'test' }));
+  fs.rmSync(MODEU, { force: true });
+  if (!eLn) await thr(() => ku.stop(pLn.id, { why: 'user' })); // a red run (a tree without the census) started it: never left behind
+  const tdLn = todos.filter((x) => /"Launcher named"/.test(String(x.text)));
+  fs.mkdirSync(path.dirname(MODE), { recursive: true }); fs.writeFileSync(MODE, JSON.stringify({ launch: { args: ['--utility-cmd-prefix=/usr/bin/true'] } }));
+  const loD = fs.existsSync(KP) ? await ENGR.launchOptions(EID, { profileId: 'bp-00000000', binaryPath: KP }) : { ok: null, error: 'no kernel in its place' };
+  fs.rmSync(MODE, { force: true });
+  ok(loU.ok === false && loU.launcher === '--browser-subprocess-path' && eLn && eLn.code === 'browser_engine_protocol' && /names another program through --browser-subprocess-path/.test(eLn.message) && fake.launches().length === nLn
+    && tdLn.length === 1 && /"Launcher named" cannot start: Fixture User Engine names another program through --browser-subprocess-path — a plugin never names the program it runs/.test(tdLn[0].text) && !!tdLn[0].i18n && tdLn[0].i18n.text.key === (BB.PROGRAM_NOTICE_WORDS || {}).launcher && tdLn[0].i18n.text.params.switch === '--browser-subprocess-path'
+    && loD.ok === false && loD.launcher === '--utility-cmd-prefix',
+    'L1b r3: through the REAL registry + keeper — the owner\'s-program engine\'s launch naming --browser-subprocess-path ⇒ refused by name, NOTHING launched, the For-you item names the switch (with its i18n); the download-source engine naming --utility-cmd-prefix ⇒ the same refusal', { loU: loU.error, eLn: eLn && eLn.message, td: tdLn.map((x) => x.text), loD: loD.error });
   // RED COPY: a registry that TRUSTS the plugin's word (no core verdict) launches the program the plugin claims — a missing one
   const MUTU = mutantCopies('badm-user', REPO);
   const bes = read('src/server/browser-engines.js');
@@ -1380,6 +1424,28 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     const pTrust = await RU.probe(UID);
     const vTrust = pTrust.ok ? ENGN.engineChoiceVerdict({ choice: { kind: 'plugin', id: UID }, engine: { ...pTrust.fact, executable: true } }) : null;
     ok(pTrust.ok && pTrust.fact.installed === true && vTrust && vTrust.ok === true && vTrust.executablePath === path.join(UD, 'gone'), 'control (u): a registry that TRUSTS the plugin\'s installed:true hands THE choice verdict a missing program it would START — exactly what V1 catches', { fact: pTrust.ok && pTrust.fact, vTrust });
+  }
+  // L1b r3 controls — (l) a launch verdict without the launcher census accepts a plugin naming another program
+  const engsL = read('src/browser-engines.js'), lAnchor = 'const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name).join(\'|\')})(?:=|$)`, \'i\');';
+  if (!engsL.includes(lAnchor)) ok(false, 'control (l): the anchor (the launcher census\'s pattern) is not in this tree', lAnchor);
+  else {
+    const EL = MUTU.load('src/browser-engines.js', engsL.replace(lAnchor, 'const LAUNCHER_ARG_RE = /(?!)/;'), 'no-launchers');
+    const vl = EL.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }, { id: UID });
+    ok(vl.ok === true && vl.launch.args.includes('--browser-subprocess-path=/usr/bin/true'), 'control (l): a launch verdict without the launcher census ACCEPTS a plugin naming another program through --browser-subprocess-path — exactly what r3 catches', vl);
+  }
+  // (i) the import read by two readers (the guard asks Array.isArray, apply() asks .includes) lets a bearer's STRING sections through
+  const pssI = read('src/routes/persistence.js');
+  const iA1 = 'const sections = namesOf(sectionsAsked), includeSensitive = namesOf(sensitiveAsked);', iA2 = "if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(";
+  if (!pssI.includes(iA1) || !pssI.includes(iA2)) ok(false, 'control (i): the anchors (the section list read once) are not in this tree', { iA1: pssI.includes(iA1), iA2: pssI.includes(iA2) });
+  else {
+    const PRi = MUTU.load('src/routes/persistence.js', pssI.replace(iA1, 'const sections = sectionsAsked, includeSensitive = sensitiveAsked;').replace(iA2, "if (Array.isArray(sections) && sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows("), 'two-readers');
+    const PDi = path.join(ROOT, 'persist-v3-two-readers'); fs.mkdirSync(PDi, { recursive: true });
+    PRi.setup({ dataDir: PDi, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} });
+    const appI = expressE(); appI.use(expressE.json()); appI.use(PRi.router);
+    const srvI = await new Promise((r) => { const s = appI.listen(0, '127.0.0.1', () => r(s)); }); servers.add(srvI);
+    await preq('PATCH', '/api/settings', { [UROW]: PROG }, null, srvI.address().port);
+    const wi = await preq('POST', '/api/config/import', { file: { app: 'vibespace-config', sections: { settings: { [UROW]: '/tmp/agent-chosen' } } }, sections: 'settings' }, 'vsst_agent', srvI.address().port);
+    ok(wi.status === 200 && readP(PDi)[UROW] === '/tmp/agent-chosen', 'control (i): an import whose guard and apply() read the section list two ways lets a bearer\'s sections:"settings" REPLACE the owner\'s program row — exactly what V3 r3 catches', { status: wi.status, row: readP(PDi)[UROW] });
   }
   // L1b r2 controls — (d) a registry whose program path falls back to the MANIFEST's default runs the program the PLUGIN named
   const upAnchor = "const userPathOf = (id) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } return typeof v === 'string' ? v.trim() : ''; };";

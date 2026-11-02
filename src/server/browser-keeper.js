@@ -1273,7 +1273,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (p.buildMissing.filed) return;
     if (!userTodos || typeof userTodos.add !== 'function') { if (!had) log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error} (no For-you store is wired, so only this journal says so)`); return; }
     // L1b r2: an OWNER's program refused is said as that (its Program file row), never as a kernel to install — by the engine's source
-    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '', source: engine && engine.source ? engine.source : null, why: engine && engine.userBinary ? engine.userBinary.why : null });
+    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '', source: engine && engine.source ? engine.source : null, why: engine && engine.userBinary ? engine.userBinary.why : null, launcher: v.launcher || null }); // L1b r3: a launcher switch said by its name
     try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', ...(n.i18n ? { i18n: n.i18n } : {}) }); p.buildMissing.filed = true; commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
     log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);
@@ -4392,6 +4392,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     commit();
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
+    // lane engine-spi-egress L1b r3: the second wall on THIS road (the launch verdict refused them first) — an engine argument that starts
+    // another program (src/browser-engines.js LAUNCHER_SWITCHES) never reaches an argv
+    const launchers = ENG.launcherArgsOf(engineArgs);
+    if (launchers.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${ENG.engineWords({ id: engineLaunch.engine && engineLaunch.engine.id, label: engineLaunch.engine && engineLaunch.engine.label })}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`); }
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the

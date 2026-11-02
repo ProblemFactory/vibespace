@@ -49,6 +49,35 @@ const ARG_MAX = 1024;
  *  engine-spi-egress) the browser's PROXY: the boundary an engine stays inside is VibeSpace's to set, never a plugin's
  *  (`--no-proxy-server` / `--proxy-auto-detect` would undo it). A POSIX Chromium also reads a single-dash switch. */
 const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;
+/** lane engine-spi-egress L1b r3: THE LAUNCHER SWITCHES — Chromium switches that make the browser start ANOTHER PROGRAM (a child's
+ *  executable, a command prefixed to a child's line) or load NATIVE CODE the switch names (a library run inside a child) — the
+ *  program VibeSpace judged would then hand its work to one the plugin chose. A CLOSED census: each row says why it is in; adding
+ *  one is a deliberate edit with its test (test-browser-builds ⑦c pins the exact set). Read off Chromium's switch list and this
+ *  machine's Chrome 154 binary (the five current ones are in it; the Pepper / NaCl rows are for older builds an owner may install).
+ *  Refused BY NAME in a launch answer (engineAnswerVerdict — both sources, every road), and again where an engine's arguments
+ *  become an argv (engineWrapperText; browser-attach's census). NOT an allowlist: every other switch is the plugin's to send. */
+const LAUNCHER_SWITCHES = Object.freeze([
+  { name: 'browser-subprocess-path', kind: 'program', why: 'the executable every child process (renderer, GPU, utility, network service) is started from' },
+  { name: 'renderer-cmd-prefix', kind: 'program', why: 'a command put before every renderer\'s command line: it runs, the renderer becomes its argument' },
+  { name: 'utility-cmd-prefix', kind: 'program', why: 'a command put before every utility process\'s command line (the network service among them)' },
+  { name: 'gpu-launcher', kind: 'program', why: 'a command put before the GPU process\'s command line' },
+  { name: 'zygote-cmd-prefix', kind: 'program', why: 'a command put before the zygote\'s command line — every renderer forks from it (Linux)' },
+  { name: 'plugin-launcher', kind: 'program', why: 'the command a plugin process is started with (builds with NPAPI plugins)' },
+  { name: 'ppapi-plugin-launcher', kind: 'program', why: 'the command a Pepper plugin process is started with (builds with Pepper)' },
+  { name: 'nacl-loader-cmd-prefix', kind: 'program', why: 'a command put before the Native Client loader\'s command line (builds with NaCl)' },
+  { name: 'nacl-gdb', kind: 'program', why: 'a debugger program started beside the Native Client loader (builds with NaCl)' },
+  { name: 'ppapi-flash-path', kind: 'library', why: 'a native library loaded as the Pepper Flash plugin (builds with Pepper)' },
+  { name: 'register-pepper-plugins', kind: 'library', why: 'native libraries loaded as Pepper plugins (builds with Pepper)' },
+  { name: 'screen-ai-binary', kind: 'library', why: 'the native ScreenAI library a utility process loads (Linux / ChromeOS)' },
+  { name: 'translate-kit-binary-path', kind: 'library', why: 'the native TranslateKit library the on-device translation process loads' },
+]);
+/** A launcher switch in every spelling Chromium reads as one: `--x` / `--x=v`, a single dash (POSIX Chromium reads `-x` as a switch),
+ *  any case (Windows Chromium lowercases switch names). A value is never a switch: Chromium splits each argument at its FIRST `=`
+ *  (`--fingerprint=--gpu-launcher=x` is the switch `fingerprint`), and no road re-splits an engine's argument (the keeper's wrapper
+ *  hands each as one shell word, the attach argv as one element). `--gpu-launcherx` is another switch. */
+const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name).join('|')})(?:=|$)`, 'i');
+/** The launcher switches among an engine's arguments → their names as written (before any `=`), once each. */
+function launcherArgsOf(list) { return [...new Set((Array.isArray(list) ? list.map(String) : []).filter((a) => LAUNCHER_ARG_RE.test(a)).map((a) => clip(a.split('=')[0], 40)))]; }
 /** The proxy half of OWN_ARG_RE (refused in its own words; dropped from the keeper's own list on a wrapped launch). */
 const PROXY_ARG_RE = /^--?(?:proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -164,6 +193,9 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     // lane engine-args-string: an argument is refused only for what no road carries whole — a NUL byte (no argv holds one), a
     // line break (the protocol's one-line rule), nothing, > ARG_MAX; a comma, a space, a quote ride the keeper's wrapper whole
     if (!strList(args) || args.length > ARGS_MAX || args.some((a) => !a || a.length > ARG_MAX || /[\0\n\r]/.test(a))) return bad('browser_engine_protocol', `named launch arguments of another shape (a list of at most ${ARGS_MAX} one-line strings)`);
+    // lane engine-spi-egress L1b r3: a launch that names ANOTHER program through a launcher switch — refused by name, both sources
+    const launchers = launcherArgsOf(args);
+    if (launchers.length) return { ok: false, code: 'browser_engine_protocol', launcher: launchers[0], error: `${who}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs` };
     const proxied = args.filter((a) => PROXY_ARG_RE.test(a)); // lane engine-spi-egress: the boundary an engine stays inside is VibeSpace's
     if (proxied.length) return bad('browser_engine_protocol', `asked for ${proxied.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the browser's proxy is VibeSpace's to set: an engine that must reach only some sites declares "${EGRESS_FEATURE}", and VibeSpace wraps it in its own allowlisting proxy`);
     const own = args.filter((a) => OWN_ARG_RE.test(a));
@@ -239,6 +271,8 @@ function engineWrapperText({ program = '', args = [], env = {} } = {}) {
   const list = Array.isArray(args) ? args.map(String) : [];
   const nul = list.filter((a) => a.includes('\0'));
   if (nul.length) return no(`${nul.length} argument(s) hold a NUL byte`);
+  const launchers = launcherArgsOf(list); // L1b r3: the second wall (the launch verdict refused them first)
+  if (launchers.length) return no(`its arguments name another program through ${launchers.join(', ')}; a plugin never names the program it runs`);
   const vars = Object.entries(isObj(env) ? env : {}).map(([k, v]) => [k, String(v)]);
   const badEnv = vars.filter(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || v.includes('\0')).map(([k]) => clip(k, 40));
   if (badEnv.length) return no(`the environment name(s) ${badEnv.join(', ')} are not shell names, or a value holds a NUL byte`);
@@ -271,4 +305,5 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
-  BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict }; // lane engine-spi-egress L1b
+  BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
+  LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf }; // lane engine-spi-egress L1b r3

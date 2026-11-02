@@ -197,6 +197,9 @@ const PROGRAM_NOTICE_WORDS = Object.freeze({
   unset: '"{task}" cannot start: {plugin} has no program set — open ⚙ → Plugins → {plugin} → Program file and name one',
   refused: '"{task}" cannot start: the program you named for {plugin} cannot be run ({why}) — open ⚙ → Plugins → {plugin} → Program file',
   detail: 'The profile "{task}" runs the program you name in the settings of {plugin}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Name a program that runs in ⚙ → Plugins → {plugin} → Program file — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build — and the next command starts it.',
+  // L1b r3: an engine (either source) whose launch names ANOTHER program through a launcher switch (src/browser-engines.js LAUNCHER_SWITCHES)
+  launcher: '"{task}" cannot start: {plugin} names another program through {switch} — a plugin never names the program it runs',
+  launcherDetail: 'VibeSpace started nothing for "{task}": the launch answer of {plugin} names another program through {switch}, and VibeSpace runs only the program it judged. Update the plugin or turn it off in ⚙ → Plugins — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build.',
 });
 /** …and why the program cannot run, by the core's `why` (src/browser-engines.js userBinaryVerdict) — the card's words too. */
 const PROGRAM_WHY_WORDS = Object.freeze({
@@ -209,9 +212,15 @@ const fillKey = (key, params) => String(key).replace(/\{(\w+)\}/g, (m, k) => (pa
 /** The ONE For-you notice of a chosen build that is gone (the keeper files it once per profile and choice): plain words,
  *  what to do — the English is the inbox's own (its items are stored strings, never re-translated); an owner's program's notice
  *  carries its `i18n` too (the client says it in its language). `source` / `why` = the engine's kernel source and the core's verdict
- *  on the owner's program (L1b r2). */
-function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '', source = null, why = null } = {}) {
+ *  on the owner's program (L1b r2); `launcher` = the launcher switch a launch answer named (L1b r3 — either source). */
+function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '', source = null, why = null, launcher = null } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
+  if (c.kind === 'plugin' && launcher) {
+    const plugin = String(engineLabel || c.id || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), task = String(label), sw = String(launcher).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 40);
+    const params = { task, plugin, switch: sw };
+    return { text: fillKey(PROGRAM_NOTICE_WORDS.launcher, params), detail: fillKey(PROGRAM_NOTICE_WORDS.launcherDetail, params),
+      i18n: { text: { key: PROGRAM_NOTICE_WORDS.launcher, params }, detail: [{ key: PROGRAM_NOTICE_WORDS.launcherDetail, params }] } };
+  }
   if (c.kind === 'plugin' && source === 'user' && (code === 'browser_engine_kernel_missing' || code === 'browser_engine_not_executable')) {
     const plugin = String(engineLabel || c.id || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), task = String(label);
     const key = code === 'browser_engine_kernel_missing' || why === 'unset' ? PROGRAM_NOTICE_WORDS.unset : PROGRAM_NOTICE_WORDS.refused;

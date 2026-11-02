@@ -309,6 +309,21 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const bad = AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--user-data-dir=/elsewhere'] });
   ok(!bad.ok && bad.code === 'bad_argv', 'CONTROL: an engine argument naming another --user-data-dir fails the builder\'s census (bad_argv) — never spawned', bad);
   await ke.stop(pE.id, { why: 'user' });
+  // lane engine-spi-egress L1b r3: the ATTACH road's own census refuses a switch that starts ANOTHER program (the launch verdict refuses it
+  // first; this registry hands it unjudged, as a stub can) — the start is refused by name and nothing is spawned
+  const REGL = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['--browser-subprocess-path=/usr/bin/true'], env: {} } }) };
+  const kl = mk({ dataDir: path.join(S, 'data-engine-launcher'), engines: REGL });
+  const pL = kl.createProfile({ label: 'Engine launcher', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+  let ranL0 = ''; try { ranL0 = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ranL0 = ''; }
+  const nL = chromeLog().length;
+  const rL = await kl.start(pL.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+  let ranL = ''; try { ranL = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ranL = ''; }
+  const recL = kl._reg().browsers[pL.id] || {};
+  const wordsL = /names? another program through --browser-subprocess-path; a plugin never names the program it runs/; // the wrapper's wall (written first, on both roads) or the attach road's own
+  const refusedL = (rL.e && /^(?:browser_engine_protocol|launch_failed)$/.test(String(rL.e.code)) && wordsL.test(rL.e.message)) || (rL.v && rL.v.state === 'failed' && wordsL.test(JSON.stringify(rL.v)));
+  ok(refusedL && chromeLog().length === nL && ranL === ranL0 && recL.state !== 'ready', 'lane engine-spi-egress L1b r3: the ATTACH road refuses an engine argument that starts another program (--browser-subprocess-path) before anything is spawned — by the wrapper\'s wall (written before the road is chosen) or its own, by name', { r: rL.e ? rL.e.message : rL.v, state: recL.state });
+  await kl.stop(pL.id, { why: 'user' }).catch(() => { }); // a red run (a tree without the walls) started it: never left behind
+  try { kl.shutdown(); } catch { /* none */ }
   // lane engine-distribution: the kernel side's plugin has no childProcess — its probe says version null + declaredVersion; the
   // KEEPER has the version measured ONCE before the first launch (the engine record's), the record + the card say «measured»
   const factN = { ...fact, version: null, declaredVersion: '150.0.7871.186-vs1' };
