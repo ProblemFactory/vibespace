@@ -1139,6 +1139,47 @@ function sanitizeArgs(v) {
   if (!dropped.length) return { value: v, dropped: [] };
   return { value: parts.map((x) => x.trim()).filter((x) => x && !RAW_ARG_RE.test(x)).join(','), dropped };
 }
+// ── lane engine-args-string (owner 2026-11-02: a conversation's browser on an engine plugin never started — the config the
+// keeper wrote held `args` as a LIST and the driver refused the whole file «invalid type: sequence, expected a string»):
+// THE DRIVER'S `args`, ONE shape on every road ──
+/** The driver's own reading of `args` (its config's and AGENT_BROWSER_ARGS alike), MEASURED on agent-browser 0.38.2: the
+ *  string is cut at EVERY comma and EVERY line break (a newline-separated line is cut at its commas too), each piece
+ *  trimmed, empty pieces dropped — no quoting; a space stays inside its switch. A list is read the same way piece by piece
+ *  (what it would become once written). PURE. */
+function driverArgsList(args) {
+  const parts = Array.isArray(args) ? args.flatMap((x) => String(x).split(/[,\n]/)) : typeof args === 'string' ? args.split(/[,\n]/) : [];
+  return parts.map((x) => x.trim()).filter(Boolean);
+}
+/** THE ONE WRITER of the driver's `args`: a string is the driver's shape already — kept byte for byte (a running browser
+ *  launched with that spelling; another one relaunches it); a list → its switches joined with `,`, each first proven to
+ *  read back as ITSELF (driverArgsList): a switch holding a comma or a line break (the driver would cut it in two), a NUL,
+ *  nothing but blanks, or a blank at either end (trimmed away) is REFUSED by name — never dropped, never split. Nothing ⇒
+ *  nothing. → `{ok:true, args}` | `{ok:false, code:'browser_args_uncarried', bad, error}`. PURE. */
+function driverArgsText(args) {
+  if (args === undefined || args === null || typeof args === 'string') return { ok: true, args };
+  const list = Array.isArray(args) ? args.map(String) : null;
+  const bad = list ? list.filter((s) => { const r = driverArgsList(s); return s.includes('\0') || r.length !== 1 || r[0] !== s; }) : [];
+  if (list && !bad.length) return { ok: true, args: list.join(',') };
+  const named = bad.slice(0, 3).map((s) => JSON.stringify(s.slice(0, 80))).join(', ') + (bad.length > 3 ? ` and ${bad.length - 3} more` : '');
+  return { ok: false, code: 'browser_args_uncarried', bad, error: list ? `the browser driver reads its launch arguments as ONE comma-separated line — ${named} cannot ride it whole (a comma or a line break inside an argument cuts it in two; a blank at either end is trimmed away)` : `the browser's launch arguments are a ${typeof args}, neither one line nor a list` };
+}
+/** THE MERGE of the keeper's launch switches with an engine plugin's (measured on the owner's hub: --no-sandbox,
+ *  --ozone-platform=x11, --use-angle=swiftshader and --enable-unsafe-swiftshader each rode twice): ONE switch per NAME —
+ *  `--foo=bar` and `--foo` are the switch `--foo` (a word that is no switch is its own name) — kept where its name first
+ *  appeared. Both sides naming one switch: the KEEPER's value stays for its own control switches (RAW_ARG_RE: the launch
+ *  mark, the debugging endpoint, the profile directory — the engine's copy is dropped; the engine verdict refuses the
+ *  endpoint and the directory by name before this), the ENGINE's value wins for every other (its rendering switches —
+ *  Chromium reads a switch's LAST value, so that is what the keeper-then-engine list always meant). Within one side the
+ *  last spelling wins the same way. `keeper` = a list or the driver's line (read the driver's way); `engine` = a list, its
+ *  switches kept whole (driverArgsText judges them). → a list. PURE. */
+function mergeLaunchArgs(keeper, engine) {
+  const nameOf = (s) => { const i = s.indexOf('='); return s.startsWith('-') && i > 0 ? s.slice(0, i) : s; };
+  const out = new Map();
+  const put = (s, ours) => { const k = nameOf(s), had = out.get(k); if (had && had.ours && !ours && RAW_ARG_RE.test(k)) return; out.set(k, { s, ours }); };
+  for (const s of Array.isArray(keeper) ? keeper.map(String) : driverArgsList(keeper)) put(s, true);
+  for (const s of Array.isArray(engine) ? engine.map(String) : driverArgsList(engine)) put(s, false);
+  return [...out.values()].map((x) => x.s);
+}
 /**
  * → `{ config, dropped: { project: [keys], keys: [keys], args: [switches] } }`.
  * `user` = the machine's file (an object, or null when absent), `project` =
@@ -1285,6 +1326,7 @@ module.exports = {
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
+  driverArgsList, driverArgsText, mergeLaunchArgs, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper ∪ engine merge
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   AGENT_BROWSER_CLI, TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,

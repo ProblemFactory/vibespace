@@ -684,9 +684,51 @@ const EID = 'vibespace.custom-browser';
   ok(!badO.length && good.ok && good.executablePath === '/k/chrome' && good.version === P0.version && good.major === 150 && ENGN.ENGINE_CODES.every((k) => BB.BUILD_CODES.includes(k)), 'THE verdict for an engine, in order: well-formed · the user\'s · chromium · the engine there · its kernel installed · executable · protocol; ok ⇒ its kernel\'s path + the version (major 150); the 6 codes are in BUILD_CODES', badO);
   const rs = read('src/routes/browser.js');
   ok(ENGN.ENGINE_CODES.every((k) => new RegExp(`\\b${k}: 409\\b`).test(rs)), 'every engine refusal is a 409 in the routes\' STATUS table');
-  const le = ENGN.engineLaunchEnv({ args: ['--a=1,2', '--b'], env: { X: 'y' } }, { base: ['--mark'] });
-  ok(le.AGENT_BROWSER_ARGS === '--mark\n--a=1,2\n--b' && !('X' in le) && ENGN.engineLaunchEnv({ args: ['--b'] }, { base: ['--m'] }).AGENT_BROWSER_ARGS === '--m,--b' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })),
-    'the launch view: the base arguments first, the engine\'s after; newline-separated when one holds a comma (the CLI takes either); no arguments ⇒ no list (the config\'s stays); env outside the whitelist never carried', le);
+  const le = ENGN.engineLaunchEnv({ args: ['--a=1', '--b', '--mark'], env: { X: 'y' } }, { base: ['--mark'] });
+  const leComma = (() => { try { return ENGN.engineLaunchEnv({ args: ['--a=1,2'] }, { base: ['--m'] }); } catch (e) { return e; } })();
+  ok(le.AGENT_BROWSER_ARGS === '--mark,--a=1,--b' && !('X' in le) && ENGN.engineLaunchEnv({ args: ['--b'] }, { base: ['--m'] }).AGENT_BROWSER_ARGS === '--m,--b' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] }))
+    && leComma instanceof Error && leComma.code === 'browser_args_uncarried' && /"--a=1,2"/.test(leComma.message),
+    'the launch view: the base arguments first, the engine\'s after, ONE switch per name, ONE comma-separated line (lane engine-args-string: the driver cuts at every comma AND newline — an argument holding a comma throws by name, never split); no arguments ⇒ no list (the config\'s stays); env outside the whitelist never carried', { le, leComma: String(leComma && leComma.message) });
+  // ── lane engine-args-string (owner 2026-11-02: a conversation's browser on the custom kernel never started — its config held
+  // `args` as a LIST: «invalid type: sequence, expected a string»): THE DRIVER'S `args`, ONE shape — PURE legs ──
+  {
+    const VB0 = require('../src/browser-verbs.js');
+    const missing = (k) => () => { throw new Error(`src/browser-verbs.js has no ${k}`); };
+    const VB = { ...VB0, ...Object.fromEntries(['driverArgsList', 'driverArgsText', 'mergeLaunchArgs'].map((k) => [k, typeof VB0[k] === 'function' ? VB0[k] : missing(k)])) };
+    const BPRc = { ...BPR, configRefusalOf: typeof BPR.configRefusalOf === 'function' ? BPR.configRefusalOf : () => null };
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const safe = (fn) => { try { return fn(); } catch (e) { return e; } };
+    const driverReads = (line) => String(line).split(/[,\n]/).map((x) => x.trim()).filter(Boolean); // THE ORACLE: the driver's reading as measured on 0.38.2 (never the code under test)
+    // the driver's reading, as MEASURED on agent-browser 0.38.2 (a dump-argv "chrome" launched with each config string)
+    ok(safe(() => same(VB.driverArgsList('--a=1,--b=x y'), ['--a=1', '--b=x y']) && same(VB.driverArgsList('--a=1,2\n--b=x y'), ['--a=1', '2', '--b=x y']) && same(VB.driverArgsList(' --a=1 , --b ,,--c'), ['--a=1', '--b', '--c']) && same(VB.driverArgsList('--a="p,q"'), ['--a="p', 'q"']) && same(VB.driverArgsList('--a=1 --b=2'), ['--a=1 --b=2'])) === true,
+      'the driver\'s reading (measured on 0.38.2): cut at EVERY comma and line break, each piece trimmed, empty ones dropped, no quoting, a space stays inside its switch');
+    const L = ['--no-sandbox', '--use-angle=swiftshader', '--user-agent=Mozilla/5.0 (X11; Linux x86_64) VibeSpace', '--disk-cache-dir=/var/tmp/a b/cache', '--vibespace-keeper=bk-0000e0e1'];
+    const T = safe(() => VB.driverArgsText(L));
+    ok(T && T.ok && typeof T.args === 'string' && same(driverReads(T.args), L), 'THE ONE WRITER: a list → ONE string, read back by the driver\'s rule as the SAME switches (a space, an `=`, a path survive both ways)', T);
+    const cut = safe(() => VB.driverArgsText(['--ok', '--enable-features=A,B', ' --pad', '', '--two\nlines']));
+    ok(cut && cut.ok === false && cut.code === 'browser_args_uncarried' && same(cut.bad, ['--enable-features=A,B', ' --pad', '', '--two\nlines']) && /"--enable-features=A,B"/.test(cut.error),
+      'a switch the one line cannot carry back as itself (a comma, a blank at an end, nothing, a line break) is REFUSED by name — never dropped, never split', cut);
+    ok(safe(() => VB.driverArgsText('--a,--b\n--c').args === '--a,--b\n--c' && VB.driverArgsText(undefined).ok && VB.driverArgsText(undefined).args === undefined && !VB.driverArgsText({ a: 1 }).ok) === true,
+      'a string is the driver\'s shape already — kept byte for byte (a running browser launched with that spelling); nothing ⇒ nothing; another type refused');
+    // the dedupe: the owner's measured merged list (the first 14 of 43) → one switch per name
+    const keeperLine = '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=bk-209f474e,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing';
+    const engineOwn = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'];
+    const mo = safe(() => VB.mergeLaunchArgs(keeperLine, engineOwn));
+    const names = (l) => l.map((x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x));
+    ok(same(mo, ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing', '--use-gl=angle', '--enable-webgl', '--ignore-gpu-blocklist']) && Array.isArray(mo) && new Set(names(mo)).size === mo.length,
+      'THE MERGE over the owner\'s measured list: --no-sandbox / --ozone-platform / --use-angle / --enable-unsafe-swiftshader once each, in first-seen order, the engine\'s new switches after', mo);
+    const mr = safe(() => VB.mergeLaunchArgs(['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=swiftshader', '--log-level=3'], ['--vibespace-keeper=forged', '--remote-debugging-port=9222', '--use-angle=gl', '--log-level=0', '--use-angle=vulkan']));
+    ok(same(mr, ['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=vulkan', '--log-level=0']),
+      'THE RULE on one name, two values: the KEEPER\'s value stays for its own control switches (the mark, the debugging endpoint — RAW_ARG_RE), the ENGINE\'s wins for its rendering switches (its LAST spelling — Chromium reads the last value)', mr);
+    ok(lv({ ...L0, args: ['--enable-features=A,B'] }).code === 'browser_engine_protocol' && /"--enable-features=A,B"/.test(lv({ ...L0, args: ['--enable-features=A,B'] }).error) && lv({ ...L0, args: [' --pad'] }).code === 'browser_engine_protocol' && lv({ ...L0, args: ['--user-agent=a b', '--x=/p q'] }).ok,
+      'the launch verdict asks THE one writer first: an engine argument holding a comma (or a blank at an end) is refused by NAME at the door (browser_engine_protocol) — before any file; a space inside one is fine', lv({ ...L0, args: ['--enable-features=A,B'] }));
+    // the driver's refusal of a config, in VibeSpace's words (the owner saw the raw serde line)
+    const raw = '⚠ invalid config file /d/browser-env/display/bk-1-engine-2.json: invalid type: sequence, expected a string at line 2 column 10\n⚠ failed to load config from /d/browser-env/display/bk-1-engine-2.json';
+    const cr = BPR.launchFatalOf(raw, { lineOf: (f, n) => (f === '/d/browser-env/display/bk-1-engine-2.json' && n === 2 ? '  "args": [' : null) });
+    const cr0 = BPRc.configRefusalOf(raw);
+    ok(cr && cr.reason === 'config_refused' && /the setting "args"/.test(cr.error) && /holds a list where the driver expects a string/.test(cr.error) && /bk-1-engine-2\.json/.test(cr.error) && !/\/d\//.test(cr.error) && cr0 && /line 2 of bk-1-engine-2\.json/.test(cr0.error) && BPRc.configRefusalOf('Chrome exited early') === null,
+      'the driver REFUSING our config is said in VibeSpace\'s words: WHICH setting (the key on the line it names) and WHY (a list where it expects a string), the file by name — never a path; no line reader ⇒ the line number', { cr, cr0 });
+  }
   const D = ENGN.defaultEngineOf;
   const FE = { plugin: EID, default: true };
   ok(D({ own: 'default', fleet: FE }).source === 'user' && D({ own: 'default', fleet: FE }).value === 'default' && D({ fleet: FE }).value === 'plugin:' + EID && D({ fleet: FE }).source === 'fleet' && D({ fleet: { plugin: EID, default: false } }).value === 'default' && D({ fleet: { plugin: EID, default: false } }).source === 'fleet'
@@ -819,7 +861,12 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   // config every call names (the agent's own commands included) — never a relaunch on Chrome
   const pairs = BPR.browserEnvFor({ browserKey: KEY_E, variant: BPR.VARIANTS.N, idleMs: 600000 });
   const n0 = fake.launches().length;
+  // lane engine-args-string: the engine answers switches the keeper's own config also carries (the owner's kernel did: its list
+  // repeated --no-sandbox / --ozone-platform / --use-angle …), one with another value, and a forged launch mark
+  const ENGINE_ARGS = ['--vibespace-engine=fixture', '--no-sandbox', '--disable-blink-features=AutomationControlled', '--log-level=0', '--use-angle=swiftshader', '--use-angle=gl', '--user-agent=Fixture Kernel/150 (X11)', `--vibespace-keeper=forged`];
+  setMode({ launch: { args: ENGINE_ARGS } });
   const eph = await ke.ensureEphemeral({ browserKey: KEY_E, sessionId: 'sess-e', envPairs: pairs, sessionName: 'eng', variant: 'N' });
+  setMode(null);
   const ev0 = ke.ephemeralFor(KEY_E);
   const ep = ev0 ? ke.profile(ev0.profileId) : null;
   const la = fake.launches().at(-1);
@@ -827,6 +874,21 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   const cf = ke.configFileFor({ ephemeral: true, pairs });
   let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cf, 'utf8')); } catch { cfg = null; }
   ok(cfg && cfg.executablePath === KP && (cfg.args || []).includes('--vibespace-engine=fixture'), 'the config the AGENT\'s own commands are named (/resolve) carries the same program + arguments — the launch view never differs, so the browser is never relaunched on Chrome', cf);
+  {
+    // lane engine-args-string: THE FILE the launch named — `args` ONE string (the driver refuses a list: «invalid type: sequence,
+    // expected a string» — the owner's hub, 2026-11-02), read back by the driver's own rule: one switch per name, the keeper's
+    // mark once (the forged one gone), the engine's rendering switches present with the engine's value
+    const VB = require('../src/browser-verbs.js');
+    const a0 = la && la.config ? la.config.args : undefined;
+    const got = typeof a0 === 'string' ? a0.split(/[,\n]/).map((x) => x.trim()).filter(Boolean) : []; // the driver's reading, measured on 0.38.2
+    const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
+    const dups = got.map(nm).filter((n, i, all) => all.indexOf(n) !== i);
+    const marks = got.filter((x) => x.startsWith(VB.KEEPER_MARK + '='));
+    ok(typeof a0 === 'string' && cfg && cfg.args === a0, 'the engine launch\'s config (and the /resolve one, the SAME file) holds `args` as ONE string — never a list', { type: Array.isArray(a0) ? 'list' : typeof a0, args: a0 });
+    ok(got.length > 0 && !dups.length && marks.length === 1 && marks[0] === BPR.keeperMarkArg(KEY_E), 'read back by the driver\'s rule: no switch twice, the keeper\'s mark ONCE (its own value — the engine\'s forged one dropped)', { dups, marks, got });
+    ok(['--vibespace-engine=fixture', '--no-sandbox', '--use-angle=gl', '--user-agent=Fixture Kernel/150 (X11)', '--disable-blink-features=AutomationControlled'].every((x) => got.includes(x)) && !got.includes('--use-angle=swiftshader') && (!got.some((x) => x.startsWith('--log-level=')) || got.includes('--log-level=0')),
+      'the engine\'s rendering switches are there with the ENGINE\'s value (--use-angle=gl, its last; --log-level=0 over the keeper\'s quiet 3), a space inside one survives', got);
+  }
   fleetE = null;
   try { if (ep) ke.retireEphemeral(ep.id, 'test'); } catch { /* best effort */ }
 }

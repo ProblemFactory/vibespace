@@ -97,7 +97,7 @@ try {
   ok(be.tmpDir() === path.join(shortData, 'browser-env', 'tmp') && be.tmpDir() === be.tmpDir(), 'browser-env.tmpDir() (the /resolve answer → the CLI\'s TMPDIR) = the verdict, memoized');
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   ok(/const daemonTmp = \(\) => \{ if \(daemonTmpMade\) return daemonTmpMade; const d = F\.makeBrowserTmpDir\(\{ dataDir, log \}\);/.test(ksrc) && !/path\.join\(dataDir, 'browser-env', 'tmp'\)/.test(ksrc), "the keeper's daemon TMPDIR = the same maker (no second spelling of the data path)");
-  ok((ksrc.match(/B\.launchFatalOf\(r\.stderr \|\| r\.error \|\| r\.stdout\)/g) || []).length === 2, 'both launch-failure sites (ephemeral + named) name a known FATAL');
+  ok((ksrc.match(/B\.launchFatalOf\(r\.stderr \|\| r\.error \|\| r\.stdout(?:, \{ lineOf: ownConfigLine \})?\)/g) || []).length === 2, 'both launch-failure sites (ephemeral + named) name a known FATAL');
 } finally {
   for (const d of made) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 }

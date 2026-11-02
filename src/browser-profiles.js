@@ -416,8 +416,20 @@ const LAUNCH_FATALS = [
   { reason: 'socket_path_too_long', re: /Socket path too long/i, fix: "the browser's temp path is too long for Chrome's singleton socket (a Unix socket path must stay under 108 bytes) — the daemon's TMPDIR needs a shorter root" },
   { reason: 'tmp_dir_unwritable', re: /cannot create default profile directory/i, fix: "Chrome could not create its profile under the daemon's TMPDIR — that directory is missing or not writable" },
 ];
-function launchFatalOf(text) {
+/** lane engine-args-string: the driver REFUSED the launch config VibeSpace wrote («invalid config file <f>: invalid type:
+ *  sequence, expected a string at line 2 column 10») — said in VibeSpace's words: WHICH setting (the key on that line, read
+ *  through the handed-in `lineOf(file, n)`) and WHY. → `{reason:'config_refused', error}` | null. */
+function configRefusalOf(text, { lineOf = null } = {}) {
+  const m = /invalid config file (\/\S+?): (.+?) at line (\d+) column \d+/.exec(String(text || ''));
+  if (!m) return null;
+  let key = null; try { key = (/^\s*"([\w-]{1,64})"\s*:/.exec(String((lineOf && lineOf(m[1], Number(m[3]))) || '')) || [])[1] || null; } catch { key = null; }
+  const t = /^invalid type: (\w+)[^,]*, expected (.+)$/.exec(m[2]);
+  const why = t ? `it holds ${({ sequence: 'a list', map: 'an object', string: 'a string', boolean: 'true / false', integer: 'a number', null: 'nothing' })[t[1]] || t[1]} where the driver expects ${t[2]}` : m[2];
+  return { reason: 'config_refused', error: `the browser did not start: the browser driver refused the launch settings VibeSpace wrote for it — ${key ? `the setting "${key}"` : `line ${m[3]}`} of ${m[1].split('/').pop()}: ${why} (a VibeSpace fault, not the page's)` };
+}
+function launchFatalOf(text, { lineOf = null } = {}) {
   const s = String(text || '');
+  { const cr = configRefusalOf(s, { lineOf }); if (cr) return cr; }
   for (const f of LAUNCH_FATALS) {
     const m = f.re.exec(s);
     if (m) { const line = (s.slice(0, m.index).split('\n').pop() + s.slice(m.index).split('\n')[0]).trim().slice(0, 240); return { reason: f.reason, error: `the browser did not start (${f.reason}): ${f.fix} — Chrome said: ${line}` }; }
@@ -3522,7 +3534,7 @@ module.exports = {
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
   browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default (a PREFERENCE — the list admits)
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,
-  SOCKET_PATH_MAX, SOCKET_DIR_BASE, SUN_PATH_LIMIT, CHROME_SINGLETON_TAIL, BROWSER_TMP_SHORT_BASE, browserTmpDir, launchFatalOf, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
+  SOCKET_PATH_MAX, SOCKET_DIR_BASE, SUN_PATH_LIMIT, CHROME_SINGLETON_TAIL, BROWSER_TMP_SHORT_BASE, browserTmpDir, launchFatalOf, configRefusalOf, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
   USER_CONFIG_REL, PROJECT_CONFIG_NAME, layerProjectConfig,
   DEFAULT_IDLE_TIMEOUT_MS, idleTimeoutMs,
   browserEnvFor,

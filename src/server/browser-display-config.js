@@ -15,9 +15,10 @@
  *        the launch RELAUNCHES the browser — so every call of the record re-derives the SAME file from the SAME fact
  *        until the next launch probes again. The user's own config file is never written.
  *   engineFileFor(file, view)                   — lane engine-plugin: a conversation's browser launched on a browser ENGINE
- *        names, at every call, the file it names anyway + the engine's program (`executablePath`) and arguments (appended to
- *        `args`) — the same derived-file rule (written once, re-written only when its content changes), so the agent's own
- *        commands carry the launch's view and never relaunch it on Chrome (the measured relaunch rule).
+ *        names, at every call, the file it names anyway + the engine's program (`executablePath`) and arguments (merged into
+ *        `args`, ONE switch per name, written as the driver's ONE comma-separated line — lane engine-args-string) — the
+ *        same derived-file rule (written once, re-written only when its content changes), so the agent's own commands
+ *        carry the launch's view and never relaunch it on Chrome (the measured relaunch rule).
  *
  * Never throws: a base file that cannot be read, or a dir that cannot be written, leaves the call on its base file
  * (said once in the journal — the launch then fails as it did before this lane, never worse).
@@ -26,6 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const D = require('../browser-display.js');
+const V = require('../browser-verbs.js'); // lane engine-args-string: THE one writer of the driver's `args` + the keeper ∪ engine merge
 
 function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now, noDesktopWindow = undefined, vncDisplay = null } = {}) { // noDesktopWindow: H5's switch for a gate (undefined = the module's default, OFF in 2.369.200)
   if (!dir) throw new Error('browser-display-config: dir is required');
@@ -76,7 +78,12 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
    *  when its content changes; the memo names the file only while it is still ours (a regular file of this uid with exactly
    *  this content — lstat: a symlink swapped in is not followed) — the keeper's machine-file rule (takeover r4). A file that
    *  cannot be written leaves the call on `fallback` (said once). */
-  function derived(file, cfg, fallback, what) {
+  function derived(file, cfg0, fallback, what) {
+    // lane engine-args-string: `args` leaves through THE one writer — a list is joined into the driver's ONE line (a list in the
+    // file is refused whole by the driver: «invalid type: sequence, expected a string»); a switch that line cannot carry is said
+    const a = V.driverArgsText(cfg0.args);
+    if (!a.ok) { say(`args:${file}`, `${what} could not be written at ${file}: ${a.error} — the browser's calls keep ${fallback}`); return fallback; }
+    const cfg = a.args === cfg0.args ? cfg0 : { ...cfg0, args: a.args };
     const text = JSON.stringify(cfg, null, 2);
     const own = () => { try { const st = fs.lstatSync(file); return st.isFile() && !st.isSymbolicLink() && (typeof process.getuid !== 'function' || st.uid === process.getuid()) && fs.readFileSync(file, 'utf8') === text; } catch { return false; } };
     if (memo.get(file) === text && own()) return file;
@@ -99,8 +106,9 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const base = readCfg(baseFile);
     if (!base) { say(`eread:${baseFile}`, `the engine view could not read ${baseFile} — its calls keep that file`); return baseFile; }
     const extra = Array.isArray(view.args) ? view.args.map(String) : [];
-    const had = Array.isArray(base.args) ? base.args.map(String) : typeof base.args === 'string' && base.args.trim() ? base.args.split(/[,\n]/).map((x) => x.trim()).filter(Boolean) : [];
-    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: [...had, ...extra] } : {}) };
+    // lane engine-args-string: ONE switch per name — the keeper's control switches stay its own, the engine's value wins for
+    // the rest (browser-verbs mergeLaunchArgs); derived() writes the list as the driver's one line
+    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: V.mergeLaunchArgs(base.args, extra) } : {}) };
     const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000')).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
     return derived(file, cfg, baseFile, 'the engine view\'s config');

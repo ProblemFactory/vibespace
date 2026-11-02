@@ -17,6 +17,7 @@
  *   `browserEngine`) › 'default'; read at a profile's CREATE and at a conversation's browser's first start, then WRITTEN on
  *   the record (a later flip changes new records only).
  */
+const V = require('./browser-verbs.js'); // lane engine-args-string: the driver's `args` — its ONE writer + the keeper ∪ engine merge (PURE → PURE)
 /** Every refusal of an engine — a closed set merged into src/browser-builds.js BUILD_CODES (the routes' STATUS: 409). */
 const ENGINE_CODES = Object.freeze(['browser_engine_missing', 'browser_engine_kernel_missing', 'browser_engine_not_executable', 'browser_engine_protocol', 'browser_engine_unanswered', 'browser_engine_env']);
 /** The protocol this VibeSpace speaks (the kernel's `VibeSpace.getVersion` answers the same number). */
@@ -75,6 +76,8 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '' } = {}) {
     if (!strList(args) || args.length > ARGS_MAX || args.some((a) => !a || a.length > ARG_MAX || /[\0\n\r]/.test(a))) return bad('browser_engine_protocol', `named launch arguments of another shape (a list of at most ${ARGS_MAX} one-line strings)`);
     const own = args.filter((a) => OWN_ARG_RE.test(a));
     if (own.length) return bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`);
+    const carry = V.driverArgsText(args); // lane engine-args-string: every argument must ride the driver's ONE line as itself
+    if (!carry.ok) return bad('browser_engine_protocol', `named ${carry.bad.slice(0, 3).map((x) => JSON.stringify(clip(x, 60))).join(', ')} — the browser driver reads its launch arguments as one comma-separated line, so an argument holding a comma (or a blank at either end) cannot reach the browser whole; tell the plugin's author`);
     const env = body.env === undefined || body.env === null ? {} : body.env;
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
@@ -108,13 +111,18 @@ function engineChoiceVerdict({ choice = null, engine = null, machine = 'this com
   const ver = vk === 'measured' ? engine.measuredVersion : vk === 'reported' ? engine.version : vk === 'declared' ? engine.declaredVersion : null;
   return { ok: true, executablePath: engine.binaryPath, version: ver == null ? null : String(ver), major: majorOfVersion(ver), versionKind: vk };
 }
-/** An engine's launch answer as the browser CLI's env view: its arguments in AGENT_BROWSER_ARGS (newline separated when one
- *  holds a comma — the CLI takes either), its env (the ENGINE_ENV_KEYS it may set). `base` = the arguments the launch carries
- *  anyway (the keeper's mark, the automation flag) — an env list REPLACES the config's, so they ride it too. */
+/** An engine's launch answer as the browser CLI's env view: its arguments merged with `base` (the arguments the launch carries
+ *  anyway — the keeper's mark, the automation flag; an env list REPLACES the config's, so they ride it too) — ONE switch per
+ *  name (browser-verbs mergeLaunchArgs) — in AGENT_BROWSER_ARGS as the driver's ONE comma-separated line (driverArgsText:
+ *  measured on 0.38.2, the CLI cuts at every comma AND newline, so an argument holding a comma throws by name — the launch
+ *  verdict refuses it first), its env (the ENGINE_ENV_KEYS it may set). */
 function engineLaunchEnv({ args = [], env = {} } = {}, { base = [] } = {}) {
-  const all = [...(Array.isArray(base) ? base.map(String) : []), ...(Array.isArray(args) ? args.map(String) : [])];
   const out = {};
-  if (Array.isArray(args) && args.length) out.AGENT_BROWSER_ARGS = all.join(all.some((a) => a.includes(',')) ? '\n' : ',');
+  if (Array.isArray(args) && args.length) { // lane engine-args-string: ONE switch per name (the keeper's control switches stay its own), ONE line — the driver cuts at every comma AND newline
+    const line = V.driverArgsText(V.mergeLaunchArgs(Array.isArray(base) ? base : [], args));
+    if (!line.ok) throw Object.assign(new Error(line.error), { code: line.code });
+    out.AGENT_BROWSER_ARGS = line.args;
+  }
   for (const k of Object.keys(env || {})) if (ENGINE_ENV_KEYS.includes(k)) out[k] = String(env[k]);
   return out;
 }
