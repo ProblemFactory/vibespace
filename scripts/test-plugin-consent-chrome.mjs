@@ -15,7 +15,12 @@
 //   ⑥ the browser-engine bullet's zh sentence names the program VibeSpace starts as a profile's browser
 //   ⑦ Cancel closes it and the switch is off again
 //   ⑧ the read-only variant (the chip's «查看能力…») — ③ ④ ⑤ again
-// On 160045063 (the base — run this file on a `git archive` copy) ③ ④ ⑤ ⑥ are RED, in both variants (15 rows).
+//   ⑨ lane plugin-update-button (the owner, 2026-11-02: no Update on the row — it lived only in the chip's menu): the planted
+//     plugin carries a GIT install record (ref main, the owner's shape) ⇒ its row shows «更新…» beside «卸载…», both inside the
+//     row and the viewport at 1000 × 600, the switch / ⚙ columns not widened (the name keeps its width); the chip's menu has no 更新; a real press on a path-installed plugin's «更新…» with
+//     nothing new at its source says «… 已是最新（0.1.0）». PNG <prefix>-row.png = the planted plugin's row.
+// On 160045063 (the base — run this file on a `git archive` copy) ③ ④ ⑤ ⑥ are RED, in both variants (15 rows); on 63f59d572
+// ⑨ is RED (no 更新… on the row, 更新 in the chip's menu, the press finds no button).
 // PNGs: PLUGIN_CONSENT_PNG_DIR (default: the scratch root) <prefix>-consent.png / <prefix>-readonly.png, prefix =
 // PLUGIN_CONSENT_SHOT_PREFIX (default 'run'). This box's own fonts (the zh words need a CJK face; the runner's DejaVu has none).
 // Requires google-chrome (SKIP without). Run: node scripts/test-plugin-consent-chrome.mjs
@@ -74,6 +79,12 @@ fs.writeFileSync(path.join(pdir, 'vibespace-plugin.json'), J({ id: PID, version:
   description: 'A browser engine plugin (the shape of the owner\'s: its own server process, chosen as the agent browser).', server: true,
   contributes: { routes: true, browserEngine: true }, capabilities: { server: { fs: { read: [], write: [] }, net: [] } } }, null, 2));
 fs.writeFileSync(path.join(pdir, 'server.js'), '// never started: the plugin stays disabled\n');
+// ⑨: the planted plugin was installed from Git at ref main (the owner's Custom Browser Kernel) — its install record
+fs.writeFileSync(path.join(wt, 'data/plugin-registry.json'), J({ enabled: {}, trust: {}, installs: { [PID]: { source: 'git', value: 'https://example.invalid/userW/custom-browser-kernel.git', ref: 'main', sha: '5e1f'.repeat(10), contentHash: null, installedAt: Date.now(), updatedAt: null, credential: null, by: 'user' } } }, null, 2));
+// ⑨: a second plugin, installed through the page from a folder — its Update finds the same bytes
+const HID = 'update.hello', hsrc = path.join(ROOT, 'hello-src');
+fs.mkdirSync(hsrc, { recursive: true });
+fs.writeFileSync(path.join(hsrc, 'vibespace-plugin.json'), J({ id: HID, version: '0.1.0', engines: { vibespace: '2.369.24' }, label: 'Update Hello', description: 'A plugin with nothing new at its source.' }, null, 2));
 
 const port = await freePort();
 const home = scratchHome('plugin-consent-home', fs); homes.push(home);
@@ -186,7 +197,7 @@ await step('⑦', async () => {
 });
 await step('⑧', async () => {
   await realClick(`${row} .plugin-chip`);
-  const tagged = await waitFor(`(() => { const i = [...document.querySelectorAll('.context-menu-item')].find((x) => ['查看能力…', 'Show capabilities…'].includes(x.textContent.trim())); if (i) i.dataset.pc = 'caps'; return !!i; })()`, 8000);
+  const tagged = await waitFor(`(() => { const its = [...document.querySelectorAll('.context-menu-item')]; window.__pcMenu = its.map((x) => x.textContent.trim()); const i = its.find((x) => ['查看能力…', 'Show capabilities…'].includes(x.textContent.trim())); if (i) i.dataset.pc = 'caps'; return !!i; })()`, 8000);
   if (tagged) await realClick('[data-pc="caps"]');
   const up3 = await waitFor(`!!document.querySelector('#plugin-consent-dialog .plugin-caps-list')`, 15000);
   check('⑧ the chip\'s «查看能力…» opens the read-only variant', tagged && up3);
@@ -194,6 +205,41 @@ await step('⑧', async () => {
   check(`⑧ «${m?.title}» has no Enable button`, !!m && !(await evalJs(`!!document.querySelector('#plugin-consent-dialog .plugin-consent-accept')`)));
   await shot('readonly');
   judge('read-only:', m);
+});
+await step('⑨', async () => {
+  const closeB = await evalJs(`(() => { const b = document.querySelector('#plugin-consent-dialog .plugin-consent-actions .mounts-btn'); if (b) b.dataset.pc = 'close'; return !!b; })()`);
+  if (closeB) await realClick('[data-pc="close"]');
+  await waitFor(`!document.getElementById('plugin-consent-dialog')`, 8000);
+  const menu = await evalJs('window.__pcMenu || null');
+  check(`⑨ ONE door: the chip's menu lists ${J(menu)} — no 更新`, Array.isArray(menu) && menu.length > 0 && !menu.some((x) => /^(更新|Update)/.test(x)), menu);
+  const inst = await evalJs(`fetch('/api/plugins/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${J(J({ source: 'path', value: hsrc }))} }).then((x) => x.json())`);
+  check('⑨ a second plugin installs through the page from a folder (source path)', inst?.plugin?.id === HID, inst);
+  await evalJs(`(() => { const b = [...document.querySelectorAll('.plugin-manifests-head .mounts-btn')].find((x) => ['重新扫描', 'Rescan'].includes(x.textContent.trim())); if (b) b.click(); return !!b; })()`);
+  await waitFor(`!!document.querySelector('.plugin-row[data-plugin="${HID}"]')`, 15000);
+  const M = await evalJs(`(() => {
+    const row = document.querySelector('${row}'); if (!row) return null;
+    row.scrollIntoView({ block: 'center' });
+    const R = (e) => { const r = e.getBoundingClientRect(); return { t: r.top, b: r.bottom, l: r.left, r: r.right, w: r.width, h: r.height }; };
+    const box = row.querySelector('.plugin-row-actions'), main = row.querySelector('.plugin-row-main'), sw = row.querySelector(':scope > .plugin-sw'), gear = row.querySelector(':scope > .plugin-gear');
+    const btns = box ? [...box.querySelectorAll('button')].map((b) => ({ text: b.textContent.trim(), cls: b.className, disabled: b.disabled, vis: getComputedStyle(b).visibility, ...R(b) })) : [];
+    return { row: R(row), box: box && { parentIsRow: box.parentElement === row, ...R(box) }, btns, main: R(main), sw: R(sw), gear: R(gear), colGap: parseFloat(getComputedStyle(row).columnGap), vw: innerWidth, vh: innerHeight };
+  })()`);
+  if (M) { // the row's PNG first — on the base (no cluster) it is the «before»
+    const pad = 6, x = Math.max(0, M.row.l - pad), y = Math.max(0, M.row.t - pad);
+    try { const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: Math.min(M.vw - x, M.row.w + 2 * pad), height: Math.min(M.vh - y, M.row.h + 2 * pad), scale: 1 } }); const f = path.join(SHOTS, `${PREFIX}-row.png`); fs.writeFileSync(f, Buffer.from(data, 'base64')); console.log(`  (shot: ${f})`); } catch { }
+  }
+  const upd = M?.btns.find((b) => b.text === '更新…'), un = M?.btns.find((b) => b.text === '卸载…');
+  check(`⑨ the git-installed plugin's row shows «更新…» beside «卸载…» in one actions cluster (${J(M?.btns.map((b) => b.text))})`, !!upd && !!un && !!M.box?.parentIsRow && M.btns.indexOf(upd) < M.btns.indexOf(un) && /\bplugin-update\b/.test(upd.cls) && !upd.disabled, M);
+  const inside = (b) => !!b && b.w > 0 && b.h > 0 && b.vis === 'visible' && b.l >= M.row.l - 0.5 && b.r <= M.row.r + 0.5 && b.t >= M.row.t - 0.5 && b.b <= M.row.b + 0.5 && b.l >= 0 && b.r <= M.vw && b.t >= 0 && b.b <= M.vh;
+  const gaps = M && [M.sw.l - M.main.r, M.gear.l - M.sw.r].map((g) => +g.toFixed(1));
+  check(`⑨ the cluster widens neither the switch nor the ⚙ column — the name keeps its width (${M && M.main.w.toFixed(0)} px; gaps ${J(gaps)} vs the row's ${M && M.colGap} px)`, !!M && gaps.every((g) => g <= M.colGap + 0.5), M && { main: M.main, sw: M.sw, gear: M.gear });
+  check(`⑨ both buttons are drawn inside the row and the 1000 × 600 viewport, on one line (更新… ${upd ? `${upd.l.toFixed(0)},${upd.t.toFixed(0)} ${upd.w.toFixed(0)}×${upd.h.toFixed(0)}` : 'absent'}; 卸载… ${un ? `${un.l.toFixed(0)},${un.t.toFixed(0)}` : 'absent'})`, inside(upd) && inside(un) && Math.abs(upd.t - un.t) <= 1, M);
+  const hrow = `.plugin-row[data-plugin="${HID}"]`;
+  await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.scrollIntoView({ block: 'center' }); return !!r; })()`);
+  const pressed = await realClick(`${hrow} .plugin-update`);
+  const said = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
+  const toasts = await evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent.trim())`);
+  check(`⑨ a real press on «更新…» with nothing new at the source says «${HID} 已是最新（0.1.0）» (${J(toasts)})`, !!pressed && said, { pressed, miss: realClick.lastMiss, toasts });
 });
 check('no page exceptions', pageErrors.length === 0, pageErrors.slice(0, 3));
 console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS (${pass})`);

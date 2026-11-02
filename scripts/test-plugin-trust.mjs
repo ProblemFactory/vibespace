@@ -162,6 +162,11 @@ await post('/api/plugins/install', { source: 'path', value: path.join(src, 'hell
 await post('/api/plugins/manifests/example.hello/enabled', { enabled: true, trusted: true }); // the source swap above dropped consent — re-give it, then Update must keep it
 const up = await post('/api/plugins/manifests/example.hello/update', {});
 ok(up.status === 200 && up.body.plugin?.id === 'example.hello' && up.body.previous && (await row('example.hello')).install.updatedAt && (await row('example.hello')).trusted, 'update re-runs the recorded source (path), trashes the previous copy and KEEPS consent (the owner asked for this version from the source they already trusted; a changed capability surface still trips the drift check)');
+// lane plugin-update-button: the answer says when NOTHING was new at the source (the row's toast: «already up to date»)
+ok(up.body.unchanged === true, 'update from the same bytes at the recorded path answers unchanged: true', up.body.unchanged);
+fs.writeFileSync(path.join(src, 'hello', 'CHANGES.txt'), 'next\n');
+const upNew = await post('/api/plugins/manifests/example.hello/update', {});
+ok(upNew.status === 200 && upNew.body.unchanged === false, 'a changed package at the recorded path answers unchanged: false (the row says «Updated … to …»)', upNew.body);
 ok((await post('/api/plugins/manifests/example.hello/update', {})).status === 200 && (await post('/api/plugins/manifests/nope.nope/update', {})).status === 404, 'update: unknown id → 404');
 const stateFile = path.join(root, 'data', 'plugins-state', 'example.hello', 'counter.json');
 // the update just restarted the plugin process — wait for it (gate flake: POST /x/count raced a 'starting' state)
@@ -262,7 +267,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   await PL.install({ source: 'git', value: URL_H, ref: 'main', credential: 'plugin-git' }); resetCalls();
   const u7 = await PL.update('acme.private');
   const f7 = fetchOf(calls());
-  ok(u7.plugin.version === '1.0.1' && f7 && f7.argv.at(-1) === 'main' && f7.ask && f7.ask.pass === TOKEN && PL.installRecord('acme.private').sha === sha2, 'Update re-pulls the recorded ref with the recorded credential and records the new sha');
+  ok(u7.plugin.version === '1.0.1' && f7 && f7.argv.at(-1) === 'main' && f7.ask && f7.ask.pass === TOKEN && PL.installRecord('acme.private').sha === sha2 && u7.unchanged === true, 'Update re-pulls the recorded ref with the recorded credential and records the new sha; the ref still at the recorded commit ⇒ unchanged: true (lane plugin-update-button)');
   // ⑧ the row's reachability Test: ls-remote with the credential (the same files, shredded)
   const PI = require(path.join(REPO, 'src/server/plugin-install.js'));
   const inst8 = PI.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP });

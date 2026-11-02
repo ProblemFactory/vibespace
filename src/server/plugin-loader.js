@@ -456,6 +456,9 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (inst.source === 'zip') throw httpErr(400, `"${id}" was installed from an uploaded file — upload the new .vsp through Install plugin… (it replaces the installed copy)`);
     stopChild(rec);
     const r = await installer.install({ source: inst.source, value: inst.value, expectId: id, ref: inst.ref || null, credential: inst.credential || null });
+    // lane plugin-update-button: NOTHING NEW at the source — a git ref still at the recorded commit, any other source the same
+    // package fingerprint — so the row's toast says «already up to date» instead of «Updated to» the version it already had
+    const unchanged = inst.source === 'git' ? !!r.sha && r.sha === inst.sha : !!r.contentHash && r.contentHash === inst.contentHash;
     // Update = the owner deliberately pulling a new version of THIS plugin from
     // the source they already chose; consent rides along (a changed capability
     // surface still trips the discovery drift check). The new fingerprint must
@@ -466,7 +469,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (fresh?.enabled) { fresh.crashes = []; startChild(fresh); }
     syncShims(); notify();
     tele('plugin-update', `${inst.source} ${id}@${r.version}`);
-    return { plugin: list().find((p) => p.id === id), previous: r.previous, warnings: r.warnings };
+    return { plugin: list().find((p) => p.id === id), previous: r.previous, warnings: r.warnings, unchanged };
   }
 
   // ── routes ──
