@@ -278,6 +278,23 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   // ⑨ RED CONTROLS — patched copies of the installer each turn a census above red
   const SRC = read('src/server/plugin-install.js');
   const M = mutantCopies('plugin-trust-git', REPO);
+  // ⑦b lane plugin-update-button r2: THE REF MOVED — main gains a commit (1.0.2) after the install recorded sha2, so the
+  // recorded sha is the OLDER one: Update answers unchanged: false and records the new sha (the row's toast says «Updated …
+  // to 1.0.2», never «already up to date»). RED CONTROL first, on the same move: a patched loader whose git branch ignores the
+  // recorded sha (`!!r.sha`) answers unchanged: true — the leg refuses it. (Placed after ⑧: its ls-remote pins main at sha2.)
+  {
+    const LSRC = read('src/server/plugin-loader.js');
+    const anchor = "inst.source === 'git' ? !!r.sha && r.sha === inst.sha :";
+    ok(LSRC.includes(anchor), 'control ⑦b: the git branch of unchanged is in plugin-loader.js', anchor);
+    const moved = (u, rec, sha) => !!u && u.unchanged === false && rec?.sha === sha && u.plugin?.version === '1.0.2';
+    const before = PL.installRecord('acme.private');
+    const mut = M.load('src/server/plugin-loader.js', LSRC.replace(anchor, "inst.source === 'git' ? !!r.sha :"), 'unchanged-git').create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: 1500 });
+    const sha3 = FX.commit({ 'vibespace-plugin.json': pkg('1.0.2') });
+    const um = await mut.update('acme.private');
+    ok(before.ref === 'main' && before.sha === sha2 && sha3 !== sha2 && um.unchanged === true && !moved(um, mut.installRecord('acme.private'), sha3), 'RED CONTROL ⑦b: a loader whose git branch ignores the recorded sha answers unchanged: true on a ref that moved — the leg below refuses it', { unchanged: um.unchanged, sha: mut.installRecord('acme.private')?.sha });
+    const u7b = await PL.update('acme.private');
+    ok(moved(u7b, PL.installRecord('acme.private'), sha3), 'Update after the ref moved (recorded sha2, main now at a new commit): unchanged: false, the new sha recorded, version 1.0.2', { unchanged: u7b.unchanged, sha: PL.installRecord('acme.private')?.sha, version: u7b.plugin?.version });
+  }
   const mutant = async (tag, from, to, check) => {
     if (!SRC.includes(from)) return ok(false, `control ${tag}: its anchor is gone from plugin-install.js`, from);
     const mod = M.load('src/server/plugin-install.js', SRC.replace(from, to), tag);
