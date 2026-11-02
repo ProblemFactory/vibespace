@@ -800,6 +800,25 @@ console.log('— ⑦ resume, an agent error, text only');
     ok('agy\'s stream got TEXT only, every line (another block type would end it)', agyLines().every((c) => typeof c === 'string'));
   } finally { await w.stop(); }
 }
+// lane agy-wall-signal r3: a wall record names the model the running turn's process started on (agy's own init.model)
+{
+  const w = startWrapper({ env: { AGY_STUB_DEFAULT_MODEL: 'gemini-3.8-flash-medium' } });
+  try {
+    await w.until(() => w.find('session'), 8000, 'session');
+    w.send({ type: 'chat-input', text: 'this will fail', msgId: 'sm1' });
+    const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
+    const n = await w.until(() => w.find('notice', (r) => r.noticeKind === 'agy-error'), 4000, 'agy-error notice');
+    ok('r3: a DEFAULT-model conversation — agy\'s init names its model, and the agy-error notice + the error prompt_end both carry it as servedModel', end.stopReason === 'error' && end.servedModel === 'gemini-3.8-flash-medium' && n.servedModel === 'gemini-3.8-flash-medium', { end, n });
+  } finally { await w.stop(); }
+  const w2 = startWrapper({});
+  try {
+    await w2.until(() => w2.find('session'), 8000, 'session');
+    w2.send({ type: 'chat-input', text: 'this will fail', msgId: 'sm2' });
+    const end = await w2.until(() => w2.find('prompt_end'), 8000, 'end');
+    const n = await w2.until(() => w2.find('notice', (r) => r.noticeKind === 'agy-error'), 4000, 'agy-error notice');
+    ok('r3: …an agy whose init names no model: no servedModel field on either record (never a guess)', !('servedModel' in end) && !('servedModel' in n), { end, n });
+  } finally { await w2.stop(); }
+}
 {
   // RED control (lane agy-harness-fixes): the pre-fix wrapper DROPPED every picture — a picture-only message never reached agy
   const src = fs.readFileSync(WRAPPER, 'utf8');

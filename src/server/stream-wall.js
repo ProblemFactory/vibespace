@@ -49,7 +49,7 @@ function roomNotice(room) {
     text: `${room.name}: weekly limit ${room.usedPct} % used — switch this conversation's model to continue` };
 }
 
-function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../usage-cache-write.js'), door = null, now = Date.now, log = (l) => console.log(l) } = {}) {
+function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../usage-cache-write.js'), door = null, wrapperMetaOf = null, now = Date.now, log = (l) => console.log(l) } = {}) {
   const lastWall = new WeakMap();   // session → the wall it last wrote (the notice and its prompt_end are ONE wall)
   const lastModel = new WeakMap();  // session → the model the stream last named (agy's `usage` record)
   const fired = [];                 // the one-shot's ledger for the hub's life: { key, limitId, resetsAt }
@@ -77,6 +77,18 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     }).catch((e) => { log(`[stream-wall] ${key}: the wall re-check failed: ${e.message}`); return null; });
   }
 
+  /** THE WALL'S MODEL — the model the TURN ran on, by witness (r3): ① the wall record's own `servedModel` (the wrapper's
+   *  agy `init.model` for this process — in stream order, moved only when a set-model restart's new process inits, so a
+   *  pick during the turn never moves it); ② the wrapper's own sidecar (`agy.model`, the same fact — an older wrapper that
+   *  stamps no field, and it survives a hub restart); ③ the session record (the engine's ladder, else lock › pick ›
+   *  spawn); ④ agy's `usage` record (it arrives AFTER the wall: a session that names nothing else). */
+  function modelOfWall(session, rec, modelOf) {
+    if (typeof rec.servedModel === 'string' && rec.servedModel) return rec.servedModel;
+    try { const m = wrapperMetaOf && wrapperMetaOf(session); if (m && m.agy && typeof m.agy.model === 'string' && m.agy.model) return m.agy.model; } catch { }
+    let model = null; try { model = (modelOf && modelOf()) || null; } catch { model = null; }
+    return model || ownModelOf(session) || lastModel.get(session) || null;
+  }
+
   /** One wrapper record of `session` (`modelOf` = the session's model; `say(rec)` = a line into its chat).
    *  → { wallRoom, oneShot } when a wall was written, else null. */
   function onRecord(session, rec, { modelOf = null, say = null } = {}) {
@@ -85,10 +97,7 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     if (rec.kind !== 'notice' && rec.kind !== 'prompt_end') return null;
     const quota = quotaOf(session.backend);
     if (!quota || typeof quota.signalFromStream !== 'function') return null;
-    // the model: the session's fact at the moment of the record (the engine's ladder, else the session record itself);
-    // agy's `usage` record arrives AFTER the wall, so it is only a secondary witness (a session that names none)
-    let model = null; try { model = (modelOf && modelOf()) || null; } catch { model = null; }
-    const sig = quota.signalFromStream(rec, { model: model || ownModelOf(session) || lastModel.get(session) || null });
+    const sig = quota.signalFromStream(rec, { model: modelOfWall(session, rec, modelOf) });
     if (!sig || sig.source !== 'stream') return null;
     if (sig.kind === 'unread') { once(`unread|${session.backend}|${sig.why}`, `[stream-wall] ${session.backend}: a usage wall the stream named was not read (${sig.why}) — nothing written, never a guess`); return null; }
     if (sig.kind !== 'exhausted') return null;

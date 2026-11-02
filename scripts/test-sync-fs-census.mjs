@@ -185,6 +185,7 @@ const ROWS = [
   ["src/secret-file.js", "*", 5, "local-only", "callers replace data/auth.json, data/agentd attach configs, data/dropline-oauth.json, the frp relay file in data/ and ~/.vibespace/plugins/frp/frpc.toml"],
   ["src/server/account-usage-routes.js", "create > route:PATCH /api/accounts/pool/:id > ownLink", 1, "local-only", "accounts.sessionPoolLinkPath = <dataDir>/pool-links/<pool>/<sid> (both sanitized)"],
   ["src/server/account-usage-routes.js", "create > route:POST /api/accounts/:id/relogin", 1, "local-only", "accounts.subDir(id) = <dataDir>/subs/<id> (the member's credential dir)"],
+  ["src/server/account-usage-routes.js", "create > wrapperMetaOf", 1, "local-only", "the agy wrapper's own sidecar <rootDir>/data/session-buffers/<webui id>.json (server.js BUFFERS_DIR — the hub's id, never a user path; lane agy-wall-signal r3: the usage wall's model for an older wrapper)"],
   ["src/server/agent-tool-generators.js", "create > ensureDir", 2, "local-only", "called only for <checkout>/data/bin, data/bin/editor and data/usage-cache (rootDir from server.js)"],
   ["src/server/agent-tool-generators.js", "create > agentHooksStatus", 4, "local-only", "HOOK_FILES = the harness hook files (~/.claude/settings.json, ~/.codex/hooks.json: vendor CLI config, inject.hookFile) and their dirs"],
   ["src/server/local-index.js", "readProcText", 1, "local-only", "lane human-cli: /proc only (self stat, cgroup, mountinfo, boot_id, the parent's comm; another hub's / a row's stat by its recorded pid) — procfs, never a mount"],

@@ -46,6 +46,7 @@ const NOTICE = { ts: TS, type: 'acp', kind: 'notice', level: 'error', text: 'Ant
 const PEND = { ts: '2026-11-02T13:21:36.045Z', type: 'acp', kind: 'prompt_end', promptId: 'p39-3287287', stopReason: 'error', error: { message: TEXT, status: 'ERROR' } };
 const USAGE = { ts: '2026-11-02T13:21:36.053Z', type: 'acp', kind: 'usage', sessionId: '00000000-0000-4000-8000-000000000000', total: {}, turn: {}, last: {}, model: 'gemini-4-argon-high', modelFrom: 'agy', durationSeconds: 808712.58 };
 const RESET = 1793952070; // the re-check's Gemini weekly reset — exactly ts + 90h39m34s
+const EARLIER = T - 2 * 86400e3; // the account's Re-check TWO DAYS before the wall (ms — r3: it was 172.8 s)
 const MODEL = { model: 'gemini-4-argon-high' };
 
 console.log('① the three record shapes → one signal each (or none)');
@@ -119,7 +120,7 @@ const INCIDENT = envelope({ g7: 99.22, g7r: RESET, g5: 27.51, g5r: sec(T) + 3 * 
 fs.writeFileSync(ENV_FILE, JSON.stringify(INCIDENT));
 // the reading the account held BEFORE the wall (a Re-check two days earlier)
 const seed = (key, at, env) => { const j = U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(env), measuredAt: at }); return W.writeReading({ cacheDir: CACHE, key, set: { ...j.reading, identity: key }, extras: { backend: 'antigravity' }, source: 'cli-usage', backend: 'antigravity' }); };
-const BEFORE = envelope({ g7: 40, g7r: RESET, g5: 10, g5r: sec(T) + 3600, c7: 0, c7r: sec(T - 2 * 86400) + 7 * 86400, c5: 0, c5r: sec(T) + 4 * 3600 });
+const BEFORE = envelope({ g7: 40, g7r: RESET, g5: 10, g5r: sec(T) + 3600, c7: 0, c7r: sec(EARLIER) + 7 * 86400, c5: 0, c5r: sec(T) + 4 * 3600 });
 const disk = (key) => W.readCacheObject(CACHE, key);
 const lim = (o, id) => (o && o.limits || []).find((l) => l.limitId === id);
 const win = (o, id, k) => QM.windowOfKind(lim(o, id), k);
@@ -141,7 +142,7 @@ const modelOf = (s) => () => s._spawnModel;
 
 console.log('⑥ THE WRITE: the walled window, nothing else');
 {
-  seed(A.id, T - 2 * 86400, BEFORE);
+  seed(A.id, EARLIER, BEFORE);
   const before = disk(A.id);
   const road = mkRoad({ door: null });
   const s = sess(A);
@@ -154,7 +155,7 @@ console.log('⑥ THE WRITE: the walled window, nothing else');
   ok('…the Gemini limit says who measured it last (stream) and the file keeps the backend + agy\'s window names', lim(after, G).source === 'stream' && after.backend === 'antigravity' && after.windowNames?.['Gemini Models/7d'] === 'Weekly Limit Remaining' && after.source === 'stream');
   // THE AGE RULE (r2): the row's age label is the file's fetchedAt — a wall never moves it (it stamps only its own window)
   const MA0 = await import(path.join(REPO, 'src/lib/manage-agents.js'));
-  ok('…the file\'s fetchedAt (the row\'s age label) stays the STALE reading\'s — the untouched windows keep their age; the walled window carries the wall\'s own measuredAt', after.fetchedAt === before.fetchedAt && after.fetchedAt === T - 2 * 86400 && MA0.onDemandUsageView({ limits: after.limits, fetchedAt: after.fetchedAt }).fetchedAt === T - 2 * 86400, JSON.stringify([before.fetchedAt, after.fetchedAt]));
+  ok('…the file\'s fetchedAt (the row\'s age label) stays the STALE reading\'s — the untouched windows keep their age; the walled window carries the wall\'s own measuredAt', after.fetchedAt === before.fetchedAt && after.fetchedAt === EARLIER && MA0.onDemandUsageView({ limits: after.limits, fetchedAt: after.fetchedAt }).fetchedAt === EARLIER, JSON.stringify([before.fetchedAt, after.fetchedAt]));
   ok('the answer names the room (the other group\'s weekly window read at 0 %)', r && r.wallRoom && r.wallRoom.name === C && r.wallRoom.usedPct === 0, JSON.stringify(r && r.wallRoom));
   const mid = fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8');
   ok('the prompt_end of the same wall writes nothing more', road.onRecord(s, PEND, { modelOf: modelOf(s) }) === null && fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8') === mid);
@@ -226,7 +227,7 @@ console.log('⑧ THE ONE-SHOT (owner\'s ruling A): one read per account per wall
 {
   fs.rmSync(LOG, { force: true });
   for (const a of [A, B, Cc, D]) fs.rmSync(W.cacheFileFor(CACHE, a.id), { force: true });
-  seed(A.id, T - 2 * 86400, BEFORE);
+  seed(A.id, EARLIER, BEFORE);
   clock.t = T + 50;
   const said = [];
   const road = mkRoad();
@@ -347,7 +348,7 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
   clock.t = T + 50;
   // the FIRST wall of a session (a restart / a new conversation on an exhausted account): no `usage` record has spoken yet
-  fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true }); seed(A.id, T - 2 * 86400, BEFORE);
+  fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true }); seed(A.id, EARLIER, BEFORE);
   const fed = drive(fresh(A, { _spawnModel: 'gemini-4-argon-high' }), [NOTICE, PEND, USAGE]);
   const g7 = win(disk(A.id), G, '7d');
   ok('THE FIRST WALL of a session (notice → prompt_end → usage: no usage record yet) is WRITTEN — the session\'s own model names the group', g7 && g7.usedPct === 100 && g7.resetsAt === RESET, JSON.stringify(g7));
@@ -359,7 +360,7 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   drive(fresh(B, { _spawnModel: 'gemini-4-argon-high' }), [NOTICE, PEND], KEYS.filter((x) => x !== 'sessionModelFor'));
   ok('…and with an engine that LACKS the accessor, the session record\'s own model still writes the wall (the fallback)', win(disk(B.id), G, '7d')?.usedPct === 100);
   // the prompt_end FIRST (agy\'s stdout result read before its stderr line): the room rides the prompt_end, said once
-  fs.rmSync(W.cacheFileFor(CACHE, Cc.id), { force: true }); seed(Cc.id, T - 2 * 86400, BEFORE);
+  fs.rmSync(W.cacheFileFor(CACHE, Cc.id), { force: true }); seed(Cc.id, EARLIER, BEFORE);
   const fed2 = drive(fresh(Cc, { _spawnModel: 'gemini-4-argon-high' }), [PEND, NOTICE, USAGE]);
   const pe = fed2.find((m) => m.kind === 'prompt_end');
   ok('PROMPT_END FIRST: the prompt_end carries the room, the later notice none — EXACTLY ONE room line through the real normalizer', pe && pe.wallRoom && pe.wallRoom.name === C && !fed2.find((m) => m.kind === 'notice').wallRoom && rooms(fed2).length === 1, JSON.stringify(rooms(fed2).map((m) => m.content[0])));
@@ -370,6 +371,32 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   s4._pickedModel = 'gemini-4-argon-high'; s4._pickedModelAt = T - 60e3;                               // the person switched
   drive(s4, [NOTICE, PEND]);
   ok('A WALL AFTER A MODEL SWITCH lands on the NEW model\'s group (Gemini), the old group untouched', win(disk(D.id), G, '7d')?.usedPct === 100 && !lim(disk(D.id), C), JSON.stringify(disk(D.id)?.limits?.map((l) => l.limitId)));
+  // r3 — THE SERVED MODEL FIRST: the wall records' own `servedModel` (the wrapper's agy init.model) — a Default-model
+  // conversation after a hub restart names nothing on the session; a pick during the running turn moves only the pick
+  const served = (r, m) => ({ ...r, servedModel: m });
+  fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true });
+  drive(fresh(A), [served(NOTICE, 'gemini-3.8-flash-medium'), served(PEND, 'gemini-3.8-flash-medium')]);
+  ok('r3: a DEFAULT-model conversation after a restart (no lock / pick / spawn, no usage record yet): the wall records\' servedModel names the group — WRITTEN', win(disk(A.id), G, '7d')?.usedPct === 100);
+  fs.rmSync(W.cacheFileFor(CACHE, B.id), { force: true });
+  const s5 = fresh(B, { _spawnModel: 'claude-sonnet-4-6' });
+  s5._pickedModel = 'gemini-4-argon-high'; s5._pickedModelAt = T - 5e3;   // picked DURING the turn: the wrapper restarts only after it
+  drive(s5, [served(NOTICE, 'claude-sonnet-4-6'), served(PEND, 'claude-sonnet-4-6')]);
+  ok('r3: a PICK DURING THE TURN, then the wall ⇒ the OLD model\'s group (Claude and GPT — what the turn ran on); Gemini untouched', win(disk(B.id), C, '7d')?.usedPct === 100 && !lim(disk(B.id), G), JSON.stringify(disk(B.id)?.limits?.map((l) => l.limitId)));
+  clock.t = T + 20 * 60e3;
+  const later = (r) => ({ ...r, ts: new Date(T + 20 * 60e3).toISOString(), ...(r.promptId ? { promptId: 'p40-1' } : {}) });
+  drive(s5, [served(later(NOTICE), 'gemini-4-argon-high'), served(later(PEND), 'gemini-4-argon-high')]);
+  ok('r3: …after the wrapper\'s restart (its new process inits on the pick), the next wall ⇒ the NEW model\'s group', win(disk(B.id), G, '7d')?.usedPct === 100);
+  clock.t = T + 50;
+  // an OLDER wrapper (no servedModel field — every conversation running when the hub updates): the wrapper's own sidecar
+  const sidecars = {};
+  SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l), wrapperMetaOf: (x) => sidecars[x._webuiId] || null });
+  fs.rmSync(W.cacheFileFor(CACHE, Cc.id), { force: true });
+  const s6 = fresh(Cc, { _webuiId: 'w-old-wrapper', _pickedModel: 'claude-sonnet-4-6' });
+  sidecars['w-old-wrapper'] = { agy: { model: 'gemini-4-argon-high' } };   // the model the old wrapper's agy init named
+  drive(s6, [NOTICE, PEND]);
+  ok('r3: an OLDER wrapper (no servedModel) — the wrapper\'s sidecar agy.model is the witness, ahead of the session\'s pick (Gemini written)', win(disk(Cc.id), G, '7d')?.usedPct === 100 && !lim(disk(Cc.id), C));
+  ok('r3: the hub\'s road is configured with that reader: the wrapper\'s own BUFFERS_DIR sidecar <webui id>.json', /wrapperMetaOf: \(s\) => \(s && s\._webuiId \? JSON\.parse\(fs\.readFileSync\(path\.join\(rootDir, 'data', 'session-buffers', s\._webuiId \+ '\.json'\), 'utf8'\)\) : null\)/.test(read('src/server/account-usage-routes.js')) && /const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/.test(read('server.js')));
+  SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
   // no model fact anywhere ⇒ still no signal, said
   const n0 = logs.length;
   const fake = { ...A, id: 'agy-no-model-acct' };

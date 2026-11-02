@@ -91,7 +91,7 @@ if (process.env.AGY_STUB_AUTH === 'wait') { // the MEASURED start on a character
 if (flag('--input-format') !== 'stream-json') { process.stderr.write('stub: only --input-format stream-json is implemented\n'); process.exit(2); }
 const cid = flag('--conversation') || process.env.AGY_STUB_CID || crypto.randomUUID(); // AGY_STUB_CID: a suite's fixed conversation (its fixture store is that conversation's)
 const model = flag('--model') || 'default', effort = flag('--effort') || '', mode = argv.includes('--dangerously-skip-permissions') ? 'always-proceed' : (flag('--mode') || 'request-review');
-out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['ask_permission', 'run_command', 'write_to_file'], permission_mode: mode === 'always-proceed' ? 'always-proceed' : 'request-review', ...(flag('--model') ? { model } : {}) } });
+out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['ask_permission', 'run_command', 'write_to_file'], permission_mode: mode === 'always-proceed' ? 'always-proceed' : 'request-review', ...(flag('--model') ? { model } : process.env.AGY_STUB_DEFAULT_MODEL ? { model: process.env.AGY_STUB_DEFAULT_MODEL } : {}) } }); // AGY_STUB_DEFAULT_MODEL: the slug real agy names for a Default conversation (lane agy-wall-signal r3)
 let step = 0, turns = 0, busy = Promise.resolve();
 // the running sums (see USAGE above) + agy's own transcript when asked
 const TX = process.env.AGY_STUB_TRANSCRIPT === '1' && process.env.HOME ? path.join(process.env.HOME, '.gemini', 'antigravity-cli', 'brain', cid, '.system_generated', 'logs', 'transcript.jsonl') : null;

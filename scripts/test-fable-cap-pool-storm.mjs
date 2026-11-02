@@ -1657,9 +1657,12 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
   ok('§10 the consumer set is derived from the registry and is not empty',
     consumers.length >= 3, JSON.stringify(consumers));
 
+  // THE `engine:` OBJECT LITERAL'S KEYS ONLY (lane agy-wall-signal r3): the whole `create({…})` options literal also names
+  // BUFFERS_DIR, activeSessions, … — a consumer reading `engine.BUFFERS_DIR` would have passed against it
+  const engineKeys = (anchor) => { const i = srv.indexOf(anchor); return i < 0 ? [] : names(literalAfter(srv.slice(i), 'engine: {')); };
   const wired = {
-    'src/server/session-stdout.js': names(literalAfter(srv, "require('./src/server/session-stdout.js').create({")),
-    'src/server/session-brain.js': names(literalAfter(srv, "require('./src/server/session-brain.js').create({")),
+    'src/server/session-stdout.js': engineKeys("require('./src/server/session-stdout.js').create({"),
+    'src/server/session-brain.js': engineKeys("require('./src/server/session-brain.js').create({"),
   };
   ok('§10 both `engine:` literals were found in server.js',
     wired['src/server/session-stdout.js'].length > 5 && wired['src/server/session-brain.js'].length > 3);
@@ -1679,20 +1682,32 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
     missingTotal === 0, String(missingTotal));
   // …AND every name a consumer READS off `engine` directly (lane agy-wall-signal r2, the acceptance's MAJOR: acp-events read
   // `engine.sessionModelFor?.(session)` — an optional-chained read this destructure census never saw; server.js's literal
-  // lacked the key, so in production the first wall of a session was dropped while every suite that stubbed the key was green)
-  const directReads = (rel) => [...new Set((fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '')
-    .match(/\bengine\??\.([A-Za-z_$][\w$]*)/g) || []).map((m) => m.replace(/^engine\??\./, '')))];
-  const direct = consumers.flatMap((c) => directReads(c).filter((n) => !wired['src/server/session-stdout.js'].includes(n)).map((n) => `${c}: engine.${n}`));
-  ok('§10 every name a consumer READS off `engine` directly (engine.x / engine.x?.(…)) is in the literal too', direct.length === 0, JSON.stringify(direct));
-  ok('§10 …the wall road\'s model accessor is wired: acp-events destructures sessionModelFor and server.js\'s literal carries it',
+  // lacked the key, so in production the first wall of a session was dropped while every suite that stubbed the key was
+  // green). r3: dotted AND bracketed reads (`engine.x`, `engine?.x`, `engine['x']`, `engine?.["x"]`), judged against the
+  // `engine:` literal's keys only, by ONE census function that reads a FILE (its RED control plants into a file)
+  const READ_RE = /\bengine\s*(?:\?\.)?(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(['"])([A-Za-z_$][\w$]*)\2\s*\])/g;
+  const directReadsOfFile = (abs) => [...new Set([...fs.readFileSync(abs, 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '').matchAll(READ_RE)].map((m) => m[1] || m[3]))];
+  const directMissing = (files, wiredSet) => files.flatMap((abs) => directReadsOfFile(abs).filter((n) => !wiredSet.includes(n)).map((n) => `${path.relative(REPO, abs)}: engine.${n}`));
+  const direct = directMissing(consumers.map((c) => path.join(REPO, c)), wired['src/server/session-stdout.js']);
+  ok('§10 every name a consumer READS off `engine` directly (engine.x / engine?.x / engine[\'x\']) is in the `engine:` literal too', direct.length === 0, JSON.stringify(direct));
+  ok('§10 …the wall road\'s model accessor is wired: acp-events destructures sessionModelFor and server.js\'s `engine:` literal carries it',
     destructured('src/server/stdout/acp-events.js').includes('sessionModelFor') && wired['src/server/session-stdout.js'].includes('sessionModelFor'));
-  // RED CONTROLS: server.js's literal WITHOUT the key, and a direct optional-chained read of a key the literal lacks
+  ok('§10 …the wired set is the `engine:` literal, not the whole options literal (BUFFERS_DIR / activeSessions are options, never engine names)',
+    !wired['src/server/session-stdout.js'].includes('BUFFERS_DIR') && !wired['src/server/session-stdout.js'].includes('activeSessions') && wired['src/server/session-stdout.js'].includes('noteTurnEnd'));
+  // RED CONTROLS: server.js's literal WITHOUT the key; reads planted into a scratch COPY of a real consumer FILE
   {
-    const lit = literalAfter(srv, "require('./src/server/session-stdout.js').create({");
+    const lit = literalAfter(srv.slice(srv.indexOf("require('./src/server/session-stdout.js').create({")), 'engine: {');
     const noKey = names(lit.replace('notePoolAuthFailure, sessionModelFor,', 'notePoolAuthFailure,'));
-    ok('§10 RED control: the literal without sessionModelFor ⇒ acp-events\' destructure is missing it', noKey.length > 5 && !noKey.includes('sessionModelFor') && destructured('src/server/stdout/acp-events.js').some((n) => !noKey.includes(n)));
-    const planted = "x(engine.notAWiredName?.(session));";
-    ok('§10 RED control: a planted `engine.<name>?.(` read of a name the literal lacks is caught by the direct-read census', (planted.match(/\bengine\??\.([A-Za-z_$][\w$]*)/g) || []).map((m) => m.replace(/^engine\??\./, '')).some((n) => !wired['src/server/session-stdout.js'].includes(n)));
+    ok('§10 RED control: the `engine:` literal without sessionModelFor ⇒ acp-events\' destructure is missing it', noKey.length > 5 && !noKey.includes('sessionModelFor') && destructured('src/server/stdout/acp-events.js').some((n) => !noKey.includes(n)));
+    const dir10 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-storm10-'));
+    try {
+      const real = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
+      const anchor10 = '  function attach(session, id, ptyProcess,';
+      const copy = path.join(dir10, 'acp-events.js');
+      fs.writeFileSync(copy, real.replace(anchor10, "  const planted1 = engine.BUFFERS_DIR?.(null); const planted2 = engine['notWiredName']; const planted3 = engine?.[\"alsoNotWired\"];\n" + anchor10));
+      const caught = directMissing([copy], wired['src/server/session-stdout.js']);
+      ok('§10 RED control: reads PLANTED into a copy of acp-events.js — an option name (engine.BUFFERS_DIR?.()), engine[\'x\'], engine?.["x"] — are each caught by the census over that file', real.includes(anchor10) && ['BUFFERS_DIR', 'notWiredName', 'alsoNotWired'].every((n) => caught.some((c) => c.endsWith('engine.' + n))) && directMissing([path.join(REPO, 'src/server/stdout/acp-events.js')], wired['src/server/session-stdout.js']).length === 0, JSON.stringify(caught));
+    } finally { fs.rmSync(dir10, { recursive: true, force: true }); }
   }
   // …and the two names this whole branch depends on are really there
   ok('§10 …including the round-1 pair and the r3 teardown settle',

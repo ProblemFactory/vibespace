@@ -145,7 +145,11 @@ function writeRecord(rec) {
   schedulePersist();
 }
 function record(kind, fields = {}) { writeRecord({ ts: now(), type: 'acp', kind, ...fields }); }
-function notice(level, text, noticeKind = null) { record('notice', { level, text, noticeKind }); log(`${level}: ${text}`); }
+function notice(level, text, noticeKind = null, extra = null) { record('notice', { level, text, noticeKind, ...(extra || {}) }); log(`${level}: ${text}`); }
+/** THE SERVED MODEL of the running process (lane agy-wall-signal r3): the slug agy's own `init` named — a set-model restarts
+ *  the process (after a running turn), so this is what the CURRENT turn runs on; the hub files a usage wall under its group. */
+const servedModel = () => (meta.agy && typeof meta.agy.model === 'string' && meta.agy.model) || null;
+const servedField = () => (servedModel() ? { servedModel: servedModel() } : {});
 
 const modeValues = () => ['accept-edits', 'auto', 'plan', 'bypassPermissions'];
 const modesOf = () => ({ availableModes: modeValues().map((id) => ({ id, name: id })), currentModeId: state.mode || null });
@@ -571,7 +575,7 @@ function handleStderr(line, from = null) {
     return;
   }
   const m = /^AGY_ERROR:\s*(\{.*\})\s*$/.exec(line.trim());
-  if (m) { const j = safeJsonParse(m[1], {}); notice('error', `Antigravity: ${j.short_error || j.message || m[1].slice(0, 300)}`, 'agy-error'); return; }
+  if (m) { const j = safeJsonParse(m[1], {}); notice('error', `Antigravity: ${j.short_error || j.message || m[1].slice(0, 300)}`, 'agy-error', servedField()); return; }
   const nothing = NO_OUTPUT_RE.test(line) ? noOutputSkippedNothing() : null;
   if (nothing) { log(`no soft-deny card: ${nothing}`); return; }
   if (SOFT_DENY_RE.test(line)) { softDenyCard(line); }
@@ -760,7 +764,7 @@ function stopRunningTurn(why) {
   return true;
 }
 function endPrompt(mine, stopReason, error, opts) {
-  record('prompt_end', { promptId: mine.id, stopReason, error: error || null });
+  record('prompt_end', { promptId: mine.id, stopReason, error: error || null, ...(stopReason === 'error' ? servedField() : {}) });
   if (activePrompt === mine) activePrompt = null;
   meta.streaming = false; meta.activePromptId = null; scheduleMeta();
   if (opts.retry && retryBypass) { retryBypass = false; if (!pendingRestart) pendingRestart = 'retry done: back to the mode'; }

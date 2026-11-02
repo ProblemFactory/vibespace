@@ -975,7 +975,10 @@ const usageDoor = require('./cli-usage-door.js').createCliUsageDoor({
 // names is written as a reading and fires ONE read of that account through this same door (src/server/stream-wall.js —
 // once per account per wall, judge-gated, never a timer; only where the descriptor declares `onDemand.onWallSignal`)
 require('./stream-wall.js').configure({ harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
-  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor });
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor,
+  // the wrapper's own sidecar (server.js BUFFERS_DIR/<webui id>.json): its agy `init.model` — the wall's model for a wrapper
+  // that does not stamp one, across a hub restart (r3)
+  wrapperMetaOf: (s) => (s && s._webuiId ? JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'session-buffers', s._webuiId + '.json'), 'utf8')) : null) });
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }
