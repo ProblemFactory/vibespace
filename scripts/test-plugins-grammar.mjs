@@ -9,6 +9,8 @@
 // llm-plugin-rename (the Decision API plugin is the LLM plugin): a census over src/ + scripts/ + data/bin + the agent docs
 // + public/ — the old name is in no file but the migration, the registry's declared legacy env spellings and the legs that
 // prove them (each row says why); the design docs keep their FILE names (history) — RED: a planted user-visible string.
+// ⑥ lane plugin-consent-layout: both consent bodies open with `.dialog-intro` and the list of powers has its own rule (RED: the
+// base 160045063's files).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +151,30 @@ console.log('— ⑤ the capability word browser-engine (CAP_VERBS: probe + laun
     const reg = require(path.join(repo, 'src/server/browser-engines.js')).create({ plugins: m });
     ok(JSON.stringify(reg.rows()) === JSON.stringify([{ id: 'builtin.fake-engine', label: 'Fake engine', family: 'builtin', version: null }]), '⑤ …and the engine table addresses a built-in engine `builtin.<id>` (the manifest id rule), beside the manifest family', reg.rows());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+// ⑥ lane plugin-consent-layout (the owner on the plugin consent dialog, 2026-11-01: «布局问题»): a dialog's explanation is that
+// dialog's body text — both consent bodies (the plugin consent + Show capabilities…, the harness-service offer) open with
+// `.dialog-intro`, never the Usage window's 10 px dim `.usage-note`; the list of powers has its own rule (padding-left ≤ 20 px,
+// margin 0, the intro's size). THE FENCE — the layout itself is measured in headless chrome (test-plugin-consent-chrome).
+// RED CONTROL = the base 160045063's files (SKIP by name when the object is absent).
+console.log('⑥ the consent dialogs open with their own body text (.dialog-intro); the list of powers has its own rule');
+{
+  const at = (sha, rel) => { try { return execFileSync('git', ['-C', repo, 'show', `${sha}:${rel}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+  const fence = (ui, css) => {
+    const intros = ['async _pluginConsentDialog(', '_harnessServiceDialog('].map((fn) => { const a = ui.indexOf(fn); const m = a < 0 ? null : ui.slice(a).match(/body\.innerHTML = `\s*<div class="([^"]+)"/); return m ? m[1] : null; });
+    const rule = (sel) => { const m = css.match(new RegExp('^' + sel.replace(/\./g, '\\.') + ' \\{([^}]*)\\}', 'm')); return m ? m[1] : null; };
+    const list = rule('.plugin-caps-list'), intro = rule('.dialog-intro'), px = (r, k) => { const m = r && r.match(new RegExp(k + ':\\s*(\\d+)px')); return m ? +m[1] : null; };
+    return { intros, listPad: px(list, 'padding-left'), listMargin0: !!list && /margin:\s*0[;\s]/.test(list), listFs: px(list, 'font-size'), introFs: px(intro, 'font-size'), introDim: !intro || /--text-dim/.test(intro) };
+  };
+  const holds = (f) => f.intros.every((c) => c === 'dialog-intro') && f.listPad != null && f.listPad <= 20 && f.listMargin0 && f.listFs != null && f.listFs === f.introFs && !f.introDim;
+  const f = fence(now, read('public/style.css'));
+  ok(holds(f), `⑥ both consent bodies open with ${JSON.stringify(f.intros)}; .plugin-caps-list { padding-left ${f.listPad}px, margin 0: ${f.listMargin0}, ${f.listFs}px } = .dialog-intro's ${f.introFs}px, not --text-dim`);
+  const zh = read('src/lib/i18n-zh.js').split('\n').find((l) => l.includes('"Can be chosen as the agent browser: it names the program')) || '';
+  ok(zh.includes('它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动'), '⑥ the browser-engine capability in zh names the program VibeSpace starts as a profile\'s browser');
+  const bu = at('160045063', 'src/lib/plugins-ui.js'), bc = at('160045063', 'public/style.css');
+  if (bu && bc) { const fb = fence(bu, bc); ok(!holds(fb), `⑥ RED CONTROL: the base 160045063 fails the same fence (${JSON.stringify(fb.intros)}, list rule ${fb.listPad == null ? 'absent' : fb.listPad + 'px'})`); }
+  else console.log('  SKIP ⑥ RED CONTROL — the base object 160045063 is not in this clone');
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

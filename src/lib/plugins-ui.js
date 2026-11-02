@@ -424,8 +424,10 @@ export function installPluginsUI(App) {
       let decided = false;
       const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); }, kind: 'decision' }); // decision: a consent — enable this plugin's code or not; nothing to fill
       const risky = items.some((it) => it.id === 'client-module' || it.id === 'child-process');
+      // the explanation is THIS dialog's body text (.dialog-intro), never the Usage window's 10 px dim note — the owner read it as
+      // disabled text a band below the title (lane plugin-consent-layout); the list keeps its own rhythm (.plugin-caps-list)
       body.innerHTML = `
-        <div class="usage-note">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
+        <div class="dialog-intro">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
         <ul class="plugin-caps-list">${items.map((it) => `<li class="plugin-cap plugin-cap-${escHtml(it.id)}">${escHtml(t(it.text, it.params || {}))}</li>`).join('')}</ul>
         ${risky && !readOnly ? `<div class="plugin-cfg-warn">${escHtml(t('Trusted code has the same power as VibeSpace itself. There is no undo beyond disabling it.'))}</div>` : ''}
         ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: new Date(trust.trustedAt).toLocaleString() }))}</div>` : ''}
@@ -613,7 +615,7 @@ export function installPluginsUI(App) {
         onClose: () => { if (!decided) resolve(false); }, kind: 'decision',
       });
       body.innerHTML = `
-        <div class="usage-note">${escHtml(t('{name} keeps its conversations in its own database rather than in files, so VibeSpace cannot read a STOPPED conversation without asking {name} itself.', { name: meta.label || meta.id }))}</div>
+        <div class="dialog-intro">${escHtml(t('{name} keeps its conversations in its own database rather than in files, so VibeSpace cannot read a STOPPED conversation without asking {name} itself.', { name: meta.label || meta.id }))}</div>
         <ul class="plugin-caps-list">
           <li class="plugin-cap">${escHtml(t('Lists, opens, resumes and forks stopped {name} conversations in the sidebar', { name: meta.label || meta.id }))}</li>
           <li class="plugin-cap">${escHtml(t('Runs `opencode serve` on 127.0.0.1 (loopback only) using your own installed CLI — nothing is downloaded and nothing is exposed'))}</li>

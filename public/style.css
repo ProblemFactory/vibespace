@@ -1806,6 +1806,10 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .dialog-hint.dialog-error { color: var(--red); margin-top: 6px; } /* lane launch-picture-size: showInputDialog's inline refusal (validate) */
 .dialog-list { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--text); } /* B-a67c: what a confirm ends (a group close's tab names) */
 .dialog-list li { overflow-wrap: anywhere; }
+/* A dialog's EXPLANATION is that dialog's body text (lane plugin-consent-layout — the owner on the plugin consent dialog, 2026-11-01:
+   «布局问题»): the modal's base size (html, body 13 px) in the readable secondary tone, no margin of its own (the body's padding and
+   gap space it). The Usage window's `.usage-note` (10 px, --text-dim, 4 px margins) read as disabled text a band below the title. */
+.dialog-intro { font-size: 13px; line-height: 1.45; color: var(--text-secondary); margin: 0; overflow-wrap: anywhere; }
 /* lane dialog-unsaved-guard: a dialog closing with unsaved changes ASKS — in place, a sheet inside the dialog over its
    own content (never a second modal); Escape on it = Keep editing */
 .dialog.dialog-guarded { position: relative; }
@@ -5435,6 +5439,12 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 .plugin-cfg-select { font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
 .plugin-cfg-flags { flex: 1; min-width: 160px; font-size: 11px; font-family: var(--font-mono, monospace); padding: 3px 6px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
 .plugin-cfg-hint { font-size: 10px; color: var(--text-dim); }
+/* the consent dialogs' list of powers (plugin consent / Show capabilities… / the harness-service offer) — its own rhythm: the
+   marker inside the dialog's text column (the global reset left padding 0 — the markers hung on the dialog's border), the
+   intro's size, rows 6 px apart (lane plugin-consent-layout) */
+.plugin-caps-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.plugin-caps-list > li + li { margin-top: 6px; }
+.plugin-cap { overflow-wrap: anywhere; }
 .plugin-cfg-warn { font-size: 10px; color: var(--yellow, #e5c07b); }
 
 /* ── Integrations & keys window (design-communication-panel §14.5; a4 polish

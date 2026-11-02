@@ -10963,7 +10963,7 @@ export default {
   "That engine speaks another version of the engine protocol — update the plugin or VibeSpace.": "这个内核说的是另一版内核协议 — 请更新插件或 VibeSpace。",
   "That engine's plugin did not answer — restart it in ⚙ → Plugins.": "这个内核的插件没有应答 — 在 ⚙ → 插件 里重启它。",
   "That engine asked to set environment variables VibeSpace does not allow.": "这个内核要求设置 VibeSpace 不允许的环境变量。",
-  "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "可被选作 Agent 浏览器：它指定 VibeSpace 作为配置的浏览器启动的程序，该程序在插件沙箱之外运行。",
+  "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "可被选作 Agent 浏览器：它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动；该程序在插件沙箱之外运行。",
   "The page shows a dialog": "网页弹出了一个对话框", // lane browser-surfaces
   "The site asks for a client certificate": "网站要求选择客户端证书", // lane browser-surfaces
   "The page asks for a permission": "网页请求一项权限", // lane browser-surfaces
