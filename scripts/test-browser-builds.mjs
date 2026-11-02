@@ -1604,7 +1604,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   try { kw.shutdown(); } catch { /* none */ }
   LDRG.setEnabled(GID, false);
   })();
-  // control (g): --permission import confinement (capabilities.server = {}, no childProcess; only pluginDir + stateDir readable)
+  // control (i): --permission import confinement (capabilities.server = {}, no childProcess; only pluginDir + stateDir readable)
   {
     const cpG = require('child_process');
     const osG = require('os');
@@ -1699,11 +1699,11 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     const badS = mkSandboxRoot('outside-probe', "const BAD_PY = fs.existsSync(path.join(process.env.HOME || '/nonexistent', '.local/bin/python3')); void BAD_PY;");
     badS.ldrS.setEnabled(EID, true, { trusted: true });
     const wBad = async () => { const t0 = Date.now(); while (badS.engrS.rows().length !== 1 && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 25)); return badS.engrS.rows().length === 1; };
-    ok(await wBad(), 'control (g): the planted plugin with an import-time outside-sandbox fs.existsSync starts its IPC loop');
+    ok(await wBad(), 'control (i): the planted plugin with an import-time outside-sandbox fs.existsSync starts its IPC loop');
     const prBad = await badS.engrS.probe(EID);
     const rawBad = await badS.ldrS.askRoute(EID, { method: 'GET', path: '/probe', query: {} });
     ok(!prBad.ok && prBad.code === 'browser_engine_protocol' && /answered its probe with HTTP 500/.test(prBad.error) && rawBad.status === 500 && rawBad.body && rawBad.body.code === 'ERR_ACCESS_DENIED',
-      'control (g): an import-time fs.existsSync outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA throws ERR_ACCESS_DENIED ⇒ HTTP 500 browser_engine_protocol — RED against the sandbox confinement law', { prBad, rawBad });
+      'control (i): an import-time fs.existsSync outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA throws ERR_ACCESS_DENIED ⇒ HTTP 500 browser_engine_protocol — RED against the sandbox confinement law', { prBad, rawBad });
     badS.ldrS.shutdown();
   }
 }
