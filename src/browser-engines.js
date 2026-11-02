@@ -91,8 +91,13 @@ function paddedArgsOf(list) { return (Array.isArray(list) ? list.map(String) : [
  *  `--x=<any value>`, the name a letter or digit first). A bare `--` is Chromium's END OF SWITCHES: everything after it — the keeper's
  *  own proxy pair, which rides LAST — would be read as pages (the egress proxy off on a headed browser); a page, a path or a bare
  *  word would open as a start-up page. → the arguments that are not switches. */
-const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/;
+const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/s; // r6: `s` — a value may hold U+2028 / U+2029 (\n / \r are refused before, by the one-line rule)
 function nonSwitchArgsOf(list) { return (Array.isArray(list) ? list.map(String) : []).filter((a) => !SWITCH_FORM_RE.test(switchFormOf(a))); }
+/** lane engine-spi-egress L1b r6: the PERSON's own list on a WRAPPED launch (their browser config's switches ride the driver's line
+ *  BEFORE the wrapper's, and the keeper's proxy pair rides last): their proxy switches dropped (withoutProxyArgs), and every argument
+ *  that is not a switch dropped too — a bare -- there would end the switches before the proxy pair. The person's config is theirs, so
+ *  nothing is refused: → `{args, dropped}`, and the caller SAYS what it dropped (the journal). */
+function wrappedOwnArgs(list) { const l = withoutProxyArgs(list), dropped = nonSwitchArgsOf(l); return { args: l.filter((a) => !dropped.includes(a)), dropped }; }
 /** The switch-only refusal's words (one sentence for the three walls). */
 const notSwitchWords = (list) => `an engine launch takes switches only; ${list.slice(0, 3).map((a) => `«${clip(a, 40)}»`).join(', ')} ${list.length > 1 ? 'are not switches' : 'is not a switch'} (a page, a path or a bare -- would reorder what the browser reads)`;
 /** A launcher switch in every spelling Chromium reads as one — tested on the argument's TRIMMED form (switchFormOf, r4): `--x` /
@@ -220,16 +225,16 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (!strList(args) || args.length > ARGS_MAX || args.some((a) => !a || a.length > ARG_MAX || /[\0\n\r]/.test(a))) return bad('browser_engine_protocol', `named launch arguments of another shape (a list of at most ${ARGS_MAX} one-line strings)`);
     // lane engine-spi-egress L1b r3: a launch that names ANOTHER program through a launcher switch — refused by name, both sources
     const launchers = launcherArgsOf(args);
-    if (launchers.length) return { ok: false, code: 'browser_engine_protocol', launcher: launchers[0], error: `${who}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs` };
+    if (launchers.length) return { ok: false, code: 'browser_engine_protocol', rule: 'launcher', arg: launchers[0], launcher: launchers[0], error: `${who}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs` };
     // L1b r4: every rule reads the argument as Chromium will — its TRIMMED form (switchFormOf)
     const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a)); // lane engine-spi-egress: the boundary an engine stays inside is VibeSpace's
-    if (proxied.length) return bad('browser_engine_protocol', `asked for ${proxied.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the browser's proxy is VibeSpace's to set: an engine that must reach only some sites declares "${EGRESS_FEATURE}", and VibeSpace wraps it in its own allowlisting proxy`);
+    if (proxied.length) return { ...bad('browser_engine_protocol', `asked for ${proxied.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the browser's proxy is VibeSpace's to set: an engine that must reach only some sites declares "${EGRESS_FEATURE}", and VibeSpace wraps it in its own allowlisting proxy`), rule: 'proxy', arg: clip(proxied[0].split('=')[0], 40) };
     const own = args.map(switchFormOf).filter((a) => OWN_ARG_RE.test(a));
-    if (own.length) return bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`);
+    if (own.length) return { ...bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`), rule: 'own', arg: clip(own[0].split('=')[0], 40) };
     const padded = paddedArgsOf(args);
-    if (padded.length) return bad('browser_engine_protocol', `named an argument that starts or ends with whitespace (${padded.slice(0, 3).map((a) => JSON.stringify(clip(a, 40))).join(', ')}) — an engine switch may not start or end with whitespace: Chromium would read « --x» as --x`);
+    if (padded.length) return { ...bad('browser_engine_protocol', `named an argument that starts or ends with whitespace (${padded.slice(0, 3).map((a) => JSON.stringify(clip(a, 40))).join(', ')}) — an engine switch may not start or end with whitespace: Chromium would read « --x» as --x`), rule: 'padded', arg: clip(padded[0], 40) };
     const nonSwitch = nonSwitchArgsOf(args); // L1b r5: a bare --, a page, a path, a word — refused by name
-    if (nonSwitch.length) return { ok: false, code: 'browser_engine_protocol', error: `${who}'s launch: ${notSwitchWords(nonSwitch)}` };
+    if (nonSwitch.length) return { ok: false, code: 'browser_engine_protocol', rule: 'switch-only', arg: clip(nonSwitch[0], 40), error: `${who}'s launch: ${notSwitchWords(nonSwitch)}` };
     const env = body.env === undefined || body.env === null ? {} : body.env;
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
@@ -341,4 +346,5 @@ module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
   LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3
   switchFormOf, paddedArgsOf, // lane engine-spi-egress L1b r4
-  SWITCH_FORM_RE, nonSwitchArgsOf, notSwitchWords }; // lane engine-spi-egress L1b r5
+  SWITCH_FORM_RE, nonSwitchArgsOf, notSwitchWords, // lane engine-spi-egress L1b r5
+  wrappedOwnArgs }; // lane engine-spi-egress L1b r6

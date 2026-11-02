@@ -120,7 +120,10 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     // file's proxy switches are dropped (Chromium ranks a pac url / no-proxy above --proxy-server) and the list is always written
     const wrapped = view.wrapped === true;
     if (wrapped && !(path.dirname(view.executablePath) === dir && /^engine-[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.sh$/.test(path.basename(view.executablePath)))) throw Object.assign(new Error(`the browser's egress proxy rides its engine wrapper, and ${view.executablePath} is not the keeper's — the call was refused, never run outside its proxy`), { code: 'egress_proxy_missing' });
-    const kept = wrapped ? ENG.withoutProxyArgs(V.driverArgsList(base.args)) : base.args;
+    // lane engine-spi-egress L1b r6: the person's own list keeps switches only on a wrapped launch — what it drops is said once
+    const w = wrapped ? ENG.wrappedOwnArgs(V.driverArgsList(base.args)) : null;
+    if (w && w.dropped.length) say(`own-nonswitch:${baseFile}:${w.dropped.join('\u0000')}`, `${baseFile} names ${w.dropped.slice(0, 3).map((a) => `«${String(a).slice(0, 40)}»`).join(', ')} — not a switch, so it is left out of the wrapped engine view (a bare -- would put VibeSpace's proxy switches after the end of the browser's switches)`);
+    const kept = w ? w.args : base.args;
     const cfg = { ...base, executablePath: view.executablePath, ...(extra.length || wrapped ? { args: V.splitLaunchArgs(kept, extra).keeper } : {}) };
     const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000') + (wrapped ? '\u0000wrapped' : '')).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);

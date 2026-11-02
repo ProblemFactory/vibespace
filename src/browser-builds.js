@@ -200,6 +200,12 @@ const PROGRAM_NOTICE_WORDS = Object.freeze({
   // L1b r3: an engine (either source) whose launch names ANOTHER program through a launcher switch (src/browser-engines.js LAUNCHER_SWITCHES)
   launcher: '"{task}" cannot start: {plugin} names another program through {switch} — a plugin never names the program it runs',
   launcherDetail: 'VibeSpace started nothing for "{task}": the launch answer of {plugin} names another program through {switch}, and VibeSpace runs only the program it judged. Update the plugin or turn it off in ⚙ → Plugins — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build.',
+  // L1b r6: every other launch rule the verdict refuses by (src/browser-engines.js engineAnswerVerdict `rule` / `arg`)
+  proxy: '"{task}" cannot start: {plugin} asked to set the proxy of its browser ({switch}) — only VibeSpace sets that proxy',
+  own: '"{task}" cannot start: {plugin} asked for {switch} — only VibeSpace sets the debugging endpoint and the profile folder',
+  padded: '"{task}" cannot start: {plugin} named an argument with a space at its start or end («{arg}») — a plugin may send browser switches only',
+  'switch-only': '"{task}" cannot start: {plugin} named «{arg}», which is not a browser switch — a plugin may send browser switches only',
+  ruleDetail: 'VibeSpace started nothing for "{task}": the launch answer of {plugin} breaks a launch rule, and VibeSpace starts a browser only inside its rules. Update the plugin or turn it off in ⚙ → Plugins — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build.',
 });
 /** …and why the program cannot run, by the core's `why` (src/browser-engines.js userBinaryVerdict) — the card's words too. */
 const PROGRAM_WHY_WORDS = Object.freeze({
@@ -212,9 +218,16 @@ const fillKey = (key, params) => String(key).replace(/\{(\w+)\}/g, (m, k) => (pa
 /** The ONE For-you notice of a chosen build that is gone (the keeper files it once per profile and choice): plain words,
  *  what to do — the English is the inbox's own (its items are stored strings, never re-translated); an owner's program's notice
  *  carries its `i18n` too (the client says it in its language). `source` / `why` = the engine's kernel source and the core's verdict
- *  on the owner's program (L1b r2); `launcher` = the launcher switch a launch answer named (L1b r3 — either source). */
-function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '', source = null, why = null, launcher = null } = {}) {
+ *  on the owner's program (L1b r2); `launcher` = the launcher switch a launch answer named (L1b r3 — either source); `rule` / `arg` =
+ *  the launch rule the verdict refused by and what it named (L1b r6: proxy · own · padded · switch-only — each said as itself). */
+function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '', source = null, why = null, launcher = null, rule = null, arg = null } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
+  if (c.kind === 'plugin' && !launcher && (rule === 'proxy' || rule === 'own' || rule === 'padded' || rule === 'switch-only')) {
+    const plugin = String(engineLabel || c.id || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), task = String(label), named = String(arg == null ? '' : arg).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 40);
+    const key = PROGRAM_NOTICE_WORDS[rule], params = { task, plugin, ...(rule === 'proxy' || rule === 'own' ? { switch: named } : { arg: named }) };
+    return { text: fillKey(key, params), detail: fillKey(PROGRAM_NOTICE_WORDS.ruleDetail, { task, plugin }),
+      i18n: { text: { key, params }, detail: [{ key: PROGRAM_NOTICE_WORDS.ruleDetail, params: { task, plugin } }] } };
+  }
   if (c.kind === 'plugin' && launcher) {
     const plugin = String(engineLabel || c.id || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), task = String(label), sw = String(launcher).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 40);
     const params = { task, plugin, switch: sw };

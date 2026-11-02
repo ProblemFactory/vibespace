@@ -1205,7 +1205,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  switches composed before the split (lane engine-args-string r2). A WRAPPED launch (its proxy switches ride the wrapper, last)
    *  always carries this list — it REPLACES the config's, whose proxy switches (a user's pac url, no-proxy) are dropped. */
   function engineEnvOf(p, prow, be, kept, quietLog) {
-    const b0 = be.egress ? ENG.withoutProxyArgs(kept || engineBaseArgs(p, prow)) : kept || engineBaseArgs(p, prow);
+    // lane engine-spi-egress L1b r6: on a WRAPPED launch the person's own list keeps switches only (a bare -- there would end the
+    // switches before the keeper's proxy pair) — what is dropped is SAID (their config is theirs: dropped by name, never refused)
+    const w = be.egress ? ENG.wrappedOwnArgs(kept || engineBaseArgs(p, prow)) : null;
+    if (w && w.dropped.length) log.warn?.(`[browser] ${p.id} "${p.label}": its browser config names ${w.dropped.slice(0, 3).map((a) => `«${String(a).slice(0, 40)}»`).join(', ')} — not a switch, so it is left out of this wrapped launch (a bare -- would put VibeSpace's proxy switches after the end of the browser's switches)`);
+    const b0 = w ? w.args : kept || engineBaseArgs(p, prow);
     return ENG.engineLaunchEnv(be, { base: quietLog ? B.withKeeperMark(BE.withQuietLogging(b0), p.id) : b0, always: !!be.egress });
   }
   /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
@@ -1273,7 +1277,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (p.buildMissing.filed) return;
     if (!userTodos || typeof userTodos.add !== 'function') { if (!had) log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error} (no For-you store is wired, so only this journal says so)`); return; }
     // L1b r2: an OWNER's program refused is said as that (its Program file row), never as a kernel to install — by the engine's source
-    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '', source: engine && engine.source ? engine.source : null, why: engine && engine.userBinary ? engine.userBinary.why : null, launcher: v.launcher || null }); // L1b r3: a launcher switch said by its name
+    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '', source: engine && engine.source ? engine.source : null, why: engine && engine.userBinary ? engine.userBinary.why : null, launcher: v.launcher || null, rule: v.rule || null, arg: v.arg || null }); // L1b r3: a launcher switch said by its name — r6: every launch rule as itself
     try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', ...(n.i18n ? { i18n: n.i18n } : {}) }); p.buildMissing.filed = true; commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
     log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);

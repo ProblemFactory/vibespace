@@ -1423,6 +1423,26 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const ns5 = (ENGN.nonSwitchArgsOf || (() => ['?']))(['--a', '--', 'x', '--b=c d']);
   ok(!nsRef.length && !nsOk.length && nelL.ok === false && nelL.launcher === '--gpu-launcher' && wDash.ok === false && !wDash.text && /takes switches only; «--» is not a switch/.test(String(wDash.error)) && ns5.join() === '--,x',
     'L1b r5 PURE: THE SWITCH-ONLY RULE — «--» (the end of switches: the keeper\'s proxy pair would ride after it), «-», «---», a page, a URL, a path, «foo bar» ⇒ refused by name; --x, -x, --x=, --x=a b c, --x-y_z=1 and the real wrapper pass; a NEL (U+0085) in front of a launcher is trimmed and the switch named; the wrapper text for an answer with a bare -- is NEVER written', { nsRef, nsOk, nel: nelL.error, wDash: wDash.error, ns5 });
+  // L1b r6: the For-you item says the RULE that refused and what it named — every launch rule, never «does not answer as an engine»
+  const ruleN = [['--', 'switch-only', /named «--», which is not a browser switch — a plugin may send browser switches only/], [' --no-proxy-server', 'proxy', /asked to set the proxy of its browser \(--no-proxy-server\) — only VibeSpace sets that proxy/], [' --user-data-dir=/x', 'own', /asked for --user-data-dir — only VibeSpace sets the debugging endpoint and the profile folder/], [' --foo', 'padded', /named an argument with a space at its start or end \(« --foo»\) — a plugin may send browser switches only/]].map(([a, rule, re]) => {
+    const v = lvL(['--no-sandbox', a]);
+    const n = BB.missingNotice({ label: 'Work', choice: { kind: 'plugin', id: UID }, code: v.code, engineLabel: 'Fixture User Engine', source: 'user', launcher: v.launcher, rule: v.rule, arg: v.arg });
+    return { a, ok: v.rule === rule && re.test(String(n.text)) && !/does not answer as an engine|kernel|install|download/i.test(`${n.text} ${n.detail}`) && !!n.i18n && n.i18n.text.key === (BB.PROGRAM_NOTICE_WORDS || {})[rule], text: n.text };
+  });
+  ok(lvL(['--x=a\u2028b', '--y=c\u2029d']).ok === true && lvL(['--x=a\nb']).ok === false, 'L1b r6: a VALUE holding U+2028 / U+2029 is a switch\'s value (SWITCH_FORM_RE carries the `s` flag) — a line break stays refused by the one-line rule');
+  ok(ruleN.every((x) => x.ok), 'L1b r6 PURE: the verdict carries the RULE + what it named (switch-only · proxy · own · padded), and missingNotice says each as itself (en / zh / ja keys) — never «does not answer as an engine», never a kernel / install word', ruleN.filter((x) => !x.ok));
+  // the person's OWN list on a wrapped launch keeps switches only (a bare -- would end the switches before the keeper's proxy pair)
+  const wo = (ENGN.wrappedOwnArgs || ((l) => ({ args: l, dropped: [] })))(['--disable-x', '--', '--proxy-server=y', 'about:blank', '--keep=a b']);
+  const DCr6 = require('../src/server/browser-display-config.js'), sayR6 = [];
+  const WD6 = path.join(ROOT, 'wrapped-own'); fs.mkdirSync(path.join(WD6, 'display'), { recursive: true });
+  const dc6 = DCr6.create({ dir: path.join(WD6, 'display'), writeJson: (f, o) => { fs.writeFileSync(f + '.t', JSON.stringify(o, null, 2)); fs.renameSync(f + '.t', f); }, log: { log() { }, warn: (m) => sayR6.push(String(m)) } });
+  const base6 = path.join(WD6, 'base.json'); fs.writeFileSync(base6, JSON.stringify({ args: '--disable-gpu-compositing,--,--proxy-server=http://own.test:1' }));
+  const wr6 = dc6.engineWrapperFor('bp-0000r6aa', { program: PROG, args: ['--no-sandbox', '--proxy-server=http://127.0.0.1:1', '--proxy-bypass-list=<-loopback>'], env: {} });
+  let cfg6 = null; try { cfg6 = JSON.parse(fs.readFileSync(dc6.engineFileFor(base6, { executablePath: wr6.file, args: ['--no-sandbox'], wrapped: true }), 'utf8')); } catch (e) { cfg6 = { error: e.message }; }
+  const ks6 = read('src/server/browser-keeper.js'), envOf6 = ks6.slice(ks6.indexOf('  function engineEnvOf('), ks6.indexOf('  const engineBaseArgs = '));
+  ok(wo.args.join() === '--disable-x,--keep=a b' && wo.dropped.join() === '--,about:blank' && wr6.ok && cfg6 && cfg6.args === '--disable-gpu-compositing' && sayR6.some((m) => /names «--» — not a switch, so it is left out of the wrapped engine view/.test(m))
+    && /ENG\.wrappedOwnArgs\(/.test(envOf6) && !/ENG\.withoutProxyArgs\(/.test(envOf6) && /left out of this wrapped launch/.test(envOf6),
+    'L1b r6: the PERSON\'s own list on a WRAPPED launch keeps switches only — a bare «--» or a page there is DROPPED by name (said in the journal: their config is theirs, never refused), the proxy switches as before; the conversation road\'s derived config proves it, the profile road (engineEnvOf) reads the same helper', { wo, cfg6, said: sayR6 });
   // THE REAL registry + keeper: the user source (the fixture's launch answer bent to name one) ⇒ refused by name, NOTHING launched, the
   // For-you words name the switch; the download source (⑦'s fixture engine, its kernel in place) ⇒ the same refusal
   fs.mkdirSync(path.dirname(MODEU), { recursive: true }); fs.writeFileSync(MODEU, JSON.stringify({ launch: { args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }));
@@ -1434,6 +1454,18 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   fs.rmSync(MODEU, { force: true });
   if (!eLn) await thr(() => ku.stop(pLn.id, { why: 'user' })); // a red run (a tree without the census) started it: never left behind
   const tdLn = todos.filter((x) => /"Launcher named"/.test(String(x.text)));
+  // L1b r6: a bare «--» and a padded « --no-proxy-server» in the launch answer ⇒ refused, nothing launched, and the For-you item says the rule
+  const r6k = [];
+  for (const [label, arg, re] of [['Dash answer', '--', /named «--», which is not a browser switch/], ['Proxy answer', ' --no-proxy-server', /asked to set the proxy of its browser \(--no-proxy-server\)/]]) {
+    fs.writeFileSync(MODEU, JSON.stringify({ launch: { args: ['--no-sandbox', arg] } }));
+    const pr6 = ku.createProfile({ label, browser: { kind: 'plugin', id: UID } }, { engine: await ku.engineFactOf(UID) });
+    const n6 = fake.launches().length, e6 = await thr(() => ku.start(pr6.id, { why: 'test' }));
+    if (!e6) await thr(() => ku.stop(pr6.id, { why: 'user' })); // a red run started it: never left behind
+    const td6 = todos.filter((x) => String(x.text).startsWith(`"${label}"`));
+    r6k.push({ label, ok: !!e6 && fake.launches().length === n6 && td6.length === 1 && re.test(td6[0].text) && !/does not answer as an engine/.test(td6[0].text), text: td6.map((x) => x.text) });
+  }
+  fs.rmSync(MODEU, { force: true });
+  ok(r6k.every((x) => x.ok), 'L1b r6: through the REAL keeper — a launch answer holding «--» or « --no-proxy-server» is refused, NOTHING launched, and the For-you item names the rule + the argument (never «does not answer as an engine»)', r6k);
   fs.mkdirSync(path.dirname(MODE), { recursive: true }); fs.writeFileSync(MODE, JSON.stringify({ launch: { args: ['--utility-cmd-prefix=/usr/bin/true'] } }));
   const loD = fs.existsSync(KP) ? await ENGR.launchOptions(EID, { profileId: 'bp-00000000', binaryPath: KP }) : { ok: null, error: 'no kernel in its place' };
   fs.rmSync(MODE, { force: true });
@@ -1471,7 +1503,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     ok(vw.launcher !== '--browser-subprocess-path' && vw5.launcher !== '--browser-subprocess-path' && !/proxy is VibeSpace/.test(String(vw.error)), 'control (w): the UNTRIMMED reading never NAMES «\\t--browser-subprocess-path=…» nor « --no-proxy-server» as the switches Chromium trims them into (r5\'s switch-only rule still stops them, unnamed) — exactly what r4\'s «refused NAMING the switch» catches', { vw, vw5 });
   }
   // (s) a launch without the switch-only rule: a bare -- passes, and the wrapper writes the keeper's proxy pair AFTER it (read as pages)
-  const sAnchor = 'const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/;';
+  const sAnchor = 'const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/s;'; // r6: the `s` flag
   if (!engsL.includes(sAnchor)) ok(false, 'control (s): the anchor (the switch-only rule) is not in this tree', sAnchor);
   else {
     const ES = MUTU.load('src/browser-engines.js', engsL.replace(sAnchor, 'const SWITCH_FORM_RE = /(?:)/;'), 'any-argument');
