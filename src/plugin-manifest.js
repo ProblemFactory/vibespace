@@ -274,7 +274,13 @@ function validateManifest(raw, { hostVersion = null, folderName = null, homeDir 
           if (typeof s.default !== 'number' || !Number.isFinite(s.default)) return errors.push(`${at}.default must be a number`);
           out.default = s.default;
           for (const k of ['min', 'max', 'step']) if (s[k] !== undefined) { if (typeof s[k] !== 'number' || !Number.isFinite(s[k])) return errors.push(`${at}.${k} must be a number`); out[k] = s[k]; }
-        } else if (s.type === 'string') { if (s.default !== undefined && typeof s.default !== 'string') return errors.push(`${at}.default must be a string`); out.default = typeof s.default === 'string' ? s.default.slice(0, 2000) : ''; }
+        } else if (s.type === 'string') {
+          if (s.default !== undefined && typeof s.default !== 'string') return errors.push(`${at}.default must be a string`);
+          // lane engine-spi-egress L1b r2: an ENGINE's reserved program row names no program — the owner does (a default would let a
+          // trusted plugin's next version run any program on this computer with no consent asked); '' or none is the only default
+          if (s.key === BEN.BINARY_ROW_KEY && c.browserEngine === true && s.default !== undefined && s.default !== '') return errors.push(`${at}.default: a plugin never names the program it runs; the executablePath row may not carry a default`);
+          out.default = typeof s.default === 'string' ? s.default.slice(0, 2000) : '';
+        }
         else if (s.type === 'select') {
           if (!Array.isArray(s.options) || !s.options.length || s.options.length > MAX_LIST) return errors.push(`${at}.options must be a non-empty array (≤ ${MAX_LIST}) of "value" or { value, label }`);
           const options = [];

@@ -79,10 +79,11 @@ function engineArgs({ args = [], egress = null } = {}) { return [...V.splitLaunc
 // read a path outside its package + state dir (node --permission), so VibeSpace JUDGES the file and its word on installed /
 // executable is not read. A program is VibeSpace's fact — downloaded with a receipt, or named by the owner and judged here.
 const BINARY_ROW_KEY = 'executablePath';
-/** The manifest's RESERVED program row (a string row keyed executablePath) → `{default}` | null — the egressRowOf shape. */
+/** The manifest's RESERVED program row (a string row keyed executablePath) → `{key}` | null — PRESENCE only (L1b r2): the row carries
+ *  no default VibeSpace reads (plugin-manifest refuses one by name), so nothing of the manifest can name the program it runs. */
 function binaryRowOf(settings) {
   const r = (Array.isArray(settings) ? settings : []).find((s) => isObj(s) && s.key === BINARY_ROW_KEY && s.type === 'string');
-  return r ? { default: typeof r.default === 'string' ? r.default : '' } : null;
+  return r ? { key: BINARY_ROW_KEY } : null;
 }
 function binaryRowPath(id) { return `plugin.${String(id || '')}.${BINARY_ROW_KEY}`; }
 /** An engine plugin's settings keys only the OWNER writes (a bearer — an agent, a job, an automation key — is refused at the settings
@@ -103,17 +104,19 @@ function programMagicOk(magic, platform = 'linux') {
   return hex === '7f454c46';
 }
 /** THE FILE VERDICT of the owner's program (the CORE's — never the plugin's): `path` = the row's value; `fact` = browser-builds
- *  fileFact over it (`{usable, why}`); `magic` = its first 4 bytes. → `{ok:true}` | `{ok:false, code, why, error}` — the error names
- *  the row, never the path. */
+ *  fileFact over it (`{usable, why}`); `magic` = its first 4 bytes (null = they could not be READ — an execute-only file, L1b r2:
+ *  `unreadable`, never «another platform's build»). → `{ok:true}` | `{ok:false, code, why, error}` — the error names the row, never
+ *  the path. */
 function userBinaryVerdict({ path = '', fact = null, magic = null, platform = 'linux', id = '', label = '' } = {}) {
   const who = engineWords({ id, label }), name = clip(label, 80) || clip(id, 80) || 'its plugin';
   const p = String(path == null ? '' : path);
   if (!p) return { ok: false, code: 'browser_engine_kernel_missing', why: 'unset', error: `${who} has no program set — open ⚙ → Plugins → ${name} → Program file` };
   if (!p.startsWith('/') || p.length > 4096 || /[\0\n\r]/.test(p)) return { ok: false, code: 'browser_engine_not_executable', why: 'shape', error: `${who}'s Program file is not one absolute path` };
   const why = fact && fact.usable ? null : (fact && fact.why) || 'missing';
-  const words = { missing: 'it is not there', 'not-a-file': 'it is not a file', 'not-executable': 'it is not executable', blocked: 'it is on a storage mount that is not answering' };
+  const words = { missing: 'it is not there', 'not-a-file': 'it is not a file', 'not-executable': 'it is not executable', blocked: 'it is on a storage mount that is not answering', unreadable: "VibeSpace can't read the file to check it — give it read permission" };
   if (why) return { ok: false, code: 'browser_engine_not_executable', why, error: `the program you named for ${who} can't be run (${words[why] || why}) — check ⚙ → Plugins → ${name} → Program file` };
-  const b = magic ? Array.from(magic) : [];
+  if (magic == null) return { ok: false, code: 'browser_engine_not_executable', why: 'unreadable', error: `the program you named for ${who} can't be run (${words.unreadable}) — check ⚙ → Plugins → ${name} → Program file` };
+  const b = Array.from(magic);
   if (b[0] === 0x23 && b[1] === 0x21) return { ok: false, code: 'browser_engine_not_executable', why: 'script', error: `the program you named for ${who} is a script — VibeSpace runs a browser program itself (its own launch wrapper carries the plugin's switches)` };
   if (!programMagicOk(b, platform)) return { ok: false, code: 'browser_engine_not_executable', why: 'platform', error: `the program you named for ${who} is not a program this machine runs (a script or another platform's build)` };
   return { ok: true };
@@ -198,7 +201,9 @@ function engineChoiceVerdict({ choice = null, engine = null, machine = 'this com
   if (engine.protocol !== PROTOCOL || !Array.isArray(engine.features)) return { ok: false, code: 'browser_engine_protocol', error: `${who} does not speak this VibeSpace's engine protocol ${PROTOCOL}` };
   // lane engine-spi-egress: an engine that must stay inside a list is never started without the list's place (the probe's row)
   if (engine.features.includes(EGRESS_FEATURE) && !(isObj(engine.egress) && engine.egress.setting === egressRowPath(id))) return { ok: false, code: 'browser_engine_protocol', error: `${who} declares the "${EGRESS_FEATURE}" feature without its "${EGRESS_ROW_KEY}" settings row — VibeSpace never starts it unwrapped` };
-  const vk = engine.measuredVersion ? 'measured' : engine.version ? 'reported' : engine.declaredVersion ? 'declared' : 'none';
+  // L1b r2: the OWNER's program is judged by VibeSpace's measurement of THAT file only (the record's stamp = the file now) — never the
+  // plugin's word: not measured yet ⇒ no version, so the ladder asks instead of judging
+  const vk = engine.measuredVersion ? 'measured' : engine.source === 'user' ? 'none' : engine.version ? 'reported' : engine.declaredVersion ? 'declared' : 'none';
   const ver = vk === 'measured' ? engine.measuredVersion : vk === 'reported' ? engine.version : vk === 'declared' ? engine.declaredVersion : null;
   return { ok: true, executablePath: engine.binaryPath, version: ver == null ? null : String(ver), major: majorOfVersion(ver), versionKind: vk };
 }

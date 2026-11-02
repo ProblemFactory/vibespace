@@ -39,6 +39,8 @@ export const noticeKeyTables = () => {
     { name: 'src/job-model.js FOR_YOU_WORDS', keys: Object.values(req('../src/job-model.js').FOR_YOU_WORDS) },
     // lane frp-token-proof: the frp plugin's For-you words (the dropped login, the retirement) are constants in src/relay-token.js
     { name: 'src/relay-token.js DROPPED_TEXT / DROPPED_DETAIL / RETIRED_TEXT / RETIRED_DETAIL', keys: [RT.DROPPED_TEXT, ...Object.values(RT.DROPPED_DETAIL), RT.RETIRED_TEXT, RT.RETIRED_DETAIL] },
+    // lane engine-spi-egress L1b r2: the For-you words of a refused OWNER's program (and its why) are constants in src/browser-builds.js
+    { name: 'src/browser-builds.js PROGRAM_NOTICE_WORDS / PROGRAM_WHY_WORDS', keys: [...Object.values(req('../src/browser-builds.js').PROGRAM_NOTICE_WORDS), ...Object.values(req('../src/browser-builds.js').PROGRAM_WHY_WORDS)] },
   ];
 };
 

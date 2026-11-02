@@ -29,6 +29,7 @@
  */
 const path = require('path');
 const fsp = require('fs').promises;
+const crypto = require('crypto');
 const BE = require('../browser-engines.js');
 const BB = require('../browser-builds.js'); // lane engine-spi-egress L1b: fileFact — the file verdict a build pin already uses
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE the owner's program (a user-path) is read
@@ -92,14 +93,18 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     const v = BE.engineSourceOf({ row: BE.binaryRowOf(row.settings), kernelJson, id: row.id, label: row.label });
     return v.ok ? { ...v, row: BE.binaryRowOf(row.settings) } : v;
   }
-  /** The owner's program path (the setting; else the row's manifest default) — '' when none is set. */
-  const userPathOf = (id, row) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } return String(typeof v === 'string' ? v : (row && row.default) || '').trim(); };
+  /** The owner's program path — THE OWNER'S STORED VALUE only (`plugin.<id>.executablePath`), never a word of the manifest (L1b r2:
+   *  a default there would let a plugin's next version name the program it runs, with no consent asked); '' when none is set. */
+  const userPathOf = (id) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } return typeof v === 'string' ? v.trim() : ''; };
   async function binaryPathOf(id) {
     const s = await sourceOf(id);
     if (!s.ok) return s;
-    return { ok: true, source: s.source, path: s.source === 'user' ? userPathOf(id, s.row) : kernelPath(id) };
+    return { ok: true, source: s.source, path: s.source === 'user' ? userPathOf(id) : kernelPath(id) };
   }
-  /** THE CORE's look at the owner's program: one stat (browser-builds fileFact over it) + its first 4 bytes — never a run. */
+  /** THE CORE's look at the owner's program: one stat (browser-builds fileFact over it) + its first 4 bytes — never a run. `magic` null =
+   *  the bytes could not be READ (an execute-only file — said as `unreadable`). The STAMP the measure keys on (L1b r2): size, mtime,
+   *  ctime, inode and the path's hash — another file at the same size + mtime (another path, a symlink moved, a copy over it whose
+   *  mtime was set back: its ctime moves) is measured again. */
   async function userFactOf(p) {
     if (!p || !p.startsWith('/') || /[\0\n\r]/.test(p)) return { fact: { usable: false, why: 'missing' }, magic: null };
     if (DOOR.blocked(p)) return { fact: { usable: false, why: 'blocked' }, magic: null }; // a stalled storage mount: answered, never read
@@ -107,7 +112,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     const fact = BB.fileFact(p, { fsImpl: { statSync: () => { if (!st) throw new Error('missing'); return st; } } });
     let magic = null;
     if (fact.usable) { let fh = null; try { fh = await fsp.open(p, 'r'); const b = Buffer.alloc(4); const { bytesRead } = await fh.read(b, 0, 4, 0); magic = b.subarray(0, bytesRead); } catch { magic = null; } finally { if (fh) await fh.close().catch(() => {}); } }
-    return { fact, magic, stamp: st ? `${st.size}:${Math.round(st.mtimeMs)}` : null }; // the stamp the measure keys on (no second stat)
+    return { fact, magic, stamp: st ? `${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}:${st.ino}:${crypto.createHash('sha256').update(p).digest('hex').slice(0, 16)}` : null }; // the stamp the measure keys on (no second stat)
   }
   async function probe(id) {
     const pv = providerFor(id);
@@ -117,7 +122,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     if (src.source === 'user') {
       // lane engine-spi-egress L1b: the OWNER's program — handed to the plugin (it answers protocol / kinds / features / its own
       // version word), JUDGED here: installed / executable / binaryPath are the core's, never the plugin's claim
-      const want = userPathOf(id, src.row);
+      const want = userPathOf(id);
       const r = await pv.probe({ binaryPath: want, platform: BE.platformOf(platform) });
       if (!r.ok) return r;
       const { fact, magic, stamp } = await userFactOf(want);

@@ -10979,6 +10979,11 @@ export default {
   "it is not a program this computer runs": "它不是这台电脑能运行的程序", // lane engine-spi-egress L1b: the owner's program (source user)
   "it is not one absolute path": "它不是一个绝对路径", // lane engine-spi-egress L1b: the owner's program (source user)
   "it is on a storage mount that is not answering": "它所在的存储挂载没有响应", // lane engine-spi-egress L1b: the mount door answered for it
+  "VibeSpace can't read the file to check it — give it read permission": "VibeSpace 读不到这个文件、无法检查它 — 请给它读权限", // lane engine-spi-egress L1b r2: an execute-only program
+  "{plugin} · not measured yet — VibeSpace measures the program at its next launch": "{plugin} · 尚未测量 — VibeSpace 会在下次启动时测量这个程序", // lane engine-spi-egress L1b r2: the version is THIS file's only
+  '"{task}" cannot start: {plugin} has no program set — open ⚙ → Plugins → {plugin} → Program file and name one': '"{task}" 无法启动：{plugin} 没有设置程序 — 打开 ⚙ → 插件 → {plugin} → 程序文件，指定一个程序', // lane engine-spi-egress L1b r2: the For-you notice of the owner's program
+  '"{task}" cannot start: the program you named for {plugin} cannot be run ({why}) — open ⚙ → Plugins → {plugin} → Program file': '"{task}" 无法启动：你为 {plugin} 指定的程序无法运行（{why}）— 打开 ⚙ → 插件 → {plugin} → 程序文件', // lane engine-spi-egress L1b r2: the For-you notice of the owner's program
+  'The profile "{task}" runs the program you name in the settings of {plugin}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Name a program that runs in ⚙ → Plugins → {plugin} → Program file — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build — and the next command starts it.': '浏览器档案 "{task}" 运行你在 {plugin} 的设置里指定的程序，所以它的浏览器没有启动（VibeSpace 不会自行把它换成 Chrome）。在 ⚙ → 插件 → {plugin} → 程序文件 里指定一个能运行的程序 — 或在 Agent 浏览器面板里对 "{task}" 选择「更换版本…」改用某个 Chrome 版本 — 下一条命令就会启动它。', // lane engine-spi-egress L1b r2: the For-you notice of the owner's program
   "Runs the program you name in its settings (⚙ → Plugins → {name} → Program file) as the agent browser, outside the plugin sandbox.": "作为 Agent 浏览器运行你在它的设置里指定的程序（⚙ → 插件 → {name} → 程序文件），该程序在插件沙箱之外运行。", // lane engine-spi-egress L1b: the owner's program (source user)
   "The page shows a dialog": "网页弹出了一个对话框", // lane browser-surfaces
   "The site asks for a client certificate": "网站要求选择客户端证书", // lane browser-surfaces

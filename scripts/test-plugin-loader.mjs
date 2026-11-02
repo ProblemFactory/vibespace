@@ -148,6 +148,14 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   ok(uv.ok && BRD(uv.manifest) === true && BRD(uNone.manifest) === false && M.capabilitySummary(uv.manifest).some((c) => c.id === 'user-binary' && /Runs the program you name in its settings/.test(c.text)) && M.capabilitiesHash(uv.manifest) !== M.capabilitiesHash(uNone.manifest)
     && uRow && !('path' in uRow) && uRow.description.length <= 300 && uRow.type === 'string',
     'lane engine-spi-egress L1b: the user variant validates; its RESERVED program row (a string executablePath — no `path` field rides a manifest row, a description cut to 300) is declared, consent says «Runs the program you name in its settings…» and its hash covers the row (a version adding or dropping it drifts)', JSON.stringify(uv.errors));
+  // L1b r2 MAJOR 1: a plugin never names the program it runs — an ENGINE's program row carrying a default is REFUSED by name ('' or none
+  // is the only default); the row is reserved for engines only (another plugin's string row of that name keeps its default)
+  const uDef = (d) => M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.map((s) => (s.key === 'executablePath' ? { ...s, default: d } : s)) } });
+  const uNoDef = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.map((s) => { if (s.key !== 'executablePath') return s; const { default: _d, ...o } = s; return o; }) } });
+  const dTrue = uDef('/usr/bin/true'), dSpace = uDef(' '), dEmpty = uDef('');
+  const notEngine = M.validateManifest({ id: 'acme.tool', version: '1.0.0', engines: { vibespace: '2.369.24' }, client: 'none', contributes: { settings: [{ key: 'executablePath', type: 'string', default: '/usr/bin/true', label: 'Tool' }] } });
+  ok(!dTrue.ok && dTrue.errors.some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e)) && !dSpace.ok && dEmpty.ok && uNoDef.ok && notEngine.ok,
+    'L1b r2 MAJOR 1: an engine\'s program row with a default (\'/usr/bin/true\', even \' \') ⇒ REFUSED by name «a plugin never names the program it runs; the executablePath row may not carry a default»; \'\' or no default validates; a non-engine plugin\'s row of that name is not the reserved one', { dTrue: dTrue.errors, dSpace: dSpace.errors });
   ok(off.contributes.browserEngine === undefined && M.capabilitiesHash(off) === M.capabilitiesHash(plain) && M.capabilitiesHash(v.manifest) !== M.capabilitiesHash(plain) && !M.needsConsent(plain), 'false = not an engine (named only when true): every capabilities hash before this lane stays the same — an existing trust is never voided — and growing into an engine re-asks consent');
 }
 {
@@ -175,6 +183,31 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   ok(reg.rows().length === 0, 'disabled ⇒ out of the table at once');
   le.shutdown();
   try { fs.rmSync(eroot, { recursive: true, force: true }); } catch {}
+}
+
+// ── ②b' lane engine-spi-egress L1b r2: THE REAL LOADER over the two reserved rows (no process started — autoStart off) ──
+// (A) a trusted engine whose next version DROPS its site-list row ⇒ untrusted AND switched off (`enabled === false`), said; (MAJOR 1) a
+// trusted engine whose next version gives its program row a DEFAULT ⇒ invalid, switched off with the refusal's own words (fail closed)
+{
+  const droot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plug-drift-'));
+  const put = (id, man) => { const d = path.join(droot, 'data', 'plugins', id); fs.mkdirSync(d, { recursive: true }); fs.copyFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/server.js'), path.join(d, 'server.js')); fs.writeFileSync(path.join(d, 'vibespace-plugin.json'), JSON.stringify(man)); };
+  const gm0 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-egress/vibespace-plugin.json'), 'utf8'));
+  const um0 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-user/vibespace-plugin.json'), 'utf8'));
+  put(gm0.id, gm0); put(um0.id, um0);
+  const ld = create({ rootDir: droot, app: null, autoStart: false, hostVersion: '2.369.356', log: { log() {}, warn() {} } });
+  const rowD = (id) => ld.list().find((p) => p.id === id) || {};
+  ld.setEnabled(gm0.id, true, { trusted: true }); ld.setEnabled(um0.id, true, { trusted: true });
+  const before = [rowD(gm0.id).enabled, rowD(um0.id).enabled];
+  put(gm0.id, { ...gm0, version: '0.0.2', contributes: { ...gm0.contributes, settings: [] } });
+  put(um0.id, { ...um0, version: '0.0.2', contributes: { ...um0.contributes, settings: um0.contributes.settings.map((s) => (s.key === 'executablePath' ? { ...s, default: '/usr/bin/true' } : s)) } });
+  ld.reload();
+  const g2 = rowD(gm0.id), u2 = rowD(um0.id);
+  ok(before.every((x) => x === true) && g2.enabled === false && !ld.isTrusted(gm0.id) && /capabilities changed since you trusted this plugin/.test(String(g2.notice || '')),
+    'L2 acceptance (A), through the REAL loader: a trusted engine whose next version drops its site-list row is SWITCHED OFF (enabled === false), untrusted, «capabilities changed since you trusted this plugin»', { before, enabled: g2.enabled, notice: g2.notice });
+  ok(u2.enabled === false && u2.valid === false && (u2.errors || []).some((e) => /a plugin never names the program it runs; the executablePath row may not carry a default/.test(e)),
+    'L1b r2 MAJOR 1, through the REAL loader: a trusted engine whose next version names a program in its row\'s default is INVALID and switched off (enabled === false) with the refusal\'s own words — fail closed, never a program the plugin chose', { enabled: u2.enabled, valid: u2.valid, errors: u2.errors });
+  ld.shutdown();
+  try { fs.rmSync(droot, { recursive: true, force: true }); } catch {}
 }
 
 // ── ②c lane engine-distribution: THE FLEET'S ENGINE PLUGIN AT BOOT + D2 (the cluster's pre-trust) ──

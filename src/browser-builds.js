@@ -153,7 +153,9 @@ function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = n
   }
   if (ladder && written) {
     const lv = SW.versionLadder({ target: c.kind === 'plugin' ? `${BE.engineWords({ id: c.id, label: engine && engine.label })}${version ? ' (' + version + ')' : ''}` : version ? `Chrome ${version}` : `the chrome at ${c.path}`, targetMajor: major, recordedMajor, dirMajor, confirmed });
-    if (!lv.ok) return { ok: false, code: lv.code, error: lv.error, needsConfirm: !!lv.needsConfirm, waysOut: lv.waysOut || [], wrote: lv.wrote != null ? lv.wrote : null, targetMajor: major };
+    // L1b r2: an OWNER's program VibeSpace has not measured yet (a new file, a stale record) is not judged by any other word — asked
+    const unmeasured = c.kind === 'plugin' && engine && engine.source === 'user' && major == null;
+    if (!lv.ok) return { ok: false, code: lv.code, error: unmeasured && lv.code === 'downgrade_unknown' ? `${BE.engineWords({ id: c.id, label: engine.label })}: the program you named is not measured yet (VibeSpace measures it at its next launch), so which Chromium major it runs is not known — ${lv.wrote != null ? `this directory was last written by Chromium ${lv.wrote}, and a lower major would be refused by Chromium one-way` : 'nothing has recorded which Chromium major wrote this directory'}; confirm once to switch anyway` : lv.error, needsConfirm: !!lv.needsConfirm, waysOut: lv.waysOut || [], wrote: lv.wrote != null ? lv.wrote : null, targetMajor: major, ...(unmeasured ? { unmeasured: true } : {}) };
   }
   return { ok: true, choice: c, executablePath, version, major };
 }
@@ -187,16 +189,45 @@ function buildWords(choice, { engineLabel = '' } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
   return c.kind === 'build' ? `Chrome ${c.version}` : c.kind === 'path' ? `the chrome at ${c.path}` : c.kind === 'plugin' ? BE.engineWords({ id: c.id, label: engineLabel }) : 'the default build';
 }
+/** lane engine-spi-egress L1b r2: the For-you words of a refused OWNER's program (an engine whose source is `user`) — each an i18n key
+ *  the client says in its language (the item's `i18n`), filled in English for the stored text. Never «kernel», never «install» or
+ *  «download» (there is nothing to download: the door answers 409 engine_source_user), never the path: the door is the plugin's
+ *  Program file row. scripts/i18n-check.mjs requires each in both dicts. */
+const PROGRAM_NOTICE_WORDS = Object.freeze({
+  unset: '"{task}" cannot start: {plugin} has no program set — open ⚙ → Plugins → {plugin} → Program file and name one',
+  refused: '"{task}" cannot start: the program you named for {plugin} cannot be run ({why}) — open ⚙ → Plugins → {plugin} → Program file',
+  detail: 'The profile "{task}" runs the program you name in the settings of {plugin}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Name a program that runs in ⚙ → Plugins → {plugin} → Program file — or choose Change build… on "{task}" in the Agent browser panel to pick a Chrome build — and the next command starts it.',
+});
+/** …and why the program cannot run, by the core's `why` (src/browser-engines.js userBinaryVerdict) — the card's words too. */
+const PROGRAM_WHY_WORDS = Object.freeze({
+  missing: 'it is not there', 'not-a-file': 'it is not a file', 'not-executable': 'it is not executable', script: 'it is a script',
+  platform: 'it is not a program this computer runs', shape: 'it is not one absolute path', blocked: 'it is on a storage mount that is not answering',
+  unreadable: "VibeSpace can't read the file to check it — give it read permission",
+});
+/** `{key}` filled with `params` the way the client's t() fills it (a `{name}` with no param is kept). */
+const fillKey = (key, params) => String(key).replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : String(params[k])));
 /** The ONE For-you notice of a chosen build that is gone (the keeper files it once per profile and choice): plain words,
- *  what to do — the English is the inbox's own (its items are stored strings, never re-translated). */
-function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '' } = {}) {
+ *  what to do — the English is the inbox's own (its items are stored strings, never re-translated); an owner's program's notice
+ *  carries its `i18n` too (the client says it in its language). `source` / `why` = the engine's kernel source and the core's verdict
+ *  on the owner's program (L1b r2). */
+function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '', source = null, why = null } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
+  if (c.kind === 'plugin' && source === 'user' && (code === 'browser_engine_kernel_missing' || code === 'browser_engine_not_executable')) {
+    const plugin = String(engineLabel || c.id || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), task = String(label);
+    const key = code === 'browser_engine_kernel_missing' || why === 'unset' ? PROGRAM_NOTICE_WORDS.unset : PROGRAM_NOTICE_WORDS.refused;
+    const whyKey = PROGRAM_WHY_WORDS[why] || PROGRAM_WHY_WORDS.missing;
+    const params = { task, plugin, ...(key === PROGRAM_NOTICE_WORDS.refused ? { why: whyKey } : {}) };
+    return {
+      text: fillKey(key, params), detail: fillKey(PROGRAM_NOTICE_WORDS.detail, { task, plugin }),
+      i18n: { text: { key, params: key === PROGRAM_NOTICE_WORDS.refused ? { task, plugin, why: { key: whyKey } } : { task, plugin } }, detail: [{ key: PROGRAM_NOTICE_WORDS.detail, params: { task, plugin } }] },
+    };
+  }
   if (c.kind === 'plugin') { // lane engine-plugin: the engine's plugin or its kernel is gone — said by what is missing; never Chrome in its place
     const eng = BE.engineWords({ id: c.id, label: engineLabel });
     const what = code === 'browser_engine_kernel_missing' ? `${eng}'s kernel is not installed` : code === 'browser_engine_not_executable' ? `${eng}'s kernel cannot be run` : code === 'browser_engine_missing' ? `${eng}'s plugin is not running` : `${eng} does not answer as an engine`;
     return {
       text: `"${label}" cannot start: ${what} on this computer`,
-      detail: `The profile "${label}" is set to run ${eng}, and ${what}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Open the Agent browser panel and choose Change build… on "${label}" to pick a Chrome build or the default one — or ${code === 'browser_engine_missing' ? 'enable the plugin again in ⚙ → Plugins' : 'install its kernel again'}, and the next command starts it.`,
+      detail: `The profile "${label}" is set to run ${eng}, and ${what}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Open the Agent browser panel and choose Change build… on "${label}" to pick a Chrome build or the default one — or ${code === 'browser_engine_missing' ? 'enable the plugin again in ⚙ → Plugins' : source === 'user' ? 'check the plugin in ⚙ → Plugins' : 'install its kernel again'}, and the next command starts it.`,
     };
   }
   const what = c.kind === 'build' ? `Chrome ${c.version}` : c.kind === 'path' ? `the browser at ${c.path}` : 'its browser';
@@ -372,7 +403,7 @@ function versionSays(out, version) {
   return { ok: !!m && m[1] === String(version), says: m ? m[1] : null };
 }
 
-module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
+module.exports = { buildWords, missingNotice, PROGRAM_NOTICE_WORDS, PROGRAM_WHY_WORDS, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
   // lane chrome-builds-download (design 004)
   CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays,
   downloadHardRows }; // lane engine-distribution: the two hard rows, shared with a browser engine's kernel download

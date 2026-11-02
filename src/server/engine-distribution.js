@@ -101,6 +101,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const recOf = (id) => (record.engines[id] = record.engines[id] || {});
   const running = new Map();   // id → the download in flight {step, bytes, total, startedAt, by, abort}
   const measuring = new Map();
+  const userKernelSaid = new Set(); // L1b r2: an owner's-program engine whose record holds a downloaded kernel — said ONCE per hub life
   const restoring = new Map(); // id → the put-back in flight (one at a time: installKernel, measure and the boot may all ask)
   const fleetLast = { at: null, outcome: null, code: null, error: null, plugin: null };
   const labelOf = (id) => { try { const p = (L() && L().list ? L().list() : []).find((x) => x.id === id); return p && p.label ? String(p.label) : ''; } catch { return ''; } };
@@ -552,7 +553,8 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   function runVersion(exe) {
     return new Promise((resolve) => {
       try {
-        execFile(exe, ['--version'], { timeout: versionMs, maxBuffer: 64 * 1024, encoding: 'utf8', env: serviceEnv(env()) }, (er, so, se) => resolve({ ok: !er, out: `${so || ''}\n${se || ''}`, error: er ? (er.killed ? `no answer within ${Math.round(versionMs / 1000)} s` : er.code != null ? `exited ${er.code}` : er.message) : null }));
+        // L1b r2: each failure in words — a flood past the 64 KB cap, a signal — never execFile's own message (it names the path)
+        execFile(exe, ['--version'], { timeout: versionMs, maxBuffer: 64 * 1024, encoding: 'utf8', env: serviceEnv(env()) }, (er, so, se) => resolve({ ok: !er, out: `${so || ''}\n${se || ''}`, error: er ? (er.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'printed more than 64 KB for --version' : er.killed ? `no answer within ${Math.round(versionMs / 1000)} s` : er.code != null ? `exited ${er.code}` : er.signal ? `ended by ${er.signal}` : 'it could not be run') : null }));
       } catch (e) { resolve({ ok: false, out: '', error: e.message }); }
     });
   }
@@ -620,10 +622,19 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     notify();
   }
   /** THE ENGINE RECORD as a surface reads it (sync, never a path): the download in flight, the installed kernel, the measured
-   *  version, the last failure. */
-  function kernelFact(id) {
+   *  version, the last failure. `source: 'user'` + `stamp` (L1b r2 — the registry's stamp of the owner's program NOW): the kernel
+   *  state belongs to the download source and is IGNORED (a record an earlier, downloading version of the same plugin left — said
+   *  once in the journal), and the measured version is THIS file's only (the record's `for` = `user:stat:<stamp>`), else null. */
+  function kernelFact(id, { source = null, stamp = null } = {}) {
     const sid = String(id || '');
     const r = record.engines[sid] || {}, run = running.get(sid);
+    if (source === 'user') {
+      if ((r.kernel || r.failure) && !userKernelSaid.has(sid)) { userKernelSaid.add(sid); log.log?.(`[browser] ${who(sid)} runs the program its owner names — the kernel this computer's record holds for it (an earlier version of the plugin downloaded one) is ignored; the files stay`); }
+      const mu = r.measured && stamp && r.measured.for === `user:stat:${stamp}` ? r.measured : null;
+      return { state: 'absent', step: null, bytes: null, total: null, by: null, version: null, sha256: null, installedAt: null, source: null,
+        measuredVersion: mu && mu.version ? mu.version : null, measuredAt: mu && mu.version ? mu.at : null, measureError: mu && !mu.version ? mu.error || null : null,
+        code: null, error: null, failedAt: null, node: null, need: null, credential: null };
+    }
     // a node refusal is a fact about THAT Node and THAT plugin version — on another Node (an upgrade), or after the plugin updated (its
     // kernel.json may name a tar.gz now — lane engine-spi-egress r2), it is asked again, so the record says nothing of it
     const f0 = r.failure || null, f = f0 && f0.code === 'engine_node_unsupported' && (f0.node !== nodeNow || (f0.plugin && f0.plugin !== pluginVersionOf(sid))) ? null : f0;

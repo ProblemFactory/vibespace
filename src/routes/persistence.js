@@ -815,14 +815,23 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   router.get('/api/settings', (req, res) => res.json(readSettings()));
   // lane engine-spi-egress L1b (V3): a browser engine's PROGRAM and SITE LIST rows are the owner's — a request carrying a bearer (an
-  // agent, a job, an automation key) never writes them, sign-in on or off (src/browser-engines.js ENGINE_OWNER_ROW_RE)
-  const engineOwnerRows = (req, obj) => { if (!require('../write-origin.js').pressBearer(req.headers)) return []; const RE = require('../browser-engines.js').ENGINE_OWNER_ROW_RE; return Object.keys(obj && typeof obj === 'object' ? obj : {}).filter((k) => RE.test(k)); };
-  const refuseEngineRows = (req, res, obj) => { const hit = engineOwnerRows(req, obj); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot write them`, code: 'engine_row_owner_only' }); return true; };
+  // agent, a job, an automation key) never writes them, sign-in on or off (src/browser-engines.js ENGINE_OWNER_ROW_RE). r2: ONE
+  // verdict for EVERY bearer write road (PATCH, the whole-file POST, a config import's settings section): the file the write would
+  // LEAVE against the one stored — a bearer may neither set, change nor drop an engine row (a whole-file POST that simply omits
+  // them would erase them); the rows carried verbatim are no change. Nothing is written when it refuses.
+  const engineRowsTouched = (req, next) => {
+    if (!require('../write-origin.js').pressBearer(req.headers)) return [];
+    const RE = require('../browser-engines.js').ENGINE_OWNER_ROW_RE;
+    const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
+    const keys = new Set([...Object.keys(cur), ...Object.keys(nxt)].filter((k) => RE.test(k)));
+    return [...keys].filter((k) => Object.hasOwn(cur, k) !== Object.hasOwn(nxt, k) || JSON.stringify(cur[k]) !== JSON.stringify(nxt[k]));
+  };
+  const refuseEngineRows = (req, res, next) => { const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
 
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
-    if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3)
+    if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3) — r2: the whole file it would leave (an omitted row = dropped)
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
@@ -834,9 +843,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const current = readSettings();
     const patch = req.body;
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
-    if (refuseEngineRows(req, res, patch)) return; // lane engine-spi-egress L1b (V3)
     const merged = { ...current, ...patch };
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     writeSettings(merged);
     res.json({ success: true });
   });
@@ -985,6 +994,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!file || file.app !== 'vibespace-config' || typeof file.sections !== 'object') {
       return res.status(400).json({ error: 'Not a VibeSpace config file' });
     }
+    // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
+    // list row is refused WHOLE — all or nothing: no section of it is applied
+    if (Array.isArray(sections) && sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

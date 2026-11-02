@@ -41,7 +41,9 @@ export function engineNote(e, t) {
     if (b && b.code === 'browser_engine_kernel_missing') return t(i18nKey('{plugin} · no program set — open ⚙ → Plugins → {plugin} → Program file'), { plugin });
     if (b) return t(i18nKey("{plugin} · the program you named can't be run ({why})"), { plugin, why: userWhyWords(b.why, t) });
     if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) });
-    return t(i18nKey('{plugin} · the program did not say its version'), { plugin });
+    // L1b r2: a version is THIS file's measurement only — a program not measured yet (new, replaced) says so, never an older one's
+    if (e.measureFailed) return t(i18nKey('{plugin} · the program did not say its version'), { plugin });
+    return t(i18nKey('{plugin} · not measured yet — VibeSpace measures the program at its next launch'), { plugin });
   }
   const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
   // lane kernel-asset-credential: the road the download takes — a release asset of the plugin's own repository, with its credential
@@ -70,6 +72,7 @@ function userWhyWords(why, t) {
     case 'platform': return t(i18nKey('it is not a program this computer runs'));
     case 'shape': return t(i18nKey('it is not one absolute path'));
     case 'blocked': return t(i18nKey('it is on a storage mount that is not answering'));
+    case 'unreadable': return t(i18nKey("VibeSpace can't read the file to check it — give it read permission"));
     default: return String(why || '');
   }
 }

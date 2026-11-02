@@ -1158,9 +1158,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const eds = () => { try { return typeof engineDistribution === 'function' ? engineDistribution() : engineDistribution; } catch { return null; } };
   function withKernelFact(f) {
     const d = eds();
-    const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id) : null;
+    // L1b r2: an OWNER's program reads the record by ITS stamp — a version measured for another file is not this one's
+    const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id, f.source === 'user' ? { source: 'user', stamp: f.binaryStamp || null } : {}) : null;
     if (!k) return f;
-    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need, credential: k.credential || null } };
+    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, measureFailed: !!(f.installed && k.measureError), kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need, credential: k.credential || null } };
   }
   /** The engine table as the USER's surfaces read it (Change build…, New profile…, Settings): each row's probe FACT, never its
    *  path (the kernel's place stays here). A paired machine's dialog has none. */
@@ -1174,7 +1175,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
         declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
         // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
-        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null }) });
+        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed }) });
     }
     return out;
   }
@@ -1245,7 +1246,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     // round 4: the probe finds the kernel IN its place while the record holds none (dropped once) ⇒ measure — the record follows it
     const unrecorded = !!(engine && engine.kernel && engine.kernel.state !== 'installed' && engine.kernel.state !== 'downloading');
-    if (d && engine && !engine.code && engine.installed && engine.executable && (!engine.measuredVersion || unrecorded)) { try { await d.measure(c.id, engine.source === 'user' ? { path: engine.binaryPath, stamp: engine.binaryStamp } : {}); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); } // lane engine-spi-egress L1b: the owner's program measured by ITS stat
+    // L1b r2: an OWNER's program is measured at EVERY launch (the measure is cached by the file's stamp — a stale record never stands)
+    if (d && engine && !engine.code && engine.installed && engine.executable && ((!engine.measuredVersion || unrecorded) || engine.source === 'user')) { try { await d.measure(c.id, engine.source === 'user' ? { path: engine.binaryPath, stamp: engine.binaryStamp } : {}); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); } // lane engine-spi-egress L1b: the owner's program measured by ITS stat
     const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', engine, label: p.label });
     if (!v.ok && !fetching && refused && refused.code === 'engine_node_unsupported' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace cannot download it here: ${refused.message}`;
     else if (!v.ok && !fetching && refused && refused.code === 'engine_kernel_aside' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — ${refused.message}`;
@@ -1270,8 +1272,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!had) { p.buildMissing = { what, kind: c.kind, code: v.code, at: now(), filed: false }; commit(); }
     if (p.buildMissing.filed) return;
     if (!userTodos || typeof userTodos.add !== 'function') { if (!had) log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error} (no For-you store is wired, so only this journal says so)`); return; }
-    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '' });
-    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); p.buildMissing.filed = true; commit(); }
+    // L1b r2: an OWNER's program refused is said as that (its Program file row), never as a kernel to install — by the engine's source
+    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '', source: engine && engine.source ? engine.source : null, why: engine && engine.userBinary ? engine.userBinary.why : null });
+    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', ...(n.i18n ? { i18n: n.i18n } : {}) }); p.buildMissing.filed = true; commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
     log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);
   }
