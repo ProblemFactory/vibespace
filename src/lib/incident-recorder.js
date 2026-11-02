@@ -20,7 +20,8 @@ import { BUILD_VERSION } from './build-version.js';
 import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 import { stackHead } from './incident-stack.js'; // lane vault-chip-zone-errors: an uncaught / unhandled entry keeps its first frames (PURE)
-import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary — survives the loads in this tab, so a back that cost one is in it
+import { navLogRead } from './nav-log.js';
+import { createWheelRecorder, wheelScroller, FINE_SCROLL_CAP } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the wheel record + the chat views' fine scroll trace (PURE) // lane phone-back-reload: the tab's diary — survives the loads in this tab, so a back that cost one is in it
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
@@ -52,8 +53,20 @@ export function installIncidentRecorder(app) {
 
   // ── action ring: clicks + coarse keys + window lifecycle ──
   document.addEventListener('pointerdown', (e) => {
-    push(rings.action, CAP.action, { t: Date.now(), k: 'ptr', el: describeEl(e.target), x: Math.round(e.clientX), y: Math.round(e.clientY) });
+    // pointerType (B-a7a9): mouse / pen / touch — a touch press and a mouse press were the same record
+    push(rings.action, CAP.action, { t: Date.now(), k: 'ptr', el: describeEl(e.target), x: Math.round(e.clientX), y: Math.round(e.clientY), pointerType: e.pointerType || '' });
   }, { capture: true, passive: true });
+  // WHEEL (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t: a 767 px move 0–1 ms after an input stamp that no ring could
+  // name): one record per 100 ms burst — deltaY summed, deltaMode (0 px · 1 lines · 2 pages), ctrl, the event count and
+  // the scrollTop of the scroller it moves when the burst began and closed (src/lib/scroll-forensics.js, PURE)
+  // the scrollers' last positions, one write per scroll event (the wheel record's stBefore)
+  const lastSt = new WeakMap();
+  document.addEventListener('scroll', (e) => { const n = e.target === document ? document.scrollingElement : e.target; if (n) lastSt.set(n, n.scrollTop); }, { capture: true, passive: true });
+  document.addEventListener('wheel', createWheelRecorder({
+    now: Date.now, later: (fn, ms) => setTimeout(fn, ms), describe: describeEl, lastSt,
+    scrollerOf: (el) => wheelScroller(el, (n) => getComputedStyle(n), document.scrollingElement),
+    push: (rec) => push(rings.action, CAP.action, rec),
+  }), { capture: true, passive: true });
   let lastTypeAt = 0;
   document.addEventListener('keydown', (e) => {
     const w = actionKeyWords(e); // C-/M-/A-/S- + key, S-· for a shifted character, c:1 when the input method owned it (chat-enter-keys.js, PURE)
@@ -214,6 +227,8 @@ export function installIncidentRecorder(app) {
           }
         } catch {}
         traces[winId] = { sid: v.sessionId || null, geom, tail: v._traceRing.slice(-300) };
+        // the FINE scroll trace (B-a7a9): every scroll event for 2 s after a run toggle / the ↓ (ChatView._noteFineScroll)
+        if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);
       }
       if (Object.keys(traces).length) out.chatTraces = traces;
     } catch (e) { out.chatTraces = 'failed: ' + e.message; }

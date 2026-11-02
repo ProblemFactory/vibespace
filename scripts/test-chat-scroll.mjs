@@ -34,6 +34,9 @@
 //   clipped) until a wheel brought them back and the list grew +311 px under the reader (the −500 wheel read 188 px).
 //   CONTROL at the end: `flex-shrink: 1` put back on .chat-msg ⇒ the census finds collapsed cards. VS_CPU_THROTTLE=<n>
 //   slows the page's main thread n× (the runner's 2 vCPU).
+// ⑪ THE INCIDENT NAMES THE INPUT (lane run-open-jump, B-a7a9): the page's real capture, read back from the hub's bundle — the
+//   ⑪ wheel-up is a wheel record (deltaY, deltaMode, n, list position before > after), the ↓ press carries pointerType, the
+//   window's fine scroll trace holds the header toggles' and the ↓'s arms and every scroll event after them
 // RED CONTROL: the same suite on the base tree (2.369.342) fails 22 legs: ① ② ④ ⑤ ⑦'s PageDown ⑧ ⑨ ⑩ (③, ⑥ and ⑦'s wheel
 // are pins — a real wheel always worked; the studies' «dead wheel» was the harness: agent-browser 0.38.2 `mouse wheel` lands at 0,0).
 // Requires google-chrome (SKIP without). Run: node scripts/test-chat-scroll.mjs [--tree <dir>] [--font dejavu|box]
@@ -489,6 +492,25 @@ try {
   m11 = await seq2(); await sleep(2500);
   const gAfter = await geo2(); r11 = await ring2(m11);
   check('…and it keeps following the stream (live edits never unpin)', gAfter.pin === true && gAfter.sh - gAfter.st - gAfter.ch < 60 && gAfter.total > gBtn.total && !r11.some((e) => e.tag === 'unpin'), { gBtn, gAfter });
+
+  // ── ⑪ THE INCIDENT NAMES THE INPUT (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t: a 767 px move 0–1 ms after a stamp
+  // no ring could name): the REAL capture of this page, read back from the hub's bundle — the −700 wheel-up above is a
+  // wheel record with its delta and the list's position before and after, the ↓ press carries its pointerType, and the
+  // window's fine scroll trace holds every scroll event after the header toggles and the ↓
+  console.log('⑪ the incident capture carries the wheel record, the pointer type and the fine scroll trace');
+  const incId = await evalJs(`app.autoCaptureIncident('chat-scroll', 'recorder check')`);
+  let bundle = null; try { bundle = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', String(incId), 'bundle.json'), 'utf8')); } catch {}
+  const acts = bundle?.client?.rings?.action || [];
+  const wheel700 = acts.filter((a) => a.k === 'wheel').find((a) => a.deltaY === -700);
+  check(`the −700 wheel-up is ONE wheel record {deltaY −700, deltaMode 0, n 1}, its list position before > after (${wheel700?.stBefore} → ${wheel700?.stAfter}), over the chat (${wheel700?.el} — the recorder describes four levels up from the target)`,
+    !!wheel700 && wheel700.deltaMode === 0 && wheel700.n === 1 && wheel700.stBefore > wheel700.stAfter && /chat-(message-list|msg|compact|text)/.test(wheel700.el), acts.filter((a) => a.k === 'wheel'));
+  const btnPtr = acts.filter((a) => a.k === 'ptr' && /chat-scroll-btn/.test(a.el)).pop();
+  check(`…the ↓ press is a ptr record with its pointerType (${btnPtr?.pointerType})`, btnPtr?.pointerType === 'mouse', btnPtr);
+  const fine = Object.values(bundle?.client?.snapshot?.chatTraces || {}).find((x) => x.sid === sid2)?.fine || [];
+  const arms = fine.filter((e) => e.arm).map((e) => e.arm);
+  const afterBtn = fine.slice(fine.findIndex((e) => e.arm === 'scrollBtn') + 1).filter((e) => !e.arm);
+  check(`…and the window's fine trace: arms ${JSON.stringify(arms)} (the header open + close, the ↓), every scroll event after the ↓ kept with its writer (${afterBtn.length}: ${[...new Set(afterBtn.map((e) => e.by))].join(', ')})`,
+    arms.includes('runOpen') && arms.includes('runClose') && arms.includes('scrollBtn') && afterBtn.length > 0 && afterBtn.every((e) => Number.isFinite(e.st) && Number.isFinite(e.sh) && Number.isFinite(e.ch) && typeof e.by === 'string'), fine.slice(-12));
 
   console.log('⑪ the server: a new conversation is born with its history loaded');
   const ids2 = await evalJs(`${V2}._getSessionIds()`);

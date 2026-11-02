@@ -39,6 +39,7 @@ import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
+import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
 import { NeedsCards } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
@@ -613,6 +614,7 @@ class ChatView {
         this._noteTailPress('scrollBtn');
         this._resumeSettleUntil = 0;
         this._setPinned(true, 'scrollBtn');
+        this._armScrollFine('scrollBtn'); // B-a7a9: every scroll event for 2 s after the press
         this._forceScrollToBottom();
       } else {
         this.jumpToBottom();
@@ -7099,12 +7101,33 @@ class ChatView {
   }
   /** WHO WROTE scrollTop LAST (inc-mubvu3a4-x8sb): every programmatic write
    *  stamps its author so the coarse `scroll` sample can tell OUR write from
-   *  native anchoring / content growth (`writeAgo`, `by`). Two assignments. */
-  _traceExpect(by) { this._lastStWriteAt = Date.now(); this._lastStWriteBy = by || ''; }
+   *  native anchoring / content growth (`writeAgo`, `by`). Three assignments: the count (B-a7a9) lets the fine trace
+   *  tell a scroll event that FOLLOWS a stamped write from one the browser made on its own. */
+  _traceExpect(by) { this._lastStWriteAt = Date.now(); this._lastStWriteBy = by || ''; this._stWriteSeq = (this._stWriteSeq || 0) + 1; }
+  /** THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t): the coarse sampler below logs only moves
+   *  ≥ 400 px, and its `from` is the last LOGGED position, so a capture of «826 → 59 in one event» could not say what
+   *  happened in between. For FINE_SCROLL_MS after a person's run toggle or the ↓, EVERY scroll event is kept (st, sh,
+   *  ch, the stamped writer since the previous event or 'none', writeAgo, wheelAgo) in a capped ring of its own — the
+   *  coarse ring keeps its history; the incident capture ships it as chatTraces[win].fine. An arm opens the window with
+   *  a marker holding the geometry at the press. Positions only, never content. */
+  _armScrollFine(why) {
+    const l = this._messageList;
+    if (!l) return;
+    this._scrollFineUntil = Date.now() + FINE_SCROLL_MS;
+    this._stWriteSeen = this._stWriteSeq || 0;
+    pushFine(this._scrollFine || (this._scrollFine = []), { t: Date.now(), arm: why, st: Math.round(l.scrollTop), sh: l.scrollHeight, ch: l.clientHeight, pin: this._pinned ? 1 : 0 });
+  }
+  _noteFineScroll(st) {
+    const l = this._messageList, now = Date.now();
+    pushFine(this._scrollFine || (this._scrollFine = []), fineScrollEntry({ now, st, sh: l.scrollHeight, ch: l.clientHeight,
+      writeSeq: this._stWriteSeq, seenSeq: this._stWriteSeen, writeAt: this._lastStWriteAt, writeBy: this._lastStWriteBy, userAt: this._lastUserScrollAt }));
+    this._stWriteSeen = this._stWriteSeq || 0;
+  }
   _installScrollTracer() {
     let last = 0;
     this._messageList.addEventListener('scroll', () => {
       const st = this._messageList.scrollTop;
+      if (Date.now() < (this._scrollFineUntil || 0)) this._noteFineScroll(st); // the 2-s window after a toggle / the ↓ (B-a7a9)
       if (Math.abs(st - last) < 400) return; // coarse: only real moves, not per-frame noise
       this._trace('scroll', {
         from: Math.round(last), to: Math.round(st),
@@ -7567,6 +7590,7 @@ class ChatView {
     // used to stay expanded forever once the tail moved on), so it stays
     // inherited-open and re-folds when it stops being last.
     if (outsidePass) {
+      this._armScrollFine(run.open ? 'runOpen' : 'runClose'); // B-a7a9: every scroll event for 2 s after a toggle outside a pass
       const isLast = this._runs?.length ? this._runs[this._runs.length - 1] === run : false;
       const sticky = run.open && !isLast;
       for (const el of run.members) { if (sticky) this._runStickyOpen.add(el); else this._runStickyOpen.delete(el); }

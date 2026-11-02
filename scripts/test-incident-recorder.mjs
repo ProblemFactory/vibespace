@@ -25,6 +25,13 @@
 //      tab): the ring keeps the last NAV_LOG_CAP rows; a full ring of the widest rows stays small; prevDocTail reads
 //      the PREVIOUS document's last rows only; entriesShape carries no URL; the PRIVACY CENSUS — every navNote( call in
 //      src/lib writes only the declared keys (never a URL, a title, a record's words); the snapshot carries the diary
+//   ⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t: one scroll event moved a
+//      chat 767 px 0–1 ms after an input stamp no ring could name): src/lib/scroll-forensics.js (PURE) — one wheel record
+//      per 100 ms burst {t, k, el, deltaY summed, deltaMode, ctrl, n, stBefore at the scroller's last scroll event,
+//      stAfter at the close} (CONTROL: without the map stBefore reads the moved position), wheelScroller, the fine entry
+//      {t, st, sh, ch, by (the writer since the last event, else 'none'), writeAgo, wheelAgo}, the ring cap; the wiring
+//      pins (ptr pointerType, the wheel + scroll listeners, chatTraces[win].fine, the arms in _setRunOpen and the ↓, the
+//      write count) + a MUTANT; a full ring's bytes
 // Run: node scripts/test-incident-recorder.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -284,6 +291,73 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   const rec = read('src/lib/incident-recorder.js');
   ok('the snapshot carries the diary (out.navLog = navLogRead()) — every capture, manual or automatic', rec.includes("import { navLogRead } from './nav-log.js';") && rec.includes('try { out.navLog = navLogRead(); } catch { }'));
   ok('autoCaptureIncident takes the toast\'s words (a back that cost a load is no freeze); the freeze words stay the default', /app\.autoCaptureIncident = async \(reason, detail, \{ toastKey = 'Freeze captured automatically \(\{id\}\) — see Diagnostics → Incidents' \} = \{\}\) => \{/.test(rec) && rec.includes('showToast(t(toastKey, { id: r.id }));'));
+}
+
+console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t)');
+{
+  const F = await import(pathToFileURL(path.join(REPO, 'src/lib/scroll-forensics.js')).href);
+  // a fake clock + timer: the coalescing window is driven by hand
+  let clock = 1000; const timers = [];
+  const later = (fn, ms) => timers.push({ at: clock + ms, fn });
+  const tick = (ms) => { clock += ms; for (const tm of timers.splice(0).sort((a, b) => a.at - b.at)) { if (tm.at <= clock) tm.fn(); else timers.push(tm); } };
+  const list = { nodeType: 1, scrollTop: 1950, scrollHeight: 2787, clientHeight: 837, parentElement: null };
+  const card = { nodeType: 1, scrollTop: 0, scrollHeight: 40, clientHeight: 40, parentElement: list };
+  const lastSt = new Map([[list, 1950]]);
+  const ring = [];
+  const onWheel = F.createWheelRecorder({ now: () => clock, later, describe: (el) => (el === card ? 'div.card' : '?'), scrollerOf: () => list, push: (r) => ring.push(r), lastSt });
+  list.scrollTop = 1850; // the compositor applied the first notch BEFORE the main thread saw the wheel (measured)
+  onWheel({ target: card, deltaY: -100, deltaMode: 0, ctrlKey: false });
+  tick(30); onWheel({ target: card, deltaY: -66.666, deltaMode: 0, ctrlKey: true });
+  list.scrollTop = 1783;
+  tick(80); // the 100 ms window closes
+  onWheel({ target: card, deltaY: 1, deltaMode: 2, ctrlKey: false }); // a NEW burst: a page-mode notch
+  tick(100);
+  const [a, b] = ring;
+  ok(`ONE record per 100 ms burst (${ring.length} for 3 events in two bursts), pushed at the burst's first event`, ring.length === 2 && a.t === 1000 && b.t === 1110, ring);
+  ok('the wheel record\'s shape: {t, k:"wheel", el, deltaY (summed, 2 decimals), deltaMode, ctrl, n, stBefore, stAfter}',
+    JSON.stringify(Object.keys(a)) === JSON.stringify(['t', 'k', 'el', 'deltaY', 'deltaMode', 'ctrl', 'n', 'stBefore', 'stAfter'])
+    && a.k === 'wheel' && a.el === 'div.card' && a.deltaY === -166.67 && a.deltaMode === 0 && a.ctrl === 1 && a.n === 2, a);
+  ok(`stBefore = the scroller at its LAST SCROLL EVENT (${a.stBefore}; the main thread read ${1850} — already moved), stAfter = at the window's close (${a.stAfter})`, a.stBefore === 1950 && a.stAfter === 1783, a);
+  ok('a page-mode notch says so (deltaMode 2) — the question the capture could not answer', b.deltaMode === 2 && b.deltaY === 1 && b.n === 1 && b.ctrl === 0, b);
+  // CONTROL: no lastSt ⇒ stBefore is the current position (the old reading) — the map is what makes it «before»
+  const ring2 = []; const w2 = F.createWheelRecorder({ now: () => clock, later, describe: () => 'x', scrollerOf: () => list, push: (r) => ring2.push(r) });
+  list.scrollTop = 1700; w2({ target: card, deltaY: -10, deltaMode: 0 }); tick(100);
+  ok('CONTROL: without the scroll listener\'s map stBefore reads the already-moved position (1700 = stAfter)', ring2[0]?.stBefore === 1700 && ring2[0]?.stAfter === 1700, ring2);
+  // the scroller: the nearest ancestor that overflows AND lets it scroll
+  const style = (ov) => () => ({ overflowY: ov });
+  const pre = { nodeType: 1, scrollHeight: 400, clientHeight: 100, parentElement: list };
+  const inner = { nodeType: 1, scrollHeight: 10, clientHeight: 10, parentElement: pre };
+  ok('wheelScroller: a clipped (overflow hidden) box is passed over; the list (overflow auto) is the scroller', F.wheelScroller(inner, (n) => ({ overflowY: n === pre ? 'hidden' : 'auto' }), 'ROOT') === list);
+  ok('…an overflowing auto box under the pointer is the scroller; nothing scrollable ⇒ the document\'s', F.wheelScroller(inner, style('auto'), 'ROOT') === pre && F.wheelScroller({ nodeType: 1, scrollHeight: 5, clientHeight: 5, parentElement: null }, style('auto'), 'ROOT') === 'ROOT');
+  // the fine entry: the writer since the previous scroll event, else 'none'
+  const e1 = F.fineScrollEntry({ now: 5000, st: 1950.4, sh: 2787, ch: 837, writeSeq: 7, seenSeq: 6, writeAt: 4983, writeBy: 'fsb', userAt: 4968 });
+  const e2 = F.fineScrollEntry({ now: 5304, st: 59, sh: 2787, ch: 837, writeSeq: 7, seenSeq: 7, writeAt: 4983, writeBy: 'fsb', userAt: 5304 });
+  ok('the fine entry\'s shape: {t, st, sh, ch, by, writeAgo, wheelAgo}', JSON.stringify(Object.keys(e1)) === JSON.stringify(['t', 'st', 'sh', 'ch', 'by', 'writeAgo', 'wheelAgo']) && e1.st === 1950, e1);
+  ok(`a scroll event AFTER a stamped write names it (by ${e1.by}, writeAgo ${e1.writeAgo}); one with no write since the last event is the browser's own (by ${e2.by}, wheelAgo ${e2.wheelAgo}) — the capture's «by fsb, writeAgo 333» read as fsb`, e1.by === 'fsb' && e1.writeAgo === 17 && e2.by === 'none' && e2.writeAgo === 321 && e2.wheelAgo === 0, { e1, e2 });
+  const fr = []; for (let i = 0; i < F.FINE_SCROLL_CAP + 25; i++) F.pushFine(fr, { i });
+  ok(`the fine ring is capped (${fr.length} = FINE_SCROLL_CAP ${F.FINE_SCROLL_CAP}, the oldest dropped); the window is ${F.FINE_SCROLL_MS} ms, the burst ${F.WHEEL_COALESCE_MS} ms`, fr.length === F.FINE_SCROLL_CAP && fr[0].i === 25 && F.FINE_SCROLL_MS === 2000 && F.WHEEL_COALESCE_MS === 100);
+  // the wiring (source pins: the module draws the page)
+  const rec = read('src/lib/incident-recorder.js');
+  const cv = read('src/lib/chat-view.js');
+  ok('the recorder: ptr records carry pointerType; a capture-phase passive wheel listener runs createWheelRecorder into the action ring with the scroll listener\'s map',
+    rec.includes("pointerType: e.pointerType || '' });") && /document\.addEventListener\('wheel', createWheelRecorder\(\{[\s\S]{0,400}lastSt,[\s\S]{0,300}push: \(rec\) => push\(rings\.action, CAP\.action, rec\),\s*\}\), \{ capture: true, passive: true \}\);/.test(rec)
+    && /document\.addEventListener\('scroll', \(e\) => \{[^\n]*lastSt\.set\(n, n\.scrollTop\);[^\n]*\{ capture: true, passive: true \}\);/.test(rec));
+  ok('…and the capture ships each chat window\'s fine ring (chatTraces[win].fine)', rec.includes('if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);'));
+  const setRunOpen = cv.match(/\n  _setRunOpen\(run, open\) \{[\s\S]*?\n  \}\n/)?.[0] || '';
+  const armPin = (src) => /if \(outsidePass\) \{\n\s*this\._armScrollFine\(run\.open \? 'runOpen' : 'runClose'\);/.test(src);
+  ok('the chat view ARMS the window at a toggle outside a pass (_setRunOpen) and at the ↓ press; every scroll event inside it is kept BEFORE the coarse 400 px filter',
+    armPin(setRunOpen)
+    && /this\._setPinned\(true, 'scrollBtn'\);\n\s*this\._armScrollFine\('scrollBtn'\);/.test(cv)
+    && /if \(Date\.now\(\) < \(this\._scrollFineUntil \|\| 0\)\) this\._noteFineScroll\(st\);[^\n]*\n\s*if \(Math\.abs\(st - last\) < 400\) return;/.test(cv));
+  ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', /_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1; \}/.test(cv));
+  // MUTANT: the arm dropped from _setRunOpen ⇒ the pin reds
+  const mutant = setRunOpen.replace(/\n\s*this\._armScrollFine\(run\.open \? 'runOpen' : 'runClose'\);[^\n]*/, '');
+  ok('MUTANT: _setRunOpen without its arm reds the arm pin', mutant !== setRunOpen && armPin(setRunOpen) && !armPin(mutant));
+  // the bundle bound: a full fine ring of the widest entries beside a full action ring of wheel records
+  const wide = { t: 1793625787053, st: 123456, sh: 1234567, ch: 12345, by: 'extendTop:delta', writeAgo: 1234567, wheelAgo: 1234567 };
+  const wheelRec = { t: 1793625787053, k: 'wheel', el: 'div.chat-compact-content<div.chat-compact-msg<div.chat-msg.chat-msg-assistant<div.chat-message-list.chat-minimap-active', deltaY: -12345.67, deltaMode: 0, ctrl: 1, n: 999, stBefore: 123456, stAfter: 123456 };
+  const kb = Buffer.byteLength(JSON.stringify({ fine: Array(F.FINE_SCROLL_CAP).fill(wide), action: Array(500).fill(wheelRec) }, null, 1)) / 1024;
+  ok(`a full fine ring + an action ring of 500 wheel records = ${kb.toFixed(0)} KB in bundle.json — far inside the hub's body cap`, kb < 512, kb);
 }
 
 console.log(`\nfull console ring with stacks: ${(ringBytes / 1024).toFixed(0)} KB in bundle.json`);
