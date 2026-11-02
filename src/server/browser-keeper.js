@@ -4394,8 +4394,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     // lane engine-spi-egress L1b r3: the second wall on THIS road (the launch verdict refused them first) — an engine argument that starts
     // another program (src/browser-engines.js LAUNCHER_SWITCHES) never reaches an argv
-    const launchers = ENG.launcherArgsOf(engineArgs);
-    if (launchers.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${ENG.engineWords({ id: engineLaunch.engine && engineLaunch.engine.id, label: engineLaunch.engine && engineLaunch.engine.label })}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`); }
+    // r4: on the argument's TRIMMED form (src/browser-engines.js switchFormOf — Chromium's own reading), and a padded argument refused too
+    const launchers = ENG.launcherArgsOf(engineArgs), padded = ENG.paddedArgsOf(engineArgs);
+    const engWho = ENG.engineWords({ id: engineLaunch && engineLaunch.engine && engineLaunch.engine.id, label: engineLaunch && engineLaunch.engine && engineLaunch.engine.label });
+    if (launchers.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`); }
+    if (padded.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho} named an argument that starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x`); }
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the

@@ -761,8 +761,9 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     ok(sr && same(sr.keeper, ['--vibespace-keeper=bk-1', '--remote-debugging-port=0']) && same(sr.engine, ['--use-angle=vulkan', '--log-level=0']),
       'THE RULE on one name, two values: the KEEPER\'s alone for its control switches (RAW_ARG_RE — the mark, the debugging endpoint: the engine\'s copy dropped), the ENGINE\'s for every other (its LAST spelling, at its first place — Chromium reads the last value; the keeper\'s copy leaves its part)', sr);
     const nul = lv({ ...L0, args: ['--a\0b'] });
-    ok(lv({ ...L0, args: OWNER_ENGINE }).ok && lv({ ...L0, args: [' --pad ', "--q=it's"] }).ok && nul.code === 'browser_engine_protocol' && lv({ ...L0, args: ['--a\n--b'] }).code === 'browser_engine_protocol',
-      'the launch verdict refuses only what no road carries whole — a NUL byte, a line break (the one-line rule); the owner\'s comma switches, a blank at an end, a quote pass (they ride the wrapper)', nul);
+    const padV = lv({ ...L0, args: [' --pad '] }); // lane engine-spi-egress L1b r4: a blank at an END is refused (Chromium trims it, then reads the switch)
+    ok(lv({ ...L0, args: OWNER_ENGINE }).ok && lv({ ...L0, args: ['--pad=a  b', "--q=it's"] }).ok && padV.code === 'browser_engine_protocol' && /starts or ends with whitespace/.test(String(padV.error)) && nul.code === 'browser_engine_protocol' && lv({ ...L0, args: ['--a\n--b'] }).code === 'browser_engine_protocol',
+      'the launch verdict refuses only what no road carries whole — a NUL byte, a line break (the one-line rule) — and (L1b r4) a blank at an END (Chromium trims « --x» into --x); the owner\'s comma switches, blanks INSIDE a value, a quote pass (they ride the wrapper)', { nul, padV: padV.error });
     const wt = safe(() => ENGN.engineWrapperText({ program: '/k/chr ome', args: ["--q=it's", '--w=1,2'], env: { VS_PROBE: 'a b' } }));
     ok(wt && wt.ok && /^#!\/bin\/sh\n/.test(wt.text) && wt.text.includes("export VS_PROBE='a b'\n") && wt.text.includes(`exec '/k/chr ome' "$@" '--q=it'\\''s' '--w=1,2'\n`) && !ENGN.engineWrapperText({ program: 'chrome' }).ok && !ENGN.engineWrapperText({ program: '/k/c', args: ['a\0b'] }).ok && !ENGN.engineWrapperText({ program: '/k/c', env: { 'A B': 'x' } }).ok,
       'THE WRAPPER\'s text: POSIX sh, the env as exports, `exec \'<kernel>\' "$@" \'<switch>\'…` — every word single-quoted (a \' as \'\\\'\'); refused by name: a relative program, a NUL, an env name that is no shell name', wt);
@@ -827,10 +828,11 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
     ok(JSON.stringify(run.argv) === JSON.stringify(want) && new Set(run.argv.map(nm)).size === run.argv.length && OWNER_ENGINE_K.filter((x) => x.includes(',')).every((x) => run.argv.includes(x)),
       `the owner's switches reach the program VERBATIM, ONCE, in order — the keeper's (the driver's reading of the line) then the engine's; --accept-lang=en-US,en, --window-size=1920,1080, --window-position=24,36, --disable-features=… whole (${run.argv.length} switches)`, { got: run.argv, want });
-    const odd = ["--lang-label=it's \"quoted\" $HOME `x` \\n", ' padded '];
+    const odd = ["--lang-label=it's \"quoted\" $HOME `x` \\n", '--padded=a  b   c']; // L1b r4: blanks INSIDE survive whole; one at an END is refused (below)
     const wq = dc.engineWrapperFor('q-1', { program: STUB, args: odd, env: { VS_PROBE: 'a b  c' } });
     const rq = wq.ok ? runAs(wq.file, ['--from-driver']) : { argv: [], env: '' };
-    ok(JSON.stringify(rq.argv) === JSON.stringify(['--from-driver', ...odd]) && rq.env === 'a b  c', 'a single quote, a double quote, $, a backtick, a backslash, blanks at the ends — each argument survives whole; an env value with spaces survives its export', rq);
+    const wpad = ENGN.engineWrapperText({ program: STUB, args: [' padded '] }) || {};
+    ok(JSON.stringify(rq.argv) === JSON.stringify(['--from-driver', ...odd]) && rq.env === 'a b  c' && wpad.ok === false && /starts or ends with whitespace/.test(String(wpad.error)), 'a single quote, a double quote, $, a backtick, a backslash, blanks inside a value — each argument survives whole; an env value with spaces survives its export; (L1b r4) an argument with a blank at an END is refused by the wrapper writer', { rq, wpad: wpad.error });
     const ino0 = fs.statSync(wq.file).ino, m0 = fs.statSync(wq.file).mtimeMs;
     const same1 = dc.engineWrapperFor('q-1', { program: STUB, args: odd, env: { VS_PROBE: 'a b  c' } });
     const ino1 = fs.statSync(wq.file).ino;
@@ -1298,6 +1300,13 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const st7 = readP();
   ok(i5.status === 403 && /engine_row_owner_only/.test(i5.body) && st5[UROW] === s5a[UROW] && JSON.stringify(st5) === JSON.stringify(s5a) && i6.every((r) => r.status === 400 && /import_sections_invalid/.test(r.body)) && JSON.stringify(st6) === JSON.stringify(s5a) && i7.status === 200 && st7['browser.headed'] === true && st7[UROW] === s5a[UROW],
     'V3 r3: a bearer\'s import naming its sections as a STRING ("settings") is judged like the list — 403, nothing written; sections 42 / {} / [1] / null ⇒ 400 import_sections_invalid by name, nothing read; the owner\'s cookie import with a string still lands', { i5: i5.status, i6: i6.map((r) => r.status), i7: i7.status });
+  // L1b r4: includeSensitive is read by the SAME one reader — a name or a list of names; any other shape refused naming includeSensitive
+  const impI = (inc) => ({ file: { app: 'vibespace-config', sections: { bookmarks: [] } }, sections: [], includeSensitive: inc });
+  const i8 = await Promise.all(['hosts', ['hosts']].map((v) => preq('POST', '/api/config/import', impI(v))));
+  const i9 = await Promise.all([true, {}, null, 7].map((v) => preq('POST', '/api/config/import', impI(v))));
+  const i10 = await preq('POST', '/api/config/import', impS({ 'browser.headed': false }, ''));
+  ok(i8.every((r) => r.status === 200) && i9.every((r) => r.status === 400 && /includeSensitive must be a section name or a list of section names/.test(r.body) && /import_sections_invalid/.test(r.body)) && i10.status === 200 && /"applied":\[\]/.test(i10.body) && readP()['browser.headed'] === true,
+    'V3 r4: includeSensitive read by the same one reader — "hosts" / ["hosts"] ⇒ 200; true / {} / null / 7 ⇒ 400 naming includeSensitive; sections "" ⇒ 200 applied [] (the name of no section: nothing written, no bypass)', { i8: i8.map((r) => r.status), i9: i9.map((r) => r.status), i10: i10.body });
   // V7: consent covers the row — a version that DROPS it drifts (switched off until re-enabled)
   const MANU = path.join(UROOT, 'data', 'plugins', UID, 'vibespace-plugin.json'), manU = fs.readFileSync(MANU, 'utf8');
   const mU = JSON.parse(manU);
@@ -1385,7 +1394,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   // PURE: the closed census (adding a row = editing this list), each refused BY NAME in every spelling Chromium reads as that switch; a
   // longer name / a value holding the text is not the switch; the real CloakBrowser wrapper's args (ce45ad8) pass; the two later walls
   const LSW = ENGN.LAUNCHER_SWITCHES || [];
-  const LEXPECT = ['browser-subprocess-path', 'renderer-cmd-prefix', 'utility-cmd-prefix', 'gpu-launcher', 'zygote-cmd-prefix', 'plugin-launcher', 'ppapi-plugin-launcher', 'nacl-loader-cmd-prefix', 'nacl-gdb', 'ppapi-flash-path', 'register-pepper-plugins', 'screen-ai-binary', 'translate-kit-binary-path'];
+  const LEXPECT = ['browser-subprocess-path', 'renderer-cmd-prefix', 'utility-cmd-prefix', 'gpu-launcher', 'zygote-cmd-prefix', 'plugin-launcher', 'ppapi-plugin-launcher', 'nacl-loader-cmd-prefix', 'nacl-gdb', 'ppapi-flash-path', 'register-pepper-plugins', 'screen-ai-binary', 'translate-kit-binary-path', 'clear-key-cdm-path-for-testing', 'test-gl-lib']; // r4: + the two library rows the Chrome 154 scan found
   const lvL = (args) => ENGN.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args } }, { id: UID, label: 'Fixture User Engine' });
   const spellL = (n) => [`--${n}=/tmp/other-program`, `--${n}`, `-${n}=/tmp/other-program`, `--${n.toUpperCase()}=/tmp/other-program`];
   const missL = LEXPECT.flatMap((n) => spellL(n).map((a) => [a, lvL(['--no-sandbox', a])])).filter(([a, r]) => !(r.ok === false && r.code === 'browser_engine_protocol' && r.launcher === a.split('=')[0] && String(r.error).includes(`launch names another program through ${a.split('=')[0]}; a plugin never names the program it runs`))).map(([a, r]) => [a, r.code || 'ok']);
@@ -1394,7 +1403,17 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const realW = ENGN.engineWrapperText({ program: '/k/chrome', args: ['--no-sandbox', '--fingerprint=1234567'] }) || {}, realA = { names: (ENGN.launcherArgsOf || (() => ['?']))(['--no-sandbox', '--fingerprint=1234567']) };
   ok(JSON.stringify(LSW.map((r) => r.name)) === JSON.stringify(LEXPECT) && Object.isFrozen(LSW) && LSW.every((r) => /^(program|library)$/.test(r.kind) && String(r.why).length > 20) && !missL.length && !passL.length
     && wallW.ok === false && /name another program through --gpu-launcher/.test(String(wallW.error)) && wallA.names.join() === '--Renderer-Cmd-Prefix,-nacl-gdb' && realW.ok === true && realA.names.length === 0,
-    'L1b r3 PURE: THE LAUNCHER SWITCHES — a closed census of 13 (each with its kind + why); each refused BY NAME in the launch verdict as --x=v, --x, -x=v and any case («… names another program through <switch>; a plugin never names the program it runs»); --x-longer / a value holding the text pass; the real wrapper\'s --no-sandbox --fingerprint pass; the wrapper writer refuses them too, and launcherArgsOf (the attach road\'s wall in the keeper) names them', { missL, passL, wallW: wallW.error, wallA: wallA.names });
+    'L1b r3 PURE: THE LAUNCHER SWITCHES — a closed census of 15 (r4: + clear-key-cdm-path-for-testing, test-gl-lib; each with its kind + why); each refused BY NAME in the launch verdict as --x=v, --x, -x=v and any case («… names another program through <switch>; a plugin never names the program it runs»); --x-longer / a value holding the text pass; the real wrapper\'s --no-sandbox --fingerprint pass; the wrapper writer refuses them too, and launcherArgsOf (the attach road\'s wall in the keeper) names them', { missL, passL, wallW: wallW.error, wallA: wallA.names });
+  // L1b r4: ONE READING — Chromium trims whitespace from an argument before it reads it as a switch, so every rule judges the TRIMMED
+  // form (switchFormOf) and a padded argument is refused by name; inner whitespace in a value is not padding
+  const PADS = [[' ', ''], ['\t', ''], ['\v', ''], ['\f', ''], ['', ' ']];
+  const missP = LEXPECT.flatMap((n) => PADS.map(([pre, post]) => [`${pre}--${n}=/tmp/other-program${post}`, n])).map(([a, n]) => [a, n, lvL(['--no-sandbox', a])]).filter(([, n, r]) => !(r.ok === false && r.launcher === `--${n}` && String(r.error).includes(`names another program through --${n}; a plugin never names the program it runs`))).map(([a, , r]) => [JSON.stringify(a), r.code || 'ok']);
+  const ownP = [[' --no-proxy-server', /asked for --no-proxy-server — the browser's proxy is VibeSpace's to set/], ['\t--proxy-pac-url=http://x.test/p', /asked for --proxy-pac-url/], [' --user-data-dir=/elsewhere', /asked for --user-data-dir — the debugging endpoint and the profile's directory are VibeSpace's/], [' --remote-debugging-port=1', /asked for --remote-debugging-port/], [' --foo', /starts or ends with whitespace .* an engine switch may not start or end with whitespace: Chromium would read « --x» as --x/], ['--foo ', /starts or ends with whitespace/], ['   ', /starts or ends with whitespace/]].filter(([a, re]) => { const r = lvL(['--no-sandbox', a]); return !(r.ok === false && r.code === 'browser_engine_protocol' && re.test(String(r.error))); }).map(([a]) => JSON.stringify(a));
+  const innerP = [['--user-agent=Mozilla 5.0 (X11; Linux)'], ['--lang=en US'], ['--no-sandbox', '--fingerprint=1234567']].filter((a) => lvL(a).ok !== true);
+  const wP1 = ENGN.engineWrapperText({ program: '/k/chrome', args: [' --browser-subprocess-path=/x'] }) || {}, wP2 = ENGN.engineWrapperText({ program: '/k/chrome', args: ['\t--foo'] }) || {};
+  const lP = (ENGN.launcherArgsOf || (() => []))(['\v--nacl-gdb=/x', ' --Gpu-Launcher=/x ']), pP = (ENGN.paddedArgsOf || (() => []))(['--a', ' --b', '--c\t']);
+  ok(!missP.length && !ownP.length && !innerP.length && wP1.ok === false && /through --browser-subprocess-path/.test(String(wP1.error)) && wP2.ok === false && /starts or ends with whitespace/.test(String(wP2.error)) && lP.join() === '--nacl-gdb,--Gpu-Launcher' && pP.length === 2,
+    'L1b r4 PURE: ONE READING — every launcher row padded with a space / tab / \\v / \\f in front or a space behind ⇒ refused NAMING the switch; « --no-proxy-server», a tab-padded --proxy-pac-url, « --user-data-dir», « --remote-debugging-port» ⇒ refused by their own rules; any other padded argument ⇒ refused «… may not start or end with whitespace: Chromium would read « --x» as --x»; inner whitespace in a value (a user agent) and the real wrapper pass; the wrapper writer reads the same form', { missP: missP.slice(0, 6), ownP, innerP, wP1: wP1.error, wP2: wP2.error, lP, pP });
   // THE REAL registry + keeper: the user source (the fixture's launch answer bent to name one) ⇒ refused by name, NOTHING launched, the
   // For-you words name the switch; the download source (⑦'s fixture engine, its kernel in place) ⇒ the same refusal
   fs.mkdirSync(path.dirname(MODEU), { recursive: true }); fs.writeFileSync(MODEU, JSON.stringify({ launch: { args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }));
@@ -1432,6 +1451,14 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     const EL = MUTU.load('src/browser-engines.js', engsL.replace(lAnchor, 'const LAUNCHER_ARG_RE = /(?!)/;'), 'no-launchers');
     const vl = EL.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }, { id: UID });
     ok(vl.ok === true && vl.launch.args.includes('--browser-subprocess-path=/usr/bin/true'), 'control (l): a launch verdict without the launcher census ACCEPTS a plugin naming another program through --browser-subprocess-path — exactly what r3 catches', vl);
+  }
+  // (w) the UNTRIMMED reading (r3's): a tab in front of a launcher switch passes the verdict — what Chromium then reads as the switch
+  const wAnchor = "function switchFormOf(a) { return String(a == null ? '' : a).replace(/^\\s+|\\s+$/g, ''); }";
+  if (!engsL.includes(wAnchor)) ok(false, 'control (w): the anchor (the one trimmed reading) is not in this tree', wAnchor);
+  else {
+    const EW = MUTU.load('src/browser-engines.js', engsL.replace(wAnchor, "function switchFormOf(a) { return String(a == null ? '' : a); }"), 'untrimmed');
+    const vw = EW.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '\t--browser-subprocess-path=/usr/bin/true', ' --no-proxy-server'] } }, { id: UID });
+    ok(vw.ok === true, 'control (w): the UNTRIMMED reading accepts «\\t--browser-subprocess-path=…» and « --no-proxy-server» — exactly what r4 catches (Chromium trims them into the switches)', vw);
   }
   // (i) the import read by two readers (the guard asks Array.isArray, apply() asks .includes) lets a bearer's STRING sections through
   const pssI = read('src/routes/persistence.js');
@@ -1507,7 +1534,7 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   ok(ENo.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: [], env: { LD_PRELOAD: '/x' } } }, { id: EID }).ok === true, 'control (f): …LD_PRELOAD rides the browser\'s env — exactly what ⑦\'s browser_engine_env row catches');
   // lane engine-spi-egress: (g) the OLD own-argument rule — a plugin's proxy rides; (h) a keeper that does not wrap — the browser unproxied
   const ownAnchor = "const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;";
-  const proxAnchor = '    const proxied = args.filter((a) => PROXY_ARG_RE.test(a));';
+  const proxAnchor = '    const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a));'; // L1b r4: the rule reads the trimmed form
   const ENg = MUT.load('src/browser-engines.js', es.replace(ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;').replace(proxAnchor, '    const proxied = [];'), 'old-own-args');
   ok(es.includes(ownAnchor) && es.includes(proxAnchor) && ENg.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--proxy-server=http://evil.test:8080'] } }, { id: EID }).ok === true, 'control (g): the base\'s own-argument rule ACCEPTS a plugin\'s --proxy-server — exactly what ⑦\'s V1 row catches');
   const wrapAnchor = '    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', setting: engine.egress.setting, fallback: engine.egress.default }) : null;';

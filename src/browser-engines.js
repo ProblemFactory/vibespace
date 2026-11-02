@@ -52,10 +52,15 @@ const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|
 /** lane engine-spi-egress L1b r3: THE LAUNCHER SWITCHES — Chromium switches that make the browser start ANOTHER PROGRAM (a child's
  *  executable, a command prefixed to a child's line) or load NATIVE CODE the switch names (a library run inside a child) — the
  *  program VibeSpace judged would then hand its work to one the plugin chose. A CLOSED census: each row says why it is in; adding
- *  one is a deliberate edit with its test (test-browser-builds ⑦c pins the exact set). Read off Chromium's switch list and this
- *  machine's Chrome 154 binary (the five current ones are in it; the Pepper / NaCl rows are for older builds an owner may install).
- *  Refused BY NAME in a launch answer (engineAnswerVerdict — both sources, every road), and again where an engine's arguments
- *  become an argv (engineWrapperText; browser-attach's census). NOT an allowlist: every other switch is the plugin's to send. */
+ *  one is a deliberate edit with its test (test-browser-builds ⑦c pins the exact set). Read off Chromium's switch list and source and
+ *  this machine's Chrome 154 binary — the scan to re-run at a Chrome bump: `strings -n 6 <chrome> | grep -xE
+ *  '[a-z0-9]+(-[a-z0-9]+)*-(path|paths|binary|library|lib|exe|executable|so|dll)(-for-testing)?'` and `… | grep -E
+ *  '(cmd-prefix|launcher|subprocess-path)'`, each hit judged against Chromium's switch definition (most name data, not code). The
+ *  Pepper / NaCl rows are for older builds an owner may install. EXTENSIONS ARE LEFT OUT, deliberately (`--load-extension`,
+ *  `--disable-extensions-except`): they load code the BROWSER runs inside its own extension model — the plugin's business — never a
+ *  program the OS runs (backlog: revisit). Refused BY NAME in a launch answer (engineAnswerVerdict — both sources, every road), and
+ *  again where an engine's arguments become an argv: engineWrapperText, and the keeper's attachStart (src/browser-attach.js stays
+ *  require-free). NOT an allowlist: every other switch is the plugin's to send. */
 const LAUNCHER_SWITCHES = Object.freeze([
   { name: 'browser-subprocess-path', kind: 'program', why: 'the executable every child process (renderer, GPU, utility, network service) is started from' },
   { name: 'renderer-cmd-prefix', kind: 'program', why: 'a command put before every renderer\'s command line: it runs, the renderer becomes its argument' },
@@ -70,14 +75,25 @@ const LAUNCHER_SWITCHES = Object.freeze([
   { name: 'register-pepper-plugins', kind: 'library', why: 'native libraries loaded as Pepper plugins (builds with Pepper)' },
   { name: 'screen-ai-binary', kind: 'library', why: 'the native ScreenAI library a utility process loads (Linux / ChromeOS)' },
   { name: 'translate-kit-binary-path', kind: 'library', why: 'the native TranslateKit library the on-device translation process loads' },
+  { name: 'clear-key-cdm-path-for-testing', kind: 'library', why: 'a testing switch that still loads the Clear Key CDM library the path names (media)' },
+  { name: 'test-gl-lib', kind: 'library', why: 'the GL library tried FIRST for desktop GL (Linux; a testing switch that loads the library the path names)' },
 ]);
-/** A launcher switch in every spelling Chromium reads as one: `--x` / `--x=v`, a single dash (POSIX Chromium reads `-x` as a switch),
- *  any case (Windows Chromium lowercases switch names). A value is never a switch: Chromium splits each argument at its FIRST `=`
+/** lane engine-spi-egress L1b r4: ONE READING of an engine argument for EVERY switch check (the launcher census, the proxy rule, the
+ *  own-switch rule — user-data-dir, remote-debugging). Chromium trims whitespace from each argument BEFORE it reads it as a switch
+ *  (POSIX: base::TrimWhitespaceASCII — space \t \n \v \f \r; Windows: Unicode whitespace), so « --x» IS --x: every rule judges the
+ *  trimmed form (JS `\s`, the wider set), and an argument that is not its own trimmed form is refused by name — a whitespace-padded
+ *  argument has no honest use. */
+function switchFormOf(a) { return String(a == null ? '' : a).replace(/^\s+|\s+$/g, ''); }
+/** The arguments that start or end with whitespace (each judged as its trimmed form too — this rule says the padding itself). */
+function paddedArgsOf(list) { return (Array.isArray(list) ? list.map(String) : []).filter((a) => switchFormOf(a) !== a); }
+/** A launcher switch in every spelling Chromium reads as one — tested on the argument's TRIMMED form (switchFormOf, r4): `--x` /
+ *  `--x=v`, a single dash (POSIX Chromium reads `-x` as a switch), any case (Windows Chromium lowercases switch names), with any
+ *  whitespace around it. A value is never a switch: Chromium splits each argument at its FIRST `=`
  *  (`--fingerprint=--gpu-launcher=x` is the switch `fingerprint`), and no road re-splits an engine's argument (the keeper's wrapper
  *  hands each as one shell word, the attach argv as one element). `--gpu-launcherx` is another switch. */
 const LAUNCHER_ARG_RE = new RegExp(`^--?(?:${LAUNCHER_SWITCHES.map((r) => r.name).join('|')})(?:=|$)`, 'i');
 /** The launcher switches among an engine's arguments → their names as written (before any `=`), once each. */
-function launcherArgsOf(list) { return [...new Set((Array.isArray(list) ? list.map(String) : []).filter((a) => LAUNCHER_ARG_RE.test(a)).map((a) => clip(a.split('=')[0], 40)))]; }
+function launcherArgsOf(list) { return [...new Set((Array.isArray(list) ? list.map(String) : []).map(switchFormOf).filter((a) => LAUNCHER_ARG_RE.test(a)).map((a) => clip(a.split('=')[0], 40)))]; }
 /** The proxy half of OWN_ARG_RE (refused in its own words; dropped from the keeper's own list on a wrapped launch). */
 const PROXY_ARG_RE = /^--?(?:proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -196,10 +212,13 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     // lane engine-spi-egress L1b r3: a launch that names ANOTHER program through a launcher switch — refused by name, both sources
     const launchers = launcherArgsOf(args);
     if (launchers.length) return { ok: false, code: 'browser_engine_protocol', launcher: launchers[0], error: `${who}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs` };
-    const proxied = args.filter((a) => PROXY_ARG_RE.test(a)); // lane engine-spi-egress: the boundary an engine stays inside is VibeSpace's
+    // L1b r4: every rule reads the argument as Chromium will — its TRIMMED form (switchFormOf)
+    const proxied = args.map(switchFormOf).filter((a) => PROXY_ARG_RE.test(a)); // lane engine-spi-egress: the boundary an engine stays inside is VibeSpace's
     if (proxied.length) return bad('browser_engine_protocol', `asked for ${proxied.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the browser's proxy is VibeSpace's to set: an engine that must reach only some sites declares "${EGRESS_FEATURE}", and VibeSpace wraps it in its own allowlisting proxy`);
-    const own = args.filter((a) => OWN_ARG_RE.test(a));
+    const own = args.map(switchFormOf).filter((a) => OWN_ARG_RE.test(a));
     if (own.length) return bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`);
+    const padded = paddedArgsOf(args);
+    if (padded.length) return bad('browser_engine_protocol', `named an argument that starts or ends with whitespace (${padded.slice(0, 3).map((a) => JSON.stringify(clip(a, 40))).join(', ')}) — an engine switch may not start or end with whitespace: Chromium would read « --x» as --x`);
     const env = body.env === undefined || body.env === null ? {} : body.env;
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
@@ -271,8 +290,9 @@ function engineWrapperText({ program = '', args = [], env = {} } = {}) {
   const list = Array.isArray(args) ? args.map(String) : [];
   const nul = list.filter((a) => a.includes('\0'));
   if (nul.length) return no(`${nul.length} argument(s) hold a NUL byte`);
-  const launchers = launcherArgsOf(list); // L1b r3: the second wall (the launch verdict refused them first)
+  const launchers = launcherArgsOf(list); // L1b r3: the second wall (the launch verdict refused them first) — r4: on the trimmed form
   if (launchers.length) return no(`its arguments name another program through ${launchers.join(', ')}; a plugin never names the program it runs`);
+  if (paddedArgsOf(list).length) return no('an argument starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x');
   const vars = Object.entries(isObj(env) ? env : {}).map(([k, v]) => [k, String(v)]);
   const badEnv = vars.filter(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || v.includes('\0')).map(([k]) => clip(k, 40));
   if (badEnv.length) return no(`the environment name(s) ${badEnv.join(', ')} are not shell names, or a value holds a NUL byte`);
@@ -306,4 +326,5 @@ module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE,
   platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
-  LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf }; // lane engine-spi-egress L1b r3
+  LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3
+  switchFormOf, paddedArgsOf }; // lane engine-spi-egress L1b r4

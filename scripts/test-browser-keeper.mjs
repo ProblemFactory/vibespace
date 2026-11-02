@@ -323,6 +323,17 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const refusedL = (rL.e && /^(?:browser_engine_protocol|launch_failed)$/.test(String(rL.e.code)) && wordsL.test(rL.e.message)) || (rL.v && rL.v.state === 'failed' && wordsL.test(JSON.stringify(rL.v)));
   ok(refusedL && chromeLog().length === nL && ranL === ranL0 && recL.state !== 'ready', 'lane engine-spi-egress L1b r3: the ATTACH road refuses an engine argument that starts another program (--browser-subprocess-path) before anything is spawned — by the wrapper\'s wall (written before the road is chosen) or its own, by name', { r: rL.e ? rL.e.message : rL.v, state: recL.state });
   await kl.stop(pL.id, { why: 'user' }).catch(() => { }); // a red run (a tree without the walls) started it: never left behind
+  // L1b r4: the same switch with a TAB in front (Chromium trims it, then reads the switch) ⇒ the same refusal, nothing spawned
+  const REGT = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['\t--gpu-launcher=/usr/bin/true'], env: {} } }) };
+  const kt = mk({ dataDir: path.join(S, 'data-engine-launcher-tab'), engines: REGT });
+  const pT = kt.createProfile({ label: 'Engine launcher tab', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+  const nT = chromeLog().length;
+  const rT = await kt.start(pT.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+  let ranT = ''; try { ranT = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ranT = ''; }
+  const wordsT = /names? another program through --gpu-launcher; a plugin never names the program it runs/;
+  ok(((rT.e && wordsT.test(rT.e.message)) || (rT.v && rT.v.state === 'failed' && wordsT.test(JSON.stringify(rT.v)))) && chromeLog().length === nT && ranT === ranL && (kt._reg().browsers[pT.id] || {}).state !== 'ready', 'lane engine-spi-egress L1b r4: a TAB in front of the switch (Chromium trims it) ⇒ the same refusal by name on the attach road, nothing spawned', { r: rT.e ? rT.e.message : rT.v });
+  await kt.stop(pT.id, { why: 'user' }).catch(() => { });
+  try { kt.shutdown(); } catch { /* none */ }
   try { kl.shutdown(); } catch { /* none */ }
   // lane engine-distribution: the kernel side's plugin has no childProcess — its probe says version null + declaredVersion; the
   // KEEPER has the version measured ONCE before the first launch (the engine record's), the record + the card say «measured»
