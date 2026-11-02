@@ -304,19 +304,12 @@ export function installPluginsUI(App) {
         const chip = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes') }[p.state] || p.state || '') : t('enabled');
         const tone = !p.valid ? 'err' : p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '';
         const why = [...(p.errors || []), p.lastError, p.notice, clientErr ? t('Client module error: {error}', { error: clientErr }) : ''].filter(Boolean).join(' · ');
-        // the chip opens what the plugin offers (its windows, what it may do, an update) — actions, never settings
+        // the chip opens what the plugin offers (its windows, what it may do) — actions, never settings; Update is the row's own button
         const onChip = (ev) => {
           const rect = ev.currentTarget.getBoundingClientRect();
           showContextMenu(rect.left, rect.bottom + 2, [
             ...(p.contributes?.windows || []).map((w) => ({ label: t('Open {name}', { name: w.title }), disabled: !p.enabled, action: () => { this.pluginClient?.open?.(p.id, w.id); close(); } })),
             { label: t('Show capabilities…'), action: () => this._pluginConsentDialog(p, null, { readOnly: true }) },
-            { label: t('Update'), disabled: !p.install || p.install.source === 'zip', action: async () => {
-              showToast(t('Updating {id}…', { id: p.id }));
-              const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/update`, { method: 'POST' });
-              if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
-              showToast(t('Updated {id} to {version}', { id: p.id, version: rr.plugin?.version || '' }));
-              this.pluginClient?.refresh?.(); render();
-            } },
           ]);
           ev.stopPropagation();
         };
@@ -341,12 +334,33 @@ export function installPluginsUI(App) {
           showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
           this.pluginClient?.refresh?.(); render();
         };
+        // lane plugin-update-button (the owner, 2026-11-02: Update lived only in the status chip's menu — the owner saw none): an action
+        // the person must take is a LABELLED CONTROL on the row. A recorded source that can update (git / path / github-release)
+        // ⇒ «Update…» beside Uninstall… (one cluster in the row's [install] slot); an uploaded file or a hand-placed folder ⇒ no
+        // button (never a greyed one) — the row's fact line says how instead
+        const actions = document.createElement('div'); actions.className = 'plugin-row-actions';
+        if (p.install && p.install.source !== 'zip') {
+          const upd = document.createElement('button');
+          upd.className = 'mounts-btn plugin-install plugin-update'; upd.textContent = t('Update…');
+          upd.onclick = async () => {
+            upd.disabled = true;
+            showToast(t('Updating {id}…', { id: p.id }));
+            const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/update`, { method: 'POST' });
+            if (rr?.error) { upd.disabled = false; showToast(rr.error, { type: 'error' }); return; }
+            const version = rr.plugin?.version || '';
+            showToast(rr.unchanged ? t('{id} is already up to date ({version})', { id: p.id, version }) : t('Updated {id} to {version}', { id: p.id, version }));
+            this.pluginClient?.refresh?.(); render();
+          };
+          actions.appendChild(upd);
+        }
+        actions.appendChild(uninstall);
         // lane engine-distribution (D2): the cluster installed AND trusted it (only the id it names, only at the sha it pins)
         let fact = null;
         if (p.trustedBy === 'fleet') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-fleet-trusted'; fact.textContent = t('Installed and trusted by the cluster') + (p.install?.sha ? ` · ${p.install.sha.slice(0, 12)}` : ''); }
+        else if (!p.install || p.install.source === 'zip') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-update-how'; fact.textContent = p.install ? t('Installed from an uploaded file — upload the new .vsp through Install plugin…') : t('Placed by hand — reinstall it through Install plugin… to make it updatable'); }
         const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
         rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip,
-          sw, install: uninstall, gear: this._pluginGear(p.id, p.label || p.id), fact }));
+          sw, install: actions, gear: this._pluginGear(p.id, p.label || p.id), fact }));
       }
       parent.appendChild(sec);
     };

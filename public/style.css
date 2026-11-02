@@ -5409,6 +5409,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-row > .plugin-gear { grid-area: gear; }
 .plugin-row > .plugin-chip { grid-area: chip; justify-self: start; }
 .plugin-row > .plugin-install { grid-area: inst; justify-self: end; }
+.plugin-row > .plugin-row-actions { grid-area: inst; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; } /* lane plugin-update-button: a manifest plugin's Update… + Uninstall… in the one [install] slot */
+.plugin-row:has(> .plugin-row-actions > .plugin-update) { grid-template-areas: "dot main sw gear" ". chip chip chip" ". inst inst inst"; } /* two buttons in the [install] slot widened the switch / ⚙ columns and broke the name per letter in the ~200 px rail (measured) — the cluster takes its own line across the name column */
 .plugin-manifests-head { flex-wrap: wrap; }
 .plugin-chip { max-width: 100%; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: none; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: inherit; }
 button.plugin-chip { cursor: pointer; }

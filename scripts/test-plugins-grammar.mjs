@@ -11,6 +11,9 @@
 // prove them (each row says why); the design docs keep their FILE names (history) — RED: a planted user-visible string.
 // ⑥ lane plugin-consent-layout: both consent bodies open with `.dialog-intro` and the list of powers has its own rule (RED: the
 // base 160045063's files).
+// ⑦ lane plugin-update-button: the REAL plugins-ui.js in a fake DOM — a plugin that can update has «Update…» beside Uninstall…,
+// an uploaded / hand-placed one says how instead, the press posts /update and says «already up to date»; the chip's menu has
+// no Update (RED: the base 63f59d572's file).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -175,6 +178,134 @@ console.log('⑥ the consent dialogs open with their own body text (.dialog-intr
   const bu = at('160045063', 'src/lib/plugins-ui.js'), bc = at('160045063', 'public/style.css');
   if (bu && bc) { const fb = fence(bu, bc); ok(!holds(fb), `⑥ RED CONTROL: the base 160045063 fails the same fence (${JSON.stringify(fb.intros)}, list rule ${fb.listPad == null ? 'absent' : fb.listPad + 'px'})`); }
   else console.log('  SKIP ⑥ RED CONTROL — the base object 160045063 is not in this clone');
+}
+
+// ⑦ lane plugin-update-button (the owner, 2026-11-02, asked to press Update on the Custom Browser Kernel row: «有问题，看聊天» —
+// his screenshot showed name · switch · ⚙ · 「运行中」 · 「卸载…」 and no Update; it lived ONLY in the status chip's menu, and a
+// status chip reads as a badge). AN ACTION THE PERSON MUST TAKE IS A LABELLED CONTROL ON THE ROW. The REAL plugins-ui.js,
+// esbuild-bundled with its imports stubbed (utils: fetchJson / showToast / showContextMenu recorded; i18n: the English words),
+// renders the manifest list into a fake DOM: git / path / github-release installs ⇒ «Update…» beside Uninstall… in one cluster;
+// a zip install ⇒ no Update button (never a greyed one) + «upload the new .vsp»; a hand-placed folder ⇒ «placed by hand»; a press
+// posts /update and toasts «already up to date» on `unchanged: true`, «Updated … to …» otherwise, the server's error on a
+// refusal (the button pressable again); the chip's menu lists no Update (ONE door). RED CONTROL = the base 63f59d572's file
+// through the same walk (SKIP by name when the object is absent). The row's layout at 1000 × 600 zh: test-plugin-consent-chrome ⑨.
+console.log('⑦ a plugin that can update has a labelled «Update…» on its row; one that cannot says how; the chip has no Update');
+{
+  const esbuild = require(path.join(repo, 'node_modules/esbuild'));
+  const { pathToFileURL } = await import('node:url');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MUT = mutantCopies('plugins-grammar', repo);
+  const W = globalThis.__pu = { calls: [], toasts: [], menus: [] };
+  const STUBS = {
+    './utils.js': `const W = globalThis.__pu;
+      export const createModalShell = () => { throw new Error('no modal in this leg'); }; export const freshKey = (k) => k;
+      export const fetchJson = (u, o) => W.fetchJson(u, o); export const showToast = (m, o) => { W.toasts.push([m, (o && o.type) || 'info']); };
+      export const showConfirmDialog = async () => false; export const showContextMenu = (x, y, items) => { W.menus.push(items); };
+      export const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); export const copyText = async () => {};`,
+    './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));',
+    './agent-meta.js': 'export const BACKEND_META = {};',
+    './voice-plugin-card.js': 'export const renderVoiceSheet = () => {};',
+    './settings-schema.js': 'export const pluginCategoryOf = () => null;',
+    './decision-readout.js': 'export const decisionLineOf = () => null, paintDecisionLine = () => {}, liveDecisionLine = () => null;',
+    '../plugin-cred-state.js': 'export const pluginGitCredOf = () => null;',
+  };
+  class El {
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.dataset = {}; this.attrs = {}; this._text = ''; this.className = ''; this.title = ''; this.disabled = false; this.onclick = null; }
+    get classList() { const el = this; const has = () => el.className.split(/\s+/).filter(Boolean); return { add: (...c) => { el.className = [...new Set([...has(), ...c])].join(' '); }, contains: (c) => has().includes(c) }; }
+    append(...ns) { for (const n of ns) this.appendChild(typeof n === 'string' ? Object.assign(new El('#text'), { _text: n }) : n); }
+    appendChild(n) { n.parentNode = this; this.children.push(n); return n; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    get innerHTML() { return this._html || ''; }
+    set innerHTML(h) { this._html = String(h); this._text = this._html.replace(/<[^>]*>/g, ''); this.children = []; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+    getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0 }; }
+    all() { return [this, ...this.children.flatMap((c) => c.all())]; }
+    get isConnected() { return true; }
+  }
+  globalThis.document = { createElement: (tag) => new El(tag) };
+  const SHA = 'a'.repeat(40);
+  const mrow = (id, install) => ({ id, label: id, version: '0.1.5', description: 'a plugin', valid: true, enabled: true, server: true, state: 'running', install, contributes: {} });
+  const ROWS = [
+    mrow('kit.git', { source: 'git', value: 'https://example.invalid/userW/kit.git', ref: 'main', sha: SHA }),
+    mrow('kit.path', { source: 'path', value: '/srv/kit' }),
+    mrow('kit.release', { source: 'github-release', value: 'userW/kit' }),
+    mrow('kit.zip', { source: 'zip', value: 'kit.vsp' }),
+    mrow('kit.hand', null),
+  ];
+  // the server's answers: kit.git = nothing new at its ref; kit.path = a new package; kit.release = a refusal
+  W.fetchJson = async (u, o) => {
+    W.calls.push([u, (o && o.method) || 'GET']);
+    if (u === '/api/plugins') return { plugins: [] };
+    if (u === '/api/plugins/manifests') return { plugins: ROWS };
+    const m = /^\/api\/plugins\/manifests\/([^/]+)\/update$/.exec(u);
+    if (m && m[1] === 'kit.release') return { error: 'the release has no .vsp asset' };
+    if (m) return { plugin: { ...ROWS.find((r) => r.id === decodeURIComponent(m[1])) }, previous: null, warnings: [], unchanged: m[1] === 'kit.git' };
+    return {};
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 15));
+  const J = JSON.stringify;
+  const walk = async (src, tag) => {
+    const stub = { name: 'pu-stubs', setup(b) {
+      b.onResolve({ filter: /^\.\.?\// }, (a) => (Object.hasOwn(STUBS, a.path) ? { path: a.path, namespace: 'pu-stub' } : null));
+      b.onLoad({ filter: /.*/, namespace: 'pu-stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' }));
+    } };
+    const out = await esbuild.build({ stdin: { contents: src, resolveDir: path.join(repo, 'src/lib'), sourcefile: 'plugins-ui.js', loader: 'js' }, bundle: true, format: 'esm', write: false, plugins: [stub], logLevel: 'silent' });
+    const f = path.join(MUT.dir, `plugins-ui-${tag}.mjs`);
+    fs.writeFileSync(f, out.outputFiles[0].text); MUT.files.push(f);
+    const { installPluginsUI } = await import(pathToFileURL(f).href);
+    function App() { }
+    installPluginsUI(App);
+    const app = new App(); const root = new El('div');
+    await app.openPluginsDialog({ container: root });
+    const rowOf = (id) => root.all().find((e) => e.className === 'plugin-row' && e.dataset.plugin === id) || null;
+    const buttons = (row) => (row ? row.all().filter((e) => e.tagName === 'BUTTON') : []);
+    const named = (row, label) => buttons(row).find((e) => e.textContent === label) || null;
+    const rows = {};
+    for (const { id } of ROWS) {
+      const row = rowOf(id), upd = named(row, 'Update…'), un = named(row, 'Uninstall…'), box = upd && upd.parentNode;
+      rows[id] = { buttons: buttons(row).map((e) => e.textContent), update: !!upd, cluster: !!(upd && un && box === un.parentNode && box !== row && box.children.indexOf(upd) < box.children.indexOf(un)),
+        fact: (row && row.all().find((e) => /\bplugin-row-fact\b/.test(e.className)) || {}).textContent || null };
+    }
+    const press = async (id) => {
+      W.calls.length = 0; W.toasts.length = 0;
+      const b = named(rowOf(id), 'Update…');
+      if (b) { await b.onclick(); await tick(); }
+      return { pressed: !!b, calls: W.calls.filter(([u]) => /\/update$/.test(u)), toasts: [...W.toasts], disabledAfter: b ? b.disabled : null };
+    };
+    const pgit = await press('kit.git'), ppath = await press('kit.path'), prel = await press('kit.release');
+    W.menus.length = 0;
+    const chip = rowOf('kit.git') && rowOf('kit.git').all().find((e) => /\bplugin-chip\b/.test(e.className));
+    if (chip && chip.onclick) chip.onclick({ currentTarget: chip, stopPropagation() { } });
+    return { rows, pgit, ppath, prel, menu: (W.menus[0] || []).map((i) => i.label) };
+  };
+  const ZIP_WORDS = 'Installed from an uploaded file — upload the new .vsp through Install plugin…';
+  const HAND_WORDS = 'Placed by hand — reinstall it through Install plugin… to make it updatable';
+  const verdict = (w) => ({
+    updatable: ['kit.git', 'kit.path', 'kit.release'].every((id) => w.rows[id].update && w.rows[id].cluster),
+    zip: !w.rows['kit.zip'].update && w.rows['kit.zip'].fact === ZIP_WORDS,
+    hand: !w.rows['kit.hand'].update && w.rows['kit.hand'].fact === HAND_WORDS,
+    unchanged: J(w.pgit.calls) === J([['/api/plugins/manifests/kit.git/update', 'POST']]) && w.pgit.toasts.some(([m, k]) => m === 'kit.git is already up to date (0.1.5)' && k === 'info') && !w.pgit.toasts.some(([m]) => /^Updated /.test(m)),
+    changed: w.ppath.toasts.some(([m]) => m === 'Updated kit.path to 0.1.5') && !w.ppath.toasts.some(([m]) => /up to date/.test(m)),
+    refused: w.prel.toasts.some(([m, k]) => m === 'the release has no .vsp asset' && k === 'error') && w.prel.disabledAfter === false,
+    oneDoor: w.menu.includes('Show capabilities…') && !w.menu.some((l) => /^Update/.test(l)),
+  });
+  const w = await walk(now, 'now'), v = verdict(w);
+  ok(v.updatable, `⑦ git / path / github-release installs: «Update…» beside «Uninstall…» in one cluster (${['kit.git', 'kit.path', 'kit.release'].map((id) => `${id}: ${J(w.rows[id].buttons)}`).join(' · ')})`);
+  ok(v.zip, `⑦ a zip install: no Update button, the row says «${w.rows['kit.zip'].fact}» (${J(w.rows['kit.zip'].buttons)})`);
+  ok(v.hand, `⑦ a hand-placed folder: no Update button, the row says «${w.rows['kit.hand'].fact}» (${J(w.rows['kit.hand'].buttons)})`);
+  ok(v.unchanged, `⑦ the press posts /api/plugins/manifests/kit.git/update and, the ref still at its commit (unchanged), toasts ${J(w.pgit.toasts.map(([m]) => m))}`);
+  ok(v.changed, `⑦ a new package toasts «Updated … to …» (${J(w.ppath.toasts.map(([m]) => m))})`);
+  ok(v.refused, `⑦ a refusal toasts the server's error and the button is pressable again (${J(w.prel.toasts)}, disabled after: ${w.prel.disabledAfter})`);
+  ok(v.oneDoor, `⑦ ONE door: the chip's menu lists ${J(w.menu)} — no Update`);
+  const b0 = (() => { try { return execFileSync('git', ['-C', repo, 'show', '63f59d572:src/lib/plugins-ui.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
+  if (b0 === null) console.log('  SKIP ⑦ RED CONTROL — the base object 63f59d572 is not in this clone');
+  else {
+    const wb = await walk(b0, 'base'), vb = verdict(wb);
+    const red = Object.entries(vb).filter(([, x]) => !x).map(([k]) => k);
+    ok(['updatable', 'zip', 'hand', 'unchanged', 'oneDoor'].every((k) => red.includes(k)), `⑦ RED CONTROL: the base 63f59d572 fails the same walk — ${red.join(', ')} (its kit.git row: ${J(wb.rows['kit.git'].buttons)}; its chip menu: ${J(wb.menu)})`);
+  }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

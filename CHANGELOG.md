@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.371 — 2026-11-02
+
+### Changed
+- A plugin installed from Git or a folder now has an “Update…” button on its row; one installed from an uploaded file says how to replace it.
+
 ## 2.369.370 — 2026-11-01
 
 ### Fixed

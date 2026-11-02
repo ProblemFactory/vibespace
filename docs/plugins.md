@@ -141,7 +141,7 @@ Each `contributes.agentTools[]` becomes an executable `data/bin/vibespace-tool-<
 | `.vsp` package | a zip of the plugin folder (a single top-level folder is unwrapped) |
 | GitHub release | `owner/repo[@tag]` — the release's `*.vsp` asset (public repos) |
 
-Packages are staged, validated (manifest, host version, capability paths, no symlinks, size caps, Zip-Slip), then moved into `data/plugins/<id>/`. A previous copy of the same id is moved to `data/plugins-trash/<id>-<time>/` — nothing is ever deleted. **Update** re-runs the recorded source (zip installs: upload the new file). **Uninstall** moves the plugin folder and its state dir to the trash.
+Packages are staged, validated (manifest, host version, capability paths, no symlinks, size caps, Zip-Slip), then moved into `data/plugins/<id>/`. A previous copy of the same id is moved to `data/plugins-trash/<id>-<time>/` — nothing is ever deleted. **Update…** (the button on the plugin's row in ⚙ → Plugins) re-runs the recorded source and says when nothing was new there; a zip install has no Update button — upload the new file through Install plugin…; a folder placed by hand — reinstall it through Install plugin… to make it updatable. **Uninstall** moves the plugin folder and its state dir to the trash.
 
 ## Where things live
 `data/plugins/<id>/` (the plugin), `data/plugins-state/<id>/` (its data), `data/plugins-trash/` (previous copies), `data/plugin-registry.json` (enabled / trust / install records), `data/bin/vibespace-tool-*` (generated shims).
