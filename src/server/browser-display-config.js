@@ -15,10 +15,13 @@
  *        the launch RELAUNCHES the browser — so every call of the record re-derives the SAME file from the SAME fact
  *        until the next launch probes again. The user's own config file is never written.
  *   engineFileFor(file, view)                   — lane engine-plugin: a conversation's browser launched on a browser ENGINE
- *        names, at every call, the file it names anyway + the engine's program (`executablePath`) and arguments (merged into
- *        `args`, ONE switch per name, written as the driver's ONE comma-separated line — lane engine-args-string) — the
- *        same derived-file rule (written once, re-written only when its content changes), so the agent's own commands
- *        carry the launch's view and never relaunch it on Chrome (the measured relaunch rule).
+ *        names, at every call, the file it names anyway + the engine's program (`executablePath` — lane engine-args-string
+ *        r2: the keeper's WRAPPER, which carries the engine's switches whole) and, in `args`, the keeper's part of the
+ *        switches (every name the engine gives removed; the driver's ONE comma-separated line) — the same derived-file
+ *        rule (written once, re-written only when its content changes), so the agent's own commands carry the launch's
+ *        view and never relaunch it on Chrome (the measured relaunch rule).
+ *   engineWrapperFor(name, spec) / dropEngineWrapper(name) — lane engine-args-string r2: THE ENGINE'S WRAPPER of one
+ *        profile (`engine-<id>.sh` here, 0700, atomic, re-written when its text changes, removed with the profile).
  *
  * Never throws: a base file that cannot be read, or a dir that cannot be written, leaves the call on its base file
  * (said once in the journal — the launch then fails as it did before this lane, never worse).
@@ -27,7 +30,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const D = require('../browser-display.js');
-const V = require('../browser-verbs.js'); // lane engine-args-string: THE one writer of the driver's `args` + the keeper ∪ engine merge
+const V = require('../browser-verbs.js'); // lane engine-args-string: THE one writer of the driver's `args` + the keeper | engine split
+const ENG = require('../browser-engines.js'); // lane engine-args-string r2: the engine's wrapper text (PURE)
 
 function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now, noDesktopWindow = undefined, vncDisplay = null } = {}) { // noDesktopWindow: H5's switch for a gate (undefined = the module's default, OFF in 2.369.200)
   if (!dir) throw new Error('browser-display-config: dir is required');
@@ -106,14 +110,43 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const base = readCfg(baseFile);
     if (!base) { say(`eread:${baseFile}`, `the engine view could not read ${baseFile} — its calls keep that file`); return baseFile; }
     const extra = Array.isArray(view.args) ? view.args.map(String) : [];
-    // lane engine-args-string: ONE switch per name — the keeper's control switches stay its own, the engine's value wins for
-    // the rest (browser-verbs mergeLaunchArgs); derived() writes the list as the driver's one line
-    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: V.mergeLaunchArgs(base.args, extra) } : {}) };
+    // lane engine-args-string r2 — THE WRAPPER ROAD: `view.executablePath` is the keeper's wrapper (engineWrapperFor), which
+    // carries the engine's switches (`view.args`) whole; the driver's `args` keep only the keeper's part of the split (every name
+    // the engine gives leaves it — browser-verbs splitLaunchArgs), written by derived() as the driver's one comma-free line
+    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: V.splitLaunchArgs(base.args, extra).keeper } : {}) };
     const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000')).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
     return derived(file, cfg, baseFile, 'the engine view\'s config');
   }
-  return { factFor, fileFor, engineFileFor, probe: probeNow, dir };
+  /** lane engine-args-string r2: THE ENGINE'S WRAPPER of one profile — `<dir>/engine-<name>.sh` (`name` = the profile id: one
+   *  per profile, which runs one engine at a time), its text src/browser-engines.js engineWrapperText. Written 0700 through a
+   *  temporary file renamed over it (atomic), RE-WRITTEN at a launch only when its text changes (the derived rule: a regular
+   *  file of this uid, mode 0700, exactly this text — lstat, a planted link is replaced, never followed). Never under /tmp
+   *  (the keeper's own browser-env dir). → `{ok:true, file}` | `{ok:false, code, error}` (never throws). */
+  const wrapperFile = (name) => path.join(dir, `engine-${name}.sh`);
+  function engineWrapperFor(name, spec) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(String(name || ''))) return { ok: false, code: 'browser_engine_wrapper', error: `the engine's launch wrapper cannot be written: ${JSON.stringify(String(name).slice(0, 40))} is not a file name` };
+    const w = ENG.engineWrapperText(spec);
+    if (!w.ok) return w;
+    const file = wrapperFile(name);
+    const own = () => { try { const st = fs.lstatSync(file); return st.isFile() && !st.isSymbolicLink() && (st.mode & 0o777) === 0o700 && (typeof process.getuid !== 'function' || st.uid === process.getuid()) && fs.readFileSync(file, 'utf8') === w.text; } catch { return false; } };
+    if (memo.get(file) === w.text && own()) return { ok: true, file };
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(tmp, w.text, { mode: 0o700 });
+      fs.chmodSync(tmp, 0o700);
+      fs.renameSync(tmp, file);
+      memo.set(file, w.text);
+      return { ok: true, file };
+    } catch (e) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* none */ }
+      return { ok: false, code: 'browser_engine_wrapper', error: `the engine's launch wrapper could not be written at ${file} (${e && e.message})` };
+    }
+  }
+  /** …removed with its profile (the keeper's removeProfile). */
+  function dropEngineWrapper(name) { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(String(name || ''))) return; const f = wrapperFile(name); memo.delete(f); try { fs.rmSync(f, { force: true }); } catch { /* best effort */ } }
+  return { factFor, fileFor, engineFileFor, engineWrapperFor, dropEngineWrapper, probe: probeNow, dir };
 }
 
 module.exports = { create };

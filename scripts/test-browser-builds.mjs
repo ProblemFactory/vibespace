@@ -27,6 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { execFileSync } from 'node:child_process'; // lane engine-args-string r2: the engine's wrapper run by a real sh
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, keeperWithInstalls } from './mutant-copy.mjs';
@@ -658,6 +659,16 @@ console.log('— ⑦ lane engine-plugin: the engine verdicts, the real keeper ov
 const ENGN = require('../src/browser-engines.js');
 const BPR = require('../src/browser-profiles.js');
 const EID = 'vibespace.custom-browser';
+// lane engine-args-string r2 — THE WRAPPER ROAD: on an engine launch the driver starts the keeper's WRAPPER (`exec '<kernel>' "$@"
+// '<engine switch>'…`); these read it back as a shell would (a single-quoted word, `'\''` inside) — the kernel it runs, its words
+const shWords = (line) => { const out = []; const re = /'((?:[^']|'\\'')*)'/g; let m; while ((m = re.exec(line))) out.push(m[1].replace(/'\\''/g, "'")); return out; };
+const wrapperOf = (exe) => { let t = ''; try { t = fs.readFileSync(exe, 'utf8'); } catch { return null; } const line = t.split('\n').find((l) => l.startsWith('exec ')); if (!line || !line.includes(' "$@"')) return null; const [head, tail] = [line.slice(0, line.indexOf(' "$@"')), line.slice(line.indexOf(' "$@"') + 5)]; return { program: shWords(head)[0], args: shWords(tail), text: t }; };
+const kernelOf = (exe) => { const w = exe ? wrapperOf(exe) : null; return w ? w.program : exe; };
+// THE OWNER'S SWITCHES (a fixture — measured on his hub 2026-11-02, 2.369.370, the custom kernel v0.1.5; none is a secret): the
+// keeper's line as his base config held it (the mark's value his conversation's browser key), and the custom kernel's own
+// arguments as his engine config named them — the four holding a comma read by 主开发 (fixups-r2), the rest from the brief
+const OWNER_KEEPER_LINE = '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=bk-209f474e,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing';
+const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades'];
 {
   ok(ENGN.ID_RE.source === require('../src/plugin-manifest.js').ID_RE.source, 'the engine id rule IS the manifest id rule (src/plugin-manifest.js ID_RE)');
   const P0 = { installed: true, executable: true, binaryPath: '/k/chrome', version: 'Chromium 150.0.7871.186', protocol: 1, kinds: ['js-dialog'], features: ['surfaces', 'webauthn'] };
@@ -684,11 +695,10 @@ const EID = 'vibespace.custom-browser';
   ok(!badO.length && good.ok && good.executablePath === '/k/chrome' && good.version === P0.version && good.major === 150 && ENGN.ENGINE_CODES.every((k) => BB.BUILD_CODES.includes(k)), 'THE verdict for an engine, in order: well-formed · the user\'s · chromium · the engine there · its kernel installed · executable · protocol; ok ⇒ its kernel\'s path + the version (major 150); the 6 codes are in BUILD_CODES', badO);
   const rs = read('src/routes/browser.js');
   ok(ENGN.ENGINE_CODES.every((k) => new RegExp(`\\b${k}: 409\\b`).test(rs)), 'every engine refusal is a 409 in the routes\' STATUS table');
-  const le = ENGN.engineLaunchEnv({ args: ['--a=1', '--b', '--mark'], env: { X: 'y' } }, { base: ['--mark'] });
-  const leComma = (() => { try { return ENGN.engineLaunchEnv({ args: ['--a=1,2'] }, { base: ['--m'] }); } catch (e) { return e; } })();
-  ok(le.AGENT_BROWSER_ARGS === '--mark,--a=1,--b' && !('X' in le) && ENGN.engineLaunchEnv({ args: ['--b'] }, { base: ['--m'] }).AGENT_BROWSER_ARGS === '--m,--b' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] }))
-    && leComma instanceof Error && leComma.code === 'browser_args_uncarried' && /"--a=1,2"/.test(leComma.message),
-    'the launch view: the base arguments first, the engine\'s after, ONE switch per name, ONE comma-separated line (lane engine-args-string: the driver cuts at every comma AND newline — an argument holding a comma throws by name, never split); no arguments ⇒ no list (the config\'s stays); env outside the whitelist never carried', { le, leComma: String(leComma && leComma.message) });
+  const leBase = ['--vibespace-keeper=bk-1', '--disable-blink-features=AutomationControlled', '--log-level=3'];
+  const le = (() => { try { return ENGN.engineLaunchEnv({ args: ['--a=1,2', '--log-level=0', '--vibespace-keeper=forged'], env: { X: 'y' } }, { base: leBase }); } catch (e) { return e; } })();
+  ok(le && le.AGENT_BROWSER_ARGS === '--vibespace-keeper=bk-1,--disable-blink-features=AutomationControlled' && Object.keys(le).length === 1 && ENGN.engineLaunchEnv({ args: ['--b'] }, { base: ['--m'] }).AGENT_BROWSER_ARGS === '--m' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })),
+    'the launch view (lane engine-args-string r2): AGENT_BROWSER_ARGS carries ONLY the keeper\'s part — every name the engine gives leaves it (--log-level), the mark stays the keeper\'s — as ONE comma-separated line; an engine switch holding a comma throws nothing (it rides the wrapper); no arguments ⇒ no list (the config\'s stays); no env ever rides the driver (the wrapper exports it)', { le: le instanceof Error ? le.message : le });
   // ── lane engine-args-string (owner 2026-11-02: a conversation's browser on the custom kernel never started — its config held
   // `args` as a LIST: «invalid type: sequence, expected a string»): THE DRIVER'S `args`, ONE shape — PURE legs ──
   {
@@ -710,18 +720,22 @@ const EID = 'vibespace.custom-browser';
       'a switch the one line cannot carry back as itself (a comma, a blank at an end, nothing, a line break) is REFUSED by name — never dropped, never split', cut);
     ok(safe(() => VB.driverArgsText('--a,--b\n--c').args === '--a,--b\n--c' && VB.driverArgsText(undefined).ok && VB.driverArgsText(undefined).args === undefined && !VB.driverArgsText({ a: 1 }).ok) === true,
       'a string is the driver\'s shape already — kept byte for byte (a running browser launched with that spelling); nothing ⇒ nothing; another type refused');
-    // the dedupe: the owner's measured merged list (the first 14 of 43) → one switch per name
-    const keeperLine = '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=bk-209f474e,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing';
-    const engineOwn = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'];
-    const mo = safe(() => VB.mergeLaunchArgs(keeperLine, engineOwn));
+    // THE SPLIT (r2): the owner's switches — the keeper's line from his base config, the custom kernel's own (the four holding a
+    // comma read from his engine config by 主开发, 2026-11-02) — one switch per name, the keeper's part rides the driver's line,
+    // the engine's the wrapper
+    const so = safe(() => VB.splitLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE));
     const names = (l) => l.map((x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x));
-    ok(same(mo, ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--ozone-platform=x11', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-compositing', '--use-gl=angle', '--enable-webgl', '--ignore-gpu-blocklist']) && Array.isArray(mo) && new Set(names(mo)).size === mo.length,
-      'THE MERGE over the owner\'s measured list: --no-sandbox / --ozone-platform / --use-angle / --enable-unsafe-swiftshader once each, in first-seen order, the engine\'s new switches after', mo);
-    const mr = safe(() => VB.mergeLaunchArgs(['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=swiftshader', '--log-level=3'], ['--vibespace-keeper=forged', '--remote-debugging-port=9222', '--use-angle=gl', '--log-level=0', '--use-angle=vulkan']));
-    ok(same(mr, ['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=vulkan', '--log-level=0']),
-      'THE RULE on one name, two values: the KEEPER\'s value stays for its own control switches (the mark, the debugging endpoint — RAW_ARG_RE), the ENGINE\'s wins for its rendering switches (its LAST spelling — Chromium reads the last value)', mr);
-    ok(lv({ ...L0, args: ['--enable-features=A,B'] }).code === 'browser_engine_protocol' && /"--enable-features=A,B"/.test(lv({ ...L0, args: ['--enable-features=A,B'] }).error) && lv({ ...L0, args: [' --pad'] }).code === 'browser_engine_protocol' && lv({ ...L0, args: ['--user-agent=a b', '--x=/p q'] }).ok,
-      'the launch verdict asks THE one writer first: an engine argument holding a comma (or a blank at an end) is refused by NAME at the door (browser_engine_protocol) — before any file; a space inside one is fine', lv({ ...L0, args: ['--enable-features=A,B'] }));
+    ok(so && same(so.keeper, ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--disable-gpu-compositing']) && same(so.engine, OWNER_ENGINE) && new Set(names([...so.keeper, ...so.engine])).size === so.keeper.length + so.engine.length && same(safe(() => VB.mergeLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE)), [...so.keeper, ...so.engine]),
+      'THE SPLIT over the owner\'s switches: every name once — the engine\'s own (--no-sandbox / --ozone-platform / --use-angle / --enable-unsafe-swiftshader, the four holding a comma) ride the ENGINE\'s part whole, the keeper\'s part keeps the rest (the mark, the automation flag, --disable-gpu-compositing); merge = keeper then engine', so);
+    const sr = safe(() => VB.splitLaunchArgs(['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=swiftshader', '--log-level=3'], ['--vibespace-keeper=forged', '--remote-debugging-port=9222', '--use-angle=gl', '--log-level=0', '--use-angle=vulkan']));
+    ok(sr && same(sr.keeper, ['--vibespace-keeper=bk-1', '--remote-debugging-port=0']) && same(sr.engine, ['--use-angle=vulkan', '--log-level=0']),
+      'THE RULE on one name, two values: the KEEPER\'s alone for its control switches (RAW_ARG_RE — the mark, the debugging endpoint: the engine\'s copy dropped), the ENGINE\'s for every other (its LAST spelling, at its first place — Chromium reads the last value; the keeper\'s copy leaves its part)', sr);
+    const nul = lv({ ...L0, args: ['--a\0b'] });
+    ok(lv({ ...L0, args: OWNER_ENGINE }).ok && lv({ ...L0, args: [' --pad ', "--q=it's"] }).ok && nul.code === 'browser_engine_protocol' && lv({ ...L0, args: ['--a\n--b'] }).code === 'browser_engine_protocol',
+      'the launch verdict refuses only what no road carries whole — a NUL byte, a line break (the one-line rule); the owner\'s comma switches, a blank at an end, a quote pass (they ride the wrapper)', nul);
+    const wt = safe(() => ENGN.engineWrapperText({ program: '/k/chr ome', args: ["--q=it's", '--w=1,2'], env: { VS_PROBE: 'a b' } }));
+    ok(wt && wt.ok && /^#!\/bin\/sh\n/.test(wt.text) && wt.text.includes("export VS_PROBE='a b'\n") && wt.text.includes(`exec '/k/chr ome' "$@" '--q=it'\\''s' '--w=1,2'\n`) && !ENGN.engineWrapperText({ program: 'chrome' }).ok && !ENGN.engineWrapperText({ program: '/k/c', args: ['a\0b'] }).ok && !ENGN.engineWrapperText({ program: '/k/c', env: { 'A B': 'x' } }).ok,
+      'THE WRAPPER\'s text: POSIX sh, the env as exports, `exec \'<kernel>\' "$@" \'<switch>\'…` — every word single-quoted (a \' as \'\\\'\'); refused by name: a relative program, a NUL, an env name that is no shell name', wt);
     // the driver's refusal of a config, in VibeSpace's words (the owner saw the raw serde line)
     const raw = '⚠ invalid config file /d/browser-env/display/bk-1-engine-2.json: invalid type: sequence, expected a string at line 2 column 10\n⚠ failed to load config from /d/browser-env/display/bk-1-engine-2.json';
     const cr = BPR.launchFatalOf(raw, { lineOf: (f, n) => (f === '/d/browser-env/display/bk-1-engine-2.json' && n === 2 ? '  "args": [' : null) });
@@ -736,6 +750,53 @@ const EID = 'vibespace.custom-browser';
     'THE POLICY: the user\'s own value › the fleet\'s (default true ⇒ the plugin, false ⇒ Chrome — said «set by the cluster preset») › \'default\'; a stored value outside the enum is none');
   const mn = BB.missingNotice({ label: 'K', choice: c, code: 'browser_engine_kernel_missing', engineLabel: 'Custom Browser Kernel' });
   ok(/"K" cannot start: the Custom Browser Kernel engine's kernel is not installed/.test(mn.text) && /never switches it to Chrome by itself/.test(mn.detail) && !/\/k\//.test(mn.text + mn.detail), 'the vanished kernel\'s ONE For-you notice says what is missing and the way out — never a path', mn);
+}
+// ── lane engine-args-string r2: THE WRAPPER ROAD over the REAL browser-display-config (the keeper's writer) and a real `sh` — the
+// owner's switches (his base config's line + the custom kernel's own) reach an argv-recording program verbatim, once, in order ──
+{
+  const DCm = require('../src/server/browser-display-config.js');
+  const VB = require('../src/browser-verbs.js');
+  const WD = path.join(ROOT, 'engine-wrap'); fs.mkdirSync(WD, { recursive: true });
+  const dc = DCm.create({ dir: path.join(WD, 'display'), writeJson: (f, o) => { fs.writeFileSync(f + '.t', JSON.stringify(o, null, 2)); fs.renameSync(f + '.t', f); }, log: { log() { }, warn() { } } });
+  const STUB = path.join(WD, 'record-argv'), OUT = path.join(WD, 'argv.bin');
+  fs.writeFileSync(STUB, '#!/bin/sh\nprintf \'%s\\0\' "$@" > "$STUB_OUT"\nprintf \'%s\' "${VS_PROBE-}" > "$STUB_OUT.env"\n', { mode: 0o755 });
+  const runAs = (prog, argv) => { fs.rmSync(OUT, { force: true }); execFileSync(prog, argv, { env: { PATH: '/usr/bin:/bin', STUB_OUT: OUT } }); const raw = fs.readFileSync(OUT, 'utf8'); return { argv: raw ? raw.replace(/\0$/, '').split('\0') : [], env: fs.readFileSync(OUT + '.env', 'utf8') }; };
+  const driverReads = (line) => String(line).split(/[,\n]/).map((x) => x.trim()).filter(Boolean); // the driver's reading, measured on 0.38.2
+  const has = typeof dc.engineWrapperFor === 'function';
+  ok(has, 'browser-display-config writes THE ENGINE\'S WRAPPER (engineWrapperFor) — the program the driver starts on an engine launch');
+  if (has) {
+    const base = path.join(WD, 'base.json'); fs.writeFileSync(base, JSON.stringify({ headed: false, noAutoDialog: true, args: OWNER_KEEPER_LINE }));
+    const eng = VB.splitLaunchArgs([], OWNER_ENGINE).engine;
+    const w = dc.engineWrapperFor('bk-209f474e', { program: STUB, args: eng, env: {} });
+    const cfgFile = dc.engineFileFor(base, { executablePath: w.file, args: eng });
+    let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch { cfg = null; }
+    const st = w.ok ? fs.lstatSync(w.file) : null;
+    ok(w.ok && w.file === path.join(WD, 'display', 'engine-bk-209f474e.sh') && st.isFile() && (st.mode & 0o777) === 0o700 && cfg && cfg.executablePath === w.file && typeof cfg.args === 'string' && driverReads(cfg.args).every((x) => !x.includes(',')),
+      'the wrapper: `engine-<profile>.sh` in the keeper\'s own display dir (never /tmp — the keeper\'s data dir), a regular file 0700; the derived config names it as the program, its `args` ONE comma-free line', { w, cfg, mode: st && (st.mode & 0o777).toString(8) });
+    const run = cfg ? runAs(cfg.executablePath, driverReads(cfg.args)) : { argv: [] };
+    const want = ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--disable-gpu-compositing', ...OWNER_ENGINE];
+    const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
+    ok(JSON.stringify(run.argv) === JSON.stringify(want) && new Set(run.argv.map(nm)).size === run.argv.length && OWNER_ENGINE.filter((x) => x.includes(',')).every((x) => run.argv.includes(x)),
+      `the owner's switches reach the program VERBATIM, ONCE, in order — the keeper's (the driver's reading of the line) then the engine's; --accept-lang=en-US,en, --window-size=1920,1080, --window-position=24,36, --disable-features=… whole (${run.argv.length} switches)`, { got: run.argv, want });
+    const odd = ["--lang-label=it's \"quoted\" $HOME `x` \\n", ' padded '];
+    const wq = dc.engineWrapperFor('q-1', { program: STUB, args: odd, env: { VS_PROBE: 'a b  c' } });
+    const rq = wq.ok ? runAs(wq.file, ['--from-driver']) : { argv: [], env: '' };
+    ok(JSON.stringify(rq.argv) === JSON.stringify(['--from-driver', ...odd]) && rq.env === 'a b  c', 'a single quote, a double quote, $, a backtick, a backslash, blanks at the ends — each argument survives whole; an env value with spaces survives its export', rq);
+    const ino0 = fs.statSync(wq.file).ino, m0 = fs.statSync(wq.file).mtimeMs;
+    const same1 = dc.engineWrapperFor('q-1', { program: STUB, args: odd, env: { VS_PROBE: 'a b  c' } });
+    const ino1 = fs.statSync(wq.file).ino;
+    const changed = dc.engineWrapperFor('q-1', { program: STUB, args: ['--other=1,2'], env: {} });
+    const rc = changed.ok ? runAs(changed.file, []) : { argv: [] };
+    const left = fs.readdirSync(path.join(WD, 'display')).filter((f) => f.includes('.tmp'));
+    ok(same1.ok && same1.file === wq.file && ino1 === ino0 && fs.statSync(wq.file).mtimeMs >= m0 && changed.file === wq.file && JSON.stringify(rc.argv) === '["--other=1,2"]' && fs.statSync(wq.file).ino !== ino0 && !left.length,
+      'RE-WRITTEN when the engine\'s switches change, under the SAME name (one wrapper per profile; an unchanged text is not touched — same inode), through a temporary file renamed over it (a new inode, nothing left beside it)', { ino0, ino1, left });
+    const target = path.join(WD, 'not-ours.txt'); fs.writeFileSync(target, 'theirs');
+    fs.symlinkSync(target, path.join(WD, 'display', 'engine-q-2.sh'));
+    const wl = dc.engineWrapperFor('q-2', { program: STUB, args: ['--x'] });
+    ok(wl.ok && !fs.lstatSync(wl.file).isSymbolicLink() && fs.readFileSync(target, 'utf8') === 'theirs', 'a link planted at the wrapper\'s name is replaced, never followed (its target untouched)');
+    dc.dropEngineWrapper('q-1'); dc.dropEngineWrapper('q-2'); dc.dropEngineWrapper('../escape');
+    ok(!fs.existsSync(wq.file) && !fs.existsSync(wl.file) && fs.existsSync(target) && !dc.engineWrapperFor('../x', { program: STUB }).ok, 'dropEngineWrapper removes it (the keeper\'s removeProfile); a name that is no file name is refused, never a path');
+  }
 }
 // the fixture engine through the REAL loader (its node --permission child over IPC) in a scratch root; the kernel = a tiny
 // program in the plugin's own state folder (the path VibeSpace resolves and hands it); the shared fake agent-browser logs
@@ -782,10 +843,11 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   await ke.start(pe.id, { why: 'test' });
   const ns = 'vs-' + pe.id;
   const la = fake.launches().at(-1), cs = callsOf(ns, c0);
-  const args = String(la.args || '').split(/[,\n]/);
-  ok(la.exe === KP && cs.length >= 2 && cs.every((c) => c.exe === KP), `the engine's kernel rides EVERY call of the browser's own session (${cs.map((c) => c.verb).join(' · ')}) — AGENT_BROWSER_EXECUTABLE_PATH, the build pin's road`, { la, cs });
-  ok(args.includes('--vibespace-engine=fixture') && args.includes(`--vibespace-profile=${pe.id}`) && args.includes(BPR.keeperMarkArg(pe.id)) && args.includes('--disable-blink-features=AutomationControlled') && args.some((a) => /^--log-level=/.test(a) || /^--disable-logging/.test(a) || /^--v=/.test(a) || /enable-logging/.test(a)),
-    'its launch arguments ride AGENT_BROWSER_ARGS with what the config\'s list carried (the keeper\'s mark, the automation flag) and the quiet switches', args);
+  const keeperArgs = String(la.args || '').split(/[,\n]/), wr = la.exe ? wrapperOf(la.exe) : null, args = [...keeperArgs, ...((wr && wr.args) || [])];
+  ok(kernelOf(la.exe) === KP && la.exe !== KP && cs.length >= 2 && cs.every((c) => c.exe === la.exe), `the engine's kernel rides EVERY call of the browser's own session (${cs.map((c) => c.verb).join(' · ')}) — AGENT_BROWSER_EXECUTABLE_PATH, the build pin's road: the keeper's WRAPPER over the kernel (lane engine-args-string r2)`, { la, cs });
+  ok(args.includes('--vibespace-engine=fixture') && args.includes(`--vibespace-profile=${pe.id}`) && args.includes(BPR.keeperMarkArg(pe.id)) && args.includes('--disable-blink-features=AutomationControlled') && args.some((a) => /^--log-level=/.test(a) || /^--disable-logging/.test(a) || /^--v=/.test(a) || /enable-logging/.test(a))
+    && !keeperArgs.includes('--vibespace-engine=fixture') && wr && wr.args.includes('--vibespace-engine=fixture'),
+    'its launch arguments: AGENT_BROWSER_ARGS carries what the config\'s list carried (the keeper\'s mark, the automation flag) and the quiet switches; the ENGINE\'s ride the wrapper, never the driver\'s text', { keeperArgs, wrapper: wr && wr.args });
   const rc = ke._reg().browsers[pe.id].browserChoice;
   ok(rc && rc.kind === 'plugin' && rc.id === EID && rc.version === KVER, 'the browser record says what this launch was asked to run: {kind:\'plugin\', id, version} (the probe\'s version)', rc);
   await ke.stop(pe.id, { why: 'user' });
@@ -800,7 +862,7 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   ok(e2 && e2.code === 'browser_engine_kernel_missing' && todos.length === t1 + 1 && !(ke.list().browsers[pe.id] && ke.list().browsers[pe.id].state === 'starting'), '…a second refused launch files nothing more, and no half-started record is left');
   fs.renameSync(KP + '.away', KP);
   await ke.start(pe.id, { why: 'test' });
-  ok(!ke.profile(pe.id).buildMissing && fake.launches().at(-1).exe === KP, 'the kernel back ⇒ it starts, the mark clears by itself');
+  ok(!ke.profile(pe.id).buildMissing && kernelOf(fake.launches().at(-1).exe) === KP, 'the kernel back ⇒ it starts, the mark clears by itself');
   await ke.stop(pe.id, { why: 'user' });
   // an engine that does not answer / asks for env / speaks another protocol — each by name; a timeout marks nothing
   setMode({ hang: 'probe' });
@@ -835,10 +897,16 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   const swA = await thr(() => ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'plugin', id: EID }, by: 'agent' }));
   ok(swA && swA.code === 'browser_choice_user_only' && !ke.profile(pc.id).browser, 'an agent never switches a profile to an engine (refused by name, nothing changed)', swA && swA.code);
   const sw = await ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
-  ok(sw.ok && sw.restarted && fake.launches().at(-1).exe === KP && ke.profile(pc.id).browser.id === EID, 'Change build… → the engine: the running browser restarts on its kernel', { ok: sw.ok, restarted: sw.restarted });
+  ok(sw.ok && sw.restarted && kernelOf(fake.launches().at(-1).exe) === KP && ke.profile(pc.id).browser.id === EID, 'Change build… → the engine: the running browser restarts on its kernel', { ok: sw.ok, restarted: sw.restarted });
   await ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'default' }, by: 'user' });
   await ke.stop(pc.id, { why: 'user' });
   ok(ke.list().profiles.length > 0 && t0 <= todos.length, 'the engine legs leave the keeper usable');
+  // lane engine-args-string r2: the engine profile's WRAPPER (written at its engine launches) goes with the profile
+  const wpe = path.join(ROOT, 'data-eng', 'browser-env', 'display', `engine-${pe.id}.sh`);
+  const hadW = fs.existsSync(wpe);
+  await ke.stop(pe.id, { why: 'user' }).catch(() => { });
+  const rmE = await thr(() => ke.removeProfile(pe.id));
+  ok(hadW && !rmE && !ke.profile(pe.id) && !fs.existsSync(wpe), 'the engine profile\'s wrapper (`engine-<profile>.sh`, written at its launches) is REMOVED with the profile (removeProfile)', { hadW, rmE: rmE && rmE.message, left: fs.existsSync(wpe) });
 }
 // THE POLICY: the two read points (a profile's create, a conversation's browser's first start), written on the record
 {
@@ -861,33 +929,47 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   // config every call names (the agent's own commands included) — never a relaunch on Chrome
   const pairs = BPR.browserEnvFor({ browserKey: KEY_E, variant: BPR.VARIANTS.N, idleMs: 600000 });
   const n0 = fake.launches().length;
-  // lane engine-args-string: the engine answers switches the keeper's own config also carries (the owner's kernel did: its list
-  // repeated --no-sandbox / --ozone-platform / --use-angle …), one with another value, and a forged launch mark
-  const ENGINE_ARGS = ['--vibespace-engine=fixture', '--no-sandbox', '--disable-blink-features=AutomationControlled', '--log-level=0', '--use-angle=swiftshader', '--use-angle=gl', '--user-agent=Fixture Kernel/150 (X11)', `--vibespace-keeper=forged`];
+  // lane engine-args-string (r1 + r2): the engine answers the owner's switches (the four holding a comma), ones the keeper's own
+  // config also carries (another value for one), a forged launch mark and a quote — the conversation's browser STARTS with all
+  const ENGINE_ARGS = ['--vibespace-engine=fixture', ...OWNER_ENGINE, '--disable-blink-features=AutomationControlled', '--log-level=0', '--use-angle=gl', '--user-agent=Fixture Kernel/150 (X11)', '--vibespace-keeper=forged', "--x-quote=it's"];
   setMode({ launch: { args: ENGINE_ARGS } });
-  const eph = await ke.ensureEphemeral({ browserKey: KEY_E, sessionId: 'sess-e', envPairs: pairs, sessionName: 'eng', variant: 'N' });
+  let eph = null, ephErr = null; try { eph = await ke.ensureEphemeral({ browserKey: KEY_E, sessionId: 'sess-e', envPairs: pairs, sessionName: 'eng', variant: 'N' }); } catch (e) { ephErr = e; }
   setMode(null);
+  ok(!ephErr, 'the conversation\'s browser on the engine STARTS with the owner\'s switches — none refused (a comma is carried, not a reason)', ephErr && `${ephErr.code}: ${ephErr.message}`);
   const ev0 = ke.ephemeralFor(KEY_E);
   const ep = ev0 ? ke.profile(ev0.profileId) : null;
   const la = fake.launches().at(-1);
-  ok(eph && ep && ep.browser && ep.browser.id === EID && fake.launches().length === n0 + 1 && la.config && la.config.executablePath === KP && (la.config.args || []).includes('--vibespace-engine=fixture'), 'a conversation\'s browser is BORN with the policy\'s engine and LAUNCHES its kernel: the config it ran with names the program + its arguments', { browser: ep && ep.browser, config: la && la.config });
+  ok(eph && ep && ep.browser && ep.browser.id === EID && fake.launches().length === n0 + 1 && la.config && kernelOf(la.config.executablePath) === KP && ((wrapperOf(la.config.executablePath) || {}).args || []).includes('--vibespace-engine=fixture'), 'a conversation\'s browser is BORN with the policy\'s engine and LAUNCHES its kernel: the config it ran with names the program (the keeper\'s wrapper over the kernel) + its arguments (the wrapper\'s)', { browser: ep && ep.browser, config: la && la.config });
   const cf = ke.configFileFor({ ephemeral: true, pairs });
   let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cf, 'utf8')); } catch { cfg = null; }
-  ok(cfg && cfg.executablePath === KP && (cfg.args || []).includes('--vibespace-engine=fixture'), 'the config the AGENT\'s own commands are named (/resolve) carries the same program + arguments — the launch view never differs, so the browser is never relaunched on Chrome', cf);
+  ok(cfg && cfg.executablePath === la.config.executablePath && kernelOf(cfg.executablePath) === KP, 'the config the AGENT\'s own commands are named (/resolve) carries the same program + arguments — the launch view never differs, so the browser is never relaunched on Chrome', cf);
   {
     // lane engine-args-string: THE FILE the launch named — `args` ONE string (the driver refuses a list: «invalid type: sequence,
-    // expected a string» — the owner's hub, 2026-11-02), read back by the driver's own rule: one switch per name, the keeper's
-    // mark once (the forged one gone), the engine's rendering switches present with the engine's value
+    // expected a string» — the owner's hub, 2026-11-02) carrying the KEEPER's part only (r2); the program = the keeper's wrapper
+    // whose words are the ENGINE's part; run with the driver's reading of the line as "$@", every switch arrives once, in order
     const VB = require('../src/browser-verbs.js');
     const a0 = la && la.config ? la.config.args : undefined;
     const got = typeof a0 === 'string' ? a0.split(/[,\n]/).map((x) => x.trim()).filter(Boolean) : []; // the driver's reading, measured on 0.38.2
     const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
     const dups = got.map(nm).filter((n, i, all) => all.indexOf(n) !== i);
     const marks = got.filter((x) => x.startsWith(VB.KEEPER_MARK + '='));
+    const wantEngine = ['--vibespace-engine=fixture', '--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=gl', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades', '--disable-blink-features=AutomationControlled', '--log-level=0', '--user-agent=Fixture Kernel/150 (X11)', "--x-quote=it's"];
+    const wr = la && la.config && la.config.executablePath ? wrapperOf(la.config.executablePath) : null;
     ok(typeof a0 === 'string' && cfg && cfg.args === a0, 'the engine launch\'s config (and the /resolve one, the SAME file) holds `args` as ONE string — never a list', { type: Array.isArray(a0) ? 'list' : typeof a0, args: a0 });
-    ok(got.length > 0 && !dups.length && marks.length === 1 && marks[0] === BPR.keeperMarkArg(KEY_E), 'read back by the driver\'s rule: no switch twice, the keeper\'s mark ONCE (its own value — the engine\'s forged one dropped)', { dups, marks, got });
-    ok(['--vibespace-engine=fixture', '--no-sandbox', '--use-angle=gl', '--user-agent=Fixture Kernel/150 (X11)', '--disable-blink-features=AutomationControlled'].every((x) => got.includes(x)) && !got.includes('--use-angle=swiftshader') && (!got.some((x) => x.startsWith('--log-level=')) || got.includes('--log-level=0')),
-      'the engine\'s rendering switches are there with the ENGINE\'s value (--use-angle=gl, its last; --log-level=0 over the keeper\'s quiet 3), a space inside one survives', got);
+    ok(got.length > 0 && !dups.length && marks.length === 1 && marks[0] === BPR.keeperMarkArg(KEY_E) && !got.some((x) => wantEngine.map(nm).includes(nm(x))), 'read back by the driver\'s rule: the KEEPER\'s part only — no switch twice, the mark ONCE (its own value — the engine\'s forged one dropped), no name the engine gives', { dups, marks, got });
+    const wfile = ep ? path.join(ROOT, 'data-eng', 'browser-env', 'display', `engine-${ep.id}.sh`) : '';
+    const wst = (() => { try { return fs.lstatSync(wfile); } catch { return null; } })();
+    ok(wr && la.config.executablePath === wfile && wst && wst.isFile() && (wst.mode & 0o777) === 0o700 && wr.program === KP && JSON.stringify(wr.args) === JSON.stringify(wantEngine),
+      'the program the config names is the keeper\'s WRAPPER (`engine-<profile>.sh` beside the display configs, 0700) over the kernel, its words the ENGINE\'s part — one per name, the engine\'s last value (--use-angle=gl, --log-level=0), the forged mark gone, the four comma switches and the quote whole', { exe: la && la.config && la.config.executablePath, wr: wr && wr.args });
+    let argvK = [];
+    if (wr) {
+      const RSTUB = path.join(ROOT, 'record-argv-k'), ROUT = path.join(ROOT, 'argv-k.bin');
+      fs.writeFileSync(RSTUB, '#!/bin/sh\nprintf \'%s\\0\' "$@" > "$STUB_OUT"\n', { mode: 0o755 });
+      const swapped = path.join(ROOT, 'wrapper-swapped.sh'); fs.writeFileSync(swapped, wr.text.replace(`exec '${KP}'`, `exec '${RSTUB}'`), { mode: 0o700 }); // the ONE edit: its program
+      try { execFileSync(swapped, got, { env: { PATH: '/usr/bin:/bin', STUB_OUT: ROUT } }); argvK = fs.readFileSync(ROUT, 'utf8').replace(/\0$/, '').split('\0'); } catch { argvK = []; }
+    }
+    ok(JSON.stringify(argvK) === JSON.stringify([...got, ...wantEngine]) && new Set(argvK.map(nm)).size === argvK.length,
+      `the keeper's wrapper (its program swapped for an argv recorder — the one edit), run with the driver's reading of the line as "$@": EVERY switch arrives verbatim, ONCE, keeper's first then the engine's (${argvK.length})`, argvK);
   }
   fleetE = null;
   try { if (ep) ke.retireEphemeral(ep.id, 'test'); } catch { /* best effort */ }
@@ -897,7 +979,9 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   const MUT = mutantCopies('badm-engine', REPO);
   const ks = read('src/server/browser-keeper.js');
   const anchor = "    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }";
-  const fb = ks.replace(anchor, "    if (!v.ok) return {};");
+  // lane engine-args-string r2: the wrapper step refuses a launch with no program by name — the mutant also skips it (a keeper
+  // that falls back to Chrome would): absent on an older tree, that second patch is a no-op
+  const fb = ks.replace(anchor, "    if (!v.ok) return {};").replace('        const ew = engineProgramOf(p, buildEnv);', '        const ew = buildEnv.executablePath ? engineProgramOf(p, buildEnv) : { program: null, args: [] };');
   ok(ks.includes(anchor) && fb !== ks, 'control (e): the patch (a keeper that starts Chrome when the engine\'s kernel vanished) applies');
   const Ke = MUT.load('src/server/browser-keeper.js', fb, 'engine-fallback');
   fs.mkdirSync(path.join(ROOT, 'data-ce'), { recursive: true });
@@ -1058,7 +1142,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   // ③ the launch reads the MEASURED version (no second --version), the record says it
   const pk = keD.createProfile({ label: 'Measured', browser: { kind: 'plugin', id: EID } }, { engine: await keD.engineFactOf(EID) });
   await keD.start(pk.id, { why: 'test' });
-  ok(keD._reg().browsers[pk.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1 && fake.launches().at(-1).exe === KP, 'the launch: the kernel, the MEASURED version on the browser record — the kernel ran --version once in all', { runs: runs1(), rc: keD._reg().browsers[pk.id].browserChoice });
+  ok(keD._reg().browsers[pk.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1 && kernelOf(fake.launches().at(-1).exe) === KP, 'the launch: the kernel, the MEASURED version on the browser record — the kernel ran --version once in all', { runs: runs1(), rc: keD._reg().browsers[pk.id].browserChoice });
   await keD.stop(pk.id, { why: 'user' });
   // ④ refusals BY NAME, before / after bytes — the installed kernel untouched by every failed attempt
   const before = fs.readFileSync(KP, 'utf8');
@@ -1126,7 +1210,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(e8 && e8.code === 'browser_engine_kernel_missing' && /VibeSpace is downloading it now/.test(e8.message), 'the kernel not there ⇒ the launch is refused BY NAME and says VibeSpace is downloading it now (its first use) — never Chrome in its place', e8 && e8.message);
   const t8 = Date.now(); while (ED.kernelFact(EID).state === 'downloading' && Date.now() - t8 < 8000) await new Promise((r) => setTimeout(r, 25));
   await ke8.start(p8.id, { why: 'test' });
-  ok(ED.kernelFact(EID).state === 'installed' && fake.launches().at(-1).exe === KP && ke8._reg().browsers[p8.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1, '…it lands, and the next launch runs it with its measured version (one --version)', { st: ED.kernelFact(EID).state, runs: runs1() });
+  ok(ED.kernelFact(EID).state === 'installed' && kernelOf(fake.launches().at(-1).exe) === KP && ke8._reg().browsers[p8.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1, '…it lands, and the next launch runs it with its measured version (one --version)', { st: ED.kernelFact(EID).state, runs: runs1() });
   await ke8.stop(p8.id, { why: 'user' });
   // ⑧ a kernel placed BY HAND (no receipt): measured once (keyed by its size + mtime), «declared» until then
   const ED2 = EDM.create({ dataDir: path.join(ROOT, 'data-ed2'), engines: ENGR, loader: LDR, log: { log() {}, warn() {} } });
@@ -1293,7 +1377,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const pA = keA.createProfile({ label: 'Aside', browser: { kind: 'plugin', id: EID } }, { engine: await keA.engineFactOf(EID) });
   fs.renameSync(kdir, removing); const h12b = hits.length;
   const sA = await thrK(keA.start(pA.id, { why: 'test' }));
-  ok(!sA && fs.existsSync(KP) && !fs.existsSync(removing) && hits.length === h12b && fake.launches().at(-1).exe === KP, 'round 3: a FIRST USE finds the kernel aside ⇒ the launch puts it back (no download) and starts it', { e: sA && sA.message, hits: hits.slice(h12b) });
+  ok(!sA && fs.existsSync(KP) && !fs.existsSync(removing) && hits.length === h12b && kernelOf(fake.launches().at(-1).exe) === KP, 'round 3: a FIRST USE finds the kernel aside ⇒ the launch puts it back (no download) and starts it', { e: sA && sA.message, hits: hits.slice(h12b) });
   await keA.stop(pA.id, { why: 'user' });
   // ⑫c ROUND 4: THE PUT-BACK ONLY ONTO AN ENOENT-EMPTY PLACE — a stat of the place answering anything else (EIO / ESTALE) is a
   // transient: nothing moved, nothing said; a leftover beside a GOOD kernel is deleted, never put back over it; a record dropped
@@ -1330,7 +1414,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const pC = keC.createProfile({ label: 'Healed', browser: { kind: 'plugin', id: EID } }, { engine: await keC.engineFactOf(EID) });
   const sC = await thrK(keC.start(pC.id, { why: 'test' }));
   const kfC = C2.kernelFact(EID), recC = recAt('data-ed12f');
-  ok(dropped && stillC === 'failed' && !sC && fake.launches().at(-1).exe === KP && kfC.state === 'installed' && kfC.version === kL.version && kfC.code === null && JSON.stringify(recC.kernel) === JSON.stringify(kL) && !recC.aside && !recC.failure && leftTodos.length === 1 && hits.length === h12c,
+  ok(dropped && stillC === 'failed' && !sC && kernelOf(fake.launches().at(-1).exe) === KP && kfC.state === 'installed' && kfC.version === kL.version && kfC.code === null && JSON.stringify(recC.kernel) === JSON.stringify(kL) && !recC.aside && !recC.failure && leftTodos.length === 1 && hits.length === h12c,
     'round 4 (c): a record DROPPED once (a put-back that failed) + the kernel back in its place ⇒ the next good probe (a first use: installed, executable) measures and the record says installed again — its own record, the failure cleared, no download, no second notice',
     { dropped, stillC, kfC, e: sC && sC.message });
   await keC.stop(pC.id, { why: 'user' });
