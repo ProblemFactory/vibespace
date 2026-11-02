@@ -221,6 +221,7 @@ const ROWS = [
   ["src/server/browser-keeper.js", "create > onKeptDir", 1, "local-only", "readlink of an ephemeral p.dir = <dataDir>/browser-env/<key>.profile link or <dataDir>/browser-profiles/<key> (ephemeralDirOf over hub-made pairs)"],
   ["src/server/browser-keeper.js", "create > userConfig", 1, "local-only", "~/.agent-browser/config.json (homeDir + B.USER_CONFIG_REL) — the vendor CLI's own config"],
   ["src/server/browser-keeper.js", "create > machineConfigFile", 2, "local-only", "src = ~/.agent-browser/config.json; file = <dataDir>/browser-env/machine-<mark>.json (CONFIG_DIR)"],
+  ["src/server/browser-keeper.js", "create > ownConfigLine", 1, "local-only", "one line of a config the keeper wrote under <dataDir>/browser-env/ (CONFIG_DIR — any other path answers null before a read), after the driver refused it (lane engine-args-string: the refusal's words)"],
   ["src/server/browser-keeper.js", "create > machineConfigFile > own", 2, "local-only", "file = <dataDir>/browser-env/machine-<mark>.json (CONFIG_DIR = dataDir/browser-env)"],
   ["src/server/browser-keeper.js", "create > createProfile", 1, "local-only", "mkdir only when no dir is handed in: d = ~/.agent-browser/<profileDirName(id)>"],
   ["src/server/browser-keeper.js", "create > adoptDirectory", 1, "guarded", "dir: the --adopt route is realpath-fenced to ~/.agent-browser|<dataDir>/browser-profiles, trace to ~/.agent-browser, but migrations.js passes ~/.agent-browser/config.json's profile unfenced"],

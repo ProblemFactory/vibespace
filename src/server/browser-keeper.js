@@ -904,6 +904,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // takeover r3: the keeper's own config files (see `configured`) — written 0600 under data/browser-env/,
   // re-written only when their content changes (the user edited the file / the headed setting moved)
   const CONFIG_DIR = path.join(dataDir, 'browser-env');
+  /** lane engine-args-string: line `n` of a config the keeper wrote (under CONFIG_DIR only) — the driver's refusal names its file + line */
+  const ownConfigLine = (f, n) => { const r = path.resolve(String(f)); if (!r.startsWith(CONFIG_DIR + path.sep)) return null; try { return fs.readFileSync(r, 'utf8').split('\n')[n - 1] || null; } catch { return null; } };
   const configMemo = new Map();
   const configSaid = new Set();
   const configSay = (key, line) => { if (configSaid.has(key)) return; configSaid.add(key); try { log.warn?.(`[browser] ${line}`); } catch { /* none */ } };
@@ -1020,6 +1022,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk, holdDialogs: hold, automationFlag: flag });
     else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.withKeeperMark(cfg.args, markOk); if (hold) cfg.noAutoDialog = true; }
     if (quietLogFor(kind, markOk)) cfg.args = B.withKeeperMark(BE.withQuietLogging(cfg.args), markOk); // lane browser-stderr-pipe: the mark rides last
+    { const a = VERBS.driverArgsText(cfg.args); if (!a.ok) { configSay(`args:${file}`, `the keeper's ${kind} browser config could not be written at ${file}: ${a.error} — its calls keep the CLI's own config search`); return null; } if (a.args !== cfg.args) cfg.args = a.args; } // lane engine-args-string: THE one writer of the driver's `args` (a list leaves as its one line)
     const text = JSON.stringify(cfg);
     const memoKey = kind + '|' + (markOk || '');
     const memo = configMemo.get(memoKey);
@@ -2956,7 +2959,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
           const lr = lockRefusalAfterLaunch(p, prev); // verify r2 (F1): its kept directory taken meanwhile ⇒ said by name
-          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr ? lr.error : ((B.launchFatalOf(r.stderr || r.error || r.stdout) || {}).error || `the browser did not start: ${text}`); // lane browser-tmpdir-socket-length: a known FATAL named with its fix
+          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr ? lr.error : ((B.launchFatalOf(r.stderr || r.error || r.stdout, { lineOf: ownConfigLine }) || {}).error || `the browser did not start: ${text}`); // lane browser-tmpdir-socket-length: a known FATAL named with its fix (lane engine-args-string: + the driver's refusal of our config)
           commit();
           // verify r3 (F3): said in the journal on this row too (the named start's sentence; the ephemeral start said nothing)
           if (lr) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": NOT started — ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory was taken while launching'}: ${lr.error}`); throw namedError(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}); }
@@ -4103,7 +4106,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // a key-bearing launch that fails on licence/concurrency is the THIRD
         // named refusal (§7.4, round 8 #3) — under a cluster default it says
         // the seats are shared fleet-wide and offers the one click out
-        const cls = intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: (B.launchFatalOf(r.stderr || r.error || r.stdout) || {}).error || `the browser did not start: ${text}`, action: null };
+        const cls = intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: (B.launchFatalOf(r.stderr || r.error || r.stdout, { lineOf: ownConfigLine }) || {}).error || `the browser did not start: ${text}`, action: null };
         rec.state = 'failed'; rec.endedAt = now(); rec.lastError = cls.error;
         commit();
         throw namedError(cls.code, cls.error, { provider: p.provider, action: cls.action || null });

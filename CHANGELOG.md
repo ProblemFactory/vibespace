@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.371 — 2026-11-02
+
+### Fixed
+- A browser that runs a custom engine plugin now starts: the launch settings VibeSpace handed to the browser driver were written in the wrong shape.
+
 ## 2.369.370 — 2026-11-01
 
 ### Fixed

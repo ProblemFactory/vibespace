@@ -118,7 +118,7 @@ export const ROWS = [
   ['src/server/browser-display-config.js', 'own-tree', 3, null, DATA],
   ['src/server/browser-env.js', 'own-tree', 22, null, DATA],
   ['src/server/browser-installs.js', 'own-tree', 5, null, DATA],
-  ['src/server/browser-keeper.js', 'own-tree', 35, null, DATA], // lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records)
+  ['src/server/browser-keeper.js', 'own-tree', 36, null, DATA], // lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records); lane engine-args-string: + one line of its OWN config file under data/browser-env/ the driver refused (ownConfigLine — the refusal's words)
   ['src/server/browser-kept.js', 'own-tree', 3, null, DATA],
   ['src/server/browser-trace.js', 'own-tree', 13, null, DATA],
   ['src/server/channel-api-cards.js', 'own-tree', 2, null, DATA],

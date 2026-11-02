@@ -75,6 +75,9 @@
 //   ⑧ lane engine-plugin (2026-10-25): the REAL keeper over the fixture engine plugin (the real loader's IPC child) whose
 //      kernel is the FAKE KERNEL — the real agent-browser launches it as a profile's browser (its arguments + the keeper's
 //      mark through AGENT_BROWSER_ARGS), and our own CDP socket on the record's url reads ONE VibeSpace.getVersion answer.
+//   ⑧b lane engine-args-string (2026-11-02): ⑧'s world on the OTHER road — a conversation's browser born on the engine
+//      (browser.defaultEngine) is launched by the real agent-browser with the keeper's DERIVED config: `args` ONE string (a
+//      list was refused whole by the driver on the owner's hub), the kernel runs with one switch per name, the mark once.
 //   ⑨ lane browser-surfaces (2026-10-25): ⑧'s world + the REAL routes, dialog watch and `vibespace-browser` — a js-dialog
 //      SURFACE holding a navigation ends the verb in flight [dialog_open], `surfaces` lists it, `answer <id> accept` is ONE
 //      VibeSpace.answerSurface on the watch's own page session, the page continues; the watch's session never hooks Fetch /
@@ -1119,6 +1122,71 @@ console.log('— ⑧ lane engine-plugin: the real agent-browser launches the FAK
     } finally {
       try { if (c8) c8.ws.close(); } catch { }
       try { LD8.shutdown(); } catch { }
+      for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(200);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
+
+// ═══ ⑧b lane engine-args-string (owner 2026-11-02): A CONVERSATION'S BROWSER ON THE ENGINE, THROUGH THE REAL CLI ═══
+// ⑧'s world, the other road: `browser.defaultEngine` names the fixture engine, so a conversation's browser (ensureEphemeral) is
+// born on it and the REAL agent-browser launches the fake kernel with the keeper's DERIVED config (browser-display-config
+// engineFileFor) — the file the owner's hub wrote with `args` as a LIST, which the real driver refused whole («invalid type:
+// sequence, expected a string») so the browser never started. The engine answers switches the keeper's own config carries too.
+console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on the engine, launched by the REAL agent-browser with the keeper\'s derived config');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Bp = require('../src/browser-profiles.js');
+  let verB = null; try { verB = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
+  if (!verB) skip('⑧b agent-browser is not runnable here (put the real binary first on PATH) — the conversation-browser leg needs it');
+  else await (async () => {
+    const KR = scratch('mc8b'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
+    for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const EID = 'vibespace.custom-browser', KEYB = 'bk-0000f8b1';
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', EID), { recursive: true });
+    fs.mkdirSync(path.join(PROOT, 'data', 'plugins-state', EID), { recursive: true });
+    // the engine repeats switches the keeper's config carries (the owner's kernel did), one with its own value, and forges a mark
+    fs.writeFileSync(path.join(PROOT, 'data', 'plugins-state', EID, 'mode.json'), JSON.stringify({ launch: { args: ['--vibespace-engine=fixture', '--disable-blink-features=AutomationControlled', '--use-angle=swiftshader', '--use-angle=gl', '--vibespace-keeper=forged'] } }));
+    const expressB = require(path.join(REPO, 'node_modules/express'));
+    const LDB = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: expressB(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const REGB = require('../src/server/browser-engines.js').create({ loader: LDB, dataDir: path.join(PROOT, 'data') });
+    const KPB = REGB.kernelPath(EID);
+    fs.mkdirSync(path.dirname(KPB), { recursive: true });
+    fs.writeFileSync(KPB, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: (k) => (k === 'browser.defaultEngine' ? 'plugin:' + EID : undefined), liveKeys: () => new Set([KEYB]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REGB });
+    let cB = null, eph = null;
+    try {
+      LDB.setEnabled(EID, true, { trusted: true });
+      const t0 = Date.now(); while (!REGB.rows().length && Date.now() - t0 < 8000) await sleep(25);
+      const pairs = Bp.browserEnvFor({ browserKey: KEYB, variant: Bp.VARIANTS.N, idleMs: 600000 });
+      let ev = null; try { ev = await kk.ensureEphemeral({ browserKey: KEYB, sessionId: 'sess-mc8b', envPairs: pairs, sessionName: 'eng', variant: 'N' }); } catch (e) { ev = e; }
+      eph = kk.ephemeralFor(KEYB);
+      const recB = eph ? kk.browserOf(eph.profileId) : null;
+      let cfgB = null; try { cfgB = JSON.parse(fs.readFileSync(kk.configFileFor({ ephemeral: true, pairs }), 'utf8')); } catch { }
+      // the kernel's argv as it RUNS (/proc): what the real CLI handed it from the config's one line
+      const kpid = mine().find((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('fake-kernel.mjs'); } catch { return false; } });
+      let argvB = []; try { argvB = fs.readFileSync(`/proc/${kpid}/cmdline`, 'utf8').split('\0'); } catch { }
+      ok(recB && recB.state === 'ready' && !recB.lastError && recB.browserChoice && recB.browserChoice.kind === 'plugin' && recB.browserChoice.id === EID, `⑧b the REAL ${verB} STARTED the conversation's browser on the engine: ready, no error, the record {kind:'plugin'}`, JSON.stringify({ ev: ev instanceof Error ? `${ev.code}: ${ev.message}` : ev && ev.state, rec: recB && { state: recB.state, lastError: recB.lastError, choice: recB.browserChoice } }));
+      ok(cfgB && typeof cfgB.args === 'string' && cfgB.executablePath === KPB, '⑧b the config the launch and the agent\'s own commands name holds `args` as ONE string beside the kernel\'s program', JSON.stringify(cfgB));
+      ok(argvB.includes('--vibespace-engine=fixture') && argvB.includes('--use-angle=gl') && !argvB.includes('--use-angle=swiftshader') && argvB.filter((a) => a.startsWith('--vibespace-keeper=')).length === 1 && argvB.includes(Bp.keeperMarkArg(KEYB)) && argvB.filter((a) => a === '--disable-blink-features=AutomationControlled').length === 1,
+        '⑧b the kernel RUNS with the engine\'s switches (its value: --use-angle=gl), the keeper\'s mark ONCE (the forged one dropped), the automation flag once', JSON.stringify(argvB));
+      // the driver road records no CDP url: the kernel's own DevToolsActivePort (in the --user-data-dir the CLI handed it) names it
+      const udd = (argvB.find((a) => a.startsWith('--user-data-dir=')) || '').slice('--user-data-dir='.length);
+      let urlB = null; try { const [pl, wp] = fs.readFileSync(path.join(udd, 'DevToolsActivePort'), 'utf8').split('\n'); urlB = `ws://127.0.0.1:${Number(pl)}${wp.trim()}`; } catch { }
+      if (urlB && B_isLoop(urlB)) { cB = cdpClient(urlB); await cB.open; const gv = await cB.call('VibeSpace.getVersion'); ok(gv.result && gv.result.protocol === 1, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', JSON.stringify(gv)); cB.ws.close(); cB = null; }
+      else ok(false, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', `no DevToolsActivePort under ${udd || '(no --user-data-dir)'}`);
+      try { await kk.retireEphemeral(eph.profileId, 'test'); } catch { }
+      LDB.shutdown();
+      await sleep(600);
+      const leftB = mine().map((pid) => { let c = ''; try { c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').slice(0, 120); } catch { } return `${pid} ${c}`; });
+      ok(leftB.length === 0, `⑧b the retire ended the kernel and the CLI's daemon, the loader its plugin — no process of this leg is left (${leftB.join(' | ') || 'none'})`);
+    } finally {
+      try { if (cB) cB.ws.close(); } catch { }
+      try { LDB.shutdown(); } catch { }
       for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
       await sleep(200);
       for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
