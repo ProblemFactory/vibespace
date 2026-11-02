@@ -77,7 +77,8 @@
 //      mark through AGENT_BROWSER_ARGS), and our own CDP socket on the record's url reads ONE VibeSpace.getVersion answer.
 //   ⑧b lane engine-args-string (2026-11-02): ⑧'s world on the OTHER road — a conversation's browser born on the engine
 //      (browser.defaultEngine) is launched by the real agent-browser with the keeper's DERIVED config: `args` ONE string (a
-//      list was refused whole by the driver on the owner's hub), the kernel runs with one switch per name, the mark once.
+//      list was refused whole by the driver on the owner's hub), the kernel runs with one switch per name, the mark once;
+//      r2: the program is the keeper's WRAPPER and the engine's switches holding a comma arrive whole.
 //   ⑨ lane browser-surfaces (2026-10-25): ⑧'s world + the REAL routes, dialog watch and `vibespace-browser` — a js-dialog
 //      SURFACE holding a navigation ends the verb in flight [dialog_open], `surfaces` lists it, `answer <id> accept` is ONE
 //      VibeSpace.answerSurface on the watch's own page session, the page continues; the watch's session never hooks Fetch /
@@ -1148,8 +1149,10 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
     const EID = 'vibespace.custom-browser', KEYB = 'bk-0000f8b1';
     fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', EID), { recursive: true });
     fs.mkdirSync(path.join(PROOT, 'data', 'plugins-state', EID), { recursive: true });
-    // the engine repeats switches the keeper's config carries (the owner's kernel did), one with its own value, and forges a mark
-    fs.writeFileSync(path.join(PROOT, 'data', 'plugins-state', EID, 'mode.json'), JSON.stringify({ launch: { args: ['--vibespace-engine=fixture', '--disable-blink-features=AutomationControlled', '--use-angle=swiftshader', '--use-angle=gl', '--vibespace-keeper=forged'] } }));
+    // the engine repeats switches the keeper's config carries (the owner's kernel did), one with its own value, forges a mark — and
+    // (r2) names switches HOLDING A COMMA, as the owner's kernel does (--window-size=1920,1080, --disable-features=…,…)
+    const COMMA_B = ['--window-size=1234,567', '--disable-features=A,B'];
+    fs.writeFileSync(path.join(PROOT, 'data', 'plugins-state', EID, 'mode.json'), JSON.stringify({ launch: { args: ['--vibespace-engine=fixture', '--disable-blink-features=AutomationControlled', '--use-angle=swiftshader', '--use-angle=gl', '--vibespace-keeper=forged', ...COMMA_B] } }));
     const expressB = require(path.join(REPO, 'node_modules/express'));
     const LDB = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: expressB(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
     const REGB = require('../src/server/browser-engines.js').create({ loader: LDB, dataDir: path.join(PROOT, 'data') });
@@ -1171,12 +1174,18 @@ console.log('— ⑧b lane engine-args-string: a conversation\'s browser born on
       const kpid = mine().find((pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('fake-kernel.mjs'); } catch { return false; } });
       let argvB = []; try { argvB = fs.readFileSync(`/proc/${kpid}/cmdline`, 'utf8').split('\0'); } catch { }
       ok(recB && recB.state === 'ready' && !recB.lastError && recB.browserChoice && recB.browserChoice.kind === 'plugin' && recB.browserChoice.id === EID, `⑧b the REAL ${verB} STARTED the conversation's browser on the engine: ready, no error, the record {kind:'plugin'}`, JSON.stringify({ ev: ev instanceof Error ? `${ev.code}: ${ev.message}` : ev && ev.state, rec: recB && { state: recB.state, lastError: recB.lastError, choice: recB.browserChoice } }));
-      ok(cfgB && typeof cfgB.args === 'string' && cfgB.executablePath === KPB, '⑧b the config the launch and the agent\'s own commands name holds `args` as ONE string beside the kernel\'s program', JSON.stringify(cfgB));
+      let wtext = ''; try { wtext = cfgB ? fs.readFileSync(cfgB.executablePath, 'utf8') : ''; } catch { }
+      ok(cfgB && typeof cfgB.args === 'string' && cfgB.executablePath !== KPB && /\/engine-[^/]+\.sh$/.test(cfgB.executablePath) && wtext.includes(`exec '${KPB}' "$@"`) && !cfgB.args.includes('fixture'), '⑧b the config the launch and the agent\'s own commands name holds `args` as ONE string (the keeper\'s part) and, as its program, the keeper\'s WRAPPER over the kernel', JSON.stringify(cfgB));
       ok(argvB.includes('--vibespace-engine=fixture') && argvB.includes('--use-angle=gl') && !argvB.includes('--use-angle=swiftshader') && argvB.filter((a) => a.startsWith('--vibespace-keeper=')).length === 1 && argvB.includes(Bp.keeperMarkArg(KEYB)) && argvB.filter((a) => a === '--disable-blink-features=AutomationControlled').length === 1,
         '⑧b the kernel RUNS with the engine\'s switches (its value: --use-angle=gl), the keeper\'s mark ONCE (the forged one dropped), the automation flag once', JSON.stringify(argvB));
       // the driver road records no CDP url: the kernel's own DevToolsActivePort (in the --user-data-dir the CLI handed it) names it
       const udd = (argvB.find((a) => a.startsWith('--user-data-dir=')) || '').slice('--user-data-dir='.length);
       let urlB = null; try { const [pl, wp] = fs.readFileSync(path.join(udd, 'DevToolsActivePort'), 'utf8').split('\n'); urlB = `ws://127.0.0.1:${Number(pl)}${wp.trim()}`; } catch { }
+      // r2: the switches holding a comma arrive WHOLE through the real CLI (the wrapper appends them after its own "$@": the CLI's
+      // defaults — its own --window-size / --disable-features — come first, so the engine's value is the LAST, the one Chromium reads)
+      const lastOf = (n) => argvB.filter((a) => a.startsWith(n + '=')).pop();
+      ok(COMMA_B.every((x) => argvB.includes(x)) && lastOf('--window-size') === COMMA_B[0] && lastOf('--disable-features') === COMMA_B[1],
+        '⑧b the engine\'s switches HOLDING A COMMA reach the kernel whole through the REAL CLI (--window-size=1234,567, --disable-features=A,B — each the last of its name)', JSON.stringify(argvB.filter((a) => /^--(window-size|disable-features)=/.test(a))));
       if (urlB && B_isLoop(urlB)) { cB = cdpClient(urlB); await cB.open; const gv = await cB.call('VibeSpace.getVersion'); ok(gv.result && gv.result.protocol === 1, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', JSON.stringify(gv)); cB.ws.close(); cB = null; }
       else ok(false, '⑧b our own CDP socket on the kernel\'s DevToolsActivePort: VibeSpace.getVersion answers — the KERNEL runs, never Chrome in its place', `no DevToolsActivePort under ${udd || '(no --user-data-dir)'}`);
       try { await kk.retireEphemeral(eph.profileId, 'test'); } catch { }

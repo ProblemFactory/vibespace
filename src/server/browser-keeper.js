@@ -1189,6 +1189,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
    *  the automation flag where the row stamps it, the keeper's mark LAST. */
   const engineBaseArgs = (p, prow) => B.withKeeperMark(B.withAutomationFlag([], { on: automationFlagOn() && !!(prow && prow.automationFlag) }), p.id);
+  /** lane engine-args-string r2 — THE WRAPPER ROAD: the program the browser driver starts on an ENGINE launch (both driver
+   *  roads: a profile's env, a conversation's derived config) — `exec '<kernel>' "$@" <the engine's part of the split>`, the
+   *  engine's env as exports (browser-display-config engineWrapperFor: `engine-<profile id>.sh`, 0700, atomic, re-written only
+   *  when its text changes, removed with the profile). The engine's switches never cross the driver's text (it cuts at every
+   *  comma — the owner's kernel names four switches holding one). A wrapper that cannot be written refuses the launch by name:
+   *  never the kernel without its switches, never Chrome in its place. → `{program, args}` (the wrapper, the engine's part). */
+  function engineProgramOf(p, el) {
+    const args = VERBS.splitLaunchArgs([], el.args).engine;
+    const w = displays.engineWrapperFor(p.id, { program: el.executablePath, args, env: el.env || {} });
+    if (!w.ok) throw namedError('launch_failed', `the browser did not start: ${w.error}`, { engine: el.engine && el.engine.id });
+    return { program: w.file, args };
+  }
   /** THE ENGINE'S LAUNCH — its probe judged by THE verdict now (a plugin or kernel gone since it was chosen is refused BY NAME,
    *  MARKED on the record + ONE For-you item; VibeSpace never starts Chrome in its place), then its launch options for THIS
    *  profile (the kernel VibeSpace resolved, the profile's directory) → `{executablePath, args, env, engine:{id, version,
@@ -1341,6 +1353,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end
+    displays.dropEngineWrapper(id); // lane engine-args-string r2: its engine wrapper goes with it (removal needs a stopped browser)
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
     { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
     commit();
@@ -2917,7 +2930,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
-      if (engineLaunch) { rec.engineView = { executablePath: engineLaunch.executablePath, args: engineLaunch.args.slice() }; rec.browserChoice = recordedChoice(p, engineLaunch); }
+      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole)
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -3991,12 +4004,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const p0 = (async () => {
       // lane engine-plugin: an ENGINE choice is judged HERE — its probe + launch options are I/O, asked inside the in-flight
       // start (a second start of this profile waits on this one) and before any record exists (a refusal leaves none). Its
-      // program rides the build pin's own road (AGENT_BROWSER_EXECUTABLE_PATH), its arguments AGENT_BROWSER_ARGS (with the
-      // mark + the automation flag the config's list would have carried, then the quiet switches), its env ENGINE_ENV_KEYS only
+      // program — the keeper's wrapper over the kernel — rides the build pin's own road (AGENT_BROWSER_EXECUTABLE_PATH), the
+      // keeper's switches AGENT_BROWSER_ARGS (the mark + the automation flag the config's list would have carried + the quiet
+      // switches, minus every name the engine gives), the engine's switches + env (ENGINE_ENV_KEYS only) the wrapper
       if (buildEnv.engineChoice) {
         buildEnv = await launchEngineOf(p, buildEnv.engineChoice);
-        providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: buildEnv.executablePath }), ...ENG.engineLaunchEnv(buildEnv, { base: engineBaseArgs(p, prow) }) };
-        if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: BE.withQuietLogging(String(providerEnv.AGENT_BROWSER_ARGS)) };
+        // lane engine-args-string r2: the CLI starts the keeper's WRAPPER (the engine's switches ride it whole); AGENT_BROWSER_ARGS
+        // carries the keeper's part only — the quiet switches composed BEFORE the split, so a log switch the engine names is its own
+        const ew = engineProgramOf(p, buildEnv);
+        const base = quietLog ? B.withKeeperMark(BE.withQuietLogging(engineBaseArgs(p, prow)), p.id) : engineBaseArgs(p, prow);
+        providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: ew.program }), ...ENG.engineLaunchEnv(buildEnv, { base }) };
       }
       const ns = nsOf(profileId);
       const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)

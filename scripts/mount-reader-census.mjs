@@ -115,7 +115,7 @@ export const ROWS = [
   ['src/server/browser-cloak-install.js', 'own-tree', 4, null, DATA],
   ['src/server/browser-clone-run.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-disk-run.js', 'own-tree', 3, null, DATA],
-  ['src/server/browser-display-config.js', 'own-tree', 3, null, DATA],
+  ['src/server/browser-display-config.js', 'own-tree', 5, null, DATA], // lane engine-args-string r2: + the engine wrapper's own() check (lstat + read of <dataDir>/browser-env/display/engine-<id>.sh)
   ['src/server/browser-env.js', 'own-tree', 22, null, DATA],
   ['src/server/browser-installs.js', 'own-tree', 5, null, DATA],
   ['src/server/browser-keeper.js', 'own-tree', 36, null, DATA], // lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records); lane engine-args-string: + one line of its OWN config file under data/browser-env/ the driver refused (ownConfigLine — the refusal's words)

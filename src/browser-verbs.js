@@ -1163,23 +1163,27 @@ function driverArgsText(args) {
   const named = bad.slice(0, 3).map((s) => JSON.stringify(s.slice(0, 80))).join(', ') + (bad.length > 3 ? ` and ${bad.length - 3} more` : '');
   return { ok: false, code: 'browser_args_uncarried', bad, error: list ? `the browser driver reads its launch arguments as ONE comma-separated line — ${named} cannot ride it whole (a comma or a line break inside an argument cuts it in two; a blank at either end is trimmed away)` : `the browser's launch arguments are a ${typeof args}, neither one line nor a list` };
 }
-/** THE MERGE of the keeper's launch switches with an engine plugin's (measured on the owner's hub: --no-sandbox,
- *  --ozone-platform=x11, --use-angle=swiftshader and --enable-unsafe-swiftshader each rode twice): ONE switch per NAME —
- *  `--foo=bar` and `--foo` are the switch `--foo` (a word that is no switch is its own name) — kept where its name first
- *  appeared. Both sides naming one switch: the KEEPER's value stays for its own control switches (RAW_ARG_RE: the launch
- *  mark, the debugging endpoint, the profile directory — the engine's copy is dropped; the engine verdict refuses the
- *  endpoint and the directory by name before this), the ENGINE's value wins for every other (its rendering switches —
- *  Chromium reads a switch's LAST value, so that is what the keeper-then-engine list always meant). Within one side the
- *  last spelling wins the same way. `keeper` = a list or the driver's line (read the driver's way); `engine` = a list, its
- *  switches kept whole (driverArgsText judges them). → a list. PURE. */
-function mergeLaunchArgs(keeper, engine) {
+/** THE SPLIT of one launch's switches between the keeper's and an engine plugin's (measured on the owner's hub: --no-sandbox,
+ *  --ozone-platform=x11, --use-angle=swiftshader and --enable-unsafe-swiftshader each rode twice). ONE switch per NAME —
+ *  `--foo=bar` and `--foo` are the switch `--foo` (a word that is no switch is its own name) — its LAST spelling, at the place
+ *  the name first appeared. The control switches (RAW_ARG_RE: the launch mark, the debugging endpoint, the profile directory,
+ *  remote-allow-origins) are the KEEPER's alone: an engine's copy is dropped (no file sets them, a user's or an engine's; the
+ *  engine verdict refuses the endpoint and the directory by name before this). Every other name both sides give is the
+ *  ENGINE's (its value; the keeper's copy leaves the keeper's part — Chromium reads a switch's LAST value, so that is what
+ *  keeper-then-engine always meant). → `{keeper, engine}`: the keeper's part rides the driver's ONE line (driverArgsText —
+ *  comma-free by construction: every piece came from that line or the keeper's own constants); the engine's part rides the
+ *  keeper's WRAPPER (src/browser-engines.js engineWrapperText) — never the driver's text, so a switch holding a comma
+ *  (`--window-size=1920,1080`) reaches the browser whole. `keeper` = a list or the driver's line (read the driver's way);
+ *  `engine` = a list, its switches kept whole. The engine's part does not depend on the keeper's. PURE. */
+function splitLaunchArgs(keeper, engine) {
   const nameOf = (s) => { const i = s.indexOf('='); return s.startsWith('-') && i > 0 ? s.slice(0, i) : s; };
-  const out = new Map();
-  const put = (s, ours) => { const k = nameOf(s), had = out.get(k); if (had && had.ours && !ours && RAW_ARG_RE.test(k)) return; out.set(k, { s, ours }); };
-  for (const s of Array.isArray(keeper) ? keeper.map(String) : driverArgsList(keeper)) put(s, true);
-  for (const s of Array.isArray(engine) ? engine.map(String) : driverArgsList(engine)) put(s, false);
-  return [...out.values()].map((x) => x.s);
+  const once = (list) => { const m = new Map(); for (const s of list) m.set(nameOf(s), s); return m; };
+  const e = once((Array.isArray(engine) ? engine.map(String) : driverArgsList(engine)).filter((s) => !RAW_ARG_RE.test(nameOf(s))));
+  const k = once(Array.isArray(keeper) ? keeper.map(String) : driverArgsList(keeper));
+  return { keeper: [...k].filter(([n]) => !e.has(n)).map(([, s]) => s), engine: [...e.values()] };
 }
+/** The order the browser receives them in: the keeper's part, then the engine's (splitLaunchArgs — ONE merge rule). PURE. */
+function mergeLaunchArgs(keeper, engine) { const s = splitLaunchArgs(keeper, engine); return [...s.keeper, ...s.engine]; }
 /**
  * → `{ config, dropped: { project: [keys], keys: [keys], args: [switches] } }`.
  * `user` = the machine's file (an object, or null when absent), `project` =
@@ -1326,7 +1330,7 @@ module.exports = {
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
-  driverArgsList, driverArgsText, mergeLaunchArgs, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper ∪ engine merge
+  driverArgsList, driverArgsText, splitLaunchArgs, mergeLaunchArgs, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper | engine split
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   AGENT_BROWSER_CLI, TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,

@@ -73,11 +73,11 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '' } = {}) {
     const exe = body.executablePath;
     if (typeof exe !== 'string' || !exe.startsWith('/') || exe.length > 4096 || /[\0\n\r]/.test(exe)) return bad('browser_engine_protocol', 'named no absolute program to start');
     const args = body.args === undefined ? [] : body.args;
+    // lane engine-args-string: an argument is refused only for what no road carries whole — a NUL byte (no argv holds one), a
+    // line break (the protocol's one-line rule), nothing, > ARG_MAX; a comma, a space, a quote ride the keeper's wrapper whole
     if (!strList(args) || args.length > ARGS_MAX || args.some((a) => !a || a.length > ARG_MAX || /[\0\n\r]/.test(a))) return bad('browser_engine_protocol', `named launch arguments of another shape (a list of at most ${ARGS_MAX} one-line strings)`);
     const own = args.filter((a) => OWN_ARG_RE.test(a));
     if (own.length) return bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`);
-    const carry = V.driverArgsText(args); // lane engine-args-string: every argument must ride the driver's ONE line as itself
-    if (!carry.ok) return bad('browser_engine_protocol', `named ${carry.bad.slice(0, 3).map((x) => JSON.stringify(clip(x, 60))).join(', ')} — the browser driver reads its launch arguments as one comma-separated line, so an argument holding a comma (or a blank at either end) cannot reach the browser whole; tell the plugin's author`);
     const env = body.env === undefined || body.env === null ? {} : body.env;
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
@@ -111,20 +111,47 @@ function engineChoiceVerdict({ choice = null, engine = null, machine = 'this com
   const ver = vk === 'measured' ? engine.measuredVersion : vk === 'reported' ? engine.version : vk === 'declared' ? engine.declaredVersion : null;
   return { ok: true, executablePath: engine.binaryPath, version: ver == null ? null : String(ver), major: majorOfVersion(ver), versionKind: vk };
 }
-/** An engine's launch answer as the browser CLI's env view: its arguments merged with `base` (the arguments the launch carries
- *  anyway — the keeper's mark, the automation flag; an env list REPLACES the config's, so they ride it too) — ONE switch per
- *  name (browser-verbs mergeLaunchArgs) — in AGENT_BROWSER_ARGS as the driver's ONE comma-separated line (driverArgsText:
- *  measured on 0.38.2, the CLI cuts at every comma AND newline, so an argument holding a comma throws by name — the launch
- *  verdict refuses it first), its env (the ENGINE_ENV_KEYS it may set). */
-function engineLaunchEnv({ args = [], env = {} } = {}, { base = [] } = {}) {
+/** An engine's launch as the browser CLI's env view (lane engine-args-string, r2 — THE WRAPPER ROAD): the CLI starts the keeper's
+ *  wrapper (engineWrapperText — AGENT_BROWSER_EXECUTABLE_PATH, the caller's) and AGENT_BROWSER_ARGS carries ONLY the keeper's
+ *  part of the split (browser-verbs splitLaunchArgs: `base` = the arguments the launch carries anyway — the mark, the automation
+ *  flag, the quiet switches; an env list REPLACES the config's, so they ride it — minus every name the engine gives) as the
+ *  driver's ONE comma-separated line (driverArgsText; measured on 0.38.2 the CLI cuts at every comma AND newline). The engine's
+ *  own switches and env ride the wrapper, never the CLI (its env never reached the browser either: the CLI scrubs it). No
+ *  engine argument ⇒ no list (the config's stays). A keeper switch the line cannot carry throws by name (a bug: the keeper's
+ *  switches are comma-free by construction). */
+function engineLaunchEnv({ args = [] } = {}, { base = [] } = {}) {
   const out = {};
-  if (Array.isArray(args) && args.length) { // lane engine-args-string: ONE switch per name (the keeper's control switches stay its own), ONE line — the driver cuts at every comma AND newline
-    const line = V.driverArgsText(V.mergeLaunchArgs(Array.isArray(base) ? base : [], args));
+  if (Array.isArray(args) && args.length) {
+    const line = V.driverArgsText(V.splitLaunchArgs(Array.isArray(base) ? base : [], args).keeper);
     if (!line.ok) throw Object.assign(new Error(line.error), { code: line.code });
     out.AGENT_BROWSER_ARGS = line.args;
   }
-  for (const k of Object.keys(env || {})) if (ENGINE_ENV_KEYS.includes(k)) out[k] = String(env[k]);
   return out;
+}
+/** One POSIX shell word: single-quoted, a `'` inside as `'\''` — every byte but NUL rides it verbatim. */
+const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+/** THE ENGINE'S WRAPPER (lane engine-args-string r2 — the owner's custom kernel names `--window-size=1920,1080`,
+ *  `--accept-lang=en-US,en`, `--window-position=24,36`, `--disable-features=A,B,…`; the driver cuts its text at every comma, so
+ *  an engine's switches never cross it): the program the driver starts on an engine launch — POSIX sh, the engine's env as
+ *  `export` lines, then `exec '<kernel>' "$@" '<switch>'…` (the driver's own switches — the keeper's line + its defaults —
+ *  first, the engine's after: Chromium reads a switch's last value, so the engine's win; exec keeps the pid the driver
+ *  watches). `args` = splitLaunchArgs's engine part; each one shell word, whole. Refused by name: a program not absolute, a
+ *  NUL anywhere (no argv / env holds one), an env name that is no shell name. → `{ok:true, text}` | `{ok:false, code, error}`. PURE. */
+function engineWrapperText({ program = '', args = [], env = {} } = {}) {
+  const no = (error) => ({ ok: false, code: 'browser_engine_wrapper', error: `the engine's launch wrapper cannot be written: ${error}` });
+  if (typeof program !== 'string' || !program.startsWith('/') || program.includes('\0')) return no('its program is not an absolute path');
+  const list = Array.isArray(args) ? args.map(String) : [];
+  const nul = list.filter((a) => a.includes('\0'));
+  if (nul.length) return no(`${nul.length} argument(s) hold a NUL byte`);
+  const vars = Object.entries(isObj(env) ? env : {}).map(([k, v]) => [k, String(v)]);
+  const badEnv = vars.filter(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || v.includes('\0')).map(([k]) => clip(k, 40));
+  if (badEnv.length) return no(`the environment name(s) ${badEnv.join(', ')} are not shell names, or a value holds a NUL byte`);
+  const text = ['#!/bin/sh',
+    '# VibeSpace: a browser ENGINE\'s launch (written by the keeper; lane engine-args-string). The browser driver starts this as',
+    '# the browser: its own switches arrive as "$@", the engine\'s are appended whole here — never through the driver\'s text.',
+    ...vars.map(([k, v]) => `export ${k}=${shellWord(v)}`),
+    `exec ${shellWord(program)} "$@"${list.map((a) => ' ' + shellWord(a)).join('')}`, ''].join('\n');
+  return { ok: true, text };
 }
 
 /** `browser.defaultEngine`'s value → the choice it writes on a new record (null = the default, nothing written). */
@@ -146,4 +173,4 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 }
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, CUSTOM_BROWSER_ID, DEFAULT_ENGINE_VALUES, OWN_ARG_RE,
-  platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineLaunchEnv, choiceOfDefault, defaultEngineOf };
+  platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineLaunchEnv, engineWrapperText, choiceOfDefault, defaultEngineOf };
