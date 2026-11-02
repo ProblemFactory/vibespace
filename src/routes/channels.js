@@ -1193,7 +1193,7 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'expired' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500
+    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'except_conflicts' || code === 'except_unnamed' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer); lane held-except-doors r2: an Approve's grant refused by the ONE writer — by name, never a 500 (r12: these two sit BEFORE `expired` — test-wake-approve-card pins the text from `expired` to the 409 as ONE literal, exactly once, and its RED control cuts it; test-channel-placement pins the last code)
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
