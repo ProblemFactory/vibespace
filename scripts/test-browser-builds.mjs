@@ -1604,6 +1604,108 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   try { kw.shutdown(); } catch { /* none */ }
   LDRG.setEnabled(GID, false);
   })();
+  // control (g): --permission import confinement (capabilities.server = {}, no childProcess; only pluginDir + stateDir readable)
+  {
+    const cpG = require('child_process');
+    const osG = require('os');
+    const fkUrl = path.join(REPO, 'scripts/fixtures/fake-kernel.mjs');
+    const nmLink = path.join(REPO, 'node_modules');
+    const nmReal = fs.realpathSync(nmLink);
+    const fkRun = cpG.spawnSync(process.execPath, [
+      '--permission',
+      `--allow-fs-read=${path.join(REPO, 'scripts/fixtures')}`,
+      `--allow-fs-read=${fs.realpathSync(path.join(REPO, 'scripts/fixtures'))}`,
+      `--allow-fs-read=${nmLink}`,
+      `--allow-fs-read=${nmReal}`,
+      `--allow-fs-read=${path.join(REPO, 'package.json')}`,
+      `--allow-fs-read=${fs.realpathSync(path.join(REPO, 'package.json'))}`,
+      '--input-type=module',
+      '-e',
+      `const m = await import(${JSON.stringify('file://' + fkUrl)}); if (m.KINDS.length !== 20 || m.FEATURES.length !== 3) process.exit(2);`,
+    ], {
+      cwd: osG.tmpdir(),
+      env: { PATH: '/nonexistent-outside-sandbox/bin:/usr/bin', HOME: '/nonexistent-outside-sandbox/home' },
+      encoding: 'utf8',
+    });
+    ok(fkRun.status === 0, 'fake-kernel.mjs imports cleanly under node --permission without touching paths outside its allowed read roots', { status: fkRun.status, stderr: fkRun.stderr });
+
+    const mkSandboxRoot = (tag, topProbeLine) => {
+      const sr = path.join(ROOT, `sandbox-${tag}`);
+      const pdir = path.join(sr, 'data', 'plugins', EID);
+      fs.mkdirSync(path.join(pdir, 'src'), { recursive: true });
+      const baseMan = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/vibespace-plugin.json'), 'utf8'));
+      fs.writeFileSync(path.join(pdir, 'vibespace-plugin.json'), JSON.stringify({ ...baseMan, capabilities: { server: {} } }, null, 2));
+      fs.writeFileSync(path.join(pdir, 'src', 'index.mjs'), [
+        "import fs from 'node:fs';",
+        "import path from 'node:path';",
+        topProbeLine,
+        "const KINDS = ['js-dialog','http-auth','client-cert','permission','file-chooser','download','print','popup','select-popup','webauthn','credential','payment-request','external-protocol','interstitial','fullscreen','pointer-lock','media-picker','device-chooser','native-picker','suppressed'];",
+        "const canRead = (p) => typeof p === 'string' && p.startsWith('/') && (!process.permission || process.permission.has('fs.read', p));",
+        "export function probeBinary(input = {}) {",
+        "  const stateDir = process.env.VIBESPACE_PLUGIN_DATA || '';",
+        "  const bin = String(input.binaryPath || path.join(stateDir, 'kernel', 'linux-x64', 'chrome'));",
+        "  let installed = false, executable = false;",
+        "  if (canRead(bin)) { try { installed = fs.statSync(bin).isFile(); if (installed) { fs.accessSync(bin, fs.constants.X_OK); executable = true; } } catch {} }",
+        "  return { id: 'vibespace.custom-browser', installed, executable, binaryPath: bin, version: null, declaredVersion: '150.0.7871.186-vs1', protocol: 1, kinds: KINDS, features: ['surfaces', 'webauthn', 'credentials'], capabilities: { dmtg: { available: false, code: 'dmtg_unavailable', reason: 'child_process_disabled' } } };",
+        "}",
+        "export function resolveLaunch(input = {}) {",
+        "  const stateDir = process.env.VIBESPACE_PLUGIN_DATA || '';",
+        "  const bin = String(input.binaryPath || path.join(stateDir, 'kernel', 'linux-x64', 'chrome'));",
+        "  return { executablePath: bin, binaryPath: bin, args: ['--no-first-run'], env: {}, capabilities: { dmtg: { available: false, code: 'dmtg_unavailable', reason: 'child_process_disabled' } } };",
+        "}",
+      ].join('\n'));
+      fs.writeFileSync(path.join(pdir, 'server.js'), [
+        "'use strict';",
+        "process.send({ t: 'hello', api: 1 });",
+        "process.on('message', async (msg) => {",
+        "  if (!msg || typeof msg !== 'object') return;",
+        "  if (msg.t === 'shutdown') process.exit(0);",
+        "  if (msg.t !== 'route') return;",
+        "  try {",
+        "    const mod = await import('./src/index.mjs');",
+        "    const input = { ...(msg.query || {}), ...(msg.body && typeof msg.body === 'object' ? msg.body : {}) };",
+        "    if (msg.path === '/probe') return process.send({ t: 'route-reply', id: msg.id, status: 200, body: mod.probeBinary(input) });",
+        "    if (msg.path === '/resolve-launch' || msg.path === '/launch-options') return process.send({ t: 'route-reply', id: msg.id, status: 200, body: mod.resolveLaunch(input) });",
+        "    process.send({ t: 'route-reply', id: msg.id, status: 404, body: { error: 'not found' } });",
+        "  } catch (err) {",
+        "    process.send({ t: 'route-reply', id: msg.id, status: 500, body: { error: err.message, ...(err && err.code ? { code: err.code } : {}) } });",
+        "  }",
+        "});",
+      ].join('\n'));
+      const ldrS = require('../src/server/plugin-loader.js').create({
+        rootDir: sr,
+        app: expressE(),
+        hostVersion: '2.369.356',
+        log: { log() {}, warn() {} },
+        agentEnv: () => ({ PATH: '/nonexistent-outside-sandbox/bin:/usr/bin', HOME: '/nonexistent-outside-sandbox/home' }),
+      });
+      const engrS = require('../src/server/browser-engines.js').create({ loader: ldrS, dataDir: path.join(sr, 'data'), timeoutMs: 2000 });
+      return { sr, ldrS, engrS };
+    };
+
+    // Clean lazy-guarded plugin: /probe and /resolve-launch (/launch-options) both answer 200 under --permission with no childProcess
+    const goodS = mkSandboxRoot('clean', '// zero import-time filesystem probes');
+    goodS.ldrS.setEnabled(EID, true, { trusted: true });
+    const wGood = async () => { const t0 = Date.now(); while (goodS.engrS.rows().length !== 1 && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 25)); return goodS.engrS.rows().length === 1; };
+    ok(await wGood(), 'sandbox clean plugin: starts under node --permission (capabilities.server = {}, no childProcess)');
+    const prGood = await goodS.engrS.probe(EID);
+    const loGood = await goodS.engrS.launchOptions(EID, { profileId: 'bp-sbx', binaryPath: goodS.engrS.kernelPath(EID), userDataDir: '/outside/sandbox/profile' });
+    const loRaw = await goodS.ldrS.askRoute(EID, { method: 'POST', path: '/launch-options', body: { profileId: 'bp-sbx' } });
+    ok(prGood.ok && prGood.fact.installed === false && prGood.fact.version === null && !prGood.fact.features.includes('dmtg') && loGood.ok && loGood.launch.executablePath === goodS.engrS.kernelPath(EID) && loRaw.status === 200 && loRaw.body.capabilities.dmtg.available === false,
+      'sandbox clean plugin: import touches no outside-sandbox path — /probe, /resolve-launch and /launch-options all answer 200 (dmtg unavailable by name)', { prGood, loGood });
+    goodS.ldrS.shutdown();
+
+    // Planted RED control: an import-time fs.existsSync outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA (the v0.1.4 bug) fails 500 ERR_ACCESS_DENIED
+    const badS = mkSandboxRoot('outside-probe', "const BAD_PY = fs.existsSync(path.join(process.env.HOME || '/nonexistent', '.local/bin/python3')); void BAD_PY;");
+    badS.ldrS.setEnabled(EID, true, { trusted: true });
+    const wBad = async () => { const t0 = Date.now(); while (badS.engrS.rows().length !== 1 && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 25)); return badS.engrS.rows().length === 1; };
+    ok(await wBad(), 'control (g): the planted plugin with an import-time outside-sandbox fs.existsSync starts its IPC loop');
+    const prBad = await badS.engrS.probe(EID);
+    const rawBad = await badS.ldrS.askRoute(EID, { method: 'GET', path: '/probe', query: {} });
+    ok(!prBad.ok && prBad.code === 'browser_engine_protocol' && /answered its probe with HTTP 500/.test(prBad.error) && rawBad.status === 500 && rawBad.body && rawBad.body.code === 'ERR_ACCESS_DENIED',
+      'control (g): an import-time fs.existsSync outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA throws ERR_ACCESS_DENIED ⇒ HTTP 500 browser_engine_protocol — RED against the sandbox confinement law', { prBad, rawBad });
+    badS.ldrS.shutdown();
+  }
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════
@@ -1839,6 +1941,35 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
     const EDp = EDM.create({ dataDir: PD, engines: { kernelPath: () => pk }, log: { log() {}, warn() {} } });
     const mp = await EDp.measure(EID);
     ok(mp.ok && /^\d{2,4}\.\d+\.\d+\.\d+/.test(mp.version) && /measured /.test(BMm.engineNote({ id: EID, label: 'Custom Browser Kernel', installed: true, executable: true, version: null, measuredVersion: mp.version }, tW)), `the kernel side's OWN CLI stub at the kernel's place: VibeSpace's --version (serviceEnv, 5 s) measures it — «measured ${mp.version}» (it says «${mp.says}»)`, mp);
+    // ⑧c the kernel side's OWN server.js + src/index.mjs forked by the REAL plugin-loader under node --permission (capabilities.server = {}):
+    // /probe, /launch-options and /resolve-launch all answer 200 without touching any path outside VIBESPACE_PLUGIN_DIR / VIBESPACE_PLUGIN_DATA
+    const peerRoot = path.join(ROOT, 'peer-loader-sandbox');
+    const peerPlugDst = path.join(peerRoot, 'data', 'plugins', EID);
+    fs.mkdirSync(peerPlugDst, { recursive: true });
+    for (const rel of ['server.js', 'vibespace-plugin.json', 'package.json', 'kernel.json', 'config', 'src']) {
+      if (fs.existsSync(path.join(peerDir, rel))) fs.cpSync(path.join(peerDir, rel), path.join(peerPlugDst, rel), { recursive: true });
+    }
+    const ldrP = require('../src/server/plugin-loader.js').create({
+      rootDir: peerRoot,
+      app: expressE(),
+      hostVersion: '2.369.369',
+      log: { log() {}, warn() {} },
+      agentEnv: () => ({ PATH: '/nonexistent-outside-sandbox/bin:/usr/bin', HOME: '/nonexistent-outside-sandbox/home' }),
+    });
+    const engrP = require('../src/server/browser-engines.js').create({ loader: ldrP, dataDir: path.join(peerRoot, 'data'), timeoutMs: 3000 });
+    ldrP.setEnabled(EID, true, { trusted: true });
+    const tPeer = Date.now(); while (engrP.rows().length !== 1 && Date.now() - tPeer < 8000) await new Promise((r) => setTimeout(r, 25));
+    const prPeer0 = await engrP.probe(EID);
+    const loPeerRaw = await ldrP.askRoute(EID, { method: 'POST', path: '/launch-options', body: { profileId: 'bp-peer', userDataDir: '/outside/sandbox/profile' } });
+    const kpPeer = engrP.kernelPath(EID);
+    fs.mkdirSync(path.dirname(kpPeer), { recursive: true });
+    const elfBuf = Buffer.alloc(64); elfBuf[0] = 0x7f; elfBuf[1] = 0x45; elfBuf[2] = 0x4c; elfBuf[3] = 0x46; elfBuf[4] = 2;
+    fs.writeFileSync(kpPeer, elfBuf, { mode: 0o755 });
+    const prPeer1 = await engrP.probe(EID);
+    const loPeer1 = await engrP.launchOptions(EID, { profileId: 'bp-peer', binaryPath: kpPeer, userDataDir: '/outside/sandbox/profile' });
+    ok(prPeer0.ok && prPeer0.fact.installed === false && loPeerRaw.status === 200 && prPeer1.ok && prPeer1.fact.installed === true && prPeer1.fact.executable === true && prPeer1.fact.version === null && loPeer1.ok && loPeer1.launch.executablePath === kpPeer,
+      'the kernel side\'s OWN plugin (VIBESPACE_CUSTOM_BROWSER_PLUGIN) under the real loader\'s --permission sandbox: /probe, /launch-options and /resolve-launch all answer 200 with zero outside-sandbox fs touches', { prPeer0, loStatus: loPeerRaw.status, prPeer1, loPeer1 });
+    ldrP.shutdown();
   }
   // ⑨ RED CONTROL: a copy without the sha256 check installs the corrupted archive — exactly what ④'s sha leg refuses
   const EDS = read('src/server/engine-distribution.js');

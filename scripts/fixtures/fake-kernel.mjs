@@ -357,7 +357,12 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     egress: () => egressLog.slice() }; // lane engine-spi-egress: every navigation's fetch (through the proxy or direct)
 }
 
-const asProgram = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const selfFile = path.normalize(fileURLToPath(import.meta.url));
+let asProgram = false;
+if (process.argv[1]) {
+  if (process.argv[1].startsWith('/')) asProgram = path.normalize(process.argv[1]) === selfFile;
+  else { try { asProgram = path.resolve(process.argv[1]) === selfFile; } catch { asProgram = false; } }
+}
 if (asProgram) {
   const argv = process.argv.slice(2);
   if (argv.includes('--version')) { process.stdout.write(FAKE_KERNEL_VERSION + '\n'); process.exit(0); }
