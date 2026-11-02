@@ -10,6 +10,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An engine plugin cannot choose the program it runs or change its browser's proxy, and its launch may carry only browser switches.
 - Only you can set the program an engine plugin runs; an agent's token cannot set, change or remove it.
 
+### Fixed
+- When an Antigravity conversation hits its usage limit, its account's usage shows that limit and its reset at once, then reads the exact numbers itself.
+
 ## 2.369.371 — 2026-11-02
 
 ### Changed
