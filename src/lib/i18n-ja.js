@@ -1334,6 +1334,7 @@ export default {
   "billing::Plan": "プラン",
   "Open working directory": "作業ディレクトリを開く",
   "⚠ Model auto-fallback: {from} → {to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)": "⚠ モデルの自動フォールバック：{from} → {to}（容量/過負荷などでharnessがモデルを切り替えました。/model またはバッジメニューで戻せます）",
+  "{name}: weekly limit {pct} % used — switch this conversation’s model to continue": "{name}：週間上限の {pct}% を使用済み — この会話のモデルを切り替えると続けられます",
   "A terminal opened — sign in with the account you want to add. Your other logins are untouched; VibeSpace captures it automatically.": "ターミナルが開きました——追加したいアカウントでサインインしてください。他のログインには影響しません。VibeSpace が自動的に取り込みます。",
   "Add subscription": "サブスクリプションを追加",
   "Add subscription…": "サブスクリプションを追加…",

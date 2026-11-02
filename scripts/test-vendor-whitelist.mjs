@@ -546,6 +546,41 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     'B-9b40: the probe spawns exactly PANEL_PROBE_ARGS — no second spelling of the argv');
 }
 
+// ── 5c: THE ON-DEMAND USAGE DOOR'S CALLERS (lane agy-wall-signal; the owner's ruling «A» 2026-11-02) ──
+// src/server/cli-usage-door.js spawns a harness CLI's own usage command (antigravity: `agy -p /usage` — answered without a
+// turn; a local spawn, not an HTTP construction, so the census above never sees it). It had ONE caller: a PERSON's
+// Re-check. The owner's ruling adds exactly ONE more, deliberately, with its gates: a usage WALL the account's own
+// conversation named (src/server/stream-wall.js) fires ONE read of that account — event = the wall (never a timer, a
+// cadence, a session start / stop / idle), once per account per reset (the ledger), only for a LIVE wall record, only
+// where the descriptor declares `onDemand.onWallSignal` (gated in the door itself), judge-gated (a 'turn-started'
+// verdict disarms it until the hub restarts). A third caller, a caller without its gates, or a timer in either file is RED.
+{
+  const CALLERS = {
+    'src/server/account-usage-routes.js': { n: 1, gates: [/usageDoor\.read\(req\.params\.id, \{ person: !isAgentBearer\(req\) \}\)/] },
+    'src/server/stream-wall.js': { n: 1, gates: [/door\.read\(key, \{ wall: true \}\)/, /od\.onWallSignal === true/, /Math\.abs\(t - sig\.measuredAt\) <= LIVE_MS/,
+      /fired\.some\(\(f\) => f\.key === key && f\.limitId === sig\.limitId && Math\.abs\(f\.resetsAt - sig\.resetsAt\) <= SAME_RESET_S\)/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/] },
+  };
+  const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
+  const callsIn = (t) => (t.replace(/^\s*(\/\/|\*).*$/gm, '').match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
+  const found = {};
+  for (const f of [...srcFiles('src'), 'server.js']) { const t = fs.readFileSync(path.join(REPO, f), 'utf-8'); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
+  ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && Object.entries(CALLERS).every(([f, c]) => found[f] === c.n),
+    '5c: the usage door has exactly TWO callers — a person\'s press (account-usage-routes) and the wall one-shot (stream-wall) — one call each', JSON.stringify(found));
+  for (const [f, c] of Object.entries(CALLERS)) {
+    const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
+    const missing = c.gates.filter((g) => !g.test(t)).map(String);
+    ok(!missing.length, `5c: ${f} keeps its gates (${c.gates.length})`, missing.join(' · '));
+  }
+  const door = fs.readFileSync(path.join(REPO, 'src/server/cli-usage-door.js'), 'utf-8'), wall = fs.readFileSync(path.join(REPO, 'src/server/stream-wall.js'), 'utf-8');
+  ok(/if \(!person && !wall\) return \{ ok: false, status: 403/.test(door) && /if \(!person && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{/.test(door),
+    '5c: the DOOR refuses any other caller (403), a wall read the descriptor does not declare (400), and keeps the judge\'s STOP');
+  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1,
+    '5c: never a timer — the wall road holds none, the door only its own child\'s 30 s kill');
+  // CONTROLS: a third caller and a timer-driven re-check, planted, are RED by the same reads
+  const planted = wall.replace('function readOnce(', "setInterval(() => door.read('x', { wall: true }), 3600e3);\n  function readOnce(");
+  ok(planted !== wall && callsIn(planted) === 2 && /setInterval/.test(planted), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
+}
+
 // ── 6: LOCAL ORACLES (owner ruling 6 of docs/design-harness-features.md §5.1) ──
 // "用（逐条附「不发 vendor 请求」证据进白名单豁免；人触发/已有节拍）", with §4.2's
 // hard gate: the zero-network property must be MEASURED per command, never

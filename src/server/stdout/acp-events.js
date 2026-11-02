@@ -40,8 +40,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
     // the streaming flag from prompt_start/prompt_end, the activity label,
     // todos from `plan`, the agent's offered models into the model registry,
     // peer-delivery honesty, then feedLive for the normalizer. No wall
-    // machine: ACP carries no subscription-quota signal (usage_update is
-    // context size).
+    // machine: ACP v1 carries no subscription-quota signal (usage_update is
+    // context size) — but a harness whose descriptor reads a WALL from its
+    // wrapper's records (antigravity: quota.signalFromStream) has it written
+    // as a reading by src/server/stream-wall.js (lane agy-wall-signal).
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
       session.buffer += output;
@@ -61,6 +63,14 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
           if (msg.type !== 'acp') { feedLive(session, msg); continue; } // e.g. the echoed permission-response frame
           // a SUBAGENT's own step (lane agy-subagent-cards): its virtual session's, never the parent's cards / label
           if (msg.kind === 'sub') { require('../acp-subagents.js').feed(session, id, msg, broadcastToSession); continue; }
+          // A WALL THE STREAM NAMES IS A READING (lane agy-wall-signal): the descriptor's signal, written for the session's
+          // account; the wall notice carries the room sentence's facts (`wallRoom`) to the chat
+          if (msg.kind === 'notice' || msg.kind === 'prompt_end' || msg.kind === 'usage') {
+            try {
+              const w = require('../stream-wall.js').onRecord(session, msg, { modelOf: () => engine.sessionModelFor?.(session), say: (r) => feedLive(session, r) });
+              if (w && w.wallRoom && msg.kind === 'notice') msg.wallRoom = w.wallRoom;
+            } catch (e) { console.warn(`[acp] usage wall not read: ${e.message}`); }
+          }
           let newLabel = null;
           if (msg.kind === 'session') {
             noteMode(msg);

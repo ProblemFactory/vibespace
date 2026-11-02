@@ -2844,6 +2844,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/record-shape.js', 'the vendor vocabulary census (rateLimitType / unifiedWindows key lists) — names, not reads'],
         ['src/harnesses/codex-quota.js', 'codex: `if (!fiveHour && !sevenDay) return null`; trippedWindow falls back to the other window'],
         ['src/harnesses/antigravity-usage.js', 'antigravity: its own window kinds; a group without a 5h window yields none'],
+        ['src/harnesses/antigravity-wall.js', 'antigravity\'s wall signal NAMES the window its stated reset can be (≤ 5 h ⇒ the 5h one) — a producer of ONE window; it reads no stored 5h window (lane agy-wall-signal)'],
         ['src/auto-resume-signal.js', 'statedBuckets skips a missing bucket; an arm on a bucket the snapshot does not state waits its own timer'],
         ['src/lib/usage-meter.js', 'has5h / fiveHourAbsent: no 5h donut or row without a 5h window; «5-hour limit lifted (<time>)» for a tombstoned one; codex keeps its own pair'],
         ['src/lib/manage-agents.js', 'has5h: no 5h donut/pill without one; hostOwnReading for the 4 machine-login gates; onDemandUsageView maps a stated 5h only'],
@@ -3330,6 +3331,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const RAW22 = /\b(?:utilization|usedPercent|usedPct|remainingPct|fiveHour|sevenDay|scopedWeekly)\b|conic-gradient\(|% used|% left/;
   const VIA22 = /\bbucketView\(|\bwindowDisplay\(|\b(?:v|v5|v7|vSc|cv5|cv7)\.reading\b/;
   const ALLOW22 = {
+    'chat-renderers.js': [['const wallRoomLine = (r) =>', 'the usage wall\'s room sentence (lane agy-wall-signal): its percent is the hub\'s, taken through windowDisplay (src/server/stream-wall.js roomOf — only a weekly window the verdict READS)']],
     'chat-status-bar.js': [['chat-status-ctx-pie', 'the CONTEXT-window pie (a conversation\'s context use, not a quota bucket)'],
       ['has {rem}% left (under the {line}% floor', 'the wall line words the SERVER\'s pool verdict (bucketRemaining — the same 60-s inequality), never a stored bucket']],
     'manage-agents.js': [

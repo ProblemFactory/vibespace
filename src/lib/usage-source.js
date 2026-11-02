@@ -48,6 +48,7 @@ export function readingSource(source, { corroborated = undefined, t = (s) => s }
     case 'codex-rollout':
       return { key: 'transcript', label: t('session transcript'), tip: t('Read from a recent Codex session transcript on this machine — as fresh as that session\'s last turn, not as of now.') };
     case 'limit-banner':
+    case 'stream': // lane agy-wall-signal: a conversation's own refusal, read as the limit spent until its stated reset
       return { key: 'banner', label: t('own session (limit hit)'), tip: t("A session on this account's credential slot was refused by the limit.") };
     case 'wall':
       return { key: 'wall', label: t('marked spent'), tip: t('Not a reading: this account refused a turn, so the bucket was marked spent until its reset.') };

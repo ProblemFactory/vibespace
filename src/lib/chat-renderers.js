@@ -587,6 +587,10 @@ const peerFoldLabel = (open, who) => (who
   ? (open ? t('Hide the message from {name}', { name: who }) : t('Show the message from {name}', { name: who }))
   : (open ? t('Hide the message') : t('Show the message')));
 
+
+/** A USAGE WALL'S ROOM (lane agy-wall-signal): another model group of the walled account whose weekly window is read
+ *  under 90 % — agy's own group name, the whole percent; a model switch continues the conversation there. */
+const wallRoomLine = (r) => t('{name}: weekly limit {pct} % used — switch this conversation’s model to continue', { name: String(r.name || ''), pct: Number(r.usedPct) || 0 });
 class ChatRenderers {
   /**
    * @param {Object} opts
@@ -1923,6 +1927,13 @@ class ChatRenderers {
       }
       return { el, sideEffect: null };
     }
+    // A USAGE WALL'S ROOM, said after the wall's own re-check read it (lane agy-wall-signal): the numbers ride the record
+    if (msg.noticeKind === 'usage-wall-room' && msg.content?.[0]?.wallRoom) {
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-wall-room';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(wallRoomLine(msg.content[0].wallRoom))}</span>`;
+      return { el, sideEffect: null };
+    }
     if (msg.noticeKind === 'model-fallback' && msg.content?.[0]?.fallbackTo) {
       const b = msg.content[0];
       const el = document.createElement('div');
@@ -1995,7 +2006,11 @@ class ChatRenderers {
     // Error / interrupted
     if (msg.status === 'error' || msg.status === 'interrupted') {
       if (msg.errorKind === 'prompt-too-long') return { el: this.appendContextFullCard(text), sideEffect: null };
-      return { el: this.appendSystem(text), sideEffect: null };
+      const el = this.appendSystem(text);
+      // the usage wall's ONE added sentence (lane agy-wall-signal): another model group of this account has weekly room
+      const room = msg.content?.[0]?.wallRoom;
+      if (room) { const line = document.createElement('div'); line.className = 'chat-system chat-wall-room'; line.textContent = wallRoomLine(room); el.appendChild(line); }
+      return { el, sideEffect: null };
     }
     // Other system messages (hook summary, etc.)
     if (text) {

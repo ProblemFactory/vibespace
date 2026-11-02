@@ -5,6 +5,10 @@
 // account, when a PERSON presses Re-check in Manage agents. Never a timer (§ban-safety: the one owner-approved usage
 // timer is Claude's auto-cli; this reading is on demand only), never an agent (a vsst_/jbt_ bearer is refused), at most
 // once a minute per account, never under `accounts.onDemandQuotaRefresh = off`.
+// THE SECOND CALLER (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage WALL the account's conversation
+// named (src/server/stream-wall.js) — `read(id, { wall: true })`, honoured ONLY where the descriptor declares
+// `onDemand.onWallSignal`; once per account per wall (the caller's ledger), every gate below unchanged (the minute's
+// pace, the setting, the judge's STOP). Still never a timer: the event is the wall.
 //   · the CLI = the path the read-time check answers NOW (src/server/cli-cmd.js `check`, forced: a person asked);
 //   · the env = the account's own spawn env (accounts.resolveForSpawn: its HOME root, the session bus disabled) over
 //     the agents' env (ws-handler agentEnv — every harness's credential names dropped), so the CLI reads THAT
@@ -76,14 +80,15 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   }
   return {
     PACE_MS: paceMs,
-    /** ONE reading of account `id`, on a person's press (`person` false ⇒ refused). */
-    async read(id, { person = false } = {}) {
-      if (!person) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
+    /** ONE reading of account `id`, on a person's press (`person`) or a wall its conversation named (`wall`); else refused. */
+    async read(id, { person = false, wall = false } = {}) {
+      if (!person && !wall) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
       const a = accounts.get(id);
       if (!a) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       const be = a.backend || 'claude';
       const od = harnessOf(be)?.quota?.onDemand;
       if (!od || typeof od.judge !== 'function' || !Array.isArray(od.argv)) return { ok: false, status: 400, code: 'no-reading', error: `${harnessOf(be)?.label || be} declares no on-demand usage reading` };
+      if (!person && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
       let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
       if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
       if (inflight.has(id)) return inflight.get(id);

@@ -479,13 +479,14 @@ export function rosterUsageSnapshot(stamp, maps) {
  *  (`_acctUsageHtml`) draws: one donut per window, each limit's 5h before its 7d, as a legacy-shaped bucket
  *  (utilization 0..1, resetsAt in seconds, state); its tooltip is the CLI's own words and number ("Gemini Models ·
  *  Weekly Limit Remaining 100%" — agy prints what REMAINS, the donut fills with what is used). A window that states no
- *  spend is not drawn. null = nothing to draw. PURE, exported for the gate. */
+ *  spend is not drawn (lane agy-wall-signal: `Number(null)` is 0 — a spend-less window drew a 0 % donut; the gauge law:
+ *  no reading is «no reading», never 0 %). null = nothing to draw. PURE, exported for the gate. */
 export function onDemandUsageView(r) {
   if (!r || !Array.isArray(r.limits) || !r.limits.length) return null;
   const names = r.windowNames && typeof r.windowNames === 'object' ? r.windowNames : {};
   const windows = [];
   for (const l of r.limits) {
-    const ws = (Array.isArray(l && l.windows) ? l.windows : []).filter((w) => w && Number.isFinite(Number(w.usedPct))).slice().sort((a, b) => (Number(a.minutes) || 0) - (Number(b.minutes) || 0));
+    const ws = (Array.isArray(l && l.windows) ? l.windows : []).filter((w) => w && w.usedPct != null && w.usedPct !== '' && Number.isFinite(Number(w.usedPct))).slice().sort((a, b) => (Number(a.minutes) || 0) - (Number(b.minutes) || 0));
     for (const w of ws) {
       const used = Math.max(0, Math.min(100, Number(w.usedPct)));
       windows.push({

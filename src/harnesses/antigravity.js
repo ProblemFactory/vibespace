@@ -21,6 +21,7 @@ const { AgyAdapter, AGY_EFFORTS } = require('../adapters/agy');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
 const AGY_USAGE = require('./antigravity-usage');
+const AGY_WALL = require('./antigravity-wall');
 const { AGY_SLASH_COMMANDS } = require('./antigravity-slash');
 const { HARNESS_SETTINGS } = require('../harness-settings');
 const AS = require('../agy-store');
@@ -125,15 +126,19 @@ const shq = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 /** The spawn env of an account: its root as HOME and the bus disabled (the login is the root's file). */
 const spawnEnvOf = (dir) => ({ HOME: dir, DBUS_SESSION_BUS_ADDRESS: 'disabled:' });
 
-/** THE QUOTA CONTRACT (lane antigravity-card-fixes): NULL_QUOTA's honest nothing — no stream signal (so auto-resume
- *  stays derived OFF), NO probe rung (`'cli-usage'` would arm claude's auto-cli TIMER, src/server/auto-cli-loop.js,
+/** THE QUOTA CONTRACT (lane antigravity-card-fixes): NULL_QUOTA's honest nothing — NO probe rung (`'cli-usage'` would arm claude's auto-cli TIMER, src/server/auto-cli-loop.js,
  *  and spawn `claude -p /usage` on these accounts) — plus `onDemand`: the usage command agy answers without a turn,
  *  read for ONE named account on a person's Re-check by src/server/cli-usage-door.js, in the account's own HOME root
  *  (cwd = its empty login dir), judged + parsed by antigravity-usage.js. No pool: agy keeps a conversation in its
- *  HOME root's own store, so a conversation cannot move to another account. */
+ *  HOME root's own store, so a conversation cannot move to another account.
+ *  THE PASSIVE HALF (lane agy-wall-signal, 2026-11-02): a wall the stream names IS a reading — `signalFromStream` reads the
+ *  wrapper's refusal (./antigravity-wall.js) and src/server/stream-wall.js writes it (the limit at 100 % until the reset
+ *  agy named); `onDemand.onWallSignal` (the owner's ruling «A»): that wall fires ONE on-demand read of the account
+ *  (judge-gated, once per account per reset, never a timer) whose measured numbers replace the stream's 100 %. */
 const AGY_QUOTA = Object.freeze({
   ...NULL_QUOTA,
-  onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD) }),
+  signalFromStream: AGY_WALL.signalFromStream,
+  onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true }),
 });
 
 /** BILLING IDENTITY of a live agy session: a named Google account (its own HOME root) or the machine's own login. */
@@ -250,10 +255,11 @@ module.exports = {
     // its card-less invoke_subagent rows, read from the store — records acp-events routes as if journaled
     afterTurn: (session) => AGY_BACKFILL.afterTurn(session),
   },
-  quota: AGY_QUOTA,            // the `-p /usage` reading on a person's Re-check (answered without a turn — agy's own changelog)
-  // AUTO-RESUME'S RESUME VERB: a continue is a user line on the wrapper's stdin (the 'prompt' form, as ACP) — the
-  // verb exists; AGY_QUOTA classifies no limit (NULL_QUOTA's signal), so nothing can arm it (derived: never offered)
-  resume: { form: 'prompt', deliver: (session, text, deps) => !!deps.sendChatInput(session, text) },
+  quota: AGY_QUOTA,            // the wall signal (passive) + the `-p /usage` reading on a Re-check or ONE per wall (no turn — agy's own changelog)
+  // AUTO-RESUME'S RESUME VERB: NONE (lane agy-wall-signal). AGY_QUOTA now classifies a limit (the wall signal), and
+  // `caps.autoResume` is derived signal AND verb — the 'prompt' verb this row declared (a user line on the wrapper's
+  // stdin) would have ARMED unattended continues nobody ruled on. Auto-resume for agy stays derived OFF until it is.
+  resume: null,
   // the billing row: a Google login per account (its HOME root), no API keys / long-lived token; the usage of a named
   // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store. effortLevels = agy's own
   // --effort list (the adapter's AGY_EFFORTS, the one place) and NO effortExtras: the menu offers exactly these (lane

@@ -61,13 +61,15 @@ const usage = (n) => ({ input_tokens: 100 * n, output_tokens: 7 * n, thinking_to
 
 // `-p /usage` (the reading the CLI answers itself): $AGY_STUB_USAGE = auth (default — the MEASURED unauthenticated
 // envelope) | ok (a SUCCESS with no turn — a stand-in payload, its shape NOT agy's) | capture (the SIGNED-IN answer,
-// verbatim from scripts/fixtures/antigravity-usage-1.4.3.json — lane antigravity-card-fixes) | turn (a SUCCESS that
+// verbatim from scripts/fixtures/antigravity-usage-1.4.3.json — lane antigravity-card-fixes) | file:<path> (that JSON
+// envelope, verbatim — lane agy-wall-signal) | turn (a SUCCESS that
 // started a turn — what the judge must call turn-started). The working dir is logged (the reading runs in the account's
 // empty login dir).
 if (flag('-p') === '/usage' || flag('--print') === '/usage') {
   const mode = process.env.AGY_STUB_USAGE || 'auth';
   logLine({ usageCwd: process.cwd() });
   if (mode === 'capture') { out(JSON.parse(fs.readFileSync(path.join(__dirname, 'antigravity-usage-1.4.3.json'), 'utf8')).envelope); process.exit(0); }
+  if (mode.startsWith('file:')) { out(JSON.parse(fs.readFileSync(mode.slice(5), 'utf8'))); process.exit(0); } // a suite's own envelope (lane agy-wall-signal: the incident's numbers)
   if (mode === 'turn') { out({ conversation_id: crypto.randomUUID(), status: 'SUCCESS', response: 'stand-in', duration_seconds: 1.2, num_turns: 1, usage: usage(1) }); process.exit(0); }
   if (mode === 'ok') { out({ conversation_id: '', status: 'SUCCESS', response: 'stand-in model\t80%\towner@example.com', duration_seconds: 0, num_turns: 0, usage: usage(0) }); process.exit(0); }
   process.stderr.write("Error: authentication required. Run 'agy' to log in, then retry.\nerror: authentication failed or timed out\n");

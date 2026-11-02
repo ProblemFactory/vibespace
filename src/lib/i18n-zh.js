@@ -1335,6 +1335,7 @@ export default {
   "billing::Plan": "套餐",
   "Open working directory": "打开工作目录",
   "⚠ Model auto-fallback: {from} → {to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)": "⚠ 模型自动回退：{from} → {to}（harness 因容量/过载等切换了模型；用 /model 或徽章菜单可切回）",
+  "{name}: weekly limit {pct} % used — switch this conversation’s model to continue": "{name}：本周额度已用 {pct}% — 切换这个对话的模型即可继续",
   "A terminal opened — sign in with the account you want to add. Your other logins are untouched; VibeSpace captures it automatically.": "已打开一个终端——用你想添加的账号登录。你其它的登录不受影响；VibeSpace 会自动捕获。",
   "Add subscription": "添加订阅",
   "Add subscription…": "添加订阅…",

@@ -98,7 +98,7 @@ console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
   const tbl = HARNESS_SETTINGS.antigravity;
   ok('settings: the table IS the descriptor\'s; its effort / mode options are agy\'s own values', g.settings === tbl && tbl.rows.find((r) => r.key === 'defaultEffort').options.filter((o) => o.value).every((o) => AGY_EFFORTS.includes(o.value))
     && tbl.rows.find((r) => r.key === 'defaultPermissionMode').options.filter((o) => o.value).every((o) => AGY_MODES.includes(o.value)));
-  ok('auto-resume: the prompt verb exists, no limit signal (NULL_QUOTA, commit 1) ⇒ never offered', JSON.stringify(capsOf('antigravity').autoResume) === JSON.stringify({ signal: false, resume: 'prompt', supported: false }));
+  ok('auto-resume: a limit signal (the wall, lane agy-wall-signal) and NO resume verb ⇒ derived never offered', JSON.stringify(capsOf('antigravity').autoResume) === JSON.stringify({ signal: true, resume: null, supported: false }));
   ok('commit 2 = named Google accounts, each its own HOME root (localOnly, nothing shipped); still no pool', !!g.creds && g.creds.spawnForm === 'isolated-home' && g.creds.localOnly === true && g.creds.files.length === 0 && capsOf('antigravity').pool === false);
   ok('the job door strips agy\'s login names (GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL — names the binary holds)', ['GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL'].every((n) => HE.VENDOR_CREDENTIAL_ENV.includes(n) && FX.env.names.includes(n)));
 }

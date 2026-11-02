@@ -971,6 +971,11 @@ const usageDoor = require('./cli-usage-door.js').createCliUsageDoor({
   cacheDir: path.join(rootDir, 'data', 'usage-cache'), agentEnv: () => require('../ws-handler').agentEnv(),
   setting: (k) => serverSetting(k),
 });
+// …and its SECOND caller (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage wall an account's conversation
+// names is written as a reading and fires ONE read of that account through this same door (src/server/stream-wall.js —
+// once per account per wall, judge-gated, never a timer; only where the descriptor declares `onDemand.onWallSignal`)
+require('./stream-wall.js').configure({ harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor });
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }

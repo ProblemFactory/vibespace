@@ -811,6 +811,34 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     'the four harnesses each declare their OWN verb form (message / turn-start / prompt / none)');
   ok(capsOf('opencode').autoResume.supported === false && capsOf('opencode').autoResume.resume === 'prompt',
     'opencode CAN be continued but has no limit signal (ACP v1 exposes no subscription window) ⇒ not offered, honestly');
+  // lane agy-wall-signal: antigravity now READS a limit (the wall its stream names, quota.signalFromStream) and declares NO
+  // resume verb — signal without a verb: never offered, and the (b) loop below drives it into a stub and proves it never arms
+  ok(JSON.stringify(capsOf('antigravity').autoResume) === JSON.stringify({ signal: true, resume: null, supported: false }) && reg.resumeVerb('antigravity') === null
+    && reg.get('antigravity').quota.signalFromStream !== NULL_QUOTA.signalFromStream,
+    'antigravity: a limit signal (the wall the stream names) and NO resume verb ⇒ derived never offered, never armed');
+
+  // THE ON-DEMAND READ ON A WALL IS A DECLARED CAPABILITY (lane agy-wall-signal, the owner's ruling «A»): the door
+  // (src/server/cli-usage-door.js) runs a harness's on-demand argv on a wall ONLY where its descriptor declares
+  // `quota.onDemand.onWallSignal` — every registered harness asked through the REAL door with a counting spawn stub
+  {
+    const { EventEmitter } = require('events');
+    const DOOR = require(path.join(REPO, 'src/server/cli-usage-door.js'));
+    const spawned = [];
+    const child = () => { const c = new EventEmitter(); c.stdin = { end() { } }; c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.kill = () => { }; setImmediate(() => c.emit('close', 1, null)); return c; };
+    const wallDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wallcap-'));
+    for (const id of reg.ids()) {
+      const decl = reg.get(id).quota?.onDemand?.onWallSignal === true;
+      const door = DOOR.createCliUsageDoor({ accounts: { get: (k) => ({ id: k, backend: id }), resolveForSpawn: () => ({ localEnv: { HOME: path.join(wallDir, 'h') } }) },
+        harnessOf: (x) => reg.get(x), cliCmds: { check: async () => '/bin/false' }, cacheDir: wallDir, setting: () => 'manual', agentEnv: () => ({}),
+        spawnImpl: () => { spawned.push(id); return child(); }, log: () => { } });
+      const n0 = spawned.length;
+      const r = await door.read('acct-' + id, { wall: true });
+      ok(decl ? spawned.length === n0 + 1 : (spawned.length === n0 && r.ok === false),
+        `${id}: ${decl ? 'DECLARES onDemand.onWallSignal ⇒ a wall read runs its on-demand argv once' : `declares no wall read ⇒ a wall read spawns NOTHING (${r.code})`}`, JSON.stringify(r));
+    }
+    ok(reg.ids().filter((id) => reg.get(id).quota?.onDemand?.onWallSignal === true).join(',') === 'antigravity', 'only antigravity declares the wall read (the owner\'s ruling names it)');
+    try { fs.rmSync(wallDir, { recursive: true, force: true }); } catch { }
+  }
 
   // (b) A DECLARED VERB REALLY WORKS: arm → fire, delivered through the
   // harness's OWN deliver() into a stub of its OWN channel. Driven through the

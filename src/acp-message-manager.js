@@ -478,7 +478,11 @@ class AcpMessageManager extends MessageWindow {
     const text = String(rec.text || '');
     if (!text) return;
     const isErr = rec.level === 'error';
-    const msg = this._create({ role: 'system', status: isErr ? 'error' : 'complete', content: [{ type: 'system_info', text: isErr ? `Error: ${text}` : text }], noticeKind: rec.noticeKind || 'notice' });
+    // a USAGE WALL's room sentence (lane agy-wall-signal: src/server/stream-wall.js read it from the account's reading) —
+    // the facts only (a name, a whole percent); the client says the sentence in the UI's language
+    const r = rec.wallRoom && typeof rec.wallRoom === 'object' ? rec.wallRoom : null;
+    const wallRoom = r && typeof r.name === 'string' && r.name && Number.isFinite(Number(r.usedPct)) ? { name: r.name.slice(0, 80), usedPct: Math.max(0, Math.min(100, Math.round(Number(r.usedPct)))) } : null;
+    const msg = this._create({ role: 'system', status: isErr ? 'error' : 'complete', content: [{ type: 'system_info', text: isErr ? `Error: ${text}` : text, ...(wallRoom ? { wallRoom } : {}) }], noticeKind: rec.noticeKind || 'notice' });
     if (emit) this._emit({ op: 'create', message: msg });
   }
 
