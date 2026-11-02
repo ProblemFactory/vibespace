@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.372 — 2026-11-02
+
+### Added
+- A browser engine plugin can ask VibeSpace to let its browser reach only the sites you list; the list is a row under the plugin's own settings.
+- A browser engine plugin can point at a browser program you installed yourself; VibeSpace checks the file and measures its version before it runs it.
+- An engine plugin cannot choose the program it runs or change its browser's proxy, and its launch may carry only browser switches.
+- Only you can set the program an engine plugin runs; an agent's token cannot set, change or remove it.
+
 ## 2.369.371 — 2026-11-02
 
 ### Changed
