@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.370 — 2026-11-01
+
+### Fixed
+- A grant you narrowed with “except …” keeps its exceptions when you save its dialog for another reason; removing one is shown before you save.
+- An exception left from an earlier grant now shows under the picker, with ✕ to remove it.
+- A machine's «Who can use it» saves again when a list names a conversation that is not running.
+- Saving a «Who can use it» list this version cannot read repairs it, and the grants history names what it removed.
+- In an automation key's «Grant to…», exclusions apply per grant: saving without changes changes nothing, and the dialog says which grant leaves someone out.
+
 ## 2.369.369 — 2026-11-01
 
 ### Fixed
