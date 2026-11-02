@@ -520,7 +520,19 @@ console.log('— ③c the cloak launch is an ENV pair on every call (the measure
   const answers = [];
   for (const h of refusedHosts) answers.push(await connectTo(h));
   ok(answers.every((a) => /^HTTP\/1\.1 403/.test(a)) && refusedHosts.every((h) => kReal.cloakEgress().recent.some((r) => r.host === h)) && kReal.cloakEgress().stats.allowed === 0, `a running cloak browser cannot reach the vendor's download / update / registry hosts or loopback: each CONNECT 403 by name, remembered in the recent refusals, nothing allowed (${JSON.stringify(kReal.cloakEgress().recent.map((r) => r.host))})`);
-  await kReal.stop(pr.id, { why: 'user' }).catch(() => {});
+  // lane engine-spi-egress r2 THE RESTART (the cloak road — the gap was pre-existing): the browser survives the hub; the next keeper's
+  // boot re-binds ITS proxy on the port the launch view names — the vendor's host still refused, the refusal still this profile's
+  kReal.shutdown();
+  const deadC = await connectTo('cloakbrowser.dev');
+  const kReal2 = mk(K, 'data-3c-real');
+  await kReal2.boot();
+  const recC = kReal2._reg().browsers[pr.id] || {};
+  const againC = await connectTo('cloakbrowser.dev');
+  ok(deadC === '' && recC.state === 'ready' && recC.egress && recC.egress.cloak === true && recC.egress.port === pport && kReal2.cloakEgress(pr.id).url === `http://127.0.0.1:${pport}` && /^HTTP\/1\.1 403/.test(againC) && kReal2.cloakRefusals(pr.id, 0).includes('cloakbrowser.dev'),
+    'r2 THE RESTART (cloak): a cloak browser adopted by the next keeper is behind ITS proxy again on the same port — the vendor\'s host refused, by name, to this profile', { deadC, state: recC.state, egress: recC.egress, againC });
+  await kReal2.stop(pr.id, { why: 'user' }).catch(() => {});
+  ok(!kReal2.cloakEgress(pr.id).url && !(kReal2._reg().browsers[pr.id] || {}).egress, 'r2: a STOPPED browser frees its proxy\'s port (the next start takes a new one)');
+  kReal2.shutdown();
   const kMut = mk(K2, 'data-3c-mut');
   const pm = kMut.createProfile({ label: 'Cloak view', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
   await kMut.start(pm.id).catch(() => {});

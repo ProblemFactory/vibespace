@@ -674,6 +674,7 @@ const kernelOf = (exe) => { const w = exe ? wrapperOf(exe) : null; return w ? w.
 // arguments as his engine config named them — the four holding a comma read by 主开发 (fixups-r2), the rest from the brief
 const OWNER_KEEPER_LINE = '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=bk-209f474e,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing';
 const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades'];
+const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platform')); // lane engine-spi-egress r2: the keeper owns the display platform
 {
   ok(ENGN.ID_RE.source === require('../src/plugin-manifest.js').ID_RE.source, 'the engine id rule IS the manifest id rule (src/plugin-manifest.js ID_RE)');
   const P0 = { installed: true, executable: true, binaryPath: '/k/chrome', version: 'Chromium 150.0.7871.186', protocol: 1, kinds: ['js-dialog'], features: ['surfaces', 'webauthn'] };
@@ -749,8 +750,13 @@ const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', 
     // the engine's the wrapper
     const so = safe(() => VB.splitLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE));
     const names = (l) => l.map((x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x));
-    ok(so && same(so.keeper, ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--disable-gpu-compositing']) && same(so.engine, OWNER_ENGINE) && new Set(names([...so.keeper, ...so.engine])).size === so.keeper.length + so.engine.length && same(safe(() => VB.mergeLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE)), [...so.keeper, ...so.engine]),
-      'THE SPLIT over the owner\'s switches: every name once — the engine\'s own (--no-sandbox / --ozone-platform / --use-angle / --enable-unsafe-swiftshader, the four holding a comma) ride the ENGINE\'s part whole, the keeper\'s part keeps the rest (the mark, the automation flag, --disable-gpu-compositing); merge = keeper then engine', so);
+    // lane engine-spi-egress r2 (the hotfix verifier's rule b): the display platform is the KEEPER's — the engine's --ozone-platform
+    // copy is dropped (the keeper's line names the owner's x11 pin), so the engine's part is the owner's switches without it
+    ok(so && same(so.keeper, ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--ozone-platform=x11', '--disable-gpu-compositing']) && same(so.engine, OWNER_ENGINE_K) && new Set(names([...so.keeper, ...so.engine])).size === so.keeper.length + so.engine.length && same(safe(() => VB.mergeLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE)), [...so.keeper, ...so.engine]),
+      'THE SPLIT over the owner\'s switches: every name once — the engine\'s own (--no-sandbox / --use-angle / --enable-unsafe-swiftshader, the four holding a comma) ride the ENGINE\'s part whole, the keeper\'s part keeps the rest (the mark, the automation flag, the display platform — r2: the keeper\'s alone —, --disable-gpu-compositing); merge = keeper then engine', so);
+    const sk = safe(() => VB.splitLaunchArgs(['--vibespace-keeper=bk-1', '--ozone-platform=x11'], ['--ozone-platform=wayland', '-vibespace-keeper=forged', '-remote-debugging-port=9222', '-user-data-dir=/x', '-profile-directory=Y', '--proxy-pac-url=http://p', '-use-angle=gl']));
+    ok(sk && same(sk.keeper, ['--vibespace-keeper=bk-1', '--ozone-platform=x11']) && same(sk.engine, ['-use-angle=gl']),
+      'lane engine-spi-egress r2 (the hotfix verifier\'s rules b + c): the KEEPER owns the display platform (an engine naming wayland never undoes the x11 pin) and every proxy switch; a SINGLE-dash spelling is the same name (`-vibespace-keeper` / `-remote-debugging-port` / `-user-data-dir` / `-profile-directory` dropped like their double-dash form — they would land last and win)', sk);
     const sr = safe(() => VB.splitLaunchArgs(['--vibespace-keeper=bk-1', '--remote-debugging-port=0', '--use-angle=swiftshader', '--log-level=3'], ['--vibespace-keeper=forged', '--remote-debugging-port=9222', '--use-angle=gl', '--log-level=0', '--use-angle=vulkan']));
     ok(sr && same(sr.keeper, ['--vibespace-keeper=bk-1', '--remote-debugging-port=0']) && same(sr.engine, ['--use-angle=vulkan', '--log-level=0']),
       'THE RULE on one name, two values: the KEEPER\'s alone for its control switches (RAW_ARG_RE — the mark, the debugging endpoint: the engine\'s copy dropped), the ENGINE\'s for every other (its LAST spelling, at its first place — Chromium reads the last value; the keeper\'s copy leaves its part)', sr);
@@ -804,13 +810,22 @@ const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', 
     const w = dc.engineWrapperFor('bk-209f474e', { program: STUB, args: eng, env: {} });
     const cfgFile = dc.engineFileFor(base, { executablePath: w.file, args: eng });
     let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch { cfg = null; }
+    // lane engine-spi-egress r2 (the hotfix verifier's merge note 1): a WRAPPED view (its proxy rides the wrapper) is FAIL-CLOSED —
+    // a program that is not the keeper's wrapper ⇒ refused (the call never runs outside its proxy); the base file's proxy switches go
+    const pxS = ['--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>'];
+    const baseP = path.join(WD, 'base-proxy.json'); fs.writeFileSync(baseP, JSON.stringify({ args: '--disable-gpu-compositing,--proxy-pac-url=http://pac.test/p.pac,--no-proxy-server' }));
+    const wP = dc.engineWrapperFor('bp-wrapped01', { program: STUB, args: [...eng, ...pxS], env: {} });
+    const eFC = await thr(async () => dc.engineFileFor(baseP, { executablePath: STUB, args: [...eng, ...pxS], wrapped: true }));
+    let cfgP = null; try { cfgP = JSON.parse(fs.readFileSync(dc.engineFileFor(baseP, { executablePath: wP.file, args: [...eng, ...pxS], wrapped: true }), 'utf8')); } catch { cfgP = null; }
+    ok(eFC && eFC.code === 'egress_proxy_missing' && /never run outside its proxy/.test(eFC.message) && cfgP && cfgP.executablePath === wP.file && cfgP.args === '--disable-gpu-compositing',
+      'lane engine-spi-egress r2: a WRAPPED view whose program is not the keeper\'s wrapper ⇒ REFUSED (fail-closed — never named without its proxy); with the wrapper: the config\'s line keeps no proxy switch of the base file (a pac url / no-proxy outrank --proxy-server)', { e: eFC && eFC.message, cfgP });
     const st = w.ok ? fs.lstatSync(w.file) : null;
     ok(w.ok && w.file === path.join(WD, 'display', 'engine-bk-209f474e.sh') && st.isFile() && (st.mode & 0o777) === 0o700 && cfg && cfg.executablePath === w.file && typeof cfg.args === 'string' && driverReads(cfg.args).every((x) => !x.includes(',')),
       'the wrapper: `engine-<profile>.sh` in the keeper\'s own display dir (never /tmp — the keeper\'s data dir), a regular file 0700; the derived config names it as the program, its `args` ONE comma-free line', { w, cfg, mode: st && (st.mode & 0o777).toString(8) });
     const run = cfg ? runAs(cfg.executablePath, driverReads(cfg.args)) : { argv: [] };
-    const want = ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--disable-gpu-compositing', ...OWNER_ENGINE];
+    const want = ['--disable-blink-features=AutomationControlled', '--vibespace-keeper=bk-209f474e', '--ozone-platform=x11', '--disable-gpu-compositing', ...OWNER_ENGINE_K]; // r2: the display platform the keeper's
     const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
-    ok(JSON.stringify(run.argv) === JSON.stringify(want) && new Set(run.argv.map(nm)).size === run.argv.length && OWNER_ENGINE.filter((x) => x.includes(',')).every((x) => run.argv.includes(x)),
+    ok(JSON.stringify(run.argv) === JSON.stringify(want) && new Set(run.argv.map(nm)).size === run.argv.length && OWNER_ENGINE_K.filter((x) => x.includes(',')).every((x) => run.argv.includes(x)),
       `the owner's switches reach the program VERBATIM, ONCE, in order — the keeper's (the driver's reading of the line) then the engine's; --accept-lang=en-US,en, --window-size=1920,1080, --window-position=24,36, --disable-features=… whole (${run.argv.length} switches)`, { got: run.argv, want });
     const odd = ["--lang-label=it's \"quoted\" $HOME `x` \\n", ' padded '];
     const wq = dc.engineWrapperFor('q-1', { program: STUB, args: odd, env: { VS_PROBE: 'a b  c' } });
@@ -987,7 +1002,7 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     const nm = (x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x);
     const dups = got.map(nm).filter((n, i, all) => all.indexOf(n) !== i);
     const marks = got.filter((x) => x.startsWith(VB.KEEPER_MARK + '='));
-    const wantEngine = ['--vibespace-engine=fixture', '--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=gl', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades', '--disable-blink-features=AutomationControlled', '--log-level=0', '--user-agent=Fixture Kernel/150 (X11)', "--x-quote=it's"];
+    const wantEngine = ['--vibespace-engine=fixture', '--no-sandbox', '--use-gl=angle', '--use-angle=gl', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades', '--disable-blink-features=AutomationControlled', '--log-level=0', '--user-agent=Fixture Kernel/150 (X11)', "--x-quote=it's"];
     const wr = la && la.config && la.config.executablePath ? wrapperOf(la.config.executablePath) : null;
     ok(typeof a0 === 'string' && cfg && cfg.args === a0, 'the engine launch\'s config (and the /resolve one, the SAME file) holds `args` as ONE string — never a list', { type: Array.isArray(a0) ? 'list' : typeof a0, args: a0 });
     ok(got.length > 0 && !dups.length && marks.length === 1 && marks[0] === BPR.keeperMarkArg(KEY_E) && !got.some((x) => wantEngine.map(nm).includes(nm(x))), 'read back by the driver\'s rule: the KEEPER\'s part only — no switch twice, the mark ONCE (its own value — the engine\'s forged one dropped), no name the engine gives', { dups, marks, got });
@@ -1051,23 +1066,24 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   const GHOME = path.join(ROOT, 'egress-home');
   fs.mkdirSync(path.join(GHOME, '.agent-browser'), { recursive: true });
   fs.writeFileSync(path.join(GHOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--use-angle=swiftshader,--ozone-platform=wayland,--proxy-pac-url=http://pac.test/p.pac,--no-proxy-server' }));
-  const kg = mkKeeper(path.join(ROOT, 'data-egress'), { homeDir: GHOME, engines: ENGRG, serverSetting: (k) => settingsG[k], liveKeys: () => new Set([KEY_A, KEY_G]), egressResolve: (h) => (/^(?:listed\.test|(?:[a-z0-9-]+\.)*later\.test)$/.test(h) ? '127.0.0.1' : h) });
+  const kgOpts = { homeDir: GHOME, engines: ENGRG, serverSetting: (k) => settingsG[k], liveKeys: () => new Set([KEY_A, KEY_G]), egressResolve: (h) => (/^(?:listed\.test|(?:[a-z0-9-]+\.)*later\.test)$/.test(h) ? '127.0.0.1' : h) };
+  let kg = mkKeeper(path.join(ROOT, 'data-egress'), kgOpts);
   const pe = kg.createProfile({ label: 'Wrapped', browser: { kind: 'plugin', id: GID } }, { engine: await kg.engineFactOf(GID) });
   const c0 = fake.calls().length;
   await kg.start(pe.id, { why: 'test' });
   const la = fake.launches().at(-1), args = String(la.args || '').split(/[,\n]/);
-  const pxArg = args.find((a) => a.startsWith('--proxy-server=')) || '', pxUrl = pxArg.slice('--proxy-server='.length);
-  let wrapG = ''; try { wrapG = fs.readFileSync(la.exe, 'utf8'); } catch { wrapG = ''; } // lane engine-args-string r2: the program is the keeper's wrapper
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(pxUrl) && args.includes('--proxy-bypass-list=<-loopback>') && args.includes(BPR.keeperMarkArg(pe.id)) && wrapG.includes(`'${GKP}'`) && wrapG.includes("'--vibespace-engine=fixture'") && !/proxy/.test(wrapG),
-    'THE KEEPER WRAPS IT: --proxy-server=<this profile\'s allowlisting proxy> + --proxy-bypass-list=<-loopback> ride the KEEPER\'s part of the driver line beside the mark; the plugin\'s own switches ride the keeper\'s wrapper over its kernel (no proxy switch there)', { args, wrapG });
+  const wrG = wrapperOf(la.exe) || { program: null, args: [] }; // lane engine-args-string r2: the program is the keeper's wrapper
+  const pxArg = wrG.args.find((a) => a.startsWith('--proxy-server=')) || args.find((a) => a.startsWith('--proxy-server=')) || '', pxUrl = pxArg.slice('--proxy-server='.length); // (a tree that put it on the driver line: found there, judged below)
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(pxUrl) && wrG.program === GKP && JSON.stringify(wrG.args.slice(-2)) === JSON.stringify([pxArg, '--proxy-bypass-list=<-loopback>']) && wrG.args.includes('--vibespace-engine=fixture') && args.includes(BPR.keeperMarkArg(pe.id)) && !args.some((a) => /^--?proxy/.test(a)),
+    'THE KEEPER WRAPS IT: --proxy-server=<this profile\'s allowlisting proxy> + --proxy-bypass-list=<-loopback> ride the keeper\'s WRAPPER over its kernel, LAST (after the plugin\'s switches — nothing the driver adds before can undo them); the driver\'s line carries the mark, no proxy switch', { args, wrG });
   const cs = callsOf('vs-' + pe.id, c0);
-  ok(cs.length >= 2 && cs.every((c) => String(c.args || '').split(/[,\n]/).includes(pxArg)), `V2: the proxy rides EVERY call's launch view (${cs.map((c) => c.verb).join(' · ')})`, cs);
+  ok(cs.length >= 2 && cs.every((c) => c.exe === la.exe) && (wrapperOf(la.exe) || { args: [] }).args.includes(pxArg), `V2: the proxy rides EVERY call's launch view (${cs.map((c) => c.verb).join(' · ')}) — each names the same wrapper, which carries it`, cs);
   // L2's F4: the env list REPLACES the config's — so it carries the keeper's OWN list from the config the launch names (the display
   // plan applied: on a box with Xvfb and no display the hidden-window rung's x11 pin), minus the user's proxy switches
   const DSPm = require('../src/browser-display.js');
   const cfgL = DSPm.argsList(la.config && la.config.args), keptL = cfgL.filter((a) => !(ENGN.PROXY_ARG_RE || /$^/).test(a));
   const lastOz = (l) => DSPm.ozoneOf(l), fb = (kg._reg().browsers[pe.id].display || {}).fallback || null;
-  ok(keptL.length >= 3 && keptL.every((a) => args.includes(a)) && args.includes('--use-angle=swiftshader') && !args.some((a) => /^--(?:proxy-pac-url|no-proxy-server)/.test(a)) && args.filter((a) => a.startsWith('--proxy-server=')).length === 1 && lastOz(args) === lastOz(cfgL) && (!fb || fb.rung !== 'hidden-window' || lastOz(args) === 'x11'),
+  ok(keptL.length >= 3 && keptL.every((a) => args.includes(a)) && args.includes('--use-angle=swiftshader') && !args.some((a) => /^--?proxy|^--?no-proxy/.test(a)) && wrG.args.filter((a) => a.startsWith('--proxy-server=')).length === 1 && lastOz(args) === lastOz(cfgL) && (!fb || fb.rung !== 'hidden-window' || lastOz(args) === 'x11'),
     `F4: the engine's env list carries EVERY switch of the config the launch names (the user's, the mark, the display plan's — here ${fb ? `the ${fb.rung || fb.why} rung, ozone ${lastOz(cfgL) || 'none'}` : `no fallback, ozone ${lastOz(cfgL) || 'none'}`}), never the user's proxy switches — ONE proxy, the keeper's`, { fb, cfgL, args });
   const tq = Date.now();
   const [r1, r2, r3, r4] = [await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/page`), await pxReq(pxUrl, 'GET', `http://unlisted.test:${TP}/page`), await pxReq(pxUrl, 'GET', `http://127.0.0.1:${TP}/page`), await pxReq(pxUrl, 'CONNECT', 'unlisted.test:443')];
@@ -1087,7 +1103,31 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
     'F7: the refusals ride the verb answer as today (THIS profile\'s proxy, by name) — the words name the engine\'s own list, no CloakBrowser card; CloakBrowser\'s view and sentence unchanged', { hosts, eng, said });
   const rsE = read('src/routes/browser.js');
   ok(/const hosts = k\.cloakRefusals\(profileId, since\); if \(hosts\.length\) egressRefused = \{ hosts, text: require\('\.\.\/browser-switch\.js'\)\.egressRefusedText\(hosts, typeof k\.egressEngineOf === 'function' \? k\.egressEngineOf\(profileId\) : null\) \}/.test(rsE), 'WIRING: the verb answer\'s egressRefused names the wrapped engine (k.egressEngineOf)');
-  await kg.stop(pe.id, { why: 'user' });
+  // r2 (主开发's acceptance, MAJOR) THE RESTART: the browser SURVIVES the hub; the next keeper's boot re-binds ITS proxy on the port
+  // its launch view names before it is ready — the listed host passes, the unlisted one is refused, the refusal reaches THIS profile
+  const portG = Number((/:(\d+)$/.exec(pxUrl) || [])[1] || 0);
+  kg.shutdown();
+  const rDead = await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/x`);
+  kg = mkKeeper(path.join(ROOT, 'data-egress'), kgOpts);
+  await kg.boot();
+  const rec2 = kg._reg().browsers[pe.id] || {}, tq2 = Date.now();
+  const [b1, b2] = [await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/x`), await pxReq(pxUrl, 'GET', `http://unlisted.test:${TP}/x`)];
+  ok(rDead.status === 0 && rec2.state === 'ready' && rec2.egress && rec2.egress.port === portG && b1.status === 200 && b2.status === 403 && kg.cloakRefusals(pe.id, tq2).includes('unlisted.test') && (kg.egressEngineOf(pe.id) || {}).id === GID,
+    'r2 THE RESTART: a wrapped browser adopted by the next keeper is ready only behind ITS proxy again — the SAME port its launch view names, the listed host passes, the unlisted one refused, the refusal this profile\'s', { rDead, state: rec2.state, egress: rec2.egress, b1, b2 });
+  // …and the port HELD by another program at the restart ⇒ NOT ready: refused by name, ended by identity, ONE For-you line — never
+  // served by another proxy, never rebound elsewhere
+  kg.shutdown();
+  const FOREIGN = http.createServer((q, r) => { r.writeHead(200); r.end('foreign'); }); servers.add(FOREIGN);
+  await new Promise((res) => FOREIGN.listen(portG, '127.0.0.1', res));
+  const pidG = rec2.pid, tF = todos.length;
+  kg = mkKeeper(path.join(ROOT, 'data-egress'), kgOpts);
+  await kg.boot();
+  const rec3 = kg._reg().browsers[pe.id] || {};
+  const gone = (() => { try { process.kill(pidG, 0); return false; } catch (e) { return e.code === 'ESRCH'; } })();
+  await new Promise((res) => FOREIGN.close(res));
+  ok(rec3.state !== 'ready' && new RegExp(`cannot listen on its port ${portG} again — another program holds it`).test(String(rec3.lastError)) && !kg.cloakEgress(pe.id).url && todos.length === tF + 1 && /"Wrapped" was stopped at the restart: its egress proxy's port \d+ is in use/.test(todos.at(-1).text) && gone,
+    'r2: the port HELD by another program at the restart ⇒ NOT ready — said by name, the browser ended by identity, ONE For-you line; no proxy of ours took another port for it', { state: rec3.state, lastError: rec3.lastError, todo: todos.at(-1), gone });
+  try { await kg.stop(pe.id, { why: 'user' }); } catch { /* ended already */ }
   // L2 acceptance (A): the declaration is STICKY — the word dropped by a later answer ⇒ refused by name; a version that drops the
   // row too ⇒ its consent hash drifts ⇒ out of the table (re-enable to accept it) — nothing launched either way
   const GMODE = path.join(GROOT, 'data', 'plugins-state', GID, 'mode.json'), GMAN = path.join(GROOT, 'data', 'plugins', GID, 'vibespace-plugin.json');
@@ -1113,9 +1153,10 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   const evG = kg.ephemeralFor(KEY_G), epG = evG ? kg.profile(evG.profileId) : null;
   const rdA = (a) => require('../src/browser-display.js').argsList(a); // the config's `args` read the driver's way (a list, or ONE line — lane engine-args-string)
   const laG = fake.launches().at(-1), cfgA = rdA(laG && laG.config && laG.config.args);
-  const ephPx = (cfgA.find((a) => String(a).startsWith('--proxy-server=')) || '').slice('--proxy-server='.length);
+  const wrE = (laG && laG.config && laG.config.executablePath ? wrapperOf(laG.config.executablePath) : null) || { args: [] }; // r2: the proxy rides the wrapper
+  const ephPx = (wrE.args.find((a) => String(a).startsWith('--proxy-server=')) || '').slice('--proxy-server='.length);
   let cfgG = null; try { cfgG = JSON.parse(fs.readFileSync(kg.configFileFor({ ephemeral: true, pairs }), 'utf8')); } catch { cfgG = null; }
-  ok(dG.value === 'plugin:' + GID && dG.source === 'user' && epG && epG.browser && epG.browser.id === GID && fake.launches().length === n2 + 1 && /^http:\/\/127\.0\.0\.1:\d+$/.test(ephPx) && ephPx !== pxUrl && cfgA.includes('--proxy-bypass-list=<-loopback>') && cfgG && rdA(cfgG.args).includes('--proxy-server=' + ephPx),
+  ok(dG.value === 'plugin:' + GID && dG.source === 'user' && epG && epG.browser && epG.browser.id === GID && fake.launches().length === n2 + 1 && /^http:\/\/127\.0\.0\.1:\d+$/.test(ephPx) && ephPx !== pxUrl && wrE.args.includes('--proxy-bypass-list=<-loopback>') && !cfgA.some((a) => /^--?(?:proxy|no-proxy)/.test(a)) && cfgG && cfgG.executablePath === laG.config.executablePath,
     'V6: \'plugin:<another id>\' as the default ⇒ a conversation\'s browser is BORN on that engine and wrapped by ITS OWN proxy — the config the agent\'s own commands name carries the same arguments', { dG, browser: epG && epG.browser, cfgA });
   delete settingsG['browser.defaultEngine'];
   if (epG) { try { kg.detach({ profileId: epG.id, browserKey: KEY_G, by: 'user' }); } catch { /* none */ } await kg.retireEphemeral(epG.id, 'test').catch(() => { }); } // its conversation gone (the lease dropped, then retired)
@@ -1166,7 +1207,7 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   const pw = kw.createProfile({ label: 'Unwrapped', browser: { kind: 'plugin', id: GID } }, { engine: await kw.engineFactOf(GID) });
   await kw.start(pw.id, { why: 'control' });
   const lw = String(fake.launches().at(-1).args || '');
-  ok(ks.includes(wrapAnchor) && !/--proxy-server=/.test(lw) && /--vibespace-keeper=/.test(lw), 'control (h): a keeper that does not wrap launches the egress engine with NO proxy — its browser would reach any host; exactly what ⑦b\'s «the keeper wraps it» catches', lw);
+  ok(ks.includes(wrapAnchor) && !/--proxy-server=/.test(lw) && !(wrapperOf(fake.launches().at(-1).exe) || { args: [] }).args.some((a) => /proxy-server/.test(a)) && /--vibespace-keeper=/.test(lw), 'control (h): a keeper that does not wrap launches the egress engine with NO proxy — its browser would reach any host; exactly what ⑦b\'s «the keeper wraps it» catches', lw);
   try { await kw.stop(pw.id, { why: 'user' }); } catch { /* none */ }
   try { kw.shutdown(); } catch { /* none */ }
   LDRG.setEnabled(GID, false);
@@ -1594,7 +1635,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
 
   // ⑬ THE RED CONTROLS of round 2 — patched copies, each turning a leg above red
   const fwA = EDS.indexOf('  function fileWriter(dest) {'), fwB = EDS.indexOf('  /** The free bytes of the filesystem');
-  const gateAnchor = '      planOf(sid, { unpack: unpackFacts(), format: doc0 instanceof Error ? null : EK.archiveFormatOf(doc0, plan.tag) });'; // lane engine-spi-egress: the gate reads the archive's format
+  const gateAnchor = '      planOf(sid, { unpack: unpackFacts(), format: m0.ok ? m0.layout.archiveFormat : EK.archiveFormatOf(doc, plan.tag) });'; // lane engine-spi-egress: the gate reads the archive's format (r2: after kernel.json is judged)
   const backAnchor = '      if (had) { try { await io.rename(plan.removingDir, plan.targetDir); back = true; }';
   const asideAnchor = '  async function putBack(sid, plan) {';
   const EKS = read('src/engine-kernel.js');
@@ -1757,6 +1798,26 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(!rF && fs.statSync(gF.kpG).mode & 0o100 && LAYOUT.requiredFiles.every((f) => fs.statSync(path.join(path.dirname(gF.kpG), f)).isFile()) && rF1 && rF1.code === 'build_unpack_failed' && /a file above the archive's top folder/.test(rF1.message) && !fs.existsSync(path.dirname(gF1.kpG))
     && !fLink.ok && /a link entry/.test(fLink.error) && !fDots.ok && /"\.\."/.test(fDots.error) && !fMiss.ok && /no libEGL\.so/.test(fMiss.error),
     'L2 F1: a FLAT tar.gz (no top folder — the vendor\'s real shape) lands with stripComponents 0; 1 on it ⇒ refused before extraction; at 0 a link / ".." / a missing required file are still refused', { rF: rF && rF.message, rF1: rF1 && rF1.message });
+  // r2 (主开发's acceptance, minor 2): kernel.json is read and judged FIRST — on a Node without zstd a broken kernel.json is refused
+  // as itself (never recorded engine_node_unsupported); a tar.zst one is (for THAT Node and THAT plugin version) — the plugin updated
+  // to a tar.gz kernel.json ⇒ the record says nothing of it and the download runs
+  let verN = '0.0.1';
+  const kpN = path.join(ROOT, 'data-gzn-k', 'kernel', 'linux-x64', 'chrome');
+  const edN = edAt('data-gzn', { engines: { kernelPath: () => kpN }, loader: { list: () => [{ id: EID, label: 'Fixture Browser Engine', version: verN }] }, zlib: {}, nodeVersion: '20.20.2' });
+  const kjN = path.join(ROOT, 'data-gzn', 'plugins', EID, 'kernel.json');
+  fs.writeFileSync(kjN, '{ not json');
+  const eBrk = await thrK(edN.installKernel(EID, { wait: true })), fBrk = edN.kernelFact(EID);
+  fs.writeFileSync(kjN, JSON.stringify(kjson({ layout: { ...LAYOUT, archiveFormat: 'zip' } }, { layout: {} })));
+  const eZip = await thrK(edN.installKernel(EID, { wait: true })), fZip = edN.kernelFact(EID);
+  fs.writeFileSync(kjN, JSON.stringify(kjson({}, { url: 'https://kernels.test/k.tar.zst', sha256: sha(ARCH), bytes: ARCH.length })));
+  const eZst = await thrK(edN.installKernel(EID, { wait: true })), fZst = edN.kernelFact(EID);
+  verN = '0.0.2';
+  fs.writeFileSync(kjN, JSON.stringify(kjson({}, { url: 'https://kernels.test/k.tar.gz', sha256: sha(GZ), bytes: GZ.length, layout: GZL })));
+  const fUpd = edN.kernelFact(EID);
+  const eUpd = await thrK(edN.installKernel(EID, { wait: true }));
+  ok(eBrk && eBrk.code === 'browser_engine_protocol' && fBrk.code !== 'engine_node_unsupported' && eZip && eZip.code === 'browser_engine_protocol' && fZip.code !== 'engine_node_unsupported'
+    && eZst && eZst.code === 'engine_node_unsupported' && fZst.state === 'failed' && fZst.code === 'engine_node_unsupported' && fUpd.state !== 'failed' && !eUpd && fs.existsSync(kpN),
+    'r2 minor 2: on a Node WITHOUT zstd a broken / zip kernel.json is refused AS ITSELF (browser_engine_protocol — never recorded engine_node_unsupported); a tar.zst one is engine_node_unsupported for that Node and that plugin version — the plugin updated to a tar.gz kernel.json ⇒ asked again and it lands', { eBrk: eBrk && eBrk.code, fBrk: fBrk.code, eZip: eZip && eZip.code, eZst: eZst && eZst.code, fUpd: fUpd.state, eUpd: eUpd && eUpd.message });
   const EDz = M8.load('src/server/engine-distribution.js', EDS.replace('gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()', 'zlibIn.createZstdDecompress()'), 'zstd-only');
   const gC = (() => { const kpC = path.join(ROOT, 'data-gz6-k', 'kernel', 'linux-x64', 'chrome'); const d = edAt('data-gz6', { engines: { kernelPath: () => kpC } }, EDz); fs.writeFileSync(path.join(ROOT, 'data-gz6', 'plugins', EID, 'kernel.json'), JSON.stringify(kjson({}, { url: 'https://kernels.test/k.tar.gz', sha256: sha(GZ), bytes: GZ.length, layout: GZL }))); return d; })();
   const rCz = await thrK(gC.installKernel(EID, { wait: true }));

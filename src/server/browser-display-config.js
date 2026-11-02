@@ -25,6 +25,8 @@
  *
  * Never throws: a base file that cannot be read, or a dir that cannot be written, leaves the call on its base file
  * (said once in the journal — the launch then fails as it did before this lane, never worse).
+ * One exception, FAIL-CLOSED (lane engine-spi-egress r2): engineFileFor of a WRAPPED view whose program is not the keeper's
+ * wrapper throws (code egress_proxy_missing) — a browser that must stay inside its egress proxy is never named without it.
  */
 const fs = require('fs');
 const path = require('path');
@@ -113,12 +115,14 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     // lane engine-args-string r2 — THE WRAPPER ROAD: `view.executablePath` is the keeper's wrapper (engineWrapperFor), which
     // carries the engine's switches (`view.args`) whole; the driver's `args` keep only the keeper's part of the split (every name
     // the engine gives leaves it — browser-verbs splitLaunchArgs), written by derived() as the driver's one comma-free line
-    // lane engine-spi-egress: `view.keeperArgs` = the KEEPER's own switches of this launch (a wrapped engine's proxy): appended to
-    // the keeper's part, and every proxy switch of the base file dropped (Chromium ranks a pac url / no-proxy above them)
-    const own = Array.isArray(view.keeperArgs) ? view.keeperArgs.map(String) : [];
-    const kept = own.length ? ENG.withoutProxyArgs(V.driverArgsList(base.args)) : base.args;
-    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length || own.length ? { args: [...V.splitLaunchArgs(kept, extra).keeper, ...own] } : {}) };
-    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000') + '\u0000' + own.join('\u0000')).digest('hex').slice(0, 10);
+    // lane engine-spi-egress r2: a WRAPPED view (`view.wrapped`: its proxy switches ride the keeper's wrapper, last) — FAIL-CLOSED: its
+    // program must be this keeper's wrapper (else the proxy would be silently dropped: refused, the call never runs); the base
+    // file's proxy switches are dropped (Chromium ranks a pac url / no-proxy above --proxy-server) and the list is always written
+    const wrapped = view.wrapped === true;
+    if (wrapped && !(path.dirname(view.executablePath) === dir && /^engine-[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.sh$/.test(path.basename(view.executablePath)))) throw Object.assign(new Error(`the browser's egress proxy rides its engine wrapper, and ${view.executablePath} is not the keeper's — the call was refused, never run outside its proxy`), { code: 'egress_proxy_missing' });
+    const kept = wrapped ? ENG.withoutProxyArgs(V.driverArgsList(base.args)) : base.args;
+    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length || wrapped ? { args: V.splitLaunchArgs(kept, extra).keeper } : {}) };
+    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000') + (wrapped ? '\u0000wrapped' : '')).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
     return derived(file, cfg, baseFile, 'the engine view\'s config');
   }

@@ -64,9 +64,11 @@ function egressRowOf(settings) {
 }
 function egressRowPath(id) { return `plugin.${String(id || '')}.${EGRESS_ROW_KEY}`; }
 function egressArgs(url) { return url ? [`--proxy-server=${String(url)}`, '--proxy-bypass-list=<-loopback>'] : []; }
-/** An engine's launch arguments as the browser runs them: the plugin's, then the keeper's own proxy arguments when the launch
- *  is WRAPPED (`egress` = the keeper's proxy url) — what every road hands on (the env list, a conversation's config, attach). */
-function engineArgs({ args = [], egress = null } = {}) { return [...(Array.isArray(args) ? args.map(String) : []), ...egressArgs(egress)]; }
+/** An engine's launch switches as the KERNEL receives them after the driver's own (the keeper's wrapper on both driver roads, the
+ *  attach argv): the plugin's — its part of the split (browser-verbs splitLaunchArgs: one per name, never a control / display /
+ *  proxy switch) — then, when the launch is WRAPPED (`egress` = the keeper's proxy url), the keeper's own proxy switches LAST
+ *  (Chromium reads a switch's last value: nothing the driver adds before them can undo them). */
+function engineArgs({ args = [], egress = null } = {}) { return [...V.splitLaunchArgs([], Array.isArray(args) ? args.map(String) : []).engine, ...egressArgs(egress)]; }
 /** The keeper's OWN list for a wrapped launch (the config's switches it carries onto an engine's env list — L2's F4) without any
  *  proxy switch: Chromium ranks `--no-proxy-server` / `--proxy-pac-url` / `--proxy-auto-detect` ABOVE `--proxy-server`, so a
  *  user's own proxy switch would undo the boundary. */

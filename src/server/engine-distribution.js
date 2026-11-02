@@ -104,6 +104,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const restoring = new Map(); // id → the put-back in flight (one at a time: installKernel, measure and the boot may all ask)
   const fleetLast = { at: null, outcome: null, code: null, error: null, plugin: null };
   const labelOf = (id) => { try { const p = (L() && L().list ? L().list() : []).find((x) => x.id === id); return p && p.label ? String(p.label) : ''; } catch { return ''; } };
+  const pluginVersionOf = (id) => { try { const p = (L() && L().list ? L().list() : []).find((x) => x.id === id); return p && p.version ? String(p.version) : null; } catch { return null; } };
   const who = (id) => BE.engineWords({ id, label: labelOf(id) });
   const fleetEngine = () => { try { const f = fleetFacts(); return f && f.browserEngine && typeof f.browserEngine === 'object' ? f.browserEngine : null; } catch { return null; } };
   // the fleet's kernel as it names it — a field it names is merged over the package's (never dropped for it: kernelManifestVerdict)
@@ -282,12 +283,13 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       // the fleet's boot then needs no download; one that cannot be put back is refused by name (engine_kernel_aside)
       if (await restoreAside(sid, plan) && by !== 'user') { running.delete(sid); notify(); return { ok: true, restored: true, id: sid }; }
       // the Node it would unpack on (round 2): no zstd ⇒ refused by name before any byte moves, remembered for this Node —
-      // lane engine-spi-egress: unless kernel.json names a tar.gz (gunzip is in every Node); its own refusal comes after
+      // lane engine-spi-egress r2: kernel.json is read and judged FIRST (its format decides whether zstd is needed at all — a tar.gz
+      // unpacks on every Node); a kernel.json fault is said as itself, never recorded as engine_node_unsupported
       st.step = 'plan';
-      const doc0 = await manifestDoc(sid).catch((e) => e);
-      planOf(sid, { unpack: unpackFacts(), format: doc0 instanceof Error ? null : EK.archiveFormatOf(doc0, plan.tag) });
-      if (doc0 instanceof Error) throw doc0;
-      const doc = doc0;
+      const doc = await manifestDoc(sid);
+      const m0 = EK.kernelManifestVerdict(doc, { tag: plan.tag, fleet: fleetKernelFor(sid), id: sid, label: labelOf(sid) });
+      if (!m0.ok && m0.code === 'browser_engine_protocol') throw named(m0.code, m0.error);
+      planOf(sid, { unpack: unpackFacts(), format: m0.ok ? m0.layout.archiveFormat : EK.archiveFormatOf(doc, plan.tag) });
       const plats = doc && doc.platforms && typeof doc.platforms === 'object' ? Object.keys(doc.platforms) : [];
       const art = doc && doc.platforms && doc.platforms[plan.tag];
       await fsp.mkdir(plan.root, { recursive: true, mode: 0o700 });
@@ -525,7 +527,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const code = (e && e.code) || 'build_fetch_failed', error = clip(e && e.message, 400);
     const again = rec.failure && rec.failure.code === code && rec.failure.filed;
     const road = (e && e.credential) || credential || null; // lane kernel-asset-credential: the road the download took
-    rec.failure = { code, error, step: step || 'plan', at: now(), by, filed: !!again, ...(e && e.node ? { node: String(e.node), need: String(e.need || EK.NODE_FLOOR) } : {}), ...(road ? { credential: road } : {}) };
+    rec.failure = { code, error, step: step || 'plan', at: now(), by, filed: !!again, ...(e && e.node ? { node: String(e.node), need: String(e.need || EK.NODE_FLOOR), plugin: pluginVersionOf(sid) } : {}), ...(road ? { credential: road } : {}) };
     log.warn?.(`[browser] ${who(sid)}'s kernel download failed at ${step || 'plan'} [${code}] — ${error}`);
     if (by !== 'user' && !again && code !== 'install_running') rec.failure.filed = fileNotice(sid, { what: 'kernel', code, error });
     await save();
@@ -596,8 +598,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   function kernelFact(id) {
     const sid = String(id || '');
     const r = record.engines[sid] || {}, run = running.get(sid);
-    // a node refusal is a fact about THAT Node — on another one (an upgrade) it is asked again, so the record says nothing of it
-    const f0 = r.failure || null, f = f0 && f0.code === 'engine_node_unsupported' && f0.node !== nodeNow ? null : f0;
+    // a node refusal is a fact about THAT Node and THAT plugin version — on another Node (an upgrade), or after the plugin updated (its
+    // kernel.json may name a tar.gz now — lane engine-spi-egress r2), it is asked again, so the record says nothing of it
+    const f0 = r.failure || null, f = f0 && f0.code === 'engine_node_unsupported' && (f0.node !== nodeNow || (f0.plugin && f0.plugin !== pluginVersionOf(sid))) ? null : f0;
     const k = r.kernel || null, mv = r.measured || null;
     return {
       state: run ? 'downloading' : k ? 'installed' : f ? 'failed' : 'absent',

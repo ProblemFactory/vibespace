@@ -1198,12 +1198,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return wrapped ? ENG.withoutProxyArgs(list) : list;
   }
   /** lane engine-spi-egress: THE KEEPER'S PART of an engine launch's env list (the profile road): `kept` = the planned config's
-   *  own list (L2's F4) else the base arguments below, the quiet switches composed before the split (lane engine-args-string r2),
-   *  then a WRAPPED launch's proxy switches — keeper-owned, so the list is carried even when the engine names no switch. */
+   *  own list (L2's F4: the user's switches, the mark, the display plan's ozone pin) else the base arguments below, the quiet
+   *  switches composed before the split (lane engine-args-string r2). A WRAPPED launch (its proxy switches ride the wrapper, last)
+   *  always carries this list — it REPLACES the config's, whose proxy switches (a user's pac url, no-proxy) are dropped. */
   function engineEnvOf(p, prow, be, kept, quietLog) {
-    const b0 = kept || engineBaseArgs(p, prow);
-    const base = [...(quietLog ? B.withKeeperMark(BE.withQuietLogging(b0), p.id) : b0), ...ENG.egressArgs(be.egress)];
-    return ENG.engineLaunchEnv(be, { base, always: !!be.egress });
+    const b0 = be.egress ? ENG.withoutProxyArgs(kept || engineBaseArgs(p, prow)) : kept || engineBaseArgs(p, prow);
+    return ENG.engineLaunchEnv(be, { base: quietLog ? B.withKeeperMark(BE.withQuietLogging(b0), p.id) : b0, always: !!be.egress });
   }
   /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
    *  the automation flag where the row stamps it, the keeper's mark LAST. */
@@ -1215,7 +1215,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  comma — the owner's kernel names four switches holding one). A wrapper that cannot be written refuses the launch by name:
    *  never the kernel without its switches, never Chrome in its place. → `{program, args}` (the wrapper, the engine's part). */
   function engineProgramOf(p, el) {
-    const args = VERBS.splitLaunchArgs([], el.args).engine;
+    const args = ENG.engineArgs(el); // lane engine-spi-egress r2: the plugin's part of the split + a wrapped launch's proxy switches, LAST
     const w = displays.engineWrapperFor(p.id, { program: el.executablePath, args, env: el.env || {} });
     if (!w.ok) throw namedError('launch_failed', `the browser did not start: ${w.error}`, { engine: el.engine && el.engine.id });
     return { program: w.file, args };
@@ -1840,6 +1840,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  recorded `stopped` — not an error; the next verb starts it again. */
   function markEphemeralGone(rec, seenBy = 'the tick') {
     rec.state = 'stopped'; rec.endedAt = now(); rec.stoppedBy = 'idle'; rec.lastError = null;
+    dropEgress(rec.profileId); delete rec.egress; // lane engine-spi-egress r2: its proxy's port is free again
     rec.note = `the browser idled out (${Math.round((Number.isInteger(rec.idleMs) ? rec.idleMs : pairsIdleMs(pairsOf(rec.profileId))) / 60000)} min without a command) — the next command starts it again`;
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
@@ -2808,6 +2809,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (i && i.ok && Number.isInteger(i.pid) && i.pid !== d.pid) return null; // another daemon answers under that name: not this one's to re-own
     const url = endpointOfDaemon(d, rec);
     const v = O.reownVerdict({ daemonAnswered: !!(i && i.ok), active: !!(i && i.active), ask: i && i.active && url ? await askPages({ cdpUrl: url }) : null });
+    if (v.act === 're-own' && rec.egress) { const eg = await egressAdopt(rec); if (!eg.ok) { egressNotice(rec, p, eg); v.act = 'end'; v.why = eg.error; } } // lane engine-spi-egress r2: behind ITS proxy or ended
     if (v.act === 're-own') {
       Object.assign(rec, { pid: d.pid, starttime: d.starttime, cdpUrl: url && /^wss?:/.test(url) ? url : rec.cdpUrl, state: 'ready', adoptedAt: now(), lastError: null, note: null, stoppedBy: null, endedAt: null });
       recaptureBrowser(rec, 'boot'); dirty = true;
@@ -2953,7 +2955,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
-      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { keeperArgs: ENG.egressArgs(engineLaunch.egress) } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress: a wrapped engine's proxy switches are the KEEPER's (its part of the driver's line)
+      rec.egress = engineLaunch && engineLaunch.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port the launch view names
+      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { wrapped: true } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress r2: a WRAPPED launch's proxy switches ride it too, last — `wrapped` = its config keeps no proxy switch of the base file
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -4055,6 +4058,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // lane profile-lock-roll (L1): the LAUNCH-HOST lineage rides every new record too (a refused start keeps the witness;
       // this machine's name is added only at the launch below)
       { const lh = launchHostsFor(prevRec, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prevRec && prevRec.host ? prevRec.host : lh[lh.length - 1]; } }
+      rec.egress = !p.host && (buildEnv.egress || (prow.egressProxy && prow.executable === 'installed')) ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port this launch view names (cloak's or an engine's)
       reg.browsers[profileId] = rec;
       commit();
       const failed = (code, msg) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg); };
@@ -4576,6 +4580,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // url) answered `tab_gone` to every command after a Quit; its next attach binds its new tab THROUGH its grant.
       if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) markTabLost(profileId, l.browserKey, 'closed');
       delete reg.leftTabs[profileId]; // verify r2: the tabs conversations left behind went with the browser
+      dropEgress(profileId); if (rec) delete rec.egress; // lane engine-spi-egress r2: a stopped browser frees its proxy's port (the next start takes a new one)
       commit();
       if (isEph(p)) keptNote('stop', p, { why }); // lane browser-resume (§3.9): its logins + its tabs are KEPT (D2: `why` decides whether its next start reopens them)
       emitLease({ kind: 'browser-stopped', profileId, why, local: true, ...ephEventFields(profileId) }); // lane H: an ephemeral browser's stop is said like any other (ephemeral: true)
@@ -6209,8 +6214,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   // ── §7.2.1 THE ENFORCED BOUNDARY of a running cloak browser (lane-cloak) — lane engine-spi-egress: of ANY wrapped browser ──
   // ONE allowlisting proxy PER PROFILE (verify r1 V1 of lane browser-propose: a refusal must reach the agent whose
-  // browser was refused — and only it; one shared proxy could not say whose request it refused), started lazily at the
-  // profile's first wrapped start and kept while its record is (a stable url = one launch view). WHOSE list it admits is the
+  // browser was refused — and only it; one shared proxy could not say whose request it refused), started at a wrapped launch.
+  // r2 (主开发's acceptance): its PORT rides the browser record (`rec.egress`, persisted beside the launch view that names it) —
+  // a browser SURVIVES a hub restart, so the boot that adopts it re-binds THAT port before it is ready (adoptAll / bootReown →
+  // egressAdopt), never another; a port another program holds ⇒ the browser is ended by identity and said by name (never left
+  // behind a dead or a foreign proxy); a new proxy never takes a port a live record names; a stop / a removal frees it. WHOSE list it admits is the
   // entry's `of`, re-read per request: CloakBrowser's = the record's RUN hosts (measured: none — the browser itself needs no
   // site) + the sites this deployment names (`browser.cloak.egressAllowlist`), the browser getting `--proxy-server` +
   // `<-loopback>` from browser-switch launchEnvFor (everything else the record names — the download hosts, the vendor's
@@ -6225,14 +6233,28 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const engineSites = (of) => { let v; try { v = serverSetting(of.setting); } catch { v = undefined; } return typeof v === 'string' ? v : String(of.fallback || ''); };
   const egressListOf = (of) => (of.cloak ? cloakRunList() : B.parseEgressAllowlist(engineSites(of)));
   const egressName = (of) => (of.cloak ? 'CloakBrowser' : ENG.engineWords({ id: of.engine, label: of.label }));
-  async function egressUrlFor(profileId = null, of = CLOAK_EGRESS) {
+  async function egressUrlFor(profileId = null, of = CLOAK_EGRESS, { port = 0 } = {}) {
     const k0 = String(profileId || '');
     const have = egressProxies.get(k0);
-    if (have && have.px.port()) { have.of = of; return have.px.url(); }
+    if (have && have.px.port() && (!port || have.px.port() === port)) { have.of = of; return have.px.url(); }
     const ent = { px: null, of };
-    const px = ent.px = EgressProxy.create({ allowlist: () => egressListOf(ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
-    const w = egressName(of);
-    try { await px.listen(); } catch (e) { throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} could not listen (${e && e.message}) — ${w} is never started without it`, of.cloak ? { provider: 'cloak' } : { engine: of.engine }); }
+    const w = egressName(of), extra = of.cloak ? { provider: 'cloak' } : { engine: of.engine };
+    // r2: `port` = the one a surviving browser's launch view names (adoption) — that port or a refusal, never another; a NEW proxy
+    // (port 0) never keeps a port another live record names (that browser's proxy is re-bound on it at its adoption)
+    const named = new Set(Object.values(reg.browsers).filter((r) => r && r.egress && Number.isInteger(r.egress.port) && String(r.profileId) !== k0 && B.isLiveBrowser(r)).map((r) => r.egress.port));
+    let px = null;
+    for (let i = 0; i < 8 && !px; i++) {
+      const c = EgressProxy.create({ allowlist: () => egressListOf(ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
+      try { await c.listen({ port }); } catch (e) {
+        if (port && e && e.code === 'EADDRINUSE') throw namedError('egress_proxy_missing', `its allowlisting egress proxy cannot listen on its port ${port} again — another program holds it, and ${w} is never left behind a proxy that is not its own`, { ...extra, port });
+        throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} could not listen (${e && e.message}) — ${w} is never started without it`, extra);
+      }
+      if (!port && named.has(c.port())) { c.close().catch(() => {}); continue; }
+      px = c;
+    }
+    if (!px) throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} found no free port — ${w} is never started without it`, extra);
+    ent.px = px;
+    if (have && port) { egressProxies.delete(k0); have.px.close().catch(() => {}); }
     const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
     if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
     egressProxies.set(k0, ent);
@@ -6241,6 +6263,32 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return px.url();
   }
   const cloakEgressUrl = (profileId = null) => egressUrlFor(profileId, CLOAK_EGRESS);
+  /** r2: what a launch RECORDS of its proxy (`rec.egress`, persisted with the record): the port its launch view names + whose list
+   *  (CloakBrowser's, or an engine's reserved row) — what the boot needs to re-bind it. null = this profile has none. */
+  function egressRecordOf(profileId) {
+    const e = egressProxies.get(String(profileId || ''));
+    if (!e || !e.px.port()) return null;
+    return e.of.cloak ? { port: e.px.port(), cloak: true } : { port: e.px.port(), engine: String(e.of.engine || ''), label: String(e.of.label || ''), setting: String(e.of.setting || ''), fallback: String(e.of.fallback == null ? '' : e.of.fallback) };
+  }
+  const egressOfRecord = (e) => (e.cloak ? CLOAK_EGRESS : { engine: String(e.engine || ''), label: String(e.label || ''), setting: String(e.setting || ''), fallback: String(e.fallback || '') });
+  /** r2: THE ADOPTION of a wrapped browser — its proxy listening again on the port its record names (the list read live as before,
+   *  its refusals this profile's) → `{ok:true}` | `{ok:false, port, error}` (the port is another program's: never rebound elsewhere). */
+  async function egressAdopt(rec) {
+    const e = rec && rec.egress;
+    if (!e || !Number.isInteger(e.port) || e.port <= 0) return { ok: true };
+    const have = egressProxies.get(String(rec.profileId));
+    if (have && have.px.port() === e.port) return { ok: true };
+    try { await egressUrlFor(rec.profileId, egressOfRecord(e), { port: e.port }); return { ok: true }; }
+    catch (err) { return { ok: false, port: e.port, error: String((err && err.message) || err) }; }
+  }
+  /** …and its refusal said: the journal, and ONE For-you line for a named profile (a conversation's browser is said to its agent
+   *  at its next start — the record's lastError). */
+  function egressNotice(rec, p, eg) {
+    log.warn?.(`[browser] ${rec.profileId} "${p ? p.label : ''}": not adopted at the restart — ${eg.error}`);
+    if (!p || isEph(p) || !userTodos || typeof userTodos.add !== 'function') return;
+    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: `"${p.label}" was stopped at the restart: its egress proxy's port ${eg.port} is in use`, detail: `${eg.error}. VibeSpace ended that browser rather than let anything else answer for it. Start it again — it gets a new proxy and keeps its site list.`, sessionName: 'Agent browser' }); }
+    catch (e) { log.warn?.(`[browser] ${rec.profileId}: the egress notice was not filed (${e && e.message})`); }
+  }
   /** A record removed ⇒ its proxy closed (removeProfile). */
   function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }
   /** What a wrapped browser may reach right now and what was refused (the dialog / the proof read it; no secrets) — one
@@ -6973,6 +7021,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       }
       const v = B.adoptVerdict(rec, { verdict, active });
       if (!v) continue;
+      // lane engine-spi-egress r2: a WRAPPED browser is ready only behind ITS proxy again — re-bound on the port its launch view
+      // names; a port another program holds ⇒ ended by identity, said by name (never left behind a dead or a foreign proxy)
+      if (v.state === 'ready' && rec.egress) { const eg = await egressAdopt(rec); if (!eg.ok) { egressNotice(rec, p, eg); own = { act: 'end', why: eg.error, result: await endProcess(rec.pid, rec.starttime, { termMs: 5000 }) }; v.state = 'failed'; } }
       if (own && own.act === 'end') { v.lastError = `${own.why} — its daemon was ended at the restart (${own.result})`; rec.note = O.endedNote({ why: own.why, at: now() }); }
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
         log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
@@ -7096,7 +7147,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
+  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 

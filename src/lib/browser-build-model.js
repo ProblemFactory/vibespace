@@ -85,6 +85,16 @@ export function engineFactText(r, t) {
   parts.push(engines.length ? engines.map((e) => engineNote(e, t)).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.')));
   return parts.join(' ');
 }
+/** lane engine-spi-egress r2: THE ROW'S <select>, drawn from engineOptions at EVERY draw — the first, a Reset's redraw, the engines'
+ *  answer, their failure (`r` null / an error ⇒ no engine row): the stored value always shows AS ITSELF (an engine that is not here
+ *  «its plugin is not running»), never as Chrome. `doc` = the document (injected — this file stays DOM-free). → the options. */
+export function fillEngineSelect(sel, r, value, t, doc) {
+  const v = String(value == null || value === '' ? 'default' : value);
+  const opts = engineOptions(r && !r.error ? r : null, v, t);
+  sel.replaceChildren(...opts.map((o) => { const el = doc.createElement('option'); el.value = o.value; el.textContent = o.label; el.selected = o.value === v; return el; }));
+  sel.value = v;
+  return opts;
+}
 /** lane engine-spi-egress: «Default browser engine»'s OPTIONS, drawn from the engine table GET /api/browser/engines carries —
  *  no engine id is named anywhere: Chrome, one option per engine here (its label), then the stored value and the value in
  *  effect when no row names them (an engine whose plugin is not running — a fact, kept selectable). → [{value, label}] */

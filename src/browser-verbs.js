@@ -1125,6 +1125,10 @@ const RAW_CONFIG_KEYS = Object.freeze(['cdp', 'autoConnect']);
  *  it is in RAW_ARG_RE (dropped from both, said like every raw switch) and only the keeper writes it. */
 const KEEPER_MARK = '--vibespace-keeper';
 const RAW_ARG_RE = /^--(?:remote-debugging-[a-z-]+|remote-allow-origins|user-data-dir|profile-directory|vibespace-keeper)(?:=|$)/;
+/** lane engine-spi-egress r2: names only the KEEPER sets on an engine launch (never an engine's): the display platform (the
+ *  keeper's display plan pins it — an engine naming wayland must not undo the hidden window's x11) and every proxy switch (the
+ *  keeper's egress proxy; the engine verdict refuses them by name first). Matched on a dash-normalised name (splitLaunchArgs). */
+const KEEPER_ONLY_RE = /^--(?:ozone-platform|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)$/;
 /** `args` as the binary reads it (a string, comma or newline separated — or a
  *  list), minus the raw-debugging / user-data-dir switches. Untouched (the
  *  same value, byte for byte) when nothing is dropped. */
@@ -1176,9 +1180,13 @@ function driverArgsText(args) {
  *  (`--window-size=1920,1080`) reaches the browser whole. `keeper` = a list or the driver's line (read the driver's way);
  *  `engine` = a list, its switches kept whole. The engine's part does not depend on the keeper's. PURE. */
 function splitLaunchArgs(keeper, engine) {
-  const nameOf = (s) => { const i = s.indexOf('='); return s.startsWith('-') && i > 0 ? s.slice(0, i) : s; };
+  // lane engine-spi-egress r2 (the hotfix verifier's merge notes): a NAME is the switch's own, whatever its dashes — a POSIX
+  // Chromium reads `-x` as `--x`, so `-vibespace-keeper=…` / `-remote-debugging-port=…` are the control switches too (they
+  // would land LAST on the kernel's line and win); the engine never sets the DISPLAY or the PROXY (KEEPER_ONLY_RE: the
+  // keeper's display plan pins ozone, the keeper's egress proxy is the only proxy) — its copies are dropped like RAW_ARG_RE's
+  const nameOf = (s) => { const i = s.indexOf('='), n = s.startsWith('-') && i > 0 ? s.slice(0, i) : s; return /^-[^-]/.test(n) ? '-' + n : n; };
   const once = (list) => { const m = new Map(); for (const s of list) m.set(nameOf(s), s); return m; };
-  const e = once((Array.isArray(engine) ? engine.map(String) : driverArgsList(engine)).filter((s) => !RAW_ARG_RE.test(nameOf(s))));
+  const e = once((Array.isArray(engine) ? engine.map(String) : driverArgsList(engine)).filter((s) => !RAW_ARG_RE.test(nameOf(s)) && !KEEPER_ONLY_RE.test(nameOf(s))));
   const k = once(Array.isArray(keeper) ? keeper.map(String) : driverArgsList(keeper));
   return { keeper: [...k].filter(([n]) => !e.has(n)).map(([, s]) => s), engine: [...e.values()] };
 }
@@ -1330,7 +1338,7 @@ module.exports = {
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
-  driverArgsList, driverArgsText, splitLaunchArgs, mergeLaunchArgs, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper | engine split
+  driverArgsList, driverArgsText, splitLaunchArgs, mergeLaunchArgs, KEEPER_ONLY_RE, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper | engine split
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   AGENT_BROWSER_CLI, TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,

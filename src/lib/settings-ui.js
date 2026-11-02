@@ -4,7 +4,7 @@ import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-att
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
-import { engineFactText, engineOptions } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
+import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
@@ -668,16 +668,21 @@ class SettingsUI {
    *  Lane engine-spi-egress: the SAME answer draws the row's options (engineOptions — no engine id named in the schema). */
   _renderEngineFact(info, row = null, path = '') {
     const line = document.createElement('div');
-    line.className = 'settings-row-fact';
+    line.className = 'settings-row-fact settings-engine-fact';
     line.textContent = t('checking…');
     info.appendChild(line);
-    fetchJson('/api/browser/engines').then((r) => {
-      if (line.isConnected || line.parentNode) line.textContent = engineFactText(r, t);
-      const sel = row && !(r && r.error) ? row.querySelector('select.settings-select') : null;
-      if (!sel) return;
-      const v = String(this.settings.get(path) ?? 'default');
-      sel.replaceChildren(...engineOptions(r, v, t).map((o) => { const el = document.createElement('option'); el.value = o.value; el.textContent = o.label; el.selected = o.value === v; return el; }));
-    });
+    this._loadEngines(row, path, line);
+  }
+  /** lane engine-spi-egress r2: GET /api/browser/engines at EVERY draw of the row (its first and a Reset's redraw) — the fact line and
+   *  the <select> from the same answer; a failed answer keeps the stored value AS ITSELF (fillEngineSelect), never Chrome. */
+  _loadEngines(row, path, line) {
+    const paint = (r) => {
+      if (r && !r.error) this._engines = r;
+      if (line && (line.isConnected || line.parentNode)) line.textContent = engineFactText(r, t);
+      const sel = row ? row.querySelector('select.settings-select') : null;
+      if (sel) fillEngineSelect(sel, r && !r.error ? r : null, this.settings.get(path), t, document);
+    };
+    Promise.resolve(fetchJson('/api/browser/engines')).then(paint, () => paint({ error: 'unreachable' }));
   }
 
   /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):
@@ -941,6 +946,7 @@ class SettingsUI {
         if (String(value) === String(opt.value)) o.selected = true;
         select.appendChild(o);
       }
+      if (schema.fact === 'browser-engine') fillEngineSelect(select, this._engines || null, value, t, document); // lane engine-spi-egress r2: the engines last read, the stored value as itself
       select.onchange = () => { this.settings.set(path, select.value); row.classList.toggle('modified', this.settings.isModified(path)); };
       return select;
     }
@@ -1056,6 +1062,7 @@ class SettingsUI {
     const controlWrap = row.querySelector('.settings-row-control');
     controlWrap.innerHTML = '';
     controlWrap.appendChild(this._createControl(path, schema, row));
+    if (schema.fact === 'browser-engine') this._loadEngines(row, path, row.querySelector('.settings-engine-fact')); // lane engine-spi-egress r2: a Reset re-reads the engines
   }
 }
 

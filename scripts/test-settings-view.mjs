@@ -545,8 +545,28 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
 {
   const de = S.SETTINGS_SCHEMA['browser.defaultEngine'], ui = read('src/lib/settings-ui.js');
   ok(de && de.type === 'enum' && de.options.length === 1 && de.options[0].value === 'default' && !/plugin:|custom-browser/.test(JSON.stringify(de)) && de.fact === 'browser-engine' && de.tier === 'advanced'
-    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /sel\.replaceChildren\(\.\.\.engineOptions\(r, v, t\)/.test(ui) && /import \{ engineFactText, engineOptions \} from '\.\/browser-build-model\.js'/.test(ui),
+    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /import \{ engineFactText, fillEngineSelect \} from '\.\/browser-build-model\.js'/.test(ui),
     'lane engine-spi-egress: the default-engine row names no engine id (Chrome alone in the schema); its options are DRAWN from the engine table the fact line reads (engineOptions), the same answer', de && de.options);
+}
+
+// lane engine-spi-egress r2 (主开发's acceptance, minor 3): the row's <select> is drawn at EVERY draw — its first, a Reset's redraw
+// (which re-reads the engines), the engines' answer AND their failure: a stored 'plugin:<id>' shows AS ITSELF (its engine absent:
+// «its plugin is not running»), never as Chrome. A fake document drives the REAL drawing function (browser-build-model).
+{
+  const BMs = await import('../src/lib/browser-build-model.js');
+  const tS = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  const doc = { createElement: (tag) => ({ tag, value: '', textContent: '', selected: false }) };
+  const mkSel = () => ({ children: [], value: '', replaceChildren(...els) { this.children = els; } });
+  const draw = (r, v) => { const sel = mkSel(); if (typeof BMs.fillEngineSelect === 'function') BMs.fillEngineSelect(sel, r, v, tS, doc); return sel; };
+  const shown = (sel) => (sel.children.find((o) => o.selected) || {}).value || null;
+  const ENGS = { engines: [{ id: 'acme.engine', label: 'Acme', installed: true }], defaultEngine: { value: 'plugin:gone.engine', source: 'user' } };
+  const sErr = draw({ error: 'boom' }, 'plugin:gone.engine'), sNone = draw(null, 'plugin:gone.engine'), sOk = draw(ENGS, 'plugin:gone.engine'), sReset = draw(ENGS, undefined);
+  ok(shown(sErr) === 'plugin:gone.engine' && /gone\.engine — its plugin is not running/.test(sErr.children[1].textContent) && sErr.children.length === 2 && shown(sNone) === 'plugin:gone.engine'
+    && sOk.children.map((o) => o.value).join() === 'default,plugin:acme.engine,plugin:gone.engine' && shown(sOk) === 'plugin:gone.engine' && shown(sReset) === 'default' && sReset.children.some((o) => o.value === 'plugin:acme.engine'),
+    'r2 minor 3: the default-engine <select> — the engines route FAILS or has not answered ⇒ the stored plugin:<id> still shows AS ITSELF («its plugin is not running»), never as Chrome; answered ⇒ one option per engine; after a Reset the engines last read are still offered', { err: sErr.children.map((o) => o.value), ok: sOk.children.map((o) => o.value) });
+  const ui2 = read('src/lib/settings-ui.js');
+  ok(/if \(schema\.fact === 'browser-engine'\) fillEngineSelect\(select, this\._engines \|\| null, value, t, document\)/.test(ui2) && /if \(schema\.fact === 'browser-engine'\) this\._loadEngines\(row, path, row\.querySelector\('\.settings-engine-fact'\)\)/.test(ui2) && /\.then\(paint, \(\) => paint\(\{ error: 'unreachable' \}\)\)/.test(ui2),
+    'r2 minor 3 WIRING: every draw of the control draws the engines last read; a Reset\'s redraw re-reads GET /api/browser/engines; a failed read still draws (the stored value as itself)');
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
