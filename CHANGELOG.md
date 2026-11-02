@@ -4,6 +4,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.371 — 2026-11-02
 
+### Changed
+- A plugin installed from Git or a folder now has an “Update…” button on its row; one installed from an uploaded file says how to replace it.
+
 ### Fixed
 - A browser that runs a custom engine plugin now starts, and the engine's own launch settings reach it whole.
 
