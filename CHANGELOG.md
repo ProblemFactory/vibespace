@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A browser engine plugin can point at a browser program you installed yourself; VibeSpace checks the file and measures its version before it runs it.
 - An engine plugin cannot choose the program it runs or change its browser's proxy, and its launch may carry only browser switches.
 - Only you can set the program an engine plugin runs; an agent's token cannot set, change or remove it.
+- Report a problem now records mouse-wheel scrolls, which pointer pressed, and how a chat moved just after you open folded tool calls or press ↓.
 
 ### Fixed
 - When an Antigravity conversation hits its usage limit, its account's usage shows that limit and its reset at once, then reads the exact numbers itself.
