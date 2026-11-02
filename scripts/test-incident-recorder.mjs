@@ -27,11 +27,13 @@
 //      src/lib writes only the declared keys (never a URL, a title, a record's words); the snapshot carries the diary
 //   ⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t: one scroll event moved a
 //      chat 767 px 0–1 ms after an input stamp no ring could name): src/lib/scroll-forensics.js (PURE) — one wheel record
-//      per 100 ms burst {t, k, el, deltaY summed, deltaMode, ctrl, n, stBefore at the scroller's last scroll event,
-//      stAfter at the close} (CONTROL: without the map stBefore reads the moved position), wheelScroller, the fine entry
-//      {t, st, sh, ch, by (the writer since the last event, else 'none'), writeAgo, wheelAgo}, the ring cap; the wiring
-//      pins (ptr pointerType, the wheel + scroll listeners, chatTraces[win].fine, the arms in _setRunOpen and the ↓, the
-//      write count) + a MUTANT; a full ring's bytes
+//      per 100 ms burst of ONE deltaMode {t, k, el, deltaY summed, deltaMode, ctrl, n, stBefore at the scroller's last
+//      scroll event, stAfter at the close} (CONTROL: without the map stBefore reads the moved position), deltaY read before
+//      deltaMode, a mode change splits the burst; r2: THE WHEEL RING IS ITS OWN — 60 s of 60 Hz wheeling after 20 presses
+//      leaves the 20 presses and says how many bursts it dropped (CONTROL: r1's shared ring keeps 0 presses); the fine
+//      window keeps its HEAD and TAIL at 240 Hz with one dropped-count marker (CONTROL: r1's 300 cap lost the arm);
+//      wheelScroller, the fine entry; the wiring pins (pointerType, rings.wheel, either ring shipped, the arm FIRST in
+//      _setRunOpen with no live layout read) + MUTANTS; a full ring's bytes
 // Run: node scripts/test-incident-recorder.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -293,13 +295,13 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   ok('autoCaptureIncident takes the toast\'s words (a back that cost a load is no freeze); the freeze words stay the default', /app\.autoCaptureIncident = async \(reason, detail, \{ toastKey = 'Freeze captured automatically \(\{id\}\) — see Diagnostics → Incidents' \} = \{\}\) => \{/.test(rec) && rec.includes('showToast(t(toastKey, { id: r.id }));'));
 }
 
-console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t)');
+console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t; r2: their own rings, the window\'s head kept)');
 {
   const F = await import(pathToFileURL(path.join(REPO, 'src/lib/scroll-forensics.js')).href);
   // a fake clock + timer: the coalescing window is driven by hand
   let clock = 1000; const timers = [];
   const later = (fn, ms) => timers.push({ at: clock + ms, fn });
-  const tick = (ms) => { clock += ms; for (const tm of timers.splice(0).sort((a, b) => a.at - b.at)) { if (tm.at <= clock) tm.fn(); else timers.push(tm); } };
+  const tick = (ms) => { clock += ms; for (const tm of timers.splice(0).sort((x, y) => x.at - y.at)) { if (tm.at <= clock) tm.fn(); else timers.push(tm); } };
   const list = { nodeType: 1, scrollTop: 1950, scrollHeight: 2787, clientHeight: 837, parentElement: null };
   const card = { nodeType: 1, scrollTop: 0, scrollHeight: 40, clientHeight: 40, parentElement: list };
   const lastSt = new Map([[list, 1950]]);
@@ -323,6 +325,29 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   const ring2 = []; const w2 = F.createWheelRecorder({ now: () => clock, later, describe: () => 'x', scrollerOf: () => list, push: (r) => ring2.push(r) });
   list.scrollTop = 1700; w2({ target: card, deltaY: -10, deltaMode: 0 }); tick(100);
   ok('CONTROL: without the scroll listener\'s map stBefore reads the already-moved position (1700 = stAfter)', ring2[0]?.stBefore === 1700 && ring2[0]?.stAfter === 1700, ring2);
+  // r2 5d: a burst never sums two units — a change of deltaMode closes it
+  const ring3 = []; const w3 = F.createWheelRecorder({ now: () => clock, later, describe: () => 'x', scrollerOf: () => list, push: (r) => ring3.push(r) });
+  w3({ target: card, deltaY: 3, deltaMode: 1 }); tick(10); w3({ target: card, deltaY: 120, deltaMode: 0 }); tick(100);
+  ok(`a mode change inside 100 ms splits the burst: 3 lines and 120 px are two records (${ring3.map((r) => r.deltaY + '@' + r.deltaMode).join(', ')}), never «123, mode 1»`, ring3.length === 2 && ring3[0].deltaY === 3 && ring3[0].deltaMode === 1 && ring3[1].deltaY === 120 && ring3[1].deltaMode === 0, ring3);
+  // r2 5a: deltaY is read before deltaMode (Firefox answers later listeners in lines once deltaMode was read first)
+  const order = []; const w4 = F.createWheelRecorder({ now: () => clock, later, describe: () => 'x', scrollerOf: () => list, push: () => {} });
+  w4({ target: card, get deltaY() { order.push('deltaY'); return -5; }, get deltaMode() { order.push('deltaMode'); return 0; } }); tick(100);
+  ok(`deltaY is read BEFORE deltaMode (${order.join(' → ')})`, order[0] === 'deltaY' && order.includes('deltaMode'), order);
+  // r2 2 — THE CROWD-OUT, measured: 20 presses, then 60 s of 60 Hz wheeling; the recorder's own two rings
+  const CAPA = 500;
+  const pushA = (r, e) => { r.push(e); if (r.length > CAPA) r.splice(0, r.length - CAPA); };
+  const run60 = (intoAction) => {
+    const action = [], wheel = []; let pushed = 0; clock = 50000;
+    for (let i = 0; i < 20; i++) pushA(action, { t: clock + i, k: 'ptr', el: 'x', x: 1, y: 1, pointerType: 'mouse' });
+    const w = F.createWheelRecorder({ now: () => clock, later, describe: () => 'list', scrollerOf: () => list, push: (r) => { pushed++; return intoAction ? pushA(action, r) : F.pushCapped(wheel, F.WHEEL_RING_CAP, r); } });
+    for (let i = 0; i < 60 * 60; i++) { w({ target: card, deltaY: -4, deltaMode: 0 }); tick(1000 / 60); }
+    tick(200);
+    return { ptr: action.filter((x) => x.k === 'ptr').length, wheelInAction: action.filter((x) => x.k === 'wheel').length, wheel: wheel.length, dropped: wheel[0]?.droppedBefore || 0, pushed };
+  };
+  let own; try { own = run60(false); } catch (e) { own = { error: String(e.message || e) }; } // a tree without the wheel ring reds HERE by name, never throws the suite
+  const shared = run60(true);
+  ok(`60 s of 60 Hz wheeling after 20 presses: the action ring keeps all ${own.ptr} presses; the wheel ring holds ${own.wheel} bursts (WHEEL_RING_CAP ${F.WHEEL_RING_CAP}) and says it dropped ${own.dropped} of ${own.pushed} on its first record`, own.ptr === 20 && own.wheelInAction === 0 && own.wheel === F.WHEEL_RING_CAP && own.pushed > 500 && own.dropped === own.pushed - F.WHEEL_RING_CAP, own);
+  ok(`CONTROL (r1's wiring — wheel records in the shared 500-entry action ring): the same minute leaves ${shared.ptr} of 20 presses and no count of the loss`, shared.ptr === 0 && shared.wheelInAction === CAPA, shared);
   // the scroller: the nearest ancestor that overflows AND lets it scroll
   const style = (ov) => () => ({ overflowY: ov });
   const pre = { nodeType: 1, scrollHeight: 400, clientHeight: 100, parentElement: list };
@@ -333,31 +358,51 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   const e1 = F.fineScrollEntry({ now: 5000, st: 1950.4, sh: 2787, ch: 837, writeSeq: 7, seenSeq: 6, writeAt: 4983, writeBy: 'fsb', userAt: 4968 });
   const e2 = F.fineScrollEntry({ now: 5304, st: 59, sh: 2787, ch: 837, writeSeq: 7, seenSeq: 7, writeAt: 4983, writeBy: 'fsb', userAt: 5304 });
   ok('the fine entry\'s shape: {t, st, sh, ch, by, writeAgo, wheelAgo}', JSON.stringify(Object.keys(e1)) === JSON.stringify(['t', 'st', 'sh', 'ch', 'by', 'writeAgo', 'wheelAgo']) && e1.st === 1950, e1);
-  ok(`a scroll event AFTER a stamped write names it (by ${e1.by}, writeAgo ${e1.writeAgo}); one with no write since the last event is the browser's own (by ${e2.by}, wheelAgo ${e2.wheelAgo}) — the capture's «by fsb, writeAgo 333» read as fsb`, e1.by === 'fsb' && e1.writeAgo === 17 && e2.by === 'none' && e2.writeAgo === 321 && e2.wheelAgo === 0, { e1, e2 });
-  const fr = []; for (let i = 0; i < F.FINE_SCROLL_CAP + 25; i++) F.pushFine(fr, { i });
-  ok(`the fine ring is capped (${fr.length} = FINE_SCROLL_CAP ${F.FINE_SCROLL_CAP}, the oldest dropped); the window is ${F.FINE_SCROLL_MS} ms, the burst ${F.WHEEL_COALESCE_MS} ms`, fr.length === F.FINE_SCROLL_CAP && fr[0].i === 25 && F.FINE_SCROLL_MS === 2000 && F.WHEEL_COALESCE_MS === 100);
+  ok(`a scroll event AFTER a stamped write names it (by ${e1.by}, writeAgo ${e1.writeAgo}); one with no write since the last event is the browser's own (by ${e2.by}, wheelAgo ${e2.wheelAgo})`, e1.by === 'fsb' && e1.writeAgo === 17 && e2.by === 'none' && e2.writeAgo === 321 && e2.wheelAgo === 0, { e1, e2 });
+  // r2 3 — a 2 s window at 240 Hz = 480 events: the HEAD (the arm + the first FINE_HEAD) and the TAIL survive, the middle is counted
+  const fr = []; F.pushFine(fr, { t: 0, arm: 'runOpen', at: 'press' });
+  for (let i = 1; i <= 480; i++) F.pushFine(fr, { t: i, st: i, by: 'none' });
+  const drop = fr.find((x) => 'dropped' in x);
+  ok(`240 Hz × 2 s: the arm marker survives (${fr[0]?.arm}), the first ${F.FINE_HEAD} events follow it, ONE marker counts the ${drop?.dropped} dropped from the middle, the last ${F.FINE_TAIL} end it (${fr.length} entries)`,
+    fr[0]?.arm === 'runOpen' && fr[1].t === 1 && fr[F.FINE_HEAD].t === F.FINE_HEAD && drop?.dropped === 480 - F.FINE_HEAD - F.FINE_TAIL && fr[fr.length - 1].t === 480 && fr[fr.length - F.FINE_TAIL].t === 480 - F.FINE_TAIL + 1 && fr.length === 1 + F.FINE_HEAD + 1 + F.FINE_TAIL, { n: fr.length, drop });
+  const r1push = (r, e) => { r.push(e); if (r.length > 300) r.splice(0, r.length - 300); }; // r1's pushFine: one cap, oldest first
+  const fr1 = []; r1push(fr1, { t: 0, arm: 'runOpen' }); for (let i = 1; i <= 480; i++) r1push(fr1, { t: i });
+  ok(`CONTROL (r1's ring, cap 300): the same window loses its arm marker and its first ${fr1[0].t - 1} events — the START, where a cause lives`, !fr1.some((x) => x.arm) && fr1[0].t === 181, fr1[0]);
+  const fr2 = []; F.pushFine(fr2, { t: 0, arm: 'scrollBtn' }); for (let i = 1; i <= 900; i++) F.pushFine(fr2, i === 450 ? { t: i, arm: 'runOpen' } : { t: i });
+  ok(`two busy windows: the ring stays ≤ FINE_SCROLL_CAP (${fr2.length} ≤ ${F.FINE_SCROLL_CAP}) and the window in progress is whole (its arm kept)`, fr2.length <= F.FINE_SCROLL_CAP && fr2.some((x) => x.arm === 'runOpen'));
   // the wiring (source pins: the module draws the page)
   const rec = read('src/lib/incident-recorder.js');
   const cv = read('src/lib/chat-view.js');
-  ok('the recorder: ptr records carry pointerType; a capture-phase passive wheel listener runs createWheelRecorder into the action ring with the scroll listener\'s map',
-    rec.includes("pointerType: e.pointerType || '' });") && /document\.addEventListener\('wheel', createWheelRecorder\(\{[\s\S]{0,400}lastSt,[\s\S]{0,300}push: \(rec\) => push\(rings\.action, CAP\.action, rec\),\s*\}\), \{ capture: true, passive: true \}\);/.test(rec)
+  ok('the recorder: ptr records carry pointerType; the wheel listener feeds its OWN ring (rings.wheel through pushCapped), with the scroll listener\'s map — never rings.action',
+    rec.includes("pointerType: e.pointerType || '' });") && /const rings = \{ action: \[\], ws: \[\], console: \[\], op: \[\], wheel: \[\] \};/.test(rec)
+    && /document\.addEventListener\('wheel', createWheelRecorder\(\{[\s\S]{0,400}lastSt,[\s\S]{0,300}push: \(rec\) => pushCapped\(rings\.wheel, WHEEL_RING_CAP, rec\),\s*\}\), \{ capture: true, passive: true \}\);/.test(rec)
+    && !/push\(rings\.action, CAP\.action, rec\)/.test(rec)
     && /document\.addEventListener\('scroll', \(e\) => \{[^\n]*lastSt\.set\(n, n\.scrollTop\);[^\n]*\{ capture: true, passive: true \}\);/.test(rec));
-  ok('…and the capture ships each chat window\'s fine ring (chatTraces[win].fine)', rec.includes('if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);'));
+  ok('…the capture ships a window whose coarse ring is empty but whose fine ring is not (either ring), and its fine ring',
+    rec.includes('if (!v?._traceRing?.length && !v?._scrollFine?.length) continue;') && rec.includes('if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);'));
+  ok('…and the nav-log import keeps its own comment (the scroll-forensics import is its own line)', rec.includes("import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary"));
   const setRunOpen = cv.match(/\n  _setRunOpen\(run, open\) \{[\s\S]*?\n  \}\n/)?.[0] || '';
-  const armPin = (src) => /if \(outsidePass\) \{\n\s*this\._armScrollFine\(run\.open \? 'runOpen' : 'runClose'\);/.test(src);
-  ok('the chat view ARMS the window at a toggle outside a pass (_setRunOpen) and at the ↓ press; every scroll event inside it is kept BEFORE the coarse 400 px filter',
+  const armPin = (src) => /^\n  _setRunOpen\(run, open\) \{\n    if \(!run\?\.header\) return;\n    if \(!this\._runsMutating\) this\._armScrollFine\(open \? 'runOpen' : 'runClose'\);/.test(src) && (src.match(/_armScrollFine\(/g) || []).length === 1;
+  const armFn = cv.match(/\n  _armScrollFine\(why\) \{[\s\S]*?\n  \}\n/)?.[0] || '';
+  ok('the chat view ARMS the window BEFORE the toggle (the first line of _setRunOpen, outside a pass) and at the ↓ press; every scroll event inside it is kept BEFORE the coarse 400 px filter',
     armPin(setRunOpen)
     && /this\._setPinned\(true, 'scrollBtn'\);\n\s*this\._armScrollFine\('scrollBtn'\);/.test(cv)
     && /if \(Date\.now\(\) < \(this\._scrollFineUntil \|\| 0\)\) this\._noteFineScroll\(st\);[^\n]*\n\s*if \(Math\.abs\(st - last\) < 400\) return;/.test(cv));
+  const noLayoutPin = (fn) => !!fn && !/scrollTop|scrollHeight|clientHeight|getBoundingClientRect|offset(Top|Height)/.test(fn) && /const now = Date\.now\(\), g = this\._geomSeen;/.test(fn) && fn.includes("at: 'press'");
+  ok('…and the arm reads NO live layout: the geometry the scroll handler last saw (_geomSeen, set in its rAF read), marked «at: press»',
+    noLayoutPin(armFn)
+    && /const \{ scrollTop, scrollHeight, clientHeight \} = this\._messageList;\n\s*this\._geomSeen = \{ st: Math\.round\(scrollTop\), sh: scrollHeight, ch: clientHeight, t: Date\.now\(\) \};/.test(cv));
   ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', /_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1; \}/.test(cv));
-  // MUTANT: the arm dropped from _setRunOpen ⇒ the pin reds
-  const mutant = setRunOpen.replace(/\n\s*this\._armScrollFine\(run\.open \? 'runOpen' : 'runClose'\);[^\n]*/, '');
-  ok('MUTANT: _setRunOpen without its arm reds the arm pin', mutant !== setRunOpen && armPin(setRunOpen) && !armPin(mutant));
-  // the bundle bound: a full fine ring of the widest entries beside a full action ring of wheel records
+  // MUTANTS: the arm back AFTER the toggles (r1's place) ⇒ the pin reds; a live read in the arm ⇒ its pin reds
+  const mutant = setRunOpen.replace("\n    if (!this._runsMutating) this._armScrollFine(open ? 'runOpen' : 'runClose');", '').replace('    if (outsidePass) {\n', "    if (outsidePass) {\n      this._armScrollFine(run.open ? 'runOpen' : 'runClose');\n");
+  ok('MUTANT: the arm moved back after the toggles (r1) reds the arm pin', mutant !== setRunOpen && armPin(setRunOpen) && !armPin(mutant));
+  const liveArm = armFn.replace('const now = Date.now(), g = this._geomSeen;', 'const now = Date.now(), l = this._messageList, g = { st: l.scrollTop, sh: l.scrollHeight, ch: l.clientHeight, t: now };');
+  ok('MUTANT: a live layout read put back in the arm reds the no-layout pin', liveArm !== armFn && noLayoutPin(armFn) && !noLayoutPin(liveArm));
+  // the bundle bound: a full fine ring of the widest entries + a full wheel ring
   const wide = { t: 1793625787053, st: 123456, sh: 1234567, ch: 12345, by: 'extendTop:delta', writeAgo: 1234567, wheelAgo: 1234567 };
-  const wheelRec = { t: 1793625787053, k: 'wheel', el: 'div.chat-compact-content<div.chat-compact-msg<div.chat-msg.chat-msg-assistant<div.chat-message-list.chat-minimap-active', deltaY: -12345.67, deltaMode: 0, ctrl: 1, n: 999, stBefore: 123456, stAfter: 123456 };
-  const kb = Buffer.byteLength(JSON.stringify({ fine: Array(F.FINE_SCROLL_CAP).fill(wide), action: Array(500).fill(wheelRec) }, null, 1)) / 1024;
-  ok(`a full fine ring + an action ring of 500 wheel records = ${kb.toFixed(0)} KB in bundle.json — far inside the hub's body cap`, kb < 512, kb);
+  const wheelRec = { t: 1793625787053, k: 'wheel', el: 'div.chat-compact-content<div.chat-compact-msg<div.chat-msg.chat-msg-assistant<div.chat-message-list.chat-minimap-active', deltaY: -12345.67, deltaMode: 0, ctrl: 1, n: 999, stBefore: 123456, stAfter: 123456, droppedBefore: 123456 };
+  const kb = Buffer.byteLength(JSON.stringify({ fine: Array(F.FINE_SCROLL_CAP).fill(wide), wheel: Array(F.WHEEL_RING_CAP).fill(wheelRec) }, null, 1)) / 1024;
+  ok(`a full fine ring (${F.FINE_SCROLL_CAP}) + a full wheel ring (${F.WHEEL_RING_CAP}) = ${kb.toFixed(0)} KB per window in bundle.json — far inside the hub's body cap`, kb < 512, kb);
 }
 
 console.log(`\nfull console ring with stacks: ${(ringBytes / 1024).toFixed(0)} KB in bundle.json`);

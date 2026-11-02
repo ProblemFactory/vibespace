@@ -20,8 +20,8 @@ import { BUILD_VERSION } from './build-version.js';
 import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 import { stackHead } from './incident-stack.js'; // lane vault-chip-zone-errors: an uncaught / unhandled entry keeps its first frames (PURE)
-import { navLogRead } from './nav-log.js';
-import { createWheelRecorder, wheelScroller, FINE_SCROLL_CAP } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the wheel record + the chat views' fine scroll trace (PURE) // lane phone-back-reload: the tab's diary — survives the loads in this tab, so a back that cost one is in it
+import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary — survives the loads in this tab, so a back that cost one is in it
+import { createWheelRecorder, wheelScroller, pushCapped, WHEEL_RING_CAP, FINE_SCROLL_CAP } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the wheel ring + the chat views' fine scroll trace (PURE)
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
@@ -48,7 +48,7 @@ function describeEl(el) {
 }
 
 export function installIncidentRecorder(app) {
-  const rings = { action: [], ws: [], console: [], op: [] };
+  const rings = { action: [], ws: [], console: [], op: [], wheel: [] }; // wheel: its OWN ring (B-a7a9 r2) — wheeling never pushes a click or a key out of `action`
   const t0 = Date.now();
 
   // ── action ring: clicks + coarse keys + window lifecycle ──
@@ -57,15 +57,16 @@ export function installIncidentRecorder(app) {
     push(rings.action, CAP.action, { t: Date.now(), k: 'ptr', el: describeEl(e.target), x: Math.round(e.clientX), y: Math.round(e.clientY), pointerType: e.pointerType || '' });
   }, { capture: true, passive: true });
   // WHEEL (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t: a 767 px move 0–1 ms after an input stamp that no ring could
-  // name): one record per 100 ms burst — deltaY summed, deltaMode (0 px · 1 lines · 2 pages), ctrl, the event count and
-  // the scrollTop of the scroller it moves when the burst began and closed (src/lib/scroll-forensics.js, PURE)
+  // name): one record per 100 ms burst of one deltaMode — deltaY summed, deltaMode (0 px · 1 lines · 2 pages), ctrl, the
+  // event count and the scrollTop of the scroller it moves when the burst began and closed (src/lib/scroll-forensics.js,
+  // PURE) — into rings.wheel (WHEEL_RING_CAP bursts; a drop is counted on the first record left, `droppedBefore`)
   // the scrollers' last positions, one write per scroll event (the wheel record's stBefore)
   const lastSt = new WeakMap();
   document.addEventListener('scroll', (e) => { const n = e.target === document ? document.scrollingElement : e.target; if (n) lastSt.set(n, n.scrollTop); }, { capture: true, passive: true });
   document.addEventListener('wheel', createWheelRecorder({
     now: Date.now, later: (fn, ms) => setTimeout(fn, ms), describe: describeEl, lastSt,
     scrollerOf: (el) => wheelScroller(el, (n) => getComputedStyle(n), document.scrollingElement),
-    push: (rec) => push(rings.action, CAP.action, rec),
+    push: (rec) => pushCapped(rings.wheel, WHEEL_RING_CAP, rec),
   }), { capture: true, passive: true });
   let lastTypeAt = 0;
   document.addEventListener('keydown', (e) => {
@@ -202,7 +203,7 @@ export function installIncidentRecorder(app) {
     try {
       const traces = {};
       for (const [winId, v] of app.sessions || []) {
-        if (!v?._traceRing?.length) continue;
+        if (!v?._traceRing?.length && !v?._scrollFine?.length) continue; // either ring (r2: a view with only a fine window was skipped)
         // GEOMETRY AT CAPTURE (inc-mubvu3a4-x8sb g1): the ring says what moved
         // the view; this says what the viewport HELD when the user pressed the
         // button — how many cards intersect it and how many of those the
@@ -226,7 +227,7 @@ export function installIncidentRecorder(app) {
               ws: v._windowStart, we: v._windowEnd, total: v._total, pin: v._pinned ? 1 : 0, tp: v._teleported ? 1 : 0, cv: !v._container?.classList?.contains('chat-no-content-visibility') };
           }
         } catch {}
-        traces[winId] = { sid: v.sessionId || null, geom, tail: v._traceRing.slice(-300) };
+        traces[winId] = { sid: v.sessionId || null, geom, tail: (v._traceRing || []).slice(-300) };
         // the FINE scroll trace (B-a7a9): every scroll event for 2 s after a run toggle / the ↓ (ChatView._noteFineScroll)
         if (v._scrollFine?.length) traces[winId].fine = v._scrollFine.slice(-FINE_SCROLL_CAP);
       }

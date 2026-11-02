@@ -501,9 +501,10 @@ try {
   const incId = await evalJs(`app.autoCaptureIncident('chat-scroll', 'recorder check')`);
   let bundle = null; try { bundle = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', String(incId), 'bundle.json'), 'utf8')); } catch {}
   const acts = bundle?.client?.rings?.action || [];
-  const wheel700 = acts.filter((a) => a.k === 'wheel').find((a) => a.deltaY === -700);
-  check(`the −700 wheel-up is ONE wheel record {deltaY −700, deltaMode 0, n 1}, its list position before > after (${wheel700?.stBefore} → ${wheel700?.stAfter}), over the chat (${wheel700?.el} — the recorder describes four levels up from the target)`,
-    !!wheel700 && wheel700.deltaMode === 0 && wheel700.n === 1 && wheel700.stBefore > wheel700.stAfter && /chat-(message-list|msg|compact|text)/.test(wheel700.el), acts.filter((a) => a.k === 'wheel'));
+  const wheels = bundle?.client?.rings?.wheel || []; // the wheel's OWN ring (r2) — never the action ring
+  const wheel700 = wheels.find((a) => a.deltaY === -700);
+  check(`the −700 wheel-up is ONE record in the WHEEL ring (none in the action ring) {deltaY −700, deltaMode 0, n 1}, its list position before > after (${wheel700?.stBefore} → ${wheel700?.stAfter}), over the chat (${wheel700?.el} — the recorder describes four levels up from the target)`,
+    !!wheel700 && wheel700.deltaMode === 0 && wheel700.n === 1 && wheel700.stBefore > wheel700.stAfter && /chat-(message-list|msg|compact|text)/.test(wheel700.el) && !acts.some((a) => a.k === 'wheel'), wheels);
   const btnPtr = acts.filter((a) => a.k === 'ptr' && /chat-scroll-btn/.test(a.el)).pop();
   check(`…the ↓ press is a ptr record with its pointerType (${btnPtr?.pointerType})`, btnPtr?.pointerType === 'mouse', btnPtr);
   const fine = Object.values(bundle?.client?.snapshot?.chatTraces || {}).find((x) => x.sid === sid2)?.fine || [];

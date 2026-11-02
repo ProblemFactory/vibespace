@@ -5,16 +5,23 @@
 // and nothing in the bundle could say what the input was. The action ring kept only ptr {el, x, y}, key and ime (no
 // wheel, no pointer type), and the chat trace kept only moves ≥ 400 px (`from` = the last LOGGED position). So it could
 // not tell a one-notch page scroll from a native layout move. Two records answer that next time:
-//   • the action ring's WHEEL record — one per WHEEL_COALESCE_MS burst: the first event's time, target and deltaMode,
-//     the summed deltaY, the event count, whether Ctrl was held, and the scrollTop of the scroller the wheel moves when
-//     the burst began and when it closed. Positions and deltas only — never content (the recorder's privacy rule).
+//   • the WHEEL ring (its own — r2: in the shared action ring 60 s of wheeling pushed every click and key out): one record
+//     per WHEEL_COALESCE_MS burst of ONE deltaMode — the first event's time, target and deltaMode, the summed deltaY, the
+//     event count, whether Ctrl was held, and the scrollTop of the scroller the wheel moves when the burst began and when
+//     it closed. A ring that dropped records says so on its first one (`droppedBefore`, cumulative). Positions and deltas
+//     only — never content (the recorder's privacy rule).
 //   • the chat view's FINE scroll trace — EVERY scroll event for FINE_SCROLL_MS after a run toggle or the ↓ button:
 //     st, sh, ch, the writer (the `_traceExpect` stamp written since the previous scroll event, else 'none'),
-//     writeAgo, wheelAgo; an arm marker opens each window with the geometry at the press.
+//     writeAgo, wheelAgo; an arm marker opens each window with the geometry the view last saw. A window keeps its HEAD
+//     (the marker + the first FINE_HEAD events — where a cause lives) and its TAIL (the last FINE_TAIL), and counts what
+//     it dropped between them in ONE marker (r2: at 240 Hz a 300-entry ring lost the arm and the first 181 events).
 
 export const WHEEL_COALESCE_MS = 100;
+export const WHEEL_RING_CAP = 200;   // bursts; 20 s of continuous wheeling at 10 bursts a second
 export const FINE_SCROLL_MS = 2000;
-export const FINE_SCROLL_CAP = 300; // per view: two full windows at 60 Hz plus their markers
+export const FINE_HEAD = 200;        // events kept from a window's start (with its arm marker)
+export const FINE_TAIL = 200;        // events kept from its end
+export const FINE_SCROLL_CAP = 600;  // the whole ring: the window in progress (≤ 402 entries) always fits whole
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -30,31 +37,48 @@ export function wheelScroller(el, styleOf, root = null) {
   return root;
 }
 
-/** The wheel listener's body: one record per WHEEL_COALESCE_MS window, pushed at the burst's FIRST event (so the ring
- *  stays in time order) and completed in place when the window closes (`stAfter`, the totals). `stBefore` is the
- *  scroller's position at its last scroll event before the burst (`lastSt`, kept by the recorder's capture-phase
- *  scroll listener): measured in headless Chrome 154, a compositor-threaded wheel scroll is ALREADY applied when the
- *  main thread dispatches the wheel event (1950 read as 1775 for a 175 px notch), while its scroll event comes after.
- *  A scroller with no scroll event yet reads its current position. */
+/** Push onto a capped ring; the oldest go, and the new first record carries the cumulative count dropped before it. */
+export function pushCapped(ring, cap, entry) {
+  ring.push(entry);
+  const over = ring.length - cap;
+  if (over > 0) {
+    const before = ring[0]?.droppedBefore || 0;
+    ring.splice(0, over);
+    ring[0].droppedBefore = before + over;
+  }
+  return ring;
+}
+
+/** The wheel listener's body: one record per WHEEL_COALESCE_MS window of ONE deltaMode (a change of unit closes the burst —
+ *  lines and pixels never sum), pushed at the burst's FIRST event (so the ring stays in time order) and completed in place
+ *  when the window closes (`stAfter`, the totals). `stBefore` is the scroller's position at its last scroll event before
+ *  the burst (`lastSt`, kept by the recorder's capture-phase scroll listener): measured in headless Chrome 154, a
+ *  compositor-threaded wheel scroll is ALREADY applied when the main thread dispatches the wheel event (1950 read as 1775
+ *  for a 175 px notch), while its scroll event comes after. A scroller with no scroll event yet reads its current position.
+ *  deltaY is read BEFORE deltaMode (r2): Firefox reports line units to every later listener once deltaMode was read first. */
 export function createWheelRecorder({ now, later, describe, scrollerOf, push, lastSt = null }) {
   let cur = null;
-  const close = () => {
-    const c = cur; cur = null;
-    if (!c) return;
+  const close = (c) => {
+    if (!c || c.closed) return;
+    c.closed = true;
+    if (cur === c) cur = null;
     try { c.rec.stAfter = c.sc ? Math.round(c.sc.scrollTop) : null; } catch { c.rec.stAfter = null; }
   };
   return (e) => {
+    const dy = Number(e.deltaY) || 0;
+    const mode = e.deltaMode | 0;
+    if (cur && cur.rec.deltaMode !== mode) close(cur);
     if (!cur) {
       let sc = null;
       try { sc = scrollerOf(e.target); } catch { }
       const before = sc ? (lastSt?.has(sc) ? lastSt.get(sc) : sc.scrollTop) : null;
-      const rec = { t: now(), k: 'wheel', el: describe(e.target), deltaY: 0, deltaMode: e.deltaMode | 0, ctrl: 0, n: 0, stBefore: before == null ? null : Math.round(before), stAfter: null };
-      cur = { rec, sc };
+      const rec = { t: now(), k: 'wheel', el: describe(e.target), deltaY: 0, deltaMode: mode, ctrl: 0, n: 0, stBefore: before == null ? null : Math.round(before), stAfter: null };
+      const c = cur = { rec, sc, closed: false };
       push(rec);
-      later(close, WHEEL_COALESCE_MS);
+      later(() => close(c), WHEEL_COALESCE_MS);
     }
     const r = cur.rec;
-    r.deltaY = round2(r.deltaY + (Number(e.deltaY) || 0));
+    r.deltaY = round2(r.deltaY + dy);
     r.n++;
     if (e.ctrlKey) r.ctrl = 1;
   };
@@ -72,9 +96,27 @@ export function fineScrollEntry({ now, st, sh, ch, writeSeq, seenSeq, writeAt, w
   };
 }
 
-/** Push onto a capped fine ring (oldest dropped). */
-export function pushFine(ring, entry, cap = FINE_SCROLL_CAP) {
-  ring.push(entry);
-  if (ring.length > cap) ring.splice(0, ring.length - cap);
+/** Push onto a view's fine ring, window by window: an arm marker (`entry.arm`) opens a window; its first FINE_HEAD events
+ *  stay; past them ONE `{dropped}` marker holds the count of the events dropped from the window's middle, and the last
+ *  FINE_TAIL follow it. The ring as a whole keeps FINE_SCROLL_CAP entries (older windows go first). The per-window
+ *  state lives on the array (`ring.win`, not serialized). */
+export function pushFine(ring, entry) {
+  if (entry.arm) {
+    ring.win = { n: 0, drop: null, tail: 0 };
+    ring.push(entry);
+  } else {
+    const w = ring.win || (ring.win = { n: 0, drop: null, tail: 0 });
+    w.n++;
+    if (w.n <= FINE_HEAD) ring.push(entry);
+    else {
+      if (!w.drop) { w.drop = { t: entry.t, dropped: 0 }; ring.push(w.drop); }
+      ring.push(entry); w.tail++;
+      if (w.tail > FINE_TAIL) {
+        const at = ring.indexOf(w.drop);
+        ring.splice(at + 1, 1); w.tail--; w.drop.dropped++;
+      }
+    }
+  }
+  if (ring.length > FINE_SCROLL_CAP) ring.splice(0, ring.length - FINE_SCROLL_CAP);
   return ring;
 }

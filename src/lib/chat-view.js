@@ -803,6 +803,7 @@ class ChatView {
         scrollTick = false;
         if (this._suspended) return; // hidden-desktop window: geometry is meaningless, decide nothing
         const { scrollTop, scrollHeight, clientHeight } = this._messageList;
+        this._geomSeen = { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight, t: Date.now() }; // _armScrollFine's
         // floating run bar (2.369.37): same frame, same layout pass, no decisions
         this._updateRunBar(scrollTop);
         if (this._programmaticScroll) return; // don't interfere with programmatic scrolls
@@ -7111,11 +7112,13 @@ class ChatView {
    *  coarse ring keeps its history; the incident capture ships it as chatTraces[win].fine. An arm opens the window with
    *  a marker holding the geometry at the press. Positions only, never content. */
   _armScrollFine(why) {
-    const l = this._messageList;
-    if (!l) return;
-    this._scrollFineUntil = Date.now() + FINE_SCROLL_MS;
+    if (!this._messageList) return;
+    const now = Date.now(), g = this._geomSeen;
+    this._scrollFineUntil = now + FINE_SCROLL_MS;
     this._stWriteSeen = this._stWriteSeq || 0;
-    pushFine(this._scrollFine || (this._scrollFine = []), { t: Date.now(), arm: why, st: Math.round(l.scrollTop), sh: l.scrollHeight, ch: l.clientHeight, pin: this._pinned ? 1 : 0 });
+    // AT THE PRESS, NO LAYOUT READ (r2): the geometry the scroll handler last saw (its own rAF read), never a live read in
+    // the press's task — a recorder must not add a forced layout to the toggle it watches
+    pushFine(this._scrollFine || (this._scrollFine = []), { t: now, arm: why, at: 'press', st: g ? g.st : null, sh: g ? g.sh : null, ch: g ? g.ch : null, seenAgo: g ? now - g.t : -1, pin: this._pinned ? 1 : 0 });
   }
   _noteFineScroll(st) {
     const l = this._messageList, now = Date.now();
@@ -7528,6 +7531,7 @@ class ChatView {
 
   _setRunOpen(run, open) {
     if (!run?.header) return;
+    if (!this._runsMutating) this._armScrollFine(open ? 'runOpen' : 'runClose'); // B-a7a9: every scroll event for 2 s after a toggle outside a pass — armed BEFORE the toggle (r2)
     run.open = !!open;
     run.header.classList.toggle('open', run.open);
     const n = run.members.length;
@@ -7590,7 +7594,6 @@ class ChatView {
     // used to stay expanded forever once the tail moved on), so it stays
     // inherited-open and re-folds when it stops being last.
     if (outsidePass) {
-      this._armScrollFine(run.open ? 'runOpen' : 'runClose'); // B-a7a9: every scroll event for 2 s after a toggle outside a pass
       const isLast = this._runs?.length ? this._runs[this._runs.length - 1] === run : false;
       const sticky = run.open && !isLast;
       for (const el of run.members) { if (sticky) this._runStickyOpen.add(el); else this._runStickyOpen.delete(el); }
