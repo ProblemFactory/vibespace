@@ -818,6 +818,22 @@ console.log('— ⑦ resume, an agent error, text only');
     const n = await w2.until(() => w2.find('notice', (r) => r.noticeKind === 'agy-error'), 4000, 'agy-error notice');
     ok('r3: …an agy whose init names no model: no servedModel field on either record (never a guess)', !('servedModel' in end) && !('servedModel' in n), { end, n });
   } finally { await w2.stop(); }
+  // r4: TWO PROCESSES — a model, then a set-model to Default (agy restarts; its init names none): the stamp is cleared,
+  // never the previous process's model
+  const w3 = startWrapper({ env: { AGY_WEBUI_MODEL: 'claude-sonnet-4-6' } });
+  try {
+    await w3.until(() => w3.find('session'), 8000, 'session');
+    const metaOf = () => { try { return JSON.parse(fs.readFileSync(path.join(w3.dir, 's.json'), 'utf8')); } catch { return null; } };
+    await w3.until(() => metaOf()?.agy?.model === 'claude-sonnet-4-6', 4000, 'the first process names its model');
+    w3.send({ type: 'set-model', model: '' });
+    await w3.until(() => w3.find('notice', (r) => r.noticeKind === 'command_applied'), 5000, 'the restart onto Default');
+    await w3.until(() => w3.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length >= 2, 8000, 'the second agy start');
+    await w3.until(() => metaOf()?.agy && metaOf().agy.model === null, 4000, 'the second init clears the model').catch(() => null); // a wrapper that never clears it is the ✗ below, not a throw
+    w3.send({ type: 'chat-input', text: 'this will fail', msgId: 'sm3' });
+    const end = await w3.until(() => w3.find('prompt_end'), 8000, 'end');
+    const n = await w3.until(() => w3.find('notice', (r) => r.noticeKind === 'agy-error'), 4000, 'agy-error notice');
+    ok('r4: a set-model to DEFAULT (the 2nd process\'s init names none) ⇒ the sidecar\'s agy.model is null and the wall records carry NO servedModel (never the 1st process\'s claude-sonnet-4-6)', metaOf().agy.model === null && !('servedModel' in end) && !('servedModel' in n), { end, n, agy: metaOf()?.agy });
+  } finally { await w3.stop(); }
 }
 {
   // RED control (lane agy-harness-fixes): the pre-fix wrapper DROPPED every picture — a picture-only message never reached agy

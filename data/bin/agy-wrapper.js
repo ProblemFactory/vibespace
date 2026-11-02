@@ -435,7 +435,9 @@ function handleEvent(line, from = null) {
     const init = ev.init || {};
     if (init.permission_mode) meta.agy = { ...(meta.agy || {}), permissionMode: String(init.permission_mode) };
     if (Array.isArray(init.tools)) meta.agy = { ...(meta.agy || {}), tools: init.tools.map(String).slice(0, 200) };
-    if (typeof init.model === 'string' && init.model) meta.agy = { ...(meta.agy || {}), model: init.model.slice(0, 200) }; // the slug agy NAMES (lane agy-status-bar-facts)
+    // the slug agy NAMES (lane agy-status-bar-facts) — set on EVERY init (lane agy-wall-signal r4): a set-model to Default restarts
+    // agy, and an init that names none must not leave the PREVIOUS process's model as this one's (the wall's servedModel)
+    meta.agy = { ...(meta.agy || {}), model: typeof init.model === 'string' && init.model ? init.model.slice(0, 200) : null };
     adoptConversation(ev.conversation_id, resumeId && ev.conversation_id === resumeId ? 'load' : (resumeId ? 'new' : 'new'));
     return;
   }

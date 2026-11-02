@@ -12,16 +12,32 @@
 // judge's 'turn-started' disarms it for that account until the hub restarts. No timer anywhere: the event is the wall.
 // The consumer is told the room sentence's facts (`wallRoom`: another limit of the account whose WEEKLY window is read —
 // the display verdict 'read', never a reset since, never a guess — under 90 %); the wall notice carries them to the chat.
+const fs = require('fs');
+const path = require('path');
 const quotaModel = require('../quota-model.js');
 
 const LIVE_MS = 5 * 60 * 1000;   // a wall stamped longer ago is history (a replayed record): written, never a trigger
 const SAME_RESET_S = 60;         // one wall said again (a retry on it, a re-attach) states its reset to within a second or two
 const ROOM_MAX_PCT = 90;         // another group «has room» under this
+const SIDECAR_CAP = 256 * 1024;  // a wrapper sidecar is a few KB; anything bigger is not read (r4: the read is sync)
 
 /** THE SESSION'S OWN MODEL FACT (r2: the consumer's engine accessor may be absent — a road tested only against a stubbed
  *  engine key is not wired): the lock, the newest pick, the spawn model — the pool engine's own ladder minus the served
  *  model (no ACP consumer notes one). */
 function ownModelOf(s) { return (s && s._modelLocked && s._lockedModel) || (s && s._pickedModel) || (s && s._spawnModel) || null; }
+/** THE WRAPPER'S OWN SIDECAR (r3's rung, bounded in r4): `<dir>/<webui id>.json` — local-only (the id is the hub's own; a
+ *  path that resolves outside `dir` is refused), at most SIDECAR_CAP bytes (a bigger file is skipped by name), read only
+ *  for a WALL record. → the parsed object, or null. */
+function readWrapperSidecar(dir, session, { log = (l) => console.log(l), cap = SIDECAR_CAP } = {}) {
+  const id = session && typeof session._webuiId === 'string' ? session._webuiId : '';
+  if (!id || !dir) return null;
+  const root = path.resolve(dir), f = path.resolve(root, id + '.json');
+  if (path.dirname(f) !== root) { log(`[stream-wall] the wrapper sidecar of ${JSON.stringify(id)} resolves outside ${root} — not read`); return null; }
+  let st = null; try { st = fs.statSync(f); } catch { return null; }
+  if (!st.isFile()) return null;
+  if (st.size > cap) { log(`[stream-wall] the wrapper sidecar ${f} is ${st.size} bytes — over the ${cap}-byte cap, not read`); return null; }
+  try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; }
+}
 /** ONE wall said twice (the notice + its prompt_end, 2 ms apart): the same limit and window, and the same prompt or
  *  within 2 s of each other. */
 function sameWall(a, b) {
@@ -97,7 +113,19 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     if (rec.kind !== 'notice' && rec.kind !== 'prompt_end') return null;
     const quota = quotaOf(session.backend);
     if (!quota || typeof quota.signalFromStream !== 'function') return null;
-    const sig = quota.signalFromStream(rec, { model: modelOfWall(session, rec, modelOf) });
+    // a record is first asked WITHOUT a model: only a wall the harness reads (`unread` for want of a model) is worth one —
+    // so the model's witnesses (the sidecar read among them) are asked for a WALL record only, once per wall (r4)
+    const probe = quota.signalFromStream(rec, { model: null });
+    if (!probe || probe.source !== 'stream') return null;
+    let sig = probe;
+    if (probe.kind === 'unread' && probe.why === 'model') {
+      const prevWall = lastWall.get(session);
+      const at = Date.parse(rec.ts);
+      const sameTurn = prevWall && prevWall.model && ((prevWall.promptId && rec.promptId && prevWall.promptId === rec.promptId) || (Number.isFinite(at) && Math.abs(at - prevWall.measuredAt) <= 2000));
+      const model = (typeof rec.servedModel === 'string' && rec.servedModel) || (sameTurn ? prevWall.model : modelOfWall(session, rec, modelOf));
+      sig = quota.signalFromStream(rec, { model });
+      if (sig && sig.kind === 'exhausted') sig = { ...sig, model };
+    }
     if (!sig || sig.source !== 'stream') return null;
     if (sig.kind === 'unread') { once(`unread|${session.backend}|${sig.why}`, `[stream-wall] ${session.backend}: a usage wall the stream named was not read (${sig.why}) — nothing written, never a guess`); return null; }
     if (sig.kind !== 'exhausted') return null;
@@ -136,4 +164,4 @@ function configure(deps) { road = createStreamWallRoad(deps); return road; }
 /** The ACP consumer's entry (src/server/stdout/acp-events.js). */
 function onRecord(session, rec, opts) { return road ? road.onRecord(session, rec, opts) : null; }
 
-module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, ownModelOf, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT };
+module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, ownModelOf, readWrapperSidecar, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT, SIDECAR_CAP };

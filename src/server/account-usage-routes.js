@@ -978,7 +978,7 @@ require('./stream-wall.js').configure({ harnessOf: (id) => { try { return requir
   cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor,
   // the wrapper's own sidecar (server.js BUFFERS_DIR/<webui id>.json): its agy `init.model` — the wall's model for a wrapper
   // that does not stamp one, across a hub restart (r3)
-  wrapperMetaOf: (s) => (s && s._webuiId ? JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'session-buffers', s._webuiId + '.json'), 'utf8')) : null) });
+  wrapperMetaOf: (s) => require('./stream-wall.js').readWrapperSidecar(path.join(rootDir, 'data', 'session-buffers'), s) }); // bounded + local-only (r4)
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }

@@ -395,7 +395,26 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   sidecars['w-old-wrapper'] = { agy: { model: 'gemini-4-argon-high' } };   // the model the old wrapper's agy init named
   drive(s6, [NOTICE, PEND]);
   ok('r3: an OLDER wrapper (no servedModel) — the wrapper\'s sidecar agy.model is the witness, ahead of the session\'s pick (Gemini written)', win(disk(Cc.id), G, '7d')?.usedPct === 100 && !lim(disk(Cc.id), C));
-  ok('r3: the hub\'s road is configured with that reader: the wrapper\'s own BUFFERS_DIR sidecar <webui id>.json', /wrapperMetaOf: \(s\) => \(s && s\._webuiId \? JSON\.parse\(fs\.readFileSync\(path\.join\(rootDir, 'data', 'session-buffers', s\._webuiId \+ '\.json'\), 'utf8'\)\) : null\)/.test(read('src/server/account-usage-routes.js')) && /const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/.test(read('server.js')));
+  ok('r3: the hub\'s sidecar dir is server.js\'s BUFFERS_DIR (data/session-buffers)', /const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/.test(read('server.js')));
+  // r4: THE SIDECAR IS READ FOR A WALL RECORD ONLY, ONCE PER WALL — and bounded, local-only
+  let reads = 0;
+  SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l), wrapperMetaOf: (x) => { reads++; return sidecars[x._webuiId] || null; } });
+  const s7 = fresh({ id: 'agy-sidecar-count' }, { _webuiId: 'w-old-wrapper' });
+  drive(s7, [{ ...PEND, stopReason: 'end_turn', error: null }, USAGE, { ...PEND, promptId: 'p2', stopReason: 'end_turn', error: null }, { ...NOTICE, noticeKind: 'agy-system', level: 'info', text: 'step' }, { ...PEND, promptId: 'p3', stopReason: 'cancelled', error: null }, { ...NOTICE, noticeKind: 'command_applied', level: 'info', text: 'Model → x' }]);
+  ok('r4: records that are NO wall (turn ends, usage, other notices) ⇒ ZERO sidecar reads', reads === 0, String(reads));
+  drive(fresh({ id: 'agy-sidecar-count' }, { _webuiId: 'w-old-wrapper' }), [NOTICE, PEND]);
+  ok('r4: one wall said twice (the notice + its prompt_end, an older wrapper: no servedModel) ⇒ ONE sidecar read, the wall written', reads === 1 && win(disk('agy-sidecar-count'), G, '7d')?.usedPct === 100, String(reads));
+  {
+    const dirS = path.join(ROOT, 'sidecars'); fs.mkdirSync(dirS, { recursive: true });
+    const said = [];
+    fs.writeFileSync(path.join(dirS, 'w-small.json'), JSON.stringify({ agy: { model: 'gemini-4-argon-high' } }));
+    fs.writeFileSync(path.join(dirS, 'w-big.json'), JSON.stringify({ agy: { model: 'gemini-4-argon-high' }, pad: 'x'.repeat(1024 * 1024) }));
+    const small = SW.readWrapperSidecar(dirS, { _webuiId: 'w-small' }, { log: (l) => said.push(l) });
+    const big = SW.readWrapperSidecar(dirS, { _webuiId: 'w-big' }, { log: (l) => said.push(l) });
+    const out = SW.readWrapperSidecar(dirS, { _webuiId: '../sidecars-escape' }, { log: (l) => said.push(l) });
+    ok('r4: the reader — a small sidecar parsed; a 1 MB one SKIPPED by name (over the 256 KB cap); an id that resolves outside the dir refused', small?.agy?.model === 'gemini-4-argon-high' && big === null && out === null && said.some((l) => /w-big\.json is \d+ bytes — over the 262144-byte cap, not read/.test(l)) && said.some((l) => /resolves outside .* — not read/.test(l)), JSON.stringify(said));
+    ok('r4: the hub configures THAT reader (bounded, local-only) over data/session-buffers', /wrapperMetaOf: \(s\) => require\('\.\/stream-wall\.js'\)\.readWrapperSidecar\(path\.join\(rootDir, 'data', 'session-buffers'\), s\)/.test(read('src/server/account-usage-routes.js')) && !/readFileSync\(path\.join\(rootDir, 'data', 'session-buffers'/.test(read('src/server/account-usage-routes.js')));
+  }
   SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
   // no model fact anywhere ⇒ still no signal, said
   const n0 = logs.length;

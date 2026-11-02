@@ -1685,8 +1685,9 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
   // lacked the key, so in production the first wall of a session was dropped while every suite that stubbed the key was
   // green). r3: dotted AND bracketed reads (`engine.x`, `engine?.x`, `engine['x']`, `engine?.["x"]`), judged against the
   // `engine:` literal's keys only, by ONE census function that reads a FILE (its RED control plants into a file)
-  const READ_RE = /\bengine\s*(?:\?\.)?(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(['"])([A-Za-z_$][\w$]*)\2\s*\])/g;
-  const directReadsOfFile = (abs) => [...new Set([...fs.readFileSync(abs, 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '').matchAll(READ_RE)].map((m) => m[1] || m[3]))];
+  // r4: `engine?.x` is its own alternative (r3's optional `?.` swallowed the dot and then demanded a second one)
+  const READ_RE = /\bengine\s*(?:\?\.\s*([A-Za-z_$][\w$]*)|\.\s*([A-Za-z_$][\w$]*)|(?:\?\.)?\[\s*(['"])([A-Za-z_$][\w$]*)\3\s*\])/g;
+  const directReadsOfFile = (abs) => [...new Set([...fs.readFileSync(abs, 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '').matchAll(READ_RE)].map((m) => m[1] || m[2] || m[4]))];
   const directMissing = (files, wiredSet) => files.flatMap((abs) => directReadsOfFile(abs).filter((n) => !wiredSet.includes(n)).map((n) => `${path.relative(REPO, abs)}: engine.${n}`));
   const direct = directMissing(consumers.map((c) => path.join(REPO, c)), wired['src/server/session-stdout.js']);
   ok('§10 every name a consumer READS off `engine` directly (engine.x / engine?.x / engine[\'x\']) is in the `engine:` literal too', direct.length === 0, JSON.stringify(direct));
@@ -1704,9 +1705,9 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
       const real = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
       const anchor10 = '  function attach(session, id, ptyProcess,';
       const copy = path.join(dir10, 'acp-events.js');
-      fs.writeFileSync(copy, real.replace(anchor10, "  const planted1 = engine.BUFFERS_DIR?.(null); const planted2 = engine['notWiredName']; const planted3 = engine?.[\"alsoNotWired\"];\n" + anchor10));
+      fs.writeFileSync(copy, real.replace(anchor10, "  const planted1 = engine.BUFFERS_DIR?.(null); const planted2 = engine['notWiredName']; const planted3 = engine?.[\"alsoNotWired\"]; const planted4 = engine?.optionalUnwired?.(null);\n" + anchor10));
       const caught = directMissing([copy], wired['src/server/session-stdout.js']);
-      ok('§10 RED control: reads PLANTED into a copy of acp-events.js — an option name (engine.BUFFERS_DIR?.()), engine[\'x\'], engine?.["x"] — are each caught by the census over that file', real.includes(anchor10) && ['BUFFERS_DIR', 'notWiredName', 'alsoNotWired'].every((n) => caught.some((c) => c.endsWith('engine.' + n))) && directMissing([path.join(REPO, 'src/server/stdout/acp-events.js')], wired['src/server/session-stdout.js']).length === 0, JSON.stringify(caught));
+      ok('§10 RED control: reads PLANTED into a copy of acp-events.js — an option name (engine.BUFFERS_DIR?.()), engine[\'x\'], engine?.["x"], engine?.x?.() — are each caught by the census over that file', real.includes(anchor10) && ['BUFFERS_DIR', 'notWiredName', 'alsoNotWired', 'optionalUnwired'].every((n) => caught.some((c) => c.endsWith('engine.' + n))) && directMissing([path.join(REPO, 'src/server/stdout/acp-events.js')], wired['src/server/session-stdout.js']).length === 0, JSON.stringify(caught));
     } finally { fs.rmSync(dir10, { recursive: true, force: true }); }
   }
   // …and the two names this whole branch depends on are really there
