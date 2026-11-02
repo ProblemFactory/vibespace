@@ -8,10 +8,15 @@
 //    noExec: true (lane engine-distribution: the kernel side's v0.1.1+ — no childProcess, so `version` is null)}
 // Lane engine-distribution: like theirs, the probe also answers `declaredVersion` (its package's kernel.json, when it has one)
 // and `integrity` (its read of the receipt VibeSpace wrote beside the kernel: `stat.size === bytes` ⇒ verified — never a rehash).
+// Lane engine-spi-egress: its id and its features follow ITS OWN manifest — the EGRESS VARIANT (scripts/fixtures/engine-plugin-egress/
+// vibespace-plugin.json beside this server.js: the reserved `egressAllowlist` row) answers `features: ['egress-allowlist']` (no
+// `surfaces`) and launches its kernel with `--vibespace-kernel-features=egress-allowlist` (the fake kernel's getVersion then says so).
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const KINDS = ['js-dialog', 'http-auth', 'client-cert', 'permission', 'file-chooser', 'download', 'print', 'popup', 'select-popup', 'webauthn', 'credential', 'payment-request', 'external-protocol', 'interstitial', 'fullscreen', 'pointer-lock', 'media-picker', 'device-chooser', 'native-picker', 'suppressed'];
+const MANIFEST = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'vibespace-plugin.json'), 'utf8')) || {}; } catch { return {}; } })();
+const EGRESS = !!(MANIFEST.contributes && Array.isArray(MANIFEST.contributes.settings) && MANIFEST.contributes.settings.some((s) => s && s.key === 'egressAllowlist'));
 const mode = () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.VIBESPACE_PLUGIN_DATA || '.', 'mode.json'), 'utf8')) || {}; } catch { return {}; } };
 function declared() { try { const k = JSON.parse(fs.readFileSync(path.join(__dirname, 'kernel.json'), 'utf8')); const p = k.platforms && k.platforms['linux-x64']; return String((p && p.version) || k.version || '') || null; } catch { return null; } }
 function integrity(binaryPath) {
@@ -20,7 +25,7 @@ function integrity(binaryPath) {
 function probe(binaryPath, m = {}) {
   let installed = false, executable = false, version = null;
   try { installed = fs.statSync(binaryPath).isFile(); if (installed) { fs.accessSync(binaryPath, fs.constants.X_OK); executable = true; if (!m.noExec) version = String(execFileSync(binaryPath, ['--version'], { timeout: 3000, encoding: 'utf8' })).trim() || null; } } catch { /* a fact: absent / not runnable / no version */ }
-  return { id: 'vibespace.custom-browser', installed, executable, binaryPath, version, declaredVersion: declared(), integrity: installed ? integrity(binaryPath) : null, protocol: 1, kinds: KINDS, features: ['surfaces', 'webauthn', 'credentials'] };
+  return { id: String(MANIFEST.id || ''), installed, executable, binaryPath, version, declaredVersion: declared(), integrity: installed ? integrity(binaryPath) : null, protocol: 1, kinds: KINDS, features: EGRESS ? ['egress-allowlist'] : ['surfaces', 'webauthn', 'credentials'] };
 }
 process.send({ t: 'hello', api: 1 });
 process.on('message', (msg) => {
@@ -36,7 +41,7 @@ process.on('message', (msg) => {
     if (m.hang === 'launch') return;
     if (m.launchStatus) return reply(m.launchStatus, { error: 'fixture', code: 'fixture' });
     if (!probe(bin, m).installed) return reply(409, { error: `no kernel at ${bin}`, code: 'no_binary' });
-    return reply(200, { executablePath: bin, binaryPath: bin, args: ['--vibespace-engine=fixture', `--vibespace-profile=${input.profileId || ''}`], env: {}, persona: {}, ...(m.launch || {}) });
+    return reply(200, { executablePath: bin, binaryPath: bin, args: ['--vibespace-engine=fixture', `--vibespace-profile=${input.profileId || ''}`, ...(EGRESS ? ['--vibespace-kernel-features=egress-allowlist'] : [])], env: {}, persona: {}, ...(m.launch || {}) });
   }
   reply(404, { error: 'route not found' });
 });

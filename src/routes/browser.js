@@ -1974,11 +1974,11 @@ router.post('/api/agent/browser/audit', async (req, res) => {
       }
     }
     // verify r1 V1 (lane browser-propose): what CloakBrowser's site list REFUSED while this verb ran — its own profile's
-    // proxy (one per cloak profile), a profile this conversation HOLDS a lease on (never another's refusals), since the
+    // proxy (one per wrapped profile: cloak's, and since lane engine-spi-egress an engine's), a profile this conversation HOLDS a lease on (never another's refusals), since the
     // verb's /resolve — by name, so the agent asks for exactly that site (one card) instead of reading a blank page
     let egressRefused = null;
     if (profileId && since > 0 && typeof k.cloakRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
-      try { const hosts = k.cloakRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts) }; } catch { egressRefused = null; }
+      try { const hosts = k.cloakRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts, typeof k.egressEngineOf === 'function' ? k.egressEngineOf(profileId) : null) }; } catch { egressRefused = null; } // lane engine-spi-egress: an engine's own list by its name
     }
     // lane browser-viewport-answer (B-6dae ①): the agent's own `set viewport|device` — the page's size read AFTER it (or instead
     // of it: a pin ruled), ONE line the CLI prints and ONE trace row (the bridge's)

@@ -5,14 +5,16 @@
  * NOT in the plugin's package (1.2 GB): VibeSpace downloads it, the plugin only answers paths and arguments. The ORCH half
  * (src/server/engine-distribution.js) fetches, hashes, unpacks and writes; this file JUDGES:
  *
- *   THE MANIFEST (`kernelManifestVerdict`): the package's `kernel.json` (schemaVersion 1; `layout {archiveFormat 'tar.zst',
+ *   THE MANIFEST (`kernelManifestVerdict`): the package's `kernel.json` (schemaVersion 1; `layout {archiveFormat 'tar.zst' |
+ *   'tar.gz' (lane engine-spi-egress: a vendor's own archive — gunzip beside zstd, the same tar reader and verdicts),
  *   stripComponents, binaryRelPath 'chrome', requiredFiles[]}`; `platforms['<os>-<arch>'] {url, sha256, bytes, version,
  *   binaryRelPath, layout}`) → ONE artifact for this machine, or a refusal by name. The fleet's `browserEngine.kernel {url,
  *   sha256}` (the cluster's own artifact host) is MERGED over the package's, field by field (round 2: a fleet URL that is not
  *   https is refused by name — engine_url_not_https — never swapped for the package's; the sha256 always authenticates).
  *   THE PLAN (`kernelPlan`): every path inside the kernel's own folder — `<root>/<tag>.part`, `<root>/.unpack-<tag>/`,
  *   `<root>/<tag>/` (= dirname of the registry's kernelPath), `<root>/.removing-<tag>/`, the receipt beside `chrome`; for an
- *   install, the Node it unpacks on (round 2: a zlib without zstd ⇒ engine_node_unsupported BEFORE any byte is fetched).
+ *   install, the Node it unpacks on (round 2: a zlib without zstd ⇒ engine_node_unsupported BEFORE any byte is fetched — for
+ *   a tar.zst; a tar.gz unpacks on every Node).
  *   THE ARCHIVE (`tarParser` + `tarEntryVerdict` + `tarShapeVerdict`): a tar stream read header by header (ustar, GNU long
  *   names, pax paths); every entry judged BEFORE anything is extracted — no absolute name, no `..`, no link, no special file,
  *   one top folder per `stripComponents`, no duplicate, every `requiredFiles` a regular file, the program a regular file.
@@ -32,7 +34,7 @@
 const SCHEMA = 1;
 const RECEIPT_FILE = 'install-receipt.json';
 const KERNEL_FILE = 'kernel.json';
-const ARCHIVE_FORMATS = Object.freeze(['tar.zst']);
+const ARCHIVE_FORMATS = Object.freeze(['tar.zst', 'tar.gz']);
 /** The program's name inside the kernel's folder — the registry's kernelPath ends in it (src/server/browser-engines.js). */
 const BINARY = 'chrome';
 const BYTES_MAX = 8 * 1024 * 1024 * 1024;   // an archive or one file past 8 GB is not a browser kernel
@@ -231,19 +233,28 @@ function kernelCredentialVerdict({ kernelUrl = '', install = null, integration =
   return { use: true, host: kHost, why: 'plugin-repository', asset: true, repository, form };
 }
 
+/** lane engine-spi-egress: the archive format kernel.json names for `tag` (the platform's layout over the top one) — null when
+ *  it names none (the verdict refuses it then). */
+function archiveFormatOf(doc, tag = 'linux-x64') {
+  if (!isObj(doc)) return null;
+  const p = isObj(doc.platforms) && isObj(doc.platforms[tag]) ? doc.platforms[tag] : {};
+  const f = { ...(isObj(doc.layout) ? doc.layout : {}), ...(isObj(p.layout) ? p.layout : {}) }.archiveFormat;
+  return typeof f === 'string' ? f : null;
+}
 /** THE PLAN — the paths of one kernel install, all inside the kernel's root folder (`<data>/plugins-state/<id>/kernel/`):
  *  `kernelPath` = the registry's `<root>/<tag>/chrome`. → `{ok, root, tag, targetDir, exe, part, unpackDir, removingDir,
  *  receipt}` | a refusal (a path of another shape is never planned). `unpack` = the Node an INSTALL unpacks on, `{zstd, node}`
  *  (the ORCH hands in `typeof zlib.createZstdDecompress === 'function'` + process.versions.node): no zstd ⇒
- *  engine_node_unsupported, naming the floor and the running Node — before any byte is fetched. */
-function kernelPlan({ kernelPath = '', unpack = null } = {}) {
+ *  engine_node_unsupported, naming the floor and the running Node — before any byte is fetched; `format` = kernel.json's
+ *  archive format (archiveFormatOf) — a 'tar.gz' needs no zstd (zlib gunzip is in every Node). */
+function kernelPlan({ kernelPath = '', unpack = null, format = null } = {}) {
   const k = String(kernelPath || '');
   const segs = k.split('/');
   if (!k.startsWith('/') || segs.length < 4 || segs[segs.length - 1] !== BINARY || segs.slice(1).some((s) => !s || s === '.' || s === '..')) return { ok: false, code: 'browser_engine_missing', error: 'no kernel place on this computer for that engine' };
   const targetDir = segs.slice(0, -1).join('/');
   const root = segs.slice(0, -2).join('/');
   const tag = segs[segs.length - 2];
-  if (unpack && unpack.zstd !== true) {
+  if (unpack && unpack.zstd !== true && format !== 'tar.gz') {
     const node = clip(unpack.node, 40) || null;
     return { ok: false, code: 'engine_node_unsupported', node, need: NODE_FLOOR, error: `this VibeSpace runs on Node ${node || '(unknown)'}, whose zlib has no zstd — a browser engine's kernel (a tar.zst archive) needs Node ${NODE_FLOOR} or later to unpack; nothing was downloaded` };
   }
@@ -454,5 +465,5 @@ function versionFact({ measuredVersion = null, version = null, declaredVersion =
   return { kind: 'none', version: null };
 }
 
-module.exports = { SCHEMA, RECEIPT_FILE, KERNEL_FILE, ARCHIVE_FORMATS, BINARY, BYTES_MAX, ENTRIES_MAX, NODE_FLOOR, safeRel, httpsUrlOf, kernelManifestVerdict, kernelPlan, GIT_SOURCE_REFUSALS, gitSourceVerdict, gitRepoOf, kernelCredentialVerdict,
+module.exports = { SCHEMA, RECEIPT_FILE, KERNEL_FILE, ARCHIVE_FORMATS, BINARY, BYTES_MAX, ENTRIES_MAX, NODE_FLOOR, safeRel, httpsUrlOf, kernelManifestVerdict, archiveFormatOf, kernelPlan, GIT_SOURCE_REFUSALS, gitSourceVerdict, gitRepoOf, kernelCredentialVerdict,
   tarHeader, tarParser, tarEntryVerdict, tarShapeVerdict, fileModeOf, receiptOf, receiptVerdict, versionOf, versionFact };

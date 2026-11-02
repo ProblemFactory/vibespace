@@ -54,6 +54,7 @@
 //     path starting with it, so a `.` segment before `*` is refused (B-7638).
 //   • needsConsent covers contributed agentTools: a shim is a program on every
 //     session's PATH (local, ssh hosts, paired devices), outside the sandbox.
+const BEN = require('./browser-engines.js'); // lane engine-spi-egress: the engine SPI's reserved-row rule (PURE → PURE; this file is the server's)
 const ID_RE = /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -358,6 +359,10 @@ function contributesAgentTools(m) { return !!(m?.contributes?.agentTools?.length
 function needsConsent(m) { return !!m && (m.client === 'module' || hasDeclaredCapabilities(m) || contributesAgentTools(m) || contributesBrowserEngine(m)); }
 /** lane engine-plugin: a browser ENGINE names the program VibeSpace starts as a profile's browser — always a consent. */
 function contributesBrowserEngine(m) { return !!(m && m.contributes && m.contributes.browserEngine === true); }
+/** lane engine-spi-egress: an engine manifest declaring THE RESERVED SETTINGS ROW of a browser that must reach only listed sites
+ *  (src/browser-engines.js egressRowOf — the ONE rule). Consent covers it — capabilitiesHash names it, so a later version that
+ *  drops the row loses its trust (the owner's «a plugin cannot turn the proxy off»). */
+function egressRowDeclared(m) { return contributesBrowserEngine(m) && !!BEN.egressRowOf(m.contributes.settings); }
 
 /**
  * Plain-words capability list for the consent dialog — the SAME items on the
@@ -374,6 +379,7 @@ function capabilitySummary(m) {
   else if (m.client === 'iframe') items.push({ id: 'client-iframe', text: 'Sandboxed UI: its windows run in an isolated origin and cannot read this page.', params: {} });
   if (m.server) items.push({ id: 'server-process', text: 'Runs its own server process, confined to its plugin folder and its data folder.', params: {} });
   if (contributesBrowserEngine(m)) items.push({ id: 'browser-engine', text: 'Can be chosen as the agent browser: it names the program VibeSpace starts as a profile\'s browser, outside the plugin sandbox.', params: {} }); // lane engine-plugin
+  if (egressRowDeclared(m)) items.push({ id: 'egress-allowlist', text: 'Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.', params: {} }); // lane engine-spi-egress
   if (s.fs?.read?.length) items.push({ id: 'fs-read', text: 'Server: read files under {paths}', params: { paths: s.fs.read.join(', ') } });
   if (s.fs?.write?.length) items.push({ id: 'fs-write', text: 'Server: write AND read files under {paths}', params: { paths: s.fs.write.join(', ') } }); // write implies read in the permission args — the summary must say so
   if (s.childProcess) items.push({ id: 'child-process', text: 'Server: run other programs (child processes) — those programs are NOT confined and can reach anything the server user can.', params: {} });
@@ -405,8 +411,9 @@ function capabilitiesHash(m) {
     client: m.client || 'none', server: !!m.server, capabilities: m.capabilities || {},
     agentTools: (m.contributes?.agentTools || []).map((t) => t.name).sort(), routes: !!m.contributes?.routes,
     ...(contributesBrowserEngine(m) ? { browserEngine: true } : {}), // lane engine-plugin: named only when true — every hash before it stays the same
+    ...(egressRowDeclared(m) ? { egressAllowlist: true } : {}), // lane engine-spi-egress: the same — a version that drops the site list row drifts (re-enable to accept it)
   });
   return fnv1a(subject, 0x811c9dc5) + fnv1a(subject.split('').reverse().join(''), 0x9747b28c);
 }
 
-module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, contributesBrowserEngine, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };
+module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, contributesBrowserEngine, egressRowDeclared, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };

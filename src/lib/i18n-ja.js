@@ -10943,9 +10943,10 @@ export default {
   "“{was}” was renamed to “{now}” on another screen meanwhile — your name “{name}” replaces it": "「{was}」はその間に別の画面で「{now}」に名前が変わっていました — 入力した「{name}」に置き換えます",
   // lane engine-plugin: a browser ENGINE plugin — the «自研内核» card, the default engine setting, the consent line
   "Chrome (the browser CLI's build)": "Chrome（ブラウザ CLI のビルド）",
-  "The custom kernel (vibespace.custom-browser plugin)": "独自カーネル（vibespace.custom-browser プラグイン）",
   "Default browser engine": "既定のブラウザエンジン",
-  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新しいエージェントブラウザが動かすブラウザプログラム：ブラウザ CLI がインストールした Chrome（既定）か、vibespace.custom-browser プラグインの独自カーネル。プロファイルの作成時と会話のブラウザの初回起動時に読まれ、その後はそこに保存されます — 既存のプロファイルは「ビルドを変更…」で切り替えます。クラスタが事前に設定できます。ここで選んだ値が優先されます。",
+  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新しいエージェントブラウザが動かすブラウザプログラム：ブラウザ CLI がインストールした Chrome（既定）か、このコンピュータで有効なブラウザエンジンプラグインのブラウザ（選択肢に一覧されます）。プロファイルの作成時と会話のブラウザの初回起動時に読まれ、その後はそこに保存されます — 既存のプロファイルは「ビルドを変更…」で切り替えます。クラスタが事前に設定できます。ここで選んだ値が優先されます。",
+  "{engine} (browser engine plugin)": "{engine}（ブラウザエンジンのプラグイン）", // lane engine-spi-egress: the default engine's options, drawn from the engine table
+  "{id} — its plugin is not running on this computer": "{id} — そのプラグインはこのコンピュータで動いていません", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "the custom kernel ({id})": "独自カーネル（{id}）",
   "{plugin} does not answer as a browser engine.": "{plugin} はブラウザエンジンとして応答しません。",
   "{plugin} · its kernel is not installed on this computer.": "{plugin} · そのカーネルはこのコンピュータにインストールされていません。",
@@ -10966,6 +10967,7 @@ export default {
   "That engine's plugin did not answer — restart it in ⚙ → Plugins.": "そのエンジンのプラグインが応答しません — ⚙ → プラグイン で再起動してください。",
   "That engine asked to set environment variables VibeSpace does not allow.": "そのエンジンは VibeSpace が許可しない環境変数の設定を求めました。",
   "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "エージェントブラウザとして選べます：VibeSpace がプロファイルのブラウザとして起動するプログラムを指定し、そのプログラムはプラグインのサンドボックスの外で動きます。",
+  "Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.": "そのブラウザは設定に並べたサイトにしかアクセスできません。VibeSpace が自前の許可リスト・プロキシの内側で動かします。", // lane engine-spi-egress: the consent line of an engine with the site list row
   "The page shows a dialog": "ページがダイアログを表示しています", // lane browser-surfaces
   "The site asks for a client certificate": "サイトがクライアント証明書を求めています", // lane browser-surfaces
   "The page asks for a permission": "ページが権限を求めています", // lane browser-surfaces

@@ -26,7 +26,7 @@ const argv = raw.filter((x) => x !== '--pin-tab');
 // does ("Daemon version mismatch detected, restarting..." — measured) — except --version and session info, which never do
 const MYV = process.env.FAKE_AB_VERSION || '0.38.1';
 // lane browser-admin 2a: EVERY call's launch view, so a suite can judge that a pinned build rides each one
-fs.appendFileSync(path.join(st, 'calls.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, verb: argv.slice(0, 2).join(' '), exe: prefix.exe, v: MYV }) + '\\n');
+fs.appendFileSync(path.join(st, 'calls.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, verb: argv.slice(0, 2).join(' '), exe: prefix.exe, args: prefix.args, v: MYV }) + '\\n'); // lane engine-spi-egress: + the call's AGENT_BROWSER_ARGS
 const [a, b] = argv;
 const cfgOf = () => { const p = process.env.AGENT_BROWSER_CONFIG; if (!p) return null; try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return { unreadable: p }; } };
 // B-0b8c (lane browser-probe-transient): a --version that does not answer. <state>/version-hang = how many probes HANG (a

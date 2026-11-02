@@ -8,7 +8,9 @@
  *   rows()                 → [{id, label, family, version}] — the table now (a plugin turned off leaves it at once)
  *   providerFor(id)        → {id, label, family, probe(input), launchOptions(input)} | null
  *   probe(id)              → the probe's verdict over THE path VibeSpace resolved for its kernel (`kernelPath`) —
- *                            `{ok:true, fact}` | `{ok:false, code, error}` (src/browser-engines.js engineAnswerVerdict)
+ *                            `{ok:true, fact}` | `{ok:false, code, error}` (src/browser-engines.js engineAnswerVerdict;
+ *                            lane engine-spi-egress: judged with the manifest's `contributes.settings` — an engine declaring
+ *                            `egress-allowlist` needs its reserved `egressAllowlist` string row there)
  *   launchOptions(id, x)   → `{ok:true, launch:{executablePath, args, env}}` | a refusal by name
  *   kernelPath(id)         → `<dataDir>/plugins-state/<id>/kernel/<platform-arch>/chrome` — where a kernel lives on this
  *                            machine: inside the plugin's OWN state folder, the one place its `node --permission` process may
@@ -32,7 +34,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     let list = [];
     try { list = l && typeof l.list === 'function' ? l.list() : []; } catch (e) { log.warn?.(`[browser] the plugin list could not be read for the engine table (${e && e.message})`); }
     return list.filter((p) => p && p.valid && p.contributes && p.contributes.browserEngine === true && p.enabled && p.trusted && p.state === 'running' && BE.ID_RE.test(String(p.id || '')))
-      .map((p) => ({ id: String(p.id), label: String(p.label || p.id), family: 'manifest', version: p.version || null }));
+      .map((p) => ({ id: String(p.id), label: String(p.label || p.id), family: 'manifest', version: p.version || null, settings: Array.isArray(p.contributes.settings) ? p.contributes.settings : [] }));
   }
   function builtinRows() {
     const m = P();
@@ -41,10 +43,11 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     try { ids = m.providerIds('browser-engine'); defs = m.defs(); } catch { return []; }
     return ids.map((id) => ({ id: 'builtin.' + id, label: String((defs[id] && defs[id].label) || id), family: 'builtin', version: null, own: id }));
   }
-  function rows() {
+  function tableRows() {
     const seen = new Set();
-    return [...manifestRows(), ...builtinRows()].filter((r) => !seen.has(r.id) && seen.add(r.id)).map(({ own, ...r }) => r);
+    return [...manifestRows(), ...builtinRows()].filter((r) => !seen.has(r.id) && seen.add(r.id));
   }
+  function rows() { return tableRows().map(({ own, settings, ...r }) => r); }
   async function askManifest(row, verb, input) {
     const v = BE.ENGINE_VERBS[verb];
     const l = L();
@@ -55,7 +58,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
       if (e && e.status === 504) return BE.unansweredOf({ id: row.id, label: row.label, ms: timeoutMs || 30000 });
       return BE.missingOf({ id: row.id });
     }
-    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label });
+    return BE.engineAnswerVerdict(verb, reply, { id: row.id, label: row.label, settings: row.settings });
   }
   async function askBuiltin(row, verb, input) {
     const m = P();
@@ -65,10 +68,11 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     return BE.engineAnswerVerdict(verb, { status: body && body.status ? body.status : 200, body: body && body.status ? body.body : body }, { id: row.id, label: row.label });
   }
   function providerFor(id) {
-    const row = rows().find((r) => r.id === String(id || ''));
+    const row = tableRows().find((r) => r.id === String(id || ''));
     if (!row) return null;
     const via = row.family === 'builtin' ? askBuiltin : askManifest;
-    return { ...row, probe: (input = {}) => via(row, 'probe', input), launchOptions: (input = {}) => via(row, 'launchOptions', input) };
+    const { own, settings, ...pub } = row;
+    return { ...pub, probe: (input = {}) => via(row, 'probe', input), launchOptions: (input = {}) => via(row, 'launchOptions', input) };
   }
   function kernelPath(id) { return dataDir && BE.ID_RE.test(String(id || '')) ? path.join(dataDir, 'plugins-state', String(id), 'kernel', tag, 'chrome') : null; }
   async function probe(id) {

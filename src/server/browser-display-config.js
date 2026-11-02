@@ -113,8 +113,12 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     // lane engine-args-string r2 — THE WRAPPER ROAD: `view.executablePath` is the keeper's wrapper (engineWrapperFor), which
     // carries the engine's switches (`view.args`) whole; the driver's `args` keep only the keeper's part of the split (every name
     // the engine gives leaves it — browser-verbs splitLaunchArgs), written by derived() as the driver's one comma-free line
-    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: V.splitLaunchArgs(base.args, extra).keeper } : {}) };
-    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000')).digest('hex').slice(0, 10);
+    // lane engine-spi-egress: `view.keeperArgs` = the KEEPER's own switches of this launch (a wrapped engine's proxy): appended to
+    // the keeper's part, and every proxy switch of the base file dropped (Chromium ranks a pac url / no-proxy above them)
+    const own = Array.isArray(view.keeperArgs) ? view.keeperArgs.map(String) : [];
+    const kept = own.length ? ENG.withoutProxyArgs(V.driverArgsList(base.args)) : base.args;
+    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length || own.length ? { args: [...V.splitLaunchArgs(kept, extra).keeper, ...own] } : {}) };
+    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000') + '\u0000' + own.join('\u0000')).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
     return derived(file, cfg, baseFile, 'the engine view\'s config');
   }

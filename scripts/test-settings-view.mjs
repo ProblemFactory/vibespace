@@ -539,6 +539,16 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     'r2 wiring: the ONE settings writer computes the in-force `spend` once — the POST echoes it AND the settings-updated broadcast carries it to every tab');
 }
 
+// lane engine-spi-egress (design-desk cloak-plugin §1 (g)): «Default browser engine» NAMES NO ENGINE — its schema row holds Chrome
+// alone; the other options are drawn from the engine table its fact line reads (settings-ui _renderEngineFact over GET
+// /api/browser/engines → browser-build-model engineOptions); the advanced tier keeps the same row count
+{
+  const de = S.SETTINGS_SCHEMA['browser.defaultEngine'], ui = read('src/lib/settings-ui.js');
+  ok(de && de.type === 'enum' && de.options.length === 1 && de.options[0].value === 'default' && !/plugin:|custom-browser/.test(JSON.stringify(de)) && de.fact === 'browser-engine' && de.tier === 'advanced'
+    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /sel\.replaceChildren\(\.\.\.engineOptions\(r, v, t\)/.test(ui) && /import \{ engineFactText, engineOptions \} from '\.\/browser-build-model\.js'/.test(ui),
+    'lane engine-spi-egress: the default-engine row names no engine id (Chrome alone in the schema); its options are DRAWN from the engine table the fact line reads (engineOptions), the same answer', de && de.options);
+}
+
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
 console.log('ALL PASS (' + pass + ')');

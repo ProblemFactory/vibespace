@@ -1,0 +1,29 @@
+{
+  "id": "vibespace.egress-engine",
+  "version": "0.0.1",
+  "label": "Fixture Egress Engine",
+  "description": "The fixture engine's EGRESS VARIANT (lane engine-spi-egress): scripts/fixtures/engine-plugin/server.js beside this manifest, declaring the egress-allowlist feature and its reserved settings row — VibeSpace's allowlisting proxy wraps its browser.",
+  "engines": {
+    "vibespace": "2.369.353"
+  },
+  "client": "none",
+  "server": true,
+  "contributes": {
+    "routes": true,
+    "browserEngine": true,
+    "settings": [
+      {
+        "key": "egressAllowlist",
+        "type": "string",
+        "default": "",
+        "label": "Sites its browser may open",
+        "description": "Host names, comma separated (.example.test admits its sub-domains); every other site is refused by VibeSpace's proxy."
+      }
+    ]
+  },
+  "capabilities": {
+    "server": {
+      "childProcess": true
+    }
+  }
+}

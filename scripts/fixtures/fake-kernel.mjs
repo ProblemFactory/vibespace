@@ -47,6 +47,11 @@
 // time, never in order). r2d: + `id` (the CDP id its sender gave it — a leg finds its OWN call by it, never by its look) and `tab`
 // (the tab it rides: its session's target, a browser-level Target.* call's params.targetId, null = none — WHO a call is for, never
 // its method's name).
+// lane engine-spi-egress: THE EGRESS VARIANT — the kernel honours a proxy as Chromium does: `mode.proxy` (as a PROGRAM:
+// `--proxy-server=<url>`) ⇒ a navigation to an http(s) url FETCHES it through that proxy (http: an absolute-form GET; https: a
+// CONNECT, nothing past the tunnel) and the page's title becomes `egress <status>: <the answer's first line>`; a loopback host
+// goes DIRECT unless `--proxy-bypass-list` holds `<-loopback>` (Chromium's implicit bypass); every fetch lands in `egress()` and
+// <dir>/fake-kernel-egress.log. `--vibespace-kernel-features=<a,b>` = `mode.features` (an engine without `surfaces`).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,6 +106,28 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const onTarget = (tid, fn) => { for (const [sid, s] of sessions) if (s.targetId === tid) fn(sid, s); };
   /** A VibeSpace.* event on every session of the tab that enabled surfaces (Q2: the frame's sessionId + params.targetId). */
   const vsEvent = (tid, method, params) => onTarget(tid, (sid, s) => { if (s.vs) send(s.ws, { method, params: { ...params, targetId: tid }, sessionId: sid }); });
+  // lane engine-spi-egress: one navigation's fetch the way a proxied Chromium makes it (bounded; never throws)
+  const egressLog = [];
+  const isLoop = (h) => /^(?:localhost|127\.\d+\.\d+\.\d+|\[?::1\]?)$/i.test(String(h || ''));
+  function fetchVia(url) {
+    let u; try { u = new URL(url); } catch { return Promise.resolve(null); }
+    if (!/^https?:$/.test(u.protocol)) return Promise.resolve(null);
+    const px = mode.proxy ? (() => { try { return new URL(/^[a-z]+:\/\//i.test(mode.proxy) ? mode.proxy : 'http://' + mode.proxy); } catch { return null; } })() : null;
+    const direct = !px || (isLoop(u.hostname) && !String(mode.proxyBypass || '').split(/[;,]/).includes('<-loopback>'));
+    const tls = u.protocol === 'https:', port = Number(u.port) || (tls ? 443 : 80);
+    return new Promise((resolve) => {
+      let done = false;
+      const fin = (status, body) => { if (done) return; done = true; const r = { url: String(url), via: direct ? 'direct' : 'proxy', status, body: String(body || '').slice(0, 400) }; egressLog.push(r); if (dir) { try { fs.appendFileSync(path.join(dir, 'fake-kernel-egress.log'), JSON.stringify(r) + '\n'); } catch { /* best effort */ } } resolve(r); };
+      const read = (res) => { let b = ''; res.setEncoding('utf8'); res.on('data', (d) => { if (b.length < 4000) b += d; }); res.on('end', () => fin(res.statusCode, b)); res.on('error', () => fin(res.statusCode, b)); };
+      const opts = direct ? { host: u.hostname, port, method: 'GET', path: u.pathname + u.search } : tls ? { host: px.hostname, port: Number(px.port) || 80, method: 'CONNECT', path: `${u.hostname}:${port}` } : { host: px.hostname, port: Number(px.port) || 80, method: 'GET', path: String(url), headers: { Host: u.host } };
+      const rq = http.request({ ...opts, timeout: 5000 });
+      rq.on('response', read);
+      rq.on('connect', (res, sock) => { try { sock.destroy(); } catch { /* gone */ } if (res.statusCode === 200) fin(200, 'tunnel'); else read(res); });
+      rq.on('timeout', () => { rq.destroy(); fin(0, 'timeout'); });
+      rq.on('error', (e) => fin(0, e && e.code ? e.code : 'error'));
+      rq.end();
+    });
+  }
   const loaded = (t) => { const ev = (sid, s, method, params) => send(s.ws, { method, params, sessionId: sid }); onTarget(t.targetId, (sid, s) => { ev(sid, s, 'Page.frameNavigated', { frame: frameOf(t), type: 'Navigation' }); ev(sid, s, 'Page.domContentEventFired', { timestamp: Date.now() / 1000 }); ev(sid, s, 'Page.loadEventFired', { timestamp: Date.now() / 1000 }); for (const name of ['DOMContentLoaded', 'load', 'networkIdle']) ev(sid, s, 'Page.lifecycleEvent', { frameId: t.targetId, loaderId: 'L' + t.targetId, name, timestamp: Date.now() / 1000 }); }); };
   function openSurface(spec = {}) {
     const t = targets.get(spec.targetId) || [...targets.values()][0];
@@ -266,6 +293,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         const want = /#vs-surface=([a-z-]+)(?::([a-z]+))?/.exec(t.url);
         const login = /#vs-login=([a-z-]+)/.exec(t.url), typed = /#vs-typed=([^:#]+):([^#]+)/.exec(t.url); // lane browser-login
         if (want) setTimeout(() => openSurface(want[1] === 'js-dialog' ? { ...jsDialogSpec(want[2] || 'confirm', { message: 'Leave this page?', origin: 'https://example.test' }), targetId: t.targetId, hold: true } : { kind: want[1], targetId: t.targetId, hold: true }), 30);
+        else if (mode.proxy && /^https?:/i.test(t.url)) { const nav = t.url; fetchVia(nav).then((r) => { if (r && t.url === nav) t.title = `egress ${r.status}: ${r.body.trim().split('\n')[0]}`; loaded(t); }); } // lane engine-spi-egress
         else { setTimeout(() => loaded(t), 5); if (login) setTimeout(() => detectCredentialForm({ targetId: t.targetId, kind: login[1] }), 20); if (typed) { const [who, pw] = [typed[1], typed[2]].map(decodeURIComponent); setTimeout(() => submitCredentialForm({ targetId: t.targetId, usernameHint: who, password: pw }), 20); } }
       } return { frameId: t ? t.targetId : 'F', loaderId: t ? 'L' + t.targetId : 'L' };
       case 'Page.handleJavaScriptDialog': { // agent-browser's own session (surfaces off) answering the native face of a js-dialog surface
@@ -325,7 +353,8 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
     navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
-    dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } } };
+    dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },
+    egress: () => egressLog.slice() }; // lane engine-spi-egress: every navigation's fetch (through the proxy or direct)
 }
 
 const asProgram = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -337,7 +366,8 @@ if (asProgram) {
   const dir = flag('user-data-dir');
   if (dir) { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'fake-kernel-argv.json'), JSON.stringify(argv)); } catch { /* best effort */ } }
   const first = argv.filter((x) => !x.startsWith('-')).pop() || 'about:blank';
-  const k = await startFakeKernel({ port: flag('remote-debugging-port') || 0, dir, firstUrl: first });
+  const feats = flag('vibespace-kernel-features'), proxy = flag('proxy-server'); // lane engine-spi-egress: the egress variant
+  const k = await startFakeKernel({ port: flag('remote-debugging-port') || 0, dir, firstUrl: first, mode: { ...(feats ? { features: feats.split(',').filter(Boolean) } : {}), ...(proxy ? { proxy, proxyBypass: flag('proxy-bypass-list') || '' } : {}) } });
   process.stderr.write(`\nDevTools listening on ${k.wsUrl}\n`);
   for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(s, () => k.close().then(() => process.exit(0)));
 }

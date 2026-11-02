@@ -10944,9 +10944,10 @@ export default {
   "“{was}” was renamed to “{now}” on another screen meanwhile — your name “{name}” replaces it": "“{was}”在这期间已在另一块屏幕上改名为“{now}” — 你输入的“{name}”替换了它",
   // lane engine-plugin: a browser ENGINE plugin — the «自研内核» card, the default engine setting, the consent line
   "Chrome (the browser CLI's build)": "Chrome（浏览器 CLI 安装的版本）",
-  "The custom kernel (vibespace.custom-browser plugin)": "自研内核（vibespace.custom-browser 插件）",
   "Default browser engine": "默认浏览器内核",
-  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新建的 Agent 浏览器运行哪个浏览器程序：浏览器 CLI 安装的 Chrome（默认），或 vibespace.custom-browser 插件的自研内核。在新建配置、以及对话的浏览器第一次启动时读取，之后保存在它上面 — 已有的配置用「更换版本…」切换。集群可以预设它；你在这里选的值优先。",
+  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新建的 Agent 浏览器运行哪个浏览器程序：浏览器 CLI 安装的 Chrome（默认），或这台电脑上已启用的浏览器内核插件的浏览器（选项里列出它们）。在新建配置、以及对话的浏览器第一次启动时读取，之后保存在它上面 — 已有的配置用「更换版本…」切换。集群可以预设它；你在这里选的值优先。",
+  "{engine} (browser engine plugin)": "{engine}（浏览器内核插件）", // lane engine-spi-egress: the default engine's options, drawn from the engine table
+  "{id} — its plugin is not running on this computer": "{id} — 它的插件没有在这台电脑上运行", // lane engine-spi-egress: the default engine's options, drawn from the engine table
   "the custom kernel ({id})": "自研内核（{id}）",
   "{plugin} does not answer as a browser engine.": "{plugin} 没有按浏览器内核的方式应答。",
   "{plugin} · its kernel is not installed on this computer.": "{plugin} · 它的内核没有装在这台电脑上。",
@@ -10967,6 +10968,7 @@ export default {
   "That engine's plugin did not answer — restart it in ⚙ → Plugins.": "这个内核的插件没有应答 — 在 ⚙ → 插件 里重启它。",
   "That engine asked to set environment variables VibeSpace does not allow.": "这个内核要求设置 VibeSpace 不允许的环境变量。",
   "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "可被选作 Agent 浏览器：它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动；该程序在插件沙箱之外运行。",
+  "Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.": "它的浏览器只能访问你在它的设置里列出的网站：VibeSpace 用自己的放行代理把它包起来运行。", // lane engine-spi-egress: the consent line of an engine with the site list row
   "The page shows a dialog": "网页弹出了一个对话框", // lane browser-surfaces
   "The site asks for a client certificate": "网站要求选择客户端证书", // lane browser-surfaces
   "The page asks for a permission": "网页请求一项权限", // lane browser-surfaces

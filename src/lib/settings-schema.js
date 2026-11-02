@@ -750,17 +750,19 @@ const SETTINGS_SCHEMA = {
     category: t('Agent browser'), liveApply: true,
   },
   // lane engine-plugin (docs/design-custom-browser-plugin.zh.md §1.4): THE DEFAULT ENGINE of NEW agent browsers — Chrome as the
-  // browser CLI runs it, or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is CREATED and when a
+  // browser CLI runs it, or the browser of an engine plugin. Lane engine-spi-egress: NO engine id is named here — the row's
+  // other options are drawn from the engine table its fact carries (src/lib/settings-ui.js _renderEngineFact over GET
+  // /api/browser/engines, browser-build-model engineOptions); a stored 'plugin:<id>' whose engine is not here stays a value
+  // (src/browser-engines.js defaultEngineOf — its fact line says it is not running). Read when a profile is CREATED and when a
   // conversation's browser first STARTS, then written on that record (a later change moves new ones only; Change build…
   // switches an existing profile). The value in effect: the user's own › the cluster's (presets fleet.json `browserEngine`,
   // chart `customBrowser`) › 'default' — the row's fact line says where it came from («由集群预设»). Phase B (D1) flips the default.
   'browser.defaultEngine': {
     type: 'enum', default: 'default', options: [
       { value: 'default', label: t('Chrome (the browser CLI\'s build)') },
-      { value: 'plugin:vibespace.custom-browser', label: t('The custom kernel (vibespace.custom-browser plugin)') },
     ],
     label: t('Default browser engine'),
-    description: t('Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is created and when a conversation\'s browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.'),
+    description: t('Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the browser of a browser engine plugin enabled on this computer (the choices list them). Read when a profile is created and when a conversation\'s browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.'),
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
     fact: 'browser-engine',

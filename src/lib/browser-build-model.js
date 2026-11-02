@@ -75,11 +75,27 @@ function kernelFailWords(code, t) {
 export function engineFactText(r, t) {
   if (!r || r.error || !r.defaultEngine) return t(i18nKey('The browser engines could not be read.'));
   const d = r.defaultEngine;
-  const value = String(d.value || 'default').startsWith('plugin:') ? choiceWords({ kind: 'plugin', id: String(d.value).slice(7) }, t) : t(i18nKey("the browser CLI's default build"));
-  const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
   const engines = Array.isArray(r.engines) ? r.engines : [];
+  const pid = String(d.value || 'default').startsWith('plugin:') ? String(d.value).slice(7) : null;
+  const row = pid ? engines.find((e) => e && e.id === pid) : null;
+  const value = pid ? (row && row.label ? String(row.label) : choiceWords({ kind: 'plugin', id: pid }, t)) : t(i18nKey("the browser CLI's default build"));
+  const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
+  // lane engine-spi-egress: an engine the value names that is not in the table is a FACT said here — never a refusal of the value
+  if (pid && !row) parts.push(t(i18nKey('That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.')));
   parts.push(engines.length ? engines.map((e) => engineNote(e, t)).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.')));
   return parts.join(' ');
+}
+/** lane engine-spi-egress: «Default browser engine»'s OPTIONS, drawn from the engine table GET /api/browser/engines carries —
+ *  no engine id is named anywhere: Chrome, one option per engine here (its label), then the stored value and the value in
+ *  effect when no row names them (an engine whose plugin is not running — a fact, kept selectable). → [{value, label}] */
+export function engineOptions(r, stored, t) {
+  const out = [{ value: 'default', label: t(i18nKey("Chrome (the browser CLI's build)")) }];
+  for (const e of Array.isArray(r && r.engines) ? r.engines : []) if (e && ENGINE_ID_RE.test(String(e.id || '')) && !out.some((o) => o.value === 'plugin:' + e.id)) out.push({ value: 'plugin:' + e.id, label: t(i18nKey('{engine} (browser engine plugin)'), { engine: String(e.label || e.id) }) });
+  for (const v of [stored, r && r.defaultEngine && r.defaultEngine.value]) {
+    const s = String(v == null ? '' : v);
+    if (s.startsWith('plugin:') && ENGINE_ID_RE.test(s.slice(7)) && !out.some((o) => o.value === s)) out.push({ value: s, label: t(i18nKey('{id} — its plugin is not running on this computer'), { id: s.slice(7) }) });
+  }
+  return out;
 }
 
 /**

@@ -11,7 +11,7 @@
  *   the disk against the archive × DISK_FACTOR — `disk` names the folder's free bytes, a pod's PVC), then fetch (https only,
  *   every redirect hop https, the announced length enforced) into `<tag>.part` with its sha256 → the sha256 against the
  *   manifest's (else build_verify_failed — nothing unpacked) → a LIST pass over the zstd stream (node's zlib zstd, no shell
- *   tar) judged by tarShapeVerdict BEFORE anything is written (no link, no `..`, one top folder, every requiredFiles) and the
+ *   tar; lane engine-spi-egress: a kernel.json naming `tar.gz` — zlib gunzip, the same reader) judged by tarShapeVerdict BEFORE anything is written (no link, no `..`, one top folder, every requiredFiles) and the
  *   unpacked size against the free bytes now → the EXTRACT pass into `.unpack-<tag>/` (stripComponents; every entry judged
  *   again) → `install-receipt.json {sha256, bytes, verifiedAt, version}` beside `chrome` → ONE rename to `<tag>/` (a previous
  *   kernel renamed to `.removing-<tag>` first, then deleted): nothing half-done is ever at the kernel's place. A failed step
@@ -108,11 +108,12 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const fleetEngine = () => { try { const f = fleetFacts(); return f && f.browserEngine && typeof f.browserEngine === 'object' ? f.browserEngine : null; } catch { return null; } };
   // the fleet's kernel as it names it — a field it names is merged over the package's (never dropped for it: kernelManifestVerdict)
   const fleetKernelFor = (id) => { const fe = fleetEngine(); return fe && fe.plugin === id && fe.kernel && (fe.kernel.url || fe.kernel.sha256) ? { url: fe.kernel.url || '', sha256: fe.kernel.sha256 || '' } : null; };
-  /** The kernel's plan; `unpack` (an install's) = the Node it unpacks on — no zstd ⇒ engine_node_unsupported, by name. */
-  function planOf(id, { unpack = null } = {}) {
+  /** The kernel's plan; `unpack` (an install's) = the Node it unpacks on — no zstd ⇒ engine_node_unsupported, by name (a
+   *  tar.gz `format` needs none). */
+  function planOf(id, { unpack = null, format = null } = {}) {
     const r = R();
     const kp = r && typeof r.kernelPath === 'function' ? r.kernelPath(id) : null;
-    const plan = EK.kernelPlan({ kernelPath: kp, unpack });
+    const plan = EK.kernelPlan({ kernelPath: kp, unpack, format });
     if (!plan.ok && plan.code === 'engine_node_unsupported') throw named(plan.code, `${who(id)}'s kernel cannot be installed here: ${plan.error}`, { node: plan.node, need: plan.need });
     if (!plan.ok) throw named('browser_engine_missing', `${who(id)} has no kernel place on this computer (no such engine plugin id)`);
     return plan;
@@ -237,8 +238,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     }
     throw named('build_fetch_failed', `more than ${hops} redirects from ${clip(url, 120)}`);
   }
-  /** One pass over the archive: the zstd stream → the tar reader → `onEvent` (awaited: the file writes push back). */
-  async function tarPass(file, onEvent) {
+  /** One pass over the archive: the zstd (or gzip — kernel.json's `format`) stream → the tar reader → `onEvent` (awaited: the
+   *  file writes push back). */
+  async function tarPass(file, onEvent, format = 'tar.zst') {
     const parser = EK.tarParser();
     let seen = 0;
     const handle = async (chunk) => {
@@ -250,8 +252,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       }
     };
     const sink = new Writable({ write(chunk, _enc, cb) { handle(chunk).then(() => cb(), cb); } });
-    try { await pipeline(fs.createReadStream(file), zlibIn.createZstdDecompress(), sink); }
-    catch (e) { if (e && /^(?:build_[a-z_]+|disk)$/.test(String(e.code || ''))) throw e; throw named('build_unpack_failed', `the kernel archive is not a readable tar.zst (${clip(e && e.message, 160)})`); }
+    const gz = format === 'tar.gz';
+    try { await pipeline(fs.createReadStream(file), gz ? zlib.createGunzip() : zlibIn.createZstdDecompress(), sink); }
+    catch (e) { if (e && /^(?:build_[a-z_]+|disk)$/.test(String(e.code || ''))) throw e; throw named('build_unpack_failed', `the kernel archive is not a readable ${gz ? 'tar.gz' : 'tar.zst'} (${clip(e && e.message, 160)})`); }
     const end = parser.end();
     if (!end.ok) throw named('build_unpack_failed', `the kernel archive is not a whole tar: ${end.why}`);
   }
@@ -278,10 +281,13 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       // round 3: an aside copy beside an empty place (a landing stopped between its renames) comes BACK first — a first use or
       // the fleet's boot then needs no download; one that cannot be put back is refused by name (engine_kernel_aside)
       if (await restoreAside(sid, plan) && by !== 'user') { running.delete(sid); notify(); return { ok: true, restored: true, id: sid }; }
-      // the Node it would unpack on (round 2): no zstd ⇒ refused by name before any byte moves, remembered for this Node
+      // the Node it would unpack on (round 2): no zstd ⇒ refused by name before any byte moves, remembered for this Node —
+      // lane engine-spi-egress: unless kernel.json names a tar.gz (gunzip is in every Node); its own refusal comes after
       st.step = 'plan';
-      planOf(sid, { unpack: unpackFacts() });
-      const doc = await manifestDoc(sid);
+      const doc0 = await manifestDoc(sid).catch((e) => e);
+      planOf(sid, { unpack: unpackFacts(), format: doc0 instanceof Error ? null : EK.archiveFormatOf(doc0, plan.tag) });
+      if (doc0 instanceof Error) throw doc0;
+      const doc = doc0;
       const plats = doc && doc.platforms && typeof doc.platforms === 'object' ? Object.keys(doc.platforms) : [];
       const art = doc && doc.platforms && doc.platforms[plan.tag];
       await fsp.mkdir(plan.root, { recursive: true, mode: 0o700 });
@@ -369,7 +375,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     // ③ LIST: the archive's shape judged before anything is written, and what it unpacks to against the disk now
     st.step = 'list'; notify();
     const listed = [];
-    await tarPass(plan.part, async (ev) => { if (ev.type === 'entry') { listed.push(ev.entry); if (listed.length > EK.ENTRIES_MAX) throw named('build_unpack_failed', `the kernel archive has more than ${EK.ENTRIES_MAX} entries`); } });
+    await tarPass(plan.part, async (ev) => { if (ev.type === 'entry') { listed.push(ev.entry); if (listed.length > EK.ENTRIES_MAX) throw named('build_unpack_failed', `the kernel archive has more than ${EK.ENTRIES_MAX} entries`); } }, m.layout.archiveFormat);
     const shape = EK.tarShapeVerdict(listed, { layout: m.layout, id: sid, label: labelOf(sid) });
     if (!shape.ok) throw named(shape.code, shape.error);
     const fr2 = await freeOf(plan.root);
@@ -406,7 +412,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
           await fsp.chmod(cur.dest, EK.fileModeOf(cur.mode));
           cur = null;
         }
-      });
+      }, m.layout.archiveFormat);
     } finally { if (ws) { try { ws.destroy(); } catch { /* none */ } } }
     for (const f of m.layout.requiredFiles) { let s = null; try { s = await fsp.stat(path.join(plan.unpackDir, ...f.split('/'))); } catch { s = null; } if (!s || !s.isFile()) throw named('build_verify_failed', `the unpacked kernel has no ${f} — nothing was placed`); }
     const exeStat = await fsp.stat(path.join(plan.unpackDir, EK.BINARY));

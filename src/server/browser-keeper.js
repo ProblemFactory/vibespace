@@ -1186,6 +1186,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The choice a NEW record is born with when nothing names one — read at a profile's create and at a conversation's
    *  browser's first start, then WRITTEN on the record (a later flip moves new records only). null = the default. */
   const policyChoice = () => ENG.choiceOfDefault(defaultEngineNow().value);
+  /** lane engine-spi-egress (L2's F4): the `args` of the config the keeper wrote for this launch (its memo — no file read) with
+   *  the display plan applied (`fact`, browser-display planForFact / applyPlan: the ozone pin, software GL) — the keeper's own
+   *  list an engine's env list must carry; a WRAPPED launch drops every proxy switch from it (the keeper's proxy is the one).
+   *  null when the keeper wrote no config (its calls keep the CLI's own search — the base arguments stand). */
+  function plannedArgsOf(kind, mark, fact, { wrapped = false } = {}) {
+    let cfg = null; try { cfg = JSON.parse(configMemo.get(kind + '|' + (mark || '')) || 'null'); } catch { cfg = null; }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return null;
+    const plan = DSP.planApplies(fact) ? DSP.planForFact(cfg, fact) : null;
+    const list = DSP.argsList((plan && plan.changed ? DSP.applyPlan(cfg, plan) : cfg).args);
+    return wrapped ? ENG.withoutProxyArgs(list) : list;
+  }
+  /** lane engine-spi-egress: THE KEEPER'S PART of an engine launch's env list (the profile road): `kept` = the planned config's
+   *  own list (L2's F4) else the base arguments below, the quiet switches composed before the split (lane engine-args-string r2),
+   *  then a WRAPPED launch's proxy switches — keeper-owned, so the list is carried even when the engine names no switch. */
+  function engineEnvOf(p, prow, be, kept, quietLog) {
+    const b0 = kept || engineBaseArgs(p, prow);
+    const base = [...(quietLog ? B.withKeeperMark(BE.withQuietLogging(b0), p.id) : b0), ...ENG.egressArgs(be.egress)];
+    return ENG.engineLaunchEnv(be, { base, always: !!be.egress });
+  }
   /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
    *  the automation flag where the row stamps it, the keeper's mark LAST. */
   const engineBaseArgs = (p, prow) => B.withKeeperMark(B.withAutomationFlag([], { on: automationFlagOn() && !!(prow && prow.automationFlag) }), p.id);
@@ -1235,7 +1254,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}) });
     if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id }); }
     if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
-    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, engine: { id: c.id, version: v.version, label: engine.label || null } };
+    // lane engine-spi-egress: an engine that must stay inside a list is WRAPPED — THIS profile's allowlisting proxy (the keeper's,
+    // its list = the engine's reserved row, read per request); one that cannot listen refuses the launch by name (egress_proxy_missing)
+    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || '', setting: engine.egress.setting, fallback: engine.egress.default }) : null;
+    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null } };
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
   const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version } : {}) } : { kind: 'default' });
@@ -1354,6 +1376,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end
     displays.dropEngineWrapper(id); // lane engine-args-string r2: its engine wrapper goes with it (removal needs a stopped browser)
+    dropEgress(id); // lane engine-spi-egress: its egress proxy never outlives its record (a conversation's browser on a wrapped engine had one each)
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
     { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
     commit();
@@ -2930,7 +2953,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
-      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole)
+      if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { keeperArgs: ENG.egressArgs(engineLaunch.egress) } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress: a wrapped engine's proxy switches are the KEEPER's (its part of the driver's line)
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -4010,10 +4033,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (buildEnv.engineChoice) {
         buildEnv = await launchEngineOf(p, buildEnv.engineChoice);
         // lane engine-args-string r2: the CLI starts the keeper's WRAPPER (the engine's switches ride it whole); AGENT_BROWSER_ARGS
-        // carries the keeper's part only — the quiet switches composed BEFORE the split, so a log switch the engine names is its own
+        // carries the keeper's part only — the quiet switches composed BEFORE the split, so a log switch the engine names is its own;
+        // lane engine-spi-egress: + a wrapped engine's proxy switches (the KEEPER's part, carried even when the engine names none)
         const ew = engineProgramOf(p, buildEnv);
-        const base = quietLog ? B.withKeeperMark(BE.withQuietLogging(engineBaseArgs(p, prow)), p.id) : engineBaseArgs(p, prow);
-        providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: ew.program }), ...ENG.engineLaunchEnv(buildEnv, { base }) };
+        providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: ew.program }), ...engineEnvOf(p, prow, buildEnv, null, quietLog) };
       }
       const ns = nsOf(profileId);
       const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)
@@ -4100,6 +4123,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode(), preference: headed0 }); // H5: an unset preference resolved against this probe
       if (rec.display.fallback && headed0 !== null) headed0 = rec.display.headed;
       sayDisplay(rec.display, `${profileId} "${p.label}"`);
+      // lane engine-spi-egress (L2's F4): an ENGINE's env list REPLACES the config's `args` — so it carries the keeper's OWN list
+      // for this launch, read from THE config every call names (the user's switches, the automation flag, the mark, the display
+      // plan's ozone pin / software GL): ONE source on both roads (a conversation's derived config merges the same file's list)
+      if (buildEnv.engine) { const kept = plannedArgsOf('machine', p.id, rec.display, { wrapped: !!buildEnv.egress }); if (kept) providerEnv = { ...providerEnv, ...engineEnvOf(p, prow, buildEnv, kept, quietLog) }; }
       const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };
       rec.launchEnv = launchEnv;
       // VERIFY r2 M1: BEFORE EVERY LAUNCH ON THE DIRECTORY — a dead daemon's browser is ended first (in flight: waited),
@@ -4355,7 +4382,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     commit();
-    const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? engineLaunch.args : []; // lane engine-plugin: the engine's own arguments, censused by the builder
+    const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the
@@ -6180,42 +6207,60 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (mine && usableExe(mine) && installedStamp().ok) return { ok: true, path: mine };
     return { ok: false, error: 'CloakBrowser is not installed on this machine (browser.cloak.executablePath is empty and the measured build is not installed under data/browser-tools) — install it from Manage agents; nothing is downloaded by asking' };
   }
-  // ── §7.2.1 THE ENFORCED BOUNDARY of a running cloak browser (lane-cloak) ──
-  // ONE allowlisting proxy PER CLOAK PROFILE (verify r1 V1 of lane browser-propose: a refusal must reach the agent whose
+  // ── §7.2.1 THE ENFORCED BOUNDARY of a running cloak browser (lane-cloak) — lane engine-spi-egress: of ANY wrapped browser ──
+  // ONE allowlisting proxy PER PROFILE (verify r1 V1 of lane browser-propose: a refusal must reach the agent whose
   // browser was refused — and only it; one shared proxy could not say whose request it refused), started lazily at the
-  // profile's first cloak start and kept for the keeper's life (a stable url = one launch view): its allowlist is re-read
-  // per request = the record's RUN hosts (measured: none — the browser itself needs no site) + the sites this deployment
-  // names (`browser.cloak.egressAllowlist`); the browser gets `--proxy-server` + `<-loopback>` (browser-switch
-  // launchEnvFor). Everything else the record names — the download hosts, the vendor's update / licence hosts — is refused.
+  // profile's first wrapped start and kept while its record is (a stable url = one launch view). WHOSE list it admits is the
+  // entry's `of`, re-read per request: CloakBrowser's = the record's RUN hosts (measured: none — the browser itself needs no
+  // site) + the sites this deployment names (`browser.cloak.egressAllowlist`), the browser getting `--proxy-server` +
+  // `<-loopback>` from browser-switch launchEnvFor (everything else the record names — the download hosts, the vendor's
+  // update / licence hosts — is refused); an ENGINE declaring `egress-allowlist` = its reserved row `plugin.<id>.egressAllowlist`
+  // (the stored value, else its manifest's default), the arguments appended by the keeper itself (src/browser-engines.js
+  // engineArgs). Loopback / link-local is never admitted (egressVerdict).
   const EgressProxy = require('./egress-proxy');
-  const cloakProxies = new Map(); // profile id → its egress proxy
+  const CLOAK_EGRESS = Object.freeze({ cloak: true }); // CloakBrowser's own road (its backend row) — an engine's `of` names its id
+  const egressProxies = new Map(); // profile id → {px, of} — its egress proxy and whose list it admits
   const cloakSites = () => String(setting('browser.cloak.egressAllowlist', '') || '');
   const cloakRunList = () => B.cloakRunAllowlist(proofOf(), cloakSites());
-  async function cloakEgressUrl(profileId = null) {
+  const engineSites = (of) => { let v; try { v = serverSetting(of.setting); } catch { v = undefined; } return typeof v === 'string' ? v : String(of.fallback || ''); };
+  const egressListOf = (of) => (of.cloak ? cloakRunList() : B.parseEgressAllowlist(engineSites(of)));
+  const egressName = (of) => (of.cloak ? 'CloakBrowser' : ENG.engineWords({ id: of.engine, label: of.label }));
+  async function egressUrlFor(profileId = null, of = CLOAK_EGRESS) {
     const k0 = String(profileId || '');
-    const have = cloakProxies.get(k0);
-    if (have && have.port()) return have.url();
-    const px = EgressProxy.create({ allowlist: cloakRunList, log, ...(egressResolve ? { resolve: egressResolve } : {}) });
-    try { await px.listen(); } catch (e) { throw namedError('egress_proxy_missing', `the allowlisting egress proxy for CloakBrowser could not listen (${e && e.message}) — CloakBrowser is never started without it`, { provider: 'cloak' }); }
-    const raced = cloakProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
-    if (raced && raced.port()) { px.close().catch(() => {}); return raced.url(); }
-    cloakProxies.set(k0, px);
-    log.log?.(`[browser] cloak egress proxy for ${k0 || '?'} on ${px.url()} — admits: ${cloakRunList().join(', ') || 'nothing (no sites named in browser.cloak.egressAllowlist)'}`);
+    const have = egressProxies.get(k0);
+    if (have && have.px.port()) { have.of = of; return have.px.url(); }
+    const ent = { px: null, of };
+    const px = ent.px = EgressProxy.create({ allowlist: () => egressListOf(ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
+    const w = egressName(of);
+    try { await px.listen(); } catch (e) { throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} could not listen (${e && e.message}) — ${w} is never started without it`, of.cloak ? { provider: 'cloak' } : { engine: of.engine }); }
+    const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
+    if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
+    egressProxies.set(k0, ent);
+    if (of.cloak) log.log?.(`[browser] cloak egress proxy for ${k0 || '?'} on ${px.url()} — admits: ${cloakRunList().join(', ') || 'nothing (no sites named in browser.cloak.egressAllowlist)'}`);
+    else log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`}`);
     return px.url();
   }
-  /** What a cloak browser may reach right now and what was refused (the dialog / the proof read it; no secrets) — one
-   *  profile's proxy when named, else all of them (the url of the most recently started one). */
-  function cloakEgress(profileId = null) {
-    const pxs = profileId != null ? [cloakProxies.get(String(profileId))].filter(Boolean) : [...cloakProxies.values()];
-    const live = pxs.filter((px) => px.port());
+  const cloakEgressUrl = (profileId = null) => egressUrlFor(profileId, CLOAK_EGRESS);
+  /** A record removed ⇒ its proxy closed (removeProfile). */
+  function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }
+  /** What a wrapped browser may reach right now and what was refused (the dialog / the proof read it; no secrets) — one
+   *  profile's proxy when named, else every CloakBrowser one (the url of the most recently started one). */
+  function egressFor(profileId = null) {
+    const ents = profileId != null ? [egressProxies.get(String(profileId))].filter(Boolean) : [...egressProxies.values()].filter((x) => x.of.cloak);
+    const of = ents.length ? ents[0].of : CLOAK_EGRESS;
+    const live = ents.map((x) => x.px).filter((px) => px.port());
     const stats = live.length ? live.reduce((a, px) => ({ allowed: a.allowed + px.stats.allowed, refused: a.refused + px.stats.refused, errors: a.errors + px.stats.errors }), { allowed: 0, refused: 0, errors: 0 }) : null;
     const recent = live.flatMap((px) => px.recent()).sort((a, b) => a.at - b.at).slice(-20);
-    return { url: live.length ? live[live.length - 1].url() : null, allowlist: cloakRunList(), sites: B.parseEgressAllowlist(cloakSites()), stats, recent };
+    return { url: live.length ? live[live.length - 1].url() : null, allowlist: egressListOf(of), sites: B.parseEgressAllowlist(of.cloak ? cloakSites() : engineSites(of)), stats, recent, ...(of.cloak ? {} : { engine: of.engine }) };
   }
-  /** verify r1 V1: the hosts THIS profile's CloakBrowser was refused at or after `since` (a verb's start) — by name,
+  /** lane engine-spi-egress: the ENGINE a profile's proxy wraps (`{id, label}`; null for CloakBrowser's / none) — the verb answer
+   *  names its site list by it. */
+  function egressEngineOf(profileId) { const e = egressProxies.get(String(profileId || '')); return e && !e.of.cloak ? { id: e.of.engine, label: e.of.label || '' } : null; }
+  /** verify r1 V1: the hosts THIS profile's wrapped browser was refused at or after `since` (a verb's start) — by name,
    *  deduplicated, bounded; what the agent's verb answer carries so it can ask for exactly those sites. */
-  function cloakRefusals(profileId, since = 0) {
-    const px = cloakProxies.get(String(profileId || ''));
+  function egressRefusals(profileId, since = 0) {
+    const e = egressProxies.get(String(profileId || ''));
+    const px = e && e.px;
     if (!px || !px.port()) return [];
     const out = [];
     for (const r of px.recent()) if ((Number(r.at) || 0) >= (Number(since) || 0) && r.host && !out.includes(r.host)) out.push(r.host);
@@ -7051,7 +7096,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const pxs = [...cloakProxies.values()]; cloakProxies.clear(); for (const px of pxs) px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
+  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -7445,7 +7490,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
     proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
-    installDir, cloakEgress, cloakRefusals, // installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
+    installDir, cloakEgress: egressFor, cloakRefusals: egressRefusals, egressEngineOf, // lane engine-spi-egress: the two names read every wrapped browser's proxy (CloakBrowser's and an engine's); installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
     onLease, addDigest, updateProfile,
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)

@@ -83,6 +83,10 @@
 //      SURFACE holding a navigation ends the verb in flight [dialog_open], `surfaces` lists it, `answer <id> accept` is ONE
 //      VibeSpace.answerSurface on the watch's own page session, the page continues; the watch's session never hooks Fetch /
 //      the chooser (one source).
+//   ⑨b lane engine-spi-egress (2026-11-02): ⑨'s world on the fixture engine's EGRESS VARIANT (`egress-allowlist`, no
+//      `surfaces`) — the REAL agent-browser launches the fake kernel with the keeper's `--proxy-server` + `<-loopback>`; the
+//      kernel fetches each navigation THROUGH it: a listed host loads, an unlisted one is refused with the keeper's words and
+//      the verb answer names it [egress_refused], loopback never; the watch takes Chrome's dialog road (no surfaces).
 //   ⑩ lane browser-login (2026-10-25): ⑨'s world + a REAL vault + the logins module — the fake kernel (as the program) detects a
 //      login form on a navigation, `vibespace-browser login` fills it (the kernel counts 2 filled fields, the entry's origin
 //      expected; the agent's answer carries no value), a `--new-user … --generate --submit` signup is saved automatically with
@@ -1284,6 +1288,97 @@ console.log('— ⑨ lane browser-surfaces: the real agent-browser on the FAKE K
       try { kk.shutdown(); } catch { }
       try { srv9 && srv9.close(); } catch { }
       try { LD9.shutdown(); } catch { }
+      for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(200);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
+
+// ═══ ⑨b lane engine-spi-egress (design-desk cloak-plugin §1): AN ENGINE THAT MUST STAY INSIDE A LIST, THROUGH THE REAL CLI ═══
+// The fixture engine's EGRESS VARIANT (scripts/fixtures/engine-plugin-egress manifest beside the fixture's server.js) through the
+// REAL loader; the REAL keeper wraps its browser in ITS per-profile proxy (egressResolve points the listed names at a loopback
+// target — the verdict is taken on the name); the REAL agent-browser launches the FAKE KERNEL, which fetches every navigation
+// through the --proxy-server it was handed (its title = the answer); the REAL routes + `vibespace-browser` carry the refusal.
+console.log('— ⑨b lane engine-spi-egress: the real agent-browser on the fake kernel WITH the keeper\'s proxy — listed loads, unlisted refused by name (the verb says it), loopback never');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js');
+  const D9 = require('../src/server/browser-dialogs.js');
+  const REALg = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
+  let verg = null; try { verg = REALg ? execFileSync(REALg, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
+  if (!verg) skip(`⑨b no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the egress leg needs it`);
+  else await (async () => {
+    const KR = scratch('mc9g'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
+    for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const GID = 'vibespace.egress-engine', ROWK = `plugin.${GID}.egressAllowlist`;
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', GID), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-egress/vibespace-plugin.json'), path.join(PROOT, 'data', 'plugins', GID, 'vibespace-plugin.json'));
+    const expressG = require(path.join(REPO, 'node_modules/express'));
+    const LDG = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: expressG(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const REGG = require('../src/server/browser-engines.js').create({ loader: LDG, dataDir: path.join(PROOT, 'data') });
+    const KPG = REGG.kernelPath(GID);
+    fs.mkdirSync(path.dirname(KPG), { recursive: true });
+    fs.writeFileSync(KPG, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
+    const KEYG = 'bk-0000f9e1', TOKENG = 'vsst_mc9_egress', SIDG = 'sess-mc9g';
+    const tgt = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'text/plain', Connection: 'close' }); r.end('hello from the target\n'); });
+    await new Promise((r) => tgt.listen(0, '127.0.0.1', r));
+    const TP = tgt.address().port;
+    const settings = { [ROWK]: 'listed.test' };
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: (k) => settings[k], liveKeys: () => new Set([KEYG]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REGG,
+      egressResolve: (h) => (h === 'listed.test' ? '127.0.0.1' : h) });
+    let srvG = null, dwG = null;
+    try {
+      LDG.setEnabled(GID, true, { trusted: true });
+      const t0 = Date.now(); while (!REGG.rows().length && Date.now() - t0 < 8000) await sleep(25);
+      const pk = kk.createProfile({ label: 'Wrapped' }, { owner: { kind: 'instance', id: null } });
+      await kk.setBrowserChoice({ profileId: pk.id, choice: { kind: 'plugin', id: GID }, by: 'user' });
+      const sessionsG = new Map([[SIDG, { agentToken: TOKENG, _browserKey: KEYG, _browserVariant: 'D', _browserEnv: null, name: 'Chat egress', cwd: KR }]]);
+      dwG = D9.create({ keeper: kk, log: quiet, leaseCountOf: () => 1, holdersOf: () => [] });
+      const RG = require('../src/routes/browser.js');
+      RG.setup({ keeper: kk, activeSessions: sessionsG, dialogs: dwG, tasksForSession: () => [] });
+      const appG = expressG(); appG.use(expressG.json()); appG.use(RG.router);
+      srvG = http.createServer(appG); const portG = await freePort(); await new Promise((r) => srvG.listen(portG, '127.0.0.1', r));
+      await kk.attach({ profileId: pk.id, browserKey: KEYG, sessionId: SIDG, by: 'user' });
+      const PWG = path.join(KR, 'passwd.cjs'); fs.writeFileSync(PWG, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
+      const envG = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${portG}`, VIBESPACE_SESSION_TOKEN: TOKENG, VIBESPACE_SESSION_CWD: KR };
+      const cliG = (args) => new Promise((resolve) => {
+        const c = spawn(process.execPath, ['--require', PWG, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: envG, cwd: KR });
+        let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+        const t = setTimeout(() => c.kill('SIGKILL'), 60000);
+        c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err }); });
+      });
+      let r = await cliG(['open', `http://listed.test:${TP}/start`]);
+      let argv = []; try { argv = JSON.parse(fs.readFileSync(path.join(pk.dir, 'fake-kernel-argv.json'), 'utf8')); } catch { argv = []; }
+      const pxArg = argv.find((a) => String(a).startsWith('--proxy-server=')) || '';
+      const stG = dwG.stats()[0] || {};
+      ok(r.code === 0 && /^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/.test(pxArg) && argv.includes('--proxy-bypass-list=<-loopback>') && argv.includes('--vibespace-kernel-features=egress-allowlist') && stG.kernel === false,
+        `⑨b the REAL ${verg} launched the fake kernel WRAPPED: --proxy-server=<the keeper's per-profile proxy> + <-loopback> on its argv (the keeper's, never the plugin's); no surfaces ⇒ the watch took Chrome's dialog road`, JSON.stringify({ r, argv, kernel: stG.kernel }));
+      r = await cliG(['get', 'title']);
+      ok(r.code === 0 && /egress 200: hello from the target/.test(r.out), '⑨b a LISTED host loads — the kernel fetched it THROUGH the keeper\'s proxy (the loopback target behind its name)', JSON.stringify(r));
+      r = await cliG(['open', `http://unlisted.test:${TP}/x`]);
+      const r2 = await cliG(['get', 'title']);
+      ok(r.code === 0 && /note: .*site list refused unlisted\.test while this page loaded.*\[egress_refused\]/.test(r.err) && /Fixture Egress Engine's site list/.test(r.err) && /egress 403: egress refused: unlisted\.test is not in the egress allowlist \(listed\.test\)/.test(r2.out),
+        '⑨b an UNLISTED host is refused with the keeper\'s words (the page reads them) and the verb answer NAMES it — the engine\'s own list [egress_refused]', JSON.stringify({ r, r2 }));
+      r = await cliG(['open', `http://127.0.0.1:${TP}/x`]);
+      const r3 = await cliG(['get', 'title']);
+      let eg = []; try { eg = fs.readFileSync(path.join(pk.dir, 'fake-kernel-egress.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { eg = []; }
+      ok(/egress 403: egress refused: 127\.0\.0\.1 is loopback\/link-local/.test(r3.out) && eg.length >= 3 && eg.every((x) => x.via === 'proxy'),
+        '⑨b LOOPBACK never: <-loopback> sent it through the proxy, which refused it by name; every fetch of the kernel went through the proxy', JSON.stringify({ r3, eg }));
+      await kk.stop(pk.id, { why: 'user' });
+      LDG.shutdown();
+      await sleep(600);
+      const leftG = mine().map((pid) => { let c = ''; try { c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').slice(0, 120); } catch { } return `${pid} ${c}`; });
+      ok(leftG.length === 0, `⑨b the stop ended the kernel and the CLI's daemon — no process of this leg is left (${leftG.join(' | ') || 'none'})`);
+    } finally {
+      try { dwG && dwG.shutdown(); } catch { }
+      try { kk.shutdown(); } catch { }
+      try { srvG && srvG.close(); } catch { }
+      try { tgt.close(); } catch { }
+      try { LDG.shutdown(); } catch { }
       for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
       await sleep(200);
       for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }

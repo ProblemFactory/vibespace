@@ -24,6 +24,11 @@
 //      kernel + arguments on every call, the vanished kernel refused by name with ONE For-you item, a timeout / an env key /
 //      another protocol / the plugin turned off each by name, Change build… to it, the policy at a create and at a
 //      conversation's browser's first start (its config names the kernel for the agent's commands too); patched controls.
+//   ⑦b lane engine-spi-egress (design-desk cloak-plugin §1): an engine that declares `egress-allowlist` (the fixture's EGRESS
+//      VARIANT, no `surfaces`) is WRAPPED by the keeper's own per-profile proxy — the arguments the keeper appends on every call,
+//      a listed host passes / an unlisted one is refused with the keeper's words / loopback never, the list read live from the
+//      reserved row, the refusals on the verb answer, a conversation's browser born on ANOTHER engine id, the proxy gone with
+//      its record; a plugin naming a proxy refused; the reserved row missing refused by name. ⑧e: a tar.gz kernel.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -674,11 +679,30 @@ const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', 
   const P0 = { installed: true, executable: true, binaryPath: '/k/chrome', version: 'Chromium 150.0.7871.186', protocol: 1, kinds: ['js-dialog'], features: ['surfaces', 'webauthn'] };
   const pv = (body, status = 200) => ENGN.engineAnswerVerdict('probe', { status, body }, { id: EID, label: 'Kernel' });
   const lv = (body, status = 200) => ENGN.engineAnswerVerdict('launchOptions', { status, body }, { id: EID, label: 'Kernel' });
-  const rowsP = [[P0, true], [{ ...P0, version: null }, true], [{ ...P0, protocol: 2 }, 'browser_engine_protocol'], [{ ...P0, features: ['webauthn'] }, 'browser_engine_protocol'], [{ ...P0, installed: 'yes' }, 'browser_engine_protocol'], [{ ...P0, installed: false, executable: false }, true]];
+  const rowsP = [[P0, true], [{ ...P0, version: null }, true], [{ ...P0, protocol: 2 }, 'browser_engine_protocol'], [{ ...P0, features: ['webauthn'] }, true], [{ ...P0, installed: 'yes' }, 'browser_engine_protocol'], [{ ...P0, installed: false, executable: false }, true]];
   const badP = rowsP.filter(([b, want]) => { const r = pv(b); return want === true ? !r.ok : r.ok || r.code !== want; });
-  ok(!badP.length && pv(P0, 500).code === 'browser_engine_protocol' && pv({ ...P0, version: null }).fact.version === null, 'a probe answer: version null is a FACT (ok, null), protocol ≠ 1 / no surfaces / another shape / HTTP 500 ⇒ browser_engine_protocol, a kernel not installed is a fact (the choice judges it)', badP);
+  ok(!badP.length && pv(P0, 500).code === 'browser_engine_protocol' && pv({ ...P0, version: null }).fact.version === null, 'a probe answer: version null is a FACT (ok, null), protocol ≠ 1 / another shape / HTTP 500 ⇒ browser_engine_protocol, a kernel not installed is a fact (the choice judges it); lane engine-spi-egress: no `surfaces` is a fact too (Chrome\'s dialog road)', badP);
+  // lane engine-spi-egress: the features are a CLOSED set; `egress-allowlist` needs the manifest's RESERVED row (a string)
+  const PE = { ...P0, features: ['egress-allowlist', 'anti-bot'] }, ROWS = [{ key: 'egressAllowlist', type: 'string', default: 'a.test', label: 'Sites' }];
+  const pvS = (settings, body = PE) => ENGN.engineAnswerVerdict('probe', { status: 200, body }, { id: 'acme.engine', label: 'Acme', settings });
+  const eOk = pvS(ROWS), eNone = pvS([]), eSel = pvS([{ key: 'egressAllowlist', type: 'select', default: 'a', options: [{ value: 'a', label: 'a' }] }]), eNum = pvS([{ key: 'egressAllowlist', type: 'number', default: 1 }]);
+  const xk = pv({ ...P0, integrity: { verified: true, sha256: 'a'.repeat(64), verifiedAt: 1, pinned: '4a12bcde' }, vendor: { tier: 'free' } }); // L2's probe carries integrity.pinned
+  ok(xk.ok && xk.fact.integrity.verified === true, 'an EXTRA key in a probe answer never refuses it (L2: `integrity.pinned`, any other) — the verdict reads the keys it knows', xk);
+  ok(eOk.ok && eOk.fact.features.join() === 'egress-allowlist' && JSON.stringify(eOk.fact.egress) === JSON.stringify({ setting: 'plugin.acme.engine.egressAllowlist', default: 'a.test' }) && pv(P0).fact.egress === null
+    && eNone.code === 'browser_engine_protocol' && /declares the "egress-allowlist" feature but its manifest has no "egressAllowlist" settings row of type string/.test(eNone.error) && eSel.code === 'browser_engine_protocol' && eNum.code === 'browser_engine_protocol' && ENGN.ENGINE_FEATURES.includes('egress-allowlist'),
+    'V4 THE RESERVED ROW: `egress-allowlist` + a string row egressAllowlist ⇒ the fact names it (plugin.<id>.egressAllowlist, its default); the row missing / a select / a number ⇒ browser_engine_protocol BY NAME; a word outside ENGINE_FEATURES is dropped', { eOk, eNone: eNone.error });
+  const eDrop = pvS(ROWS, { ...P0, features: ['surfaces'] });
+  ok(eDrop.code === 'browser_engine_protocol' && /no longer declares the site list it was trusted with/.test(eDrop.error) && /never runs it outside its proxy/.test(eDrop.error) && pvS([], { ...P0, features: ['surfaces'] }).ok,
+    'L2 acceptance (A) THE DOWNGRADE GUARD: a manifest that keeps the reserved row while its probe drops `egress-allowlist` ⇒ browser_engine_protocol BY NAME (never run unwrapped); an engine without the row is unaffected', eDrop.error);
+  const CV = (engine) => ENGN.engineChoiceVerdict({ choice: { kind: 'plugin', id: 'acme.engine' }, engine: { ...engine, label: 'Acme' } });
+  ok(CV(eOk.fact).ok && CV({ ...eOk.fact, egress: null }).code === 'browser_engine_protocol' && /never starts it unwrapped/.test(CV({ ...eOk.fact, egress: null }).error) && CV({ ...P0, features: [] }).ok,
+    'the choice verdict: an egress engine whose fact lost its row is never started (browser_engine_protocol — never unwrapped); an engine with no features at all starts (Chrome\'s road)');
   const L0 = { executablePath: '/k/chrome', args: ['--x=1'], env: {} };
   const envR = lv({ ...L0, env: { LD_PRELOAD: '/x/evil.so' } });
+  const PROXY_ARGS = ['--proxy-server=http://evil.test:8080', '--proxy-server', '--proxy-bypass-list=*', '--proxy-pac-url=http://x/p.pac', '--winhttp-proxy-resolver', '--no-proxy-server', '--proxy-auto-detect', '-proxy-server=http://evil.test:8080'];
+  const prx = PROXY_ARGS.map((a) => [a, lv({ ...L0, args: ['--ok=1', a] })]).filter(([, r]) => r.ok || r.code !== 'browser_engine_protocol' || !/the browser's proxy is VibeSpace's to set/.test(r.error));
+  const dbg1 = lv({ ...L0, args: ['-remote-debugging-port=9222'] });
+  ok(!prx.length && lv({ ...L0, args: ['--proxy-serverx=1', '--my-proxy-server=1'] }).ok && dbg1.code === 'browser_engine_protocol' && /debugging endpoint and the profile's directory/.test(dbg1.error) && PROXY_ARGS.every((a) => ENGN.OWN_ARG_RE.test(a)), 'V1: a plugin naming a PROXY (--proxy-server / --proxy-bypass-list / --proxy-pac-url / --winhttp-proxy-resolver, and --no-proxy-server / --proxy-auto-detect that would undo one; a single-dash spelling too) ⇒ browser_engine_protocol by name — the boundary is VibeSpace\'s', prx.map(([a, r]) => [a, r.code || 'ok']));
   const rowsL = [[L0, true], [{ ...L0, env: undefined }, true], [{ ...L0, args: ['--remote-debugging-port=9222'] }, 'browser_engine_protocol'], [{ ...L0, args: ['--user-data-dir=/elsewhere'] }, 'browser_engine_protocol'], [{ ...L0, args: ['--a\n--b'] }, 'browser_engine_protocol'], [{ ...L0, executablePath: 'chrome' }, 'browser_engine_protocol'], [{ ...L0, args: Array(65).fill('--a') }, 'browser_engine_protocol'], [{ ...L0, env: { X: 1 } }, 'browser_engine_protocol']];
   const badL = rowsL.filter(([b, want]) => { const r = lv(b); return want === true ? !r.ok : r.ok || r.code !== want; });
   ok(!badL.length && lv({ error: 'x', code: 'no_binary' }, 409).code === 'browser_engine_kernel_missing' && envR.code === 'browser_engine_env' && /LD_PRELOAD/.test(envR.error) && !/evil/.test(envR.error),
@@ -746,8 +770,18 @@ const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', 
   const D = ENGN.defaultEngineOf;
   const FE = { plugin: EID, default: true };
   ok(D({ own: 'default', fleet: FE }).source === 'user' && D({ own: 'default', fleet: FE }).value === 'default' && D({ fleet: FE }).value === 'plugin:' + EID && D({ fleet: FE }).source === 'fleet' && D({ fleet: { plugin: EID, default: false } }).value === 'default' && D({ fleet: { plugin: EID, default: false } }).source === 'fleet'
-    && D({ own: 'plugin:nope.x', fleet: null }).source === 'default' && D({}).value === 'default' && JSON.stringify(ENGN.choiceOfDefault('plugin:' + EID)) === JSON.stringify(c) && ENGN.choiceOfDefault('default') === null,
-    'THE POLICY: the user\'s own value › the fleet\'s (default true ⇒ the plugin, false ⇒ Chrome — said «set by the cluster preset») › \'default\'; a stored value outside the enum is none');
+    && D({}).value === 'default' && JSON.stringify(ENGN.choiceOfDefault('plugin:' + EID)) === JSON.stringify(c) && ENGN.choiceOfDefault('default') === null,
+    'THE POLICY: the user\'s own value › the fleet\'s (default true ⇒ the plugin, false ⇒ Chrome — said «set by the cluster preset») › \'default\'');
+  const dO = D({ own: 'plugin:other.engine', fleet: FE });
+  ok(dO.value === 'plugin:other.engine' && dO.source === 'user' && ['plugin:Bad.Id', 'plugin:nodot', 'chrome', 'plugin:', 3].every((v) => D({ own: v }).source === 'default') && JSON.stringify(ENGN.choiceOfDefault('plugin:other.engine')) === JSON.stringify({ kind: 'plugin', id: 'other.engine' }),
+    'V6 ids DERIVED: \'plugin:<any id>\' (the manifest id rule) is the user\'s value — an engine not installed is a FACT, never a refusal; another shape is none', dO);
+  const BMe = await import('../src/lib/browser-build-model.js');
+  const tE = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  const opts = (BMe.engineOptions || (() => []))({ engines: [{ id: 'acme.engine', label: 'Acme Browser', installed: true }, { id: EID, label: 'Kernel', code: 'browser_engine_unanswered' }], defaultEngine: { value: 'plugin:gone.engine', source: 'user' } }, 'plugin:gone.engine', tE);
+  const factAbsent = BMe.engineFactText({ engines: [], defaultEngine: { value: 'plugin:gone.engine', source: 'user', fleet: null } }, tE);
+  ok(JSON.stringify(opts.map((o) => o.value)) === JSON.stringify(['default', 'plugin:acme.engine', 'plugin:' + EID, 'plugin:gone.engine']) && opts[1].label === 'Acme Browser (browser engine plugin)' && /gone\.engine — its plugin is not running/.test(opts[3].label)
+    && /That browser engine plugin is not running on this computer/.test(factAbsent) && /Your choice:/.test(factAbsent) && BMe.engineOptions(null, 'default', tE).length === 1,
+    'THE ROW\'S OPTIONS follow the engine table (Chrome + one per engine, by its label; the stored value kept and said «not running» when its engine is not here) — the fact line says it, never refuses it', { opts, factAbsent });
   const mn = BB.missingNotice({ label: 'K', choice: c, code: 'browser_engine_kernel_missing', engineLabel: 'Custom Browser Kernel' });
   ok(/"K" cannot start: the Custom Browser Kernel engine's kernel is not installed/.test(mn.text) && /never switches it to Chrome by itself/.test(mn.detail) && !/\/k\//.test(mn.text + mn.detail), 'the vanished kernel\'s ONE For-you notice says what is missing and the way out — never a path', mn);
 }
@@ -974,6 +1008,123 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   fleetE = null;
   try { if (ep) ke.retireEphemeral(ep.id, 'test'); } catch { /* best effort */ }
 }
+// ═══ ⑦b lane engine-spi-egress: AN ENGINE THAT MUST STAY INSIDE A LIST — THE KEEPER'S PROXY WRAPS IT ═══════════════════════
+// The fixture engine's EGRESS VARIANT (scripts/fixtures/engine-plugin-egress: its manifest's reserved row; the same server.js) in
+// its own scratch root through the REAL loader; a loopback TARGET server stands behind the names the keeper's egressResolve maps
+// (the verdict is always taken on the name); the proxy as the browser meets it = plain http requests to the url the launch named.
+const GID = 'vibespace.egress-engine';
+const GROOT = path.join(ROOT, 'egress-root');
+fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(GROOT, 'data', 'plugins', GID), { recursive: true });
+fs.copyFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-egress/vibespace-plugin.json'), path.join(GROOT, 'data', 'plugins', GID, 'vibespace-plugin.json'));
+const LDRG = require('../src/server/plugin-loader.js').create({ rootDir: GROOT, app: expressE(), hostVersion: '2.369.356', log: { log() { }, warn() { } }, agentEnv: () => ({ PATH: process.env.PATH }) });
+process.on('exit', () => { try { LDRG.shutdown(); } catch { /* gone */ } });
+const ENGRG = require('../src/server/browser-engines.js').create({ loader: LDRG, dataDir: path.join(GROOT, 'data'), timeoutMs: 400 });
+const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
+  let u; try { u = new URL(pxUrl); } catch { return resolve({ status: 0, body: 'no proxy url' }); }
+  const rq = http.request({ host: u.hostname, port: Number(u.port), method, path: target, headers: method === 'GET' ? { Host: new URL(target).host, Connection: 'close' } : {}, timeout: 5000 });
+  const read = (res) => { let b = ''; res.setEncoding('utf8'); res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); };
+  rq.on('response', read); rq.on('connect', (res, sock) => { sock.destroy(); resolve({ status: res.statusCode, body: '' }); });
+  rq.on('timeout', () => { rq.destroy(); resolve({ status: 0, body: 'timeout' }); }); rq.on('error', (e) => resolve({ status: 0, body: String(e && e.code) })); rq.end();
+});
+{
+  const TGT = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'text/plain', Connection: 'close' }); r.end('hello from the target'); });
+  await new Promise((res) => TGT.listen(0, '127.0.0.1', res)); servers.add(TGT);
+  const TP = TGT.address().port;
+  LDRG.setEnabled(GID, true, { trusted: true });
+  const tw = Date.now(); while (!ENGRG.rows().length && Date.now() - tw < 8000) await new Promise((r) => setTimeout(r, 25));
+  const GKP = ENGRG.kernelPath(GID);
+  fs.mkdirSync(path.dirname(GKP), { recursive: true });
+  fs.writeFileSync(GKP, `#!/bin/sh\necho "${KVER}"\n`, { mode: 0o755 });
+  const pg = await ENGRG.probe(GID);
+  ok(pg.ok && pg.fact.features.join() === 'egress-allowlist' && pg.fact.egress && pg.fact.egress.setting === `plugin.${GID}.egressAllowlist` && pg.fact.egress.default === '' && !JSON.stringify(ENGRG.rows()).includes('egressAllowlist'),
+    'the EGRESS VARIANT through the REAL loader: features [egress-allowlist] — no surfaces, optional now — and the fact names its reserved row (the table\'s public rows carry no manifest settings)', pg);
+  const EA = ENGN.engineArgs || (({ args = [] }) => args), WP = ENGN.withoutProxyArgs || ((l) => l); // (a tree without them: ✗ by name below)
+  const leW = ENGN.engineLaunchEnv({ args: [] }, { base: ['--m', ...(ENGN.egressArgs || (() => []))('http://127.0.0.1:9')], always: true });
+  ok(leW.AGENT_BROWSER_ARGS === '--m,--proxy-server=http://127.0.0.1:9,--proxy-bypass-list=<-loopback>' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })) && EA({ args: ['--a'], egress: 'http://127.0.0.1:9' }).join(' ') === '--a --proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>' && EA({ args: ['--a'] }).join() === '--a'
+    && WP(['--a', '--proxy-pac-url=http://p', ' --no-proxy-server', '-proxy-server=x', '--proxy-auto-detect']).join() === '--a',
+    'a WRAPPED launch carries the keeper\'s proxy switches in the KEEPER\'s part of the driver line (`<-loopback>`: the proxy answers loopback too), even when the plugin names no switch (`always`); engineArgs = the plugin\'s + the proxy\'s (the attach argv); the keeper\'s own list loses every proxy switch (Chromium ranks a pac url / no-proxy above --proxy-server)', leW);
+  if (!pg.ok) ok(false, '⑦b the egress variant is refused on this tree — the legs that wrap it are not reached', pg);
+  else await (async () => {
+  const ROWK = `plugin.${GID}.egressAllowlist`, KEY_G = 'bk-0000e9e1';
+  const settingsG = { [ROWK]: 'listed.test', 'browser.headed': true }; // headed: on a box with no display + Xvfb ⇒ the hidden-window rung (its x11 pin — L2's F4)
+  // the user's own driver config (its own HOME): rendering switches, a display pin, and proxy switches that would undo the wrap
+  const GHOME = path.join(ROOT, 'egress-home');
+  fs.mkdirSync(path.join(GHOME, '.agent-browser'), { recursive: true });
+  fs.writeFileSync(path.join(GHOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--use-angle=swiftshader,--ozone-platform=wayland,--proxy-pac-url=http://pac.test/p.pac,--no-proxy-server' }));
+  const kg = mkKeeper(path.join(ROOT, 'data-egress'), { homeDir: GHOME, engines: ENGRG, serverSetting: (k) => settingsG[k], liveKeys: () => new Set([KEY_A, KEY_G]), egressResolve: (h) => (/^(?:listed\.test|(?:[a-z0-9-]+\.)*later\.test)$/.test(h) ? '127.0.0.1' : h) });
+  const pe = kg.createProfile({ label: 'Wrapped', browser: { kind: 'plugin', id: GID } }, { engine: await kg.engineFactOf(GID) });
+  const c0 = fake.calls().length;
+  await kg.start(pe.id, { why: 'test' });
+  const la = fake.launches().at(-1), args = String(la.args || '').split(/[,\n]/);
+  const pxArg = args.find((a) => a.startsWith('--proxy-server=')) || '', pxUrl = pxArg.slice('--proxy-server='.length);
+  let wrapG = ''; try { wrapG = fs.readFileSync(la.exe, 'utf8'); } catch { wrapG = ''; } // lane engine-args-string r2: the program is the keeper's wrapper
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(pxUrl) && args.includes('--proxy-bypass-list=<-loopback>') && args.includes(BPR.keeperMarkArg(pe.id)) && wrapG.includes(`'${GKP}'`) && wrapG.includes("'--vibespace-engine=fixture'") && !/proxy/.test(wrapG),
+    'THE KEEPER WRAPS IT: --proxy-server=<this profile\'s allowlisting proxy> + --proxy-bypass-list=<-loopback> ride the KEEPER\'s part of the driver line beside the mark; the plugin\'s own switches ride the keeper\'s wrapper over its kernel (no proxy switch there)', { args, wrapG });
+  const cs = callsOf('vs-' + pe.id, c0);
+  ok(cs.length >= 2 && cs.every((c) => String(c.args || '').split(/[,\n]/).includes(pxArg)), `V2: the proxy rides EVERY call's launch view (${cs.map((c) => c.verb).join(' · ')})`, cs);
+  // L2's F4: the env list REPLACES the config's — so it carries the keeper's OWN list from the config the launch names (the display
+  // plan applied: on a box with Xvfb and no display the hidden-window rung's x11 pin), minus the user's proxy switches
+  const DSPm = require('../src/browser-display.js');
+  const cfgL = DSPm.argsList(la.config && la.config.args), keptL = cfgL.filter((a) => !(ENGN.PROXY_ARG_RE || /$^/).test(a));
+  const lastOz = (l) => DSPm.ozoneOf(l), fb = (kg._reg().browsers[pe.id].display || {}).fallback || null;
+  ok(keptL.length >= 3 && keptL.every((a) => args.includes(a)) && args.includes('--use-angle=swiftshader') && !args.some((a) => /^--(?:proxy-pac-url|no-proxy-server)/.test(a)) && args.filter((a) => a.startsWith('--proxy-server=')).length === 1 && lastOz(args) === lastOz(cfgL) && (!fb || fb.rung !== 'hidden-window' || lastOz(args) === 'x11'),
+    `F4: the engine's env list carries EVERY switch of the config the launch names (the user's, the mark, the display plan's — here ${fb ? `the ${fb.rung || fb.why} rung, ozone ${lastOz(cfgL) || 'none'}` : `no fallback, ozone ${lastOz(cfgL) || 'none'}`}), never the user's proxy switches — ONE proxy, the keeper's`, { fb, cfgL, args });
+  const tq = Date.now();
+  const [r1, r2, r3, r4] = [await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/page`), await pxReq(pxUrl, 'GET', `http://unlisted.test:${TP}/page`), await pxReq(pxUrl, 'GET', `http://127.0.0.1:${TP}/page`), await pxReq(pxUrl, 'CONNECT', 'unlisted.test:443')];
+  ok(r1.status === 200 && r1.body === 'hello from the target' && r2.status === 403 && r2.body.trim() === 'egress refused: unlisted.test is not in the egress allowlist (listed.test)' && r3.status === 403 && /127\.0\.0\.1 is loopback\/link-local — never admitted by a rule/.test(r3.body) && r4.status === 403,
+    'V3: a LISTED host passes (the loopback target behind its name), an UNLISTED one is refused with the keeper\'s words, LOOPBACK never (by its address too), a CONNECT to an unlisted host refused', { r1, r2, r3, r4 });
+  const n1 = fake.launches().length;
+  settingsG[ROWK] = 'listed.test, .later.test';
+  const r5 = await pxReq(pxUrl, 'GET', `http://www.later.test:${TP}/x`);
+  delete settingsG[ROWK];
+  const r6 = await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/x`);
+  settingsG[ROWK] = 'listed.test';
+  ok(r5.status === 200 && fake.launches().length === n1 && r6.status === 403 && /empty — deny by default/.test(r6.body),
+    'V3: the list is read LIVE per request from the reserved row (a site added passes at once, no relaunch); no stored value ⇒ the manifest row\'s default (empty) ⇒ deny by default', { r5, r6 });
+  const hosts = kg.cloakRefusals(pe.id, tq), eng = kg.egressEngineOf ? kg.egressEngineOf(pe.id) : null, said = SW.egressRefusedText(hosts, eng), view = kg.cloakEgress(pe.id);
+  ok(hosts.includes('unlisted.test') && hosts.includes('127.0.0.1') && eng && eng.id === GID && eng.label === 'Fixture Egress Engine' && /^Fixture Egress Engine's site list refused unlisted\.test/.test(said) && /⚙ → Plugins → Fixture Egress Engine/.test(said) && !/vibespace-browser blocked/.test(said)
+    && view.url === pxUrl && view.engine === GID && view.allowlist.join() === 'listed.test' && kg.cloakEgress().url === null && /^CloakBrowser's site list refused x\.example/.test(SW.egressRefusedText(['x.example'])),
+    'F7: the refusals ride the verb answer as today (THIS profile\'s proxy, by name) — the words name the engine\'s own list, no CloakBrowser card; CloakBrowser\'s view and sentence unchanged', { hosts, eng, said });
+  const rsE = read('src/routes/browser.js');
+  ok(/const hosts = k\.cloakRefusals\(profileId, since\); if \(hosts\.length\) egressRefused = \{ hosts, text: require\('\.\.\/browser-switch\.js'\)\.egressRefusedText\(hosts, typeof k\.egressEngineOf === 'function' \? k\.egressEngineOf\(profileId\) : null\) \}/.test(rsE), 'WIRING: the verb answer\'s egressRefused names the wrapped engine (k.egressEngineOf)');
+  await kg.stop(pe.id, { why: 'user' });
+  // L2 acceptance (A): the declaration is STICKY — the word dropped by a later answer ⇒ refused by name; a version that drops the
+  // row too ⇒ its consent hash drifts ⇒ out of the table (re-enable to accept it) — nothing launched either way
+  const GMODE = path.join(GROOT, 'data', 'plugins-state', GID, 'mode.json'), GMAN = path.join(GROOT, 'data', 'plugins', GID, 'vibespace-plugin.json');
+  fs.writeFileSync(GMODE, JSON.stringify({ probe: { features: [] } }));
+  const nD = fake.launches().length;
+  const eD = await thr(() => kg.start(pe.id, { why: 'test' }));
+  fs.rmSync(GMODE, { force: true });
+  const manG = fs.readFileSync(GMAN, 'utf8');
+  fs.writeFileSync(GMAN, JSON.stringify({ ...JSON.parse(manG), version: '0.0.2', contributes: { routes: true, browserEngine: true } }));
+  LDRG.reload();
+  const eV = await thr(() => kg.start(pe.id, { why: 'test' }));
+  const trustedV = LDRG.isTrusted(GID), rowsV = ENGRG.rows().length, noteV = (LDRG.list().find((x) => x.id === GID) || {}).notice || '';
+  fs.writeFileSync(GMAN, manG); LDRG.reload(); LDRG.setEnabled(GID, true); // the owner enables it again (the trust it agreed to is the same hash)
+  const tb = Date.now(); while (!ENGRG.rows().length && Date.now() - tb < 8000) await new Promise((r) => setTimeout(r, 25));
+  ok(eD && eD.code === 'browser_engine_protocol' && /no longer declares the site list it was trusted with/.test(eD.message) && eV && eV.code === 'browser_engine_missing' && !trustedV && rowsV === 0 && /capabilities changed since you trusted this plugin/.test(noteV) && fake.launches().length === nD && LDRG.isTrusted(GID) && ENGRG.rows().length === 1,
+    'L2 acceptance (A) THE DOWNGRADE GUARD through the real loader + keeper: the probe drops the word ⇒ refused BY NAME; a version without the row ⇒ its consent hash drifts — switched off «capabilities changed since you trusted this plugin», out of the table, refused — NOTHING launched; enabled again over the same manifest ⇒ back', { eD: eD && eD.message, eV: eV && eV.code, trustedV, rowsV, noteV });
+  // a conversation's browser born on ANOTHER engine id (the policy names any installed engine — ids derived), wrapped the same way
+  settingsG['browser.defaultEngine'] = 'plugin:' + GID;
+  const dG = kg.defaultEngineNow();
+  const pairs = BPR.browserEnvFor({ browserKey: KEY_G, variant: BPR.VARIANTS.N, idleMs: 600000 });
+  const n2 = fake.launches().length;
+  await kg.ensureEphemeral({ browserKey: KEY_G, sessionId: 'sess-g', envPairs: pairs, sessionName: 'egress', variant: 'N' });
+  const evG = kg.ephemeralFor(KEY_G), epG = evG ? kg.profile(evG.profileId) : null;
+  const rdA = (a) => require('../src/browser-display.js').argsList(a); // the config's `args` read the driver's way (a list, or ONE line — lane engine-args-string)
+  const laG = fake.launches().at(-1), cfgA = rdA(laG && laG.config && laG.config.args);
+  const ephPx = (cfgA.find((a) => String(a).startsWith('--proxy-server=')) || '').slice('--proxy-server='.length);
+  let cfgG = null; try { cfgG = JSON.parse(fs.readFileSync(kg.configFileFor({ ephemeral: true, pairs }), 'utf8')); } catch { cfgG = null; }
+  ok(dG.value === 'plugin:' + GID && dG.source === 'user' && epG && epG.browser && epG.browser.id === GID && fake.launches().length === n2 + 1 && /^http:\/\/127\.0\.0\.1:\d+$/.test(ephPx) && ephPx !== pxUrl && cfgA.includes('--proxy-bypass-list=<-loopback>') && cfgG && rdA(cfgG.args).includes('--proxy-server=' + ephPx),
+    'V6: \'plugin:<another id>\' as the default ⇒ a conversation\'s browser is BORN on that engine and wrapped by ITS OWN proxy — the config the agent\'s own commands name carries the same arguments', { dG, browser: epG && epG.browser, cfgA });
+  delete settingsG['browser.defaultEngine'];
+  if (epG) { try { kg.detach({ profileId: epG.id, browserKey: KEY_G, by: 'user' }); } catch { /* none */ } await kg.retireEphemeral(epG.id, 'test').catch(() => { }); } // its conversation gone (the lease dropped, then retired)
+  kg.removeProfile(pe.id);
+  const [g1, g2] = [await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/x`), await pxReq(ephPx, 'GET', `http://listed.test:${TP}/x`)];
+  ok(g1.status === 0 && g2.status === 0 && !!kg.egressEngineOf && kg.egressEngineOf(pe.id) === null, 'a record removed ⇒ its proxy is CLOSED (never outlives the record — a conversation\'s browser had one each)', { g1, g2 });
+  })();
+  LDRG.setEnabled(GID, false);
+}
 // ⑦ controls: patched copies the gates above must turn red
 {
   const MUT = mutantCopies('badm-engine', REPO);
@@ -999,6 +1150,27 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   ok(es.includes(envAnchor) && open !== es, 'control (f): the patch (an engine verdict that lets any env key through) applies');
   const ENo = MUT.load('src/browser-engines.js', open, 'env-open');
   ok(ENo.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: [], env: { LD_PRELOAD: '/x' } } }, { id: EID }).ok === true, 'control (f): …LD_PRELOAD rides the browser\'s env — exactly what ⑦\'s browser_engine_env row catches');
+  // lane engine-spi-egress: (g) the OLD own-argument rule — a plugin's proxy rides; (h) a keeper that does not wrap — the browser unproxied
+  const ownAnchor = "const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|proxy-server|proxy-bypass-list|proxy-pac-url|winhttp-proxy-resolver|no-proxy-server|proxy-auto-detect)(?:=|$)/;";
+  const proxAnchor = '    const proxied = args.filter((a) => PROXY_ARG_RE.test(a));';
+  const ENg = MUT.load('src/browser-engines.js', es.replace(ownAnchor, 'const OWN_ARG_RE = /^--(?:remote-debugging-(?:port|pipe|address)|user-data-dir)(?:=|$)/;').replace(proxAnchor, '    const proxied = [];'), 'old-own-args');
+  ok(es.includes(ownAnchor) && es.includes(proxAnchor) && ENg.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--proxy-server=http://evil.test:8080'] } }, { id: EID }).ok === true, 'control (g): the base\'s own-argument rule ACCEPTS a plugin\'s --proxy-server — exactly what ⑦\'s V1 row catches');
+  const wrapAnchor = '    const egress = engine.egress ? await egressUrlFor(p.id, { engine: c.id, label: engine.label || \'\', setting: engine.egress.setting, fallback: engine.egress.default }) : null;';
+  if (!ks.includes(wrapAnchor)) ok(false, 'control (h): the anchor (the keeper\'s wrap) is not in this tree', wrapAnchor);
+  else await (async () => {
+  const Kw = MUT.load('src/server/browser-keeper.js', ks.replace(wrapAnchor, '    const egress = null;'), 'no-wrap');
+  fs.mkdirSync(path.join(ROOT, 'data-cw'), { recursive: true });
+  LDRG.setEnabled(GID, true);
+  const tw = Date.now(); while (!ENGRG.rows().length && Date.now() - tw < 8000) await new Promise((r) => setTimeout(r, 25));
+  const kw = Kw.create({ dataDir: path.join(ROOT, 'data-cw'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, engines: ENGRG });
+  const pw = kw.createProfile({ label: 'Unwrapped', browser: { kind: 'plugin', id: GID } }, { engine: await kw.engineFactOf(GID) });
+  await kw.start(pw.id, { why: 'control' });
+  const lw = String(fake.launches().at(-1).args || '');
+  ok(ks.includes(wrapAnchor) && !/--proxy-server=/.test(lw) && /--vibespace-keeper=/.test(lw), 'control (h): a keeper that does not wrap launches the egress engine with NO proxy — its browser would reach any host; exactly what ⑦b\'s «the keeper wraps it» catches', lw);
+  try { await kw.stop(pw.id, { why: 'user' }); } catch { /* none */ }
+  try { kw.shutdown(); } catch { /* none */ }
+  LDRG.setEnabled(GID, false);
+  })();
 }
 
 // ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════
@@ -1071,7 +1243,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   const hm = BB.downloadHardRows({ machine: 'darwin-arm64', offered: ['linux-x64'], unsupported: 'no kernel here' });
   ok(hr.hard.length === 1 && hr.hard[0].code === 'disk' && /on \/pvc/.test(hr.hard[0].error) && hr.needBytes === 3e6 && hm.hard[0].code === 'build_platform_unsupported' && hm.hard[0].error === 'no kernel here', 'design 004\'s two hard rows are ONE helper (downloadHardRows): the disk (archive × DISK_FACTOR, the place named) and the machine');
   // ── the ARCHIVE (ustar built here, zstd by node) + the FAKE FILE HOST ──
-  const tarOf = (entries) => {
+  const tarRawOf = (entries) => {
     const parts = [];
     for (const e of entries) {
       const h = Buffer.alloc(512), body = e.body == null ? Buffer.alloc(0) : Buffer.from(e.body);
@@ -1085,8 +1257,9 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
       if (e.type !== '5' && e.type !== '2') parts.push(body, Buffer.alloc((512 - (body.length % 512)) % 512));
     }
     parts.push(Buffer.alloc(1024));
-    return zlib.zstdCompressSync(Buffer.concat(parts));
+    return Buffer.concat(parts);
   };
+  const tarOf = (entries) => zlib.zstdCompressSync(tarRawOf(entries));
   const RUNS = path.join(EROOT, 'kernel-runs.log');
   const KSAYS = 'Chromium 150.0.7871.186-vs1';
   const chromeBody = `#!/bin/sh\necho run >> ${JSON.stringify(RUNS)}\necho "${KSAYS}"\n`;
@@ -1421,7 +1594,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
 
   // ⑬ THE RED CONTROLS of round 2 — patched copies, each turning a leg above red
   const fwA = EDS.indexOf('  function fileWriter(dest) {'), fwB = EDS.indexOf('  /** The free bytes of the filesystem');
-  const gateAnchor = '      planOf(sid, { unpack: unpackFacts() });';
+  const gateAnchor = '      planOf(sid, { unpack: unpackFacts(), format: doc0 instanceof Error ? null : EK.archiveFormatOf(doc0, plan.tag) });'; // lane engine-spi-egress: the gate reads the archive's format
   const backAnchor = '      if (had) { try { await io.rename(plan.removingDir, plan.targetDir); back = true; }';
   const asideAnchor = '  async function putBack(sid, plan) {';
   const EKS = read('src/engine-kernel.js');
@@ -1535,6 +1708,59 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(m14.ok && n14.kernelFact(EID).state === 'installed' && JSON.stringify(recAt('data-ed13i').kernel) === JSON.stringify(k13), '(the same record healed by the product\'s measure — its own record again)', recAt('data-ed13i'));
   const rRe = await thrK(ED.installKernel(EID, { wait: true })); // the kernel back in its place
   ok(!rRe && fs.existsSync(KP) && !leftovers().length, '(the kernel reinstalled; nothing left beside it)', rRe && rRe.message);
+
+  // ═══ ⑧e lane engine-spi-egress: A tar.gz KERNEL (a vendor's own archive — CloakBrowser's is one) ══════════════════════════════
+  // gunzip beside zstd: the SAME list pass, verdicts, receipt and ONE rename; it unpacks on a Node without zstd; a member outside
+  // the top folder is refused BEFORE anything is extracted; zstd bytes under a tar.gz kernel.json are refused by the format's name.
+  // Each install in its own kernel place (an `engines` stub naming it) — the shared kernel above is never touched.
+  const TOPG = 'vibespace-chromium-150.0.7871.186-vs1-linux-x64';
+  const flatEntries = kernelEntries().filter((e) => e.name !== TOPG + '/').map((e) => ({ ...e, name: e.name.slice(TOPG.length + 1) }));
+  const GZFLAT = zlib.gzipSync(tarRawOf(flatEntries));
+  const GZ = zlib.gzipSync(tarRawOf(kernelEntries())), GZDOTS = zlib.gzipSync(tarRawOf(kernelEntries(undefined, [{ name: 'vibespace-chromium-150.0.7871.186-vs1-linux-x64/../../oops', body: 'x' }])));
+  Object.assign(served, { '/k.tar.gz': GZ, '/dots.tar.gz': GZDOTS, '/zst-as.tar.gz': ARCH, '/flat.tar.gz': GZFLAT });
+  const GZL = { archiveFormat: 'tar.gz', stripComponents: 1, binaryRelPath: 'chrome' };
+  const gzAt = (name, file, opts = {}, layout = GZL) => { const kpG = path.join(ROOT, name + '-k', 'kernel', 'linux-x64', 'chrome'); const e = edAt(name, { engines: { kernelPath: () => kpG }, ...opts }); fs.writeFileSync(path.join(ROOT, name, 'plugins', EID, 'kernel.json'), JSON.stringify(kjson({}, { url: `https://kernels.test${file}`, sha256: sha(served[file]), bytes: served[file].length, layout }))); return { e, kpG }; };
+  const mvG = EK.kernelManifestVerdict(kjson({}, { layout: GZL }), { tag: 'linux-x64', id: EID });
+  const AF = EK.archiveFormatOf || (() => null);
+  ok(mvG.ok && mvG.layout.archiveFormat === 'tar.gz' && EK.ARCHIVE_FORMATS.join() === 'tar.zst,tar.gz' && AF(kjson({}, { layout: GZL })) === 'tar.gz' && AF(kjson()) === 'tar.zst'
+    && EK.kernelPlan({ kernelPath: '/d/kernel/linux-x64/chrome', unpack: { zstd: false, node: '20.20.2' }, format: 'tar.gz' }).ok && EK.kernelPlan({ kernelPath: '/d/kernel/linux-x64/chrome', unpack: { zstd: false, node: '20.20.2' }, format: 'tar.zst' }).code === 'engine_node_unsupported',
+    'PURE: kernel.json may name archiveFormat tar.gz (the platform layout over the top one); a Node without zstd plans a tar.gz, never a tar.zst', mvG);
+  const hG = hits.length;
+  const g1 = gzAt('data-gz1', '/k.tar.gz');
+  const rG = await thrK(g1.e.installKernel(EID, { wait: true }));
+  const kdG = path.dirname(g1.kpG);
+  let rcG = null; try { rcG = JSON.parse(fs.readFileSync(path.join(kdG, 'install-receipt.json'), 'utf8')); } catch { rcG = null; }
+  ok(!rG && hits.slice(hG).includes('/k.tar.gz') && fs.statSync(g1.kpG).mode & 0o100 && LAYOUT.requiredFiles.every((f) => fs.statSync(path.join(kdG, f)).isFile()) && rcG && rcG.sha256 === sha(GZ) && rcG.archiveBytes === GZ.length && rcG.binarySha256 === sha(Buffer.from(chromeBody)) && g1.e.kernelFact(EID).state === 'installed' && !fs.readdirSync(path.dirname(kdG)).some((n) => /\.part$|^\.unpack-|^\.removing-/.test(n)),
+    'a tar.gz kernel DOWNLOADS (loopback https stand-in), LISTS, VERIFIES and LANDS with its receipt (the archive\'s sha256) — ONE rename, nothing left beside it', { e: rG && rG.message, rcG });
+  // L2 acceptance (B): Chrome makes `<kernel dir>/extensions` at its first start — the receipt reads the program's size only, so the
+  // kernel stays installed and verified (no false «changed»)
+  fs.mkdirSync(path.join(kdG, 'extensions', 'Temp'), { recursive: true }); fs.writeFileSync(path.join(kdG, 'extensions', 'Temp', 'x'), 'x');
+  const mX = await g1.e.measure(EID, { force: true });
+  ok(mX.ok && g1.e.kernelFact(EID).state === 'installed' && EK.receiptVerdict(rcG, { size: fs.statSync(g1.kpG).size }).verified === true, 'L2 acceptance (B): an `extensions` folder Chrome made in the kernel\'s folder changes nothing — installed, the receipt verified (it reads the program\'s size only)', mX);
+  const g2 = gzAt('data-gz2', '/k.tar.gz', { zlib: {}, nodeVersion: '20.20.2' });
+  const rN = await thrK(g2.e.installKernel(EID, { wait: true }));
+  const g3 = gzAt('data-gz3', '/dots.tar.gz');
+  const rD = await thrK(g3.e.installKernel(EID, { wait: true }));
+  const g4 = gzAt('data-gz4', '/zst-as.tar.gz');
+  const rZ = await thrK(g4.e.installKernel(EID, { wait: true }));
+  ok(!rN && fs.existsSync(g2.kpG) && rD && rD.code === 'build_unpack_failed' && !fs.existsSync(path.dirname(g3.kpG)) && rZ && rZ.code === 'build_unpack_failed' && /not a readable tar\.gz/.test(rZ.message) && !fs.existsSync(path.dirname(g4.kpG)),
+    'V5: a tar.gz installs on a Node WITHOUT zstd; a member outside the top folder ⇒ refused before anything is extracted (build_unpack_failed, no kernel folder); zstd bytes named tar.gz ⇒ refused by the format\'s name', { rN: rN && rN.message, rD: rD && rD.message, rZ: rZ && rZ.message });
+  // L2's F1 (measured): the vendor's archive has NO top folder — `stripComponents: 0` lands it; 1 on the same archive is refused
+  // before anything is extracted; a link / `..` / a missing required file stay refused at 0 (the shape the manifest declares)
+  const gF = gzAt('data-gz7', '/flat.tar.gz', {}, { ...GZL, stripComponents: 0 });
+  const rF = await thrK(gF.e.installKernel(EID, { wait: true }));
+  const gF1 = gzAt('data-gz8', '/flat.tar.gz');
+  const rF1 = await thrK(gF1.e.installKernel(EID, { wait: true }));
+  const flat0 = (extra) => EK.tarShapeVerdict([...flatEntries, ...extra].map((e) => ({ name: e.name, kind: e.type === '5' ? 'dir' : e.type === '2' ? 'link' : 'file', size: e.body ? Buffer.from(e.body).length : 0, mode: e.mode || 0o644 })), { layout: { ...LAYOUT, stripComponents: 0 }, id: EID });
+  const fLink = flat0([{ name: 'escape', type: '2', link: '/etc/passwd' }]), fDots = flat0([{ name: 'locales/../../oops', body: 'x' }]);
+  const fMiss = EK.tarShapeVerdict(flatEntries.filter((e) => e.name !== 'libEGL.so').map((e) => ({ name: e.name, kind: e.type === '5' ? 'dir' : 'file', size: 1, mode: e.mode || 0o644 })), { layout: { ...LAYOUT, stripComponents: 0 }, id: EID });
+  ok(!rF && fs.statSync(gF.kpG).mode & 0o100 && LAYOUT.requiredFiles.every((f) => fs.statSync(path.join(path.dirname(gF.kpG), f)).isFile()) && rF1 && rF1.code === 'build_unpack_failed' && /a file above the archive's top folder/.test(rF1.message) && !fs.existsSync(path.dirname(gF1.kpG))
+    && !fLink.ok && /a link entry/.test(fLink.error) && !fDots.ok && /"\.\."/.test(fDots.error) && !fMiss.ok && /no libEGL\.so/.test(fMiss.error),
+    'L2 F1: a FLAT tar.gz (no top folder — the vendor\'s real shape) lands with stripComponents 0; 1 on it ⇒ refused before extraction; at 0 a link / ".." / a missing required file are still refused', { rF: rF && rF.message, rF1: rF1 && rF1.message });
+  const EDz = M8.load('src/server/engine-distribution.js', EDS.replace('gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()', 'zlibIn.createZstdDecompress()'), 'zstd-only');
+  const gC = (() => { const kpC = path.join(ROOT, 'data-gz6-k', 'kernel', 'linux-x64', 'chrome'); const d = edAt('data-gz6', { engines: { kernelPath: () => kpC } }, EDz); fs.writeFileSync(path.join(ROOT, 'data-gz6', 'plugins', EID, 'kernel.json'), JSON.stringify(kjson({}, { url: 'https://kernels.test/k.tar.gz', sha256: sha(GZ), bytes: GZ.length, layout: GZL }))); return d; })();
+  const rCz = await thrK(gC.installKernel(EID, { wait: true }));
+  ok(EDS.includes('gz ? zlib.createGunzip() : zlibIn.createZstdDecompress()') && rCz && rCz.code === 'build_unpack_failed', 'control (gz): a copy that reads every archive as zstd refuses the same tar.gz (build_unpack_failed) — RED against ⑧e', rCz && rCz.message);
 
   // ═══ ⑧c lane kernel-asset-credential: THE KERNEL ON THE PLUGIN'S OWN REPOSITORY (a GitHub Release asset) ═════════════════════
   // The owner 2026-10-26: 「内核是支持文件，应该放到仓库里」. PURE kernelCredentialVerdict (R1) + the REAL engine-distribution over

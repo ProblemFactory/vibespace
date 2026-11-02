@@ -772,10 +772,13 @@ function rejectionText(p) {
   return `the user rejected ${what} — do not work around the refusal (no other browser, no copied session); tell the user which page needs them and carry on with what you can`;
 }
 /** verify r1 V1: the sites CloakBrowser's list REFUSED while the agent's verb ran (its own browser's proxy, by name) —
- *  the one sentence its CLI prints, so it asks for exactly those sites (one card) instead of guessing at a blank page. */
-function egressRefusedText(hosts) {
+ *  the one sentence its CLI prints, so it asks for exactly those sites (one card) instead of guessing at a blank page.
+ *  lane engine-spi-egress: `engine` ({id, label}) = the browser is an ENGINE the keeper wraps — its own site list (the
+ *  plugin's settings row) is named and no card is offered (the proposal flow targets CloakBrowser only, until it targets engines). */
+function egressRefusedText(hosts, engine = null) {
   const hs = [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => normalizeHost(h)).filter(Boolean))].slice(0, 8);
   if (!hs.length) return '';
+  if (engine && engine.id) { const name = String(engine.label || engine.id).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80); return `${name}'s site list refused ${hs.join(', ')} while this page loaded — parts of it may be missing. Do not work around it (no other browser, no copied session): tell the user which site the page needs; they add it to that list in ⚙ → Plugins → ${name} → its settings`; }
   return `CloakBrowser's site list refused ${hs.join(', ')} while this page loaded — parts of it may be missing. Do not work around it: \`vibespace-browser blocked --url https://${hs[0]}/ --why egress-refused --tier 2\` puts ONE card in the user's chat asking them to let CloakBrowser open it${hs.length > 1 ? ' (one claim per site)' : ''}`;
 }
 /** The words the agent is told when the switch is DONE — through the handback's ladder site (a free next-turn stash, or

@@ -7084,5 +7084,23 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   }
 }
 
+// ── §105 (lane engine-spi-egress, design-desk cloak-plugin §1 (g) — 2026-11-02): NO BROWSER ENGINE'S ID IS NAMED IN src/ ──
+// An engine is whatever the engine table holds: the default engine's options, its policy and its kernel's place are DERIVED
+// (src/browser-engines.js defaultEngineOf takes any 'plugin:<id>'; settings-ui draws the row's options from GET
+// /api/browser/engines), so a second engine plugin (CloakBrowser's) needs no line of the core. The ids watched: every fixture
+// manifest declaring contributes.browserEngine + the engines this project ships plugins for; plus any 'plugin:<id>' literal.
+// A src file that must name one (a migration naming the plugin a record moves to) is a ROW here, with its reason.
+{
+  const ENGINE_ID_ROWS = Object.freeze({}); // 'src/<file>': '<why it names an engine id>' — none today
+  const ids105 = new Set(['vibespace.custom-browser', 'vibespace.cloak-browser']);
+  for (const f of trackedFiles(REPO, 'scripts/fixtures')) if (/(^|\/)vibespace-plugin\.json$/.test(f)) { try { const m = JSON.parse(read(f)); if (m && m.contributes && m.contributes.browserEngine === true && typeof m.id === 'string') ids105.add(m.id); } catch { /* not a manifest */ } }
+  const scan105 = (text) => [...[...ids105].filter((id) => text.includes(id)), ...(text.match(/['"`]plugin:[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*['"`]/g) || [])];
+  const files105 = trackedFiles(REPO, 'src');
+  const red105 = files105.filter((f) => !ENGINE_ID_ROWS[f]).flatMap((f) => scan105(read(f)).map((h) => `${f}: ${h}`));
+  ok(files105.length > 100 && ids105.size >= 3 && red105.length === 0, `§105 no browser engine's id is named in src/ (${files105.length} tracked files; watched: ${[...ids105].join(', ')} + any 'plugin:<id>' literal) — ${red105.join(' | ') || 'none'}`, red105);
+  const planted105 = scan105("const CLOAK = 'plugin:vibespace.cloak-browser'; // planted");
+  ok(planted105.length === 2 && scan105('const ok = engineRowPath(id); // \'plugin:other.id:x\' is a command id').length === 0, `§105 CONTROL: a planted id is named (${planted105.join(', ')}); a derived one is not`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
