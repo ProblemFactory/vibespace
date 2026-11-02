@@ -100,10 +100,11 @@ try {
   cdp.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method === 'Runtime.exceptionThrown') pageErrors.push(JSON.stringify(m.params.exceptionDetails).slice(0, 400)); });
   const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
   // the page's ws frames that could start / feed / end a turn, and every toast as it appears
-  const SPY = `(() => { window.__frames = []; window.__toasts = []; window.__clicks = []; document.addEventListener('click', (e) => { const t = e.target; window.__clicks.push((t && (t.id || t.className || t.tagName)) + ''); }, true); window.__toastTexts = () => [...window.__toasts, ...document.querySelectorAll('.global-toast')].map((n) => ((n.querySelector && n.querySelector('.global-toast-body')) || n).textContent || '');
+  const SPY = `(() => { window.__frames = []; window.__toasts = []; window.__clicks = []; window.__fetches = []; const __f = window.fetch.bind(window); window.fetch = (u, o) => { const e = { u: String(u).slice(0, 60), m: (o && o.method) || 'GET', t0: Date.now() }; if (/refresh-note/.test(e.u)) window.__fetches.push(e); return __f(u, o).then((r) => { e.st = r.status; e.ms = Date.now() - e.t0; return r; }, (err) => { e.err = String(err).slice(0, 80); throw err; }); }; document.addEventListener('click', (e) => { const t = e.target; window.__clicks.push((t && (t.id || t.className || t.tagName)) + ''); }, true); window.__toastTexts = () => [...window.__toasts, ...document.querySelectorAll('.global-toast')].map((n) => ((n.querySelector && n.querySelector('.global-toast-body')) || n).textContent || '');
     const iv = setInterval(() => { if (!window.app || !app.ws || !app.ws.send || app.ws.__spied) return; app.ws.__spied = true; clearInterval(iv);
       const s = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && /^(create|input|chat-input|send|kill|interrupt)$/.test(o.type)) window.__frames.push(o.type); } catch {} return s(m); }; }, 50);
-    new MutationObserver((ms) => { for (const r of ms) for (const n of r.addedNodes) if (n.nodeType === 1 && /toast/.test(n.className || '')) window.__toasts.push(n); }).observe(document.documentElement, { childList: true, subtree: true }); })();`;
+    const mo = new MutationObserver((ms) => { for (const r of ms) for (const n of r.addedNodes) if (n.nodeType === 1 && /toast/.test(n.className || '')) window.__toasts.push(n); });
+    let tries = 0; const watch = () => { const root = document.documentElement; if (root) mo.observe(root, { childList: true, subtree: true }); else if (++tries < 500) setTimeout(watch, 10); }; watch(); })();`;   // .371 (int361): a frame's script can run before its root exists — observe once it does, so a real «Uncaught» shows as itself
   async function newPage(w, h, mobile, lang) {
     const tg = await send('Target.createTarget', { url: 'about:blank', newWindow: true });
     const a = await send('Target.attachToTarget', { targetId: tg.result.targetId, flatten: true });
@@ -121,6 +122,17 @@ try {
   }
   const shot = async (S, f, clip) => { if (!PNG_DIR) return null; const r = await S('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) }); if (!r.result) return null; fs.mkdirSync(PNG_DIR, { recursive: true }); const out = path.join(PNG_DIR, f); fs.writeFileSync(out, Buffer.from(r.result.data, 'base64')); return out; };
   const centre = (ev, sel) => ev(`(() => { const e = ${sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`}; if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2, w: q.width, h: q.height }; })()`);
+  // .371 (int361, B-row «the desk 确定 tap was unchecked»): a press that WAITS (≤ 5 s, every 100 ms) until its target is the element at
+  // its own centre — never a retry of the click — then presses once; a target still covered says what covers the point (tag, class,
+  // 40 chars of text) and fails by name; it never returns a silent false.
+  const pressUncovered = async (S, ev, sel) => {
+    const probe = `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return { found: false }; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y); const mine = !!h && (h === e || e.contains(h)); return { found: true, x, y, mine, disabled: !!e.disabled, cover: mine || !h ? null : { tag: h.tagName.toLowerCase(), cls: String(h.className || '').slice(0, 80), text: (h.textContent || '').trim().slice(0, 40) } }; })()`;
+    let last = null; const t0 = Date.now();
+    while (Date.now() - t0 < 5000) { last = await ev(probe); if (last && last.found && last.mine && !last.disabled) break; await new Promise((r) => setTimeout(r, 100)); }
+    if (!last || !last.found || !last.mine || last.disabled) return { ok: false, waitedMs: Date.now() - t0, ...(last || {}), dialog: await ev(`(() => { const o = document.getElementById('refresh-live-dialog'); return o ? { open: true, shown: o.offsetParent !== null, rect: o.getBoundingClientRect().toJSON() } : { open: false }; })()`) };
+    for (const type of ['mousePressed', 'mouseReleased']) await S('Input.dispatchMouseEvent', { type, x: last.x, y: last.y, button: 'left', clickCount: 1 });
+    return { ok: true, waitedMs: Date.now() - t0 };
+  };
   const press = async (S, ev, sel) => { const r = await centre(ev, sel); if (!r || r.__err) return false; for (const type of ['mousePressed', 'mouseReleased']) await S('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 }); return true; };
   const tap = async (S, ev, sel) => { const r = await centre(ev, sel); if (!r || r.__err) return false; await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] }); await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); return true; };
   const MENU_ITEM = "JS:[...document.querySelectorAll('.context-menu-item')].find((n) => /刷新所有活着的会话/.test(n.textContent))";
@@ -165,9 +177,11 @@ try {
   const emptied = await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); return { ok: o.querySelector('.btn-create').disabled, err: o.querySelector('.refresh-live-error').textContent }; })()`);
   check(`desk: an emptied note — 确定 disabled, said inline 「${emptied?.err}」`, !!emptied && emptied.ok === true && emptied.err === '请先写提醒内容', emptied);
   await D.ev(`(() => { const t = document.querySelector('#refresh-live-dialog textarea'); t.value = ${JSON.stringify(NOTE_ZH)}; t.dispatchEvent(new Event('input')); return true; })()`);
-  await press(D.S, D.ev, '#refresh-live-dialog .btn-create');
+  const deskOk = await pressUncovered(D.S, D.ev, '#refresh-live-dialog .btn-create');
+  check(`desk: 确定 is the element at its own centre and is pressed (waited ${deskOk.waitedMs} ms)${deskOk.ok ? '' : ` — NOT pressed: ${deskOk.found === false ? 'no button' : deskOk.disabled ? 'disabled' : `covered by <${deskOk.cover?.tag} class="${deskOk.cover?.cls}"> «${deskOk.cover?.text}»`}`}`, deskOk.ok, deskOk);
   const toast = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /已排给/.test(x)); return t && !document.getElementById('refresh-live-dialog') ? t : null; })()`), 10000, 150);
-  check(`desk: 确定 ⇒ the dialog closes, the toast 「${toast}」`, toast === '已排给 2 个，跳过 1 个已停止的', { toast, all: await D.ev('window.__toastTexts()'), pageErrors });
+  check(`desk: 确定 ⇒ the dialog closes, the toast 「${toast}」`, toast === '已排给 2 个，跳过 1 个已停止的', { toast, all: await D.ev('window.__toastTexts()'), pageErrors, // .371: on a red, WHERE it stopped — the last clicks, the refresh-note request (status, ms) or none, the dialog's state
+    after: await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const b = o && o.querySelector('.btn-create'); return { clicks: window.__clicks.slice(-6), fetches: window.__fetches, dialog: !!o, okDisabled: b ? b.disabled : null, err: o ? (o.querySelector('.refresh-live-error') || {}).textContent : null }; })()`) });
   const pToast = await shot(D.S, 'desk-toast.png');
   const notes1 = refreshNotes();
   check('desk: the stash holds ONE note each under the 2 live conversations, none under the stopped one', notes1[SIDS[0]].length === 1 && notes1[SIDS[1]].length === 1 && notes1[SIDS[0]][0] === NOTE_ZH && notes1[SIDS[2]].length === 0, notes1);
