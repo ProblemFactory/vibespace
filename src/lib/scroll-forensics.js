@@ -14,14 +14,15 @@
 //     st, sh, ch, the writer (the `_traceExpect` stamp written since the previous scroll event, else 'none'),
 //     writeAgo, wheelAgo; an arm marker opens each window with the geometry the view last saw. A window keeps its HEAD
 //     (the marker + the first FINE_HEAD events — where a cause lives) and its TAIL (the last FINE_TAIL), and counts what
-//     it dropped between them in ONE marker (r2: at 240 Hz a 300-entry ring lost the arm and the first 181 events).
+//     it dropped between them in ONE marker (r2: at 240 Hz a 300-entry ring lost the arm and the first 181 events); the
+//     ring holds two full windows and counts what its front trim drops (r3).
 
 export const WHEEL_COALESCE_MS = 100;
 export const WHEEL_RING_CAP = 200;   // bursts; 20 s of continuous wheeling at 10 bursts a second
 export const FINE_SCROLL_MS = 2000;
 export const FINE_HEAD = 200;        // events kept from a window's start (with its arm marker)
 export const FINE_TAIL = 200;        // events kept from its end
-export const FINE_SCROLL_CAP = 600;  // the whole ring: the window in progress (≤ 402 entries) always fits whole
+export const FINE_SCROLL_CAP = 2 * (1 + FINE_HEAD + 1 + FINE_TAIL); // 804: TWO full windows fit whole (r3 — toggle → jump → ↓ arms twice inside 2 s)
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -40,13 +41,7 @@ export function wheelScroller(el, styleOf, root = null) {
 /** Push onto a capped ring; the oldest go, and the new first record carries the cumulative count dropped before it. */
 export function pushCapped(ring, cap, entry) {
   ring.push(entry);
-  const over = ring.length - cap;
-  if (over > 0) {
-    const before = ring[0]?.droppedBefore || 0;
-    ring.splice(0, over);
-    ring[0].droppedBefore = before + over;
-  }
-  return ring;
+  return pushCappedTrim(ring, cap);
 }
 
 /** The wheel listener's body: one record per WHEEL_COALESCE_MS window of ONE deltaMode (a change of unit closes the burst —
@@ -97,26 +92,45 @@ export function fineScrollEntry({ now, st, sh, ch, writeSeq, seenSeq, writeAt, w
 }
 
 /** Push onto a view's fine ring, window by window: an arm marker (`entry.arm`) opens a window; its first FINE_HEAD events
- *  stay; past them ONE `{dropped}` marker holds the count of the events dropped from the window's middle, and the last
- *  FINE_TAIL follow it. The ring as a whole keeps FINE_SCROLL_CAP entries (older windows go first). The per-window
- *  state lives on the array (`ring.win`, not serialized). */
+ *  stay; once the window outgrows FINE_HEAD + FINE_TAIL, ONE `{dropped}` marker takes the place of the events dropped from
+ *  its middle (written only when something WAS dropped — r3), and the last FINE_TAIL follow it. The ring as a whole keeps
+ *  FINE_SCROLL_CAP entries — two full windows; older ones go first, COUNTED like the wheel ring's (`droppedBefore` on the
+ *  first entry left — r3: the front trim was silent). The per-window state lives on the array (`ring.win`, not
+ *  serialized). */
 export function pushFine(ring, entry) {
   if (entry.arm) {
-    ring.win = { n: 0, drop: null, tail: 0 };
+    ring.win = { n: 0, drop: null, first: null, tail: 0 };
     ring.push(entry);
   } else {
-    const w = ring.win || (ring.win = { n: 0, drop: null, tail: 0 });
+    const w = ring.win || (ring.win = { n: 0, drop: null, first: null, tail: 0 });
     w.n++;
     if (w.n <= FINE_HEAD) ring.push(entry);
     else {
-      if (!w.drop) { w.drop = { t: entry.t, dropped: 0 }; ring.push(w.drop); }
+      if (!w.first) w.first = entry;
       ring.push(entry); w.tail++;
       if (w.tail > FINE_TAIL) {
-        const at = ring.indexOf(w.drop);
-        ring.splice(at + 1, 1); w.tail--; w.drop.dropped++;
+        if (!w.drop) { // the FIRST drop: the marker takes the oldest tail entry's place
+          const at = ring.indexOf(w.first);
+          w.drop = { t: w.first.t, dropped: 1 };
+          ring[at] = w.drop;
+        } else {
+          ring.splice(ring.indexOf(w.drop) + 1, 1);
+          w.drop.dropped++;
+        }
+        w.tail--;
       }
     }
   }
-  if (ring.length > FINE_SCROLL_CAP) ring.splice(0, ring.length - FINE_SCROLL_CAP);
+  return pushCappedTrim(ring, FINE_SCROLL_CAP);
+}
+
+/** The front trim of a capped ring, counted on the first entry left (cumulative `droppedBefore`). */
+function pushCappedTrim(ring, cap) {
+  const over = ring.length - cap;
+  if (over > 0) {
+    const before = ring[0]?.droppedBefore || 0;
+    ring.splice(0, over);
+    ring[0].droppedBefore = before + over;
+  }
   return ring;
 }

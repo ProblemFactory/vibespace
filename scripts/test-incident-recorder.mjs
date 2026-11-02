@@ -31,7 +31,8 @@
 //      scroll event, stAfter at the close} (CONTROL: without the map stBefore reads the moved position), deltaY read before
 //      deltaMode, a mode change splits the burst; r2: THE WHEEL RING IS ITS OWN — 60 s of 60 Hz wheeling after 20 presses
 //      leaves the 20 presses and says how many bursts it dropped (CONTROL: r1's shared ring keeps 0 presses); the fine
-//      window keeps its HEAD and TAIL at 240 Hz with one dropped-count marker (CONTROL: r1's 300 cap lost the arm);
+//      window keeps its HEAD and TAIL at 240 Hz with one dropped-count marker (CONTROL: r1's 300 cap lost the arm); r3: two
+//      full windows fit (the toggle → ↓ shape keeps the first arm), no marker without a drop, the front trim counted;
 //      wheelScroller, the fine entry; the wiring pins (pointerType, rings.wheel, either ring shipped, the arm FIRST in
 //      _setRunOpen with no live layout read) + MUTANTS; a full ring's bytes
 // Run: node scripts/test-incident-recorder.mjs
@@ -369,7 +370,17 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   const fr1 = []; r1push(fr1, { t: 0, arm: 'runOpen' }); for (let i = 1; i <= 480; i++) r1push(fr1, { t: i });
   ok(`CONTROL (r1's ring, cap 300): the same window loses its arm marker and its first ${fr1[0].t - 1} events — the START, where a cause lives`, !fr1.some((x) => x.arm) && fr1[0].t === 181, fr1[0]);
   const fr2 = []; F.pushFine(fr2, { t: 0, arm: 'scrollBtn' }); for (let i = 1; i <= 900; i++) F.pushFine(fr2, i === 450 ? { t: i, arm: 'runOpen' } : { t: i });
-  ok(`two busy windows: the ring stays ≤ FINE_SCROLL_CAP (${fr2.length} ≤ ${F.FINE_SCROLL_CAP}) and the window in progress is whole (its arm kept)`, fr2.length <= F.FINE_SCROLL_CAP && fr2.some((x) => x.arm === 'runOpen'));
+  const marks2 = fr2.filter((x) => 'dropped' in x).map((x) => x.dropped);
+  ok(`two busy windows (r3): BOTH fit whole (${fr2.length} ≤ FINE_SCROLL_CAP ${F.FINE_SCROLL_CAP} = 2 × 402) — the FIRST window's arm (${fr2[0].arm}) and its marker (${marks2[0]}) survive beside the second's (${marks2[1]}), nothing trimmed`,
+    F.FINE_SCROLL_CAP >= 2 * 402 && fr2.length <= F.FINE_SCROLL_CAP && fr2[0].arm === 'scrollBtn' && !('droppedBefore' in fr2[0]) && fr2.some((x) => x.arm === 'runOpen') && JSON.stringify(marks2) === JSON.stringify([449 - F.FINE_HEAD - F.FINE_TAIL, 450 - F.FINE_HEAD - F.FINE_TAIL]), { n: fr2.length, head: fr2[0], marks2 });
+  const fr3 = []; F.pushFine(fr3, { t: 0, arm: 'runOpen' }); for (let i = 1; i <= 288; i++) F.pushFine(fr3, { t: i }); // 1.2 s at 240 Hz
+  F.pushFine(fr3, { t: 289, arm: 'scrollBtn' }); for (let i = 290; i <= 769; i++) F.pushFine(fr3, { t: i }); // then the ↓ — the incident's own shape
+  ok(`toggle, then ↓ 1.2 s later at 240 Hz: the first window keeps its arm and all ${fr3.findIndex((x) => x.arm === 'scrollBtn') - 1} events (the acceptance measured 92 entries lost uncounted at a 600 cap)`, fr3[0].arm === 'runOpen' && fr3[1].t === 1 && fr3.findIndex((x) => x.arm === 'scrollBtn') === 289 && !fr3.some((x) => 'droppedBefore' in x));
+  const fr4 = []; F.pushFine(fr4, { t: 0, arm: 'runOpen' }); for (let i = 1; i <= 300; i++) F.pushFine(fr4, { t: i });
+  ok('a window of 201–400 events drops nothing and writes NO marker (r3: it wrote {dropped: 0})', fr4.length === 301 && !fr4.some((x) => 'dropped' in x));
+  const fr5 = []; let pushedEntries = 0;
+  for (let w = 0; w < 3; w++) { F.pushFine(fr5, { t: w * 1000, arm: 'runOpen' }); pushedEntries++; for (let i = 1; i <= 480; i++) F.pushFine(fr5, { t: w * 1000 + i }); pushedEntries += 401; } // 402 entries left per window
+  ok(`three busy windows: the ring's FRONT trim is COUNTED on its first entry (droppedBefore ${fr5[0].droppedBefore} = ${pushedEntries} − ${F.FINE_SCROLL_CAP}) — never silent`, fr5.length === F.FINE_SCROLL_CAP && fr5[0].droppedBefore === pushedEntries - F.FINE_SCROLL_CAP && fr5.filter((x) => x.arm).length === 2, { n: fr5.length, head: fr5[0] });
   // the wiring (source pins: the module draws the page)
   const rec = read('src/lib/incident-recorder.js');
   const cv = read('src/lib/chat-view.js');
