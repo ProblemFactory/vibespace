@@ -58,7 +58,7 @@ const OWN_ARG_RE = /^--?(?:remote-debugging-(?:port|pipe|address)|user-data-dir|
  *  '(cmd-prefix|launcher|subprocess-path)'`, each hit judged against Chromium's switch definition (most name data, not code). The
  *  Pepper / NaCl rows are for older builds an owner may install. EXTENSIONS ARE LEFT OUT, deliberately (`--load-extension`,
  *  `--disable-extensions-except`): they load code the BROWSER runs inside its own extension model — the plugin's business — never a
- *  program the OS runs (backlog: revisit). Refused BY NAME in a launch answer (engineAnswerVerdict — both sources, every road), and
+ *  program the OS runs (backlog B-18d0: revisit when a non-Chrome engine needs them). Refused BY NAME in a launch answer (engineAnswerVerdict — both sources, every road), and
  *  again where an engine's arguments become an argv: engineWrapperText, and the keeper's attachStart (src/browser-attach.js stays
  *  require-free). NOT an allowlist: every other switch is the plugin's to send. */
 const LAUNCHER_SWITCHES = Object.freeze([
@@ -81,11 +81,20 @@ const LAUNCHER_SWITCHES = Object.freeze([
 /** lane engine-spi-egress L1b r4: ONE READING of an engine argument for EVERY switch check (the launcher census, the proxy rule, the
  *  own-switch rule — user-data-dir, remote-debugging). Chromium trims whitespace from each argument BEFORE it reads it as a switch
  *  (POSIX: base::TrimWhitespaceASCII — space \t \n \v \f \r; Windows: Unicode whitespace), so « --x» IS --x: every rule judges the
- *  trimmed form (JS `\s`, the wider set), and an argument that is not its own trimmed form is refused by name — a whitespace-padded
- *  argument has no honest use. */
-function switchFormOf(a) { return String(a == null ? '' : a).replace(/^\s+|\s+$/g, ''); }
+ *  trimmed form (JS `\s` + U+0085 NEL, which `\s` lacks — the wider set), and an argument that is not its own trimmed form is refused
+ *  by name — a whitespace-padded argument has no honest use. (The proxy / own rules match case-sensitively: POSIX Chromium reads
+ *  switch names as written; the launcher census matches any case.) */
+function switchFormOf(a) { return String(a == null ? '' : a).replace(/^[\s\u0085]+|[\s\u0085]+$/g, ''); }
 /** The arguments that start or end with whitespace (each judged as its trimmed form too — this rule says the padding itself). */
 function paddedArgsOf(list) { return (Array.isArray(list) ? list.map(String) : []).filter((a) => switchFormOf(a) !== a); }
+/** lane engine-spi-egress L1b r5: THE SWITCH-ONLY RULE — an engine's launch argument must be a SWITCH (its trimmed form `-x` / `--x` /
+ *  `--x=<any value>`, the name a letter or digit first). A bare `--` is Chromium's END OF SWITCHES: everything after it — the keeper's
+ *  own proxy pair, which rides LAST — would be read as pages (the egress proxy off on a headed browser); a page, a path or a bare
+ *  word would open as a start-up page. → the arguments that are not switches. */
+const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/;
+function nonSwitchArgsOf(list) { return (Array.isArray(list) ? list.map(String) : []).filter((a) => !SWITCH_FORM_RE.test(switchFormOf(a))); }
+/** The switch-only refusal's words (one sentence for the three walls). */
+const notSwitchWords = (list) => `an engine launch takes switches only; ${list.slice(0, 3).map((a) => `«${clip(a, 40)}»`).join(', ')} ${list.length > 1 ? 'are not switches' : 'is not a switch'} (a page, a path or a bare -- would reorder what the browser reads)`;
 /** A launcher switch in every spelling Chromium reads as one — tested on the argument's TRIMMED form (switchFormOf, r4): `--x` /
  *  `--x=v`, a single dash (POSIX Chromium reads `-x` as a switch), any case (Windows Chromium lowercases switch names), with any
  *  whitespace around it. A value is never a switch: Chromium splits each argument at its FIRST `=`
@@ -219,6 +228,8 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (own.length) return bad('browser_engine_protocol', `asked for ${own.map((a) => clip(a.split('=')[0], 40)).join(', ')} — the debugging endpoint and the profile's directory are VibeSpace's to set`);
     const padded = paddedArgsOf(args);
     if (padded.length) return bad('browser_engine_protocol', `named an argument that starts or ends with whitespace (${padded.slice(0, 3).map((a) => JSON.stringify(clip(a, 40))).join(', ')}) — an engine switch may not start or end with whitespace: Chromium would read « --x» as --x`);
+    const nonSwitch = nonSwitchArgsOf(args); // L1b r5: a bare --, a page, a path, a word — refused by name
+    if (nonSwitch.length) return { ok: false, code: 'browser_engine_protocol', error: `${who}'s launch: ${notSwitchWords(nonSwitch)}` };
     const env = body.env === undefined || body.env === null ? {} : body.env;
     if (!isObj(env) || Object.values(env).some((v) => typeof v !== 'string')) return bad('browser_engine_protocol', 'named a launch env of another shape (string values)');
     const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));
@@ -293,6 +304,8 @@ function engineWrapperText({ program = '', args = [], env = {} } = {}) {
   const launchers = launcherArgsOf(list); // L1b r3: the second wall (the launch verdict refused them first) — r4: on the trimmed form
   if (launchers.length) return no(`its arguments name another program through ${launchers.join(', ')}; a plugin never names the program it runs`);
   if (paddedArgsOf(list).length) return no('an argument starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x');
+  const nonSwitch = nonSwitchArgsOf(list); // L1b r5: the wrapper is never written with a bare -- (the keeper's proxy pair rides after it)
+  if (nonSwitch.length) return no(notSwitchWords(nonSwitch));
   const vars = Object.entries(isObj(env) ? env : {}).map(([k, v]) => [k, String(v)]);
   const badEnv = vars.filter(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || v.includes('\0')).map(([k]) => clip(k, 40));
   if (badEnv.length) return no(`the environment name(s) ${badEnv.join(', ')} are not shell names, or a value holds a NUL byte`);
@@ -327,4 +340,5 @@ module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b
   LAUNCHER_SWITCHES, LAUNCHER_ARG_RE, launcherArgsOf, // lane engine-spi-egress L1b r3
-  switchFormOf, paddedArgsOf }; // lane engine-spi-egress L1b r4
+  switchFormOf, paddedArgsOf, // lane engine-spi-egress L1b r4
+  SWITCH_FORM_RE, nonSwitchArgsOf, notSwitchWords }; // lane engine-spi-egress L1b r5

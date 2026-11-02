@@ -4399,6 +4399,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const engWho = ENG.engineWords({ id: engineLaunch && engineLaunch.engine && engineLaunch.engine.id, label: engineLaunch && engineLaunch.engine && engineLaunch.engine.label });
     if (launchers.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`); }
     if (padded.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho} named an argument that starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x`); }
+    // L1b r5: the switch-only rule on this road too (a bare -- puts the keeper's proxy pair after the end of switches)
+    const nonSwitch = ENG.nonSwitchArgsOf(engineArgs);
+    if (nonSwitch.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho}'s launch: ${ENG.notSwitchWords(nonSwitch)}`); }
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the

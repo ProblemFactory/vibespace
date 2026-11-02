@@ -1414,6 +1414,15 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
   const lP = (ENGN.launcherArgsOf || (() => []))(['\v--nacl-gdb=/x', ' --Gpu-Launcher=/x ']), pP = (ENGN.paddedArgsOf || (() => []))(['--a', ' --b', '--c\t']);
   ok(!missP.length && !ownP.length && !innerP.length && wP1.ok === false && /through --browser-subprocess-path/.test(String(wP1.error)) && wP2.ok === false && /starts or ends with whitespace/.test(String(wP2.error)) && lP.join() === '--nacl-gdb,--Gpu-Launcher' && pP.length === 2,
     'L1b r4 PURE: ONE READING — every launcher row padded with a space / tab / \\v / \\f in front or a space behind ⇒ refused NAMING the switch; « --no-proxy-server», a tab-padded --proxy-pac-url, « --user-data-dir», « --remote-debugging-port» ⇒ refused by their own rules; any other padded argument ⇒ refused «… may not start or end with whitespace: Chromium would read « --x» as --x»; inner whitespace in a value (a user agent) and the real wrapper pass; the wrapper writer reads the same form', { missP: missP.slice(0, 6), ownP, innerP, wP1: wP1.error, wP2: wP2.error, lP, pP });
+  // L1b r5: THE SWITCH-ONLY RULE — an engine launch argument must be a switch: a bare -- (Chromium's end of switches — the keeper's proxy
+  // pair rides after it), a page, a path, a word ⇒ refused by name; the wrapper is never written with one
+  const nsRef = ['--', '-', '---', 'about:blank', 'https://x.test/', '/tmp/x', 'foo bar'].filter((a) => { const r = lvL(['--no-sandbox', a]); return !(r.ok === false && r.code === 'browser_engine_protocol' && String(r.error).includes(`an engine launch takes switches only; «${a}» is not a switch (a page, a path or a bare -- would reorder what the browser reads)`)); });
+  const nsOk = [['--x'], ['-x'], ['--x='], ['--x=a b c'], ['--x-y_z=1'], ['--no-sandbox', '--fingerprint=1234567']].filter((a) => lvL(a).ok !== true);
+  const nelL = lvL(['\u0085--gpu-launcher=/x']);
+  const wDash = ENGN.engineWrapperText({ program: '/k/chrome', args: ['--no-sandbox', '--', '--proxy-server=http://127.0.0.1:1', '--proxy-bypass-list=<-loopback>'] }) || {};
+  const ns5 = (ENGN.nonSwitchArgsOf || (() => ['?']))(['--a', '--', 'x', '--b=c d']);
+  ok(!nsRef.length && !nsOk.length && nelL.ok === false && nelL.launcher === '--gpu-launcher' && wDash.ok === false && !wDash.text && /takes switches only; «--» is not a switch/.test(String(wDash.error)) && ns5.join() === '--,x',
+    'L1b r5 PURE: THE SWITCH-ONLY RULE — «--» (the end of switches: the keeper\'s proxy pair would ride after it), «-», «---», a page, a URL, a path, «foo bar» ⇒ refused by name; --x, -x, --x=, --x=a b c, --x-y_z=1 and the real wrapper pass; a NEL (U+0085) in front of a launcher is trimmed and the switch named; the wrapper text for an answer with a bare -- is NEVER written', { nsRef, nsOk, nel: nelL.error, wDash: wDash.error, ns5 });
   // THE REAL registry + keeper: the user source (the fixture's launch answer bent to name one) ⇒ refused by name, NOTHING launched, the
   // For-you words name the switch; the download source (⑦'s fixture engine, its kernel in place) ⇒ the same refusal
   fs.mkdirSync(path.dirname(MODEU), { recursive: true }); fs.writeFileSync(MODEU, JSON.stringify({ launch: { args: ['--no-sandbox', '--browser-subprocess-path=/usr/bin/true'] } }));
@@ -1453,12 +1462,22 @@ const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU,
     ok(vl.ok === true && vl.launch.args.includes('--browser-subprocess-path=/usr/bin/true'), 'control (l): a launch verdict without the launcher census ACCEPTS a plugin naming another program through --browser-subprocess-path — exactly what r3 catches', vl);
   }
   // (w) the UNTRIMMED reading (r3's): a tab in front of a launcher switch passes the verdict — what Chromium then reads as the switch
-  const wAnchor = "function switchFormOf(a) { return String(a == null ? '' : a).replace(/^\\s+|\\s+$/g, ''); }";
+  const wAnchor = "function switchFormOf(a) { return String(a == null ? '' : a).replace(/^[\\s\\u0085]+|[\\s\\u0085]+$/g, ''); }";
   if (!engsL.includes(wAnchor)) ok(false, 'control (w): the anchor (the one trimmed reading) is not in this tree', wAnchor);
   else {
     const EW = MUTU.load('src/browser-engines.js', engsL.replace(wAnchor, "function switchFormOf(a) { return String(a == null ? '' : a); }"), 'untrimmed');
     const vw = EW.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '\t--browser-subprocess-path=/usr/bin/true', ' --no-proxy-server'] } }, { id: UID });
-    ok(vw.ok === true, 'control (w): the UNTRIMMED reading accepts «\\t--browser-subprocess-path=…» and « --no-proxy-server» — exactly what r4 catches (Chromium trims them into the switches)', vw);
+    const vw5 = EW.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '\t--browser-subprocess-path=/usr/bin/true'] } }, { id: UID });
+    ok(vw.launcher !== '--browser-subprocess-path' && vw5.launcher !== '--browser-subprocess-path' && !/proxy is VibeSpace/.test(String(vw.error)), 'control (w): the UNTRIMMED reading never NAMES «\\t--browser-subprocess-path=…» nor « --no-proxy-server» as the switches Chromium trims them into (r5\'s switch-only rule still stops them, unnamed) — exactly what r4\'s «refused NAMING the switch» catches', { vw, vw5 });
+  }
+  // (s) a launch without the switch-only rule: a bare -- passes, and the wrapper writes the keeper's proxy pair AFTER it (read as pages)
+  const sAnchor = 'const SWITCH_FORM_RE = /^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$/;';
+  if (!engsL.includes(sAnchor)) ok(false, 'control (s): the anchor (the switch-only rule) is not in this tree', sAnchor);
+  else {
+    const ES = MUTU.load('src/browser-engines.js', engsL.replace(sAnchor, 'const SWITCH_FORM_RE = /(?:)/;'), 'any-argument');
+    const vs = ES.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: ['--no-sandbox', '--'] } }, { id: UID });
+    const ws = ES.engineWrapperText({ program: '/k/chrome', args: [...(vs.ok ? vs.launch.args : []), '--proxy-server=http://127.0.0.1:1', '--proxy-bypass-list=<-loopback>'] });
+    ok(vs.ok === true && ws.ok === true && /'--' '--proxy-server=http:\/\/127\.0\.0\.1:1'/.test(ws.text), 'control (s): without the switch-only rule a bare «--» passes and the wrapper writes the keeper\'s proxy pair AFTER the end of switches — exactly what r5 catches', ws.ok ? ws.text.split('\n').pop() || ws.text.split('\n').at(-2) : ws);
   }
   // (i) the import read by two readers (the guard asks Array.isArray, apply() asks .includes) lets a bearer's STRING sections through
   const pssI = read('src/routes/persistence.js');

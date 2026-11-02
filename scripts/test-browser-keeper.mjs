@@ -334,6 +334,26 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   ok(((rT.e && wordsT.test(rT.e.message)) || (rT.v && rT.v.state === 'failed' && wordsT.test(JSON.stringify(rT.v)))) && chromeLog().length === nT && ranT === ranL && (kt._reg().browsers[pT.id] || {}).state !== 'ready', 'lane engine-spi-egress L1b r4: a TAB in front of the switch (Chromium trims it) ⇒ the same refusal by name on the attach road, nothing spawned', { r: rT.e ? rT.e.message : rT.v });
   await kt.stop(pT.id, { why: 'user' }).catch(() => { });
   try { kt.shutdown(); } catch { /* none */ }
+  // L1b r5: the ATTACH road's OWN wall, pinned directly — the wrapper writer is stubbed to write the program bare (so its wall cannot
+  // answer first), the engine answers a padded argument / a bare -- unjudged: attachStart refuses each by name, nothing spawned
+  const ENGK = require('../src/browser-engines.js'), wrapOrig = ENGK.engineWrapperText;
+  const atWall = [];
+  try {
+    ENGK.engineWrapperText = (spec) => wrapOrig({ ...spec, args: [] });
+    for (const [tag, args, re] of [['padded', ['--no-sandbox', ' --x-padded=1'], /starts or ends with whitespace/], ['end-of-switches', ['--no-sandbox', '--'], /an engine launch takes switches only; «--» is not a switch/]]) {
+      const REGW = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args, env: {} } }) };
+      const kw = mk({ dataDir: path.join(S, `data-engine-attach-wall-${tag}`), engines: REGW });
+      const pW = kw.createProfile({ label: `Engine wall ${tag}`, browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+      const nW = chromeLog().length;
+      const rW = await kw.start(pW.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+      let ranW = ''; try { ranW = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ranW = ''; }
+      const said = rW.e ? String(rW.e.message) : JSON.stringify(rW.v || {});
+      atWall.push({ tag, ok: re.test(said) && !/launch wrapper cannot be written/.test(said) && chromeLog().length === nW && ranW === ranL && (kw._reg().browsers[pW.id] || {}).state !== 'ready', said: said.slice(0, 200) });
+      await kw.stop(pW.id, { why: 'user' }).catch(() => { });
+      try { kw.shutdown(); } catch { /* none */ }
+    }
+  } finally { ENGK.engineWrapperText = wrapOrig; }
+  ok(atWall.length === 2 && atWall.every((x) => x.ok), 'lane engine-spi-egress L1b r5: the attach road\'s OWN wall (the wrapper\'s stubbed away) refuses a padded argument and a bare -- by name before its argv is built — nothing spawned', atWall);
   try { kl.shutdown(); } catch { /* none */ }
   // lane engine-distribution: the kernel side's plugin has no childProcess — its probe says version null + declaredVersion; the
   // KEEPER has the version measured ONCE before the first launch (the engine record's), the record + the card say «measured»
