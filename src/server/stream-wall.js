@@ -4,7 +4,7 @@
 // PERSON's (a Re-check), the signal is the STREAM's. A harness whose `quota.signalFromStream` answers a typed wall
 // ({source:'stream', kind:'exhausted', limitId, window, usedPct, resetsAt, measuredAt}) has it written HERE, for the
 // conversation's own ACCOUNT (`_accountId` — its login; the machine's own login has no account row to write), through
-// THE ONE write path (src/usage-cache-write.js writeReading: per limit, per window, the newest measurement wins — a
+// THE ONE write path (src/usage-cache-write.js writeCacheObject: per limit, per window, the newest measurement wins — a
 // measured reading taken after the wall replaces its 100 %, and a wall never overwrites a newer one).
 // THE ONE-SHOT (the owner's ruling «A», 2026-11-02): where the descriptor declares `onDemand.onWallSignal`, the wall fires
 // ONE on-demand read of that account (src/server/cli-usage-door.js: the judge, the minute's pace and the setting exactly
@@ -18,6 +18,10 @@ const LIVE_MS = 5 * 60 * 1000;   // a wall stamped longer ago is history (a repl
 const SAME_RESET_S = 60;         // one wall said again (a retry on it, a re-attach) states its reset to within a second or two
 const ROOM_MAX_PCT = 90;         // another group «has room» under this
 
+/** THE SESSION'S OWN MODEL FACT (r2: the consumer's engine accessor may be absent — a road tested only against a stubbed
+ *  engine key is not wired): the lock, the newest pick, the spawn model — the pool engine's own ladder minus the served
+ *  model (no ACP consumer notes one). */
+function ownModelOf(s) { return (s && s._modelLocked && s._lockedModel) || (s && s._pickedModel) || (s && s._spawnModel) || null; }
 /** ONE wall said twice (the notice + its prompt_end, 2 ms apart): the same limit and window, and the same prompt or
  *  within 2 s of each other. */
 function sameWall(a, b) {
@@ -81,8 +85,10 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     if (rec.kind !== 'notice' && rec.kind !== 'prompt_end') return null;
     const quota = quotaOf(session.backend);
     if (!quota || typeof quota.signalFromStream !== 'function') return null;
+    // the model: the session's fact at the moment of the record (the engine's ladder, else the session record itself);
+    // agy's `usage` record arrives AFTER the wall, so it is only a secondary witness (a session that names none)
     let model = null; try { model = (modelOf && modelOf()) || null; } catch { model = null; }
-    const sig = quota.signalFromStream(rec, { model: model || lastModel.get(session) || null });
+    const sig = quota.signalFromStream(rec, { model: model || ownModelOf(session) || lastModel.get(session) || null });
     if (!sig || sig.source !== 'stream') return null;
     if (sig.kind === 'unread') { once(`unread|${session.backend}|${sig.why}`, `[stream-wall] ${session.backend}: a usage wall the stream named was not read (${sig.why}) — nothing written, never a guess`); return null; }
     if (sig.kind !== 'exhausted') return null;
@@ -94,13 +100,15 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     if (sig.resetsAt * 1000 <= t) return null; // its reset already passed: the wall says nothing about now
     const prev = usageWrite.readCacheObject(cacheDir, key) || {};
     // the file's own non-reading fields ride along (agy's window names, …); the write path re-derives every bucket view
-    // from the merged limits and recomputes its own markers, so only this write's provenance is left out
-    const { limits: _limits, fetchedAt: _at, source: _source, ...carried } = prev;
-    const extras = { ...carried, backend: session.backend };
-    const set = quotaModel.makeLimitSet({ identity: key, fetchedAt: Math.max(Number(prev.fetchedAt) || 0, sig.measuredAt), source: 'stream', limits: [quotaModel.makeLimit({
+    // from the merged limits and recomputes its own markers. THE AGE RULE (r2): the file's `fetchedAt` — the row's age
+    // label — moves only on a MEASURED reading; a wall stamps `measuredAt` on ITS window only, so the windows it does not
+    // touch keep the age of the reading that measured them
+    const { limits: _limits, source: _source, ...carried } = prev;
+    const obj = { ...carried, backend: session.backend, source: 'stream' };
+    const set = quotaModel.makeLimitSet({ identity: key, fetchedAt: null, source: 'stream', limits: [quotaModel.makeLimit({
       limitId: sig.limitId, name: sig.limitId, scope: 'model', source: 'stream', fetchedAt: sig.measuredAt,
       windows: [{ kind: sig.window, usedPct: sig.usedPct, resetsAt: sig.resetsAt, measuredAt: sig.measuredAt }] })] });
-    const w = usageWrite.writeReading({ cacheDir, key, set, extras, source: 'stream', backend: session.backend });
+    const w = usageWrite.writeCacheObject({ cacheDir, key, obj, set, measuredAt: sig.measuredAt, source: 'stream', backend: session.backend });
     if (!w || !w.ok) { log(`[stream-wall] ${key}: the wall was not written — ${(w && w.why) || 'refused'}`); return null; }
     const won = quotaModel.windowOfKind((w.limits || []).find((l) => l && l.limitId === sig.limitId), sig.window);
     if (!won || won.measuredAt !== sig.measuredAt) { log(`[stream-wall] ${key}: a newer reading of ${sig.limitId} ${sig.window} stands — the wall changes nothing`); return null; }
@@ -119,4 +127,4 @@ function configure(deps) { road = createStreamWallRoad(deps); return road; }
 /** The ACP consumer's entry (src/server/stdout/acp-events.js). */
 function onRecord(session, rec, opts) { return road ? road.onRecord(session, rec, opts) : null; }
 
-module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT };
+module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, ownModelOf, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT };

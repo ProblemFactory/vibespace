@@ -151,7 +151,10 @@ console.log('⑥ THE WRITE: the walled window, nothing else');
   ok('the Gemini weekly window: 100 %, its reset the one agy named, measured at the wall', g7 && g7.usedPct === 100 && g7.resetsAt === RESET && g7.measuredAt === T && g7.state === 'running', JSON.stringify(g7));
   ok('…the Gemini 5h window UNTOUCHED (the merge is per window)', JSON.stringify(win(after, G, '5h')) === JSON.stringify(win(before, G, '5h')));
   ok('…the Claude and GPT limit UNTOUCHED (the merge is per limit)', JSON.stringify(lim(after, C)) === JSON.stringify(lim(before, C)));
-  ok('…the Gemini limit says who measured it last (stream) and the file keeps the backend + agy\'s window names', lim(after, G).source === 'stream' && after.backend === 'antigravity' && after.windowNames?.['Gemini Models/7d'] === 'Weekly Limit Remaining' && after.source === 'stream' && after.fetchedAt === T);
+  ok('…the Gemini limit says who measured it last (stream) and the file keeps the backend + agy\'s window names', lim(after, G).source === 'stream' && after.backend === 'antigravity' && after.windowNames?.['Gemini Models/7d'] === 'Weekly Limit Remaining' && after.source === 'stream');
+  // THE AGE RULE (r2): the row's age label is the file's fetchedAt — a wall never moves it (it stamps only its own window)
+  const MA0 = await import(path.join(REPO, 'src/lib/manage-agents.js'));
+  ok('…the file\'s fetchedAt (the row\'s age label) stays the STALE reading\'s — the untouched windows keep their age; the walled window carries the wall\'s own measuredAt', after.fetchedAt === before.fetchedAt && after.fetchedAt === T - 2 * 86400 && MA0.onDemandUsageView({ limits: after.limits, fetchedAt: after.fetchedAt }).fetchedAt === T - 2 * 86400, JSON.stringify([before.fetchedAt, after.fetchedAt]));
   ok('the answer names the room (the other group\'s weekly window read at 0 %)', r && r.wallRoom && r.wallRoom.name === C && r.wallRoom.usedPct === 0, JSON.stringify(r && r.wallRoom));
   const mid = fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8');
   ok('the prompt_end of the same wall writes nothing more', road.onRecord(s, PEND, { modelOf: modelOf(s) }) === null && fs.readFileSync(W.cacheFileFor(CACHE, A.id), 'utf8') === mid);
@@ -318,23 +321,71 @@ console.log('⑧b the judge\'s STOP, a refusal, the capability row, no timer, no
   ok('a wall record stamped longer ago than the live bound (a replay) ⇒ written, NO spawn', old && old.oneShot === null && win(disk(B.id), G, '7d')?.usedPct === 100 && runs().length === 6, JSON.stringify(old));
 }
 
-console.log('⑨ THE REAL CONSUMER (acp-events) fed the incident\'s three records');
+console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine literal');
 {
-  fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true });
-  seed(A.id, T - 2 * 86400, BEFORE);
-  clock.t = T + 50;
-  SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
+  // r2 (the acceptance's MAJOR): the consumer gets the engine server.js HANDS it — its literal's keys, parsed from the shipped
+  // file (never a hand-made engine that happens to carry what the road reads). Each key is a no-op except the model accessor,
+  // which answers the pool engine's own ladder (lock › newest pick › spawn) — and only when the literal carries it.
+  const srv = read('server.js');
+  const i = srv.indexOf("require('./src/server/session-stdout.js').create({"), j = srv.indexOf('engine: {', i);
+  let d = 0, k = j + 8; for (; k < srv.length; k++) { if (srv[k] === '{') d++; else if (srv[k] === '}' && !--d) break; }
+  const KEYS = [...new Set((srv.slice(j + 9, k).replace(/\/\/.*$/gm, '').match(/[A-Za-z_$][\w$]*/g) || []))];
+  const LADDER = (s) => (s._modelLocked && s._lockedModel) || s._pickedModel || s._spawnModel || null;
+  const engineOf = (keys) => Object.fromEntries(keys.map((n) => [n, n === 'sessionModelFor' ? LADDER : () => { }]));
+  ok('server.js\'s session-stdout literal parsed (' + KEYS.length + ' keys) and it CARRIES sessionModelFor', KEYS.length > 20 && KEYS.includes('sessionModelFor') && KEYS.includes('noteTurnEnd'), KEYS.join(','));
+  const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
   const AE = require(path.join(REPO, 'src/server/stdout/acp-events.js'));
-  const consumer = AE.create({ engine: { noteTurnEnd() { }, sessionModelFor: (s) => s._spawnModel || null }, noteHarnessModels() { }, deliverRef: {}, permissionRulesRef: {} });
-  const fed = [];
-  const pty = { onData(fn) { this.fn = fn; } };
-  const s = { backend: 'antigravity', _accountId: A.id, _spawnModel: 'gemini-4-argon-high', buffer: '', name: 'wall' };
-  consumer.attach(s, 'w1', pty, { feedLive: (_s, m) => fed.push(m), broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
-  pty.fn([NOTICE, PEND, USAGE].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const drive = (s, recs, keys = KEYS) => {
+    const consumer = AE.create({ engine: engineOf(keys), noteHarnessModels() { }, deliverRef: {}, permissionRulesRef: {} });
+    const fed = [], pty = { onData(fn) { this.fn = fn; } };
+    consumer.attach(s, 'w-' + Math.random().toString(36).slice(2, 8), pty, { feedLive: (_s, m) => fed.push(m), broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    pty.fn(recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    return fed;
+  };
+  const rooms = (fed) => new AcpMessageManager('x').convertHistory(fed).filter((m) => m && m.content && m.content[0] && m.content[0].wallRoom);
+  const fresh = (acct, extra = {}) => ({ backend: 'antigravity', _accountId: acct.id, buffer: '', name: 'wall', ...extra });
+  SW.configure({ harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, door: null, now: () => clock.t, log: (l) => logs.push(l) });
+  clock.t = T + 50;
+  // the FIRST wall of a session (a restart / a new conversation on an exhausted account): no `usage` record has spoken yet
+  fs.rmSync(W.cacheFileFor(CACHE, A.id), { force: true }); seed(A.id, T - 2 * 86400, BEFORE);
+  const fed = drive(fresh(A, { _spawnModel: 'gemini-4-argon-high' }), [NOTICE, PEND, USAGE]);
   const g7 = win(disk(A.id), G, '7d');
-  ok('the account\'s file now holds the wall (Gemini weekly 100 % until the named reset)', g7 && g7.usedPct === 100 && g7.resetsAt === RESET, JSON.stringify(g7));
+  ok('THE FIRST WALL of a session (notice → prompt_end → usage: no usage record yet) is WRITTEN — the session\'s own model names the group', g7 && g7.usedPct === 100 && g7.resetsAt === RESET, JSON.stringify(g7));
   const n = fed.find((m) => m.kind === 'notice');
-  ok('…the notice reaches the chat with its words and the room facts; the three records all reach the normalizer', fed.length === 3 && n && n.text === NOTICE.text && n.wallRoom && n.wallRoom.name === C && n.wallRoom.usedPct === 0, JSON.stringify(fed.map((m) => m.kind)));
+  ok('…the three records all reach the normalizer; the notice keeps its words and carries the room facts', fed.length === 3 && n && n.text === NOTICE.text && n.wallRoom && n.wallRoom.name === C && n.wallRoom.usedPct === 0, JSON.stringify(fed.map((m) => m.kind)));
+  ok('…EXACTLY ONE room line through the real normalizer (notice first)', rooms(fed).length === 1);
+  // the same, without the engine key at all: the session record itself is read (a missing key never drops a wall)
+  fs.rmSync(W.cacheFileFor(CACHE, B.id), { force: true });
+  drive(fresh(B, { _spawnModel: 'gemini-4-argon-high' }), [NOTICE, PEND], KEYS.filter((x) => x !== 'sessionModelFor'));
+  ok('…and with an engine that LACKS the accessor, the session record\'s own model still writes the wall (the fallback)', win(disk(B.id), G, '7d')?.usedPct === 100);
+  // the prompt_end FIRST (agy\'s stdout result read before its stderr line): the room rides the prompt_end, said once
+  fs.rmSync(W.cacheFileFor(CACHE, Cc.id), { force: true }); seed(Cc.id, T - 2 * 86400, BEFORE);
+  const fed2 = drive(fresh(Cc, { _spawnModel: 'gemini-4-argon-high' }), [PEND, NOTICE, USAGE]);
+  const pe = fed2.find((m) => m.kind === 'prompt_end');
+  ok('PROMPT_END FIRST: the prompt_end carries the room, the later notice none — EXACTLY ONE room line through the real normalizer', pe && pe.wallRoom && pe.wallRoom.name === C && !fed2.find((m) => m.kind === 'notice').wallRoom && rooms(fed2).length === 1, JSON.stringify(rooms(fed2).map((m) => m.content[0])));
+  // a MODEL SWITCH before the wall: the NEW model\'s group (never the group the last usage record named)
+  fs.rmSync(W.cacheFileFor(CACHE, D.id), { force: true });
+  const s4 = fresh(D, { _spawnModel: 'claude-sonnet-4-6' });
+  drive(s4, [{ ...USAGE, model: 'claude-sonnet-4-6', ts: new Date(T - 600e3).toISOString() }]);   // the previous turn ran claude
+  s4._pickedModel = 'gemini-4-argon-high'; s4._pickedModelAt = T - 60e3;                               // the person switched
+  drive(s4, [NOTICE, PEND]);
+  ok('A WALL AFTER A MODEL SWITCH lands on the NEW model\'s group (Gemini), the old group untouched', win(disk(D.id), G, '7d')?.usedPct === 100 && !lim(disk(D.id), C), JSON.stringify(disk(D.id)?.limits?.map((l) => l.limitId)));
+  // no model fact anywhere ⇒ still no signal, said
+  const n0 = logs.length;
+  const fake = { ...A, id: 'agy-no-model-acct' };
+  drive(fresh(fake), [NOTICE, PEND]);
+  ok('a session that names NO model anywhere (no lock, pick, spawn or usage record) ⇒ no signal, the line — never a guess', disk(fake.id) === null && logs.slice(n0).some((l) => /not read \(model\)/.test(l)), logs.slice(n0).join(' | '));
+}
+
+console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');
+{
+  const src = read('src/lib/settings-schema.js');
+  const OPT = 'Manual (⟳ button) — plus ONE automatic read after a usage wall', DESC = 'Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall;';
+  ok('the «manual» option and the description name the one automatic read after a wall', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const dk = Object.keys(zh).find((k) => k.includes(DESC));
+  ok('…in zh and ja too (the option, and the description\'s manual clause)', !!zh[OPT] && !!ja[OPT] && !!dk && /Antigravity/.test(zh[dk]) && /Antigravity/.test(ja[dk]), JSON.stringify([zh[OPT], ja[OPT]]));
+  ok('…and the door\'s behaviour is unchanged by the words: «off» still refuses a wall read', /if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js')));
 }
 
 console.log('⑩ the gauge law on the account row');

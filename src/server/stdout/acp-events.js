@@ -16,7 +16,9 @@ const protocol = 'acp-events';
 const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 
 function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
-  const { noteTurnEnd } = engine;
+  // sessionModelFor: the session's OWN model (lane agy-wall-signal r2 — the wall's group; server.js's literal must carry
+  // every name destructured here: test-fable-cap-pool-storm §10)
+  const { noteTurnEnd, sessionModelFor } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     let lineBuf = '';
     // THE MODE THE WRAPPER RUNS IN (lane agy-harness-fixes-2): its `session` / `config` record says it, and the hub's copy
@@ -67,8 +69,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
           // account; the wall notice carries the room sentence's facts (`wallRoom`) to the chat
           if (msg.kind === 'notice' || msg.kind === 'prompt_end' || msg.kind === 'usage') {
             try {
-              const w = require('../stream-wall.js').onRecord(session, msg, { modelOf: () => engine.sessionModelFor?.(session), say: (r) => feedLive(session, r) });
-              if (w && w.wallRoom && msg.kind === 'notice') msg.wallRoom = w.wallRoom;
+              const w = require('../stream-wall.js').onRecord(session, msg, { modelOf: () => (typeof sessionModelFor === 'function' ? sessionModelFor(session) : null), say: (r) => feedLive(session, r) });
+              // the room rides WHICHEVER record carries the wall first (notice or error prompt_end — the chat draws both;
+              // agy's stdout result can be read before its stderr line): one wall, one sentence
+              if (w && w.wallRoom) msg.wallRoom = w.wallRoom;
             } catch (e) { console.warn(`[acp] usage wall not read: ${e.message}`); }
           }
           let newLabel = null;

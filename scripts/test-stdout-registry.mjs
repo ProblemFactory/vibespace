@@ -64,6 +64,7 @@ const engine = {
   // (not a `() => {}`) because a stub answering falsy would silently disable
   // the latch in every leg below, which is the shape this census exists to stop.
   servedDefinesModel: (s) => !!s?._servedModel && !(s._servedViaFallback?.to && s._servedViaFallback.to === s._servedModel),
+  sessionModelFor: (s) => (s && s._modelLocked && s._lockedModel) || s?._pickedModel || s?._spawnModel || null, // acp-events' wall road (lane agy-wall-signal r2)
   // r4: THE REROUTE THIS RECORD ANNOUNCES, asked BEFORE the served capture (the
   // incident's first announcement is a `fallback` content block on the very
   // record the substitute answered). Modelled for the same reason as the

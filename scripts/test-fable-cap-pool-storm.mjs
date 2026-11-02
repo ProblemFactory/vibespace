@@ -1677,6 +1677,23 @@ console.log('— §10 (r3) every engine name a consumer destructures is wired');
   }
   ok('§10 THE FIX: every name a consumer destructures from `engine` is in the literal server.js passes',
     missingTotal === 0, String(missingTotal));
+  // …AND every name a consumer READS off `engine` directly (lane agy-wall-signal r2, the acceptance's MAJOR: acp-events read
+  // `engine.sessionModelFor?.(session)` — an optional-chained read this destructure census never saw; server.js's literal
+  // lacked the key, so in production the first wall of a session was dropped while every suite that stubbed the key was green)
+  const directReads = (rel) => [...new Set((fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '')
+    .match(/\bengine\??\.([A-Za-z_$][\w$]*)/g) || []).map((m) => m.replace(/^engine\??\./, '')))];
+  const direct = consumers.flatMap((c) => directReads(c).filter((n) => !wired['src/server/session-stdout.js'].includes(n)).map((n) => `${c}: engine.${n}`));
+  ok('§10 every name a consumer READS off `engine` directly (engine.x / engine.x?.(…)) is in the literal too', direct.length === 0, JSON.stringify(direct));
+  ok('§10 …the wall road\'s model accessor is wired: acp-events destructures sessionModelFor and server.js\'s literal carries it',
+    destructured('src/server/stdout/acp-events.js').includes('sessionModelFor') && wired['src/server/session-stdout.js'].includes('sessionModelFor'));
+  // RED CONTROLS: server.js's literal WITHOUT the key, and a direct optional-chained read of a key the literal lacks
+  {
+    const lit = literalAfter(srv, "require('./src/server/session-stdout.js').create({");
+    const noKey = names(lit.replace('notePoolAuthFailure, sessionModelFor,', 'notePoolAuthFailure,'));
+    ok('§10 RED control: the literal without sessionModelFor ⇒ acp-events\' destructure is missing it', noKey.length > 5 && !noKey.includes('sessionModelFor') && destructured('src/server/stdout/acp-events.js').some((n) => !noKey.includes(n)));
+    const planted = "x(engine.notAWiredName?.(session));";
+    ok('§10 RED control: a planted `engine.<name>?.(` read of a name the literal lacks is caught by the direct-read census', (planted.match(/\bengine\??\.([A-Za-z_$][\w$]*)/g) || []).map((m) => m.replace(/^engine\??\./, '')).some((n) => !wired['src/server/session-stdout.js'].includes(n)));
+  }
   // …and the two names this whole branch depends on are really there
   ok('§10 …including the round-1 pair and the r3 teardown settle',
     ['noteServedModel', 'noteModelFallback', 'settleTurnLane'].every((n) => wired['src/server/session-stdout.js'].includes(n))

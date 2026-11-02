@@ -141,6 +141,14 @@ function flattenSelect(opt) {
   return out;
 }
 
+/** A USAGE WALL's room sentence (lane agy-wall-signal: src/server/stream-wall.js read it from the account's reading),
+ *  carried by whichever record carried the wall first — the facts only (a name, a whole percent); the client says the
+ *  sentence in the UI's language. Anything malformed ⇒ null. */
+function wallRoomOf(rec) {
+  const r = rec && rec.wallRoom && typeof rec.wallRoom === 'object' ? rec.wallRoom : null;
+  return r && typeof r.name === 'string' && r.name && Number.isFinite(Number(r.usedPct)) ? { name: r.name.slice(0, 80), usedPct: Math.max(0, Math.min(100, Math.round(Number(r.usedPct)))) } : null;
+}
+
 class AcpMessageManager extends MessageWindow {
   constructor(sessionId) {
     super(sessionId);
@@ -444,7 +452,8 @@ class AcpMessageManager extends MessageWindow {
       const msg = this._create({ role: 'system', status: 'interrupted', content: [{ type: 'system_info', text: 'Interrupted' }] });
       if (emit) this._emit({ op: 'create', message: msg });
     } else if (reason === 'error') {
-      const msg = this._create({ role: 'system', status: 'error', content: [{ type: 'system_info', text: `Error: ${rec.error?.message || 'prompt failed'}` }] });
+      const wallRoom = wallRoomOf(rec); // the usage wall's room, when this record carried the wall first (lane agy-wall-signal r2)
+      const msg = this._create({ role: 'system', status: 'error', content: [{ type: 'system_info', text: `Error: ${rec.error?.message || 'prompt failed'}`, ...(wallRoom ? { wallRoom } : {}) }] });
       if (emit) this._emit({ op: 'create', message: msg });
     } else if (reason !== 'end_turn') {
       const text = reason === 'refusal' ? 'The agent refused to continue (this prompt and everything after it is dropped from its context)'
@@ -478,10 +487,7 @@ class AcpMessageManager extends MessageWindow {
     const text = String(rec.text || '');
     if (!text) return;
     const isErr = rec.level === 'error';
-    // a USAGE WALL's room sentence (lane agy-wall-signal: src/server/stream-wall.js read it from the account's reading) —
-    // the facts only (a name, a whole percent); the client says the sentence in the UI's language
-    const r = rec.wallRoom && typeof rec.wallRoom === 'object' ? rec.wallRoom : null;
-    const wallRoom = r && typeof r.name === 'string' && r.name && Number.isFinite(Number(r.usedPct)) ? { name: r.name.slice(0, 80), usedPct: Math.max(0, Math.min(100, Math.round(Number(r.usedPct)))) } : null;
+    const wallRoom = wallRoomOf(rec);
     const msg = this._create({ role: 'system', status: isErr ? 'error' : 'complete', content: [{ type: 'system_info', text: isErr ? `Error: ${text}` : text, ...(wallRoom ? { wallRoom } : {}) }], noticeKind: rec.noticeKind || 'notice' });
     if (emit) this._emit({ op: 'create', message: msg });
   }

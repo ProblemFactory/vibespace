@@ -437,7 +437,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   rootDir: __dirname, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
-    maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
+    maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure, sessionModelFor, // sessionModelFor: the acp-events wall road's model (lane agy-wall-signal r2)
     modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },   // noteTurnEnd = the hooked wrapper above (the park); catchUpResetCreditFromBuffer = lane reset-path's buffer-file catch-up (codex-events — wired at the 2.369.202 integration)
   checkClaudeGoalStatus,
   broadcastToSession,
