@@ -17,12 +17,17 @@ const { execFileSync } = require('child_process');
 const KINDS = ['js-dialog', 'http-auth', 'client-cert', 'permission', 'file-chooser', 'download', 'print', 'popup', 'select-popup', 'webauthn', 'credential', 'payment-request', 'external-protocol', 'interstitial', 'fullscreen', 'pointer-lock', 'media-picker', 'device-chooser', 'native-picker', 'suppressed'];
 const MANIFEST = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'vibespace-plugin.json'), 'utf8')) || {}; } catch { return {}; } })();
 const EGRESS = !!(MANIFEST.contributes && Array.isArray(MANIFEST.contributes.settings) && MANIFEST.contributes.settings.some((s) => s && s.key === 'egressAllowlist'));
+// lane engine-spi-egress L1b: the USER VARIANT (scripts/fixtures/engine-plugin-user: the reserved `executablePath` row) — the program is
+// the OWNER's, at a path this process cannot read under node --permission: its probe ECHOES the handed path and CLAIMS installed +
+// executable (never a stat — VibeSpace judges the file itself and overrides this word), version null (it cannot run it either)
+const USER = !!(MANIFEST.contributes && Array.isArray(MANIFEST.contributes.settings) && MANIFEST.contributes.settings.some((s) => s && s.key === 'executablePath'));
 const mode = () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.VIBESPACE_PLUGIN_DATA || '.', 'mode.json'), 'utf8')) || {}; } catch { return {}; } };
 function declared() { try { const k = JSON.parse(fs.readFileSync(path.join(__dirname, 'kernel.json'), 'utf8')); const p = k.platforms && k.platforms['linux-x64']; return String((p && p.version) || k.version || '') || null; } catch { return null; } }
 function integrity(binaryPath) {
   try { const r = JSON.parse(fs.readFileSync(path.join(path.dirname(binaryPath), 'install-receipt.json'), 'utf8')); return { verified: fs.statSync(binaryPath).size === r.bytes, sha256: r.sha256 || null, verifiedAt: r.verifiedAt || null }; } catch { return null; }
 }
 function probe(binaryPath, m = {}) {
+  if (USER) return { id: String(MANIFEST.id || ''), installed: true, executable: true, binaryPath, version: null, declaredVersion: null, integrity: null, protocol: 1, kinds: KINDS, features: EGRESS ? ['egress-allowlist'] : ['surfaces', 'webauthn', 'credentials'] };
   let installed = false, executable = false, version = null;
   try { installed = fs.statSync(binaryPath).isFile(); if (installed) { fs.accessSync(binaryPath, fs.constants.X_OK); executable = true; if (!m.noExec) version = String(execFileSync(binaryPath, ['--version'], { timeout: 3000, encoding: 'utf8' })).trim() || null; } } catch { /* a fact: absent / not runnable / no version */ }
   return { id: String(MANIFEST.id || ''), installed, executable, binaryPath, version, declaredVersion: declared(), integrity: installed ? integrity(binaryPath) : null, protocol: 1, kinds: KINDS, features: EGRESS ? ['egress-allowlist'] : ['surfaces', 'webauthn', 'credentials'] };

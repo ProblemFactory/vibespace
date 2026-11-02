@@ -10968,6 +10968,17 @@ export default {
   "That engine asked to set environment variables VibeSpace does not allow.": "そのエンジンは VibeSpace が許可しない環境変数の設定を求めました。",
   "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "エージェントブラウザとして選べます：VibeSpace がプロファイルのブラウザとして起動するプログラムを指定し、そのプログラムはプラグインのサンドボックスの外で動きます。",
   "Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.": "そのブラウザは設定に並べたサイトにしかアクセスできません。VibeSpace が自前の許可リスト・プロキシの内側で動かします。", // lane engine-spi-egress: the consent line of an engine with the site list row
+  "{plugin} · no program set — open ⚙ → Plugins → {plugin} → Program file": "{plugin} · プログラムが設定されていません — ⚙ → プラグイン → {plugin} → プログラムファイル を開いてください", // lane engine-spi-egress L1b: the owner's program (source user)
+  "{plugin} · the program you named can't be run ({why})": "{plugin} · 指定したプログラムを実行できません（{why}）", // lane engine-spi-egress L1b: the owner's program (source user)
+  "{plugin} · the program did not say its version": "{plugin} · プログラムがバージョンを報告しませんでした", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not there": "存在しません", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not a file": "ファイルではありません", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not executable": "実行できません", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is a script": "スクリプトです", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not a program this computer runs": "このコンピュータで動くプログラムではありません", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not one absolute path": "1つの絶対パスではありません", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is on a storage mount that is not answering": "それがあるストレージのマウントが応答していません", // lane engine-spi-egress L1b: the mount door answered for it
+  "Runs the program you name in its settings (⚙ → Plugins → {name} → Program file) as the agent browser, outside the plugin sandbox.": "設定で指定したプログラム（⚙ → プラグイン → {name} → プログラムファイル）を、プラグインのサンドボックスの外でエージェントブラウザとして実行します。", // lane engine-spi-egress L1b: the owner's program (source user)
   "The page shows a dialog": "ページがダイアログを表示しています", // lane browser-surfaces
   "The site asks for a client certificate": "サイトがクライアント証明書を求めています", // lane browser-surfaces
   "The page asks for a permission": "ページが権限を求めています", // lane browser-surfaces

@@ -35,6 +35,14 @@ export function engineNote(e, t) {
   if (!e || typeof e !== 'object') return '';
   const plugin = String(e.label || e.id || '');
   if (e.code) return buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
+  // lane engine-spi-egress L1b: the OWNER's program (source 'user') — judged by VibeSpace, never downloaded: no download word, ever
+  if (e.source === 'user') {
+    const b = e.binary && typeof e.binary === 'object' ? e.binary : null;
+    if (b && b.code === 'browser_engine_kernel_missing') return t(i18nKey('{plugin} · no program set — open ⚙ → Plugins → {plugin} → Program file'), { plugin });
+    if (b) return t(i18nKey("{plugin} · the program you named can't be run ({why})"), { plugin, why: userWhyWords(b.why, t) });
+    if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) });
+    return t(i18nKey('{plugin} · the program did not say its version'), { plugin });
+  }
   const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
   // lane kernel-asset-credential: the road the download takes — a release asset of the plugin's own repository, with its credential
   const road = k && k.credential === 'plugin-git' ? ' · ' + t(i18nKey("from the plugin repository's Release (with the Plugin Git credential)")) : '';
@@ -51,6 +59,19 @@ export function engineNote(e, t) {
   if (e.version) return t(i18nKey('{plugin} · version {version}'), { plugin, version: String(e.version) }) + verified;
   if (e.declaredVersion) return t(i18nKey('{plugin} · declared {version} (not measured)'), { plugin, version: String(e.declaredVersion) }) + verified;
   return t(i18nKey('{plugin} · the kernel did not say its version'), { plugin }) + verified;
+}
+/** lane engine-spi-egress L1b: why the owner's program cannot run, by the core's `why` (never its path). */
+function userWhyWords(why, t) {
+  switch (String(why || '')) {
+    case 'missing': return t(i18nKey('it is not there'));
+    case 'not-a-file': return t(i18nKey('it is not a file'));
+    case 'not-executable': return t(i18nKey('it is not executable'));
+    case 'script': return t(i18nKey('it is a script'));
+    case 'platform': return t(i18nKey('it is not a program this computer runs'));
+    case 'shape': return t(i18nKey('it is not one absolute path'));
+    case 'blocked': return t(i18nKey('it is on a storage mount that is not answering'));
+    default: return String(why || '');
+  }
 }
 /** lane engine-distribution: why a kernel download stopped, by its code (the server's own sentence names the details). */
 function kernelFailWords(code, t) {

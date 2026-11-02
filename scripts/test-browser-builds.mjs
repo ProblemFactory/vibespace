@@ -1166,6 +1166,125 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   })();
   LDRG.setEnabled(GID, false);
 }
+// ═══ ⑦c lane engine-spi-egress L1b: THE OWNER'S PROGRAM — the second kernel source (design-desk cloak-plugin-addendum §0/§1) ═══════
+// The fixture engine's USER VARIANT (scripts/fixtures/engine-plugin-user: the reserved rows executablePath + egressAllowlist; its probe
+// ECHOES the handed path and CLAIMS installed + executable — never a stat) through the REAL loader + registry + keeper + engine-
+// distribution. The owner's program = files in a scratch folder: a symlink to this node (an ELF that answers --version), a folder, a
+// 0644 ELF, a `#!` script, an MZ build, a missing path.
+const UID = 'vibespace.user-engine', UROW = `plugin.${UID}.executablePath`;
+const UROOT = path.join(ROOT, 'user-root');
+fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(UROOT, 'data', 'plugins', UID), { recursive: true });
+fs.copyFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-user/vibespace-plugin.json'), path.join(UROOT, 'data', 'plugins', UID, 'vibespace-plugin.json'));
+const LDRU = require('../src/server/plugin-loader.js').create({ rootDir: UROOT, app: expressE(), hostVersion: '2.369.356', log: { log() { }, warn() { } }, agentEnv: () => ({ PATH: process.env.PATH }) });
+process.on('exit', () => { try { LDRU.shutdown(); } catch { /* gone */ } });
+const settingsU = {};
+const ENGRU = require('../src/server/browser-engines.js').create({ loader: LDRU, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsU[k] });
+{
+  const E = ENGN, ELF = [0x7f, 0x45, 0x4c, 0x46];
+  const sv = (o) => (E.userBinaryVerdict || (() => ({})))({ id: UID, label: 'Fixture User Engine', platform: 'linux', ...o });
+  const pRows = [[{ path: '' }, 'unset'], [{ path: 'rel/x' }, 'shape'], [{ path: '/x\ny' }, 'shape'], [{ path: '/x', fact: { usable: false, why: 'missing' } }, 'missing'], [{ path: '/x', fact: { usable: false, why: 'not-a-file' } }, 'not-a-file'], [{ path: '/x', fact: { usable: false, why: 'not-executable' } }, 'not-executable'], [{ path: '/x', fact: { usable: true }, magic: [0x23, 0x21, 0x2f, 0x62] }, 'script'], [{ path: '/x', fact: { usable: true }, magic: [0x4d, 0x5a, 0, 0] }, 'platform']];
+  const badU = pRows.filter(([o, why]) => sv(o).why !== why).map(([o, why]) => [why, sv(o).why]);
+  const okE = (f, ...a) => (typeof E[f] === 'function' ? E[f](...a) : undefined);
+  ok(!badU.length && sv({ path: '/x', fact: { usable: true }, magic: ELF }).ok === true && sv({ path: '' }).code === 'browser_engine_kernel_missing' && /no program set — open ⚙ → Plugins → Fixture User Engine → Program file/.test(String(sv({ path: '' }).error)) && !/\/x/.test(String(sv({ path: '/x', fact: { usable: false, why: 'missing' } }).error))
+    && okE('programMagicOk', [0xcf, 0xfa, 0xed, 0xfe], 'macos') === true && okE('programMagicOk', [0x4d, 0x5a, 0x90, 0], 'windows') === true && okE('programMagicOk', ELF, 'macos') === false
+    && JSON.stringify(okE('binaryRowOf', [{ key: 'executablePath', type: 'string', default: '' }])) === JSON.stringify({ default: '' }) && okE('binaryRowOf', [{ key: 'executablePath', type: 'select' }]) === null && okE('binaryRowPath', UID) === UROW
+    && (okE('engineSourceOf', { row: { default: '' } }) || {}).source === 'user' && (okE('engineSourceOf', { kernelJson: true }) || {}).source === 'download' && (okE('engineSourceOf', {}) || {}).source === 'download' && /names both a kernel\.json and an executablePath row — an engine has one source/.test(String((okE('engineSourceOf', { row: {}, kernelJson: true, id: UID }) || {}).error))
+    && !!E.ENGINE_OWNER_ROW_RE && E.ENGINE_OWNER_ROW_RE.test(UROW) && E.ENGINE_OWNER_ROW_RE.test(`plugin.${UID}.egressAllowlist`) && !E.ENGINE_OWNER_ROW_RE.test(`plugin.${UID}.other`),
+    'L1b PURE: the program verdict — unset / not one absolute path / missing / a folder / no x-bit / a `#!` script / another platform\'s magic, each by its why (the words name the row, never the path); the magic per platform; the reserved program row (a string); the SOURCE (the row ⇒ user, kernel.json ⇒ download, both ⇒ refused by name); the owner-only rows', badU);
+  LDRU.setEnabled(UID, true, { trusted: true });
+  const tu = Date.now(); while (!ENGRU.rows().length && Date.now() - tu < 8000) await new Promise((r) => setTimeout(r, 25));
+  const UD = path.join(ROOT, 'user-progs'); fs.mkdirSync(path.join(UD, 'adir'), { recursive: true });
+  const PROG = path.join(UD, 'browser'); fs.symlinkSync(process.execPath, PROG);
+  fs.writeFileSync(path.join(UD, 'nox'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0, 0]), { mode: 0o644 });
+  fs.writeFileSync(path.join(UD, 'script.sh'), '#!/bin/sh\nexec node "$@"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(UD, 'win.exe'), Buffer.from([0x4d, 0x5a, 0x90, 0, 3, 0]), { mode: 0o755 });
+  const states = [['', 'unset'], [path.join(UD, 'missing'), 'missing'], [path.join(UD, 'adir'), 'not-a-file'], [path.join(UD, 'nox'), 'not-executable'], [path.join(UD, 'script.sh'), 'script'], [path.join(UD, 'win.exe'), 'platform']];
+  const got = [];
+  for (const [p, why] of states) { settingsU[UROW] = p; const pr = await ENGRU.probe(UID); got.push([why, !!(pr.ok && pr.fact.source === 'user' && pr.fact.executable === false && pr.fact.userBinary && pr.fact.userBinary.why === why), pr.ok ? (pr.fact.userBinary || {}).why : pr.code]); }
+  settingsU[UROW] = PROG; const prOk = await ENGRU.probe(UID);
+  ok(got.every(([, g]) => g) && prOk.ok && prOk.fact.executable === true && prOk.fact.installed === true && prOk.fact.binaryPath === PROG && prOk.fact.userBinary === null && prOk.fact.features.join() === 'egress-allowlist',
+    'V1 / V4 THE CORE JUDGES the owner\'s program (the plugin claims installed + executable for EVERY path — its word is not read): unset · missing · a folder · no x-bit · a `#!` script · a Windows build on linux ⇒ not executable, each by its why; a real ELF program ⇒ installed, executable', got);
+  // the owner's program RUNS: the keeper's wrapper over THAT path, inside the egress proxy; measured by VibeSpace; never downloaded
+  const EDU = require('../src/server/engine-distribution.js').create({ dataDir: path.join(UROOT, 'data'), engines: ENGRU, loader: LDRU, log: { log() { }, warn() { } } });
+  settingsU[`plugin.${UID}.egressAllowlist`] = 'listed.test';
+  const ku = mkKeeper(path.join(ROOT, 'data-user'), { engines: ENGRU, engineDistribution: EDU, serverSetting: (k) => settingsU[k] });
+  const pu = ku.createProfile({ label: 'Owner program', browser: { kind: 'plugin', id: UID } }, { engine: await ku.engineFactOf(UID) });
+  await ku.start(pu.id, { why: 'test' });
+  const laU = fake.launches().at(-1), wrU = wrapperOf(laU.exe) || { program: null, args: [] }, nodeV = process.versions.node;
+  const rcU = ku._reg().browsers[pu.id].browserChoice, rowU = (await ku.engineRowsView()).find((e) => e.id === UID) || {};
+  ok(wrU.program === PROG && wrU.args.some((a) => a.startsWith('--proxy-server=')) && rcU.version === nodeV && rowU.source === 'user' && rowU.measuredVersion === nodeV && !rowU.binary && EDU.kernelFact(UID).state === 'absent' && !JSON.stringify(rowU).includes(UD),
+    `the OWNER's program runs: the keeper's wrapper execs THAT path (inside its egress proxy); its version MEASURED by VibeSpace (\`--version\` → ${nodeV}); the row says source user, never the path — and NOTHING was downloaded`, { wrU, rcU, rowU: { source: rowU.source, measuredVersion: rowU.measuredVersion, binary: rowU.binary }, kf: EDU.kernelFact(UID).state });
+  await ku.stop(pu.id, { why: 'user' });
+  // V5: the file REPLACED (another program at the same path — its size / mtime change): the core's fact carries the NEW stamp, and the
+  // measure the keeper asks at every launch (the launch above proved it) runs the new program — never a stale version
+  const recM = () => { try { return ((JSON.parse(fs.readFileSync(path.join(UROOT, 'data', 'browser-engines.json'), 'utf8')).engines || {})[UID] || {}).measured || {}; } catch { return {}; } }; // (a tree that measured nothing: no record file)
+  const forBefore = recM(), stampBefore = prOk.ok ? prOk.fact.binaryStamp : null;
+  fs.unlinkSync(PROG); fs.symlinkSync('/usr/bin/true', PROG);
+  const prNew = await ENGRU.probe(UID);
+  const mNew = await EDU.measure(UID, { path: PROG, stamp: prNew.ok ? prNew.fact.binaryStamp : null });
+  const mAgain = await EDU.measure(UID, { path: PROG, stamp: prNew.ok ? prNew.fact.binaryStamp : null });
+  const forAfter = recM();
+  ok(forBefore.version === nodeV && prNew.ok && prNew.fact.binaryStamp && prNew.fact.binaryStamp !== stampBefore && mNew.cached === false && forAfter.for !== forBefore.for && /^user:stat:/.test(forAfter.for) && forAfter.version !== nodeV && mAgain.cached === true,
+    'V5: the program at that path REPLACED (its stat moved) ⇒ the core\'s fact carries the new stamp and the measure runs it again (then cached by that stamp) — the record follows the file, never a stale version', { forBefore, forAfter, stampBefore, stampNew: prNew.ok && prNew.fact.binaryStamp });
+  fs.unlinkSync(PROG); fs.symlinkSync(process.execPath, PROG);
+  // V1 at the launch: the plugin still claims installed for a MISSING path ⇒ refused by name, nothing launched
+  settingsU[UROW] = path.join(UD, 'gone');
+  const n1 = fake.launches().length;
+  const e1 = await thr(() => ku.start(pu.id, { why: 'test' }));
+  // V2: a launch answer naming ANOTHER program ⇒ refused by name, nothing launched
+  settingsU[UROW] = PROG;
+  const MODEU = path.join(UROOT, 'data', 'plugins-state', UID, 'mode.json');
+  fs.mkdirSync(path.dirname(MODEU), { recursive: true }); fs.writeFileSync(MODEU, JSON.stringify({ launch: { executablePath: '/usr/bin/true' } }));
+  const e2 = await thr(() => ku.start(pu.id, { why: 'test' }));
+  fs.rmSync(MODEU, { force: true });
+  ok(e1 && e1.code === 'browser_engine_not_executable' && /can't be run \(it is not there\)/.test(e1.message) && e2 && e2.code === 'browser_engine_protocol' && /another program than the one VibeSpace resolved for it/.test(e2.message) && fake.launches().length === n1,
+    'V1: the plugin\'s installed:true over a MISSING program never launches (refused by its own words); V2: a launch answer naming ANOTHER program than the one VibeSpace resolved ⇒ refused by name — nothing launched either way', { e1: e1 && e1.message, e2: e2 && e2.message });
+  // V6: BOTH sources ⇒ refused by name; the download door ⇒ 409 engine_source_user
+  const KJU = path.join(UROOT, 'data', 'plugins', UID, 'kernel.json');
+  fs.writeFileSync(KJU, '{}');
+  const pBoth = await ENGRU.probe(UID);
+  fs.rmSync(KJU, { force: true });
+  const e409 = await thr(() => ku.installEngineKernel(UID));
+  const rsU = read('src/routes/browser.js');
+  ok(!pBoth.ok && pBoth.code === 'browser_engine_protocol' && /names both a kernel\.json and an executablePath row — an engine has one source/.test(pBoth.error) && e409 && e409.code === 'engine_source_user' && /\bengine_source_user: 409\b/.test(rsU),
+    'V6: an engine naming BOTH a kernel.json and the program row ⇒ refused by name (one source); the owner\'s program has no kernel to download: POST /api/browser/engines/:id/kernel ⇒ 409 engine_source_user', { pBoth: pBoth.error, e409: e409 && e409.code });
+  // V3: the program row is written by the OWNER's cookie only — a bearer (an agent, a job, an automation key) is refused at the settings door
+  const PR = require('../src/routes/persistence.js');
+  const PD = path.join(ROOT, 'persist-v3'); fs.mkdirSync(PD, { recursive: true });
+  PR.setup({ dataDir: PD, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} });
+  const appP = expressE(); appP.use(expressE.json()); appP.use(PR.router);
+  const srvP = await new Promise((r) => { const s = appP.listen(0, '127.0.0.1', () => r(s)); }); servers.add(srvP);
+  const sreq = (method, body, bearer) => new Promise((r) => { const q = http.request({ host: '127.0.0.1', port: srvP.address().port, method, path: '/api/settings', headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}) } }, (res) => { let b = ''; res.on('data', (x) => { b += x; }); res.on('end', () => r({ status: res.statusCode, body: b })); }); q.end(JSON.stringify(body)); });
+  const v3a = await sreq('PATCH', { [UROW]: '/tmp/evil' }, 'vsst_agent'), v3b = await sreq('POST', { [`plugin.${UID}.egressAllowlist`]: '.example' }, 'jbt_job'), v3c = await sreq('PATCH', { [UROW]: PROG }), v3d = await sreq('PATCH', { 'browser.headed': true }, 'vsst_agent');
+  let stP = {}; try { stP = JSON.parse(fs.readFileSync(path.join(PD, 'settings.json'), 'utf8')); } catch { stP = {}; }
+  ok(v3a.status === 403 && /engine_row_owner_only/.test(v3a.body) && v3b.status === 403 && v3c.status === 200 && stP[UROW] === PROG && v3d.status === 200,
+    'V3: the program row (and the site list) are written by the OWNER only — a bearer\'s PATCH / POST naming them ⇒ 403 engine_row_owner_only (sign-in OFF too); the person\'s write lands; other settings unchanged for a bearer', { v3a: v3a.status, v3b: v3b.status, v3c: v3c.status, v3d: v3d.status });
+  // V7: consent covers the row — a version that DROPS it drifts (switched off until re-enabled)
+  const MANU = path.join(UROOT, 'data', 'plugins', UID, 'vibespace-plugin.json'), manU = fs.readFileSync(MANU, 'utf8');
+  const mU = JSON.parse(manU);
+  fs.writeFileSync(MANU, JSON.stringify({ ...mU, version: '0.0.2', contributes: { ...mU.contributes, settings: mU.contributes.settings.filter((s) => s.key !== 'executablePath') } }));
+  LDRU.reload();
+  const noteU = (LDRU.list().find((x) => x.id === UID) || {}).notice || '', trustedU = LDRU.isTrusted(UID);
+  fs.writeFileSync(MANU, manU); LDRU.reload(); LDRU.setEnabled(UID, true);
+  const tv = Date.now(); while (!ENGRU.rows().length && Date.now() - tv < 8000) await new Promise((r) => setTimeout(r, 25));
+  ok(!trustedU && /capabilities changed since you trusted this plugin/.test(noteU) && LDRU.isTrusted(UID) && ENGRU.rows().length === 1,
+    'V7: consent COVERS the program row — a version that drops it hashes differently ⇒ switched off «capabilities changed since you trusted this plugin» (re-enable to accept it); the trusted manifest back ⇒ trusted again', { trustedU, noteU });
+  // RED COPY: a registry that TRUSTS the plugin's word (no core verdict) launches the program the plugin claims — a missing one
+  const MUTU = mutantCopies('badm-user', REPO);
+  const bes = read('src/server/browser-engines.js');
+  const overlay = 'installed: !!(fact && (fact.usable || fact.why === \'not-executable\')), executable: v.ok, userBinary: v.ok ? null : { code: v.code, why: v.why, error: v.error } } };';
+  if (!bes.includes(overlay)) ok(false, 'control (u): the anchor (the core\'s verdict over the plugin\'s word) is not in this tree', overlay);
+  else {
+    const RU = MUTU.load('src/server/browser-engines.js', bes.replace(overlay, 'userBinary: null } };'), 'trust-plugin').create({ loader: LDRU, dataDir: path.join(UROOT, 'data'), timeoutMs: 2000, setting: (k) => settingsU[k] });
+    settingsU[UROW] = path.join(UD, 'gone');
+    const pTrust = await RU.probe(UID);
+    const vTrust = pTrust.ok ? ENGN.engineChoiceVerdict({ choice: { kind: 'plugin', id: UID }, engine: { ...pTrust.fact, executable: true } }) : null;
+    ok(pTrust.ok && pTrust.fact.installed === true && vTrust && vTrust.ok === true && vTrust.executablePath === path.join(UD, 'gone'), 'control (u): a registry that TRUSTS the plugin\'s installed:true hands THE choice verdict a missing program it would START — exactly what V1 catches', { fact: pTrust.ok && pTrust.fact, vTrust });
+  }
+  settingsU[UROW] = PROG;
+  try { ku.shutdown(); } catch { /* none */ }
+  LDRU.setEnabled(UID, false);
+}
 // ⑦ controls: patched copies the gates above must turn red
 {
   const MUT = mutantCopies('badm-engine', REPO);

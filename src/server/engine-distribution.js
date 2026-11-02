@@ -273,6 +273,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     await ready;
     const sid = String(id || '');
     if (!BE.ID_RE.test(sid)) throw named('browser_engine_missing', `"${clip(sid, 80)}" is not a browser engine plugin id`);
+    if (userSourced(sid)) throw named('engine_source_user', `${who(sid)} runs the program you name in its settings (⚙ → Plugins → Program file) — VibeSpace downloads no kernel for it`); // lane engine-spi-egress L1b
     const plan = planOf(sid);
     if (running.has(sid)) { const r0 = running.get(sid); throw named('install_running', `${who(sid)}'s kernel is already downloading (${r0.total ? Math.floor((100 * r0.bytes) / r0.total) + ' %' : r0.step}) — one at a time`); }
     const st = { step: 'restore', bytes: 0, total: null, startedAt: now(), by, abort: new AbortController() };
@@ -557,9 +558,10 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   }
   /** THE MEASURED VERSION — once per kernel (the receipt's sha256; a kernel placed by hand: its size + mtime); `force` after an
    *  install. → `{ok, version, says, at, cached}` | `{ok:false, code, error}` (no kernel). */
-  async function measure(id, { force = false } = {}) {
+  async function measure(id, { force = false, path: userPath = null, stamp = null } = {}) {
     await ready;
     const sid = String(id || '');
+    if (userPath) return measureUser(sid, String(userPath), { force, stamp }); // lane engine-spi-egress L1b: the owner's program (no receipt, no place)
     let plan; try { plan = planOf(sid); } catch (e) { return { ok: false, code: e.code, error: e.message }; }
     // round 3: an aside copy beside an empty place comes back BEFORE the place is read (never while a landing owns the place)
     if (!running.has(sid)) { try { await restoreAside(sid, plan); } catch (e) { await noteFailure(sid, e, 'restore', 'first-use'); notify(); return { ok: false, code: e.code, error: e.message }; } }
@@ -583,6 +585,30 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     try { return await p; } finally { measuring.delete(sid); }
   }
 
+  /** lane engine-spi-egress L1b: THE OWNER'S PROGRAM measured — the same `--version` once, keyed by the file's own stat as the registry
+   *  read it (`stamp` = `<size>:<mtime>` — the registry judged the file, behind the mount door; nothing is read here): a replaced file
+   *  is measured again at the next launch. */
+  async function measureUser(sid, p, { force = false, stamp = null } = {}) {
+    if (!stamp) return { ok: false, code: 'browser_engine_not_executable', error: `the program named for ${who(sid)} was not judged` };
+    const forKey = `user:stat:${stamp}`;
+    const rec = recOf(sid);
+    if (!force && rec.measured && rec.measured.for === forKey) return { ok: !!rec.measured.version, cached: true, ...rec.measured };
+    if (measuring.has(sid)) return measuring.get(sid);
+    const run = (async () => {
+      const r = await runVersion(p);
+      const v = EK.versionOf(r.out);
+      rec.measured = v.version && r.ok ? { version: v.version, says: v.says, at: now(), for: forKey } : { version: null, says: v.says || null, error: r.ok ? 'it printed no version' : r.error, at: now(), for: forKey };
+      await save();
+      log.log?.(`[browser] the program named for ${who(sid)} says ${rec.measured.version ? `"${rec.measured.says}" — measured ${rec.measured.version}` : `no version (${rec.measured.error})`}`);
+      notify();
+      return { ok: !!rec.measured.version, cached: false, ...rec.measured };
+    })();
+    measuring.set(sid, run);
+    try { return await run; } finally { measuring.delete(sid); }
+  }
+  /** lane engine-spi-egress L1b: an engine whose program the OWNER names has no kernel to download — read off its MANIFEST (the
+   *  loader's list: a plugin the fleet just installed is not running yet, so the engine table does not hold it). */
+  function userSourced(sid) { try { const p = (L() && L().list ? L().list() : []).find((x) => x.id === sid); return !!(p && p.contributes && BE.binaryRowOf(p.contributes.settings)); } catch { return false; } }
   /** The kernel's place is EMPTY (ENOENT, no landing in flight) ⇒ the record holds no kernel either (round 3: the record never
    *  says «installed» over an empty place — a kernel deleted by hand, a put-back that failed). */
   async function placeEmpty(sid, e) {
@@ -644,6 +670,8 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       }
     } else fleetLast.outcome = 'same';
     let kernel = null;
+    // lane engine-spi-egress L1b: an engine whose program its OWNER names has no kernel — the fleet's preinstall / kernel are ignored, said once
+    if ((fe.preinstall === true || (fe.kernel && (fe.kernel.url || fe.kernel.sha256))) && userSourced(id)) { log.log?.(`[plugins] the fleet's engine plugin ${id} runs the program its owner names (executablePath) — the fleet's kernel / preinstall is ignored`); notify(); return { ok: true, plugin: id, outcome: fleetLast.outcome, kernel: { ok: true, ignored: 'user-source' }, restored }; }
     if (fe.preinstall === true) {
       const k = kernelFact(id);
       let present = false; try { await fsp.stat(planOf(id).exe); present = true; } catch { present = false; }

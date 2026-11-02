@@ -1,0 +1,36 @@
+{
+  "id": "vibespace.user-engine",
+  "version": "0.0.1",
+  "label": "Fixture User Engine",
+  "description": "The fixture engine's USER VARIANT (lane engine-spi-egress L1b): scripts/fixtures/engine-plugin/server.js beside this manifest; its program is the one the owner names in its settings (executablePath), judged by VibeSpace, and its browser stays inside VibeSpace's allowlisting proxy (egressAllowlist).",
+  "engines": {
+    "vibespace": "2.369.353"
+  },
+  "client": "none",
+  "server": true,
+  "contributes": {
+    "routes": true,
+    "browserEngine": true,
+    "settings": [
+      {
+        "key": "executablePath",
+        "type": "string",
+        "default": "",
+        "label": "Program file",
+        "description": "The browser program this engine runs — the full path of a program on this computer. VibeSpace checks the file and measures its version before it runs it."
+      },
+      {
+        "key": "egressAllowlist",
+        "type": "string",
+        "default": "",
+        "label": "Sites its browser may open",
+        "description": "Host names, comma separated (.example.test admits its sub-domains); every other site is refused by VibeSpace's proxy."
+      }
+    ]
+  },
+  "capabilities": {
+    "server": {
+      "childProcess": true
+    }
+  }
+}

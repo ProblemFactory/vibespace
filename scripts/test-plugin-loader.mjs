@@ -139,6 +139,15 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   ok(M.capabilitiesHash(gv.manifest) !== M.capabilitiesHash(gNone.manifest) && M.capabilitiesHash(gSel.manifest) === M.capabilitiesHash(gNone.manifest) && kHash === '5ccb5cf0d1d753eb' && ERD(gv.manifest) === true && ERD(gNone.manifest) === false
     && M.capabilitySummary(gv.manifest).some((c) => c.id === 'egress-allowlist') && !M.capabilitySummary(gNone.manifest).some((c) => c.id === 'egress-allowlist') && BEg.EGRESS_ROW_KEY === 'egressAllowlist',
     'L2 acceptance (A): consent COVERS the reserved row — an engine declaring it hashes differently (a later version dropping it drifts: untrusted until re-enabled) and the consent dialog says its browser reaches only the listed sites; a manifest without it hashes as before (the fixture kernel\'s hash = 5ccb5cf0d1d753eb, measured on 63f59d572 — every existing trust kept)', { kHash });
+  // lane engine-spi-egress L1b: the fixture's USER VARIANT — the reserved PROGRAM row (a string executablePath; a manifest settings row
+  // carries no `path` field — that is a built-in table's legacy spelling); consent names it and its hash covers it
+  const um = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-user/vibespace-plugin.json'), 'utf8'));
+  const uv = M.validateManifest(um), uNone = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.filter((s) => s.key !== 'executablePath') } });
+  const uPath = M.validateManifest({ ...um, contributes: { ...um.contributes, settings: um.contributes.settings.map((s) => (s.key === 'executablePath' ? { ...s, path: 'browser.someLegacy', description: 'x'.repeat(400) } : s)) } });
+  const BRD = M.binaryRowDeclared || (() => undefined), uRow = uPath.ok ? uPath.manifest.contributes.settings.find((s) => s.key === 'executablePath') : null;
+  ok(uv.ok && BRD(uv.manifest) === true && BRD(uNone.manifest) === false && M.capabilitySummary(uv.manifest).some((c) => c.id === 'user-binary' && /Runs the program you name in its settings/.test(c.text)) && M.capabilitiesHash(uv.manifest) !== M.capabilitiesHash(uNone.manifest)
+    && uRow && !('path' in uRow) && uRow.description.length <= 300 && uRow.type === 'string',
+    'lane engine-spi-egress L1b: the user variant validates; its RESERVED program row (a string executablePath — no `path` field rides a manifest row, a description cut to 300) is declared, consent says «Runs the program you name in its settings…» and its hash covers the row (a version adding or dropping it drifts)', JSON.stringify(uv.errors));
   ok(off.contributes.browserEngine === undefined && M.capabilitiesHash(off) === M.capabilitiesHash(plain) && M.capabilitiesHash(v.manifest) !== M.capabilitiesHash(plain) && !M.needsConsent(plain), 'false = not an engine (named only when true): every capabilities hash before this lane stays the same — an existing trust is never voided — and growing into an engine re-asks consent');
 }
 {
@@ -263,6 +272,32 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   ok(ix.plugin.trusted && ix.trustedBy === 'fleet', 'control: that copy pre-trusts a package under an id the fleet never named — exactly what ⑥ refuses (RED)');
   lf.shutdown(); srvF.close();
   try { fs.rmSync(groot, { recursive: true, force: true }); } catch {}
+}
+// ── ②d lane engine-spi-egress L1b: the fleet's engine plugin whose program its OWNER names (the reserved executablePath row) — the
+// fleet's preinstall / kernel {url, sha256} are IGNORED with ONE journal line (no download asked, no failure kept, no For-you item) ──
+{
+  const { gitRepoFixture, URL_HTTPS } = await import('./fixtures/git-repo.mjs');
+  const UID = 'vibespace.user-engine';
+  const uroot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plug-user-'));
+  const manU = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin-user/vibespace-plugin.json'), 'utf8'));
+  const srvU = fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/server.js'), 'utf8');
+  const FU = gitRepoFixture(path.join(uroot, 'repo'), [{ files: { 'vibespace-plugin.json': manU, 'server.js': srvU }, tag: 'v0.0.1' }]);
+  const RU = path.join(uroot, 'root'); fs.mkdirSync(path.join(RU, 'data', 'plugins'), { recursive: true });
+  let fleetU = null;
+  const linesU = [], todosU = [], fetched = [];
+  const qU = { log: (m) => linesU.push(String(m)), warn: (m) => linesU.push(String(m)) };
+  const lu = create({ rootDir: RU, app: null, autoStart: false, hostVersion: '2.369.356', log: { log() {}, warn() {} }, gitBin: FU.WRAP, integrations: () => null, fleetEngine: () => fleetU });
+  const regU = require(path.join(REPO, 'src/server/browser-engines.js')).create({ loader: lu, dataDir: path.join(RU, 'data') });
+  const EDU = require(path.join(REPO, 'src/server/engine-distribution.js')).create({ dataDir: path.join(RU, 'data'), engines: regU, loader: lu, fleetFacts: () => (fleetU ? { browserEngine: fleetU } : null), userTodos: { add: (k, item) => { todosU.push(item); return 'u' + todosU.length; } }, fetchImpl: async (u) => { fetched.push(String(u)); throw new Error('no network in this leg'); }, log: qU });
+  fleetU = { plugin: UID, default: false, preinstall: true, source: { git: URL_HTTPS, ref: FU.shas[0] }, kernel: { url: 'https://kernels.test/k.tar.gz', sha256: 'a'.repeat(64) } };
+  const rU = await EDU.bootFleet();
+  const said = linesU.filter((l) => /runs the program its owner names \(executablePath\) — the fleet's kernel \/ preinstall is ignored/.test(l));
+  const kfU = EDU.kernelFact(UID);
+  ok(rU.ok && rU.outcome === 'installed' && rU.kernel && rU.kernel.ignored === 'user-source' && said.length === 1 && !fetched.length && !todosU.length && kfU.state === 'absent',
+    'L1b ②d: the fleet\'s engine plugin whose program its OWNER names ⇒ installed from git as before, its preinstall + kernel IGNORED with ONE journal line — nothing fetched, no failure kept, no For-you item', { rU, said: said.length, fetched, todos: todosU.length, kf: kfU.state });
+  const eK = await (async () => { try { await EDU.installKernel(UID, { by: 'user' }); return null; } catch (e) { return e; } })();
+  ok(eK && eK.code === 'engine_source_user' && /runs the program you name in its settings/.test(eK.message) && !fetched.length, 'L1b ②d: a person\'s download asked for it ⇒ engine_source_user by name (the route\'s 409), nothing fetched', eK && eK.message);
+  try { fs.rmSync(uroot, { recursive: true, force: true }); } catch {}
 }
 
 // ── ③ wiring pins ──

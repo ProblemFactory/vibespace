@@ -72,6 +72,52 @@ function engineArgs({ args = [], egress = null } = {}) { return [...V.splitLaunc
 /** The keeper's OWN list for a wrapped launch (the config's switches it carries onto an engine's env list — L2's F4) without any
  *  proxy switch: Chromium ranks `--no-proxy-server` / `--proxy-pac-url` / `--proxy-auto-detect` ABOVE `--proxy-server`, so a
  *  user's own proxy switch would undo the boundary. */
+// ── lane engine-spi-egress L1b (design-desk cloak-plugin-addendum §0/§1 — the owner 2026-11-02: «用更系统的方式支持“自定义内核”，只是其中一个
+// 选项是用户自行安装cloakbrowser»): ONE engine interface, TWO kernel sources. `download` = the package's kernel.json (the receipt
+// road); `user` = the manifest's RESERVED row `executablePath` (a string) — the program the OWNER names in the plugin's settings
+// (`plugin.<id>.executablePath`, read live; written by the owner's cookie only). The plugin never names it: its process cannot even
+// read a path outside its package + state dir (node --permission), so VibeSpace JUDGES the file and its word on installed /
+// executable is not read. A program is VibeSpace's fact — downloaded with a receipt, or named by the owner and judged here.
+const BINARY_ROW_KEY = 'executablePath';
+/** The manifest's RESERVED program row (a string row keyed executablePath) → `{default}` | null — the egressRowOf shape. */
+function binaryRowOf(settings) {
+  const r = (Array.isArray(settings) ? settings : []).find((s) => isObj(s) && s.key === BINARY_ROW_KEY && s.type === 'string');
+  return r ? { default: typeof r.default === 'string' ? r.default : '' } : null;
+}
+function binaryRowPath(id) { return `plugin.${String(id || '')}.${BINARY_ROW_KEY}`; }
+/** An engine plugin's settings keys only the OWNER writes (a bearer — an agent, a job, an automation key — is refused at the settings
+ *  door): the program it runs, the sites its browser may reach. */
+const ENGINE_OWNER_ROW_RE = /^plugin\.[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*\.(?:executablePath|egressAllowlist)$/;
+/** THE SOURCE of an engine's kernel: the program row ⇒ 'user', else 'download' (kernel.json — its absence is the download road's own
+ *  refusal, as today); BOTH ⇒ browser_engine_protocol by name. → `{ok:true, source}` | `{ok:false, code, error}`. */
+function engineSourceOf({ row = null, kernelJson = false, id = '', label = '' } = {}) {
+  if (row && kernelJson) return { ok: false, code: 'browser_engine_protocol', error: `${engineWords({ id, label })} names both a kernel.json and an executablePath row — an engine has one source` };
+  return { ok: true, source: row ? 'user' : 'download' };
+}
+/** The magic a program of `platform` starts with: ELF (linux), Mach-O 32 / 64 either order or fat (macos), MZ (windows). */
+function programMagicOk(magic, platform = 'linux') {
+  const b = magic ? Array.from(magic).slice(0, 4) : [];
+  const hex = b.map((x) => Number(x).toString(16).padStart(2, '0')).join('');
+  if (platform === 'macos') return ['feedface', 'feedfacf', 'cefaedfe', 'cffaedfe', 'cafebabe', 'bebafeca'].includes(hex);
+  if (platform === 'windows') return hex.startsWith('4d5a');
+  return hex === '7f454c46';
+}
+/** THE FILE VERDICT of the owner's program (the CORE's — never the plugin's): `path` = the row's value; `fact` = browser-builds
+ *  fileFact over it (`{usable, why}`); `magic` = its first 4 bytes. → `{ok:true}` | `{ok:false, code, why, error}` — the error names
+ *  the row, never the path. */
+function userBinaryVerdict({ path = '', fact = null, magic = null, platform = 'linux', id = '', label = '' } = {}) {
+  const who = engineWords({ id, label }), name = clip(label, 80) || clip(id, 80) || 'its plugin';
+  const p = String(path == null ? '' : path);
+  if (!p) return { ok: false, code: 'browser_engine_kernel_missing', why: 'unset', error: `${who} has no program set — open ⚙ → Plugins → ${name} → Program file` };
+  if (!p.startsWith('/') || p.length > 4096 || /[\0\n\r]/.test(p)) return { ok: false, code: 'browser_engine_not_executable', why: 'shape', error: `${who}'s Program file is not one absolute path` };
+  const why = fact && fact.usable ? null : (fact && fact.why) || 'missing';
+  const words = { missing: 'it is not there', 'not-a-file': 'it is not a file', 'not-executable': 'it is not executable', blocked: 'it is on a storage mount that is not answering' };
+  if (why) return { ok: false, code: 'browser_engine_not_executable', why, error: `the program you named for ${who} can't be run (${words[why] || why}) — check ⚙ → Plugins → ${name} → Program file` };
+  const b = magic ? Array.from(magic) : [];
+  if (b[0] === 0x23 && b[1] === 0x21) return { ok: false, code: 'browser_engine_not_executable', why: 'script', error: `the program you named for ${who} is a script — VibeSpace runs a browser program itself (its own launch wrapper carries the plugin's switches)` };
+  if (!programMagicOk(b, platform)) return { ok: false, code: 'browser_engine_not_executable', why: 'platform', error: `the program you named for ${who} is not a program this machine runs (a script or another platform's build)` };
+  return { ok: true };
+}
 function withoutProxyArgs(list) { return (Array.isArray(list) ? list.map(String) : []).filter((a) => !PROXY_ARG_RE.test(a.trim())); }
 /** The platform word an engine's verbs take (the kernel side's `linux | macos | windows`). */
 function platformOf(nodePlatform) { return nodePlatform === 'darwin' ? 'macos' : nodePlatform === 'win32' ? 'windows' : 'linux'; }
@@ -145,6 +191,8 @@ function engineChoiceVerdict({ choice = null, engine = null, machine = 'this com
   if (!engine || typeof engine !== 'object') return missingOf({ id, machine });
   if (engine.code) return { ok: false, code: ENGINE_CODES.includes(engine.code) ? engine.code : 'browser_engine_protocol', error: String(engine.error || engine.code) };
   const who = engineWords({ id, label: engine.label });
+  // lane engine-spi-egress L1b: the OWNER's program, judged by the core (the fact carries the verdict) — said by its own words
+  if (engine.source === 'user' && isObj(engine.userBinary)) return { ok: false, code: ENGINE_CODES.includes(engine.userBinary.code) ? engine.userBinary.code : 'browser_engine_not_executable', error: String(engine.userBinary.error || engine.userBinary.code) };
   if (!engine.installed) return { ok: false, code: 'browser_engine_kernel_missing', error: `${who}'s kernel is not installed on ${machine} — install it again (its plugin's own steps), or choose another build (Change build…); VibeSpace never starts Chrome in its place` };
   if (!engine.executable || typeof engine.binaryPath !== 'string' || !engine.binaryPath.startsWith('/')) return { ok: false, code: 'browser_engine_not_executable', error: `${who}'s kernel on ${machine} cannot be run (its program is not executable)` };
   if (engine.protocol !== PROTOCOL || !Array.isArray(engine.features)) return { ok: false, code: 'browser_engine_protocol', error: `${who} does not speak this VibeSpace's engine protocol ${PROTOCOL}` };
@@ -217,4 +265,5 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
 
 module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   platformOf, engineWords, engineAnswerVerdict, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
-  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs };
+  egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs,
+  BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict }; // lane engine-spi-egress L1b

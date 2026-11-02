@@ -814,10 +814,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
 
   router.get('/api/settings', (req, res) => res.json(readSettings()));
+  // lane engine-spi-egress L1b (V3): a browser engine's PROGRAM and SITE LIST rows are the owner's — a request carrying a bearer (an
+  // agent, a job, an automation key) never writes them, sign-in on or off (src/browser-engines.js ENGINE_OWNER_ROW_RE)
+  const engineOwnerRows = (req, obj) => { if (!require('../write-origin.js').pressBearer(req.headers)) return []; const RE = require('../browser-engines.js').ENGINE_OWNER_ROW_RE; return Object.keys(obj && typeof obj === 'object' ? obj : {}).filter((k) => RE.test(k)); };
+  const refuseEngineRows = (req, res, obj) => { const hit = engineOwnerRows(req, obj); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot write them`, code: 'engine_row_owner_only' }); return true; };
 
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
+    if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3)
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
@@ -829,6 +834,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const current = readSettings();
     const patch = req.body;
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
+    if (refuseEngineRows(req, res, patch)) return; // lane engine-spi-egress L1b (V3)
     const merged = { ...current, ...patch };
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
     writeSettings(merged);

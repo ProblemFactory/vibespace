@@ -569,6 +569,22 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
     'r2 minor 3 WIRING: every draw of the control draws the engines last read; a Reset\'s redraw re-reads GET /api/browser/engines; a failed read still draws (the stored value as itself)');
 }
 
+// lane engine-spi-egress L1b: the ENGINE CARD's words for the OWNER's program (source user) — never a download word, never a path —
+// in en / zh / ja (the card and Settings' fact line share engineNote)
+{
+  const BMu = await import('../src/lib/browser-build-model.js');
+  const zhU = (await import('../src/lib/i18n-zh.js')).default, jaU = (await import('../src/lib/i18n-ja.js')).default;
+  const tr = (dict) => (s, p) => String(dict && dict[s] != null ? dict[s] : s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  const base = { id: 'vibespace.user-engine', label: 'CloakBrowser', installed: true, executable: true, source: 'user', kernel: { state: 'absent' } };
+  const cases = [[{ ...base, measuredVersion: '146.0.7680.177' }, /CloakBrowser · measured 146\.0\.7680\.177/], [{ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' } }, /CloakBrowser · no program set — open ⚙ → Plugins → CloakBrowser → Program file/],
+    [{ ...base, executable: false, binary: { code: 'browser_engine_not_executable', why: 'script' } }, /CloakBrowser · the program you named can't be run \(it is a script\)/], [{ ...base, installed: false, executable: false, binary: { code: 'browser_engine_not_executable', why: 'missing' } }, /can't be run \(it is not there\)/], [base, /CloakBrowser · the program did not say its version/]];
+  const en = cases.map(([e, re]) => [BMu.engineNote(e, tr(null)), re]);
+  const z = cases.map(([e]) => BMu.engineNote(e, tr(zhU))), j = cases.map(([e]) => BMu.engineNote(e, tr(jaU)));
+  const downloadingUser = BMu.engineNote({ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' }, kernel: { state: 'downloading', bytes: 1, total: 2 } }, tr(null));
+  ok(en.every(([s, re]) => re.test(s)) && !/download/i.test(downloadingUser) && z.every((s) => /[\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && j.every((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && /没有设置程序/.test(z[1]) && /プログラムが設定されていません/.test(j[1]),
+    'L1b: the engine card for the OWNER\'s program — «measured x» / «no program set — open ⚙ → Plugins → <plugin> → Program file» / «the program you named can\'t be run (why)» / «did not say its version»; never a download word (a stale kernel state ignored), in zh / ja too', { en: en.map(([s]) => s), z, j });
+}
+
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
 console.log('ALL PASS (' + pass + ')');

@@ -10969,6 +10969,17 @@ export default {
   "That engine asked to set environment variables VibeSpace does not allow.": "这个内核要求设置 VibeSpace 不允许的环境变量。",
   "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "可被选作 Agent 浏览器：它指定一个程序，由 VibeSpace 作为浏览器档案的浏览器来启动；该程序在插件沙箱之外运行。",
   "Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.": "它的浏览器只能访问你在它的设置里列出的网站：VibeSpace 用自己的放行代理把它包起来运行。", // lane engine-spi-egress: the consent line of an engine with the site list row
+  "{plugin} · no program set — open ⚙ → Plugins → {plugin} → Program file": "{plugin} · 没有设置程序 — 打开 ⚙ → 插件 → {plugin} → 程序文件", // lane engine-spi-egress L1b: the owner's program (source user)
+  "{plugin} · the program you named can't be run ({why})": "{plugin} · 你指定的程序无法运行（{why}）", // lane engine-spi-egress L1b: the owner's program (source user)
+  "{plugin} · the program did not say its version": "{plugin} · 程序没有报告版本", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not there": "它不存在", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not a file": "它不是文件", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not executable": "它不可执行", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is a script": "它是一个脚本", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not a program this computer runs": "它不是这台电脑能运行的程序", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is not one absolute path": "它不是一个绝对路径", // lane engine-spi-egress L1b: the owner's program (source user)
+  "it is on a storage mount that is not answering": "它所在的存储挂载没有响应", // lane engine-spi-egress L1b: the mount door answered for it
+  "Runs the program you name in its settings (⚙ → Plugins → {name} → Program file) as the agent browser, outside the plugin sandbox.": "作为 Agent 浏览器运行你在它的设置里指定的程序（⚙ → 插件 → {name} → 程序文件），该程序在插件沙箱之外运行。", // lane engine-spi-egress L1b: the owner's program (source user)
   "The page shows a dialog": "网页弹出了一个对话框", // lane browser-surfaces
   "The site asks for a client certificate": "网站要求选择客户端证书", // lane browser-surfaces
   "The page asks for a permission": "网页请求一项权限", // lane browser-surfaces

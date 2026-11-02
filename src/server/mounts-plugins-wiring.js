@@ -972,7 +972,7 @@ function createSessionMessages(session, sessionId) {
     const browserBackend = require('./browser-backend').create({ integrations: () => integrations, log: console });
     // lane engine-plugin: THE ENGINE REGISTRY; lane engine-distribution: its kernels' distribution (download · receipt ·
     // measured version · the fleet's boot job — ONE For-you producer, origin plugin)
-    const browserEngines = require('./browser-engines.js').create({ loader: pluginLoader, plugins, dataDir: path.join(rootDir, 'data'), log: console });
+    const browserEngines = require('./browser-engines.js').create({ loader: pluginLoader, plugins, dataDir: path.join(rootDir, 'data'), log: console, setting: (k) => serverSetting(k) }); // lane engine-spi-egress L1b: the owner's program row, read live
     engineDistribution = require('./engine-distribution.js').create({ dataDir: path.join(rootDir, 'data'), engines: browserEngines, loader: pluginLoader, fleetFacts: () => { try { return require('./cluster-presets.js').sharedPresets().fleet(); } catch { return null; } },
       env: () => process.env, userTodos: () => userTodos, notify: () => { try { bcastAll({ type: 'browser-engines-updated' }); } catch { /* no clients */ } }, log: console,
       integrations: () => integrations }); // lane kernel-asset-credential: the Plugin Git credential for a kernel on the plugin's own repository

@@ -363,6 +363,9 @@ function contributesBrowserEngine(m) { return !!(m && m.contributes && m.contrib
  *  (src/browser-engines.js egressRowOf — the ONE rule). Consent covers it — capabilitiesHash names it, so a later version that
  *  drops the row loses its trust (the owner's «a plugin cannot turn the proxy off»). */
 function egressRowDeclared(m) { return contributesBrowserEngine(m) && !!BEN.egressRowOf(m.contributes.settings); }
+/** lane engine-spi-egress L1b: an engine manifest declaring THE PROGRAM ROW (`executablePath` — the owner names the program it runs).
+ *  Consent covers it (capabilitiesHash names it; a version that adds or drops it drifts and is switched off until re-enabled). */
+function binaryRowDeclared(m) { return contributesBrowserEngine(m) && !!BEN.binaryRowOf(m.contributes.settings); }
 
 /**
  * Plain-words capability list for the consent dialog — the SAME items on the
@@ -379,6 +382,7 @@ function capabilitySummary(m) {
   else if (m.client === 'iframe') items.push({ id: 'client-iframe', text: 'Sandboxed UI: its windows run in an isolated origin and cannot read this page.', params: {} });
   if (m.server) items.push({ id: 'server-process', text: 'Runs its own server process, confined to its plugin folder and its data folder.', params: {} });
   if (contributesBrowserEngine(m)) items.push({ id: 'browser-engine', text: 'Can be chosen as the agent browser: it names the program VibeSpace starts as a profile\'s browser, outside the plugin sandbox.', params: {} }); // lane engine-plugin
+  if (binaryRowDeclared(m)) items.push({ id: 'user-binary', text: 'Runs the program you name in its settings (⚙ → Plugins → {name} → Program file) as the agent browser, outside the plugin sandbox.', params: { name: String(m.label || m.id || '') } }); // lane engine-spi-egress L1b
   if (egressRowDeclared(m)) items.push({ id: 'egress-allowlist', text: 'Its browser reaches only the sites you list in its settings: VibeSpace runs it inside its own allowlisting proxy.', params: {} }); // lane engine-spi-egress
   if (s.fs?.read?.length) items.push({ id: 'fs-read', text: 'Server: read files under {paths}', params: { paths: s.fs.read.join(', ') } });
   if (s.fs?.write?.length) items.push({ id: 'fs-write', text: 'Server: write AND read files under {paths}', params: { paths: s.fs.write.join(', ') } }); // write implies read in the permission args — the summary must say so
@@ -412,8 +416,9 @@ function capabilitiesHash(m) {
     agentTools: (m.contributes?.agentTools || []).map((t) => t.name).sort(), routes: !!m.contributes?.routes,
     ...(contributesBrowserEngine(m) ? { browserEngine: true } : {}), // lane engine-plugin: named only when true — every hash before it stays the same
     ...(egressRowDeclared(m) ? { egressAllowlist: true } : {}), // lane engine-spi-egress: the same — a version that drops the site list row drifts (re-enable to accept it)
+    ...(binaryRowDeclared(m) ? { executablePath: true } : {}), // lane engine-spi-egress L1b: the same — a version that adds or drops the program row drifts
   });
   return fnv1a(subject, 0x811c9dc5) + fnv1a(subject.split('').reverse().join(''), 0x9747b28c);
 }
 
-module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, contributesBrowserEngine, egressRowDeclared, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };
+module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, contributesBrowserEngine, egressRowDeclared, binaryRowDeclared, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };

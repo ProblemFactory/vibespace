@@ -1172,7 +1172,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const f = await engineFactOf(row.id);
       out.push({ id: row.id, label: row.label, family: row.family, plugin: row.version || null, ...(f.code ? { code: f.code, error: f.error } : { installed: !!f.installed, executable: !!f.executable, version: f.version, protocol: f.protocol, features: (f.features || []).slice(),
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
-        declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null }) });
+        declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
+        // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
+        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null }) });
     }
     return out;
   }
@@ -1230,7 +1232,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // a kernel not there yet is downloaded on this FIRST USE (in the background — the launch is refused by name meanwhile)
     const d = p.host ? null : eds();
     let fetching = null, refused = null;
-    if (d && engine && !engine.code && !engine.installed) {
+    if (d && engine && !engine.code && !engine.installed && engine.source !== 'user') { // lane engine-spi-egress L1b: the owner's program is never downloaded
       const k = d.kernelFact(c.id);
       if (k.state === 'downloading') fetching = k;
       // round 2: a Node this kernel cannot be unpacked on is REMEMBERED (the engine record, for that Node) — no download asked again
@@ -1243,7 +1245,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     // round 4: the probe finds the kernel IN its place while the record holds none (dropped once) ⇒ measure — the record follows it
     const unrecorded = !!(engine && engine.kernel && engine.kernel.state !== 'installed' && engine.kernel.state !== 'downloading');
-    if (d && engine && !engine.code && engine.installed && engine.executable && (!engine.measuredVersion || unrecorded)) { try { await d.measure(c.id); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); }
+    if (d && engine && !engine.code && engine.installed && engine.executable && (!engine.measuredVersion || unrecorded)) { try { await d.measure(c.id, engine.source === 'user' ? { path: engine.binaryPath, stamp: engine.binaryStamp } : {}); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); } // lane engine-spi-egress L1b: the owner's program measured by ITS stat
     const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', engine, label: p.label });
     if (!v.ok && !fetching && refused && refused.code === 'engine_node_unsupported' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace cannot download it here: ${refused.message}`;
     else if (!v.ok && !fetching && refused && refused.code === 'engine_kernel_aside' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — ${refused.message}`;

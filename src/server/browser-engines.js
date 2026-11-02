@@ -12,6 +12,11 @@
  *                            lane engine-spi-egress: judged with the manifest's `contributes.settings` — an engine declaring
  *                            `egress-allowlist` needs its reserved `egressAllowlist` string row there)
  *   launchOptions(id, x)   → `{ok:true, launch:{executablePath, args, env}}` | a refusal by name
+ *   sourceOf(id)           → lane engine-spi-egress L1b: `{ok, source: 'download' | 'user'}` — kernel.json in its package, or the
+ *                            RESERVED program row `executablePath` (both ⇒ browser_engine_protocol); binaryPathOf(id) → `{source,
+ *                            path}` (user: the owner's `plugin.<id>.executablePath`, read live; download: kernelPath). A user
+ *                            program is JUDGED HERE (the plugin's process cannot read that path): its probe's installed / executable
+ *                            are overlaid with the core's verdict (browser-builds fileFact + the 4-byte magic, PURE userBinaryVerdict)
  *   kernelPath(id)         → `<dataDir>/plugins-state/<id>/kernel/<platform-arch>/chrome` — where a kernel lives on this
  *                            machine: inside the plugin's OWN state folder, the one place its `node --permission` process may
  *                            read besides its package (the loader's implicit grant — a declared path may never cover VibeSpace's
@@ -23,9 +28,12 @@
  * plugin is required into this process. Never throws: every outcome is a verdict the keeper turns into a named refusal.
  */
 const path = require('path');
+const fsp = require('fs').promises;
 const BE = require('../browser-engines.js');
+const BB = require('../browser-builds.js'); // lane engine-spi-egress L1b: fileFact — the file verdict a build pin already uses
+const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE the owner's program (a user-path) is read
 
-function create({ loader = null, plugins = null, dataDir = null, platform = process.platform, arch = process.arch, timeoutMs = null, log = console } = {}) {
+function create({ loader = null, plugins = null, dataDir = null, platform = process.platform, arch = process.arch, timeoutMs = null, log = console, setting = () => undefined } = {}) {
   const L = () => { try { return typeof loader === 'function' ? loader() : loader; } catch { return null; } };
   const P = () => { try { return typeof plugins === 'function' ? plugins() : plugins; } catch { return null; } };
   const tag = `${BE.platformOf(platform)}-${arch === 'x64' ? 'x64' : String(arch || 'x64')}`;
@@ -75,22 +83,63 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     return { ...pub, probe: (input = {}) => via(row, 'probe', input), launchOptions: (input = {}) => via(row, 'launchOptions', input) };
   }
   function kernelPath(id) { return dataDir && BE.ID_RE.test(String(id || '')) ? path.join(dataDir, 'plugins-state', String(id), 'kernel', tag, 'chrome') : null; }
+  /** lane engine-spi-egress L1b: the kernel's SOURCE — the program row in the manifest, kernel.json in the package. */
+  async function sourceOf(id) {
+    const row = tableRows().find((r) => r.id === String(id || ''));
+    if (!row) return BE.missingOf({ id });
+    let kernelJson = false;
+    if (dataDir && row.family === 'manifest') { try { await fsp.access(path.join(dataDir, 'plugins', row.id, 'kernel.json')); kernelJson = true; } catch { kernelJson = false; } }
+    const v = BE.engineSourceOf({ row: BE.binaryRowOf(row.settings), kernelJson, id: row.id, label: row.label });
+    return v.ok ? { ...v, row: BE.binaryRowOf(row.settings) } : v;
+  }
+  /** The owner's program path (the setting; else the row's manifest default) — '' when none is set. */
+  const userPathOf = (id, row) => { let v; try { v = setting(BE.binaryRowPath(id)); } catch { v = undefined; } return String(typeof v === 'string' ? v : (row && row.default) || '').trim(); };
+  async function binaryPathOf(id) {
+    const s = await sourceOf(id);
+    if (!s.ok) return s;
+    return { ok: true, source: s.source, path: s.source === 'user' ? userPathOf(id, s.row) : kernelPath(id) };
+  }
+  /** THE CORE's look at the owner's program: one stat (browser-builds fileFact over it) + its first 4 bytes — never a run. */
+  async function userFactOf(p) {
+    if (!p || !p.startsWith('/') || /[\0\n\r]/.test(p)) return { fact: { usable: false, why: 'missing' }, magic: null };
+    if (DOOR.blocked(p)) return { fact: { usable: false, why: 'blocked' }, magic: null }; // a stalled storage mount: answered, never read
+    let st = null; try { st = await fsp.stat(p); } catch { st = null; }
+    const fact = BB.fileFact(p, { fsImpl: { statSync: () => { if (!st) throw new Error('missing'); return st; } } });
+    let magic = null;
+    if (fact.usable) { let fh = null; try { fh = await fsp.open(p, 'r'); const b = Buffer.alloc(4); const { bytesRead } = await fh.read(b, 0, 4, 0); magic = b.subarray(0, bytesRead); } catch { magic = null; } finally { if (fh) await fh.close().catch(() => {}); } }
+    return { fact, magic, stamp: st ? `${st.size}:${Math.round(st.mtimeMs)}` : null }; // the stamp the measure keys on (no second stat)
+  }
   async function probe(id) {
     const pv = providerFor(id);
     if (!pv) return BE.missingOf({ id });
+    const src = await sourceOf(id);
+    if (!src.ok) return src;
+    if (src.source === 'user') {
+      // lane engine-spi-egress L1b: the OWNER's program — handed to the plugin (it answers protocol / kinds / features / its own
+      // version word), JUDGED here: installed / executable / binaryPath are the core's, never the plugin's claim
+      const want = userPathOf(id, src.row);
+      const r = await pv.probe({ binaryPath: want, platform: BE.platformOf(platform) });
+      if (!r.ok) return r;
+      const { fact, magic, stamp } = await userFactOf(want);
+      const v = BE.userBinaryVerdict({ path: want, fact, magic, platform: BE.platformOf(platform), id, label: pv.label });
+      return { ok: true, fact: { ...r.fact, label: pv.label, source: 'user', binaryPath: want || null, binaryStamp: v.ok ? stamp : null, installed: !!(fact && (fact.usable || fact.why === 'not-executable')), executable: v.ok, userBinary: v.ok ? null : { code: v.code, why: v.why, error: v.error } } };
+    }
     const want = kernelPath(id);
     const r = await pv.probe({ binaryPath: want || '', platform: BE.platformOf(platform) });
     if (!r.ok) return r;
     // the kernel VibeSpace resolved is the one judged — a plugin answering ANOTHER program (its own env, its own layout) is refused
     if (want && r.fact.binaryPath !== want) return { ok: false, code: 'browser_engine_protocol', error: `${BE.engineWords(pv)} answered its probe about another program than the kernel VibeSpace placed for it — it must judge the path it is handed` };
-    return { ok: true, fact: { ...r.fact, label: pv.label } };
+    return { ok: true, fact: { ...r.fact, label: pv.label, source: 'download' } };
   }
   async function launchOptions(id, input = {}) {
     const pv = providerFor(id);
     if (!pv) return BE.missingOf({ id });
-    return pv.launchOptions({ platform: BE.platformOf(platform), ...input });
+    const lo = await pv.launchOptions({ platform: BE.platformOf(platform), ...input });
+    // lane engine-spi-egress L1b (both sources): the program VibeSpace resolved is the one started — never another the plugin names
+    if (lo.ok && input.binaryPath && lo.launch.executablePath !== input.binaryPath) return { ok: false, code: 'browser_engine_protocol', error: `${BE.engineWords(pv)} answered its launch with another program than the one VibeSpace resolved for it — it must start the path it is handed` };
+    return lo;
   }
-  return { rows, providerFor, probe, launchOptions, kernelPath, tag };
+  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag };
 }
 /** A GET's query values are strings (express parses them so) — the probe input as one. */
 function stringQuery(o) { const q = {}; for (const [k, v] of Object.entries(o || {})) if (v != null && v !== '') q[k] = String(v); return q; }
