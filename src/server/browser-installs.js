@@ -7,7 +7,8 @@
  * THE marker file of a running step (a server restart RE-ATTACHES to it — never a second install), the wall clock every
  * step ends at, the progress read off the log and the refusal while another install runs. It never knows WHAT it
  * installs: each installable is a ROW declared by its own file and registered by ONE line in INSTALLERS below —
- *   id              the `kind` on installState and on the marker (a marker naming no registered row is dropped)
+ *   id              the `kind` on installState and on the marker (a marker naming no registered row — a kind this version
+ *                   no longer installs — is dropped, its running step ended by identity first: reattachInstall)
  *   words(state)    the running install as the "one at a time" refusal names it
  *   logName         the running install as the re-attach log line names it
  *   markSteps       every runStep() of it rides THE marker (the step's pid + starttime)
@@ -93,6 +94,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
   }
   /** lane dc-browser-installs: the slot's answers about WHICH row runs — a row asks about itself by its own id */
   const mine = (id) => installState.kind === id;
+  let retired = null; // lane engine-spi-egress L3: what the restart found of a kind no longer installed ({kind, result, pid, step}) | null
   const otherOf = (id) => (installState.running && installState.kind !== id ? installState.kind : null);
   const busyWords = () => { const row = rows.get(installState.kind); return row ? row.words(installState) : String(installState.kind); };
   /** A server restart mid-install RE-ATTACHES (the marker names the running step's pid — the CLI install's npm, or any step
@@ -102,6 +104,17 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
     let m = null; try { m = JSON.parse(fs.readFileSync(installMarker(), 'utf8')); } catch { return null; }
     // lane chrome-builds-download: a marker of an IN-PROCESS step (`inProcess` row) carries no pid (it died with the server) — judged now
     const row = m ? rows.get(m.kind) : null; // lane dc-browser-installs: the marker's kind is a registered row's id, else dropped
+    // lane engine-spi-egress L3: a marker of a kind THIS version no longer installs (its installer was removed — an install running
+    // at the update) never leaves its step running unowned with no wall clock: ended by identity (pid + starttime, as a group —
+    // endStalledStep's rule), let go when it cannot be proven ours; the journal says which, `retiredAtBoot` keeps it for the
+    // migration that tells the user, and what the step left on disk stays where it is
+    if (m && typeof m === 'object' && !row) {
+      const kind = String(m.kind == null ? '?' : m.kind).replace(/[^\w.-]/g, '').slice(0, 40) || '?';
+      const live = Number.isInteger(m.pid) && m.pid > 1 && F.pidAlive(m.pid);
+      const ended = live && endStalledStep({ pid: m.pid, starttime: m.starttime, group: true });
+      retired = { kind, result: ended ? 'ended' : live ? 'let-go' : 'gone', pid: Number.isInteger(m.pid) ? m.pid : null, step: m.step ? String(m.step).slice(0, 40) : null };
+      log.warn?.(`[browser] an install of a kind this version no longer runs (${kind}${retired.pid ? ', pid ' + retired.pid : ''}) was found at the restart — ${ended ? 'its step was stopped by identity' : live ? 'its pid could not be proven to be the step its marker names: let go, never signalled' : 'it had ended'}; what it left under ${installDir} stays where it is`);
+    }
     if (!row || (!Number.isInteger(m.pid) && !row.inProcess)) { try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } return null; }
     if (row.beforeReattach) row.beforeReattach(m);
     Object.assign(installState, { running: true, kind: m.kind, spec: m.spec || null, startedAt: m.startedAt || now(), finishedAt: null, exitCode: null, pid: m.pid, error: null, step: m.step || 'package', refused: [] });
@@ -126,7 +139,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
   /** the keeper's shutdown: an in-process step ends with its keeper (the marker stays: the next keeper judges it) */
   function shutdown() { const row = installState.running ? rows.get(installState.kind) : null; if (row && typeof row.shutdown === 'function') row.shutdown(); }
   const register = (row) => { if (!row || typeof row.id !== 'string' || rows.has(row.id)) throw new Error(`install row ${row && row.id}: no id, or registered twice`); rows.set(row.id, row); };
-  return { register, rows, INSTALL_TIMEOUT_MS, stalledWords, endStalledStep, installState, installMarker, markInstall, runStep, installProgress, mine, otherOf, busyWords, reattachInstall, shutdown };
+  return { register, rows, INSTALL_TIMEOUT_MS, stalledWords, endStalledStep, installState, installMarker, markInstall, runStep, installProgress, mine, otherOf, busyWords, reattachInstall, shutdown, retiredAtBoot: () => (retired ? { ...retired } : null) };
 }
 
 /** The keeper's ONE call: the slot, every installer created against it (its row registered), their routes' api merged. */

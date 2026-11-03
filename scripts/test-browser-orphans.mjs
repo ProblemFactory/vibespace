@@ -16,6 +16,11 @@
 // call O(processes); CONTROL the pre-fix reader (inline, its per-daemon filters) — the same answer on random tables, and
 // once more per daemon seen: ~40× the cost of one loop turn's census. The claim is a COUNT (test-ci-gate: no wall-clock
 // bound in a fast suite): the row reads one call makes, through proxied rows.
+// LANE ENGINE-SPI-EGRESS L3 (CloakBrowser leaves the core): ⑧ WHAT THE OLD VERSION RAN IS ENDED, NEVER ADOPTED — a record a boot
+// migration marked `endAtBoot` is ended by identity at the keeper's first boot (the daemon by pid + starttime, its browser by its
+// directory) BEFORE adoption and before its proxy is re-bound; a pid that is another process now is never signalled (CONTROLS: the
+// pre-L3 keeper adopts it; a keeper that ends it after the re-bind holds its port) — and an install marker of a kind this version no
+// longer installs has its step ended by identity, or let go when it cannot be proven (CONTROL: the pre-L3 slot leaves it running).
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -255,6 +260,108 @@ async function bootLeg(Kmod, tag) {
   ok(c && c.l.state === 'ready' && c.l.alive && c.j.state === 'stopped' && !c.ended.some((x) => /^9301:|^9302:/.test(x)), '⑥ CONTROL: the pre-fix boot ADOPTS the live record whose browser answers nothing (ready on `session info` alone — the incident), leaves the answering daemon under its stopped record unowned and keeps the silent one\'s daemon + Chrome — the legs above can go red', c && { j: c.j, l: c.l, ended: c.ended });
 }
 silent.close();
+
+// ═══ ⑧ lane engine-spi-egress L3: WHAT THE OLD VERSION RAN IS ENDED AT THE UPDATE, NEVER ADOPTED ═══
+console.log('— ⑧ a record a boot migration marked is ended by identity before adoption; a retired install kind\'s step too');
+const net8 = require('net');
+const listening8 = (port) => new Promise((res) => { const c = net8.connect(port, '127.0.0.1'); c.once('connect', () => { c.destroy(); res(true); }); c.once('error', () => res(false)); });
+const kids8 = new Set();
+process.on('exit', () => { for (const k of kids8) { try { process.kill(k, 'SIGKILL'); } catch { /* gone */ } } });
+const until8 = async (pred, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await new Promise((r) => setTimeout(r, 25)); } return pred(); };
+const WHY8 = 'closed at the update: it ran CloakBrowser, which is now a plugin';
+async function endLeg(Kmod, tag, waitMs = 6000) {
+  const base = path.join(ROOT, 'end-' + tag), dataDir = path.join(base, 'data'); fs.mkdirSync(path.join(dataDir, 'browser-env'), { recursive: true });
+  const dirA = path.join(base, 'prof-a'); fs.mkdirSync(dirA, { recursive: true });
+  // REAL processes: the marked record's daemon, the Chrome it launched (its user-data-dir on its command line), and a process
+  // standing at a recycled pid (another starttime on the record)
+  const dA = spawn('/bin/sleep', ['300'], { argv0: 'agent-browser-linux-x64', env: { AGENT_BROWSER_DAEMON: '1' }, stdio: 'ignore' });
+  const cA = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '--', `--user-data-dir=${dirA}`], { stdio: 'ignore' });
+  const sR = spawn('/bin/sleep', ['300'], { stdio: 'ignore' });
+  for (const c of [dA, cA, sR]) kids8.add(c.pid);
+  const cmd8 = (pid) => String(F.procCmdline(pid) || '');
+  await until8(() => cmd8(dA.pid).includes('agent-browser-linux-x64') && cmd8(cA.pid).includes('--user-data-dir') && cmd8(sR.pid).includes('sleep'), 3000); // each has exec'd (its /proc names it)
+  const [PE] = await deadPorts(1);
+  const P8 = (id, label, dir) => ({ id, label, dir, provider: 'chromium', browser: { kind: 'plugin', id: 'fixture.engine' }, createdAt: NOW - H });
+  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    profiles: [P8('bp-000000a8', 'Marked', dirA), P8('bp-000000b8', 'Recycled', path.join(base, 'prof-b')), P8('bp-000000c8', 'Stopped', path.join(base, 'prof-c'))],
+    leases: [{ profileId: 'bp-000000a8', browserKey: 'bk-000000a8', at: NOW - H }],
+    browsers: {
+      'bp-000000a8': { profileId: 'bp-000000a8', ns: 'vs-bp-000000a8', pid: dA.pid, starttime: F.procStart(dA.pid), state: 'ready', hostId: null, external: false, cdpUrl: `ws://127.0.0.1:${PE}/devtools/browser/aaaaaaaa-8888-aaaa`,
+        browser: { pid: cA.pid, starttime: F.procStart(cA.pid), dir: dirA }, egress: { port: PE, engine: 'fixture.engine', label: 'Fixture', setting: 'plugin.fixture.engine.egressAllowlist', fallback: '' },
+        endAtBoot: { why: WHY8, by: '2026-11-cloak-to-plugin' } },
+      'bp-000000b8': { profileId: 'bp-000000b8', ns: 'vs-bp-000000b8', pid: sR.pid, starttime: 12345, state: 'ready', hostId: null, external: false, endAtBoot: { why: WHY8, by: '2026-11-cloak-to-plugin' } },
+      'bp-000000c8': { profileId: 'bp-000000c8', ns: 'vs-bp-000000c8', pid: 2147483000, starttime: 1, state: 'stopped', hostId: null, external: false, endAtBoot: { why: WHY8, by: '2026-11-cloak-to-plugin' } } } }));
+  // on a keeper that DOES adopt it, the daemon answers and its page answers (the strongest case: it would be re-owned, ready)
+  const rt0 = F.createBrowserRuntime({ env: { PATH: path.join(ROOT, 'nobin') } });
+  const runtime = Object.assign(Object.create(rt0), { info: async (ns) => (ns === 'vs-bp-000000a8' ? { ok: true, active: true, pid: dA.pid, raw: { code: 0 } } : { ok: false, active: false, pid: null, raw: { code: 1, error: 'timeout' } }) });
+  const lines = [];
+  const log = { log: (l) => lines.push(l), warn: (l) => lines.push(l), error: (l) => lines.push(l) };
+  const kk = Kmod.create({ dataDir, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(['bk-000000a8']), install: false, log, now: () => NOW, tickMs: 3600e3, runtime,
+    pageAsk: async () => ({ list: true, pages: [{ targetId: 'T0000008', url: 'https://bank.example/', answered: true, reached: true }] }),
+    daemonTable: async () => [], endIdentity: async () => 'ended' });
+  await kk.boot();
+  await until8(() => !F.pidAlive(dA.pid) && !F.pidAlive(cA.pid), waitMs);
+  const v = (id) => kk.browserOf(id) || {};
+  const r = { a: { state: v('bp-000000a8').state, lastError: v('bp-000000a8').lastError, note: v('bp-000000a8').note, mark: !!(kk._reg().browsers['bp-000000a8'] || {}).endAtBoot }, daemon: F.pidAlive(dA.pid), chrome: F.pidAlive(cA.pid), port: await listening8(PE),
+    b: { state: v('bp-000000b8').state, lastError: v('bp-000000b8').lastError }, recycled: F.pidAlive(sR.pid), c: { state: v('bp-000000c8').state, mark: !!(kk._reg().browsers['bp-000000c8'] || {}).endAtBoot },
+    lines: lines.filter((l) => /ended at the update/.test(l)) };
+  kk.shutdown();
+  for (const c of [dA, cA, sR]) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
+  return r;
+}
+{
+  const e = await endLeg(K, 'fixed');
+  ok(e.a.state === 'stopped' && !e.daemon && !e.chrome && !e.a.mark, '⑧ a MARKED live record is ENDED at the boot, never adopted: its daemon (pid + starttime) and the Chrome it launched (proven by its directory) are gone, the mark dropped', e);
+  ok(e.a.lastError === `${WHY8} — ended at the update (ended)` && new RegExp(`^stopped — its browser daemon was ended at \\d\\d:\\d\\d UTC: ${WHY8}`).test(e.a.note || ''), '⑧ its row says why, in the migration\'s words (the keeper names no reason of its own)', e.a);
+  ok(!e.port, '⑧ its proxy is NOT re-bound (nothing listens on the port its record named)', e.port);
+  ok(e.b.state === 'stopped' && e.recycled && e.b.lastError === `${WHY8} — ended at the update (unproven)`, '⑧ a marked record whose pid is ANOTHER process now (another starttime): closed, the process NEVER signalled', e.b);
+  ok(e.c.state === 'stopped' && !e.c.mark, '⑧ a mark on a stopped record is dropped (nothing to end)', e.c);
+  ok(e.lines.length === 2 && e.lines.some((l) => /"Marked" ended at the update: .* \(daemon pid \d+: ended; marked by 2026-11-cloak-to-plugin\)/.test(l)) && e.lines.some((l) => /"Recycled" ended at the update: .*unproven/.test(l)), '⑧ ONE journal line per marked browser: why, the result, who marked it', e.lines);
+  const MARK_LINE = "      if (rec.endAtBoot) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }";
+  const REBIND = "      if (v.state === 'ready' && rec.egress) { const eg = await egressAdopt(rec);";
+  const pre = keeperCopy('pre-end-at-boot', [[MARK_LINE, '      if (false) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }']]);
+  const c1 = pre ? await endLeg(pre, 'pre', 300) : null;
+  ok(c1 && c1.a.state === 'ready' && c1.daemon && c1.port, '⑧ CONTROL: the pre-L3 keeper ADOPTS the marked record — ready on the old daemon, its proxy listening again — the legs above can go red', c1 && { a: c1.a, daemon: c1.daemon, port: c1.port });
+  const late = keeperCopy('late-end-at-boot', [[MARK_LINE, '      if (false) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; }'], [REBIND, "      if (v.state === 'ready' && rec.egress) { await egressAdopt(rec); } if (rec.endAtBoot) { await endMarked(rec, p); continue; }\n" + REBIND]]);
+  const c2 = late ? await endLeg(late, 'late', 300) : null;
+  ok(c2 && c2.a.state === 'stopped' && c2.port, '⑧ CONTROL: a keeper that ends it only AFTER the re-bind leaves its proxy holding the port — the "not re-bound" leg can go red', c2 && { a: c2.a, port: c2.port });
+}
+{
+  // the install slot: a marker of a kind this version no longer installs (its installer removed — a CloakBrowser install at the update)
+  const BI = require('../src/server/browser-installs.js');
+  async function retiredLeg(BImod, tag, proven, waitMs = 3000) {
+    const tools = path.join(ROOT, 'retired-' + tag, 'data', 'browser-tools'); fs.mkdirSync(tools, { recursive: true });
+    const step = spawn('/bin/sleep', ['300'], { stdio: 'ignore', detached: true }); kids8.add(step.pid);
+    await until8(() => String(F.procCmdline(step.pid) || '').includes('sleep'), 3000);
+    const marker = path.join(tools, 'install-running.json');
+    fs.writeFileSync(marker, JSON.stringify({ kind: 'retired-kind', spec: 'gone@1.0.0', step: 'package', pid: step.pid, starttime: proven ? F.procStart(step.pid) : null, startedAt: NOW, stepAt: NOW, prefix: tools }));
+    const lines = [];
+    const slot = BImod.createSlot({ dataDir: path.dirname(tools), installDir: tools, log: { log: (l) => lines.push(l), warn: (l) => lines.push(l) }, writeJsonAtomic: (f, o) => fs.writeFileSync(f, JSON.stringify(o)) });
+    const re = slot.reattachInstall();
+    if (proven) await until8(() => !F.pidAlive(step.pid), waitMs); else await new Promise((r) => setTimeout(r, 200));
+    const out = { re, alive: F.pidAlive(step.pid), marker: fs.existsSync(marker), busy: !!slot.installState.running, retired: typeof slot.retiredAtBoot === 'function' ? slot.retiredAtBoot() : null, lines: lines.slice() };
+    try { process.kill(-step.pid, 'SIGKILL'); } catch { try { process.kill(step.pid, 'SIGKILL'); } catch { /* gone */ } }
+    return out;
+  }
+  const p8 = await retiredLeg(BI, 'proven', true);
+  ok(!p8.alive && !p8.marker && !p8.busy && p8.retired && p8.retired.kind === 'retired-kind' && p8.retired.result === 'ended' && p8.retired.step === 'package',
+    '⑧ an install marker of a kind this version no longer installs: its running step is ENDED by identity (pid + starttime, its group), the marker gone, the slot free — and what the restart found is kept for the migration that tells the user', p8);
+  ok(p8.lines.some((l) => /an install of a kind this version no longer runs \(retired-kind, pid \d+\) was found at the restart — its step was stopped by identity; what it left under .* stays where it is/.test(l)), '⑧ …said in the journal (what it left on disk stays)', p8.lines);
+  const u8 = await retiredLeg(BI, 'unproven', false);
+  ok(u8.alive && !u8.marker && u8.retired && u8.retired.result === 'let-go' && u8.lines.some((l) => /could not be proven .*: let go, never signalled/.test(l)), '⑧ …one whose pid cannot be proven the marker\'s (no starttime) is LET GO — never signalled, said', u8);
+  const biSrc = fs.readFileSync(path.join(SRCDIR, 'server/browser-installs.js'), 'utf8');
+  const RULE = "    if (m && typeof m === 'object' && !row) {\n";
+  const preBI = biSrc.includes(RULE) ? (() => { const f = path.join(ROOT, 'installs-pre-retired.js'); fs.writeFileSync(f, absReq(biSrc.replace(RULE, '    if (false) {\n'), path.join(SRCDIR, 'server'))); return require(f); })() : null;
+  const c8 = preBI ? await retiredLeg(preBI, 'pre', true, 300) : null;
+  ok(c8 && c8.alive && !c8.marker, '⑧ CONTROL: the pre-L3 slot DROPS the marker and leaves its step running unowned (no wall clock) — the legs above can go red', c8 && { alive: c8.alive, marker: c8.marker });
+  // the keeper hands the finding on (the migration reads it: `retiredInstall`)
+  const kd = path.join(ROOT, 'retired-keeper', 'data'); fs.mkdirSync(path.join(kd, 'browser-tools'), { recursive: true });
+  fs.writeFileSync(path.join(kd, 'browser-tools', 'install-running.json'), JSON.stringify({ kind: 'retired-kind', spec: 'gone@1.0.0', step: 'binary', pid: 2147483000, starttime: 1, startedAt: NOW }));
+  const kr = K.create({ dataDir: kd, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(), install: false, log: { log() { }, warn() { }, error() { } }, now: () => NOW, tickMs: 3600e3 });
+  const ri = typeof kr.retiredInstall === 'function' ? kr.retiredInstall() : null;
+  ok(ri && ri.kind === 'retired-kind' && ri.result === 'gone' && ri.step === 'binary' && !fs.existsSync(path.join(kd, 'browser-tools', 'install-running.json')), '⑧ the keeper hands what its install slot found on to the boot migration (`retiredInstall`) — a step already gone is `gone`', ri);
+  kr.shutdown();
+}
 
 // ═══ ④ THE SERVE OP + THE CAPABILITY GATE ═══
 console.log('— ④ browser-serve end-daemon + the capability gate');

@@ -7029,11 +7029,29 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       log.log?.(`[browser] adopted ${rec.profileId} "${p.label}" on ${rec.hostId} (daemon pid ${rec.pid} there)`);
     } catch (e) { ended(`${rec.hostId || 'this machine'} could not be asked (${e.message})`); }
   }
+  /** lane engine-spi-egress L3: a record a boot MIGRATION marked (`endAtBoot = {why, by}` — the migration's words; the keeper
+   *  names no reason of its own) is ENDED by identity at the first boot of the new version, BEFORE it is adopted and before any
+   *  proxy is re-bound (the road that launched it may no longer exist): the daemon by pid + starttime, then its browser by the
+   *  record's directory (reapOrphan); a pid that is another process now is never signalled. Said in the journal and on the row. */
+  async function endMarked(rec, p) {
+    const m = rec.endAtBoot; delete rec.endAtBoot; dirty = true;
+    const why = String((m && m.why) || 'closed at the update').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 300);
+    const verdict = pidVerdictOf(rec);
+    const result = verdict === 'ours' ? await endProcess(rec.pid, rec.starttime, { termMs: 5000 }) : verdict;
+    rec.state = result === 'survived' ? 'failed' : 'stopped'; rec.endedAt = now();
+    rec.lastError = `${why} — ended at the update (${result})`; rec.note = O.endedNote({ why, at: now() });
+    log.warn?.(`[browser] ${rec.profileId} "${p ? p.label : ''}" ended at the update: ${why} (daemon pid ${rec.pid}: ${result}${m && m.by ? '; marked by ' + String(m.by).slice(0, 60) : ''})`);
+    if (isEph(p)) keptNote('stop', p, { why: 'restart' }); else tabsLost(rec.profileId, 'the update that closed it');
+    if (daemonGone(rec)) reapOrphan(rec, 'boot'); // its browser follows, proven by its directory (boot awaits every reap)
+    if (rec.launch === 'attach') endDisplay(rec, 'a browser closed at the update');
+  }
   async function adoptAll() {
     ensureLoaded();
     for (const rec of Object.values(reg.browsers)) {
-      if (!B.isLiveBrowser(rec)) continue;
+      if (!B.isLiveBrowser(rec)) { if (rec && rec.endAtBoot) { delete rec.endAtBoot; dirty = true; } continue; } // a mark on a stopped record has nothing to end
       const p = profile(rec.profileId);
+      // lane engine-spi-egress L3: a marked record is never adopted, never re-bound (a paired machine's is never signalled from here)
+      if (rec.endAtBoot) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; } log.warn?.(`[browser] ${rec.profileId}: a mark to end it at the update is dropped — its browser runs on a paired machine, which is never signalled from here`); delete rec.endAtBoot; dirty = true; }
       if (!isLocalRec(rec)) { await adoptRemote(rec, p); continue; }
       const verdict = pidVerdictOf(rec);
       let active = false, own = null;
@@ -7573,7 +7591,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
     proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
-    installDir, cloakEgress: egressFor, cloakRefusals: egressRefusals, egressEngineOf, // lane engine-spi-egress: the two names read every wrapped browser's proxy (CloakBrowser's and an engine's); installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
+    installDir, retiredInstall: () => installs.slot.retiredAtBoot(), cloakEgress: egressFor, cloakRefusals: egressRefusals, egressEngineOf, // lane engine-spi-egress: the two names read every wrapped browser's proxy (CloakBrowser's and an engine's); installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
     onLease, addDigest, updateProfile,
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)

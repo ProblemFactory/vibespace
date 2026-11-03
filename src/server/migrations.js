@@ -34,6 +34,33 @@ const JOB_SECRETS_WORDS = Object.freeze({
 // 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): a custom theme saved on .374 froze the five «Cache warmth»
 // rows' derived strings; the ONE rule that drops them (r3) is PURE and shared with the store's one writer (persistence.js)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js');
+// 2026-11-cloak-to-plugin (lane engine-spi-egress L3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」
+// 「cloakbrowser直接去掉吧」): CloakBrowser leaves the core and installs as a plugin. This migration is the ONE place in src/
+// that names the plugin its records move to (scripts/test-architecture.mjs §105 ENGINE_ID_ROWS) and the old CloakBrowser facts it
+// reads (§106): the provider id, the two retired settings rows, the licence row, where VibeSpace's own download unpacked.
+const CLOAK_PLUGIN_ID = 'vibespace.cloak-browser';
+const CLOAK_MIGRATION_ID = '2026-11-cloak-to-plugin'; // also the For-you item's key (one item, re-worded, never a second)
+const CLOAK_OLD = Object.freeze({
+  provider: 'cloak', exeKey: 'browser.cloak.executablePath', sitesKey: 'browser.cloak.egressAllowlist', integration: 'cloak',
+  cacheDir: path.join('browser-tools', 'cloak-cache'), // VibeSpace's own CLOAKBROWSER_CACHE_DIR (never ~/.cloakbrowser)
+  download: path.join('browser-tools', 'cloak-cache', 'chromium-146.0.7680.177.5', 'chrome'), // the measured build's chrome (Linux)
+});
+const CLOAK_PLUGIN_WORDS = Object.freeze({
+  text: i18nKey('CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…'),
+  profiles: i18nKey('{n} browser profile(s) ran CloakBrowser: {labels}. They start again once the plugin is installed and enabled; until then a start is refused by name.'),
+  ended: i18nKey('{n} of them were running and were closed at the update — their logins stay in the profile.'),
+  carried: i18nKey('Your CloakBrowser program path was carried into ⚙ → Plugins → CloakBrowser.'),
+  download: i18nKey('VibeSpace\'s earlier download at {path} is now the program named in ⚙ → Plugins → CloakBrowser — you may move it and change the row.'),
+  noProgram: i18nKey('The plugin needs CloakBrowser installed by you — see its README.'),
+  keptProgram: i18nKey('Your plugin\'s own program path was kept; the old one is in {archive}.'),
+  sites: i18nKey('Your CloakBrowser site list was carried into ⚙ → Plugins → CloakBrowser.'),
+  keptSites: i18nKey('Your plugin\'s own site list was kept; the old one is in {archive}.'),
+  installEnded: i18nKey('A CloakBrowser install that was running at the update was stopped; what it downloaded stays under data/browser-tools.'),
+  installLetGo: i18nKey('A CloakBrowser install was running at the update; its process could not be proven to be the one VibeSpace started, so it was left alone.'),
+  proposals: i18nKey('{n} open proposal(s) to switch an agent\'s browser to CloakBrowser were closed — this version cannot switch a browser for the agent.'),
+  licence: i18nKey('Your CloakBrowser licence key is no longer used; it stays stored in data/integrations.json.'),
+  closed: i18nKey('closed at the update: it ran CloakBrowser, which is now a plugin'), // a running record's words (the keeper's journal + its row)
+});
 
 // `homeDir` is a PARAMETER, not an ambient fact: a migration that reads the
 // transcript tree (the origin backfill) must be drivable against a scratch
@@ -918,6 +945,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: CLOAK_MIGRATION_ID,
+      note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. Everything is READ first (data/browser-profiles.json, data/settings.json, the plugin's seeds.json): a torn or unreadable one FAILS by name before any write (retried at the next boot). Then, each step idempotent: (1) every profile's fingerprint seed into the plugin's seeds.json (merged — a profile the plugin already seeded keeps its own; atomic, 0600); (2) the two path facts into the plugin's program row — browser.cloak.executablePath verbatim, else VibeSpace's earlier download (that file, where it is: no rename, no receipt), else empty — and the site list into its site-list row, a plugin row that already holds a value never overwritten; both old keys stripped; (3) THROUGH the live keeper: every profile on CloakBrowser → chromium + the plugin as its build (its seed stripped once it is in seeds.json), a defaultBackend of CloakBrowser cleared on EVERY profile (nothing reads that field today; no record names a provider this version does not have), a running CloakBrowser marked `endAtBoot` (the keeper ends it by identity at its first boot, before adoption and before any proxy is re-bound), the old proxy shape, seat and Chromium-major readings dropped, and an open proposal to switch to CloakBrowser re-judged unavailable (its For-you Approve closed); (4) the report archived (data/archive/2026-11-cloak-to-plugin.json — never a secret: a stored licence key is named as present, never copied) BEFORE (5) ONE For-you notice naming the door, filed only when something was moved. A run whose notice failed is retried and files it from the archive. The profile directories, data/browser-tools and the integration store are left as they are.",
+      run() { return migrateCloakToPlugin(); },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`
@@ -1038,6 +1070,161 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
     rep.store = 'rewritten';
     return rep;
+  }
+
+  /** 2026-11-cloak-to-plugin (the row's note says the rule): READ everything, then write — seeds, settings, the keeper's
+   *  registry, the archive, the ONE notice. → the report (what moved; the ledger keeps it). */
+  function migrateCloakToPlugin() {
+    const B = require('../browser-profiles.js');
+    const ENG = require('../browser-engines.js'); // PURE: the plugin's reserved rows (`plugin.<id>.executablePath` / `.egressAllowlist`)
+    const SW = require('../browser-switch.js');   // PURE: a re-judged proposal's digest
+    const ID = CLOAK_MIGRATION_ID, P = CLOAK_OLD.provider;
+    const own = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+    const readJson = (file, what) => {
+      let text = null;
+      try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { missing: true, doc: null }; throw new Error(`${what} could not be read (${(e && e.code) || 'error'}: ${e && e.message}) — not migrated; retried at the next boot`); }
+      let doc;
+      try { doc = JSON.parse(text); } catch (e) { throw new Error(`${what} could not be read (unparsable JSON: ${e && e.message}) — not migrated, the file left as it is; retried at the next boot`); }
+      if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error(`${what} is not ${what === 'data/settings.json' ? 'a settings document' : 'an object'} (${JSON.stringify(doc).slice(0, 40)}) — not migrated; retried at the next boot`);
+      return { missing: false, doc, text };
+    };
+    const writeAtomic = (file, text, mode) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, text, { mode }); fs.renameSync(tmp, file); };
+    const modeOf = (file, d) => { try { return fs.statSync(file).mode & 0o777; } catch { return d; } };
+    // ── READ, never guess ──
+    const regFile = path.join(dataDir, 'browser-profiles.json'), setFile = path.join(dataDir, 'settings.json');
+    const seedsFile = path.join(dataDir, 'plugins-state', CLOAK_PLUGIN_ID, 'seeds.json');
+    const archFile = path.join(archiveDir, `${ID}.json`);
+    const R = readJson(regFile, 'data/browser-profiles.json');
+    const S = readJson(setFile, 'data/settings.json');
+    const profiles = R.doc && Array.isArray(R.doc.profiles) ? R.doc.profiles.filter((p) => p && typeof p === 'object') : [];
+    const cloakProfiles = profiles.filter((p) => p.provider === P);
+    const seeded = cloakProfiles.filter((p) => Number.isInteger(p.fingerprintSeed) && p.fingerprintSeed >= 1);
+    let table = null;
+    if (seeded.length) {
+      const T = readJson(seedsFile, `data/plugins-state/${CLOAK_PLUGIN_ID}/seeds.json`);   // the plugin's own rule: never over a table it cannot read
+      table = Object.assign(Object.create(null), T.doc || {});
+    }
+    let prior = null; // an earlier run of this migration that moved things and then failed (its notice): its report is told too
+    try { prior = JSON.parse(fs.readFileSync(archFile, 'utf-8')); } catch { prior = null; }
+    const rep = { profiles: [], defaults: [], seeds: { added: [], kept: [] }, settings: { program: 'none', sites: 'none', old: {}, kept: {} }, ended: [], proposals: [], egress: 0, seats: false, install: null, licence: false, left: [] };
+    // ── (1) seeds — merged, never over a profile the plugin seeded already ──
+    if (table) {
+      for (const p of seeded) { if (own(table, p.id)) rep.seeds.kept.push(p.id); else { table[p.id] = p.fingerprintSeed; rep.seeds.added.push(p.id); } }
+      if (rep.seeds.added.length) writeAtomic(seedsFile, JSON.stringify(table, null, 2) + '\n', 0o600);
+    }
+    // ── (2) the two path facts + the site list (addendum §3: the user's value verbatim, else the earlier download, else empty) ──
+    const sdoc = S.doc || {};
+    const str = (v) => (typeof v === 'string' ? v : '');
+    const exeRow = ENG.binaryRowPath(CLOAK_PLUGIN_ID), sitesRow = ENG.egressRowPath(CLOAK_PLUGIN_ID);
+    const oldExe = str(sdoc[CLOAK_OLD.exeKey]), oldSites = str(sdoc[CLOAK_OLD.sitesKey]);
+    const dl = path.join(dataDir, CLOAK_OLD.download);
+    const dlOk = (() => { try { fs.accessSync(dl, fs.constants.X_OK); return fs.statSync(dl).isFile(); } catch { return false; } })();
+    const set = {};
+    if (str(sdoc[exeRow]).trim()) { if (oldExe.trim() || dlOk) { rep.settings.program = 'kept'; rep.settings.kept[exeRow] = sdoc[exeRow]; } }
+    else if (oldExe.trim()) { set[exeRow] = oldExe; rep.settings.program = 'carried'; }
+    else if (dlOk) { set[exeRow] = dl; rep.settings.program = 'download'; }
+    if (oldSites.trim()) { if (str(sdoc[sitesRow]).trim()) { rep.settings.sites = 'kept'; rep.settings.kept[sitesRow] = sdoc[sitesRow]; } else { set[sitesRow] = oldSites; rep.settings.sites = 'carried'; } }
+    for (const k of [CLOAK_OLD.exeKey, CLOAK_OLD.sitesKey]) if (own(sdoc, k)) rep.settings.old[k] = sdoc[k];
+    if (Object.keys(rep.settings.old).length || Object.keys(set).length) {
+      const drop = new Set([CLOAK_OLD.exeKey, CLOAK_OLD.sitesKey]);
+      const next = Object.fromEntries([...Object.entries(sdoc).filter(([k]) => !drop.has(k)), ...Object.entries(set)]);
+      writeAtomic(setFile, JSON.stringify(next, null, 2), modeOf(setFile, 0o644));
+    }
+    // ── (3) the registry — THROUGH the live keeper (it holds the file in memory and saves it whole), else the file ──
+    const isMarkedEgress = (e) => !!(e && typeof e === 'object' && e.cloak === true);
+    const touches = (doc) => {
+      const ps = Array.isArray(doc && doc.profiles) ? doc.profiles : [];
+      const bs = doc && doc.browsers && typeof doc.browsers === 'object' ? Object.values(doc.browsers) : [];
+      return ps.some((p) => p && (p.provider === P || p.defaultBackend === P)) || bs.some((r) => r && isMarkedEgress(r.egress))
+        || !!(doc && ((doc.seats && own(doc.seats, P)) || (doc.majors && own(doc.majors, P))))
+        || (Array.isArray(doc && doc.blocked) && doc.blocked.some((e) => e && e.proposal && ['open', 'approved', 'failed'].includes(e.proposal.state) && e.proposal.plan && e.proposal.plan.kind !== 'none'));
+    };
+    const reshape = (doc) => {
+      const ps = Array.isArray(doc.profiles) ? doc.profiles : [];
+      const moved = new Set();
+      for (const p of ps) {
+        if (!p || typeof p !== 'object') continue;
+        if (p.defaultBackend === P) { p.defaultBackend = null; rep.defaults.push(p.id); }
+        if (p.provider !== P) continue;
+        rep.profiles.push({ id: p.id, label: String(p.label || ''), dir: p.dir || null, ...(own(p, 'browser') ? { browser: p.browser } : {}), ...(p.fingerprintSeed != null ? { seed: p.fingerprintSeed } : {}) });
+        moved.add(p.id);
+        p.provider = 'chromium';
+        p.browser = { kind: 'plugin', id: CLOAK_PLUGIN_ID };
+        // the seed leaves the record only once it is in the plugin's table (a crash between the two loses nothing)
+        if (p.fingerprintSeed != null && (!Number.isInteger(p.fingerprintSeed) || (table && own(table, p.id)))) p.fingerprintSeed = null;
+        if (p.dir) rep.left.push(String(p.dir));
+      }
+      for (const r of Object.values(doc.browsers && typeof doc.browsers === 'object' ? doc.browsers : {})) {
+        if (!r || typeof r !== 'object') continue;
+        const old = isMarkedEgress(r.egress);
+        if (old) { delete r.egress; rep.egress++; }
+        if ((moved.has(r.profileId) || old) && B.isLiveBrowser(r)) { r.endAtBoot = { why: CLOAK_PLUGIN_WORDS.closed, by: ID }; rep.ended.push({ id: r.profileId, pid: Number.isInteger(r.pid) ? r.pid : null }); }
+      }
+      if (doc.seats && own(doc.seats, P)) { delete doc.seats[P]; rep.seats = true; }
+      if (doc.majors && own(doc.majors, P)) delete doc.majors[P];
+      for (const e of Array.isArray(doc.blocked) ? doc.blocked : []) {
+        const pr = e && e.proposal;
+        if (!pr || pr.kind === 'site-reset' || !['open', 'approved', 'failed'].includes(pr.state) || !pr.plan || pr.plan.kind === 'none') continue;
+        Object.assign(pr, { state: 'unavailable', plan: { kind: 'none', why: 'install-unavailable' }, install: 'unavailable', installWhy: 'provider_unavailable', progress: null });
+        for (const k of ['installError', 'installBytes', 'installFrom']) delete pr[k];
+        pr.digest = SW.proposalDigest(pr);
+        rep.proposals.push({ id: String(e.id || ''), site: String(pr.site || ''), itemId: pr.itemId || null });
+      }
+      return rep;
+    };
+    let via = 'none';
+    if (R.doc && touches(R.doc)) {
+      const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper;
+      if (k && typeof k.reshapeStore === 'function') { k.reshapeStore(reshape); via = 'keeper'; }
+      else { reshape(R.doc); writeAtomic(regFile, JSON.stringify(R.doc, null, 2), modeOf(regFile, 0o600)); via = 'file'; }
+    }
+    // the install slot's restart (it ran when the keeper was made, before this): a CloakBrowser install it found running
+    try { const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper; const ri = k && typeof k.retiredInstall === 'function' ? k.retiredInstall() : null; if (ri && ri.kind === P && ri.result !== 'gone') rep.install = { result: ri.result, pid: ri.pid, step: ri.step }; } catch { /* no keeper */ }
+    // a licence key the integration store holds for the CloakBrowser row — PRESENCE only, never its value (it stays where it is)
+    try { const d = JSON.parse(fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8')); const r = d && d.integrations && d.integrations[CLOAK_OLD.integration]; rep.licence = !!(r && r.values && typeof r.values === 'object' && Object.keys(r.values).length); } catch { rep.licence = false; }
+    if (fs.existsSync(path.join(dataDir, CLOAK_OLD.cacheDir))) rep.left.push('data/' + CLOAK_OLD.cacheDir.split(path.sep).join('/'));
+    // ── (4) the archive, BEFORE the notice; (5) ONE notice — only when something moved, now or in a run whose notice failed ──
+    // (an old row stored EMPTY is stripped and archived, but tells nobody anything: a user who never ran CloakBrowser hears nothing)
+    const movedNow = !!(rep.profiles.length || rep.defaults.length || rep.seeds.added.length || rep.settings.program !== 'none' || rep.settings.sites !== 'none' || Object.values(rep.settings.old).some((v) => String(v == null ? '' : v).trim()) || rep.ended.length || rep.proposals.length || rep.install || rep.licence);
+    const runs = [...(prior && Array.isArray(prior.runs) ? prior.runs : []), ...(movedNow ? [{ at: new Date().toISOString(), via, ...rep }] : [])];
+    const out = { via, ...rep, earlierRuns: runs.length - (movedNow ? 1 : 0) };
+    if (!runs.length) { console.log(`[migrate] ${ID}: nothing of CloakBrowser on this instance — nothing moved, no notice`); return { ...out, notice: 'none' }; }
+    writeAtomic(archFile, JSON.stringify({ id: ID, runs }, null, 2), 0o600);
+    const all = (f) => runs.flatMap((r) => r[f] || []);
+    const last = (pick) => runs.map(pick).filter((x) => x && x !== 'none').pop() || 'none';
+    const archive = 'data/archive/' + path.basename(archFile);
+    const labels = [...new Set(all('profiles').map((p) => p.label || p.id))];
+    const lines = [];
+    if (labels.length) lines.push({ key: CLOAK_PLUGIN_WORDS.profiles, params: { n: labels.length, labels: labels.slice(0, 6).join(', ') + (labels.length > 6 ? ', …' : '') } });
+    if (all('ended').length) lines.push({ key: CLOAK_PLUGIN_WORDS.ended, params: { n: all('ended').length } });
+    const program = last((r) => r.settings && r.settings.program);
+    if (program === 'carried') lines.push({ key: CLOAK_PLUGIN_WORDS.carried });
+    else if (program === 'download') lines.push({ key: CLOAK_PLUGIN_WORDS.download, params: { path: 'data/' + CLOAK_OLD.download.split(path.sep).join('/') } });
+    else if (program === 'kept') lines.push({ key: CLOAK_PLUGIN_WORDS.keptProgram, params: { archive } });
+    else if (labels.length) lines.push({ key: CLOAK_PLUGIN_WORDS.noProgram });
+    const sites = last((r) => r.settings && r.settings.sites);
+    if (sites === 'carried') lines.push({ key: CLOAK_PLUGIN_WORDS.sites });
+    else if (sites === 'kept') lines.push({ key: CLOAK_PLUGIN_WORDS.keptSites, params: { archive } });
+    const inst = runs.map((r) => r.install).filter(Boolean).pop();
+    if (inst) lines.push({ key: inst.result === 'ended' ? CLOAK_PLUGIN_WORDS.installEnded : CLOAK_PLUGIN_WORDS.installLetGo });
+    if (all('proposals').length) lines.push({ key: CLOAK_PLUGIN_WORDS.proposals, params: { n: all('proposals').length } });
+    if (runs.some((r) => r.licence)) lines.push({ key: CLOAK_PLUGIN_WORDS.licence });
+    const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+    const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+    let store = live, priv = false;
+    if (!store || typeof store.add !== 'function') { const { UserTodoManager } = require('../user-todos.js'); store = new UserTodoManager({ dataDir, expirySweepMs: 0 }); priv = true; }
+    let filed = false;
+    try {
+      // a proposal's For-you Approve that can no longer run is closed (its card says unavailable at the next rebuild)
+      for (const pr of all('proposals')) { try { const it = pr.itemId && typeof store.get === 'function' ? store.get(pr.itemId) : null; if (it && it.status === 'open') store.setStatus(pr.itemId, 'dismissed', 'system'); } catch { /* gone */ } }
+      const head = { key: CLOAK_PLUGIN_WORDS.text };
+      const it = store.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'system', sessionName: 'Agent browser', itemKey: ID, text: fill(head), detail: lines.length ? lines.map(fill).join('\n') : null, i18n: { text: head, ...(lines.length ? { detail: lines } : {}), source: { key: i18nKey('Agent browser') } } });
+      store.flush?.();
+      filed = !!(it && it.id);
+    } finally { if (priv) { try { store.stop(); } catch { } } }
+    if (!filed) throw new Error('the For-you notice was not filed — retried at the next boot (what moved is in ' + archive + ')');
+    console.log(`[migrate] ${ID}:`, JSON.stringify({ via, profiles: rep.profiles.length, defaults: rep.defaults.length, seeds: rep.seeds, program: rep.settings.program, sites: rep.settings.sites, ended: rep.ended.length, proposals: rep.proposals.length, install: rep.install, licence: rep.licence, earlierRuns: out.earlierRuns }));
+    return { ...out, notice: 'filed' };
   }
 
   /** 2026-10-settings-rows-retired, the settings half: strip RETIRED_SETTING_KEYS from data/settings.json, the values
@@ -1214,4 +1401,4 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
-module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS };
+module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };

@@ -7097,13 +7097,17 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // manifest declaring contributes.browserEngine + the engines this project ships plugins for; plus any 'plugin:<id>' literal.
 // A src file that must name one (a migration naming the plugin a record moves to) is a ROW here, with its reason.
 {
-  const ENGINE_ID_ROWS = Object.freeze({}); // 'src/<file>': '<why it names an engine id>' — none today
+  const ENGINE_ID_ROWS = Object.freeze({ // 'src/<file>': '<why it names an engine id>'
+    'src/server/migrations.js': 'lane engine-spi-egress L3: the one-shot 2026-11-cloak-to-plugin names the plugin the CloakBrowser records move to (its profiles\' build, its rows, its seeds.json)',
+  });
   const ids105 = new Set(['vibespace.custom-browser', 'vibespace.cloak-browser']);
   for (const f of trackedFiles(REPO, 'scripts/fixtures')) if (/(^|\/)vibespace-plugin\.json$/.test(f)) { try { const m = JSON.parse(read(f)); if (m && m.contributes && m.contributes.browserEngine === true && typeof m.id === 'string') ids105.add(m.id); } catch { /* not a manifest */ } }
   const scan105 = (text) => [...[...ids105].filter((id) => text.includes(id)), ...(text.match(/['"`]plugin:[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*['"`]/g) || [])];
   const files105 = trackedFiles(REPO, 'src');
   const red105 = files105.filter((f) => !ENGINE_ID_ROWS[f]).flatMap((f) => scan105(read(f)).map((h) => `${f}: ${h}`));
   ok(files105.length > 100 && ids105.size >= 3 && red105.length === 0, `§105 no browser engine's id is named in src/ (${files105.length} tracked files; watched: ${[...ids105].join(', ')} + any 'plugin:<id>' literal) — ${red105.join(' | ') || 'none'}`, red105);
+  const stale105 = Object.keys(ENGINE_ID_ROWS).filter((f) => !files105.includes(f) || !scan105(read(f)).length);
+  ok(stale105.length === 0, `§105 every ENGINE_ID_ROWS row still names an engine id (a row whose file names none is stale) — ${stale105.join(', ') || 'none'}`, stale105);
   const planted105 = scan105("const CLOAK = 'plugin:vibespace.cloak-browser'; // planted");
   ok(planted105.length === 2 && scan105('const ok = engineRowPath(id); // \'plugin:other.id:x\' is a command id').length === 0, `§105 CONTROL: a planted id is named (${planted105.join(', ')}); a derived one is not`);
 }

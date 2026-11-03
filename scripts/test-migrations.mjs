@@ -2872,6 +2872,192 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       } finally { await new Promise((r) => srv.close(r)); }
     }
   }
+  // ── 2026-11-cloak-to-plugin (lane engine-spi-egress L3): CloakBrowser leaves the core — what an instance holds of it moves ONCE
+  // to the plugin `vibespace.cloak-browser`: the profiles (their seeds into the plugin's seeds.json, merged), the two path facts and
+  // the site list into the plugin's rows (never over a value the plugin holds), a running CloakBrowser marked for the keeper to end
+  // by identity, an open proposal closed, ONE notice — and nothing at all for an instance that never ran it. Every leg reads `?.`
+  // so a tree without the migration is RED leg by leg, never one throw. ──
+  {
+    console.log('2026-11-cloak-to-plugin');
+    const ID = '2026-11-cloak-to-plugin', PID = 'vibespace.cloak-browser';
+    const EXE = `plugin.${PID}.executablePath`, SITES = `plugin.${PID}.egressAllowlist`;
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const Kmod = require('../src/server/browser-keeper.js');
+    const MW = (() => { try { return require('../src/server/migrations.js').CLOAK_PLUGIN_WORDS || {}; } catch { return {}; } })();
+    const quiet = { log() { }, warn() { }, error() { } };
+    const GONE_PID = 2147483000; // never a live pid (pid_max is far below)
+    const prof = (n, label, x = {}) => ({ id: `bp-0000c0${n}`, label, dir: `/x/c2p/${n}`, provider: 'chromium', owner: { kind: 'instance', id: null }, sharing: 'owner', fingerprintSeed: null, defaultBackend: null, lastBackend: null, createdAt: 1, ...x });
+    const proposal = (itemId = null) => ({ id: 'bl-0000c001', url: 'https://bank.example/login', host: 'bank.example', why: 'sign-in-refused', by: 'agent', tier: 2, browserKey: 'bk-0000c001', at: 1,
+      proposal: { id: 'bl-0000c001', backend: 'cloak', site: 'bank.example', url: 'https://bank.example/login', install: 'needed', installWhy: null, installBytes: 100000000, plan: { kind: 'switch', profileId: 'bp-0000c0a4', profileLabel: 'Other', confirm: false, others: 0 }, state: 'open', by: 'agent', at: 1, decided: null, outcome: null, progress: null, told: false, digest: 'pd-00000000', itemId } });
+    const world = (x = {}) => ({ version: 1, profiles: [
+      prof('a1', 'Bank', { provider: 'cloak', fingerprintSeed: 17 }),
+      prof('a2', 'Shop', { provider: 'cloak', fingerprintSeed: 99, defaultBackend: 'cloak' }),
+      prof('a3', 'Plain', { defaultBackend: 'cloak', lastBackend: 'cloak' }),
+      prof('a4', 'Other'),
+    ], leases: [], browsers: {
+      'bp-0000c0a1': { profileId: 'bp-0000c0a1', ns: 'vs-bp-0000c0a1', pid: GONE_PID, starttime: 1, state: 'ready', hostId: null, external: false, egress: { port: 41999, cloak: true } },
+      'bp-0000c0a2': { profileId: 'bp-0000c0a2', ns: 'vs-bp-0000c0a2', pid: GONE_PID - 1, starttime: 1, state: 'stopped', hostId: null, external: false },
+    }, seats: { cloak: { tier: 'free', total: 1, at: 1, source: 'none' } }, majors: { cloak: { major: 146, at: 1 }, chromium: { major: 150, at: 1 } }, blocked: [proposal(x.itemId || null)] });
+    const seedC = (name, { reg, settings, seeds, integrations, download = false } = {}) => {
+      const root = path.join(tmp, 'c2p-' + name), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+      const sp = path.join(dataDir, 'plugins-state', PID, 'seeds.json');
+      if (reg !== undefined) fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), typeof reg === 'string' ? reg : JSON.stringify(reg), { mode: 0o600 });
+      if (settings !== undefined) fs.writeFileSync(path.join(dataDir, 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings, null, 2));
+      if (seeds !== undefined) { fs.mkdirSync(path.dirname(sp), { recursive: true }); fs.writeFileSync(sp, typeof seeds === 'string' ? seeds : JSON.stringify(seeds), { mode: 0o600 }); }
+      if (integrations !== undefined) fs.writeFileSync(path.join(dataDir, 'integrations.json'), JSON.stringify(integrations));
+      const dl = path.join(dataDir, 'browser-tools', 'cloak-cache', 'chromium-146.0.7680.177.5', 'chrome');
+      if (download) { fs.mkdirSync(path.dirname(dl), { recursive: true }); fs.writeFileSync(dl, '#!/bin/sh\n', { mode: 0o755 }); }
+      const J = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, f), 'utf8')); } catch { return null; } };
+      const B = (f) => { try { return fs.readFileSync(path.join(dataDir, f), 'utf8'); } catch { return null; } };
+      const ledger = () => J('migrations.json') || { applied: {} };
+      return { root, dataDir, dl, J, B, ledger, seedsFile: sp, seeds: () => { try { return JSON.parse(fs.readFileSync(sp, 'utf8')); } catch { return null; } }, archive: path.join(dataDir, 'archive', ID + '.json') };
+    };
+    const boot = (w, opts = {}) => create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
+    const notes = (store) => store.forSession('browser').filter((i) => i.itemKey === ID);
+    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID), `the registry carries ${ID} (append-only, dated)`);
+    // M1 THE WORLD — two CloakBrowser profiles (seeds 17 / 99), a running one with the old proxy shape, the program path + the site list,
+    // a chromium profile CloakBrowser was made the default of, an open proposal with its For-you Approve, a stored licence key — through
+    // the LIVE keeper and the LIVE inbox store (what the boot hands in)
+    const LIC = 'lic-' + crypto.randomBytes(9).toString('hex');
+    const w1 = seedC('world', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/cloak/chrome', 'browser.cloak.egressAllowlist': 'bank.example, .shop.example', 'browser.headed': true }, integrations: { integrations: { cloak: { values: { licenseKey: LIC }, clusterKey: null } } } });
+    const live1 = new UserTodoManager({ dataDir: w1.dataDir, expirySweepMs: 0 });
+    const item1 = live1.add('bk-0000c001', { text: 'The agent proposes switching its browser to CloakBrowser (bank.example refused it)', kind: 'action', urgency: 'high', by: 'agent', origin: 'browser', action: { type: 'browser-proposal', id: 'bl-0000c001', shown: 'pd-00000000' } });
+    { const d = world({ itemId: item1.id }); fs.writeFileSync(path.join(w1.dataDir, 'browser-profiles.json'), JSON.stringify(d), { mode: 0o600 }); }
+    const K1 = Kmod.create({ dataDir: w1.dataDir, homeDir: scratchHomeDir, install: false, log: quiet }); K1.list();
+    const r1 = boot(w1, { browserKeeper: () => K1, userTodos: live1 });
+    const reg1 = K1._reg(), P1 = (n) => reg1.profiles.find((p) => p.id === `bp-0000c0${n}`) || {};
+    ok(r1?.status === 'ran' && r1?.report?.via === 'keeper', 'M1 ran THROUGH the live keeper (it holds the registry in memory and saves it whole)', r1);
+    ok(['a1', 'a2'].every((n) => P1(n).provider === 'chromium' && JSON.stringify(P1(n).browser) === JSON.stringify({ kind: 'plugin', id: PID }) && P1(n).fingerprintSeed === null) && P1('a4').provider === 'chromium' && P1('a4').browser === undefined,
+      'M1 every CloakBrowser profile is chromium with the plugin as its build — its seed off the record (it is in the plugin\'s table); another profile untouched', { a1: P1('a1'), a4: P1('a4') });
+    const sd1 = w1.seeds(), sdMode = fs.existsSync(w1.seedsFile) ? fs.statSync(w1.seedsFile).mode & 0o777 : null;
+    ok(sd1 && sd1['bp-0000c0a1'] === 17 && sd1['bp-0000c0a2'] === 99 && Object.keys(sd1).length === 2 && sdMode === 0o600, 'M1 the seeds are in the plugin\'s seeds.json {profile: seed} (0600) — the same fingerprint at its next start', { sd1, sdMode });
+    const st1 = w1.J('settings.json') || {};
+    ok(st1[EXE] === '/opt/cloak/chrome' && st1[SITES] === 'bank.example, .shop.example' && !('browser.cloak.executablePath' in st1) && !('browser.cloak.egressAllowlist' in st1) && st1['browser.headed'] === true,
+      'M1 the program path (verbatim) and the site list are the plugin\'s rows; both old keys are gone; every other setting kept', st1);
+    const b1 = reg1.browsers['bp-0000c0a1'] || {}, b2 = reg1.browsers['bp-0000c0a2'] || {};
+    ok(b1.endAtBoot && b1.endAtBoot.why === MW.closed && b1.endAtBoot.by === ID && !('egress' in b1) && !b2.endAtBoot,
+      'M1 the RUNNING CloakBrowser is marked for the keeper to end at its boot (the migration\'s words), its old proxy shape dropped; a stopped one is not marked', { b1, b2 });
+    ok(P1('a2').defaultBackend === null && P1('a3').defaultBackend === null && P1('a3').lastBackend === 'cloak' && !reg1.seats.cloak && !reg1.majors.cloak && reg1.majors.chromium && reg1.majors.chromium.major === 150,
+      'M1/M11 a defaultBackend of CloakBrowser is cleared on EVERY profile (a chromium one too — the history field lastBackend stays); its seat and Chromium-major readings dropped, chromium\'s kept', { a3: P1('a3'), seats: reg1.seats, majors: reg1.majors });
+    const pr1 = ((reg1.blocked || []).find((b) => b.id === 'bl-0000c001') || {}).proposal || {};
+    const it1 = live1.get(item1.id) || {};
+    ok(pr1.state === 'unavailable' && pr1.plan && pr1.plan.kind === 'none' && pr1.install === 'unavailable' && !('installBytes' in pr1) && it1.status === 'dismissed',
+      'M10 an open proposal to switch to CloakBrowser is re-judged UNAVAILABLE (nothing to approve) and its For-you Approve is closed', { pr1, item: it1.status });
+    const n1 = notes(live1), x1 = n1[0] || {};
+    const det1 = String(x1.detail || '');
+    ok(n1.length === 1 && x1.origin === 'browser' && x1.kind === 'notice' && x1.status === 'open' && x1.text === 'CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…',
+      'M1 ONE For-you notice (origin browser): «CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…»', x1);
+    ok(/^2 browser profile\(s\) ran CloakBrowser: Bank, Shop\./m.test(det1) && /^1 of them were running and were closed at the update/m.test(det1) && /program path was carried/.test(det1) && /site list was carried/.test(det1) && /^1 open proposal\(s\) to switch/m.test(det1) && /licence key is no longer used/.test(det1) && !det1.includes(LIC),
+      '…its lines say what moved: the profiles by name, the one closed, the path and the list carried, the proposal closed, the licence key unused (its value never shown)', det1);
+    ok(Array.isArray(x1.i18n?.detail) && x1.i18n.detail.length === 6 && x1.i18n?.text?.key === MW.text && x1.i18n?.source?.key === 'Agent browser', '…and its words ride as structure (the client says them in zh / ja)', x1.i18n);
+    const arch1 = (() => { try { return fs.readFileSync(w1.archive, 'utf8'); } catch { return ''; } })(), archMode = fs.existsSync(w1.archive) ? fs.statSync(w1.archive).mode & 0o777 : null;
+    ok(arch1.includes('"bp-0000c0a1"') && arch1.includes('/opt/cloak/chrome') && arch1.includes('"seed": 17') && archMode === 0o600 && !arch1.includes(LIC) && w1.J('integrations.json')?.integrations?.cloak?.values?.licenseKey === LIC,
+      'M1 the report is archived (data/archive/2026-11-cloak-to-plugin.json, 0600: the profiles, their seeds, the old values) — the licence key NEVER copied, left where it is', { archMode, hasLic: arch1.includes(LIC) });
+    ok((w1.J('browser-profiles.json')?.profiles || []).filter((p) => p.provider === 'cloak').length === 0, 'M1 the keeper\'s own save put it on disk (no profile on CloakBrowser in the file)');
+    // …the keeper's FIRST BOOT of the new version ends the marked record by identity (its pid is gone here: nothing to signal) and says why
+    K1.shutdown();
+    const K1b = Kmod.create({ dataDir: w1.dataDir, homeDir: scratchHomeDir, install: false, log: quiet, daemonTable: async () => [], endIdentity: async () => 'ended' });
+    await K1b.boot();
+    const e1 = K1b._reg().browsers['bp-0000c0a1'] || {};
+    ok(e1.state === 'stopped' && !e1.endAtBoot && /closed at the update: it ran CloakBrowser, which is now a plugin — ended at the update \(gone\)/.test(e1.lastError || '') && /closed at the update/.test(e1.note || ''),
+      'M1 the next keeper boot ENDS the marked record (never adopted): stopped, the mark gone, its row says why', e1);
+    let ed1 = null; try { ed1 = K1b.updateProfile('bp-0000c0a3', { label: 'Plain renamed' }); } catch (e) { ed1 = { error: e.code || e.message }; }
+    ok(ed1 && !ed1.error && (K1b.profile('bp-0000c0a3') || {}).label === 'Plain renamed', 'M11 the chromium profile CloakBrowser was the default of still edits (a rename answers ok)', ed1);
+    K1b.shutdown(); live1.stop();
+    // M2 no program path set; VibeSpace's earlier download is there ⇒ THAT FILE, where it is (no rename, no receipt)
+    const w2 = seedC('download', { reg: world(), settings: { 'browser.cloak.egressAllowlist': '' }, download: true });
+    const t2 = new UserTodoManager({ dataDir: w2.dataDir, expirySweepMs: 0 });
+    const r2 = boot(w2, { userTodos: t2 });
+    const st2 = w2.J('settings.json') || {}, d2 = String((notes(t2)[0] || {}).detail || '');
+    ok(r2?.status === 'ran' && r2?.report?.via === 'file' && st2[EXE] === w2.dl && fs.existsSync(w2.dl) && !(SITES in st2) && !('browser.cloak.egressAllowlist' in st2) && /earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/.test(d2),
+      'M2 no path set ⇒ the earlier download becomes the plugin\'s program row (the file stays where it is); an EMPTY old site list is stripped, never carried; said', { st2, d2 });
+    t2.stop();
+    // M3 neither ⇒ the row stays empty and the notice says the plugin needs CloakBrowser installed by the user
+    const w3 = seedC('neither', { reg: world() });
+    const t3 = new UserTodoManager({ dataDir: w3.dataDir, expirySweepMs: 0 });
+    const r3 = boot(w3, { userTodos: t3 });
+    const d3 = String((notes(t3)[0] || {}).detail || '');
+    ok(r3?.status === 'ran' && !fs.existsSync(path.join(w3.dataDir, 'settings.json')) && /needs CloakBrowser installed by you — see its README/.test(d3) && !/github|https?:\/\//i.test(d3 + (notes(t3)[0] || {}).text),
+      'M3 neither ⇒ no row written (no settings file made) and the notice says the plugin needs CloakBrowser installed by the user — the door only, no address', d3);
+    t3.stop();
+    // M4 the plugin was installed and set on .372–.374 ⇒ NOTHING of the plugin's is overwritten (its rows, a seed it minted)
+    const w4 = seedC('kept', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/old/chrome', 'browser.cloak.egressAllowlist': 'old.example', [EXE]: '/home/u/cloak/chrome', [SITES]: 'mine.example' }, seeds: { 'bp-0000c0a1': 5, 'bp-0000feed': 7 } });
+    const t4 = new UserTodoManager({ dataDir: w4.dataDir, expirySweepMs: 0 });
+    const r4 = boot(w4, { userTodos: t4 });
+    const st4 = w4.J('settings.json') || {}, sd4 = w4.seeds() || {}, d4 = String((notes(t4)[0] || {}).detail || ''), a4 = (() => { try { return fs.readFileSync(w4.archive, 'utf8'); } catch { return ''; } })();
+    ok(r4?.status === 'ran' && st4[EXE] === '/home/u/cloak/chrome' && st4[SITES] === 'mine.example' && sd4['bp-0000c0a1'] === 5 && sd4['bp-0000c0a2'] === 99 && sd4['bp-0000feed'] === 7 && /own program path was kept/.test(d4) && /own site list was kept/.test(d4) && a4.includes('/opt/old/chrome') && a4.includes('old.example'),
+      'M4 the plugin\'s own rows and its own seed are KEPT (the new seed merged beside them) — the old values are in the archive, the notice says so', { st4, sd4, d4 });
+    t4.stop();
+    // M5 a TORN registry ⇒ failed by name before ANY write (settings untouched, no seeds), the ledger not stamped; whole again ⇒ ran
+    const torn = '{"version":1,"profiles":[{"id":"bp-0000c0a1","provider":"cloak"';
+    const set5 = { 'browser.cloak.executablePath': '/opt/cloak/chrome' };
+    const w5 = seedC('torn', { reg: torn, settings: set5 });
+    const s5 = w5.B('settings.json');
+    const r5 = boot(w5);
+    ok(r5 && r5.status === 'failed' && /browser-profiles\.json could not be read/.test(String(r5.error || '')) && w5.B('settings.json') === s5 && !fs.existsSync(w5.seedsFile) && !(w5.ledger().applied || {})[ID] && w5.B('browser-profiles.json') === torn,
+      'M5 a torn registry: FAILED by name — nothing written (settings byte-identical, no seeds.json), the ledger NOT stamped', r5);
+    fs.writeFileSync(path.join(w5.dataDir, 'browser-profiles.json'), JSON.stringify(world()));
+    const t5 = new UserTodoManager({ dataDir: w5.dataDir, expirySweepMs: 0 });
+    const r5b = boot(w5, { userTodos: t5 });
+    ok(r5b?.status === 'ran' && (w5.J('settings.json') || {})[EXE] === '/opt/cloak/chrome' && (w5.seeds() || {})['bp-0000c0a1'] === 17, 'M5 whole again ⇒ the next boot migrates it (never blocked, never skipped)', r5b);
+    // M6 a second boot ⇒ `already`, and still ONE item
+    const r6 = boot(w5, { userTodos: t5 });
+    ok(r6?.status === 'already' && notes(t5).length === 1, 'M6 a second boot answers `already`; still one For-you item', { r6: r6 && r6.status, n: notes(t5).length });
+    t5.stop();
+    // M7 an instance that never ran CloakBrowser ⇒ ran with nothing moved: NO notice, no file rewritten, no archive, no seeds.json
+    const reg7 = { version: 1, profiles: [prof('b1', 'Work')], leases: [], browsers: {} }, set7 = { 'browser.headed': false };
+    const w7 = seedC('nothing', { reg: reg7, settings: set7 });
+    const [s7, g7] = [w7.B('settings.json'), w7.B('browser-profiles.json')];
+    const t7 = new UserTodoManager({ dataDir: w7.dataDir, expirySweepMs: 0 });
+    const K7 = Kmod.create({ dataDir: w7.dataDir, homeDir: scratchHomeDir, install: false, log: quiet }); K7.list();
+    const r7 = boot(w7, { userTodos: t7, browserKeeper: () => K7 });
+    ok(r7?.status === 'ran' && r7?.report?.notice === 'none' && notes(t7).length === 0 && t7.forSession('browser').length === 0 && w7.B('settings.json') === s7 && w7.B('browser-profiles.json') === g7 && !fs.existsSync(w7.archive) && !fs.existsSync(w7.seedsFile),
+      'M7 a user who never ran CloakBrowser is told NOTHING: ran with nothing moved, no item, settings and registry byte-identical, no archive, no seeds.json', r7 && r7.report);
+    K7.shutdown(); t7.stop();
+    // M8 the plugin's seeds.json UNREADABLE ⇒ failed by name, nothing written: the record keeps its seed, the table left as it is
+    const w8 = seedC('seeds-torn', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/cloak/chrome' }, seeds: '{ not json' });
+    const r8 = boot(w8);
+    const g8 = w8.J('browser-profiles.json') || {};
+    ok(r8 && r8.status === 'failed' && /seeds\.json could not be read/.test(String(r8.error || '')) && fs.readFileSync(w8.seedsFile, 'utf8') === '{ not json' && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.fingerprintSeed === 17 && (g8.profiles || []).find((p) => p.id === 'bp-0000c0a1')?.provider === 'cloak' && (w8.J('settings.json') || {})['browser.cloak.executablePath'] === '/opt/cloak/chrome' && !(w8.ledger().applied || {})[ID],
+      'M8 an unreadable seeds.json: FAILED by name — the table untouched, every profile keeps its seed and its provider, settings untouched, not stamped', r8);
+    // M9 the install slot found a CloakBrowser install running at the update (the keeper's restart, before this) ⇒ said
+    const w9 = seedC('install', { reg: { version: 1, profiles: [], leases: [], browsers: {} } });
+    const t9 = new UserTodoManager({ dataDir: w9.dataDir, expirySweepMs: 0 });
+    const r9 = boot(w9, { userTodos: t9, browserKeeper: () => ({ retiredInstall: () => ({ kind: 'cloak', result: 'ended', pid: 4242, step: 'package' }) }) });
+    const d9 = String((notes(t9)[0] || {}).detail || '');
+    ok(r9?.status === 'ran' && /CloakBrowser install that was running at the update was stopped/.test(d9) && r9?.report?.install?.result === 'ended', 'M9 a CloakBrowser install the slot stopped at the restart is said in the notice', { d9, rep: r9 && r9.report && r9.report.install });
+    t9.stop();
+    // M12 the notice could not be filed ⇒ not stamped; the next boot (nothing left to move) files it FROM THE ARCHIVE — one item
+    const w12 = seedC('refile', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/cloak/chrome' } });
+    const r12 = boot(w12, { userTodos: { add() { throw new Error('the inbox refused it'); }, flush() { } } });
+    const t12 = new UserTodoManager({ dataDir: w12.dataDir, expirySweepMs: 0 });
+    const r12b = boot(w12, { userTodos: t12 });
+    const d12 = String((notes(t12)[0] || {}).detail || '');
+    ok(r12 && r12.status === 'failed' && fs.existsSync(w12.archive) && r12b?.status === 'ran' && r12b?.report?.earlierRuns === 1 && notes(t12).length === 1 && /^2 browser profile\(s\) ran CloakBrowser: Bank, Shop/m.test(d12) && /program path was carried/.test(d12),
+      'M12 a run whose notice failed is NOT stamped; the next boot finds nothing left to move and files the notice from the archive — once, with the first run\'s lines', { r12: r12 && r12.status, r12b: r12b && r12b.report, d12 });
+    t12.stop();
+    // the words: every key is an entry in zh AND ja
+    const { dictHasEntry } = await import('./i18n-check.mjs');
+    const dictsC = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
+    const WC = Object.values(MW);
+    ok(WC.length === 14 && WC.every((k) => dictsC.every((dt) => dictHasEntry(dt, k))), `the notice's ${WC.length} keys are entries in BOTH dicts (zh, ja)`, WC.filter((k) => !dictsC.every((dt) => dictHasEntry(dt, k))));
+    // NEGATIVE CONTROLS — patched copies of src/server/migrations.js: the legs above can go red
+    try {
+      const MC = mutantCopies('migrations-cloak', REPO_ROOT);
+      const srcC = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+      const keepRow = "    if (str(sdoc[exeRow]).trim()) { if (oldExe.trim() || dlOk) { rep.settings.program = 'kept'; rep.settings.kept[exeRow] = sdoc[exeRow]; } }\n    else if (oldExe.trim())";
+      const readSeeds = "      const T = readJson(seedsFile, `data/plugins-state/${CLOAK_PLUGIN_ID}/seeds.json`);";
+      ok(srcC.split(keepRow).length === 2 && srcC.split(readSeeds).length === 2, 'CONTROL scope: the lines the patched copies change are present once each');
+      const over = MC.load('src/server/migrations.js', srcC.replace(keepRow, '    if (oldExe.trim())'), 'overwrite');
+      const wc = seedC('mut-over', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/old/chrome', [EXE]: '/home/u/cloak/chrome' } });
+      over.create({ rootDir: wc.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
+      ok((wc.J('settings.json') || {})[EXE] === '/opt/old/chrome', 'NEGATIVE CONTROL: a copy without the never-overwrite rule writes over the plugin\'s own program row — M4 goes red');
+      const blind = MC.load('src/server/migrations.js', srcC.replace(readSeeds, "      const T = (() => { try { return readJson(seedsFile, 'seeds'); } catch { return { doc: {} }; } })();"), 'blind-seeds');
+      const wd = seedC('mut-seeds', { reg: world(), seeds: '{ not json' });
+      blind.create({ rootDir: wd.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
+      ok(fs.readFileSync(wd.seedsFile, 'utf8') !== '{ not json', 'NEGATIVE CONTROL: a copy that reads past an unreadable seeds.json writes over the plugin\'s table — M8 goes red');
+    } catch (e) { ok(false, `${ID}: the negative controls could not run on this tree (${(e && e.message) || e})`); }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

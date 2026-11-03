@@ -11627,6 +11627,21 @@ export default {
   "Its error: {error}": "エラー：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
+  // lane engine-spi-egress L3: the For-you notice of the one-shot 2026-11-cloak-to-plugin (src/server/migrations.js CLOAK_PLUGIN_WORDS)
+  "CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…": "CloakBrowser はプラグインとしてインストールするようになりました — ⚙ → プラグイン → プラグインをインストール…",
+  "{n} browser profile(s) ran CloakBrowser: {labels}. They start again once the plugin is installed and enabled; until then a start is refused by name.": "{n} 個のブラウザプロファイルが CloakBrowser で動いていました：{labels}。プラグインをインストールして有効にすると再び起動できます。それまでは起動が理由付きで拒否されます。",
+  "{n} of them were running and were closed at the update — their logins stay in the profile.": "そのうち {n} 個は更新時に動いていたため閉じました — ログイン情報はプロファイルに残っています。",
+  "Your CloakBrowser program path was carried into ⚙ → Plugins → CloakBrowser.": "CloakBrowser のプログラムのパスを ⚙ → プラグイン → CloakBrowser に引き継ぎました。",
+  "VibeSpace's earlier download at {path} is now the program named in ⚙ → Plugins → CloakBrowser — you may move it and change the row.": "VibeSpace が以前 {path} にダウンロードしたものが、⚙ → プラグイン → CloakBrowser で指定するプログラムになりました — 移動して行を変更してもかまいません。",
+  "The plugin needs CloakBrowser installed by you — see its README.": "このプラグインには、ご自身でインストールした CloakBrowser が必要です — README を参照してください。",
+  "Your plugin's own program path was kept; the old one is in {archive}.": "プラグイン自身のプログラムのパスはそのままにしました。以前のパスは {archive} にあります。",
+  "Your CloakBrowser site list was carried into ⚙ → Plugins → CloakBrowser.": "CloakBrowser のサイト一覧を ⚙ → プラグイン → CloakBrowser に引き継ぎました。",
+  "Your plugin's own site list was kept; the old one is in {archive}.": "プラグイン自身のサイト一覧はそのままにしました。以前の一覧は {archive} にあります。",
+  "A CloakBrowser install that was running at the update was stopped; what it downloaded stays under data/browser-tools.": "更新時に実行中だった CloakBrowser のインストールを停止しました。ダウンロード済みのものは data/browser-tools に残っています。",
+  "A CloakBrowser install was running at the update; its process could not be proven to be the one VibeSpace started, so it was left alone.": "更新時に CloakBrowser のインストールが実行中でしたが、そのプロセスが VibeSpace の起動したものだと確認できなかったため、そのままにしました。",
+  "{n} open proposal(s) to switch an agent's browser to CloakBrowser were closed — this version cannot switch a browser for the agent.": "エージェントのブラウザを CloakBrowser に切り替える未処理の提案 {n} 件を閉じました — このバージョンではエージェントのためにブラウザを切り替えられません。",
+  "Your CloakBrowser licence key is no longer used; it stays stored in data/integrations.json.": "CloakBrowser のライセンスキーは使われなくなりました。data/integrations.json に保存されたままです。",
+  "closed at the update: it ran CloakBrowser, which is now a plugin": "更新時に閉じました：CloakBrowser で動いていましたが、CloakBrowser は今はプラグインです",
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "セッションは停止しています — クリックで再開",
   // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)

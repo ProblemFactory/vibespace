@@ -41,6 +41,8 @@ export const noticeKeyTables = () => {
     { name: 'src/relay-token.js DROPPED_TEXT / DROPPED_DETAIL / RETIRED_TEXT / RETIRED_DETAIL', keys: [RT.DROPPED_TEXT, ...Object.values(RT.DROPPED_DETAIL), RT.RETIRED_TEXT, RT.RETIRED_DETAIL] },
     // lane engine-spi-egress L1b r2: the For-you words of a refused OWNER's program (and its why) are constants in src/browser-builds.js
     { name: 'src/browser-builds.js PROGRAM_NOTICE_WORDS / PROGRAM_WHY_WORDS', keys: [...Object.values(req('../src/browser-builds.js').PROGRAM_NOTICE_WORDS), ...Object.values(req('../src/browser-builds.js').PROGRAM_WHY_WORDS)] },
+    // lane engine-spi-egress L3: the one notice of the 2026-11-cloak-to-plugin migration (and a running record's words)
+    { name: 'src/server/migrations.js CLOAK_PLUGIN_WORDS', keys: Object.values(req('../src/server/migrations.js').CLOAK_PLUGIN_WORDS) },
   ];
 };
 

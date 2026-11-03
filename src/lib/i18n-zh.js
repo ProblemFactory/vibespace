@@ -11628,6 +11628,21 @@ export default {
   "Its error: {error}": "它的错误：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
+  // lane engine-spi-egress L3: the For-you notice of the one-shot 2026-11-cloak-to-plugin (src/server/migrations.js CLOAK_PLUGIN_WORDS)
+  "CloakBrowser now installs as a plugin — ⚙ → Plugins → Install plugin…": "CloakBrowser 现在以插件形式安装 — ⚙ → 插件 → 安装插件…",
+  "{n} browser profile(s) ran CloakBrowser: {labels}. They start again once the plugin is installed and enabled; until then a start is refused by name.": "{n} 个浏览器配置用过 CloakBrowser：{labels}。安装并启用这个插件后它们就能再次启动；在那之前，启动会被拒绝并说明原因。",
+  "{n} of them were running and were closed at the update — their logins stay in the profile.": "其中 {n} 个在更新时正在运行，已被关闭——它们的登录仍保留在配置里。",
+  "Your CloakBrowser program path was carried into ⚙ → Plugins → CloakBrowser.": "你的 CloakBrowser 程序路径已转入 ⚙ → 插件 → CloakBrowser。",
+  "VibeSpace's earlier download at {path} is now the program named in ⚙ → Plugins → CloakBrowser — you may move it and change the row.": "VibeSpace 之前下载到 {path} 的程序，现在就是 ⚙ → 插件 → CloakBrowser 里指定的程序——你可以移动它并修改这一行。",
+  "The plugin needs CloakBrowser installed by you — see its README.": "这个插件需要你自己安装 CloakBrowser——见它的 README。",
+  "Your plugin's own program path was kept; the old one is in {archive}.": "保留了插件自己的程序路径；旧的路径在 {archive} 里。",
+  "Your CloakBrowser site list was carried into ⚙ → Plugins → CloakBrowser.": "你的 CloakBrowser 网站列表已转入 ⚙ → 插件 → CloakBrowser。",
+  "Your plugin's own site list was kept; the old one is in {archive}.": "保留了插件自己的网站列表；旧的列表在 {archive} 里。",
+  "A CloakBrowser install that was running at the update was stopped; what it downloaded stays under data/browser-tools.": "更新时正在进行的 CloakBrowser 安装已被停止；它已下载的内容仍留在 data/browser-tools 下。",
+  "A CloakBrowser install was running at the update; its process could not be proven to be the one VibeSpace started, so it was left alone.": "更新时有一个 CloakBrowser 安装正在进行；无法证明它的进程就是 VibeSpace 启动的那个，所以没有动它。",
+  "{n} open proposal(s) to switch an agent's browser to CloakBrowser were closed — this version cannot switch a browser for the agent.": "{n} 个把 agent 的浏览器切换到 CloakBrowser 的待处理提议已关闭——这个版本无法替 agent 切换浏览器。",
+  "Your CloakBrowser licence key is no longer used; it stays stored in data/integrations.json.": "你的 CloakBrowser 许可证密钥不再使用；它仍保存在 data/integrations.json 里。",
+  "closed at the update: it ran CloakBrowser, which is now a plugin": "在更新时关闭：它运行的是 CloakBrowser，而 CloakBrowser 现在是一个插件",
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "会话已停止 — 点击恢复",
   // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)
