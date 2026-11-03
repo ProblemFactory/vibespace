@@ -1294,16 +1294,16 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
   const HOME = '/home/user';
   const F = (req, cwd, names) => { const p = V.planOf(req); if (!p.ok) throw new Error('plan ' + p.code); return V.cardFactsOf(p, V.shapeOf(p), cwd, { home: HOME, ...names }); };
 
-  // the owner's unifi-api.sh shape: an agent-writable program, two env secrets, NO host it declares ⇒ hosts unknown / tool-names-none, «always» withheld / destination-unknown, paths home-relative
-  const v1 = F({ argv: ['./office-net/unifi-api.sh', 'PUT', '/proxy/x', '/tmp/w.json'], env: [['UNIFI_USER', 'vault://secrets/unifi-account/username'], ['UNIFI_PASS', 'vault://secrets/unifi-account/password']], resolved: HOME + '/workspace/ops/office-net/unifi-api.sh', programWritable: true },
-    HOME + '/workspace/ops', { who: '设备管理', cmd: './office-net/unifi-api.sh PUT /proxy/x /tmp/w.json', entries: { 'secrets:unifi-account#username': 'UniFi 账号 · 用户名', 'secrets:unifi-account#password': 'UniFi 账号 · 密码' } });
-  ok(v1.v === 2 && v1.cmd === './office-net/unifi-api.sh PUT /proxy/x /tmp/w.json' && v1.cmdCut === undefined && v1.reason === null && eq(v1.env, []) && v1.secrets[0].provenance === null && v1.secrets[0].sendsTo === null && v1.who === '设备管理' && v1.tool.name === 'unifi-api.sh' && v1.tool.path === '~/workspace/ops/office-net/unifi-api.sh' && v1.tool.writable === true && v1.folder === '~/workspace/ops'
+  // the owner's ops-run shape (router-api.sh — neutral): an agent-writable program, two env secrets, NO host it declares ⇒ hosts unknown / tool-names-none, «always» withheld / destination-unknown, paths home-relative
+  const v1 = F({ argv: ['./acme-net/router-api.sh', 'PUT', '/proxy/x', '/tmp/w.json'], env: [['ROUTER_USER', 'vault://secrets/router-account/username'], ['ROUTER_PASS', 'vault://secrets/router-account/password']], resolved: HOME + '/workspace/ops/acme-net/router-api.sh', programWritable: true },
+    HOME + '/workspace/ops', { who: '设备管理', cmd: './acme-net/router-api.sh PUT /proxy/x /tmp/w.json', entries: { 'secrets:router-account#username': 'Router 账号 · 用户名', 'secrets:router-account#password': 'Router 账号 · 密码' } });
+  ok(v1.v === 2 && v1.cmd === './acme-net/router-api.sh PUT /proxy/x /tmp/w.json' && v1.cmdCut === undefined && v1.reason === null && eq(v1.env, []) && v1.secrets[0].provenance === null && v1.secrets[0].sendsTo === null && v1.who === '设备管理' && v1.tool.name === 'router-api.sh' && v1.tool.path === '~/workspace/ops/acme-net/router-api.sh' && v1.tool.writable === true && v1.folder === '~/workspace/ops'
     && v1.shape === 'tool' && v1.masking === 'common-encodings'
     && v1.hosts.known === false && v1.hosts.list.length === 0 && v1.hosts.why === 'tool-names-none'
     && v1.always.offered === false && v1.always.why === 'destination-unknown' && v1.always.directive === null
-    && v1.secrets.length === 2 && v1.secrets[0].name === 'UniFi 账号 · 用户名' && v1.secrets[0].entry === 'unifi-account' && v1.secrets[0].ref === 'vault://secrets/unifi-account/username' && eq(v1.secrets[0].as, { kind: 'env', name: 'UNIFI_USER' }) && eq(v1.secrets[1].as, { kind: 'env', name: 'UNIFI_PASS' })
+    && v1.secrets.length === 2 && v1.secrets[0].name === 'Router 账号 · 用户名' && v1.secrets[0].entry === 'router-account' && v1.secrets[0].ref === 'vault://secrets/router-account/username' && eq(v1.secrets[0].as, { kind: 'env', name: 'ROUTER_USER' }) && eq(v1.secrets[1].as, { kind: 'env', name: 'ROUTER_PASS' })
     && v1.templates.length === 0,
-    'cardFactsOf (owner\'s unifi shape): home-relative tool.path/folder, writable program, two env secrets with their { kind, name }, hosts tool-names-none, «always» destination-unknown, masking common-encodings', v1);
+    'cardFactsOf (owner\'s ops-run shape): home-relative tool.path/folder, writable program, two env secrets with their { kind, name }, hosts tool-names-none, «always» destination-unknown, masking common-encodings', v1);
 
   // a known tool naming a host (psql -h), one env secret ⇒ hosts known, «always» offered, no template
   const v2 = F({ argv: ['psql', '-h', 'db.example.com', '-U', 'svc', '-c', 'select 1'], env: [['PGPASSWORD', 'vault://secrets/prod-db/password']], resolved: '/usr/bin/psql', programWritable: false },

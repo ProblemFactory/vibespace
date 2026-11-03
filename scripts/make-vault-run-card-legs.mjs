@@ -63,26 +63,26 @@ export function legsOf(root = HERE, { commit = null } = {}) {
     if (whyAgain) facts.whyAgain = whyAgain;
     return facts;
   };
-  const UNIFI = ['./office-net/unifi-api.sh', 'PUT', '/proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/unifi-work/wan2-primary.json'];
-  const UENV = [['UNIFI_USER', 'vault://secrets/unifi-account/username'], ['UNIFI_PASS', 'vault://secrets/unifi-account/password']];
-  const UNAMES = { 'secrets:unifi-account#username': 'UniFi 账号 · 用户名', 'secrets:unifi-account#password': 'UniFi 账号 · 密码' };
-  const UINFO = [{ id: 'secrets:unifi-account#username', own: true, prov: 'stored', open: true }, { id: 'secrets:unifi-account#password', own: true, prov: 'stored', open: true }];
-  const UAWAY = [{ id: 'secrets:unifi-account#username', ref: 'vault://secrets/unifi-account/username', forHost: null, unknown: true, keep: false }, { id: 'secrets:unifi-account#password', ref: 'vault://secrets/unifi-account/password', forHost: null, unknown: true, keep: false }];
-  const unifi = (argv = UNIFI, env = UENV, resolved = `${CWD}/office-net/unifi-api.sh`) => ({ argv, env, resolved, programWritable: true });
+  const RUN_ARGV = ['./acme-net/router-api.sh', 'PUT', '/api/v1/router/sites/default/configs/networks/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/router-work/wan2-primary.json'];
+  const UENV = [['ROUTER_USER', 'vault://secrets/router-account/username'], ['ROUTER_PASS', 'vault://secrets/router-account/password']];
+  const UNAMES = { 'secrets:router-account#username': 'Router 账号 · 用户名', 'secrets:router-account#password': 'Router 账号 · 密码' };
+  const UINFO = [{ id: 'secrets:router-account#username', own: true, prov: 'stored', open: true }, { id: 'secrets:router-account#password', own: true, prov: 'stored', open: true }];
+  const UAWAY = [{ id: 'secrets:router-account#username', ref: 'vault://secrets/router-account/username', forHost: null, unknown: true, keep: false }, { id: 'secrets:router-account#password', ref: 'vault://secrets/router-account/password', forHost: null, unknown: true, keep: false }];
+  const opsRun = (argv = RUN_ARGV, env = UENV, resolved = `${CWD}/acme-net/router-api.sh`) => ({ argv, env, resolved, programWritable: true });
   const WHO = 'ops watch';
   const uNames = { who: WHO, entries: UNAMES, refsInfo: UINFO, away: UAWAY };
-  // a command of EXACTLY n characters as the door quotes it (cmdText): UNIFI + --note + one quoted arg of a' pairs (5 units each) and b's
+  // a command of EXACTLY n characters as the door quotes it (cmdText): RUN_ARGV + --note + one quoted arg of a' pairs (5 units each) and b's
   const longArgv = (n) => {
-    const head = DOOR.cmdText([...UNIFI, '--note']).length + 1 + 2;
+    const head = DOOR.cmdText([...RUN_ARGV, '--note']).length + 1 + 2;
     const k = Math.floor((n - head) / 5), r = n - head - 5 * k;
-    const argv = [...UNIFI, '--note', "a'".repeat(k) + 'b'.repeat(r)];
+    const argv = [...RUN_ARGV, '--note', "a'".repeat(k) + 'b'.repeat(r)];
     if (DOOR.cmdText(argv).length !== n) throw new Error(`longArgv(${n}) = ${DOOR.cmdText(argv).length}`);
     return argv;
   };
   const variants = [];
   const add = (name, facts, why) => variants.push({ name, why, facts });
-  // the r7 legs: the owner's unifi run (hosts unknown — 发往 decides), a known tool naming a host (Always offered), a config read
-  add('ops', factsOf(unifi(), uNames), 'r7 ⑧: the owner\'s run — an agent-writable program, two env secrets of ONE entry, no host it declares');
+  // the r7 legs: the owner's ops run (hosts unknown — 发往 decides), a known tool naming a host (Always offered), a config read
+  add('ops', factsOf(opsRun(), uNames), 'r7 ⑧: the owner\'s run — an agent-writable program, two env secrets of ONE entry, no host it declares');
   add('known-always', factsOf({ argv: ['psql', '-h', 'db.example.com', '-U', 'svc', '-c', 'select 1'], env: [['PGPASSWORD', 'vault://secrets/prod-db/password']], resolved: '/usr/bin/psql', programWritable: false },
     { who: WHO, entries: { 'secrets:prod-db#password': '生产数据库 · 密码' }, refsInfo: [{ id: 'secrets:prod-db#password', own: false, open: true }], away: [], notOwn: false }), 'r7 ⑧: «Always» offered — no hint, nothing marked');
   add('config-reads', factsOf({ argv: ['curl', '-sS', '-K', '$VAULT_FILE{B}'], file: [['B', '@b.cfg']], templates: { 'b.cfg': 'config ./more.cfg\nheader = "X-Auth: $VAULT{secrets/api-token/token}"\n' }, resolved: '/usr/bin/curl', programWritable: false },
@@ -93,22 +93,22 @@ export function legsOf(root = HERE, { commit = null } = {}) {
   add('stress', factsOf({ argv: ['./bin/curl', '-s', 'https://a.example.com:443/v1/' + 'a1b2c3d4e5f6'.repeat(8), 'https://b.example.com/v1/' + 'a1b2c3d4e5f6'.repeat(8), 'https://10.0.0.7:8443/v1/items'], env: sEnv, resolved: `${CWD}/bin/curl`, programWritable: true },
     { who: WHO, entries: Object.fromEntries(SN.map((n, k) => [`secrets:stress-${k}#secret`, `${n} · 密码`])), refsInfo: SN.map((_, k) => ({ id: `secrets:stress-${k}#secret`, own: false, open: true })), away: [] }), 'r7 ⑧: the stress shape — wrapped inside the card, «程序» first');
   // r9 ⑨: the clip notes — a whole fold (2 973) and one the store cuts at 4 096 (5 037)
-  add('clip-2973', factsOf(unifi(longArgv(2973)), uNames), 'r9 ⑨: a 2 973-character command — cmd its first 2 000, cmdCut, the WHOLE in cmdFull');
-  add('clip-5037', factsOf(unifi(longArgv(5037)), uNames), 'r9 ⑨: a 5 037-character command — the store keeps 4 096 of the fold and names cmdFull in `cut`');
+  add('clip-2973', factsOf(opsRun(longArgv(2973)), uNames), 'r9 ⑨: a 2 973-character command — cmd its first 2 000, cmdCut, the WHOLE in cmdFull');
+  add('clip-5037', factsOf(opsRun(longArgv(5037)), uNames), 'r9 ⑨: a 5 037-character command — the store keeps 4 096 of the fold and names cmdFull in `cut`');
   // r11: THE FOLDS (r25 clipFold) + whyAgain — a 2 100-character plain env value, a secret named in 2 100 characters; the rerun
   // differs from the command let through late in its ARGUMENT ORDER (the door's whyAgainOf over the two exact parts)
   const NOTE = ('wan2-primary failover window ' + '0123456789abcdef'.repeat(140)).slice(0, 2100);
   const foldEnv = [...UENV, ['RUN_NOTE', NOTE]];
-  const LONGNAME = ('UniFi 账号 · 用户名 ' + '（运维控制器本地管理员）'.repeat(200)).slice(0, 2100);
-  add('fold', factsOf(unifi([UNIFI[0], UNIFI[2], UNIFI[1], UNIFI[3]], foldEnv), { ...uNames, entries: { ...UNAMES, 'secrets:unifi-account#username': LONGNAME } }, { prev: { req: unifi(UNIFI, foldEnv) } }),
+  const LONGNAME = ('Router 账号 · 用户名 ' + '（运维控制器本地管理员）'.repeat(200)).slice(0, 2100);
+  add('fold', factsOf(opsRun([RUN_ARGV[0], RUN_ARGV[2], RUN_ARGV[1], RUN_ARGV[3]], foldEnv), { ...uNames, entries: { ...UNAMES, 'secrets:router-account#username': LONGNAME } }, { prev: { req: opsRun(RUN_ARGV, foldEnv) } }),
     'r11: a 2 100-character env value (valueCut + valueFull), a 2 100-character secret name (nameCut + nameFull), whyAgain arg-order');
   // r11: whyAgain — each dimension the door can name, through its own whyAgainOf (the same run but the ONE difference)
   const tagEnv = (v) => [...UENV, ['RUN_TAG', v]];
-  add('again-env', factsOf(unifi(UNIFI, tagEnv('r7-2')), uNames, { prev: { req: unifi(UNIFI, tagEnv('r7-1')) } }), 'r11: whyAgain env (RUN_TAG changed)');
-  add('again-folder', factsOf(unifi(), uNames, { cwd: `${CWD}/sub`, prev: { req: unifi(), cwd: CWD } }), 'r11: whyAgain folder');
-  add('again-secret-set', factsOf(unifi(UNIFI, UENV.slice(0, 1)), uNames, { prev: { req: unifi() } }), 'r11: whyAgain secret-set');
-  add('again-arg-space', factsOf(unifi([...UNIFI.slice(0, 3), '/tmp/unifi-work/wan2  primary.json']), uNames, { prev: { req: unifi([...UNIFI.slice(0, 3), '/tmp/unifi-work/wan2 primary.json']) } }), 'r11: whyAgain arg-space');
-  add('again-args', factsOf(unifi([...UNIFI.slice(0, 3), '/tmp/unifi-work/wan1-primary.json']), uNames, { prev: { req: unifi() } }), 'r11: whyAgain args');
+  add('again-env', factsOf(opsRun(RUN_ARGV, tagEnv('r7-2')), uNames, { prev: { req: opsRun(RUN_ARGV, tagEnv('r7-1')) } }), 'r11: whyAgain env (RUN_TAG changed)');
+  add('again-folder', factsOf(opsRun(), uNames, { cwd: `${CWD}/sub`, prev: { req: opsRun(), cwd: CWD } }), 'r11: whyAgain folder');
+  add('again-secret-set', factsOf(opsRun(RUN_ARGV, UENV.slice(0, 1)), uNames, { prev: { req: opsRun() } }), 'r11: whyAgain secret-set');
+  add('again-arg-space', factsOf(opsRun([...RUN_ARGV.slice(0, 3), '/tmp/router-work/wan2  primary.json']), uNames, { prev: { req: opsRun([...RUN_ARGV.slice(0, 3), '/tmp/router-work/wan2 primary.json']) } }), 'r11: whyAgain arg-space');
+  add('again-args', factsOf(opsRun([...RUN_ARGV.slice(0, 3), '/tmp/router-work/wan1-primary.json']), uNames, { prev: { req: opsRun() } }), 'r11: whyAgain args');
   // a config directive past the bound (always.directiveCut + directiveFull)
   const DIR = 'config ./' + 'd'.repeat(2100) + '.cfg';
   add('directive-long', factsOf({ argv: ['curl', '-sS', '-K', '$VAULT_FILE{B}'], file: [['B', '@b.cfg']], templates: { 'b.cfg': `${DIR}\nheader = "X-Auth: $VAULT{secrets/api-token/token}"\n` }, resolved: '/usr/bin/curl', programWritable: false },
@@ -119,16 +119,16 @@ export function legsOf(root = HERE, { commit = null } = {}) {
   const DEEP = `${CWD}/` + Array.from({ length: 120 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`).join('/');
   const LONGCWD = DEEP.slice(0, 2207 - '/evil-tail'.length).replace(/\/$/, 'x') + '/evil-tail';
   if (LONGCWD.length !== 2207) throw new Error(`LONGCWD ${LONGCWD.length}`);
-  add('folder-long', factsOf(unifi(['./run.sh', 'PUT'], UENV, `${LONGCWD}/run.sh`), uNames, { cwd: LONGCWD }),
+  add('folder-long', factsOf(opsRun(['./run.sh', 'PUT'], UENV, `${LONGCWD}/run.sh`), uNames, { cwd: LONGCWD }),
     `r12: a ${LONGCWD.length}-character working folder and its ${LONGCWD.length + '/run.sh'.length}-character program at the tail — folderCut + folderFull, tool.pathCut + pathFull`);
-  const LONGREF = ('vault://secrets/unifi-account/' + 'p'.repeat(2100)).slice(0, 2100);
-  add('away-ref-long', factsOf(unifi(), { ...uNames, away: [{ ...UAWAY[0], ref: LONGREF }] }), 'r12: a reason line whose reference is 2 100 characters — reason.away[].refCut + refFull');
+  const LONGREF = ('vault://secrets/router-account/' + 'p'.repeat(2100)).slice(0, 2100);
+  add('away-ref-long', factsOf(opsRun(), { ...uNames, away: [{ ...UAWAY[0], ref: LONGREF }] }), 'r12: a reason line whose reference is 2 100 characters — reason.away[].refCut + refFull');
   // r13 (the r12 acceptance, corr-probe-size2.cjs): THE SIZE BOUND — a run in a 4 000-character folder (its program inside it), a
   // 4 000-character argument and two 2 100-character env values: r27 folds the path ONCE (its tail past the folder), so the card
   // stays under the For-you store's 24 000-character whole bound (folding the whole path again made 26 909 — dropped to the prose)
   const BIGCWD = (`${CWD}/` + Array.from({ length: 400 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`).join('/')).slice(0, 4000 - '/tail'.length) + '/tail';
   if (BIGCWD.length !== 4000) throw new Error(`BIGCWD ${BIGCWD.length}`);
-  add('size-bound', factsOf(unifi(['./run.sh', 'PUT', 'x'.repeat(4000)], [UENV[0], ['NOTE', 'n'.repeat(2100)], ['NOTE2', 'm'.repeat(2100)]], `${BIGCWD}/run.sh`), uNames, { cwd: BIGCWD }),
+  add('size-bound', factsOf(opsRun(['./run.sh', 'PUT', 'x'.repeat(4000)], [UENV[0], ['NOTE', 'n'.repeat(2100)], ['NOTE2', 'm'.repeat(2100)]], `${BIGCWD}/run.sh`), uNames, { cwd: BIGCWD }),
     'r13: the size bound — a 4 000-character folder (program inside: pathTail), a 4 000-character argument, two 2 100-character env values');
   const legs = {
     v: 2,

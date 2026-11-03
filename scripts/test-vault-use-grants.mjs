@@ -83,7 +83,7 @@ const NOW = 1_800_000_000_000;
 console.log('① THE ROW — the door, its settings, the write\'s refusals by name');
 {
   ok(GM.DOORS.includes('vault-use') && GM.ENTRY_FIELDS['vault-use'].hosts === 'hosts' && GM.ENTRY_FIELDS['vault-use'].until === 'time', 'the door is the model\'s (DOORS) with its OWN settings: hosts + until');
-  ok(JSON.stringify(GM.hostListOf(['UniFi.LAN.', '192.168.1.1', '[fe80::1]', '@entry', 'unifi.lan'])) === JSON.stringify(['unifi.lan', '192.168.1.1', 'fe80::1', '@entry']), 'hosts: lower-cased, a trailing dot / IPv6 brackets dropped, deduplicated, @entry kept', GM.hostListOf(['UniFi.LAN.', '192.168.1.1', '[fe80::1]', '@entry', 'unifi.lan']));
+  ok(JSON.stringify(GM.hostListOf(['Router.LAN.', '192.168.1.1', '[fe80::1]', '@entry', 'router.lan'])) === JSON.stringify(['router.lan', '192.168.1.1', 'fe80::1', '@entry']), 'hosts: lower-cased, a trailing dot / IPv6 brackets dropped, deduplicated, @entry kept', GM.hostListOf(['Router.LAN.', '192.168.1.1', '[fe80::1]', '@entry', 'router.lan']));
   const bad = [['*'], ['*.com'], ['*.x'], ['any'], [''], [], 'example.com', ['a b'], ['http://x.com'], new Array(17).fill(0).map((_, i) => `h${i}.lan`)];
   ok(bad.every((h) => GM.hostListOf(h) === null || (Array.isArray(h) && h[0] === 'any' && GM.hostListOf(h) !== null)), 'never «any host»: *, *.com (a TLD), *.x (one label), an empty list, a bare string, a URL, a space, 17 hosts ⇒ not a host list ("any" is a host NAME, not «any host»)', bad.map((h) => GM.hostListOf(h)));
   // round 2 MAJOR: every shape the CARD can name is a valid grant host — host:port, ip:port, an IPv6 literal with a port, a *.domain wildcard
@@ -128,7 +128,7 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
   const ip = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', hosts: ['168.1.1'] }], except: [] };
   ok(!U.useVerdict([ip], { conversationKeys: ['cid-1'] }, run(['192.168.1.1'])).ok && U.hostCovers('example.com', 'a.b.example.com') && !U.hostCovers('example.com', 'badexample.com') && !U.hostCovers('1.1', '192.168.1.1'), 'an address covers only itself; a name never covers a look-alike (badexample.com)');
   const ent = { door: 'vault-use', resource: RES, to: [{ kind: 'conversation', key: 'cid-1', hosts: ['@entry'] }], except: [] };
-  ok(U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: ['unifi.lan'] })).ok && !U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: [] })).ok, '@entry = the hosts the entry was stored for, read at use time (none ⇒ it covers nothing)');
+  ok(U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['router.lan'], { entryHosts: ['router.lan'] })).ok && !U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['router.lan'], { entryHosts: [] })).ok, '@entry = the hosts the entry was stored for, read at use time (none ⇒ it covers nothing)');
   const none = U.useVerdict([], { conversationKeys: ['cid-1'] }, run(['192.168.1.1']));
   ok(!none.ok && none.code === 'not_granted' && !U.holds(none), 'no row ⇒ not_granted');
   // lane vault-standing-request r4 (re-derived twice — r3b pinned «another end REPLACES the member», the round before it «hosts ∪,
@@ -188,8 +188,8 @@ fs.mkdirSync(BIN, { recursive: true });
 for (const t of ['curl', 'aws', 'wget', 'gcloud', 'ssh', 'scp', 'python3', 'sh', 'mytool', 'make']) fs.writeFileSync(path.join(BIN, t), `#!/usr/bin/env node\nprocess.stdout.write('${t} got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });   // round 3: `aws` for the tool-scoped-wildcard leg (㉑); round 9: ssh/scp (the strdelim -o door leg ㉝) and the shell / interpreter / unknown / make shapes (the paste-grant shape.always leg ㉜)
 fs.chmodSync(BIN, 0o555);   // read-only: the door's programWritable is false (an «Always» / a grant is possible)
 process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
-const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(6).toString('hex')].join('-');
-const LABEL = 'UniFi UCG-Fiber admin (192.168.1.1)';
+const VALUE = ['router', 'admin', 'value', crypto.randomBytes(6).toString('hex')].join('-');
+const LABEL = 'Router admin (192.168.1.1)';
 let worldN = 0;
 async function world({ instance = 'cluster', groups = new Map(), setting = {}, doorMod = DOOR, ugMod = UG, engineMod = VE, judge = null, judgeOn = () => false, now = () => Date.now() } = {}) {
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
@@ -348,7 +348,7 @@ console.log('⑥ THE CARRY — the old «always» rows become members at the fir
   const key = (hosts) => VR.shapeKeyOf({ tool: '/usr/bin/curl', sub: [], flags: ['-s'], args: ['url'], hosts, entries: [e.ref], injection: ['env:T'], env: [], templates: [], on: null, script: null, keyed: [] });
   const t = Date.now();
   const always = [
-    { conv: 'cid-asker-1', key: key(['api.unifi.lan']), until: null, entries: [e.id], at: t, by: 'user' },
+    { conv: 'cid-asker-1', key: key(['api.router.lan']), until: null, entries: [e.id], at: t, by: 'user' },
     { conv: 'cid-asker-1', key: key([]), until: null, entries: [e.id], at: t, by: 'user' },
     { conv: 'cid-old-9', key: key(['old.lan']), until: t - 1000, entries: [e.id], at: t, by: 'user' },
   ].sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key));
@@ -358,7 +358,7 @@ console.log('⑥ THE CARRY — the old «always» rows become members at the fir
   ok(!ROW(w, e), 'before the first read: no member (the marked store can be judged only unlocked, by the door)');
   const f = d2.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' });
   const m = ROW(w, e) && ROW(w, e).to.find((x) => x.key === 'cid-asker-1');
-  ok(f.open === true && m && m.hosts.join() === 'api.unifi.lan' && !('until' in m), 'the first verified read CARRIES the «always» row: this conversation × the shape key\'s host, no end — the switch stays', { m, open: f.open });
+  ok(f.open === true && m && m.hosts.join() === 'api.router.lan' && !('until' in m), 'the first verified read CARRIES the «always» row: this conversation × the shape key\'s host, no end — the switch stays', { m, open: f.open });
   ok(grantAudit(w).some((l) => l.door === 'vault-use' && l.by === 'migration'), 'through the ONE writer, by: migration');
   const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
   ok(st.always.length === 0 && st.runnable.includes(e.id), 'the store keeps NO «always» row after the carry (re-marked) — ONE mechanism');
@@ -375,7 +375,7 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
 {
   const w = await world();
   const c = w.caller();
-  const rq = w.paste.request({ caller: c, words: 'the UniFi admin password', purpose: 'log in to the UniFi gateway to read the WAN status', kind: 'password', name: LABEL, hosts: '192.168.1.1' });
+  const rq = w.paste.request({ caller: c, words: 'the router admin password', purpose: 'log in to the router to read the WAN status', kind: 'password', name: LABEL, hosts: '192.168.1.1' });
   const item = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === P.ACTION_TYPE && i.action.requestId === rq.requestId);
   ok(rq.ok && rq.target.hosts.join() === '192.168.1.1' && item && item.action.hosts === '192.168.1.1' && item.action.grant === true, 'the request names its hosts (the item\'s action: a scalar, as every action field)', item && item.action);
   // round 5 (MAJOR item 2): the paste opens an 8-HOUR run grant to the asker (requestGrantsRequester) — NOT a standing
@@ -430,7 +430,7 @@ console.log('⑧ THE SEARCH — what was stored is found');
   const row = L.rows.find((r) => r.entry === 'secret:00c0ffee00');
   ok(asked.ok && row && row.origin === 'request' && row.askedBy.name === 'Home network' && row.hosts.join() === '192.168.1.1' && VI.provenanceOf(row) === 'request' && VI.provenanceFilterOf(row) === 'me' && VI.purposeOf(row) === 'keys', 'a request-made entry: under its kind (Passwords & keys), origin «filled by you · asked for by Home network» (the 我自己 filter)', row && { origin: row.origin, askedBy: row.askedBy, hosts: row.hosts });
   const hit = (q) => VI.viewOf(L.rows, { q, purpose: 'all' }).rows.filter((r) => r.entry === 'secret:00c0ffee00').length === 1;
-  ok(['Unifi', 'UNIFI', 'ucg-fiber', '192.168.1.1', 'home network', 'secret:00c0', 'password', 'Passwords & keys', 'asked for by'].every(hit), 'the owner\'s «Unifi» and every searched field: case-insensitive label, the host, the requesting conversation, the id\'s prefix, the kind, the purpose, the origin', ['Unifi', 'UNIFI', 'ucg-fiber', '192.168.1.1', 'home network', 'secret:00c0', 'password', 'Passwords & keys', 'asked for by'].filter((q) => !hit(q)));
+  ok(['Router', 'ROUTER', 'outer adm', '192.168.1.1', 'home network', 'secret:00c0', 'password', 'Passwords & keys', 'asked for by'].every(hit), 'the owner\'s word («Router», the name of his entry — neutral here) and every searched field: case-insensitive label, the host, the requesting conversation, the id\'s prefix, the kind, the purpose, the origin', ['Router', 'ROUTER', 'outer adm', '192.168.1.1', 'home network', 'secret:00c0', 'password', 'Passwords & keys', 'asked for by'].filter((q) => !hit(q)));
   ok(!hit('nas') && VI.SEARCHED_FIELDS.length === 6 && VI.PROVENANCES.some((p) => p.id === 'request' && /\{who\}/.test(p.label)), 'a word it does not hold finds nothing; SEARCHED_FIELDS names what the «no match» line says');
   const use = row && row.run && row.run.use;
   ok(use && Array.isArray(use.to) && use.entryHosts.join() === '192.168.1.1', 'the row carries its «Who may use it» facts (members, the entry\'s own hosts) for the window', use);

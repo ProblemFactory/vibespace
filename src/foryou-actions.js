@@ -779,8 +779,8 @@ function runCardOf(item, { t = fmt } = {}) {
     if (kind === 'env') return [{ mono: name }];
     return own(RUN_AS, kind) ? [{ text: t(RUN_AS[kind], { name }) }] : kind ? [{ code: kind }] : [];
   };
-  // the secrets by their ENTRY (`entry`, the door's grouping key): «UniFi 账号 · 用户名» and «UniFi 账号 · 密码» are ONE entry
-  // «UniFi 账号 → UNIFI_USER、UNIFI_PASS» — its name the head the Vault window's «entry · field» names share (the full names
+  // the secrets by their ENTRY (`entry`, the door's grouping key): «Router 账号 · 用户名» and «Router 账号 · 密码» are ONE entry
+  // «Router 账号 → ROUTER_USER、ROUTER_PASS» — its name the head the Vault window's «entry · field» names share (the full names
   // and references: the fold)
   const secrets = (Array.isArray(f.secrets) ? f.secrets : []).filter((s) => s && typeof s === 'object');
   const headOf = (n) => { const cut = n.indexOf(' · '); return cut > 0 ? n.slice(0, cut) : n; };

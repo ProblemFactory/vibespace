@@ -138,11 +138,11 @@ const VGRANT = 'const { spawnSync } = require("child_process"); const B = ' + JS
   + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "request", ref, "--for", "upload the nightly backup to the bucket"], { env: process.env, encoding: "utf8", timeout: 30000 });'
   + ' console.log("vibespace-vault request: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
 // round 7: the owner's own run (its argv and a tag that makes each shape new: scripts the suite writes) with the entry the agent
-// may use, as UNIFI_USER / UNIFI_PASS — a card the door files with the facts the stand-in hands it
+// may use, as ROUTER_USER / ROUTER_PASS — a card the door files with the facts the stand-in hands it
 const VFACTS = 'const { spawnSync } = require("child_process"); const fs = require("fs"); const B = ' + JSON.stringify(BIN) + '; const spec = JSON.parse(fs.readFileSync(' + JSON.stringify(DIR + '/r7-run.json') + ', "utf8"));'
   + ' const l = spawnSync(process.execPath, [B + "/vibespace-vault", "list"], { env: process.env, encoding: "utf8" }); const ref = String(l.stdout).split(String.fromCharCode(10)).join(" ").split(" ").find((w) => w.startsWith("vault://"));'
   + ' if (!ref) { console.log("vibespace-vault list: " + l.stdout + l.stderr); process.exit(3); }'
-  + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "run", "--env", "UNIFI_USER=" + ref, "--env", "UNIFI_PASS=" + ref, "--env", "RUN_TAG=" + spec.tag, "--", ...spec.argv], { env: process.env, encoding: "utf8", timeout: 90000 });'
+  + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "run", "--env", "ROUTER_USER=" + ref, "--env", "ROUTER_PASS=" + ref, "--env", "RUN_TAG=" + spec.tag, "--", ...spec.argv], { env: process.env, encoding: "utf8", timeout: 90000 });'
   + ' console.log("vibespace-vault run: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
 const VERBS = {
   watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
@@ -152,7 +152,7 @@ const VERBS = {
   // round 3: an access request (a POINTER to the Reach dialog), a wake ask on one chat, the vault's paste request and its run
   request: [['vibespace-channels', ['request', 'fake-poll/fake-poll-announce', 'to read the incident thread before I open an incident']]],
   watchpoll: [watch(${JSON.stringify(POLL)})], watchpush: [watch(${JSON.stringify(PUSH)})],
-  vreq: [['vibespace-vault', ['request', 'UniFi UCG-Fiber local admin', '--purpose', 'log in to the controller to read the WAN state', '--kind', 'password', '--name', 'UniFi UCG-Fiber local admin (agent-ops)']]],
+  vreq: [['vibespace-vault', ['request', 'Router local admin', '--purpose', 'log in to the controller to read the WAN state', '--kind', 'password', '--name', 'Router local admin (agent-ops)']]],
   vrun: [['node', ['-e', VRUN]]],
   vrunall: [['node', ['-e', VRUN.replace('process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"', '"curl", "-s", "https://api.example.com/v1/items"')]]],   // round 3: a known tool naming a host — «Always» offered
   vgrant: [['node', ['-e', VGRANT]]],
@@ -660,7 +660,7 @@ try {
   await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
   const sc = await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${sr && sr.id}"]'); if (!c) return null; const i = c.querySelector('input.ut-secret-input'); return { type: i && i.type, save: (c.querySelector('.ut-secret-save')?.textContent || '').trim(), deny: (c.querySelector('.ut-secret-deny')?.textContent || '').trim(), note: (c.querySelector('.ut-secret-note')?.textContent || '').trim(), closers: [...c.querySelectorAll('.ut-done, .ut-dismiss, .ut-reopen')].filter((x) => x.offsetParent).length, text: (c.textContent || '').slice(0, 220) }; })()`);
   await A.shot('r3-chat-vault-request-1280.png');
-  check(`r3 ⑦c: the vault's REQUEST is a card in the asking chat — the masked field (${sc && sc.type}), «${sc && sc.save}» / «${sc && sc.deny}», the note «${sc && sc.note}», no ✓ / ✕ (${sc && sc.closers})`, !!sc && sc.type === 'password' && sc.save === 'Save to vault' && /Wrong name or kind\? Refuse/.test(sc.note) && sc.closers === 0 && /UniFi UCG-Fiber local admin/.test(sc.text), sc);
+  check(`r3 ⑦c: the vault's REQUEST is a card in the asking chat — the masked field (${sc && sc.type}), «${sc && sc.save}» / «${sc && sc.deny}», the note «${sc && sc.note}», no ✓ / ✕ (${sc && sc.closers})`, !!sc && sc.type === 'password' && sc.save === 'Save to vault' && /Wrong name or kind\? Refuse/.test(sc.note) && sc.closers === 0 && /Router local admin/.test(sc.text), sc);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"] input.ut-secret-input').focus(); true`);
   await A.cdp('Input.insertText', { text: VALUE });
   const svPress = await A.restThenPress(`.cn-card[data-item="${sr && sr.id}"] .ut-secret-save`);
@@ -779,13 +779,13 @@ try {
   console.log('⑧ ROUND 7 — the run card as facts (three surfaces × 1280 / 390 × zh / en / ja); its deadline and the late card; the variants and the stress shapes');
   try {
     const LV = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/vault-run-card-legs.json'), 'utf8')).variants.map((v) => [v.name, v.facts]));   // r11: the PRODUCER'S facts (generated — repro/r11/make-card-legs.mjs)
-    fs.mkdirSync(path.join(WORK, 'office-net'), { recursive: true });
-    fs.writeFileSync(path.join(WORK, 'office-net', 'unifi-api.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
-    const UNIFI = ['./office-net/unifi-api.sh', 'PUT', '/proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/unifi-work/wan2-primary.json'];
+    fs.mkdirSync(path.join(WORK, 'acme-net'), { recursive: true });
+    fs.writeFileSync(path.join(WORK, 'acme-net', 'router-api.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
+    const RUN_ARGV = ['./acme-net/router-api.sh', 'PUT', '/api/v1/router/sites/default/configs/networks/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/router-work/wan2-primary.json'];
     const CURL = ['curl', '-s', 'https://api.example.com/v1/health'];   // a known tool naming a host — «Always» offered (action.always)
     let tag7 = 0;
     const ran7 = () => (cliLog().match(/### vfacts 0 rc=/g) || []).length;
-    const runCard = async (facts, argv = UNIFI) => {
+    const runCard = async (facts, argv = RUN_ARGV) => {
       if (facts) fs.writeFileSync(R7_FACTS, JSON.stringify(facts)); else fs.rmSync(R7_FACTS, { force: true });   // r11: no facts = the door's own (a producer door's cardFactsOf)
       fs.writeFileSync(path.join(stubDir, 'r7-run.json'), JSON.stringify({ tag: 'r7-' + (++tag7), argv }));
       const seen = new Set([...(await api()).open, ...(await api()).resolved].map((i) => i.id));
@@ -832,7 +832,7 @@ try {
     };
     const facts1 = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.prose && !o.sideways && J3(o.rows) === J3(['hosts!', 'program', 'folder', 'secrets']) && o.fold === 'closed';
     const answers1 = (o) => !!o && !!o.once && o.once.primary && Number(o.once.opacity) === 1 && !o.once.disabled && !!o.deny && o.deny.neutral && !o.always && !!o.hint && o.hintBeside;
-    const HEAD = { zh: 'ops watch 想用「UniFi 账号」运行 unifi-api.sh', en: 'ops watch wants to run unifi-api.sh with “UniFi 账号”', ja: 'ops watch が「UniFi 账号」を使って unifi-api.sh を実行しようとしています' };
+    const HEAD = { zh: 'ops watch 想用「Router 账号」运行 router-api.sh', en: 'ops watch wants to run router-api.sh with “Router 账号”', ja: 'ops watch が「Router 账号」を使って router-api.sh を実行しようとしています' };
     const facts = LV.ops;
     const look7 = {};
     let lateItem7 = null;
@@ -870,7 +870,7 @@ try {
     await lap('⑧ three languages done');
     // THE OTHER TWO VARIANTS and THE STRESS SHAPES — the chat card LOOKED at on both widths (zh)
     await lang(A, 'zh', false); await lang(B, 'zh', true); await A.front(); await quiet(A); await quiet(B);   // the variants are LOOKED at in zh (the language loop ends in ja)
-    const shapes = [['hosts-known-always', LV['known-always'], CURL], ['config-reads', LV['config-reads'], UNIFI], ['stress', LV.stress, UNIFI]];
+    const shapes = [['hosts-known-always', LV['known-always'], CURL], ['config-reads', LV['config-reads'], RUN_ARGV], ['stress', LV.stress, RUN_ARGV]];
     for (const [name, f, argv] of shapes) {
       const it = await runCard(f, argv);
       await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await A.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);

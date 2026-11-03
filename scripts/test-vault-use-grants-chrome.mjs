@@ -7,8 +7,8 @@
 // LOOPBACK stub servers on 127.0.0.1 at three distinct ports, so a grant for one host:port covers it and another does not), a
 // real headless Chrome with TWO pages of one sign-in (the WATCHING one and the STORING one):
 //   ① sign in, set the second password from the page, the live conversation and its token
-//   ② THE LIVE LIST (the owner's symptom): the watching page holds the Vault window open with «Unifi» typed — «no match»
-//      NAMES what it searched; the agent asks (`vibespace-vault request … --name "UniFi UCG-Fiber admin" --host <HOST_IN>`);
+//   ② THE LIVE LIST (the owner's symptom): the watching page holds the Vault window open with «Gateway» typed — «no match»
+//      NAMES what it searched; the agent asks (`vibespace-vault request … --name "Gateway admin" --host <HOST_IN>`);
 //      the STORING page answers it through the request route ⇒ the row appears in the watching window WITHOUT a reopen (the
 //      search box kept, the «N stored values» line follows), its origin «Filled by you · asked for by Home network»
 //   ③ NO CARD: the agent's `vibespace-vault run --env T=<ref> -- curl http://<HOST_IN>/…` runs at once (the paste grant) — a run
@@ -56,8 +56,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'vug-leg-sign-in-7';
 const SECOND = 'vug leg second password';
 const SID = crypto.randomUUID();
-const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(8).toString('hex')].join('-');
-const LABEL = 'UniFi UCG-Fiber admin';
+const VALUE = ['gateway', 'admin', 'value', crypto.randomBytes(8).toString('hex')].join('-');
+const LABEL = 'Gateway admin';
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -152,14 +152,14 @@ try {
   console.log('② THE LIVE LIST — the watching window finds what the storing page stored, with no reopen');
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   check('the watching page holds the Vault window open (one value listed)', !!(await A.until(`!!document.querySelector('.vw-list .vw-row')`, { timeout: 15000 })));
-  await A.evalJs(`(() => { const i = document.querySelector('.vw-search'); i.focus(); i.value = 'Unifi'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await A.evalJs(`(() => { const i = document.querySelector('.vw-search'); i.focus(); i.value = 'Gateway'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const empty0 = await A.until(`(() => { const e = [...document.querySelectorAll('.vw-list .vw-empty')].find((x) => x.isConnected); return e ? e.textContent : null; })()`, { timeout: 5000 });
-  check('«Unifi» typed: «no match» NAMES what it searched (names, kinds, purposes, hosts, where they came from, ids)', /No stored value matches “Unifi” — searched: names, kinds, purposes, hosts, where they came from, ids/.test(String(empty0)), empty0);
+  check('«Gateway» typed: «no match» NAMES what it searched (names, kinds, purposes, hosts, where they came from, ids)', /No stored value matches “Gateway” — searched: names, kinds, purposes, hosts, where they came from, ids/.test(String(empty0)), empty0);
   const note0 = await A.evalJs(`(document.querySelector('.vw-note') || document.querySelector('.vault-window .vw-head-note') || {}).textContent || ''`);
   await A.shot('vug-1-search-before.png');
-  const a1 = await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL, '--host', HOST_IN], TOKEN);
+  const a1 = await ask(['the router admin password', '--purpose', 'log in to the router to read the WAN status', '--kind', 'password', '--name', LABEL, '--host', HOST_IN], TOKEN);
   const hostsHere = a1.code === 0;
-  const a1b = hostsHere ? a1 : await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL], TOKEN);
+  const a1b = hostsHere ? a1 : await ask(['the router admin password', '--purpose', 'log in to the router to read the WAN status', '--kind', 'password', '--name', LABEL], TOKEN);
   check(`the agent asks with the hosts it will use (\`--host ${HOST_IN}\`) ⇒ exit 0, a request id, «for ${HOST_IN}»`, hostsHere && !!a1.id && new RegExp('for ' + rx(HOST_IN)).test(a1.out), a1.out);
   const reqId = a1b.id;
   const todo = async () => (await A.api('GET', '/api/user-todos')).json.todos;
@@ -178,7 +178,7 @@ try {
   const ms = Date.now() - at;
   check(`THE WATCHING WINDOW shows the stored row WITHOUT a reopen (${ms} ms after the store)`, !!live, { ms });
   const kept = await A.evalJs(`({ q: document.querySelector('.vw-search').value, note: (document.querySelector('.vw-note') || {}).textContent || '', rows: [...document.querySelectorAll('.vw-list .vw-row')].filter((r) => r.isConnected).length })`);
-  check('… the search box keeps «Unifi», the «N stored values» line follows (1 → 2), only the match shows', kept.q === 'Unifi' && /\b2 stored values\b/.test(kept.note) && kept.rows === 1, { kept, note0 });
+  check('… the search box keeps «Gateway», the «N stored values» line follows (1 → 2), only the match shows', kept.q === 'Gateway' && /\b2 stored values\b/.test(kept.note) && kept.rows === 1, { kept, note0 });
   const prov = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; return r ? { prov: r.dataset.prov, chip: (r.querySelector('.vw-chip-prov .vw-chip-words') || {}).textContent || '', meta: (r.querySelector('.vw-meta') || {}).textContent || '' } : null; })()`);
   check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && new RegExp('for ' + rx(HOST_IN)).test(prov.meta), prov);
   await A.shot('vug-2-search-after.png');
@@ -260,7 +260,7 @@ try {
   console.log('⑥ «no match» under a picked purpose names it — 「Search all」');
   await A.evalJs(`(() => { const b = document.querySelector('.vw-rail [data-purpose="agents"]'); if (b) b.click(); return !!b; })()`);
   const e6 = await A.until(`(() => { const e = [...document.querySelectorAll('.vw-list .vw-empty')].find((x) => x.isConnected); return e ? e.textContent : null; })()`, { timeout: 5000 });
-  check('«Kept by agents» picked + «Unifi»: «… in «Kept by agents» — searched: … · 1 match under other purposes» + 「Search all」', /No stored value matches “Unifi” in «Kept by agents» — searched: names, kinds, purposes, hosts, where they came from, ids · 1 match under other purposes/.test(String(e6)) && /Search all/.test(String(e6)), e6);
+  check('«Kept by agents» picked + «Gateway»: «… in «Kept by agents» — searched: … · 1 match under other purposes» + 「Search all」', /No stored value matches “Gateway” in «Kept by agents» — searched: names, kinds, purposes, hosts, where they came from, ids · 1 match under other purposes/.test(String(e6)) && /Search all/.test(String(e6)), e6);
   await A.shot('vug-5-no-match-purpose.png');
   await A.evalJs(`(() => { const b = document.querySelector('.vw-nomatch-all'); if (b) b.click(); return !!b; })()`);
   check('「Search all」 ⇒ the row', !!(await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 5000 })));

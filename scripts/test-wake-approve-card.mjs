@@ -1005,7 +1005,7 @@ console.log('⑫ THE VAULT\'S TWO ASKS AND THE HUB-ACT ASK — cards in the aski
 try {
   const ME = ['claude:c-ops', 'webui:sess-ops'];   // the asking chat's keys (keysForWin)
   const askOf = { runAsk: { id: 'ut-run0000001', sessionKey: 'claude:c-ops', text: 'ops asks to run a command with a vault secret', status: 'open', urgency: 'urgent', origin: 'vault', kind: 'action', action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: true }, createdAt: NOW - 30e3, expiresAt: NOW + 30e3 },
-    paste: { id: 'ut-sec0000001', sessionKey: 'claude:c-ops', text: 'ops asks you for a secret: UniFi UCG-Fiber local admin', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'secret-request', requestId: 'sr-0123456789ab', into: '', kind: 'password', conv: 'c-ops', scope: 'sess-ops' }, createdAt: NOW - 20e3 },
+    paste: { id: 'ut-sec0000001', sessionKey: 'claude:c-ops', text: 'ops asks you for a secret: Router local admin', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'secret-request', requestId: 'sr-0123456789ab', into: '', kind: 'password', conv: 'c-ops', scope: 'sess-ops' }, createdAt: NOW - 20e3 },
     hubAct: { id: 'ut-hub0000001', sessionKey: 'machines', about: 'claude:c-ops', text: 'ops wants to run a command on mac1', status: 'open', urgency: 'urgent', origin: 'machines', kind: 'action', action: { type: 'hub-act-ask', askId: 'b'.repeat(32), hostId: 'h1', machine: 'mac1', kind: 'run' }, createdAt: NOW - 10e3, expiresAt: NOW + 50e3 } };
   const rows = Object.fromEntries(['vault-run-ask', 'secret-request', 'hub-act-ask'].map((t) => { const r = FA.ROW_OF[t]; return [t, { chat: r.chat, card: r.card, decide: r.decide, scope: r.scope, stamp: r.stamp }]; }));
   ok(J(rows) === J({ 'vault-run-ask': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'allow' }, 'secret-request': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'store' }, 'hub-act-ask': { chat: true, card: 'row', decide: 'person', scope: 'about', stamp: 'allow' } }), 'THE registry rows: each a card in the chat (one renderer), decided by a person only; the run ask and the paste request filed under the asking conversation\'s own key, the hub-act ask `about` it', rows);
@@ -1527,8 +1527,8 @@ try {
     ok(J(it.facts) === J(f) && note.valueCut === true && wholeNote.length === 2100 && name.nameCut === true && wholeName.length === 2100
       && !!box && box.label === 'RUN_NOTE（完整的值）' && !!envLine && J(envLine.lines[0]) === J([{ mono: 'RUN_NOTE=' }, { aside: '（值共 2100 个字符 — 卡片上已截短，完整的值在下方）' }])
       && !!secLine && secLine.lines[0][0].text === wholeName && secLine.lines[0].some((x) => x.aside === '（卡片上已截短 — 这里是完整的）')
-      && v.rows.find((r) => r.key === 'secrets').lines[0][0].text === 'UniFi 账号' && v.headline.length < 80 && html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${wholeNote}</pre>`),
-      `(b) THE FOLDS DRAWN WHOLE: the producer's 2 100-character env value — the env line «RUN_NOTE= ${envLine && envLine.lines[0][1] && envLine.lines[0][1].aside}», its WHOLE in a box of its own «${box && box.label}»; the 2 100-character secret name whole in the fold, the face's headline and secrets row its entry head «UniFi 账号» (704a0f4c: a 2 000-character value with no marker, the 100 more characters nowhere)`, J({ store: J(it.facts) === J(f), box: !!box, envLine: envLine && envLine.lines, secHead: v && v.rows.find((r) => r.key === 'secrets') }).slice(0, 900));
+      && v.rows.find((r) => r.key === 'secrets').lines[0][0].text === 'Router 账号' && v.headline.length < 80 && html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${wholeNote}</pre>`),
+      `(b) THE FOLDS DRAWN WHOLE: the producer's 2 100-character env value — the env line «RUN_NOTE= ${envLine && envLine.lines[0][1] && envLine.lines[0][1].aside}», its WHOLE in a box of its own «${box && box.label}»; the 2 100-character secret name whole in the fold, the face's headline and secrets row its entry head «Router 账号» (704a0f4c: a 2 000-character value with no marker, the 100 more characters nowhere)`, J({ store: J(it.facts) === J(f), box: !!box, envLine: envLine && envLine.lines, secHead: v && v.rows.find((r) => r.key === 'secrets') }).slice(0, 900));
     const d = m.get(m.add('claude:r11-dir', { text: 'dir', origin: 'vault', action: { type: 'vault-run-ask', askId: '2'.repeat(32) }, facts: LV['directive-long'] }).id);
     const vd = FA.runCardOf(d, { t: tt3 }), dirWhole = LV['directive-long'].always.directiveFull.join('');
     const hintDir = vd && (vd.always.hint.find((x) => x.mono != null) || {}).mono;
@@ -1558,7 +1558,7 @@ try {
   const { who, ...noWho } = LV.ops;
   const v2 = FA.runCardOf(runItem(noWho), { t: tt3 });
   const v3 = FA.runCardOf(runItem({ ...LV.ops, who: 'w'.repeat(2000), whoCut: true }), { t: tt3 });
-  ok(/^ops watch wants to run unifi-api\.sh with “UniFi 账号”$/.test(v1.headline) && /^An agent wants to run/.test(v2.headline) && !/Session 1/.test(v2.headline) && v3.headline.startsWith('w'.repeat(2000) + '…'),
+  ok(/^ops watch wants to run router-api\.sh with “Router 账号”$/.test(v1.headline) && /^An agent wants to run/.test(v2.headline) && !/Session 1/.test(v2.headline) && v3.headline.startsWith('w'.repeat(2000) + '…'),
     `(d) THE ACTOR IS THE FACTS' WHO: «${v1.headline}»; facts with no who ⇒ «${v2.headline.slice(0, 40)}…» (704a0f4c: the record's live name «Session 1 …»); a clipped who drawn with «…»`, J({ v1: v1.headline, v2: v2.headline }));
 } catch (e) { ok(false, '⑲ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 try {

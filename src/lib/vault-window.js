@@ -496,7 +496,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (st.focus) { const f = st.focus; st.focus = null; focusRow(f); }
   }
   // lane vault-use-grants: «no match» NAMES what was searched — the fields, and the purpose when one is picked (a value
-  // under another purpose is one press away: 「Search all」) — the owner's «Unifi» answered nothing while the rail stood elsewhere
+  // under another purpose is one press away: 「Search all」) — the owner's search word answered nothing while the rail stood elsewhere
   let noMatch = null;
   function noMatchEl(v) {
     if (!noMatch) { noMatch = { el: vwEl('div', 'vw-empty vw-nomatch'), txt: vwEl('span', 'vw-nomatch-text'), all: btnEl(t('Search all'), 'vw-nomatch-all') }; noMatch.el.dataset.key = 'empty-match'; noMatch.all.onclick = () => { st.purpose = 'all'; place(); }; noMatch.el.append(noMatch.txt, noMatch.all); }
