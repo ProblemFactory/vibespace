@@ -87,6 +87,7 @@ import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, 
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
+import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
 import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 import { insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself)
 
@@ -744,6 +745,7 @@ class App {
       if (this.isMobile) return;
       applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
       placeVaultChip(); // lane vault-chip-zone-errors: the vault's lock chip follows For-you into whichever zone it now sits
+      placeWarmthChip(); // lane cache-warmth-band: …and so does the warmth summary chip (nothing while there is none)
     };
     applyArr();
     this._applyChromeArrangement = applyArr; // a switch to the desktop class re-applies it (src/lib/viewport-switch.js)

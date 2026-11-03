@@ -17,7 +17,9 @@
 //   held: '<why>'               (lane cache-warmth-tiles, 2026-11-03) the row EXISTS — its key, its default, its line in
 //                               docs/settings.md, `settings.get` — but the window does NOT draw it, not by a search, not
 //                               when modified: its feature's surface has not landed yet. The words say why and until
-//                               what; test-architecture §44 lists every held row with them (the census note).
+//                               what; test-architecture §44 lists every held row with them (the census note). (The first
+//                               user, `desktop.cacheWarmth`, was held from r1a′ until its band landed in r1b — lane
+//                               cache-warmth-band; no row is held today.)
 //
 // A clause carries exactly ONE tag of the CLOSED set WHEN_KINDS:
 //   { setting: 'chat.compactMode', is: true }     another row's value equals

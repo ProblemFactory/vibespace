@@ -9,6 +9,7 @@ import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { renderSessionCard } from './session-card.js';
+import { paintSessionCard } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a phone row's prompt-cache band
 
 export function installSidebarRender(SidebarClass) {
   const proto = SidebarClass.prototype;
@@ -206,6 +207,7 @@ export function installSidebarRender(SidebarClass) {
     // For-you items (user-todos-panel.js app.sessionAsks — the row marks, the For-you window answers)
     this.app.sessionAsks?.markIn?.(card, s);
     if (this._doorFound && s.sessionId === this._doorFound) card.classList.add('door-found'); // the tile door's one match (r4)
+    paintSessionCard(this.app, card); // lane cache-warmth-band: a phone row's warmth band + «N min left» (phone classes only)
     return card;
   };
 

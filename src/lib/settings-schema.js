@@ -265,14 +265,12 @@ const SETTINGS_SCHEMA = {
     category: t('Desktop apps'), liveApply: true,
   },
   // lane cache-warmth-tiles (the owner 2026-11-02: OPT-IN): while on, the session list carries each live conversation's
-  // prompt-cache facts (routes/sessions warmthDiff — the same facts the pool's warm-cache hold reads); off = not even computed
+  // prompt-cache facts (routes/sessions warmthDiff — the same facts the pool's warm-cache hold reads); off = not even computed.
+  // lane cache-warmth-band (q-059 r1b): the band it shows is drawn (src/lib/warmth-chrome.js) — the row is no longer held
   'desktop.cacheWarmth': {
     type: 'boolean', default: false, label: t("Prompt-cache warmth on conversation boxes"),
     description: t("Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own \u2014 it rides the session list the page already asks for."),
     category: t('Window'), liveApply: true,
-    // 主开发's ruling (r1a′): the band this switch shows lands in r1b (the owner's design verdict, q-059) — until then
-    // the switch exists but its row is not drawn: an «on» that changes nothing on screen would be a dead control
-    held: 'r1a — the band it shows is drawn in r1b (lane cache-warmth-tiles, after the owner\'s q-059 verdict); until then the row is not drawn',
   },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),

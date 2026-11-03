@@ -11,6 +11,7 @@ import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from '
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
+import { paintPreviews } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the previews' prompt-cache tiers
 
 const SPRING_MS = 350; // a window drag held this long on the compact switcher springs its list open (lane desktop-small r2 ①)
 
@@ -1054,6 +1055,7 @@ export class DesktopManager {
       this.switchTo(id);
     });
     container.appendChild(addBtn);
+    paintPreviews(this.app); // lane cache-warmth-band: the squares' tiers + each desktop's ring, from the tick's map (never in the digest)
   }
 
   /** THE SWITCHER'S FORM in the taskbar (lane desktop-small — P2-2 + the owner's many desktops): 'compact' when the previews
@@ -1098,6 +1100,7 @@ export class DesktopManager {
     btn.addEventListener('dragover', () => this.dragHover(btn)); // a taskbar tile held here springs the list open too (its rows take the drop)
     btn.addEventListener('dragleave', () => this._springStop()); // r3 ①: off the button before SPRING_MS — nothing springs later
     container.appendChild(btn);
+    paintPreviews(this.app); // lane cache-warmth-band: the folded button's ring = the worst live tier on every desktop
   }
 
   /** THE COMPACT LIST'S ROWS — ONE named source: the phone sheet's (int358: its sheetRows = master's

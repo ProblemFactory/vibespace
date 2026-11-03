@@ -11800,4 +11800,13 @@ export default {
   "Cache expired · last request {time}": "缓存已过期 · 上次请求 {time}",
   "Cache: warm — a turn is running": "缓存正热 — 回合进行中",
   "Cache expired — the conversation moved to another account · last request {time}": "缓存已过期 — 对话已换到另一个账号 · 上次请求 {time}",
+  // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
+  "Going cold {n}": "快熄火 {n}",
+  "Late {n}": "后段 {n}",
+  "Expired {n}": "过期 {n}",
+  "+{n} · {k} critical": "+{n} · {k} 临界",
+  "+{n} · {k} expired": "+{n} · {k} 已过期",
+  "By time left": "按剩余时间",
+  "Every desktop": "全部桌面",
+  "Prompt-cache warmth on every desktop — click for the list by time left": "所有桌面上的提示缓存温度 — 点开按剩余时间排序的列表",
 };

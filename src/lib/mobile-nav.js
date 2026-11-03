@@ -10,6 +10,7 @@ import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
 import { openDesktopSheet, untilGone } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
 import { doorState, followDesktops } from '../desktop-switch.js';
+import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -455,6 +456,7 @@ export class MobileNav {
 
     if (billChip) item.append(icon, label, billChip, closeBtn);
     else item.append(icon, label, closeBtn);
+    paintSwitcherRow(this.app, item, win); // lane cache-warmth-band: the row's warmth band + «N min left» (one row per tab)
     if (billChip) requestAnimationFrame(() => fitRowPill(label, billChip));
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group

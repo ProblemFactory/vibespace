@@ -72,4 +72,43 @@ function warmthTitle(w, { t = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && 
   return t('Cache: about {n} min left · last request {time}', { n: Math.max(1, Math.ceil(w.leftMs / 60000)), time: timeText(w.lastAt) });
 }
 
-module.exports = { WARMTH_TIERS, WARMTH_STATES, tierOf, warmthOf, warmthTitle };
+/** Rank of a LIVE tier (higher = worse); expired / unknown are not live (lane cache-warmth-band, q-059 r1b). */
+const LIVE_RANK = Object.freeze({ fresh: 0, mid: 1, late: 2, critical: 3 });
+const liveRank = (w) => (w && Object.prototype.hasOwnProperty.call(LIVE_RANK, w.tier) ? LIVE_RANK[w.tier] : -1);
+
+/** The worst LIVE warmth among `ws` (warmthOf results; null entries skipped): the highest live tier, ties → the smaller
+ *  frac. No live one but an expired one ⇒ that expired one. Nothing known ⇒ null. A group tile, a desktop's ring, the
+ *  folded button, the «+N» dot and a window-list host row all ask it (the owner's rule: the worst LIVE tier — an expired
+ *  cache is nothing left to save, so it never outranks one that is about to go). */
+function worstOf(ws) {
+  let worst = null, expired = null;
+  for (const w of ws || []) {
+    const r = liveRank(w);
+    if (r < 0) { if (!expired && w && w.tier === 'expired') expired = w; continue; }
+    const b = liveRank(worst);
+    if (r > b || (r === b && w.frac < worst.frac)) worst = w;
+  }
+  return worst || expired;
+}
+
+/** The summary's counts over known warmths: { critical, late, expired, known } (unknown never counted). */
+function warmthCounts(ws) {
+  const c = { critical: 0, late: 0, expired: 0, known: 0 };
+  for (const w of ws || []) {
+    if (!w || (liveRank(w) < 0 && w.tier !== 'expired')) continue;
+    c.known++;
+    if (w.tier === 'critical' || w.tier === 'late' || w.tier === 'expired') c[w.tier]++;
+  }
+  return c;
+}
+
+/** Comparator, time left ascending: live by leftMs, then expired, then unknown/null; equal ⇒ 0 (Array#sort is stable, so
+ *  the caller's order breaks ties). */
+function byTimeLeft(a, b) {
+  const cls = (w) => (liveRank(w) >= 0 ? 0 : w && w.tier === 'expired' ? 1 : 2);
+  const ca = cls(a), cb = cls(b);
+  if (ca !== cb) return ca - cb;
+  return ca === 0 ? (Number(a.leftMs) || 0) - (Number(b.leftMs) || 0) : 0;
+}
+
+module.exports = { WARMTH_TIERS, WARMTH_STATES, tierOf, warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft };

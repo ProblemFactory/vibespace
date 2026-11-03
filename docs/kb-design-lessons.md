@@ -1084,3 +1084,5 @@ A field where a person types a folder is THE path field (src/lib/path-field.js o
 ### Row: A BACK PRESS on a phone / the exit plan (lane phone-back-reload, 2026-10-26)
 
 PURE src/lib/back-guard.js (bootStep, exitPlan, exitHop, backCostLoad, slowExit, backTarget, backVerdict), ORCH mobile-back.js, diary nav-log.js ⇒ test-back-guard, test-incident-recorder; heavy test-mobile-back-chrome, test-exit-hop-chrome, test-exit-slow-chrome, test-exit-late-chrome.
+
+**The change touches…** a surface that shows a conversation's prompt-cache warmth (a band, a ring, a square, a count, a list row) ⇒ it reads ONE pass per session-poll answer (src/lib/warmth-chrome.js `noteWarmthAnswer` — the only `warmthOf` on the page) and every builder re-applies its mark from that pass's map; never a timer, `_notify`, `setTitleMeta`, the sidebar digest or `LIVE_SESSION_FACTS`; unknown draws nothing, expired draws no band; gated by test-cache-warmth ⑨ + test-cache-warmth-chrome (heavy).

@@ -14,6 +14,7 @@ import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
 import { UI_ICONS } from './icons.js';
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
+import { noteWarmthAnswer } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the poll tick's ONE warmth pass
 
 // Consecutive failed /api/sessions polls before the sidebar admits the list is
 // frozen. 3 × 5s ≈ 15s — long enough that one blip stays invisible, short
@@ -970,7 +971,7 @@ class Sidebar {
       // would skip the reschedule below (poll chain dead for the page's
       // lifetime) and, folded into one catch, would also be miscounted as a
       // server failure and freeze-mark a list that actually arrived fine.
-      let sessions = null, pollErr = '';
+      let sessions = null, pollErr = '', warmthAnswer = null;
       try {
         const res = await fetch('/api/sessions');
         const data = await res.json().catch(() => null);
@@ -983,7 +984,12 @@ class Sidebar {
         // snapshot and MARK it stale instead.
         if (!res.ok || !data || data.error || !Array.isArray(data.sessions)) {
           pollErr = data?.error || `${res.status} ${res.statusText || 'session list unavailable'}`;
-        } else sessions = data.sessions;
+        } else {
+          sessions = data.sessions;
+          // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth rides THIS answer — the facts, the hub's clock and
+          // this device's clock at the moment it arrived (the only device-clock reading the bands ever use)
+          warmthAnswer = (data.warmth && typeof data.warmth === 'object' && data.serverNow > 0) ? { map: data.warmth, serverNow: data.serverNow, receivedAt: Date.now() } : null;
+        }
       } catch (e) { pollErr = e?.message || 'server unreachable'; }
       try {
         if (sessions) {
@@ -1002,6 +1008,9 @@ class Sidebar {
             || (this._pollFails > SESSION_POLL_STALE_AFTER && this._pollFails % 12 === 0)) this._render();
         }
       } catch {}
+      // THE ONE WARMTH PASS per tick (src/lib/warmth-chrome.js): a failed fetch (undefined) re-derives from the last good
+      // answer; a good answer without warmth (null) clears — its own try, so a paint throw never kills the poll chain
+      try { noteWarmthAnswer(this.app, sessions ? warmthAnswer : undefined); } catch {}
     }
     clearTimeout(this._pollTimer);
     this._pollTimer = setTimeout(() => this._poll(), document.hidden ? 30000 : 5000);

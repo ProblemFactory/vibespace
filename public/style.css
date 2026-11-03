@@ -6161,6 +6161,62 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
   --warmth-critical: var(--bad-text);
   --warmth-expired: var(--border);
 }
+/* q-059 r1b (lane cache-warmth-band): prompt-cache warmth — colour = the tier token, LENGTH = time left / TTL (--warmth-frac,
+   written once per session-poll tick by src/lib/warmth-chrome.js); nothing animates; every mark is paint-only */
+[data-warmth-tier="fresh"]    { --warmth-c: var(--warmth-fresh); }
+[data-warmth-tier="mid"]      { --warmth-c: var(--warmth-mid); }
+[data-warmth-tier="late"]     { --warmth-c: var(--warmth-late); }
+[data-warmth-tier="critical"] { --warmth-c: var(--warmth-critical); }
+[data-warmth-tier="expired"]  { --warmth-c: var(--warmth-expired); }
+/* as drawn (Poc.html:133/:184/:189/:195): every SUMMARISING expired mark is --text-dim; only the tile / group tile /
+   chooser-row ring keeps --warmth-expired (round-4 reply ①) */
+.desktop-preview-win[data-warmth-tier="expired"], .desktop-preview[data-warmth-tier="expired"],
+.desktop-switch-compact .warmth-ring[data-warmth-tier="expired"], .wsum-dot[data-warmth-tier="expired"] { --warmth-c: var(--text-dim); }
+/* the window's band: 3 px over the title bar's bottom border (::after is the waiting blink, which paints over it); a frame
+   that hosts a tab strip draws none — each tab carries its own */
+.window:not(.seamless) > .window-titlebar[data-warmth-tier]:not(:has(> .tab-bar-tabs)) { position: relative; }
+.window:not(.seamless) > .window-titlebar[data-warmth-tier]:not(:has(> .tab-bar-tabs))::before {
+  content: ''; position: absolute; left: 0; bottom: -1px; height: 3px; pointer-events: none;
+  width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c);
+}
+/* a tab's own band on its own bottom edge (the active tab's lies on the seam); a child node — the tab's pseudo-elements are taken */
+.tab-warmth { position: absolute; left: 0; bottom: 0; height: 3px; pointer-events: none;
+  width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
+/* the ring: taskbar tiles (a group = its worst live tier), the group chooser's rows, the folded switcher button */
+.warmth-ring { width: 12px; height: 12px; flex: none; pointer-events: none; transform: rotate(-90deg); }
+.warmth-ring circle { fill: none; stroke: var(--warmth-c); stroke-width: 2;
+  stroke-dasharray: calc(var(--warmth-frac, 1) * 100) 100; }
+/* desktop previews: a square takes its tier colour (the waiting blink and the find flash keep theirs); a desktop's ring =
+   its worst live tier, just inside the border so neighbours never merge */
+.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash) { background: var(--warmth-c); }
+.desktop-preview[data-warmth-tier] { outline: 2px solid var(--warmth-c); outline-offset: -3.5px; }
+/* the «+N» chip's dot and the summary chip beside For-you («Going cold a · Late b · Expired c / n»; a stable width) */
+.wsum-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--warmth-c); pointer-events: none; }
+.taskbar-overflow .wsum-dot { margin-right: 5px; }
+.warmth-summary { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; min-width: 214px; padding: 0 9px; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: 13px; background: transparent; color: var(--text); font: inherit; font-size: 11px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.warmth-summary:hover { background: var(--bg-hover); border-color: var(--border-active); }
+.wsum-seg { display: inline-flex; align-items: center; gap: 4px; }
+.wsum-sep, .wsum-total { color: var(--text-dim); }
+/* the window list / the summary's list: a band per row, the time in words, ONE «By time left» toggle */
+.wl-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 14px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.wl-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-sort { min-height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.wl-sort[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); border-color: var(--border-active); }
+.wl-band { width: 60px; height: 3px; flex: none; position: relative; background: var(--bg-input); border-radius: 1.5px; pointer-events: none; }
+.wl-band[data-warmth-tier]::before { content: ''; position: absolute; left: 0; top: 0; height: 3px; border-radius: 1.5px;
+  width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
+.wl-left { margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }
+.warmth-list { max-width: 460px; }
+.warmth-list .wl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.warmth-list .dk { color: var(--text-dim); font-size: 11px; }
+/* the phone: a session row's / a switcher row's band on its bottom edge + its time in words */
+.sess-warmth { position: absolute; left: 0; bottom: 0; height: 3px; pointer-events: none;
+  width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
+.sess-warmth-left { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--warmth-c, var(--text-dim)); }
+/* ── end of the q-059 r1b warmth block (test-cache-warmth ⑨ reads it whole) ── */
 .chan-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
 .chan-ic svg { width: 1em; height: 1em; }
 .chan-warn { color: var(--warn-text); }

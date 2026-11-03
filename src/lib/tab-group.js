@@ -5,6 +5,7 @@ import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
 import { dragEndVerdict } from './drag-end.js';
+import { paintTab } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a tab's own prompt-cache band
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
 import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, chainFocusOf, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
@@ -904,6 +905,7 @@ const tabGroupMethods = {
         showWindowContextMenu(this._app, tabWinId, e.clientX, e.clientY, { switchSubmenu: true });
       });
       this._setupTabDrag(tab, tabWinId, chain);
+      paintTab(this._app, tab); // lane cache-warmth-band: the tab's own warmth band, re-applied at every strip rebuild (its map; nothing new computed)
       return tab;
     };
 

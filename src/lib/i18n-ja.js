@@ -11799,4 +11799,13 @@ export default {
   "Cache expired · last request {time}": "キャッシュ期限切れ · 最後のリクエスト {time}",
   "Cache: warm — a turn is running": "キャッシュは温かい — ターン実行中",
   "Cache expired — the conversation moved to another account · last request {time}": "キャッシュ期限切れ — 会話は別のアカウントへ移りました · 最後のリクエスト {time}",
+  // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
+  "Going cold {n}": "まもなく冷める {n}",
+  "Late {n}": "後半 {n}",
+  "Expired {n}": "期限切れ {n}",
+  "+{n} · {k} critical": "+{n} · {k} 臨界",
+  "+{n} · {k} expired": "+{n} · {k} 期限切れ",
+  "By time left": "残り時間順",
+  "Every desktop": "すべてのデスクトップ",
+  "Prompt-cache warmth on every desktop — click for the list by time left": "すべてのデスクトップのプロンプトキャッシュの温度 — クリックで残り時間順の一覧",
 };

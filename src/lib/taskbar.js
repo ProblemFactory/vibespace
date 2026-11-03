@@ -8,9 +8,13 @@ import { terminalOnly } from './agent-meta.js'; // the harness table's own word 
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
 import { otherDesktopWindows } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
+import { warmthDrawn, warmthRows, paintTile, paintOverflowChip, paintListRow, byRowTimeLeft } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the rings, the «+N» dot, the lists' bands
 
 /** The ⧉ list's «Other desktops» group: folded (the active desktop's windows stay the list's view) until opened; this page's. */
 let otherDesksOpen = false;
+/** «By time left» (lane cache-warmth-band, q-059 r1b): ONE flag for the ⧉ list and the warmth summary's list — pressed by
+ *  default (the design's one sort), this page's for its lifetime; only drawn while warmth is. */
+let byTimeLeftOn = true;
 
 /** Every other desktop's windows — the ones this page built there and the ones a held record lists that it has not built. */
 function otherDeskRows(app) {
@@ -212,6 +216,8 @@ export function fitTaskbarStrip(app) {
   const { hidden } = stripHidden({ tiles, width: sr.width });
   chip.hidden = hidden.length === 0;
   chip.textContent = '+' + hidden.length;
+  chip._hiddenIds = hidden; chip._warmthKey = ''; // the text above wiped the warmth dot: the chip's warmth is written again
+  paintOverflowChip(app, chip);
   chip.title = t('{n} more windows — click for the list', { n: hidden.length });
   chip.setAttribute('aria-label', chip.title);
 }
@@ -300,6 +306,7 @@ function _rebuildTaskbarItems(app, container, entries) {
     subtitle.textContent = parts[1] || win.type;
     textCol.append(title, subtitle);
     item.append(icon, textCol);
+    paintTile(app, item); // lane cache-warmth-band: the tile's warmth ring (before the icon), from the tick's map
     // Draggable: allow dropping onto desktop previews
     item.draggable = true;
     item.addEventListener('dragstart', (e) => {
@@ -598,6 +605,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   subtitle.textContent = t('{n} windows grouped', { n: group.tabWins.length });
   textCol.append(title, subtitle);
   item.appendChild(textCol);
+  paintTile(app, item); // lane cache-warmth-band: the group tile's ring = the worst live tier over its tabs
   // no native tooltip: the hover chooser lists every title (a tooltip would sit
   // over it); the keyboard / screen reader get the button's name
   item.tabIndex = 0;
@@ -754,6 +762,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     const label = document.createElement('span');
     label.textContent = win.title;
     item.append(icon, label);
+    paintTile(app, item); // lane cache-warmth-band: the row's own ring (its tab's conversation)
     item.onclick = () => {
       app.wm.revealWindow(tid); // the row names THIS tab — the host's own row included (the door that used to be spelled here by hand)
       const session = app.sessions.get(tid);
@@ -820,12 +829,58 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
   return pop;
 }
 
+/** The «By time left» head row of a warmth list (lane cache-warmth-band): its words, ONE toggle (aria-pressed). */
+function warmthHead(words, rerender) {
+  const head = document.createElement('div'); head.className = 'wl-head';
+  const name = document.createElement('span'); name.className = 'wl-head-name'; name.textContent = words;
+  const sort = document.createElement('button'); sort.type = 'button'; sort.className = 'wl-sort';
+  sort.textContent = t('By time left'); sort.setAttribute('aria-pressed', byTimeLeftOn ? 'true' : 'false');
+  sort.onclick = (e) => { e.stopPropagation(); byTimeLeftOn = !byTimeLeftOn; rerender(); };
+  head.append(name, sort);
+  return head;
+}
+
+/** THE WARMTH SUMMARY'S LIST (lane cache-warmth-band, q-059 r1b — the chip beside For-you): every conversation with a
+ *  known warmth on every desktop, by time left (expired last; unknown not listed) or, unpressed, by desktop; a row is the
+ *  window list's own jump (goOtherDesk: a built window through THE door, a held one after the switch). The order is fixed
+ *  at open and at a press — the tick patches each row's band and words in place, nothing moves under the pointer. */
+function renderEveryDesktop(app, pop, place) {
+  const dm = app.desktopManager, rows = warmthRows(app);
+  const deskName = (id) => (dm?.desktops || []).find((d) => d.id === id)?.name || '';
+  const render = () => {
+    pop.innerHTML = '';
+    pop.appendChild(warmthHead(t('Every desktop') + ' \u00B7 ' + rows.length, render));
+    const items = rows.map((r) => {
+      const item = document.createElement('div');
+      item.className = 'overlap-switcher-item';
+      item.dataset.winId = r.id; item.dataset.desktopId = r.deskId || '';
+      const icon = document.createElement('span');
+      icon.innerHTML = r.icon;
+      icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
+      const label = document.createElement('span'); label.className = 'wl-name'; label.textContent = r.title;
+      const dk = document.createElement('span'); dk.className = 'dk'; dk.textContent = deskName(r.deskId);
+      item.append(icon, label, dk);
+      paintListRow(app, item, { key: r.key }, label);
+      item.onclick = () => { pop.remove(); goOtherDesk(app, { id: r.id, deskId: r.deskId, built: r.built }); };
+      return item;
+    });
+    const deskAt = (id) => { const i = (dm?.desktops || []).findIndex((d) => d.id === id); return i < 0 ? Infinity : i; };
+    const order = byTimeLeftOn ? byRowTimeLeft(app) : (a, b) => deskAt(a.dataset.desktopId) - deskAt(b.dataset.desktopId);
+    for (const item of items.sort(order)) pop.appendChild(item);
+    place();
+  };
+  render();
+}
+
 /**
- * Show a popover listing all open windows (triggered by "x active" click).
+ * Show a popover listing all open windows (triggered by "x active" click). `opts.all` (lane cache-warmth-band): the
+ * warmth summary's list — every conversation on every desktop.
  */
-export function showWindowList(app, anchor) {
-  if (!app.wm.windows.size && !otherDeskRows(app).length) return;
+export function showWindowList(app, anchor, opts = {}) {
+  if (!opts.all && !app.wm.windows.size && !otherDeskRows(app).length) return;
   const pop = createPopover(anchor, 'overlap-switcher');
+  if (opts.all && pop._closedByAnchor) return; // the chip pressed while its list was open: closed
+  if (opts.all) pop.classList.add('warmth-list');
 
   const place = () => requestAnimationFrame(() => {
     if (!pop.isConnected) return;
@@ -837,9 +892,14 @@ export function showWindowList(app, anchor) {
     pop.style.top = (above >= 4 ? above : rect.bottom + 4) + 'px';
   });
 
+  if (opts.all) { renderEveryDesktop(app, pop, place); return; }
+
   const render = () => {
     pop.innerHTML = '';
     const activeDesk = app.desktopManager?.activeDesktopId;
+    const warm = warmthDrawn(app); // lane cache-warmth-band: off ⇒ the list is exactly as before (no head, no band, no id)
+    if (warm) pop.appendChild(warmthHead('', render)); // the toggle alone (the list is the active desktop's, as before)
+    const rows = [];
     let count = 0;
     for (const [id, win] of app.wm.windows) {
       // Skip grouped guests -- only the host appears in the list
@@ -861,6 +921,7 @@ export function showWindowList(app, anchor) {
       const label = document.createElement('span');
       label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
       item.append(icon, label);
+      if (warm) { item.dataset.winId = id; paintListRow(app, item, { ids: tabIds }, label); rows.push(item); } // a host row: its tabs' worst
       item.onclick = () => {
         app.wm.revealWindow(id); // the row is labelled with the HOST's title — show the host's tab, never the guest under its name
         const session = app.sessions.get(id);
@@ -883,6 +944,7 @@ export function showWindowList(app, anchor) {
       });
       pop.appendChild(item);
     }
+    if (warm && byTimeLeftOn) for (const item of rows.sort(byRowTimeLeft(app))) pop.appendChild(item); // «By time left»: ascending, expired then unknown last
     // lane desktop-switch-phone: the OTHER desktops' windows, folded under the active desktop's (its filter above stays the
     // default view) — a window on another desktop is one press away: the switch, then the raise
     const others = otherDeskRows(app);
@@ -901,6 +963,7 @@ export function showWindowList(app, anchor) {
         const label = document.createElement('span');
         label.textContent = r.title + ' \u00B7 ' + r.deskName;
         item.append(label);
+        if (warm) paintListRow(app, item, { ids: [r.id] }, label);
         item.onclick = () => { pop.remove(); goOtherDesk(app, r); };
         pop.appendChild(item);
       }
