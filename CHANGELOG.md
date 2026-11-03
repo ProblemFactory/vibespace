@@ -9,6 +9,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - The pool no longer moves a conversation whose prompt cache is still warm: a subscription conversation keeps its cache an hour, 5 minutes on usage credits.
+- On a phone, the “waiting for you” strip is one line until you tap it, its time left still counting; a tap opens the whole request, and the head folds it again.
+- Restore a previous layout… opens at once and says it is loading; pressing Restore says «Restoring…» until the page reloads, and a failed read says so.
 
 ## 2.369.373 — 2026-11-02
 
