@@ -58,7 +58,8 @@ let v = '', again = '';
 try { v = fs.readFileSync(fd, 'utf8'); } catch (e) { v = 'ERR:' + e.code; }
 try { again = fs.readFileSync(fd, 'utf8'); } catch (e) { again = 'ERR:' + e.code; }
 let fd3 = ''; try { fd3 = fs.readlinkSync('/proc/self/fd/3'); } catch { fd3 = ''; } // node keeps its own fds (eventpoll …) — a SOCKET at 3 is the hub's channel
-fs.writeFileSync(path.join(out, 'got-' + process.pid + '.json'), JSON.stringify({ v, again, fd3, pid: process.pid }));
+const gotF = path.join(out, 'got-' + process.pid + '.json');   // int374 (B-b1f5): written whole, then renamed in — the suite polls this dir
+fs.writeFileSync(gotF + '.tmp', JSON.stringify({ v, again, fd3, pid: process.pid })); fs.renameSync(gotF + '.tmp', gotF);
 console.log('plain ' + v); console.log('b64 ' + Buffer.from(v).toString('base64')); console.log('hex ' + Buffer.from(v).toString('hex'));
 console.log('url ' + encodeURIComponent(v)); console.error('err ' + v);
 for (let i = 0; i < 200 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
@@ -94,7 +95,9 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const owner = { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] };
   const create = (o) => jm.create({ kind: 'task', name: tag, cmd: { argv: [process.execPath, path.join(root, 'prog.js'), path.join(root, 'out')], cwd: root, env: o.env || {} }, owner, vault: ['TOK=vault://agent:conv-a/tok'], ...o, env: undefined }, { conversationId: 'conv-a', groups: new Set() });
   const until = async (pred, n = 400) => { for (let i = 0; i < n; i++) { try { await jm._sweep(); } catch { } if (pred()) return true; await nap(15); } return false; };
-  const got = () => fs.readdirSync(path.join(root, 'out')).filter((f) => f.startsWith('got-')).map((f) => JSON.parse(fs.readFileSync(path.join(root, 'out', f), 'utf8')));
+  // int374 (B-b1f5): only a whole got-<pid>.json is read; an empty one (an in-place write caught mid-way — the 2.369.373 master CI at load
+  // 7.8) and a .tmp are skipped, never parsed
+  const got = () => fs.readdirSync(path.join(root, 'out')).filter((f) => /^got-\d+\.json$/.test(f)).map((f) => fs.readFileSync(path.join(root, 'out', f), 'utf8')).filter((t) => t.length > 0).map((t) => JSON.parse(t));
   const release = () => fs.writeFileSync(path.join(root, 'out', 'release'), '1');
   const audit = () => { try { return fs.readFileSync(path.join(dd, 'vault-audit.jsonl'), 'utf8'); } catch { return ''; } };
   const uses = (id) => audit().split('\n').filter((l) => l.includes('"event":"vault-use"') && l.includes('"door":"service"') && (!id || l.includes(`Background job ${id}`))).map((l) => JSON.parse(l));
@@ -114,6 +117,14 @@ const formsAbsent = (text, s) => VR.formsOf(s).every((f) => !text.includes(f.tex
 async function legHanded() {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world('hand'), S = SENT('hand');
+  { // CONTROL (int374, B-b1f5): a 0-byte got file and a half-written .tmp, planted — got() skips both; the old reader (every got-* parsed) throws on them
+    const o = path.join(W.root, 'out'), planted = [path.join(o, 'got-1.json'), path.join(o, 'got-2.json.tmp')];
+    fs.writeFileSync(planted[0], ''); fs.writeFileSync(planted[1], '{"v":');
+    let g = null, err = '', oldErr = '';
+    try { g = W.got(); } catch (e) { err = String(e && e.message || e); }
+    try { fs.readdirSync(o).filter((f) => f.startsWith('got-')).map((f) => JSON.parse(fs.readFileSync(path.join(o, f), 'utf8'))); } catch (e) { oldErr = String(e && e.message || e); }
+    for (const f of planted) fs.rmSync(f, { force: true });
+    row(Array.isArray(g) && g.length === 0 && !err && /JSON/.test(oldErr), 'CONTROL (int374, B-b1f5): a 0-byte got file (an in-place write caught mid-way) and a half-written .tmp are SKIPPED by got(), never parsed — the old reader threw on them', { got: g, err, oldErr }); }
   W.put(S);
   const r = W.create({});
   const job = W.jm.jobs.get(r.job && r.job.id);
