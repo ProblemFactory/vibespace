@@ -142,6 +142,10 @@ function sessionFromMeta(meta, transportFacts) {
     // conversation finds its key and the orphan sweep sees this session as
     // live in memory as well as on disk.
     _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
+    // lane cache-warmth-compact: what the last request's record SAID about the prompt cache (its TTL, read / created / cold —
+    // amendment 1) and a compaction's reset still standing survive a restart beside the stamp (the three paths' own lines)
+    _cacheFact: meta.cacheFact && typeof meta.cacheFact === 'object' && !Array.isArray(meta.cacheFact) ? meta.cacheFact : null,
+    _compactedAt: Number(meta.compactedAt) > 0 ? Number(meta.compactedAt) : null,
     _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null,
     ...restoreMarks(meta.seenMarks, BUILD_VERSION), // B-86d3: the seen marks (groups' instants + folder digests + lite diff snapshots, the preamble hash, the intros' build) — a restart re-sends only what changed
     ...transportFacts,

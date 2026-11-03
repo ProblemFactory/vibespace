@@ -748,17 +748,26 @@ function setup(ctx) {
  *  facts — usage-pool-engine `cacheFactsOf`, the SAME producer the pool's warm-cache hold judges — keyed by its webui
  *  id, beside the hub's own clock: a client places the instants on THIS clock, never on its own alone (the deadline
  *  cards' rule). A conversation whose TTL or last request is unknown is left out (no colour, never a guess); a fact that
- *  throws too. Each entry: {lastRequestAt, cacheTtlSec, lost, inFlight, turnStartedAt} (round 3). */
+ *  throws too. Each entry: {lastRequestAt, cacheTtlSec, lost, inFlight, turnStartedAt} (round 3).
+ *  THE PROVENANCE (lane cache-warmth-compact, amendment 1): + `ttlSource` ('record' — the TTL the last response wrote;
+ *  'inferred' — the billing state's fallback) and, when a record stated them, `cacheObserved` (read / created / cold) and
+ *  its `cacheReadTokens` / `cacheCreatedTokens` — the hover says what the band projects from. AN UNKNOWN THAT HAS A REASON
+ *  IS SENT, never drawn: `unknown: 'compacted'` (a compaction ended, no request since) or `'no-request'` (a streamed chat
+ *  conversation that named none yet) with no instant, so the client's tier is still 'unknown' (no band, ring, count or
+ *  row) and only the hover says why. Every other unknown (no TTL — codex, a terminal view's guess) is left out as before. */
 function warmthDiff(activeSessions, factsOf, now = Date.now()) {
   const warmth = {};
   if (typeof factsOf === 'function') {
     for (const [id, s] of activeSessions || []) {
       if (!s || s.isTmuxView) continue;
       let f = null; try { f = factsOf(s, now); } catch { f = null; }
+      if (!f) continue;
       // a request in flight writes the cache from the instant it went out (the bounded turn law, round 3), stamp or none;
       // `lost` is decided hub-side (the member that served the last request ≠ the link's) — never a member id to a client
-      const flying = !!(f && f.inFlight && f.turnStartedAt);
-      if (f && f.cacheTtlSec && (f.lastRequestAt || flying)) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, lost: f.lost === true, inFlight: flying, turnStartedAt: flying ? f.turnStartedAt : null };
+      const flying = !!(f.inFlight && f.turnStartedAt);
+      const said = { ...(f.ttlSource ? { ttlSource: f.ttlSource } : {}), ...(f.cacheObserved ? { cacheObserved: f.cacheObserved, cacheReadTokens: Number(f.cacheReadTokens) || 0, cacheCreatedTokens: Number(f.cacheCreatedTokens) || 0 } : {}) };
+      if (f.cacheTtlSec && (f.lastRequestAt || flying)) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, lost: f.lost === true, inFlight: flying, turnStartedAt: flying ? f.turnStartedAt : null, ...said };
+      else if (f.unknownWhy === 'compacted' || f.unknownWhy === 'no-request') warmth[id] = { lastRequestAt: null, cacheTtlSec: f.cacheTtlSec || null, lost: false, inFlight: false, turnStartedAt: null, unknown: f.unknownWhy, ...(f.ttlSource ? { ttlSource: f.ttlSource } : {}) };
     }
   }
   return { warmth, serverNow: now };

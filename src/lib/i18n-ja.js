@@ -11758,6 +11758,14 @@ export default {
   "Cache expired · last request {time}": "キャッシュ期限切れ · 最後のリクエスト {time}",
   "Cache: warm — a turn is running": "キャッシュは温かい — ターン実行中",
   "Cache expired — the conversation moved to another account · last request {time}": "キャッシュ期限切れ — 会話は別のアカウントへ移りました · 最後のリクエスト {time}",
+  // lane cache-warmth-compact (amendment 1): the hover says what the band projects from; an unknown with a reason says why
+  "Cache: about {n} min left — projected from the {cache} of the last request (read {k} tokens at {time})": "キャッシュ残り約 {n} 分 — 前回リクエストの{cache}から推定（{time} に {k} トークン読み込み）",
+  "Cache: about {n} min left — projected from the {cache} of the last request (wrote {k} tokens at {time})": "キャッシュ残り約 {n} 分 — 前回リクエストの{cache}から推定（{time} に {k} トークン書き込み）",
+  "Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})": "キャッシュ残り約 {n} 分 — 前回リクエストの{cache}から推定（以前のキャッシュは再利用されず · {time} に {k} トークン書き込み）",
+  "1-hour cache": "1 時間キャッシュ",
+  "5-minute cache": "5 分キャッシュ",
+  "Cache reset — the conversation was compacted": "キャッシュはリセット — 会話が圧縮されました",
+  "Cache: unknown — no request yet": "キャッシュ: 不明 — まだリクエストなし",
   // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
   "Going cold {n}": "まもなく冷める {n}",
   "Late {n}": "後半 {n}",

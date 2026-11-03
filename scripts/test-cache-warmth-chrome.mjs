@@ -38,6 +38,10 @@
 //   ⑨ the phone: session rows and switcher rows carry the band and the words; an expired row says «Expired», no band
 //   ⑩ off and on, live: off ⇒ zero marks, «+N» exactly «+N», ZERO warmth mutations over two ticks, a failed poll draws
 //      nothing; the window list as before; on ⇒ the marks return with no reload
+//   ⑬ (lane cache-warmth-compact, amendment 1) the REAL road: a stub /compact (the real capture's order) ⇒ the hub sends a
+//      REASONED unknown (`compacted`), a never-asked conversation `no-request`, a '#cache' response its provenance — nothing
+//      drawn for the reasoned unknowns (no band, tier, ring or count), the bar's hover says why, en / zh / ja; the provenance
+//      sentence for the stated cache; the next request after the compaction brings the band back
 //   ⑪ scale and cost: passMs over 3 ticks in the heaviest state (+ the ×150 extrapolation, said as one); NO timer / rAF
 //      from a warmth function over three ticks (a PLANTED control proves the census sees one)
 //   ⑫ Settings → Window draws the row; the theme editor's «Cache warmth» rows (r5: seeded with the raw-hue derivations)
@@ -85,7 +89,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
-armWatchdog({ capMs: 540e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+armWatchdog({ capMs: 600e3, /* lane cache-warmth-compact: ⑬ adds ~40 s (two reloads); ci.mjs's chrome budget is 900 s */ exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 
 // ── the stub CLI (test-desktop-small-chrome's, as it is): one assistant turn per user line, its record carrying
 //    `message.usage` — the request stamp's writer (usage-pool-engine noteModelRequest) reads it; no old `timestamp` ──
@@ -98,7 +102,9 @@ out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5-1
 let n = 0, buf = '';
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch {} if (!m || m.type !== 'user') continue; const k = n++;
   setTimeout(() => {
-    out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'The weekly numbers are in: three sources agree, one is late by a day.' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 40 } } });
+    const said = JSON.stringify(m.message || m);
+    if (said.includes('"/compact')) { for (const o of [{ type: 'system', subtype: 'status', status: 'compacting' }, { type: 'system', subtype: 'status', status: null, compact_result: 'success' }, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 270743, post_tokens: 16740, duration_ms: 78444 } }, { type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.' } }, { type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' } }]) out({ ...o, session_id: SID, uuid: 'c-' + k + '-' + o.subtype }); out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 300, num_turns: 0, result: '', session_id: SID }); return; } // lane cache-warmth-compact: the real capture's order
+    out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'The weekly numbers are in: three sources agree, one is late by a day.' }], stop_reason: 'end_turn', usage: said.includes('#cache') ? { input_tokens: 10, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 17000, cache_creation: { ephemeral_1h_input_tokens: 17000, ephemeral_5m_input_tokens: 0 } } : { input_tokens: 10, output_tokens: 40 } } });
     out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 300, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 40 } });
   }, 150); } });
 process.stdin.on('end', () => process.exit(0));
@@ -839,6 +845,55 @@ await step('⑫ the theme editor\'s «Cache warmth» rows (opened through the pr
   await sleep(300);
   await bothThemes('A-desktop-11-theme-editor');
   await evalJs(`(() => { document.querySelectorAll('[data-popover]').forEach((p) => p.remove()); for (const w of [...app.wm.windows.values()]) if (w.type === 'theme-editor' || /theme/i.test(w.type)) app.wm.closeWindow(w.id); document.querySelector('.theme-editor-close, .theme-editor .close')?.click(); return 1; })()`);
+});
+
+await step('⑬ the reasoned unknown and the provenance, through the REAL road (lane cache-warmth-compact, amendment 1): a /compact, a conversation with no request, a response that states its cache', async () => {
+  // three conversations of their own (never in SIDS: the earlier legs' geometry and the phone's census stay as they were)
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const frames = [];
+  await new Promise((r) => ws.on('open', r)); ws.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch { } });
+  const mk = async (tag, name) => { ws.send(J({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: tag, sessionName: name })); for (let i = 0; i < 100; i++) { const f = frames.find((m) => m?.type === 'created' && m.reqId === tag); if (f) return f.sessionId; await sleep(100); } return null; };
+  const say = async (sid, text) => { ws.send(J({ type: 'chat-input', sessionId: sid, text })); await sleep(700); };
+  const X = await mk('cw-x', 'compacted 15'), Y = await mk('cw-y', 'no request 16'), Z = await mk('cw-z', 'cache facts 17');
+  check('⑬ setup: three more stub conversations over the hub\'s ws', !!(X && Y && Z), [X, Y, Z]);
+  await sleep(300);
+  await say(X, 'Pull this week\'s numbers together'); await say(Z, 'Pull this week\'s numbers together #cache');
+  await say(X, '/compact'); // the stub answers with the real capture's compaction (status compacting → success → compact_boundary → the summary's user record → «Compacted» → result)
+  const winS = (sid) => `[...app.wm.windows.values()].find((w) => app.sessions.get(w.id)?.sessionId === ${J(sid)})`;
+  const barS = (sid) => `(() => { const w = ${winS(sid)}; if (!w) return null; const bar = w.titleBar, cs = getComputedStyle(bar, '::before'); const width = cs.content === 'none' || cs.display === 'none' ? 0 : (parseFloat(cs.width) || 0);
+    const ring = document.querySelector('#taskbar-items .taskbar-item[data-win-id="' + w.id + '"] .warmth-ring');
+    return { tier: bar.getAttribute('data-warmth-tier'), band: width > 0.5, title: bar.getAttribute('title'), tip: bar.hasAttribute('data-warmth-tip'), ring: !!ring }; })()`;
+  const attachS = async () => { for (const [sid, name] of [[X, 'compacted 15'], [Y, 'no request 16'], [Z, 'cache facts 17']]) if (!(await evalJs(`!!${winS(sid)}`))) await evalJs(`(app.attachSession(${J(sid)}, ${J(name)}, ${J(CWD)}, { mode: 'chat', backend: 'claude' }), 1)`);
+    await waitFor(`${J([X, Y, Z])}.every((s) => !![...app.wm.windows.values()].find((w) => app.sessions.get(w.id)?.sessionId === s))`, 20000); await sleep(300); };
+  await attachS(); await nextTick(2);
+  const raw = RW.lastRaw && RW.lastRaw.warmth;
+  check('⑬ THE ROAD: the hub\'s own answer sends the compacted conversation as a REASONED unknown (`unknown: compacted`, no instant), the never-asked one as `no-request`, and the cache-stating one with its provenance (`ttlSource: record`, created 17000) — RED on 749aa7bf9',
+    !!raw && raw[X] && raw[X].unknown === 'compacted' && raw[X].lastRequestAt === null && raw[Y] && raw[Y].unknown === 'no-request' && raw[Z] && raw[Z].ttlSource === 'record' && raw[Z].cacheObserved === 'created' && raw[Z].cacheCreatedTokens === 17000,
+    raw && { X: raw[X], Y: raw[Y], Z: raw[Z] });
+  const e = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)) };
+  check('⑬ THE PIN (en): the reasoned unknowns draw NOTHING — no band, no tier, no ring — and the bar\'s hover says why: «Cache reset — the conversation was compacted», «Cache: unknown — no request yet»',
+    e.X && !e.X.band && !e.X.tier && !e.X.ring && e.X.title === 'Cache reset — the conversation was compacted' && e.X.tip && e.Y && !e.Y.band && !e.Y.tier && !e.Y.ring && e.Y.title === 'Cache: unknown — no request yet', e);
+  check('⑬ THE PIN (en): a response that stated its cache is a projection that says so — «Cache: about 60 min left — projected from the 1-hour cache of the last request (wrote 17k tokens at HH:MM)», the band drawn',
+    e.Z && e.Z.band && e.Z.tier === 'fresh' && /^Cache: about (59|60) min left — projected from the 1-hour cache of the last request \(wrote 17k tokens at \d\d:\d\d\)$/.test(e.Z.title || ''), e.Z);
+  const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-warmth'); return c ? c.textContent.trim() : null; })()`);
+  const rowsS = await evalJs(`(() => { const ids = ${J([X, Y])}.map((s) => { const w = ${'[...app.wm.windows.values()]'}.find((x) => app.sessions.get(x.id)?.sessionId === s); return w && w.id; }); return ids.filter(Boolean); })()`);
+  await shot('A-desktop-13-reasoned-unknown-dark');
+  for (const [lang, wantX, wantY, reZ] of [['zh', '缓存已重置 — 对话已压缩', '缓存：未知 — 还没有请求', /^缓存还剩约 (59|60) 分钟 — 按上次请求的1 小时缓存推算（\d\d:\d\d 写入 17k tokens）$/],
+    ['ja', 'キャッシュはリセット — 会話が圧縮されました', 'キャッシュ: 不明 — まだリクエストなし', /^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/]]) {
+    const { identifier } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` });
+    await load(1280, 800); await attachS(); await nextTick(1);
+    const b = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)) };
+    check(`⑬ (${lang}, after a reload): «${wantX}», «${wantY}» — nothing drawn; the provenance sentence translated`, b.X && !b.X.band && b.X.title === wantX && b.Y && !b.Y.band && b.Y.title === wantY && b.Z && b.Z.band && reZ.test(b.Z.title || ''), b);
+    if (lang === 'ja') {
+      // the new context's first request ends the reset — through the same real road
+      await say(X, 'Go on from the summary #cache'); await nextTick(2);
+      const a = await evalJs(barS(X)), rawA = RW.lastRaw && RW.lastRaw.warmth && RW.lastRaw.warmth[X];
+      check('⑬ THE PIN (ja): the next request after the compaction ⇒ the band is back (fresh), the hover the projection from its record — the reset is over',
+        a && a.band && a.tier === 'fresh' && /^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/.test(a.title || '') && rawA && !rawA.unknown && rawA.lastRequestAt > 0, { a, rawA });
+    }
+    await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier });
+  }
+  check('⑬ …none of them is counted: the summary chip and the reasoned rows stay out of every count (the chip read before the reloads)', chip === null || !/\b17\b/.test(chip), { chip, rowsS });
+  ws.close();
 });
 
 await step('⑨ the phone (390 × 844, touch): session rows and switcher rows', async () => {

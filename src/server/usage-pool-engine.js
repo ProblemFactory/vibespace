@@ -64,7 +64,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const { requestInFlight } = require('../turn-state.js'); // PURE: is a request in flight (never a turn paused on the owner) — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
@@ -4025,15 +4025,42 @@ function resetCreditsLeft(session, key) {
  *  a stated cache TTL (codex, antigravity) writes none yet: its writer comes with its row.
  *  THE CLI'S OWN RECORD IS NO REQUEST (round 2): a `<synthetic>`-model record (an API error, a limit or credit refusal,
  *  «Not logged in» — scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl) or one whose usage counts nothing
- *  describes no API request — message-manager.js syntheticUsage's rule, gated HERE (the ONE writer), never at a feed. */
+ *  describes no API request — message-manager.js syntheticUsage's rule, gated HERE (the ONE writer), never at a feed.
+ *  THE COMPACTION'S OWN SUMMARY REQUEST IS NO REQUEST OF THE CONVERSATION (lane cache-warmth-compact): while the parse
+ *  holds the compaction in flight (`_streamingKind === 'compacting'`, §2.11) a usage record describes the summary ask —
+ *  the OLD prefix + the summary prompt, never the next turn's prefix — so it never stamps (the real captures stream none:
+ *  the summary request's only trace on our wire is a rate_limit_event; the gate is the rule, said once, HERE).
+ *  THE RECORD'S CACHE FACTS (amendment 1 — observe the cache, don't infer it): a MAIN-THREAD record also stamps what it
+ *  says about the prompt cache (`_cacheFact`: the TTL it wrote, read / created / cold, the tokens — account-pool-auto
+ *  recordCacheFact); a sub-agent's request has its own prefix and says nothing about the conversation's. That record
+ *  is also the new context's first request after a compaction: the reset (`_compactedAt`, noteCompacted) ends HERE. */
 function noteModelRequest(session, rec, now = Date.now()) {
   if (!session || !rec || rec.type !== 'assistant' || !rec.message || !rec.message.usage) return;
   if (rec.message.model === '<synthetic>') return;
   const u = rec.message.usage;
   if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
+  if (session._streamingKind === 'compacting') return; // the compaction's own summary request (§2.11) — its cache is the old prefix
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
   session._lastRequestMember = linkMemberOf(session); // WHERE the cache now lives — the member that served it (round 4)
+  if (rec.parent_tool_use_id || rec.isSidechain) return; // a sub-agent's prefix is not the conversation's cache
+  session._cacheFact = recordCacheFact(u, session._cacheFact); // what this response SAYS about the cache (amendment 1)
+  session._compactedAt = null; // the new context's first request: the compaction's reset is over
+}
+/** THE COMPACTION'S END (lane cache-warmth-compact, 2026-11-03 — userW inc-mw1aanqt-994q, B-9769) — the ONE writer of
+ *  `_compactedAt`, called by BOTH feeds for every record (the parse beside noteModelRequest, the device stream's
+ *  claudeSideEffects), gated HERE on the record that ends a compaction: `system/compact_boundary` — the CLI writes it once
+ *  the summary has REPLACED the conversation (a failed or blocked compaction writes none and replaces nothing). From
+ *  then until the new context's first request the conversation's prompt cache is UNKNOWN (cacheFactsOf): no band, no
+ *  warm hold, no first-stop defer — a free move window, so the pool is asked at once. The EARLY signal of amendment 1,
+ *  corrected by the next record (noteModelRequest clears it and states what that request observed). Persisted with the
+ *  stamp at once (one write per compaction), so a restart keeps «reset». A backlog's boundary proves nothing about now. */
+function noteCompacted(session, rec, now = Date.now()) {
+  if (!session || !rec || rec.type !== 'system' || rec.subtype !== 'compact_boundary' || rec.parent_tool_use_id || rec.isSidechain) return;
+  if (recordIsLate(session, rec)) return;
+  session._compactedAt = Number(now) || Date.now();
+  persistRequestStamp(session);
+  kickPoolEval();
 }
 /** THE MEMBER THAT SERVED A REQUEST = the member the conversation's link named when that request went out (round 4). The
  *  CLI re-reads its credential at EVERY request (inc-mttbrtc0-6049: a re-point inside a single turn reached its very next
@@ -4056,11 +4083,15 @@ function linkMemberOf(session) {
 function persistRequestStamp(session) {
   try {
     const at = Number(session && session._lastRequestAt) || 0;
-    if (!at || !session.sockName) return false;
+    const compactedAt = Number(session && session._compactedAt) || null; // a compaction's reset travels with it (lane cache-warmth-compact)
+    if ((!at && !compactedAt) || !session.sockName) return false;
     const member = session._lastRequestMember || null; // the member that served it travels with it (round 3)
+    const cacheFact = (session._cacheFact && typeof session._cacheFact === 'object' && session._cacheFact) || null; // and what its record said (amendment 1)
     const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
-    if (prev === undefined || (prev && prev.lastRequestAt === at && (prev.lastRequestMember || null) === member)) return false; // the store is not wired / nothing new
-    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), lastRequestAt: at, lastRequestMember: member });
+    const stampOf = (m) => JSON.stringify([Number(m.lastRequestAt) || 0, m.lastRequestMember || null, m.cacheFact || null, Number(m.compactedAt) || null]);
+    const next = { lastRequestAt: at || undefined, lastRequestMember: member, cacheFact, compactedAt };
+    if (prev === undefined || (prev && stampOf(prev) === stampOf(next))) return false; // the store is not wired / nothing new
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), ...next });
     return true;
   } catch (e) { console.warn('[pool] request stamp not persisted:', e.message); return false; }
 }
@@ -4095,14 +4126,30 @@ function flushRequestStamps() {
  *    (turn-state requestInFlight — never a turn paused on the owner) and the instant it
  *    went out (`_turnStartedAt`, turn-state noteTurnFlight / noteRequestSent — round 4: EVERY
  *    request's send, a tool result's follow-up too); warmCache keeps it warm for
- *    one TTL from that instant. A paused turn ages by its stamp, like idle. */
+ *    one TTL from that instant. A paused turn ages by its stamp, like idle.
+ *  · THE CACHE IS OBSERVED (lane cache-warmth-compact, amendment 1): cacheTtlSec = the TTL the last record WROTE
+ *    (`_cacheFact`, stamped by noteModelRequest — `ttlSource: 'record'`); only while no record has stated one, the
+ *    billing state's inference above (`ttlSource: 'inferred'` — credits in use no longer override a record's hour).
+ *    `cacheObserved` = what that record saw ('read' — it reused the cached prefix; 'created' — a first write; 'cold' — a
+ *    conversation that had a cache wrote it anew: the previous prefix was not reused) + its read / created tokens. Warm
+ *    in between is a PROJECTION from that record and says so (the hover). `lost` stays the EARLY signal (a move is known
+ *    before the next request); the next record corrects it (it re-stamps where the cache now lives and says read/cold).
+ *  · A COMPACTION'S END (`_compactedAt`, noteCompacted — the other early signal) ⇒ UNKNOWN until the new context's
+ *    first request: no stamp, not lost, nothing in flight (the flight instant is the old context's), `unknownWhy:
+ *    'compacted'`. A chat conversation whose stream named no request yet is `unknownWhy: 'no-request'`. A terminal-mode
+ *    session is unchanged: no stream, no record, no compaction it could tell — the pty stamp and the inferred TTL. */
 function cacheFactsOf(session, now = Date.now()) {
   const s = session || {};
   const harness = s.backend || 'claude';
   let acct = null; try { acct = s._accountId ? accounts.get(s._accountId) : null; } catch { acct = null; }
   const apiKey = !!acct && (acct.type || 'api') === 'api';
   let onCredits = false; try { onCredits = overageState(readRawUsageCache(usageCacheKeyFor(s))).inUse === 'yes'; } catch { onCredits = false; }
-  const cacheTtlSec = cacheTtlSecFor({ harness, apiKey, onCredits });
+  const inferredTtl = cacheTtlSecFor({ harness, apiKey, onCredits });
+  const fact = Number(s._lastRequestAt) && s._cacheFact && typeof s._cacheFact === 'object' ? s._cacheFact : null;
+  const recordTtl = fact && Number(fact.ttlSec) > 0 ? Number(fact.ttlSec) : null;
+  const cacheTtlSec = recordTtl || inferredTtl;
+  const ttlSource = recordTtl ? 'record' : inferredTtl ? 'inferred' : null;
+  if (Number(s._compactedAt) > 0) return { lastRequestAt: null, cacheTtlSec, ttlSource, lost: false, inFlight: false, turnStartedAt: null, cacheObserved: null, cacheReadTokens: null, cacheCreatedTokens: null, unknownWhy: 'compacted' };
   // a chat session of a harness that states a TTL names each request in its stream (noteModelRequest): no stamp there ⇒
   // UNKNOWN (no colour, no hold) — a pty byte (the attach preamble after a restart) is never a request. The pty stamp
   // stands in only where no stream names one (a terminal-mode session).
@@ -4115,7 +4162,10 @@ function cacheFactsOf(session, now = Date.now()) {
   // a request OUT (never a turn paused on the owner) and the instant it went out — warm for one TTL from it
   const inFlight = requestInFlight({ isStreaming: s._isStreaming, turnState: s._turnState });
   const turnStartedAt = inFlight ? (Number(s._turnStartedAt) || null) : null;
-  return { lastRequestAt, cacheTtlSec, lost, inFlight, turnStartedAt };
+  const tokens = (n) => (Number.isFinite(Number(n)) && Number(n) >= 0 ? Number(n) : null);
+  return { lastRequestAt, cacheTtlSec, ttlSource, lost, inFlight, turnStartedAt,
+    cacheObserved: (fact && fact.observed) || null, cacheReadTokens: fact ? tokens(fact.read) : null, cacheCreatedTokens: fact ? tokens(fact.created) : null,
+    unknownWhy: streamed && !lastRequestAt && !(inFlight && turnStartedAt) ? 'no-request' : null };
 }
 /** Warm = a request is in flight OR its prompt cache has not gone cold (warmCache over
  *  cacheFactsOf — the SAME facts the pool's warm-cache hold reads); `inTurn` beside it. */
@@ -7680,7 +7730,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test

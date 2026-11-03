@@ -165,6 +165,31 @@ function cacheTtlSecFor({ harness = 'claude', apiKey = false, onCredits = false 
   if (!pc || apiKey) return null;
   return onCredits ? pc.creditsTtlSec : pc.subscriptionTtlSec;
 }
+// THE CACHE IS OBSERVED, NOT INFERRED (lane cache-warmth-compact, amendment 1 — the owner, 2026-11-03: «缓存时间这个你没有个
+// source of truth 吗？怎么感觉你都是按规则在猜？»). Every usage-carrying assistant record the CLI streams states its prompt
+// cache's own facts — the same fields the hub already reads for COST:
+//   · `cache_creation.ephemeral_1h_input_tokens` / `ephemeral_5m_input_tokens` > 0 ⇒ a prefix was WRITTEN with that TTL —
+//     the TTL is a fact of the record, never of the billing state (1 h wins when a record wrote both: the next request
+//     reads the hour's part, only the 5-minute tail would be re-written);
+//   · `cache_read_input_tokens` > 0 ⇒ the request READ a cached prefix: the one direct observation of warmth there is;
+//     a read re-times the entry at its CREATION TTL, so a read-only record keeps the TTL the conversation last wrote;
+//   · read 0 with a creation > 0 on a conversation that had a cache ⇒ the previous prefix was NOT reused (expired, moved,
+//     compacted, changed) — the cold start OBSERVED at the next request; a conversation's first write is 'created'.
+// → {ttlSec (3600 | 300 | the last written TTL | null), observed ('read' | 'created' | 'cold' | null — a record that
+// neither read nor wrote states nothing about the cache), read, created (tokens)}. `prev` = the conversation's last such
+// fact (session `_cacheFact`). cacheTtlSecFor above is the FALLBACK, only while no record has stated a TTL.
+function recordCacheFact(usage, prev = null) {
+  const u = usage && typeof usage === 'object' ? usage : {};
+  const cc = u.cache_creation && typeof u.cache_creation === 'object' ? u.cache_creation : {};
+  const read = Math.max(0, Number(u.cache_read_input_tokens) || 0);
+  const h1 = Math.max(0, Number(cc.ephemeral_1h_input_tokens) || 0), m5 = Math.max(0, Number(cc.ephemeral_5m_input_tokens) || 0);
+  const created = Math.max(0, Number(u.cache_creation_input_tokens) || 0) || h1 + m5;
+  const written = h1 > 0 ? 3600 : m5 > 0 ? 300 : null;
+  const prevTtl = prev && Number(prev.ttlSec) > 0 ? Number(prev.ttlSec) : null;
+  const hadCache = !!(prev && (prevTtl || prev.observed));
+  const observed = read > 0 ? 'read' : created > 0 ? (hadCache ? 'cold' : 'created') : null;
+  return { ttlSec: written || prevTtl, observed, read, created };
+}
 // warm while now − the conversation's last model request < its TTL, and the conversation is still on the member that
 // served that request (`lost`: the cache lives where the request was served — usage-pool-engine cacheFactsOf compares
 // the member noteModelRequest stamped with the member its link names now).
@@ -1766,4 +1791,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 module.exports = {
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
-  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

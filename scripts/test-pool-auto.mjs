@@ -442,15 +442,31 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   // THE TTL IS ONE FACT THE HUB STATES (lane cache-warmth-tiles, 2026-11-02): a subscription session rides the 1-hour
   // prompt cache whatever its model; usage credits IN USE ⇒ 5 minutes; a harness that states none ⇒ unknown. RED on
   // 3f8429cd5: the 2026-09-22 rule answered 300 s for every model without '[1m]'.
-  ck('TTL FACT: a subscription claude conversation rides the 1-hour cache — whatever its model (the [1m] suffix decides nothing)', cacheTtlSecFor({ harness: 'claude' }) === 3600 && cacheTtlSecFor() === 3600, String(cacheTtlSecFor({ harness: 'claude' })));
-  ck('TTL FACT: usage credits in use ⇒ the 5-minute cache', cacheTtlSecFor({ harness: 'claude', onCredits: true }) === 300);
+  ck('TTL FALLBACK (amendment 1: asked only while no record stated a TTL): a subscription claude conversation rides the 1-hour cache — whatever its model (the [1m] suffix decides nothing)', cacheTtlSecFor({ harness: 'claude' }) === 3600 && cacheTtlSecFor() === 3600, String(cacheTtlSecFor({ harness: 'claude' })));
+  ck('TTL FALLBACK: usage credits in use ⇒ the 5-minute cache', cacheTtlSecFor({ harness: 'claude', onCredits: true }) === 300);
   const { BACKEND_CAPS } = require(path.resolve('src/backend-caps.js'));
   const stating = Object.keys(BACKEND_CAPS).filter((h) => BACKEND_CAPS[h].promptCache);
   ck('TTL FACT: claude is the one shipped row that states a prompt cache; every other row — and an unknown id — answers null (unknown, never a guess)',
     stating.join() === 'claude' && Object.keys(BACKEND_CAPS).filter((h) => !BACKEND_CAPS[h].promptCache).every((h) => cacheTtlSecFor({ harness: h }) === null) && cacheTtlSecFor({ harness: 'nope' }) === null, stating.join());
-  ck('TTL FACT: an API-key claude session ⇒ unknown (the fact covers subscription billing)', cacheTtlSecFor({ harness: 'claude', apiKey: true }) === null);
+  ck('TTL FALLBACK: an API-key claude session ⇒ unknown (the inference covers subscription billing; a record\'s TTL still states it)', cacheTtlSecFor({ harness: 'claude', apiKey: true }) === null);
   const ttlSrc = (() => { const t = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8'); const i = t.indexOf('function cacheTtlSecFor('); return i < 0 ? '' : t.slice(i, t.indexOf('\n}\n', i)); })();
   ck('TTL FACT: no model reaches the rule — cacheTtlSecFor reads the harness row, never a model name or a \'[1m]\'', ttlSrc && /capsOf\(harness\)\.promptCache/.test(ttlSrc) && !/\[1m\]|model/i.test(ttlSrc), ttlSrc.slice(0, 200));
+  // AMENDMENT 1 (lane cache-warmth-compact — the owner: «缓存时间这个你没有个 source of truth 吗？»): THE CACHE IS OBSERVED. Every
+  // usage-carrying record states its prompt cache's own facts; account-pool-auto recordCacheFact reads them (PURE). Guarded so a
+  // base without it (749aa7bf9) reds BY NAME.
+  {
+    const { recordCacheFact } = require(path.resolve('src/account-pool-auto.js'));
+    const rcf = typeof recordCacheFact === 'function' ? recordCacheFact : () => ({ missing: 'recordCacheFact' });
+    const u = (read, h1, m5, total) => ({ input_tokens: 3, output_tokens: 9, cache_read_input_tokens: read, cache_creation_input_tokens: total ?? h1 + m5, cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } });
+    const first = rcf(u(0, 21000, 0)), read1h = rcf(u(42000, 600, 0), first), w5 = rcf(u(0, 0, 9000), read1h), readOnly = rcf({ input_tokens: 2, output_tokens: 4, cache_read_input_tokens: 9000 }, w5);
+    ck('RECORD FACT (pure): ephemeral_1h > 0 ⇒ ttlSec 3600; a conversation\'s first write is \'created\' (RED on 749aa7bf9: no reader)', first.ttlSec === 3600 && first.observed === 'created' && first.created === 21000 && first.read === 0, JSON.stringify(first));
+    ck('RECORD FACT (pure): a read ⇒ \'read\' with its tokens, the TTL the record wrote', read1h.ttlSec === 3600 && read1h.observed === 'read' && read1h.read === 42000, JSON.stringify(read1h));
+    ck('RECORD FACT (pure): ephemeral_5m > 0 ⇒ ttlSec 300; read 0 with a write after a conversation that had a cache ⇒ \'cold\' (the earlier prefix was not reused)', w5.ttlSec === 300 && w5.observed === 'cold' && w5.created === 9000, JSON.stringify(w5));
+    ck('RECORD FACT (pure): a READ-ONLY record keeps the TTL the conversation last wrote (a read re-times the entry at its creation TTL)', readOnly.ttlSec === 300 && readOnly.observed === 'read', JSON.stringify(readOnly));
+    const both = rcf(u(0, 500, 700)), none = rcf({ input_tokens: 5, output_tokens: 1 }), oldCli = rcf({ input_tokens: 5, output_tokens: 1, cache_creation_input_tokens: 800 });
+    ck('RECORD FACT (pure): a record that wrote BOTH buckets ⇒ the hour (the next request reads it; only the 5-minute tail is rewritten); one that neither read nor wrote states nothing; a write with no bucket breakdown ⇒ no TTL (the fallback decides)',
+      both.ttlSec === 3600 && none.ttlSec === null && none.observed === null && oldCli.ttlSec === null && oldCli.observed === 'created', JSON.stringify([both, none, oldCli]));
+  }
   const nowMs = NOW * 1000;
   ck('warm: no request stamp ⇒ NOT warm (a hold never rests on ignorance)', (() => { const w = warmCache({ lastRequestAt: undefined, cacheTtlSec: 3600, nowMs }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })());
   ck('warm: an UNKNOWN ttl ⇒ NOT warm (no hold for a harness that states no cache)', (() => { const w = warmCache({ lastRequestAt: nowMs - 1e3, cacheTtlSec: null, nowMs }); return w.warm === false && w.ttlSec === null && w.agoSec === 1; })());
@@ -771,9 +787,9 @@ await (async () => {
       const c0 = fs.readFileSync(cacheFile, 'utf8');
       fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: true, status: 'allowed', asOf: Date.now() } }));
       const fCr = factsOf(w2.eng, w2.sessions.get('sess-20'), T0);
-      ck('facts: its member paying with usage credits ⇒ the 5-minute TTL — and the 20-minute conversation reads COLD', fCr.cacheTtlSec === 300 && warmCache({ ...fCr, nowMs: T0 }).warm === false, JSON.stringify(fCr));
+      ck('facts: TTL FALLBACK (its record stated no TTL — amendment 1) — its member paying with usage credits ⇒ the 5-minute TTL, inferred — and the 20-minute conversation reads COLD', fCr.cacheTtlSec === 300 && warmCache({ ...fCr, nowMs: T0 }).warm === false, JSON.stringify(fCr));
       fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: false, status: 'allowed', asOf: Date.now() } }));
-      ck('facts: credits ENABLED but not in use (overageState mode \'allowed\') ⇒ still the hour', factsOf(w2.eng, w2.sessions.get('sess-20'), T0).cacheTtlSec === 3600);
+      ck('facts: TTL FALLBACK — credits ENABLED but not in use (overageState mode \'allowed\') ⇒ still the hour', factsOf(w2.eng, w2.sessions.get('sess-20'), T0).cacheTtlSec === 3600);
       fs.writeFileSync(cacheFile, c0);
       // THE PIN on the real engine: the projection moves the unwitnessed cold one, HOLDS the 20-minute one (RED on 3f8429cd5:
       // the 5-minute belief called it cold and moved it — a 40–80× rewrite)
@@ -1062,6 +1078,149 @@ await (async () => {
           && lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l)),
           JSON.stringify({ r: rI, f: seen['l1-idle'], link: at(wL, 'l1-idle'), l: lineOf('l1-idle') }));
         console.log = console.warn = () => { }; try { await new Promise((r) => setImmediate(r)); } finally { console.log = o0; console.warn = o1; } // the usage record's kicked pass
+      }
+    }
+    // ── LANE CACHE-WARMTH-COMPACT (2026-11-03 — userW inc-mw1aanqt-994q, B-9769; amendment 1, the owner: «缓存时间这个你没有个
+    // source of truth 吗？»): THE CACHE FACT IS WHAT THE LAST RECORD SAID — its TTL is the record's (ephemeral_1h ⇒ the hour,
+    // ephemeral_5m ⇒ 5 minutes; the billing state only the FALLBACK), what it saw (read / created / cold) corrects the early
+    // `lost`, and a compaction's END (`system/compact_boundary`, the engine's ONE writer noteCompacted) makes it UNKNOWN until
+    // the new context's first request: no band, no warm hold, no first-stop defer — a free move window. On the REAL engine
+    // (both real feeds: test-fable-cap-pool-storm §21). RED on 749aa7bf9 by name (every new engine call is guarded).
+    {
+      const metasM = new Map();
+      const metaM = { readSessionMeta: (k) => metasM.get(k) || {}, writeSessionMeta: (k, m) => { metasM.set(k, m); } };
+      const shapeM = (kind, extra) => {
+        const x = world(engMod, { burnA: 0, extra, metaStore: metaM });
+        if (!x) return null;
+        const nowS = Math.floor(Date.now() / 1000);
+        const cf = (id) => path.join(x.am.dataDir, 'usage-cache', id + '.json');
+        const rw = (id, f) => fs.writeFileSync(cf(id), JSON.stringify(f(JSON.parse(fs.readFileSync(cf(id), 'utf8')))));
+        if (kind === 'soft') rw(x.A, (c) => ({ ...c, fiveHour: { utilization: 0.93, resetsAt: nowS + 7200 } }));
+        else {
+          rw(x.A, (c) => ({ ...c, fiveHour: { utilization: 0.3, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 6 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.4, resetsAt: nowS + 6 * 86400 }] }));
+          rw(x.Bm, (c) => ({ ...c, sevenDay: { utilization: 0.3, resetsAt: nowS + 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: nowS + 86400 }] }));
+        }
+        x.credits = (inUse) => rw(x.A, (c) => ({ ...c, overage: { inUse, status: 'allowed', asOf: Date.now() } }));
+        return x;
+      };
+      const recM = (id, { read = 0, h1 = 0, m5 = 0, sub = false } = {}) => ({ type: 'assistant', message: { id, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: read, cache_creation_input_tokens: h1 + m5, cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } } }, parent_tool_use_id: sub ? 'toolu_sub' : null, uuid: 'u-' + id });
+      // shaped from a real capture (data/session-buffers, a manual /compact: pre_tokens 270743 → post_tokens 16740)
+      const boundary = (n) => ({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 270743, post_tokens: 16740, duration_ms: 78444 }, uuid: 'u-cb-' + n });
+      const note = (x, s, r, at) => x.eng.noteModelRequest?.(s, r, at);
+      const compactEnd = (x, s, r, at) => (typeof x.eng.noteCompacted === 'function' ? x.eng.noteCompacted(s, r, at) : null);
+      const quietM = (fn) => { const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { return fn(); } finally { console.log = o0; console.warn = o1; } };
+      const idle = (s) => { s._isStreaming = false; s._turnState = 'idle'; s._turnStartedAt = null; return s; };
+      const drain = () => new Promise((r) => setImmediate(r));
+      // (CW1) THE TTL IS THE RECORD'S
+      const wR = shapeM('edf', [['m1-hour', 0], ['m1-five', 0], ['m1-read', 0], ['m1-none', 0], ['m1-sub', 0]]);
+      if (!wR) ck('CW SKIP — pools unsupported on this platform', true);
+      else {
+        const g = (sid) => wR.sessions.get(sid), T = Date.now();
+        const fM = (sid, at = Date.now()) => factsOf(wR.eng, g(sid), at);
+        for (const sid of ['m1-hour', 'm1-five', 'm1-read', 'm1-none', 'm1-sub']) { idle(g(sid)); delete g(sid)._lastRequestAt; }
+        note(wR, g('m1-hour'), recM('h1', { read: 40000, h1: 900 }), T - 20 * 60e3);
+        note(wR, g('m1-five'), recM('f5', { m5: 9000 }), T - 20 * 60e3);
+        note(wR, g('m1-read'), recM('r5', { m5: 9000 }), T - 25 * 60e3); note(wR, g('m1-read'), recM('r0', { read: 9000 }), T - 20 * 60e3);
+        note(wR, g('m1-none'), { ...recM('n0'), message: { ...recM('n0').message, usage: { input_tokens: 3, output_tokens: 40 } } }, T - 20 * 60e3);
+        wR.credits(true); // the member's billing state says CREDITS IN USE (the 5-minute inference)
+        const h = fM('m1-hour'), nC = fM('m1-none');
+        ck('CW1 THE PIN — a record that wrote the 1-HOUR bucket ⇒ cacheTtlSec 3600 from the RECORD, though its member pays with credits (the billing inference says 300) — 20 min ago is WARM (RED on 749aa7bf9: 300, cold)',
+          h.cacheTtlSec === 3600 && h.ttlSource === 'record' && h.cacheObserved === 'read' && h.cacheReadTokens === 40000 && warmCache({ ...h, nowMs: Date.now() }).warm === true, JSON.stringify(h));
+        ck('CW1 THE FALLBACK — a record that stated no TTL (no cache fields) ⇒ the billing inference decides: credits in use ⇒ 300, `ttlSource: inferred` — 20 min ago is cold',
+          nC.cacheTtlSec === 300 && nC.ttlSource === 'inferred' && nC.cacheObserved === null && warmCache({ ...nC, nowMs: Date.now() }).warm === false, JSON.stringify(nC));
+        wR.credits(false); // no credits: the inference says the hour
+        const f = fM('m1-five'), rd = fM('m1-read'), nH = fM('m1-none');
+        ck('CW1 THE PIN — a record that wrote the 5-MINUTE bucket ⇒ 300 from the record, though the billing state says the hour — 20 min ago is COLD (RED on 749aa7bf9: 3600, warm)',
+          f.cacheTtlSec === 300 && f.ttlSource === 'record' && f.cacheObserved === 'created' && warmCache({ ...f, nowMs: Date.now() }).warm === false, JSON.stringify(f));
+        ck('CW1 a READ-ONLY record keeps the TTL the conversation last wrote (5 min) — the read re-times it, the bucket stays', rd.cacheTtlSec === 300 && rd.ttlSource === 'record' && rd.cacheObserved === 'read', JSON.stringify(rd));
+        ck('CW1 THE FALLBACK — no credits ⇒ the inferred hour (the old TTL FACT legs above are this fallback now)', nH.cacheTtlSec === 3600 && nH.ttlSource === 'inferred', JSON.stringify(nH));
+        const lR = quietM(() => { const o = []; const l0 = console.log, w0 = console.warn; console.log = (...a) => o.push(a.join(' ')); console.warn = (...a) => o.push(a.join(' ')); try { wR.eng.maybePoolAutoSwitchForPool(wR.P); } finally { console.log = l0; console.warn = w0; } return o; });
+        ck('CW1 THE PIN (the pool): EDF holds the 1-hour record\'s 20-min conversation and MOVES the 5-minute record\'s (RED on 749aa7bf9: both held on the inferred hour)',
+          wR.linkOf('m1-hour') === 'A' && wR.linkOf('m1-five') === 'B', ['m1-hour', 'm1-five'].map(wR.linkOf).join(',') + ' | ' + lR.filter((l) => /m1-/.test(l)).join(' | ').slice(0, 400));
+        const before = JSON.stringify(g('m1-hour')._cacheFact);
+        note(wR, g('m1-hour'), recM('sub1', { m5: 7000, sub: true }), Date.now());
+        ck('CW1 a SUB-AGENT\'s record (parent_tool_use_id) moves the stamp as before but never the conversation\'s cache fact (its own prefix)', JSON.stringify(g('m1-hour')._cacheFact) === before && before !== undefined, before + ' → ' + JSON.stringify(g('m1-hour')._cacheFact));
+        // (CW1e) `lost` IS THE EARLY SIGNAL, CORRECTED BY THE NEXT RECORD
+        const sL = g('m1-hour'); wR.am.ensureSessionPoolLink(wR.P, 'm1-hour', wR.A, { why: 'per-session-switch' });
+        note(wR, sL, recM('e0', { read: 40000, h1: 300 }), Date.now() - 60e3);
+        wR.am.ensureSessionPoolLink(wR.P, 'm1-hour', wR.Bm, { why: 'per-session-switch' });
+        const early = fM('m1-hour');
+        note(wR, sL, recM('e1', { h1: 61000 }), Date.now());
+        const conf = fM('m1-hour');
+        wR.am.ensureSessionPoolLink(wR.P, 'm1-hour', wR.A, { why: 'per-session-switch' });
+        const early2 = fM('m1-hour');
+        note(wR, sL, recM('e2', { read: 58000, h1: 200 }), Date.now());
+        const clr = fM('m1-hour');
+        ck('CW1 (e) a move after the stamp ⇒ `lost` at once (the EARLY signal); the next record READ 0 and wrote anew ⇒ observed \'cold\' — the loss confirmed, the cache now lives on B, warm',
+          early.lost === true && conf.lost === false && conf.cacheObserved === 'cold' && warmCache({ ...conf, nowMs: Date.now() }).warm === true, JSON.stringify([early.lost, conf]));
+        ck('CW1 (e) …a move back, `lost` early again, then a record that READ ⇒ observed \'read\' — the early signal cleared by the record', early2.lost === true && clr.lost === false && clr.cacheObserved === 'read' && clr.cacheReadTokens === 58000, JSON.stringify([early2.lost, clr]));
+      }
+      // (CW2) A COMPACTION'S END RESETS THE FACT — EDF: a 2-min-warm conversation is HELD; its compaction ends ⇒ unknown, MOVED
+      const wC = shapeM('edf', [['m2-compact', 0], ['m2-control', 0]]);
+      if (wC) {
+        const g = (sid) => wC.sessions.get(sid);
+        for (const sid of ['m2-compact', 'm2-control']) { idle(g(sid)); note(wC, g(sid), recM('w-' + sid, { read: 250000, h1: 1200 }), Date.now() - 2 * 60e3); }
+        const sC = g('m2-compact'), key = sC.sockName, stamp0 = sC._lastRequestAt;
+        // the compaction: in flight (the parse's §2.11 state), its own summary request's record (the OLD prefix), then its end
+        sC._streamingKind = 'compacting'; sC._isStreaming = true; sC._turnState = 'running'; sC._turnStartedAt = Date.now() - 80e3;
+        note(wC, sC, recM('summary', { read: 268000, h1: 2500 }), Date.now());
+        const afterSummary = sC._lastRequestAt;
+        sC._streamingKind = null;
+        quietM(() => compactEnd(wC, sC, boundary(1), Date.now()));
+        const fC = factsOf(wC.eng, sC, Date.now()), wcC = warmCache({ ...fC, nowMs: Date.now() });
+        ck('CW2 THE PIN — the compaction\'s own summary record (usage, while compacting) never stamps: the stamp stays the last real request\'s', afterSummary === stamp0, String(afterSummary - stamp0));
+        ck('CW2 THE PIN — the compaction\'s END ⇒ UNKNOWN: no stamp, not lost, nothing in flight (the flight instant is the old context\'s), `unknownWhy: compacted`; warmCache answers unknown (RED on 749aa7bf9: warm, 2 min ago)',
+          fC.unknownWhy === 'compacted' && fC.lastRequestAt === null && fC.lost === false && fC.inFlight === false && wcC.warm === false && wcC.unknown === true, JSON.stringify([fC, wcC]));
+        ck('CW2 THE PIN — the session meta says RESET at once (compactedAt persisted with the stamp — a restart keeps it)', Number(metasM.get(key) && metasM.get(key).compactedAt) > 0, JSON.stringify(metasM.get(key)));
+        idle(sC);
+        const lC = []; { const l0 = console.log, w0 = console.warn; console.log = (...a) => lC.push(a.join(' ')); console.warn = (...a) => lC.push(a.join(' ')); try { wC.eng.maybePoolAutoSwitchForPool(wC.P); } finally { console.log = l0; console.warn = w0; } }
+        ck('CW2 THE PIN (the pool, EDF): the compacted conversation is NOT held — it moves; the 2-min-warm control stays held (RED on 749aa7bf9: both held «warm cache»)',
+          wC.linkOf('m2-compact') === 'B' && wC.linkOf('m2-control') === 'A' && !lC.some((l) => /hold m2-compact/.test(l)) && lC.some((l) => /^\[pool\] hold m2-control: warm cache/.test(l)),
+          ['m2-compact', 'm2-control'].map(wC.linkOf).join(',') + ' | ' + lC.filter((l) => /m2-/.test(l)).join(' | ').slice(0, 400));
+        // a restart between: the conversation restored from its meta (boot-restore's fields — the real restore is test-cache-warmth ⑦)
+        const m = metasM.get(key) || {};
+        const back = { ...sC, _webuiId: 'm2-back', sockName: 'cw-m2-back', _lastRequestAt: Number(m.lastRequestAt) || undefined, _lastRequestMember: m.lastRequestMember || null, _cacheFact: m.cacheFact || null, _compactedAt: Number(m.compactedAt) || null, _streamingKind: null };
+        wC.am.ensureSessionPoolLink(wC.P, 'm2-back', wC.A, { why: 'spawn' });
+        const fB = factsOf(wC.eng, back, Date.now());
+        ck('CW2 THE PIN — a restart between the compaction and the next request ⇒ still UNKNOWN (the meta\'s reset outranks its old stamp)', fB.unknownWhy === 'compacted' && fB.lastRequestAt === null && warmCache({ ...fB, nowMs: Date.now() }).warm === false, JSON.stringify(fB));
+        // the new context's first request: warm again, the record states its own facts, the meta's reset cleared at the turn end
+        note(wC, sC, recM('next', { h1: 17000 }), Date.now());
+        quietM(() => wC.eng.noteTurnEnd(sC, { type: 'result', subtype: 'success', session_id: sC.claudeSessionId }));
+        const fN = factsOf(wC.eng, sC, Date.now());
+        ck('CW2 THE PIN — the next real request ⇒ WARM again from its record (the hour, observed \'cold\': the old prefix was replaced), and the persisted meta no longer says reset',
+          fN.unknownWhy === null && fN.lastRequestAt > 0 && fN.cacheTtlSec === 3600 && fN.ttlSource === 'record' && fN.cacheObserved === 'cold' && warmCache({ ...fN, nowMs: Date.now() }).warm === true && !(metasM.get(key) || {}).compactedAt,
+          JSON.stringify([fN, metasM.get(key)]));
+        const late = { ...boundary(2), timestamp: new Date(Date.now() - 3 * 3600e3).toISOString() };
+        quietM(() => compactEnd(wC, sC, late, Date.now()));
+        ck('CW2 a BACKLOG\'s boundary (stamped 3 h ago — a catch-up) resets nothing: still warm', !sC._compactedAt && warmCache({ ...factsOf(wC.eng, sC, Date.now()), nowMs: Date.now() }).warm === true, String(sC._compactedAt));
+      }
+      // (CW3) THE SOFT BAND: a warm conversation MID-TURN (an auto-compaction inside a turn) is a free move at the compaction's end —
+      // no first-stop defer (nothing warm) — and the end ASKS the pool itself (noteCompacted kicks the pass: no tick needed)
+      const wS = shapeM('soft', [['m3-auto', 0], ['m3-control', 0]]);
+      if (wS) {
+        const g = (sid) => wS.sessions.get(sid);
+        for (const sid of ['m3-auto', 'm3-control']) { const x = g(sid); note(wS, x, recM('w-' + sid, { read: 300000, h1: 900 }), Date.now() - 60e3); x._isStreaming = true; x._turnState = 'running'; x._turnStartedAt = Date.now() - 30e3; }
+        const lS = []; const l0 = console.log, w0 = console.warn; console.log = (...a) => lS.push(a.join(' ')); console.warn = (...a) => lS.push(a.join(' '));
+        try {
+          compactEnd(wS, g('m3-auto'), boundary(3), Date.now()); // the auto-compaction ends; the turn goes on
+          await drain(); await drain();
+        } finally { console.log = l0; console.warn = w0; }
+        ck('CW3 THE PIN — SOFT band: the compaction\'s end moves the mid-turn conversation AT ONCE (unknown: no warm-soft-defer), asked by the end itself — no pool tick ran (RED on 749aa7bf9: no writer, held to its first stop)',
+          wS.linkOf('m3-auto') === 'B' && !lS.some((l) => /defer m3-auto/.test(l)), wS.linkOf('m3-auto') + ' | ' + lS.filter((l) => /m3-|\[pool\]/.test(l)).join(' | ').slice(0, 500));
+        const lS2 = []; console.log = (...a) => lS2.push(a.join(' ')); console.warn = (...a) => lS2.push(a.join(' '));
+        try { wS.eng.maybePoolAutoSwitchForPool(wS.P); } finally { console.log = l0; console.warn = w0; }
+        ck('CW3 control: the same warm mid-turn conversation with no compaction is deferred to its first stop (warm-soft-defer)',
+          wS.linkOf('m3-control') === 'A' && lS2.concat(lS).some((l) => /^\[pool\] defer m3-control: soft-exhausted/.test(l)), wS.linkOf('m3-control') + ' | ' + lS2.filter((l) => /m3-control/.test(l)).join(' | ').slice(0, 300));
+      }
+      {
+        // THE WRITER CENSUS (the lane's growth of K2's): `_compactedAt` and `_cacheFact` are assigned in usage-pool-engine.js alone
+        // (noteCompacted sets the reset, noteModelRequest ends it and stamps the fact; boot-restore's restore is a literal's key)
+        const walkM = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkM(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
+        const filesM = [...walkM(path.resolve('src')), path.resolve('server.js')];
+        const by = (re) => { const o = {}; for (const f of filesM) { const n = (fs.readFileSync(f, 'utf8').match(re) || []).length; if (n) o[path.relative(path.resolve('.'), f)] = n; } return o; };
+        const comp = by(/\._compactedAt\s*=[^=]/g), fact = by(/\._cacheFact\s*=[^=]/g);
+        ck('CW WRITER CENSUS: `_compactedAt` is assigned only in usage-pool-engine.js — noteCompacted\'s reset and noteModelRequest\'s end of it; `_cacheFact` only by noteModelRequest (RED on 749aa7bf9: neither exists)',
+          JSON.stringify(comp) === JSON.stringify({ 'src/server/usage-pool-engine.js': 2 }) && JSON.stringify(fact) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }), JSON.stringify({ comp, fact }));
       }
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());

@@ -3602,6 +3602,69 @@ console.log('\n§21 the last model request is the stream\'s own request record')
         /if \(sendsRequest\(msg\)\) \{\s*if \(!authoritative\) session\._isStreaming = true;\s*\(recordIsLate\?\.\(session, msg\) \? noteTurnFlight : noteRequestSent\)\(session, Date\.now\(\)\);/.test(parseSrc)
         && /if \(sendsRequest\(msg\) && !recordIsLate\?\.\(session, msg\)\) noteRequestSent\(session, Date\.now\(\)\);/.test(brainSrc) && !/local-command-/.test(parseSrc.slice(parseSrc.indexOf('if (sendsRequest(msg))') - 400, parseSrc.indexOf('if (sendsRequest(msg))'))));
     }
+    // ── LANE CACHE-WARMTH-COMPACT (2026-11-03 — userW inc-mw1aanqt-994q, B-9769; amendment 1): THE CACHE FACT IS WHAT THE
+    // LAST RECORD SAID, and a compaction's END resets it until the new context's first request — ONE writer each in the engine
+    // (noteModelRequest stamps the record's cache facts; noteCompacted the reset), called by BOTH feeds. The parse is fed the
+    // REAL capture's order (data/session-buffers, a manual /compact): status compacting → (a summary usage record, if a CLI
+    // ever streams one) → status null + compact_result success → compact_boundary → the summary's user record → the
+    // «Compacted» echo → result. RED on 749aa7bf9 by name.
+    {
+      const cwRec = (sid, n, { read = 0, h1 = 0, m5 = 0 } = {}) => ({ type: 'assistant', message: { id: 'msg_cw' + n, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: read, cache_creation_input_tokens: h1 + m5, cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } } }, parent_tool_use_id: null, session_id: 'cid-' + sid, uuid: 'u-cw' + n });
+      const cwSys = (sid, n, extra) => ({ type: 'system', session_id: 'cid-' + sid, uuid: 'u-cws' + n, ...extra });
+      const cwBoundary = (sid, n) => cwSys(sid, n, { subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 270743, post_tokens: 16740, duration_ms: 78444 } });
+      const cwUser = (sid, n, text) => ({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: 'cid-' + sid, uuid: 'u-cwu' + n });
+      const sP = w.mkSession('sess-cw-p', 'personal', { _spawnModel: 'claude-fable-5-1' });
+      sP._normalizer = createMessageManager('claude', 'sess-cw-p');
+      const ptyP = mkPty(); so.setupSessionPty(sP, 'sess-cw-p', ptyP);
+      const feedP = (r) => ptyP.data(JSON.stringify(r) + '\n');
+      const capC = quiet();
+      let p1 = null, pDuring = null, pEnd = null, pAfter = null, stamp1 = null, stampDuring = null, cEnd = null;
+      try {
+        feedP(cwRec('sess-cw-p', 1, { read: 0, h1: 21000 }));
+        p1 = factsNow(sP); stamp1 = sP._lastRequestAt;
+        feedP(cwSys('sess-cw-p', 2, { subtype: 'status', status: 'compacting' }));
+        feedP(cwRec('sess-cw-p', 3, { read: 268000, h1: 2500 })); // the compaction's own summary request (the OLD prefix)
+        stampDuring = sP._lastRequestAt; pDuring = sP._streamingKind;
+        feedP(cwSys('sess-cw-p', 4, { subtype: 'status', status: null, compact_result: 'success' }));
+        feedP(cwBoundary('sess-cw-p', 5));
+        feedP(cwUser('sess-cw-p', 6, 'This session is being continued from a previous conversation that ran out of context.'));
+        feedP(cwUser('sess-cw-p', 7, '<local-command-stdout>Compacted </local-command-stdout>'));
+        feedP({ type: 'result', subtype: 'success', session_id: 'cid-sess-cw-p', uuid: 'u-cwr8' });
+        pEnd = factsNow(sP); cEnd = sP._compactedAt;
+        feedP(cwRec('sess-cw-p', 9, { read: 0, h1: 17000 }));
+        pAfter = factsNow(sP);
+      } finally { capC.done(); }
+      ok('§21 CW THE PIN (parse feed): a record that wrote the 1-hour bucket ⇒ the TTL is the RECORD\'s (3600, `ttlSource: record`), observed \'created\' — the facts the hub already read for cost (RED on 749aa7bf9: no record facts)',
+        p1 && p1.cacheTtlSec === 3600 && p1.ttlSource === 'record' && p1.cacheObserved === 'created' && p1.cacheCreatedTokens === 21000, JSON.stringify(p1));
+      ok('§21 CW THE PIN (parse feed): the compaction\'s own summary record (usage, while the parse holds it compacting) never stamps', pDuring === 'compacting' && stampDuring === stamp1, JSON.stringify([pDuring, stampDuring - stamp1]));
+      ok('§21 CW THE PIN (parse feed): the compaction\'s END (compact_boundary) ⇒ UNKNOWN until the next request — no stamp, not lost, nothing in flight, `unknownWhy: compacted`, warmCache unknown — through the summary\'s user record and the turn\'s end (RED on 749aa7bf9: warm on the old stamp)',
+        pEnd && pEnd.unknownWhy === 'compacted' && pEnd.lastRequestAt === null && pEnd.lost === false && pEnd.inFlight === false && warmCache({ ...pEnd, nowMs: Date.now() }).unknown === true && Number(cEnd) > 0, JSON.stringify([pEnd, cEnd]));
+      ok('§21 CW THE PIN (parse feed): the new context\'s first request ⇒ WARM again from its record (observed \'cold\': the old prefix was replaced), the reset over',
+        pAfter && pAfter.unknownWhy === null && pAfter.lastRequestAt > 0 && pAfter.ttlSource === 'record' && pAfter.cacheObserved === 'cold' && !sP._compactedAt && idleWarm(sP).warm === true, JSON.stringify(pAfter));
+      // the device feed's twin: the SAME writers through session-brain's claudeSideEffects
+      const sD = w.mkSession('sess-cw-d', 'personal', { _spawnModel: 'claude-fable-5-1' });
+      const capD = quiet();
+      let d1 = null, dStamp = null, dDuring = null, dEnd = null, dAfter = null;
+      try {
+        brain.claudeSideEffects(sD, 'sess-cw-d', cwRec('sess-cw-d', 11, { m5: 9000 }));
+        d1 = factsNow(sD); dStamp = sD._lastRequestAt;
+        sD._streamingKind = 'compacting'; // the parse's §2.11 state (it saw the status record): the device feed fills its gaps, never its state
+        brain.claudeSideEffects(sD, 'sess-cw-d', cwRec('sess-cw-d', 12, { read: 9000, m5: 400 }));
+        dDuring = sD._lastRequestAt; sD._streamingKind = null;
+        brain.claudeSideEffects(sD, 'sess-cw-d', cwBoundary('sess-cw-d', 13));
+        dEnd = factsNow(sD);
+        brain.claudeSideEffects(sD, 'sess-cw-d', cwRec('sess-cw-d', 14, { read: 0, m5: 6000 }));
+        dAfter = factsNow(sD);
+      } finally { capD.done(); }
+      ok('§21 CW THE PIN (device feed): a record that wrote the 5-minute bucket ⇒ 300 from the record, though the member bills on the hour (`ttlSource: record`)', d1 && d1.cacheTtlSec === 300 && d1.ttlSource === 'record' && d1.cacheObserved === 'created', JSON.stringify(d1));
+      ok('§21 CW THE PIN (device feed): the summary record never stamps while compacting; the boundary ⇒ UNKNOWN (`compacted`); the next request ⇒ warm from its record — the SAME writers (RED on 749aa7bf9)',
+        dDuring === dStamp && dEnd && dEnd.unknownWhy === 'compacted' && dEnd.lastRequestAt === null && dAfter && dAfter.unknownWhy === null && dAfter.cacheTtlSec === 300 && dAfter.cacheObserved === 'cold' && idleWarm(sD).warm === true,
+        JSON.stringify({ during: dDuring - dStamp, dEnd, dAfter }));
+      const parseSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8'), brainSrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
+      const one = (src) => (src.match(/noteCompacted\?\.\(session, msg\)/g) || []).length;
+      ok('§21 CW WIRING: each feed calls the compaction writer once, beside the stamp writer — no inline twin (neither feed writes `_compactedAt` or `_cacheFact`)',
+        one(parseSrc) === 1 && one(brainSrc) === 1 && !/\._compactedAt\s*=[^=]|\._cacheFact\s*=[^=]/.test(parseSrc + brainSrc));
+    }
   }
 }
 

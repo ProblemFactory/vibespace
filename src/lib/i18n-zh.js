@@ -11759,6 +11759,14 @@ export default {
   "Cache expired · last request {time}": "缓存已过期 · 上次请求 {time}",
   "Cache: warm — a turn is running": "缓存正热 — 回合进行中",
   "Cache expired — the conversation moved to another account · last request {time}": "缓存已过期 — 对话已换到另一个账号 · 上次请求 {time}",
+  // lane cache-warmth-compact (amendment 1): the hover says what the band projects from; an unknown with a reason says why
+  "Cache: about {n} min left — projected from the {cache} of the last request (read {k} tokens at {time})": "缓存还剩约 {n} 分钟 — 按上次请求的{cache}推算（{time} 读取 {k} tokens）",
+  "Cache: about {n} min left — projected from the {cache} of the last request (wrote {k} tokens at {time})": "缓存还剩约 {n} 分钟 — 按上次请求的{cache}推算（{time} 写入 {k} tokens）",
+  "Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})": "缓存还剩约 {n} 分钟 — 按上次请求的{cache}推算（之前的缓存没有被复用 · {time} 写入 {k} tokens）",
+  "1-hour cache": "1 小时缓存",
+  "5-minute cache": "5 分钟缓存",
+  "Cache reset — the conversation was compacted": "缓存已重置 — 对话已压缩",
+  "Cache: unknown — no request yet": "缓存：未知 — 还没有请求",
   // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
   "Going cold {n}": "快熄火 {n}",
   "Late {n}": "后段 {n}",

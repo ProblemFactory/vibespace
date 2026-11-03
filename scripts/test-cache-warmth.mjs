@@ -29,6 +29,13 @@
 //   ⑧ PURE (r1b): worstOf (the worst LIVE tier — a 5-min credits mid never outranks a 1 h critical; a tie → the smaller
 //     frac; expired only when nothing is live; nothing known ⇒ null), warmthCounts, byTimeLeft (ascending, expired then
 //     unknown last, stable) — over fixtures built by the real warmthOf on the hub's clock;
+//   ⑪ THE CACHE IS OBSERVED (lane cache-warmth-compact, amendment 1 — the owner: «缓存时间这个你没有个 source of truth 吗？»):
+//     warmthOf carries the record's provenance (`source` — the TTL the last response wrote, read / created / cold, its
+//     tokens) and an unknown's REASON (`compacted` — a compaction ended, no request since; `no-request`) without drawing
+//     it (tier 'unknown'); the hover says what the band projects from and why it is unknown, en / zh / ja; warmthDiff
+//     carries ttlSource + cacheObserved and sends a reasoned unknown with no instant; the restore reads the record's fact
+//     and the reset back; the chrome says the reasoned words ONLY where words already live (the bar's and a tab label's
+//     hover) — never a band, a ring, a count or a list row (RED on 749aa7bf9 by name);
 //   ⑨ WIRING + THE LAWS (r1b, comment-stripped code): the poll's ONE call from the SAME answer; warmth-chrome.js computes
 //     once (one warmthOf call site) and owns no timer / rAF / settings listener / _notify / setTitleMeta / colour write;
 //     every builder re-applies from the map; app.js seats the chip beside the lock chip; the CSS block's selectors (the
@@ -239,6 +246,8 @@ console.log('— ⑦ the stamp outlives a restart');
   const add = (n, meta) => { const sock = `cw-${n}-${1793300000000 + n}`; fs.writeFileSync(path.join(SOCK, sock), ''); fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ webuiSessionId: 'sess-' + sock.slice(3), createdAt: 1793300000000, cwd: '/srv/u', backend: 'claude', mode: 'chat', ...meta })); return 'sess-' + sock.slice(3); };
   const idStamped = add(1, { name: 'stamped', claudeSessionId: '11111111-1111-4111-8111-111111111111', lastRequestAt: T0 - 30 * 60e3, lastRequestMember: 'sub-member-a' });
   const idBare = add(2, { name: 'bare', claudeSessionId: '22222222-2222-4222-8222-222222222222' });
+  const factW = { ttlSec: 3600, observed: 'read', read: 42000, created: 600 };
+  const idReset = add(3, { name: 'reset', claudeSessionId: '33333333-3333-4333-8333-333333333333', lastRequestAt: T0 - 5 * 60e3, lastRequestMember: 'sub-member-a', cacheFact: factW, compactedAt: T0 - 2 * 60e3 });
   const active = new Map();
   const readMeta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META, s + '.json'), 'utf8')); } catch { return {}; } };
   const api = BR.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
@@ -254,6 +263,9 @@ console.log('— ⑦ the stamp outlives a restart');
   const w = A.warmCache({ lastRequestAt: sS && sS._lastRequestAt, cacheTtlSec: A.cacheTtlSecFor({ harness: 'claude' }), nowMs: T0 });
   ok('…so a 30-minute-old stamp is WARM, 30 min ago, after the restart (the hold and the colour read it — test-pool-auto)', w.warm === true && w.agoSec === 1800, JSON.stringify(w));
   ok('…and a meta with none restores none (the engine then calls the conversation UNKNOWN: no colour, no hold — never the attach preamble)', sB && sB._lastRequestAt === undefined, String(sB && sB._lastRequestAt));
+  const sR = active.get(idReset);
+  ok('⑪ THE PIN (lane cache-warmth-compact): what the last record SAID (its TTL, read / created / cold) and a compaction\'s reset still standing are read back — the ONE spelling (sessionFromMeta); a meta with neither restores neither (RED on 749aa7bf9)',
+    sR && JSON.stringify(sR._cacheFact) === JSON.stringify(factW) && sR._compactedAt === T0 - 2 * 60e3 && sS && sS._cacheFact === null && sS._compactedAt === null, JSON.stringify(sR && [sR._cacheFact, sR._compactedAt, sS && sS._cacheFact, sS && sS._compactedAt]));
   ok('G3 (e) THE PIN (round 3): the member that served the last request is read back with it — a restart does not forget where the cache lives (a moved link reads lost: test-pool-auto)', sS && sS._lastRequestMember === 'sub-member-a' && sB && sB._lastRequestMember === null, JSON.stringify([sS && sS._lastRequestMember, sB && sB._lastRequestMember]));
 }
 
@@ -276,6 +288,64 @@ if (HAVE) {
     const order = rows.slice().sort((a, b) => byTimeLeft(a[1], b[1])).map((r) => r[0]).join(',');
     ok('byTimeLeft: ascending time left (a 3-min credits mid before a 5-min critical), then expired, then unknown — ties keep the caller\'s order', order === 'c2,cr,c,f,g,m,u,n', order);
   }
+}
+
+console.log('— ⑪ the cache is observed (lane cache-warmth-compact, amendment 1)');
+if (HAVE) {
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const tr = (dict) => (k, p) => (dict[k] || k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const S = 1_800_000_000_000, clk = { serverNow: S, receivedAt: 0, now: 0 }, timeText = () => '18:16';
+  const rec = { lastRequestAt: S - 10 * 60e3, cacheTtlSec: 3600, lost: false, inFlight: false, turnStartedAt: null, ttlSource: 'record', cacheObserved: 'read', cacheReadTokens: 42123, cacheCreatedTokens: 800 };
+  const wRead = warmthOf(rec, clk), wInf = warmthOf({ ...rec, ttlSource: 'inferred' }, clk);
+  ok('⑪ warmthOf: a fact whose TTL the last response wrote carries its provenance (`source`: the TTL, read, its tokens); an inferred one carries none — the tier is the same either way',
+    wRead.tier === 'fresh' && JSON.stringify(wRead.source) === JSON.stringify({ ttlSec: 3600, observed: 'read', read: 42123, created: 800 }) && wInf.tier === 'fresh' && !('source' in wInf), JSON.stringify([wRead, wInf]));
+  const wReset = warmthOf({ lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: false, turnStartedAt: null, unknown: 'compacted' }, clk);
+  const wNone = warmthOf({ lastRequestAt: null, cacheTtlSec: null, unknown: 'no-request' }, clk);
+  ok('⑪ warmthOf: an unknown WITH A REASON stays tier \'unknown\' (nothing to draw: no frac, no time) and carries the reason — `compacted`, `no-request`; a reason it does not know is ignored',
+    wReset.tier === 'unknown' && wReset.frac === null && wReset.lastAt === null && wReset.unknown === 'compacted' && wNone.tier === 'unknown' && wNone.unknown === 'no-request' && !('unknown' in warmthOf({ lastRequestAt: null, cacheTtlSec: 3600, unknown: 'other' }, clk)),
+    JSON.stringify([wReset, wNone]));
+  const say = (w, t) => warmthTitle(w, { timeText, ...(t ? { t } : {}) });
+  ok('⑪ THE PIN (en): the hover says what the band projects from — «Cache: about 50 min left — projected from the 1-hour cache of the last request (read 42k tokens at 18:16)» (RED on 749aa7bf9: the bare countdown)',
+    say(wRead) === 'Cache: about 50 min left — projected from the 1-hour cache of the last request (read 42k tokens at 18:16)', say(wRead));
+  const wCold = warmthOf({ ...rec, cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 120400 }, clk), w5 = warmthOf({ ...rec, cacheTtlSec: 300, lastRequestAt: S - 60e3, cacheObserved: 'created', cacheReadTokens: 0, cacheCreatedTokens: 950 }, clk);
+  ok('⑪ (en): a cold one says the earlier cache was not reused; the 5-minute bucket names itself; a first write says it wrote',
+    say(wCold) === 'Cache: about 50 min left — projected from the 1-hour cache of the last request (the earlier cache was not reused · wrote 120k tokens at 18:16)'
+    && say(w5) === 'Cache: about 4 min left — projected from the 5-minute cache of the last request (wrote 950 tokens at 18:16)', [say(wCold), say(w5)].join(' | '));
+  ok('⑪ (en): an INFERRED TTL keeps the r1a words (the fallback says no record); expired / moved / in flight are unchanged',
+    say(wInf) === 'Cache: about 50 min left · last request 18:16' && say(warmthOf({ ...rec, lastRequestAt: S - 2 * 3600e3 }, clk)) === 'Cache expired · last request 18:16', say(wInf));
+  ok('⑪ THE PIN (en): the reasons say themselves — «Cache reset — the conversation was compacted», «Cache: unknown — no request yet»; an unknown without one still says nothing',
+    say(wReset) === 'Cache reset — the conversation was compacted' && say(wNone) === 'Cache: unknown — no request yet' && say(warmthOf(null, clk)) === '', [say(wReset), say(wNone)].join(' | '));
+  ok('⑪ zh: «缓存还剩约 50 分钟 — 按上次请求的1 小时缓存推算（18:16 读取 42k tokens）», «缓存已重置 — 对话已压缩»',
+    say(wRead, tr(zh)) === '缓存还剩约 50 分钟 — 按上次请求的1 小时缓存推算（18:16 读取 42k tokens）' && say(wReset, tr(zh)) === '缓存已重置 — 对话已压缩', [say(wRead, tr(zh)), say(wReset, tr(zh))].join(' | '));
+  ok('⑪ ja: «キャッシュ残り約 50 分 — 前回リクエストの1 時間キャッシュから推定（18:16 に 42k トークン読み込み）», «キャッシュ: 不明 — まだリクエストなし»',
+    say(wRead, tr(ja)) === 'キャッシュ残り約 50 分 — 前回リクエストの1 時間キャッシュから推定（18:16 に 42k トークン読み込み）' && say(wNone, tr(ja)) === 'キャッシュ: 不明 — まだリクエストなし', [say(wRead, tr(ja)), say(wNone, tr(ja))].join(' | '));
+  const keysA1 = ['Cache: about {n} min left — projected from the {cache} of the last request (read {k} tokens at {time})', 'Cache: about {n} min left — projected from the {cache} of the last request (wrote {k} tokens at {time})',
+    'Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})', '1-hour cache', '5-minute cache', 'Cache reset — the conversation was compacted', 'Cache: unknown — no request yet'];
+  const sameP = (k, v) => JSON.stringify((k.match(/\{\w+\}/g) || []).sort()) === JSON.stringify((String(v).match(/\{\w+\}/g) || []).sort());
+  const badA1 = keysA1.filter((k) => ![zh, ja].every((d) => typeof d[k] === 'string' && sameP(k, d[k])));
+  const unusedA1 = keysA1.filter((k) => !code('src/cache-warmth.js').includes(`t('${k}'`));
+  ok('⑪ every new key has a zh AND a ja entry with the same {placeholders}, each used through a t(\'…\') literal (§78 stays flat)', badA1.length === 0 && unusedA1.length === 0, badA1.concat(unusedA1).join(' | '));
+  ok('⑪ tokensText: 950 · 42k · 1.2M', CW.tokensText && CW.tokensText(950) === '950' && CW.tokensText(42123) === '42k' && CW.tokensText(1_234_000) === '1.2M');
+  // the session list
+  const R = require(path.join(REPO, 'src/routes/sessions.js'));
+  const live = new Map([['c-rec', {}], ['c-reset', {}], ['c-none', {}], ['c-codex', {}]]);
+  const byS = new Map([...live].map(([k, v]) => [v, k]));
+  const dA = R.warmthDiff(live, (s) => ({
+    'c-rec': { lastRequestAt: 900, cacheTtlSec: 300, ttlSource: 'record', lost: false, inFlight: false, turnStartedAt: null, cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 9000, unknownWhy: null },
+    'c-reset': { lastRequestAt: null, cacheTtlSec: 3600, ttlSource: 'inferred', lost: false, inFlight: false, turnStartedAt: null, cacheObserved: null, unknownWhy: 'compacted' },
+    'c-none': { lastRequestAt: null, cacheTtlSec: null, ttlSource: null, lost: false, inFlight: false, turnStartedAt: null, unknownWhy: 'no-request' },
+    'c-codex': { lastRequestAt: 950, cacheTtlSec: null, lost: false, unknownWhy: null } }[byS.get(s)]), 1000);
+  ok('⑪ THE PIN — warmthDiff carries the provenance (ttlSource + cacheObserved + its tokens) beside the five facts (RED on 749aa7bf9: dropped)',
+    JSON.stringify(dA.warmth['c-rec']) === JSON.stringify({ lastRequestAt: 900, cacheTtlSec: 300, lost: false, inFlight: false, turnStartedAt: null, ttlSource: 'record', cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 9000 }), JSON.stringify(dA.warmth['c-rec']));
+  ok('⑪ THE PIN — a REASONED unknown is sent with no instant (a compaction\'s reset; no request yet) — the client still draws nothing; an unknown without a reason (codex: no TTL) is left out as before (RED on 749aa7bf9)',
+    JSON.stringify(dA.warmth['c-reset']) === JSON.stringify({ lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: false, turnStartedAt: null, unknown: 'compacted', ttlSource: 'inferred' })
+    && dA.warmth['c-none'] && dA.warmth['c-none'].unknown === 'no-request' && dA.warmth['c-none'].lastRequestAt === null && !('c-codex' in dA.warmth) && warmthOf(dA.warmth['c-reset'], { serverNow: 1000, receivedAt: 0, now: 0 }).tier === 'unknown', JSON.stringify(dA.warmth));
+  // the chrome: the reasoned words live only where words already live
+  const wcA1 = code('src/lib/warmth-chrome.js');
+  ok('⑪ the chrome: the reasoned unknown\'s words go through wordsOf alone — the bar\'s and a tab label\'s hover — while every ring, square, count and list row still asks isKnown (nothing drawn)',
+    /const wordsOf = \(w\) => \(isKnown\(w\) \|\| \(w && w\.unknown\) \? warmthTitle\(w, \{ t \}\) : ''\);/.test(wcA1) && (wcA1.match(/wordsOf\(w\)/g) || []).length === 2
+    && /if \(!isKnown\(w\)\) \{ if \(ring\) ring\.remove\(\); return; \}/.test(wcA1) && /if \(!isKnown\(w\) \|\| seen\.has\(key\)\) continue;/.test(wcA1) && /const isKnown = \(w\) => !!w && \(LIVE\.has\(w\.tier\) \|\| w\.tier === 'expired'\);/.test(wcA1),
+    String((wcA1.match(/wordsOf\(w\)/g) || []).length));
 }
 
 console.log('— ⑨ the wiring and the laws (r1b)');

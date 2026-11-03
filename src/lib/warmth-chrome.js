@@ -26,7 +26,8 @@ const isLive = (w) => !!w && LIVE.has(w.tier);
 const isKnown = (w) => !!w && (LIVE.has(w.tier) || w.tier === 'expired');
 const frac3 = (w) => Math.round(Math.max(0, Math.min(1, Number(w.frac) || 0)) * 1000) / 1000;
 const minutesLeft = (w) => Math.max(1, Math.ceil((Number(w.leftMs) || 0) / 60000));
-const wordsOf = (w) => (isKnown(w) ? warmthTitle(w, { t }) : '');
+// an unknown with a reason (a compaction's reset, no request yet — lane cache-warmth-compact) draws nothing and says why in words only
+const wordsOf = (w) => (isKnown(w) || (w && w.unknown) ? warmthTitle(w, { t }) : '');
 
 /** The page's ONE warmth state: the last good ON answer, the map this tick computed, the held records' keys, the pass time. */
 const stateOf = (app) => app._warmth || (app._warmth = { last: null, byId: new Map(), held: new Map(), heldChains: new Map(), drawn: false, passMs: 0 });

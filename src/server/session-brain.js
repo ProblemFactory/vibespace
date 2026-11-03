@@ -19,7 +19,7 @@ function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHisto
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
     recordRateLimitEvent, resolveUsageKey, usageEstimator,
     noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure,
-    noteStreamRecord, recordIsLate, noteModelRequest } = engine; // + the late-record rule (lane-hot-switch) — called through `?.`: the dark-parity harness passes neither
+    noteStreamRecord, recordIsLate, noteModelRequest, noteCompacted } = engine; // + the late-record rule (lane-hot-switch) — called through `?.`: the dark-parity harness passes neither
   const usageHistory = mk(getUsageHistory);
   const metaStore = mk(getSessionMetaStore);
   const sessionStatus = mk(getSessionStatus);
@@ -192,6 +192,7 @@ function claudeSideEffects(session, sid, msg) {
       noteServedModel(session, msg.message.model); // the engine's granular consumer — same fallback rule as the parse (2026-09-13)
     }
     try { noteModelRequest?.(session, msg); } catch { } // the conversation's LAST MODEL REQUEST (lane cache-warmth-tiles) — the parse's twin call
+    try { noteCompacted?.(session, msg); } catch { } // a compaction's END resets the cache fact (lane cache-warmth-compact) — the parse's twin call
     if (sendsRequest(msg) && !recordIsLate?.(session, msg)) noteRequestSent(session, Date.now()); // a prompt's echo or a TOOL RESULT sends a request; a backlog's proves nothing about now — the parse's twin (lane cache-warmth-tiles r4)
     if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId) && !recordIsLate?.(session, msg)) {
       try {

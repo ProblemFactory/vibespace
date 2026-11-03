@@ -42,11 +42,17 @@ function tierOf({ agoMs, ttlMs } = {}) {
  *  bounded turn law — the pool's hold reads the same facts) that went out after the last request ⇒ fresh with the
  *  whole TTL left while it is younger than one TTL (each request re-times the cache); a turn PAUSED on the owner is not
  *  in flight and reads its stamp like idle (the band ages).
- *  → { tier, leftMs, frac (the time left, 1 → 0: the band's length), lastAt, lost?, inFlight? } */
+ *  THE PROVENANCE (lane cache-warmth-compact, amendment 1): a fact whose TTL the last response WROTE (`ttlSource:
+ *  'record'`) carries `source` = {ttlSec, observed, read, created} — the band is a projection from that record, and the
+ *  hover says so; an unknown with a reason (`unknown: 'compacted' | 'no-request'`) stays tier 'unknown' (nothing drawn)
+ *  and carries the reason for the hover alone.
+ *  → { tier, leftMs, frac (the time left, 1 → 0: the band's length), lastAt, lost?, inFlight?, source?, unknown? } */
 function warmthOf(fact, { serverNow, receivedAt, now } = {}) {
   const ttlMs = Number(fact && fact.cacheTtlSec) * 1000;
   const last = Number(fact && fact.lastRequestAt) || 0;
   const sNow = Number(serverNow), rAt = Number(receivedAt), cNow = Number(now);
+  const why = fact && (fact.unknown === 'compacted' || fact.unknown === 'no-request') ? fact.unknown : null;
+  if (why) return { tier: 'unknown', leftMs: null, frac: null, lastAt: null, unknown: why };
   const none = { tier: 'unknown', leftMs: null, frac: null, lastAt: last || null };
   if (!(ttlMs > 0) || !(sNow > 0) || !Number.isFinite(rAt) || !Number.isFinite(cNow)) return none;
   const hubNow = sNow + Math.max(0, cNow - rAt);
@@ -56,20 +62,37 @@ function warmthOf(fact, { serverNow, receivedAt, now } = {}) {
   if (fact.lost === true) return { tier: 'expired', leftMs: 0, frac: 0, lastAt: last, lost: true };
   const agoMs = Math.max(0, hubNow - last);
   const leftMs = Math.max(0, ttlMs - agoMs);
-  return { tier: tierOf({ agoMs, ttlMs }), leftMs, frac: leftMs / ttlMs, lastAt: last };
+  const source = fact.ttlSource === 'record' && fact.cacheObserved
+    ? { source: { ttlSec: ttlMs / 1000, observed: fact.cacheObserved, read: Number(fact.cacheReadTokens) || 0, created: Number(fact.cacheCreatedTokens) || 0 } } : {};
+  return { tier: tierOf({ agoMs, ttlMs }), leftMs, frac: leftMs / ttlMs, lastAt: last, ...source };
 }
+/** a token count as the hover writes it: 950 · 42k · 1.2M */
+const tokensText = (n) => { const v = Math.max(0, Number(n) || 0); return v >= 1e6 ? (Math.round(v / 1e5) / 10) + 'M' : v >= 1000 ? Math.round(v / 1000) + 'k' : String(v); };
 
 /** The hover words for one warmth (en keys; `t` translates, `timeText(ms)` writes an instant as HH:MM):
  *  «Cache: about N min left · last request HH:MM» («about»: the stamp is the request's RESPONSE, at most one response
  *  late; N rounded UP — 30 s left reads 1 min, never 0), «Cache expired · last
  *  request HH:MM», the move's own sentence, «Cache: warm — a turn is running» (only while a request is in flight);
- *  unknown ⇒ '' (no words). */
+ *  unknown ⇒ '' (no words).
+ *  THE PROVENANCE (lane cache-warmth-compact, amendment 1): a live warmth whose TTL the last response wrote says what it
+ *  projects from — «Cache: about N min left — projected from the 1-hour cache of the last request (read 42k
+ *  tokens at 18:16)» (wrote … for a first write; «the earlier cache was not reused · wrote …» for a cold one); an unknown with a
+ *  reason says it — «Cache reset — the conversation was compacted», «Cache: unknown — no request yet». */
 function warmthTitle(w, { t = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m)), timeText = (ms) => new Date(ms).toTimeString().slice(0, 5) } = {}) {
   if (w && w.inFlight) return t('Cache: warm — a turn is running');
+  if (w && w.tier === 'unknown' && w.unknown === 'compacted') return t('Cache reset — the conversation was compacted');
+  if (w && w.tier === 'unknown' && w.unknown === 'no-request') return t('Cache: unknown — no request yet');
   if (!w || w.tier === 'unknown' || !w.lastAt) return '';
   if (w.lost) return t('Cache expired — the conversation moved to another account · last request {time}', { time: timeText(w.lastAt) });
   if (w.tier === 'expired') return t('Cache expired · last request {time}', { time: timeText(w.lastAt) });
-  return t('Cache: about {n} min left · last request {time}', { n: Math.max(1, Math.ceil(w.leftMs / 60000)), time: timeText(w.lastAt) });
+  const n = Math.max(1, Math.ceil(w.leftMs / 60000)), time = timeText(w.lastAt), src = w.source;
+  if (src && (src.ttlSec === 3600 || src.ttlSec === 300)) {
+    const cache = src.ttlSec === 3600 ? t('1-hour cache') : t('5-minute cache');
+    if (src.observed === 'read') return t('Cache: about {n} min left — projected from the {cache} of the last request (read {k} tokens at {time})', { n, cache, k: tokensText(src.read), time });
+    if (src.observed === 'cold') return t('Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})', { n, cache, k: tokensText(src.created), time });
+    if (src.observed === 'created') return t('Cache: about {n} min left — projected from the {cache} of the last request (wrote {k} tokens at {time})', { n, cache, k: tokensText(src.created), time });
+  }
+  return t('Cache: about {n} min left · last request {time}', { n, time });
 }
 
 /** Rank of a LIVE tier (higher = worse); expired / unknown are not live (lane cache-warmth-band, q-059 r1b). */
@@ -111,4 +134,4 @@ function byTimeLeft(a, b) {
   return ca === 0 ? (Number(a.leftMs) || 0) - (Number(b.leftMs) || 0) : 0;
 }
 
-module.exports = { WARMTH_TIERS, WARMTH_STATES, tierOf, warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft };
+module.exports = { WARMTH_TIERS, WARMTH_STATES, tierOf, warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft, tokensText };
