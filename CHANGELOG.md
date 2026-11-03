@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.375 — 2026-11-03
+
+### Fixed
+- A browser profile on the custom kernel opens again: a launch switch its plugin passes that the sign-in road cannot carry is dropped and noted, not refused.
+
 ## 2.369.374 — 2026-11-03
 
 ### Added
