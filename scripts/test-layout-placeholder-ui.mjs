@@ -342,6 +342,37 @@ else await (async () => {
       && (o.during || []).some((t) => t.replace(/✕$/, '') === '布局已在另一台设备上恢复') && o.after.open && o.after.words === '还原' && !o.after.busy && !o.after.held;
     const g7 = await probe7(P1);
     ok(own7(g7), `⑦ the press names its restore (rid «${g7.rid}»); another device's broadcast during it says «${(g7.during || []).join(' | ')}»; the hub then refuses the press ⇒ the error said (${J(g7.after && g7.after.toasts)}), the button «${g7.after && g7.after.words}» again, ${g7.reloads} reloads`, g7);
+    // ⑥ r3 (Q1 — a LOST ANSWER: the hub wrote the restore and broadcast it, the POST's answer never came back; round 1 reloaded
+    //    at 900 ms, round 2 waited on that POST for ever under «正在恢复…»): the POST HELD, never answered; the broadcast naming
+    //    the press's rid injected ⇒ the press's own toast, once, and ONE reload within 1.5 s. RED CONTROL: app.js's r2 line.
+    const probe8 = async (X) => {
+      const held = [], navs = []; const off = X.on((m) => { if (m.method === 'Fetch.requestPaused' && /\/api\/layout-history/.test(m.params.request.url)) held.push(m.params); if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navs.push(Date.now()); });
+      const next = async (ms = 8000) => { await until(() => held.length > 0, ms, 20); return held.shift(); };
+      const out = {}, DLG = `document.getElementById('layout-history-dialog')`; let post = null;
+      try {
+        await X.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/layout-history*', requestStage: 'Request' }] });
+        await X.ev('(void app._showLayoutHistory(), true)'); const p = await next(); await X.send('Fetch.continueRequest', { requestId: p.requestId });
+        await until(() => X.ev(`!!${DLG}?.querySelector('.lh-restore')`), 8000, 50);
+        // (the toasts ⑦ left on screen are not this press's: only a toast drawn after this line is counted)
+        await X.ev(`(() => { window.__lh8 = []; const g = document.getElementById('global-toasts') || document.body, old = new Set(g.querySelectorAll('.global-toast')); new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!old.has(t) && !window.__lh8.includes(t.textContent)) window.__lh8.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
+        await X.click(`${DLG}.querySelector('.lh-restore')`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        post = await next(); try { out.rid = JSON.parse(post.request.postData || '{}').rid || null; } catch { out.rid = null; }
+        const n0 = navs.length, t0 = Date.now();
+        await X.ev(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: ${J(out.rid)} }); } catch { } } return 1; })()`);
+        await sleep(300); out.toasts = await X.ev('[...(window.__lh8 || [])]').catch(() => null);
+        await until(() => navs.length > n0, 3000, 20); out.ms = navs.length > n0 ? navs[n0] - t0 : null;
+        await sleep(1500); out.reloads = navs.length - n0;
+        if (!out.reloads) out.stuck = await X.ev(`${DLG}?.querySelector('.lh-restore[aria-busy="true"]')?.textContent || null`).catch(() => null);
+      } finally { if (post) { try { await X.send('Fetch.failRequest', { requestId: post.requestId, errorReason: 'Aborted' }); } catch { } } off(); try { await X.send('Fetch.disable'); } catch { } }
+      if (!out.reloads) { await sleep(400); await X.ev(`(${DLG}?.querySelector('.dialog-close')?.click(), true)`).catch(() => { }); await sleep(300); }
+      await until(async () => { try { return (await X.ev('!!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
+      return out;
+    };
+    const lost8 = (o) => !!o && /^r[0-9a-z]{6,}$/.test(o.rid || '') && o.reloads === 1 && o.ms != null && o.ms <= 1500 && Array.isArray(o.toasts) && o.toasts.length === 1 && o.toasts[0].replace(/✕$/, '') === '布局已恢复 — 正在刷新…';
+    const g8 = await probe8(P1);
+    ok(lost8(g8), `⑥ r3 the POST's answer LOST (held, never answered), the broadcast naming its rid «${g8.rid}» heard ⇒ the press's own toast ${J(g8.toasts)} and ${g8.reloads} reload ${g8.ms} ms after it (≤ 1500)`, g8);
     // the mutants (a copy of this tree's src/ with lines swapped — this tree's bundle otherwise), served for bundle.js
     const SF = fs.readFileSync(path.join(wt, 'src/lib/setup-flows.js'), 'utf8'), AP = fs.readFileSync(path.join(wt, 'src/lib/app.js'), 'utf8');
     const mutBoot = async (tag, back) => {
@@ -357,13 +388,17 @@ else await (async () => {
       return anchored;
     };
     // RED CONTROL (⑦): app.js takes ANY broadcast during the press as its own (round 1's line) — the refused press says «restored»
-    const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }', 'if (own) { own.heard = true; return; }']]);
+    const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }', 'if (own) { own.landed(); return; }']]);
     const r7 = await probe7(P1);
     ok(a7 && !own7(r7), `RED CONTROL (⑦): app.js matching any broadcast during the press${a7 ? '' : ' — AN ANCHOR MOVED'} ⇒ the refused press reads as restored (${J(r7.after && r7.after.toasts)}, ${r7.reloads} reloads) — ⑦ red`, r7);
+    // RED CONTROL (⑥ r3): app.js's r2 line — its own broadcast only marked, the reload left to the POST's answer ⇒ none, for ever
+    const a8 = await mutBoot('mut8', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }', 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }']]);
+    const r8 = await probe8(P1);
+    ok(a8 && !lost8(r8) && r8.reloads === 0, `RED CONTROL (⑥ r3): app.js's r2 line${a8 ? '' : ' — AN ANCHOR MOVED'} ⇒ the lost answer leaves ${J(r8.toasts)}, ${r8.reloads} reloads, the button «${r8.stuck}» — ⑥ r3 red`, r8);
     // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
     const back = [[SF, "t('Reading the layout history…')", "t('Loading…')"], [SF, 'if (!r || r.error || !Array.isArray(r.entries)) {', 'if (false) {'], [SF, 'const entries = r.entries;', 'const entries = r?.entries || [];'],
       [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;", ''],
-      [AP, 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
+      [AP, 'if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
     const anchored = await mutBoot('mut6', back);
     const r6 = await probe6(P1);
     ok(anchored && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);

@@ -351,10 +351,11 @@ class App {
         // silently undoing the restore (adversarial review).
         // lane phone-dock-restore: the broadcast reaches the page that ASKED too (measured: it said «…on another device» above its
         // own «Layout restored») — that page's press says it and reloads (setup-flows `_layoutRestoring`). r2 (P4): ITS OWN is the
-        // broadcast that names its rid; another during its press is another device's — said, the reload left to the press
-        // (a refused one keeps its error on screen; the hub's staleness gate holds this page's next write)
+        // broadcast that names its rid (r3: the hub's word that it landed — the press says it and reloads, whatever becomes of
+        // its POST); another during its press is another device's — said, the reload left to the press (a refused one keeps
+        // its error on screen; the hub's staleness gate holds this page's next write)
         const own = this._layoutRestoring;
-        if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }
+        if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }
         if (own) { showToast(t('Layout restored on another device')); return; }
         showToast(t('Layout restored on another device — reloading…'));
         setTimeout(() => location.reload(), 900);

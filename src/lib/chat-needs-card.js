@@ -499,8 +499,9 @@ export class NeedsCards {
       ev.preventDefault();
       this.land(item.id).catch(() => {});
     };
-    // lane phone-dock-restore: THE PHONE'S STRIP — folded, a tap anywhere on it (the head, the question, «View») opens the item;
-    // open, the head folds it. Capture: before the row's verbs, a link in the question and the question's landing
+    // lane phone-dock-restore: THE PHONE'S STRIP — folded, a tap anywhere on it (the head, the question, its clock, «View») opens
+    // the item; open, the head folds it. Capture: before the row's verbs, a link in the question and the question's landing.
+    // Round 3 (Q2 — the clock beside «View» was a dead zone: it is no row's child): folded, NOTHING on the row is skipped
     dock.addEventListener('click', (ev) => {
       if (!this.app.isMobile || ev.target.closest('.cad-all')) return;
       const open = dock.classList.contains('cad-open'), head = ev.target.closest('.cad-head');
@@ -513,7 +514,7 @@ export class NeedsCards {
         showToast(t('That button moved under the pointer just now — read it, then press it again'));
         return;
       }
-      if (!head && !ev.target.closest('.cad-look') && (open || !ev.target.closest('.cad-rows'))) return;
+      if (open && !head) return;
       ev.stopPropagation(); ev.preventDefault();
       this._dockFold(dock, head ? !open : true);
     }, { capture: true, signal: own });
@@ -548,6 +549,12 @@ export class NeedsCards {
    *  phone only); the opened item gone — nothing waits, a newer one drawn — folds it. */
   _dockStrip(dock, d, entry) {
     if (dock.classList.contains('cad-open') && (!entry || this._dockOpenId !== entry.item.id)) this._dockFold(dock, false);
+    // round 2 (P2 — the deadline law: a card with a deadline shows its time left everywhere it renders; the folded row hid it):
+    // the row's clock — the item's line's own stamps, its short words («2 min left»; past the end, its state's), counted by THE
+    // page ticker (tickDeadlines); an item with no line has none — round 3 (Q3): nor a strip with nothing waiting, cleared
+    // BEFORE that return (a hidden clock still stamped kept the page's ticker counting it for up to 60 min)
+    const clock = dock.querySelector(':scope > .cad-clock'), line = entry ? dock.querySelector(':scope > .cad-rows .ut-deadline[data-deadline-at]') : null;
+    if (clock && !line && !clock.hidden) { clock.hidden = true; clock.textContent = ''; for (const k of Object.keys(clock.dataset)) delete clock.dataset[k]; }
     if (!entry) return;
     const num = dock.querySelector(':scope > .cad-head > .cad-num'), all = dock.querySelector(':scope > .cad-all'), nw = d ? t('waiting for you · {what}', { what: String(d.n) }) : '';
     if (all.dataset.short !== t('All')) all.dataset.short = t('All');
@@ -556,11 +563,6 @@ export class NeedsCards {
       if (phone) { head.setAttribute('role', 'button'); head.tabIndex = 0; } else { head.removeAttribute('role'); head.removeAttribute('tabindex'); head.removeAttribute('aria-expanded'); }
     }
     if (phone && head.getAttribute('aria-expanded') !== open) head.setAttribute('aria-expanded', open);
-    // round 2 (P2 — the deadline law: a card with a deadline shows its time left everywhere it renders; the folded row hid it):
-    // the row's clock — the item's line's own stamps, its short words («2 min left»; past the end, its state's), counted by THE
-    // page ticker (tickDeadlines); an item with no line has none
-    const clock = dock.querySelector(':scope > .cad-clock'), line = dock.querySelector(':scope > .cad-rows .ut-deadline[data-deadline-at]');
-    if (clock && !line && !clock.hidden) { clock.hidden = true; clock.textContent = ''; for (const k of Object.keys(clock.dataset)) delete clock.dataset[k]; }
     if (clock && line) {
       for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineLate', 'deadlineLost']) { if (line.dataset[k] == null) delete clock.dataset[k]; else if (clock.dataset[k] !== line.dataset[k]) clock.dataset[k] = line.dataset[k]; }
       clock.dataset.deadlineShort = '1'; clock.hidden = false;

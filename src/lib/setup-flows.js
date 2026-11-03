@@ -511,18 +511,22 @@ export function installSetupFlows(App) {
     // THE PRESS SAYS IT RUNS (lane phone-dock-restore — measured: from the confirm's OK to the toast the dialog stood as it was,
     // the hub's whole restore long): the pressed button's busy words at once, the list held (one restore at a time); a refusal
     // gives both back. THIS page's own restore is no «other device»: the hub's broadcast reaches the page that asked too —
-    // r2 (P4): the press names it (`rid`, sent with the POST, echoed in the broadcast); app.js 'layout-restored' marks `heard` on
-    // THIS rid only (heard ⇒ restored, whatever became of this answer) — another restore during it is another device's
+    // r2 (P4): the press names it (`rid`, sent with the POST, echoed in the broadcast); app.js 'layout-restored' knows it by
+    // THIS rid only — another restore during it is another device's. Round 3 (Q1 — a lost answer left «正在恢复…» for ever: the
+    // POST has no timeout): the broadcast naming this rid IS the hub's word that the restore landed (it broadcasts on success
+    // only) — app.js calls `own.landed`; whichever word comes first says it and reloads, once
     const [list] = body.querySelectorAll('.lh-list');
-    const busy = (b) => {
-      const was = b.textContent, own = { rid: 'r' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36), heard: false };
+    const busy = (b, done) => {
+      const was = b.textContent, own = { rid: 'r' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36), over: false };
       b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;
-      const end = (res, done) => {
-        if (res?.success || own.heard) { close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
+      const end = (res) => {
+        if (own.over) return true;
+        if (res?.success) { own.over = true; close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
         b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = null;
         showToast(res?.error || t('Restore failed'), { type: 'error' });
         return false;
       };
+      own.landed = () => end({ success: true });
       end.rid = own.rid;
       return end;
     };
@@ -537,9 +541,9 @@ export function installSetupFlows(App) {
           message: t('Restore this layout? Your current one becomes a rollback point too, so this is undoable.'),
           confirmText: t('Restore'),
         }))) return;
-        const end = busy(b);
+        const end = busy(b, t('Layout restored — reloading…'));
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rid: end.rid }) }).catch(() => null);
-        end(res, t('Layout restored — reloading…'));
+        end(res);
       };
     });
     body.querySelectorAll('.lh-desk').forEach((b) => {
@@ -550,9 +554,9 @@ export function installSetupFlows(App) {
           message: t('Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', { desktop: desk }),
           confirmText: t('Restore only “{desktop}”', { desktop: desk }),
         }))) return;
-        const end = busy(b);
+        const end = busy(b, t('“{desktop}” restored — reloading…', { desktop: desk }));
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktop: desk, rid: end.rid }) }).catch(() => null);
-        end(res, t('“{desktop}” restored — reloading…', { desktop: desk }));
+        end(res);
       };
     });
     const picked = pick ? [...body.querySelectorAll('.lh-desk')].find((b) => b.dataset.id === pick.id && b.dataset.desk === pick.desk) : null;

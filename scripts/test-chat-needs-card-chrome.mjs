@@ -90,6 +90,7 @@ const MUT = scratch('chat-needs-mut');
 const MUT2 = scratch('chat-needs-mut2');
 const MUT4 = scratch('chat-needs-mut4');
 const MUT5 = scratch('chat-needs-mut5');
+const MUT6 = scratch('chat-needs-mut6');
 const WORK = path.join(stubDir, 'work', 'ops');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('chat-needs-shots');
 for (const d of [stubDir, WORK, SHOTS]) fs.mkdirSync(d, { recursive: true });
@@ -242,7 +243,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch { }
   for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir, MUT, MUT2, MUT3, MUT4, MUT5]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, fakeHome, stubDir, MUT, MUT2, MUT3, MUT4, MUT5, MUT6]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -328,6 +329,23 @@ try {
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT5 });
   ROW_BUNDLE = fs.readFileSync(path.join(MUT5, 'bundle-mut.js'));
 } catch (e) { ROW_ERR = String(e && e.message || e).split('\n')[0]; }
+// ── ㉓ r3's RED CONTROL: THIS source with the phone row's r2 lines put back — the capture's row test (the clock no row's child
+//    ⇒ a dead zone) and the return before the clock's clearing (a hidden clock still stamped ⇒ the page's ticker kept counting) ──
+let DOCK_BUNDLE = null, DOCK_ERR = '';
+try {
+  fs.mkdirSync(MUT6, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT6}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT6, 'node_modules'));
+  const f = path.join(MUT6, 'src/lib/chat-needs-card.js'); let s = fs.readFileSync(f, 'utf8');
+  for (const [from, to] of [["      if (open && !head) return;\n", "      if (!head && !ev.target.closest('.cad-look') && (open || !ev.target.closest('.cad-rows'))) return;\n"],
+    ['    if (clock && !line && !clock.hidden) {', '    if (!entry) return;\n    if (clock && !line && !clock.hidden) {']]) {
+    if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: ' + from.trim().slice(0, 50));
+    s = s.replace(from, to);
+  }
+  fs.writeFileSync(f, s);
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT6 });
+  DOCK_BUNDLE = fs.readFileSync(path.join(MUT6, 'bundle-mut.js'));
+} catch (e) { DOCK_ERR = String(e && e.message || e).split('\n')[0]; }
 
 const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((x) => x.type === 'page');
 let target = null;
@@ -2336,6 +2354,24 @@ try {
     check(`㉓ r2 …past its end the folded clock says the card's state («${k3 && k3.text}», ${k3 && k3.state}, its accent ${k3 && k3.warn}) as the item's own line does (${J(k3 && k3.line)})`, !!k3 && k3.vis && k3.state === 'due' && k3.warn && !!k3.line && k3.line.state === 'due' && k3.line.warn && k3.inRow, k3);
     await show(SHAPES23.q3.item); const k0 = await A.evalJs(CLK23);
     check(`㉓ r2 …an item with no deadline shows no clock on its row (${k0 && k0.vis})`, !!k0 && !k0.vis && !k0.line, k0);
+    // ── r3 (Q2 — the folded row's clock was a dead zone beside «View»: it is no row's child) and (Q3 — the last item gone, the
+    //    hidden clock kept its stamps: the page's ticker counted it for up to 60 min): a CDP tap on the clock's rect ⇒ the item
+    //    open; nothing waits ⇒ no [data-deadline-at] in the page and the ticker stopped (a line put in after it stays blank).
+    //    RED CONTROL (below, a load of its own after the CSS cuts): this source with the r2 lines put back.
+    let n23 = 0;
+    const CLKAT23 = `(() => { const c = ${CHAT(s23)}.element.querySelector('.chat-attn-dock > .cad-clock'); if (!c || !c.getClientRects().length) return null; const r = c.getBoundingClientRect(), x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2); return { x, y, w: Math.round(r.width), hit: document.elementFromPoint(x, y) === c }; })()`;
+    const TICK23 = `(async () => { const p = document.createElement('i'); p.dataset.deadlineAt = String(Date.now() + 30e3); p.dataset.deadlineFrom = String(Date.now() - 10e3); document.body.appendChild(p); await new Promise((r) => setTimeout(r, 1500)); const s = p.textContent; p.remove(); return s; })()`;
+    const r3leg = async () => {
+      const it = { ...SHAPES23.hub.item, id: 'ut-r23r3c' + (++n23), createdAt: Date.now() - 19e3, expiresAt: Date.now() + 41e3 };
+      await show(it); const at = await A.evalJs(CLKAT23); if (at) { await tap23(at); await sleep(500); }
+      const opened = await A.evalJs(`${CHAT(s23)}.element.querySelector('.chat-attn-dock').classList.contains('cad-open')`);
+      await A.evalJs(PUSH23('[]')); await sleep(1600); // (nothing waits: the ticker's next second finds no line counting)
+      return { at, opened, left: await A.evalJs(`document.querySelectorAll('[data-deadline-at]').length`), ticked: await A.evalJs(TICK23) };
+    };
+    const q23 = await r3leg();
+    check(`㉓ r3 a tap on the FOLDED row's clock (${J(q23.at)}) opens the item (${q23.opened}) — no dead zone beside «View»`, !!q23.at && q23.at.hit && q23.opened === true, q23);
+    check(`㉓ r3 nothing waits ⇒ no deadline stamp left in the page (${q23.left}) and its ticker stopped — a line put in after it reads «${q23.ticked}»`, q23.left === 0 && q23.ticked === '', q23);
+    await show(SHAPES23.q3.item); // (the fill legs below read a FOLDED row: the r3 leg left nothing waiting)
     // P3: the folded head's count wears the attention fill while an item is unseen (window-announce) — as the desktop's
     //    count does; none without. RED CONTROL: the fill rule cut ⇒ red by name.
     const FILL23 = `(() => { const w = ${CHAT(s23)}, n = w.element.querySelector('.chat-attn-dock > .cad-head > .cad-num'), y = document.createElement('i'); y.style.cssText = 'position:absolute;width:1px;height:1px;background:var(--yellow)'; w.element.appendChild(y); const want = getComputedStyle(y).backgroundColor; y.remove(); return { vis: !!n && n.getClientRects().length > 0, bg: n ? getComputedStyle(n).backgroundColor : null, want }; })()`;
@@ -2351,6 +2387,14 @@ try {
     const live23b = { ...live23, id: 'ut-r23clk03', createdAt: Date.now() - 19e3, expiresAt: Date.now() + 41e3 };
     await show(live23b); const kr = await A.evalJs(CLK23);
     check(`CONTROL (㉓ r2): the folded clock's rules cut out (${cutC}) ⇒ no clock on the row (${kr && kr.vis}; «${kr && kr.text}» in the DOM) — «shows its clock» goes red`, cutC >= 3 && !!kr && !kr.vis && /\d/.test(kr.text || ''), kr);
+    if (!DOCK_BUNDLE) check('CONTROL (㉓ r3): the r2 lines\' bundle builds from this source (its anchors are this lane\'s lines)', false, DOCK_ERR);
+    else {
+      mutant = { bundle: DOCK_BUNDLE };
+      try {
+        await toConv(A, s23, [], 390, 844, true); const q23r = await r3leg();
+        check(`CONTROL (㉓ r3): the r2 lines put back ⇒ the clock's tap opens nothing (${q23r.opened}), ${q23r.left} stamp left, a line put in after it reads «${q23r.ticked}» — both r3 legs red`, !!q23r.at && q23r.at.hit && q23r.opened === false && q23r.left >= 1 && q23r.ticked !== '', q23r);
+      } finally { mutant = null; }
+    }
     // THE DESKTOP NEVER FOLDS (the .373 strip the owner accepted): the answers on the strip, no «View», the head no door
     await toConv(A, s23, [], 1280, 800, false); await show(SHAPES23.hub.item);
     const dk = await A.evalJs(S23);
