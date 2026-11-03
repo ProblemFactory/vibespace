@@ -621,12 +621,17 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
   console.log(`    the «+N» chip's forms (px): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest} + the plain room's margin ${TF.OVERFLOW_CHIP_PX - forms.plain88} = ${longest + TF.OVERFLOW_CHIP_PX - forms.plain88}; OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
   check(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
-    extra.length === 1 && on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && /^\+\d+ · \d+ critical$/.test(on.chip?.text || ''), { on, off, extra });
+    extra.length === 1 && on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && !!on.chip && !!off.chip, { on, off, extra });
   check(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
     TF.OVERFLOW_CHIP_WARM_PX >= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 && TF.OVERFLOW_CHIP_WARM_PX <= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 + 8, forms);
-  // RED: a chip planted wider than the budget at the ON boundary ⇒ the probe counts fewer whole tiles than the floor
+  // THE WORST CASE at the ON boundary: the chip held at its longest warm form's width (what it says there depends on which
+  // tiles the strip cuts) — the floor still holds; RED: a chip planted wider than the budget ⇒ the probe counts fewer whole tiles
   if (on.w) {
     await device(on.w, 700); await sleep(500);
+    await evalJs(`(() => { const s = document.createElement('style'); s.id = '__worst'; s.textContent = '#taskbar-overflow { min-width: ${longest}px !important; }'; document.head.appendChild(s); return 1; })()`);
+    await sleep(500); const wc = await evalJs(FIT);
+    await evalJs(`document.getElementById('__worst').remove(), 1`); await sleep(400);
+    check(`…the worst case: the chip held at the longest warm form's width (${longest} px) at the ON boundary still leaves ≥ ${TF.STRIP_MIN_TILES} whole tiles (${wc.whole}, the strip ${wc.strip} px)`, wc.form === 'full' && !!wc.chip && wc.whole >= TF.STRIP_MIN_TILES, wc);
     await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '#taskbar-overflow { min-width: ${TF.OVERFLOW_CHIP_WARM_PX + 120}px !important; }'; document.head.appendChild(s); return 1; })()`);
     await sleep(500); const r = await evalJs(FIT);
     await evalJs(`document.getElementById('__red').remove(), 1`);
