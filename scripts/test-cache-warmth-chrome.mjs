@@ -595,6 +595,11 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   const TF = await import(path.join(repo, 'src/lib/taskbar-fit.js'));
   const keep = PLAN_K; // plan() makes its argument THE plan — the matrix is put back by name at the end
   plan({ ...keep, 5: { agoMs: M(55) }, 6: { agoMs: M(56) }, 7: { agoMs: M(57) } }); await nextTick(2); // the strip's tail critical ⇒ the chip's long form
+  // a sixth tile (a Files window, no warmth) at the strip's end: at the warm budget's boundary the five tiles alone fit whole and
+  // no chip shows — with six, a critical tile is hidden there and the chip says so (the case the budget is for)
+  const before = await evalJs(`[...app.wm.windows.keys()]`);
+  await evalJs(`(app.openFileExplorer(${J(CWD)}), 1)`); await sleep(900);
+  const extra = (await evalJs(`[...app.wm.windows.keys()]`)).filter((id) => !before.includes(id));
   const FIT = `(() => { const root = document.getElementById('desktop-previews'), c = document.getElementById('taskbar-overflow'), s = document.getElementById('taskbar-items');
     const tiles = [...s.children].filter((e) => e.classList.contains('taskbar-item')), ids = (c && !c.hidden && c._hiddenIds) || [];
     return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: c.offsetWidth } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth, mobile: !!app.isMobile }; })()`;
@@ -616,7 +621,7 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
   console.log(`    the «+N» chip's forms (px): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest} + the plain room's margin ${TF.OVERFLOW_CHIP_PX - forms.plain88} = ${longest + TF.OVERFLOW_CHIP_PX - forms.plain88}; OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
   check(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
-    on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && /critical/.test(on.chip?.text || ''), { on, off });
+    extra.length === 1 && on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && /^\+\d+ · \d+ critical$/.test(on.chip?.text || ''), { on, off, extra });
   check(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
     TF.OVERFLOW_CHIP_WARM_PX >= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 && TF.OVERFLOW_CHIP_WARM_PX <= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 + 8, forms);
   // RED: a chip planted wider than the budget at the ON boundary ⇒ the probe counts fewer whole tiles than the floor
@@ -630,6 +635,7 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
     const fb = await evalJs(`(() => { const r = document.getElementById('taskbar').getBoundingClientRect(); return { x: 0, y: r.top - 4, width: innerWidth, height: r.height + 4 }; })()`);
     await bothThemes('A-desktop-12-plusN-boundary', fb);
   }
+  await evalJs(`(() => { for (const id of ${J(extra)}) app.wm.closeWindow(id); return 1; })()`); await sleep(400);
   plan(keep); await device(1280, 800); await sleep(600); await nextTick(2);
 });
 
