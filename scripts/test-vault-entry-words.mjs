@@ -8,16 +8,22 @@
 //   ① THE RULE — wordsOf: a name ≤ 80 / a description ≤ 400, one paragraph, no hidden character, never a secret's shape
 //      (each refused BY NAME); the belt (agentEntryWords) makes a frame inert
 //   ② AT CREATION — a paste request's --name + --note: the card says the description, the box's words are the owner's to edit
-//      (his win), unedited the agent's stand; mint / put --note; `list` prints the name and the description
+//      (the owner's words win), unedited the agent's stand; mint / put --note; `list` prints the name and the description
 //   ③ LATER — describe ⇒ ONE For-you card (old → new), NOTHING written; the same again ⇒ its id; refusals by name (no change,
 //      not in its list, a kind with no words, a secret in it); another conversation cannot name it
 //   ④ ALLOW — the owner's answer (a person only) ⇒ the writer, the audit line {proposedBy, approvedBy, from, to}, the receipt;
-//      ⑤ DENY ⇒ refused, the receipt, quiet 10 min; ⑥ the owner's own Edit… (the same writer, no card); ⑥b his request card
+//      ⑤ DENY ⇒ refused, the receipt, quiet 10 min; ⑥ the owner's own Edit… (the same writer, no card); ⑥b the owner's request card
 //      for the entry says its description
 //   ⑦ A LOCK withdraws an open proposal (its receipt), the owner's edit refused while locked; ⑧ A RESTART answers a proposal
-//      the old door filed (the item IS the record); ⑨ A LEGACY note (before the rule) stays the owner's until he saves it
+//      the old door filed (the item IS the record); ⑨ A LEGACY note (before the rule) stays the owner's until it is saved again
 //   ⑩ THE CLI — describe / list / request --note / usage refusals (exit 2); ⑪ THE SWEEP — no pasted value in any answer,
 //      frame, log line, stash entry or the audit file
+//   ⑫ r2 (the acceptance of ef69952f4): a rename-only Allow keeps a legacy note the owner's (receipt, list, the box's mark) — a
+//      proposal carrying a note shares it, and its card never carries the private «now»; a re-mint / re-put of the same name keeps
+//      the words and says «rotated», `--note` on it ⇒ 409 words_later; ONE open proposal per entry (409 words_pending naming the
+//      first); the owner's Edit… withdraws a waiting proposal (no quiet); a pending fork ⇒ 401; `list` line 1 = the base's
+//      reference line (its access fact on it); a free entry's `detail` = its note (the policy judge's purpose and memo key, as
+//      base); the RUN card's facts carry the SHARED description and runCardOf draws «What it is» (a legacy note never)
 // Run: node scripts/test-vault-entry-words.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,7 +72,7 @@ function makeWorld(name, dataDir = path.join(ROOT, name)) {
   const app = express();
   app.use(auth.middleware()); auth.registerRoutes(app); app.use(express.json());
   require(path.join(REPO, 'src/routes/vault.js')).registerVaultRoutes(app, { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, log: (m) => LOGS.push(String(m)) });
-  return { dataDir, auth, vault, userTodos, vaultRun, paste, app, T1, T2 };
+  return { dataDir, auth, vault, userTodos, vaultRun, paste, app, T1, T2, activeSessions };
 }
 async function serve(w) {
   const srv = await new Promise((r) => { const s = w.app.listen(0, '127.0.0.1', () => r(s)); });
@@ -119,12 +125,12 @@ let ENTRY, REF, MREF;
   const it = open(W, P.ACTION_TYPE)[0];
   ok(it && it.i18n.detail.some((l) => l.key === 'Its description, in the agent\'s words: {note}' && l.params.note === NOTE) && it.detail.includes(NOTE) && P.wordsOfItem(it).note === NOTE && !('note' in it.action),
     'the card SAYS the description (its own line, the item\'s words — never on the action)', it && it.i18n);
-  // the owner edits the name in the box — his words win; the description he leaves stands
+  // the owner edits the name in the box — the owner's words win; the description left as it was stands
   const st = await S.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { body: { answer: 'store', value: VALUE, name: 'Acme payments sandbox' } });
-  ok(st.status === 200 && st.json.outcome === 'stored', 'the owner stores it (his name in the box)', st.json);
+  ok(st.status === 200 && st.json.outcome === 'stored', 'the owner stores it (with a new name in the box)', st.json);
   ENTRY = st.json.entry; REF = st.json.ref;
   const b = box(W, ENTRY);
-  ok(b && b.label === 'Acme payments sandbox' && b.note === NOTE && b.noteShared === true, 'the entry: the OWNER\'s name (his edit won), the agent\'s description (he left it) — marked as read by agents', b);
+  ok(b && b.label === 'Acme payments sandbox' && b.note === NOTE && b.noteShared === true, 'the entry: the OWNER\'s name (the owner\'s edit won), the agent\'s description (left as it was) — marked as read by agents', b);
   const l = (await listOf(S, W.T1)).find((e) => e.ref === REF);
   ok(l && l.label === 'Acme payments sandbox' && l.note === NOTE, '`list` (GET /api/agent/vault/runnable) names it and says what it is for', l);
   const bad3 = await S.agent(W.T1, '/api/agent/vault/secret-request', { words: 'a db password', purpose: 'p', kind: 'password', name: 'acme-db' });
@@ -210,11 +216,11 @@ console.log('⑥ THE OWNER\'S OWN EDIT — the same writer, no card');
 {
   const r = await S.hit('/api/vault/entry-words', { body: { entry: ENTRY, note: 'Owner\'s words: the sandbox key of acme, test mode.' } });
   const al = auditLines(W).filter((x) => x.event === 'vault-entry-words').pop();
-  ok(r.status === 200 && box(W, ENTRY).note === 'Owner\'s words: the sandbox key of acme, test mode.' && al.proposedBy === 'user' && al.approvedBy === 'user' && open(W, P.WORDS_TYPE).length === 0, 'his Edit… writes at once — no card; the audit line names him both ways', { r: r.json, al });
+  ok(r.status === 200 && box(W, ENTRY).note === 'Owner\'s words: the sandbox key of acme, test mode.' && al.proposedBy === 'user' && al.approvedBy === 'user' && open(W, P.WORDS_TYPE).length === 0, 'the owner\'s Edit… writes at once — no card; the audit line names the owner both ways', { r: r.json, al });
   const bad = await S.hit('/api/vault/entry-words', { body: { entry: ENTRY, note: 'a\nb' } });
   const nope = await S.hit('/api/vault/entry-words', { body: { entry: 'totp:acme', note: 'x' } });
   const bearer = await S.agent(W.T1, '/api/vault/entry-words', { entry: ENTRY, note: 'agent wrote this' });
-  ok(bad.json.code === 'note_lines' && nope.json.code === 'words_not_here' && (bearer.status === 401 || bearer.status === 403) && box(W, ENTRY).note.startsWith('Owner\'s words'), 'his edit is judged by the same rule; a kind with no words refused; a bearer refused at the gate', { bad: bad.json, nope: nope.json, bearer: bearer.status });
+  ok(bad.json.code === 'note_lines' && nope.json.code === 'words_not_here' && (bearer.status === 401 || bearer.status === 403) && box(W, ENTRY).note.startsWith('Owner\'s words'), 'the owner\'s edit is judged by the same rule; a kind with no words refused; a bearer refused at the gate', { bad: bad.json, nope: nope.json, bearer: bearer.status });
 }
 
 console.log('⑥b THE OWNER\'S REQUEST CARD says what it is for');
@@ -253,7 +259,7 @@ console.log('⑧ A RESTART — the item IS the record');
   W = W2; S = S2;   // the rest runs on the new hub
 }
 
-console.log('⑨ A LEGACY NOTE (written under «never shown to an agent») stays the owner\'s until he saves it');
+console.log('⑨ A LEGACY NOTE (written under «never shown to an agent») stays the owner\'s until it is saved again');
 {
   const add = W.vault.secretPut('secret:legacy0001', VALUE + '-legacy', { prov: 'owner', label: 'Old router', note: 'my private reminder', kind: 'password' });   // the box as the old dialog wrote it (no noteShared)
   const id = 'secrets:secret:legacy0001#secret';
@@ -262,7 +268,7 @@ console.log('⑨ A LEGACY NOTE (written under «never shown to an agent») stays
   ok(add.ok && on && on.ok && l1 && l1.label === 'Old router' && !('note' in l1), 'its name is listed, its old note is NOT', { l1, on });
   await S.hit('/api/vault/entry-words', { body: { entry: 'secret:legacy0001', note: 'The old router\'s admin password (192.168.1.1).' } });
   const l2 = (await listOf(S, W.T1)).find((e) => /legacy0001/.test(e.ref));
-  ok(l2 && l2.note === 'The old router\'s admin password (192.168.1.1).', 'once he saves it, agents read it', l2);
+  ok(l2 && l2.note === 'The old router\'s admin password (192.168.1.1).', 'once the owner saves it, agents read it', l2);
 }
 
 console.log('⑩ THE CLI');
@@ -281,6 +287,69 @@ console.log('⑩ THE CLI');
   const sec = await S3.cli(W.T1, ['describe', MREF, '--note', `see ${TOKEN_SHAPE}`]);
   ok(sec.code === 1 && /note_secret/.test(sec.err), 'a secret\'s shape ⇒ exit 1 with its code', sec);
   S3.srv.close();
+}
+
+console.log('⑫ r2 — the acceptance of ef69952f4');
+{
+  const VR = require(path.join(REPO, 'src/vault-run.js')), VI = require(path.join(REPO, 'src/vault-inventory.js')), FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  // MAJOR 1: a rename-only Allow on a legacy-note entry keeps the note the owner's
+  const LEG = ['secret', 'legacy0002'].join(':'), LREF = VR.refFor('secrets', LEG, 'secret').ref, PRIV = 'PRIVATE owner reminder — the blue drawer';   // the ref built at run time (the secret scan reads a literal one as an assignment)
+  W.vault.secretPut(LEG, VALUE + '-l2', { prov: 'owner', label: 'Old switch', note: PRIV, kind: 'password' });
+  W.vaultRun.setRunnable({ id: 'secrets:secret:legacy0002#secret', on: true, reauthed: true, by: 'user' });
+  const p1 = await S.agent(W.T1, '/api/agent/vault/words', { entry: LREF, name: 'Office switch' });
+  const it1 = open(W, P.WORDS_TYPE).find((i) => i.action.askId === p1.json.proposalId);
+  ok(p1.status === 200 && it1 && !JSON.stringify(it1).includes(PRIV), 'a rename-only proposal on an entry with a private note: its card never carries the note', it1 && it1.detail);
+  const a1 = await S.hit(`/api/vault/words-asks/${p1.json.proposalId}/answer`, { body: { answer: 'allow' } });
+  const rc1 = STASH.find((e) => e.ref === p1.json.proposalId), l1 = (await listOf(S, W.T1)).find((e) => e.ref === LREF), b1 = box(W, LEG);
+  ok(a1.json.outcome === 'applied' && b1.label === 'Office switch' && b1.note === PRIV && b1.noteShared !== true && rc1 && !rc1.text.includes(PRIV) && /its name is «Office switch»/.test(rc1.text) && !/description/.test(rc1.text.split('APPLIED')[1].split('Every agent')[0]) && l1 && l1.label === 'Office switch' && !('note' in l1),
+    'Allow ⇒ renamed; the note stays the owner\'s — not in the receipt (it says only the name), not in list, the box still unshared', { rc: rc1 && rc1.text, l1, shared: b1.noteShared });
+  const p2 = await S.agent(W.T1, '/api/agent/vault/words', { entry: LREF, note: 'The office switch admin login (10.0.0.2).' });
+  const it2 = open(W, P.WORDS_TYPE).find((i) => i.action.askId === p2.json.proposalId);
+  ok(p2.status === 200 && it2 && !JSON.stringify(it2).includes(PRIV) && /Description now: only you read it/.test(it2.detail), 'a proposal that CARRIES a note: its card says the private «now» is the owner\'s alone — never its text', it2 && it2.detail);
+  await S.hit(`/api/vault/words-asks/${p2.json.proposalId}/answer`, { body: { answer: 'allow' } });
+  const l2 = (await listOf(S, W.T1)).find((e) => e.ref === LREF);
+  ok(box(W, LEG).noteShared === true && l2 && l2.note === 'The office switch admin login (10.0.0.2).', '…its Allow writes the description and shares it', l2);
+  // MAJOR 2: a rotation keeps the words; --note on an existing name is a later change
+  const mname = MREF.slice('vault://'.length), before = box(W, mname);
+  const rm = await S.agent(W.T1, '/api/agent/vault/mint', { name: 'deploy-token' });
+  const after = box(W, mname);
+  ok(rm.status === 200 && /rotated; its name and description kept/.test(rm.json.rotated || '') && after.label === before.label && after.note === before.note && after.noteShared === before.noteShared && after.at >= before.at, 're-mint of the same name ⇒ the value rotated, its name, description and mark kept (said)', { before, after, rm: rm.json });
+  const rn = await S.agent(W.T1, '/api/agent/vault/mint', { name: 'deploy-token', note: 'rewritten without a card' });
+  const rp = await S.agent(W.T1, '/api/agent/vault/put', { name: 'vendor-key', value: VALUE + '-put2', note: 'rewritten too' });
+  ok(rn.status === 409 && rn.json.code === 'words_later' && /describe/.test(rn.json.error) && rp.status === 409 && rp.json.code === 'words_later' && box(W, mname).note === before.note, '--note on an existing name (mint and put) ⇒ 409 words_later naming describe — nothing rewritten', { rn: rn.json, rp: rp.json });
+  const rp2 = await S.agent(W.T1, '/api/agent/vault/put', { name: 'vendor-key', value: VALUE + '-put3' });
+  ok(rp2.status === 200 && rp2.json.rotated && box(W, 'agent:cid-words-1/vendor-key').note === 'The vendor dashboard key (read only).', 're-put without --note ⇒ rotated, its description kept', rp2.json);
+  // MINOR b: ONE open proposal per entry; the owner's Edit… withdraws it
+  W.vaultRun.setRunnable({ id: 'secrets:secret:legacy0002#secret', on: true, reauthed: true, by: 'user' });
+  const q1 = await S.agent(W.T1, '/api/agent/vault/words', { entry: LREF, note: 'first proposal' });
+  const q2 = await S.agent(W.T2, '/api/agent/vault/words', { entry: LREF, note: 'second proposal' });
+  ok(q1.status === 200 && q2.status === 409 && q2.json.code === 'words_pending' && /Words asker/.test(q2.json.error), 'a second conversation\'s proposal on the same entry ⇒ 409 words_pending naming the first', q2.json);
+  const quiet0 = STASH.length;
+  await S.hit('/api/vault/entry-words', { body: { entry: LEG, note: 'The owner\'s words for the switch.' } });
+  const rcq = STASH.slice(quiet0).find((e) => e.ref === q1.json.proposalId);
+  const q3 = await S.agent(W.T1, '/api/agent/vault/words', { entry: LREF, note: 'again after the edit' });
+  ok(!open(W, P.WORDS_TYPE).some((i) => i.action.askId === q1.json.proposalId) && rcq && /changed its name and description themselves/.test(rcq.text) && q3.status === 200, 'the owner\'s own Edit… withdraws the waiting proposal (its receipt says so) — no quiet: the agent may propose again', { rcq: rcq && rcq.text, q3: q3.json });
+  // MINOR c: a pending fork is refused by THE resolver (never filed under its parent)
+  W.activeSessions.set('w3', { agentToken: 'vsst_' + 'c'.repeat(32), claudeSessionId: 'cid-words-1', backend: 'claude', _webuiId: 'w3', name: 'Fork lane', _forkRequested: true });
+  const fk = await S.agent('vsst_' + 'c'.repeat(32), '/api/agent/vault/words', { entry: MREF, note: 'from a fork' });
+  const fp = await S.agent('vsst_' + 'c'.repeat(32), '/api/agent/vault/secret-request', { words: 'x', purpose: 'y' });
+  ok(fk.status === 401 && fp.status === 401 && fk.json.code === fp.json.code, 'a pending fork: describe ⇒ 401 like the paste request (ONE resolver) — never filed under its parent', { fk: fk.json, fp: fp.json });
+  W.activeSessions.delete('w3');
+  // MINOR d: list line 1 = the base's reference line
+  const cl = await S.cli(W.T1, ['list']);
+  const lines = cl.out.split('\n'), i0 = lines.findIndex((l) => l.startsWith(MREF));
+  ok(i0 >= 0 && /^vault:\/\/\S+  .+ \((password|secret|api-key)\)  yours: minted/.test(lines[i0]) && /^    what it is: /.test(lines[i0 + 1]), '`list`: line 1 is the base\'s reference line with its access fact; «what it is:» its own next line', lines.slice(i0, i0 + 2));
+  // MINOR a: a free entry's detail = its note (the judge's purpose and memo key, as base)
+  const fr = VI.secretRowOf({ name: 'secret:judge00001', at: 1, label: 'acme-api-key', note: 'Asked for by Words asker: run the payment tests', kind: 'api-key' });
+  ok(fr.detail === 'Asked for by Words asker: run the payment tests' && fr.note === fr.detail, 'a free entry\'s row keeps `detail` = its note (the policy judge reads it as the purpose; unchanged entries keep their memo key)', fr);
+  // the RUN card: the SHARED description as a facts field, drawn under the name (a legacy note never)
+  const ref = VR.parseRef(MREF), spec = { argv: ['curl'], refs: [ref], files: [] };
+  const f0 = VR.cardFactsOf(spec, { routeHosts: [] }, '/tmp', { entries: { [ref.id]: 'Deploy password' }, notes: { [ref.id]: 'The staging box deploy password.' } });
+  const card = FA.runCardOf({ action: { type: 'vault-run-ask' }, facts: { v: 1, ...f0 } }, {});
+  const flat = JSON.stringify(card);
+  ok(f0.secrets[0].note === 'The staging box deploy password.' && /What it is: The staging box deploy password\./.test(flat), 'the run card: its facts carry the description (`note`), runCardOf draws «What it is: …» under the name', f0.secrets[0]);
+  const runSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  ok(/if \(row && row\.noteShared === true && row\.note\) noteById\[r\.id\] = String\(row\.note\);/.test(runSrc) && /entries: nameById, notes: noteById,/.test(runSrc), 'the run door hands cardFactsOf the SHARED descriptions only (wiring pin — a legacy note never reaches a card)');
 }
 
 console.log('⑪ THE SWEEP — the pasted values reach no answer, frame, log, stash or audit line');

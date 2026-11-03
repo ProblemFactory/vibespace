@@ -329,9 +329,10 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `mint --note` (the words rule — a secret's shape, a line break refused by name)
     if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
     const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor, forHost: forWords, note: nw.note || null });   // forHost: the one host it goes to without asking
+    if (!r.ok && r.code === 'words_later') return res.status(409).json({ ok: false, code: r.code, error: PW.WORDS.words_later });   // lane vault-entry-description r2 (MAJOR 2)
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'mint', conv: p.scope }, { outcome: 'ok', purpose: typeof b.for === 'string' ? b.for.slice(0, 200) : 'mint a secret it never sees', actor: p.actor }); } catch { /* the mint still answered — the use law seam (int331): mint is a USE so `uses` reads it back */ } }
-    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null });
+    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null, ...(r.rotated ? { rotated: 'value rotated; its name and description kept' } : {}) });
   });
   app.post('/api/agent/vault/put', (req, res) => {
     const p = agentPrincipal(req);
@@ -345,9 +346,10 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `put --note`
     if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
     const r = vault.agentPut(en.name, value, { actor: p.actor, note: nw.note || null });
+    if (!r.ok && r.code === 'words_later') return res.status(409).json({ ok: false, code: r.code, error: PW.WORDS.words_later });   // lane vault-entry-description r2 (MAJOR 2)
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'put', conv: p.scope }, { outcome: 'ok', purpose: 'store a value it was given', actor: p.actor }); } catch { /* the put still answered — the use law seam (int331): put is a USE so `uses` reads it back */ } }
-    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)' });
+    res.json({ ok: true, name: r.name, ref: r.ref, ...(r.rotated ? { rotated: 'value rotated; its name and description kept' } : {}), provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)' });
   });
   // lane vault-use-law: every answer of the link-token door (the device audit's row, below) is also a USE of that machine's
   // link token by the conversation that asked — the ONE writer's line (door link-token, conv, outcome) and, for a refusal
@@ -401,21 +403,23 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
  * integration store; a free entry: the vault's `secret:<id>`); POST /api/vault/secrets {label, kind, note, value} — the
  * Vault window's 「其他密钥或密码…」 (a free entry the owner adds); DELETE /api/vault/secrets/:id — its delete door.
  */
-function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
+/** The vsst_'s conversation as the paste door reads a caller — { job } for a job token (by its prefix), else null. ONE resolver
+ *  (lane vault-entry-description r2, MINOR c): the paste routes AND the words route (`describe`) read it — its id is the
+ *  FORK-SAFE durable one (addressableId: null for a pending fork, which the door then refuses unauthorized). */
+function pasteCallerIn(activeSessions, req) {
   const { addressableId } = require('../claude-lock-capture.js');
-  const tokenOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
-  /** The vsst_'s conversation as the paste door reads a caller — { job } for a job token (by its prefix), else null. */
-  function pasteCallerOf(req) {
-    const token = tokenOf(req);
-    if (token.startsWith('jbt_')) return { job: true };
-    if (!token.startsWith('vsst_')) return null;
-    for (const [k, s] of activeSessions) {
-      if (!s || !sameToken(token, s.agentToken)) continue;
-      const cid = addressableId(s);
-      return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, scope: String(s._webuiId || k), name: s.name || s.webuiName || null };
-    }
-    return null;
+  const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+  if (token.startsWith('jbt_')) return { job: true };
+  if (!token.startsWith('vsst_')) return null;
+  for (const [k, s] of activeSessions) {
+    if (!s || !sameToken(token, s.agentToken)) continue;
+    const cid = addressableId(s);
+    return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, scope: String(s._webuiId || k), name: s.name || s.webuiName || null };   // the paste door's caller
   }
+  return null;
+}
+function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
+  const pasteCallerOf = (req) => pasteCallerIn(activeSessions, req);
   const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
   const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
   app.post('/api/agent/vault/secret-request', (req, res) => {
@@ -435,7 +439,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
   app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined }); }));   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
-  // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and edits them himself
+  // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and the owner's own edit of them
   app.post('/api/vault/words-asks/:id/answer', person((req) => { const b = req.body || {}; return paste.answerWords(String(req.params.id), { answer: b.answer, by: 'user', person: true }); }));
   app.post('/api/vault/entry-words', person((req) => { const b = req.body || {}; return paste.ownerWords({ entry: typeof b.entry === 'string' ? b.entry : '', name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, by: 'user' }); }));
 }
@@ -520,7 +524,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     const pr = require('../vault-run.js').parseRef(typeof b.entry === 'string' ? b.entry.trim() : '');
     const list = caller.job ? null : run.runnableFor(caller);
     const seen = !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
-    const r = paste.propose({ caller: { job: !!caller.job, conversationId: caller.conv || caller.conversationId, sessionKey: caller.sessionKey, scope: caller.scope, name: caller.name }, entry: pr && pr.store === 'secrets' ? pr.entry : null, ref: pr ? pr.ref : '', seen, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined });
+    const pc = pasteCallerIn(activeSessions, req) || {};   // r2 (MINOR c): the paste door's ONE resolver — a pending fork has no id of its own and is refused, never filed under its parent
+    const r = paste.propose({ caller: { job: !!pc.job, conversationId: pc.conversationId || null, sessionKey: pc.sessionKey || null, scope: pc.scope, name: pc.name }, entry: pr && pr.store === 'secrets' ? pr.entry : null, ref: pr ? pr.ref : '', seen, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined });
     if (!r || !r.ok) return res.status(paste.statusOf((r && r.code) || 'unfiled')).json({ ok: false, code: (r && r.code) || 'unfiled', error: (r && r.words) || paste.words((r && r.code) || 'unfiled'), ...(r && r.until ? { until: r.until } : {}) });
     return res.json({ ok: true, proposalId: r.proposalId, ref: pr.ref, ...(r.already ? { already: r.already } : { to: r.to, filed: CN.filedLine('vault-words-ask', r.todoId, OF.tray()) }), tray: OF.tray() });
   });

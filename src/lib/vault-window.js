@@ -377,7 +377,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const label = vwEl('div', 'vw-label', labelWord(row));
     main.append(label);
     const meta = [];
-    if (row.detail && row.store !== 'automation') meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
+    if (row.detail && row.store !== 'automation' && !(hasWords(row) && row.note && row.note.startsWith(row.detail))) meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // lane vault-entry-description r2: a free entry's detail IS its description — said once, on its own line   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
     meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
@@ -393,7 +393,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     else main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
     if (ownRule) main.append(ownRule);
     // lane vault-entry-description: its DESCRIPTION under the name (or that it has none), and a mark while an agent's proposal of
-    // new words waits in For you; a description the owner wrote before the rule says it is his alone until he saves it again
+    // new words waits in For you; a description the owner wrote before the rule says it is the owner's alone until it is saved again
     const words = hasWords(row);
     let pend = null;
     if (words) {

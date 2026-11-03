@@ -32,7 +32,7 @@
  *     新的 agent 很难知道每个 key 是干啥的…第一次创建 + request key 的 agent 本身可以 request 同时直接加 description，后续修改需要我
  *     approve。名字也一样」): an entry's NAME is its box's `label` (one line, ≤ 80) and its DESCRIPTION its `note` (one paragraph,
  *     ≤ 400) — ONE validator (wordsOf) for every writer. The creator writes them free (`request … --name --note`, mint / put
- *     `--note`; the owner's paste box shows them, editable — his edit wins); later an agent PROPOSES (`vibespace-vault describe`
+ *     `--note`; the owner's paste box shows them, editable — the owner's edit wins); later an agent PROPOSES (`vibespace-vault describe`
  *     ⇒ a For-you card `vault-words-ask`, 允许 / 拒绝 — wordsCardOf) and the owner's Allow writes them through the engine's ONE
  *     writer (editEntryWords); every agent that may use the entry reads them in its list (agentEntryWords — the belt).
  */
@@ -100,6 +100,7 @@ const WORDS = Object.freeze({
   describe_required: 'say what changes: vibespace-vault describe <vault://…> --name "<new name>" and/or --note "<what it is for>"',
   words_same: 'nothing changes — that is already its name and description',
   words_not_here: 'that entry has no name or description of its own to change — its card, its site or VibeSpace names it',
+  words_later: 'that entry already exists — a later change of its name or description waits for the user: vibespace-vault describe <its vault:// reference> --note "…" (a rotation without --note keeps its words)',   // r2 (MAJOR 2)
 });
 /** A text that holds a secret's SHAPE (a token's: PEM, JWT, a vendor prefix, key material — src/secret-shapes.js hasTokenShape;
  *  never the keyword rules, which read «the router password for 192.168.1.1» as one) — never a name or a description. */
@@ -263,6 +264,9 @@ const RENAME_LINE = i18nKey('Name: «{old}» → «{new}»');
 const NOTE_FROM_LINE = i18nKey('Description now: {note}');
 const NOTE_TO_LINE = i18nKey('Description after: {note}');
 const NOTE_NONE = i18nKey('(none)');
+/** r2 (MAJOR 1): the description NOW when only the owner reads it (a note from before the rule) — the card never carries its text
+ *  (the item rides the asking conversation's own list), the owner reads it in the Vault window. */
+const NOTE_PRIVATE = i18nKey('Description now: only you read it (in the Vault window) — Allow replaces it');
 function wordsCardOf({ who, ref, from = {}, to = {} }) {
   const old = String(from.name || ''), renames = to.name !== undefined && to.name !== old, redescribes = to.note !== undefined && to.note !== String(from.note || '');
   const head = renames && redescribes ? i18nKey('{who} wants to rename «{old}» to «{new}» and change its description') : renames ? i18nKey('{who} wants to rename «{old}» to «{new}»') : i18nKey('{who} wants to change the description of «{old}»');
@@ -270,7 +274,7 @@ function wordsCardOf({ who, ref, from = {}, to = {} }) {
   const noteParam = (n) => (n ? n : { key: NOTE_NONE });
   const lines = [
     ...(renames ? [{ key: RENAME_LINE, params: { old, new: to.name } }] : []),
-    ...(redescribes ? [{ key: NOTE_FROM_LINE, params: { note: noteParam(String(from.note || '')) } }, { key: NOTE_TO_LINE, params: { note: noteParam(to.note) } }] : []),
+    ...(redescribes ? [from.shared === false && from.note ? { key: NOTE_PRIVATE } : { key: NOTE_FROM_LINE, params: { note: noteParam(String(from.note || '')) } }, { key: NOTE_TO_LINE, params: { note: noteParam(to.note) } }] : []),
     { key: i18nKey('The entry: {ref}'), params: { ref } },
     { key: i18nKey('Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.') },
   ];
@@ -292,11 +296,14 @@ function proposalOfItem(it) {
 function wordsReceiptText(o = {}) {
   const piece = (s, max = 200) => PT.toAgentText(String(s == null ? '' : s), { max, kind: 'line' });
   const head = `[Vault] Your proposal ${piece(o.proposalId, 20)} (vibespace-vault describe) for ${piece(o.ref, 160)}`;
-  if (o.outcome === 'applied') return `${head}: APPLIED — the user allowed it. Its name is «${piece(o.to && o.to.name, 80)}»; its description: ${o.to && o.to.note ? `«${piece(o.to.note, 400)}»` : 'none'}. Every agent that may use it reads them in vibespace-vault list.`;
+  // r2 (MAJOR 1): the receipt says only what the card showed — the words the proposal carried, never a description it did not write
+  if (o.outcome === 'applied') { const t = o.to || {}; const said = [...(t.name !== undefined ? [`its name is «${piece(t.name, 80)}»`] : []), ...(t.note !== undefined ? [`its description: ${t.note ? `«${piece(t.note, 400)}»` : 'none'}`] : [])]; return `${head}: APPLIED — the user allowed it; ${said.join('; ') || 'nothing changed'}. Every agent that may use it reads its name and description in vibespace-vault list.`; }
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request. Nothing changed. Propose it again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;
   if (o.outcome === 'gone') return `${head}: NOT APPLIED — the entry is not in the vault any more.`;
   return `${head}: REFUSED — ${REFUSED_WHY[o.why] || REFUSED_WHY.denied}. Its name and description stay as they were. Do not propose it again in the next ${QUIET_MS / 60e3} minutes.`;
 }
+/** r2 (MINOR b): ONE open proposal per entry — the refusal names the conversation whose proposal waits (its name belted). */
+function pendingWords(who) { return `a change of that entry's name or description by ${PT.toAgentText(String(who == null ? '' : who), { max: 80, kind: 'line' })} already waits on the user — wait for their answer`; }
 /** THE BELT where an entry's words reach an agent (`vibespace-vault list` / `uses`): its name and its description — words an
  *  agent or the owner wrote, read by ANOTHER agent — each ONE inline piece of the peer-text belt (bounded, folded,
  *  frame-inert). → { name, note } ('' when none). */
@@ -306,6 +313,7 @@ function agentEntryWords({ label, note } = {}) {   // the name's bound is an inv
 
 /** A REFUSAL's cause → its words toward the agent (the item's resolution: 拒绝, ✕, ✓ without a paste, a clear). */
 const REFUSED_WHY = Object.freeze({
+  edited: 'the user changed its name and description themselves meanwhile — read them in vibespace-vault list, and propose again only if it still needs a change',   // r2 (MINOR b)
   denied: 'the user pressed Refuse',
   dismissed: 'the user dismissed the request',
   done: 'the user marked it handled without pasting anything',
@@ -361,5 +369,5 @@ function valueOf(raw) {
 module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
-  WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords,   // lane vault-entry-description
+  WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords,   // lane vault-entry-description
 };

@@ -1390,6 +1390,7 @@ function cardFactsOf(spec, shape, cwd, names = {}) {
     const i = info[r.id] || {}, aw = awayOfId(r.id);
     return {
       ...clipFold('name', ent[r.id] || shortRefId(r)), ...clipFold('entry', String(r.entry)), ...clipFold('ref', r.ref), as: injectionOfRef(spec, r),
+      ...(names.notes && names.notes[r.id] ? clipFold('note', String(names.notes[r.id])) : {}),   // lane vault-entry-description r2: what it is (its SHARED description — the door hands no other)
       own: !!i.own, provenance: i.own ? (i.prov === 'minted' ? 'minted' : 'stored') : (i.open ? 'granted' : null),   // whose entry it is, as a CODE
       forHost: i.forHost || null,                                                                                     // the host a minted value was minted FOR
       sendsTo: aw ? (aw.unknown ? null : aw.host || null) : null,                                                     // the host this run would SEND it to (null = unknown)

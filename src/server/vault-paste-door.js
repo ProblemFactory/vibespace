@@ -34,11 +34,11 @@
  *     while one is open ⇒ its id again (already: 'open'); after a refusal the same place is quiet for 10 minutes
  *     (request_quiet — the agent was told so in its receipt).
  *   · THE WORDS OF AN ENTRY (lane vault-entry-description — the owner 2026-11-02: the first agent writes them free, later changes
- *     wait for his approval, names too): a NEW entry's request carries its description (`--note`) beside its name; the paste box
+ *     wait for the owner's approval, names too): a NEW entry's request carries its description (`--note`) beside its name; the paste box
  *     shows both, editable — the OWNER's words at the paste win. Later an agent PROPOSES (`vibespace-vault describe` — an entry
- *     it may reference, its list's): ONE For-you item `vault-words-ask` (允许 / 拒绝; it waits for him — a late answer counts; a
- *     lock withdraws it), the words on the item's own lines (old → new); his Allow writes them through the engine's ONE writer
- *     (editEntryWords — proposedBy the agent, approvedBy the owner) and the agent reads a receipt at its next turn. His own
+ *     it may reference, its list's): ONE For-you item `vault-words-ask` (允许 / 拒绝; it waits for the owner — a late answer counts; a
+ *     lock withdraws it), the words on the item's own lines (old → new); the owner's Allow writes them through the engine's ONE writer
+ *     (editEntryWords — proposedBy the agent, approvedBy the owner) and the agent reads a receipt at its next turn. The owner's own
  *     Edit… in the Vault window goes through the same writer (ownerWords). The creator has no later right of its own.
  */
 const crypto = require('crypto');
@@ -284,7 +284,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     let s = null;
     try { s = (vault.secretNames() || []).find((x) => x && x.name === entry) || null; } catch { s = null; }
     const row = s ? VI.secretRowOf(s) : null;
-    return row ? { name: String(row.label || ''), note: String(row.note || '') } : null;
+    return row ? { name: String(row.label || ''), note: String(row.note || ''), shared: row.noteShared === true } : null;   // shared: r2 (MAJOR 1)
   }
   const wrecordOf = (it) => {
     const a = it && it.action;
@@ -301,7 +301,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** Close a proposal's item by THIS door, forget it, tell the agent. outcome: applied | refused | withdrawn | gone. */
   function wsettle(w, outcome, { why = 'denied', to = null } = {}) {
     wforget(w);
-    if (outcome === 'refused') quiet.set(`${w.conv}\nwords:${w.entry}`, now() + P.QUIET_MS);
+    if (outcome === 'refused' && why !== 'edited') quiet.set(`${w.conv}\nwords:${w.entry}`, now() + P.QUIET_MS);   // r2: the owner's own edit is no refusal of the agent's words
     if (userTodos && w.todoId) {
       try { const it = userTodos.get?.(w.todoId); if (it && it.status === 'open') { settling.add(w.todoId); try { const by = outcome === 'applied' ? 'allowed' : outcome === 'withdrawn' ? 'vault_locked' : outcome === 'gone' || why === 'gone' ? 'ask-over' : 'denied'; if (w.fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([w.todoId], by, w.fact); else userTodos.setStatus(w.todoId, 'done', by); } finally { settling.delete(w.todoId); } } } catch (e) { log(`${w.who}: the item of ${w.proposalId} could not be closed: ${e.message}`); }
     }
@@ -338,6 +338,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     index();
     const conv = String(caller.conversationId);
     for (const w of wopen.values()) if (w.conv === conv && w.entry === entry) return { ok: true, already: 'open', proposalId: w.proposalId };
+    for (const w of wopen.values()) if (w.entry === entry) return { ...named('words_pending'), words: P.pendingWords(w.who) };   // r2 (MINOR b): ONE open proposal per entry
     const qu = quiet.get(`${conv}\nwords:${entry}`);
     if (qu && qu > now()) return named('request_quiet', { until: new Date(qu).toISOString() });
     if ([...wopen.values()].filter((w) => w.conv === conv).length >= P.LIMITS.openPerConversation || wopen.size >= P.LIMITS.openHubWide) return named('too_many_requests');
@@ -376,7 +377,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const r = vault.editEntryWords(w.entry, { label: to.name, note: to.note }, { proposedBy: w.who, approvedBy: String(by).slice(0, 40) });
     if (!r || !r.ok) { const c = String((r && r.code) || ''); return named(c.includes('vault_locked') ? 'vault_locked' : c === 'entry_unknown' ? 'entry_unknown' : 'store_failed'); }
     try { vault.contentsChanged && vault.contentsChanged('words'); } catch { }   // every open Vault window re-reads (its row's words)
-    wsettle(w, 'applied', { to: { name: r.to.label, note: r.to.note } });
+    wsettle(w, 'applied', { to: { ...(to.name !== undefined ? { name: r.to.label } : {}), ...(to.note !== undefined ? { note: r.to.note } : {}) } });   // r2 (MAJOR 1): what the card showed
     return { ok: true, outcome: 'applied', entry: w.entry };
   }
   /** THE OWNER'S OWN EDIT (the Vault window's Edit… — a person on this page): the same writer, no card. */
@@ -390,6 +391,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const r = vault.editEntryWords(e, { label: v.name, note: v.note }, { proposedBy: String(by).slice(0, 40), approvedBy: String(by).slice(0, 40) });
     if (!r || !r.ok) return named(String((r && r.code) || '').includes('vault_locked') ? 'vault_locked' : 'store_failed');
     try { vault.contentsChanged && vault.contentsChanged('words'); } catch { }
+    index();
+    for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'refused', { why: 'edited' });   // r2 (MINOR b): the owner's edit withdraws a waiting proposal (its «now» is stale) — the agent is told
     return { ok: true, entry: e, name: r.to.label, note: r.to.note };
   }
   /** The open proposals (the Vault window's pending marker — ids and entries; the words are the items'). */

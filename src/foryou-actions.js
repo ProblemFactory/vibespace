@@ -790,8 +790,9 @@ function runCardOf(item, { t = fmt } = {}) {
   for (const s of secrets) {
     const name = wholeOf(s, 'name').shown || wholeOf(s, 'ref').shown, key = wholeOf(s, 'entry').whole || headOf(name);
     let g = groups.find((x) => x.key === key);
-    if (!g) groups.push(g = { key, names: [], as: [] });
+    if (!g) groups.push(g = { key, names: [], as: [], note: '' });
     g.names.push(name); g.as.push(asOf(s.as));
+    if (!g.note && typeof s.note === 'string' && s.note) g.note = wholeOf(s, 'note').shown;   // lane vault-entry-description r2: what the entry is for
   }
   const entryName = (g) => (g.names.length === 1 ? g.names[0] : g.names.every((n) => headOf(n) === headOf(g.names[0])) ? headOf(g.names[0]) : g.names.join(t(', ')));
   const who = wholeOf(f, 'who').shown || t('An agent'), toolName = str(tool.name) || pathW.shown;   // r11: the facts' own `who` — never the record's live session name
@@ -810,7 +811,7 @@ function runCardOf(item, { t = fmt } = {}) {
     hosts: [known ? list(hosts.map((x) => [{ mono: x }])) : hostWhy],
     program: [[{ mono: rel, ...(rel0 !== rel ? { whole: rel0 } : {}) }, ...(rel0 !== rel || (pathW.lost && rel0 === path) ? longAside(pathW) : []), ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
     folder: [[{ mono: folderW.shown }, ...longAside(folderW)]],   // r12: a long folder's clip on the face, said; the whole under the fold
-    secrets: groups.map((g) => [{ text: entryName(g) }, { text: ' → ' }, ...list(g.as.filter((x) => x.length))]),
+    secrets: groups.flatMap((g) => [[{ text: entryName(g) }, { text: ' → ' }, ...list(g.as.filter((x) => x.length))], ...(g.note ? [[{ aside: t('What it is: {note}', { note: g.note }) }]] : [])]),   // r2: its description under it
   };
   const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)

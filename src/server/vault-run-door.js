@@ -905,7 +905,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     save({ runnable: d.runnable, always: d.always, policyApproved });
   }
   /** lane vault-entry-description: a row's NAME and DESCRIPTION as an agent reads them — each one piece of the peer-text belt
-   *  (src/vault-paste.js agentEntryWords); a description the owner wrote before the rule (`noteShared` false) stays his. */
+   *  (src/vault-paste.js agentEntryWords); a description the owner wrote before the rule (`noteShared` false) stays the owner's. */
   const wordsOfRow = (row) => PW.agentEntryWords({ label: row && row.label, note: row && row.noteShared ? row.note : '' });
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
@@ -1293,7 +1293,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return g;
   }
   /** lane vault-entry-description: an entry's DESCRIPTION on the owner's request cards — under its name, what it is for (a
-   *  description the owner wrote before the rule is his: shown to him too). */
+   *  description the owner wrote before the rule is the owner's: the owner's card shows it too). */
   const noteOfRow = (row) => String((row && row.note) || '').slice(0, 400);
   const noteLine = (r) => (r.note ? [{ key: 'What it is: {note}', params: { note: r.note } }] : []);
   const requestWords = (r) => [
@@ -1982,11 +1982,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
     const refused = !!(d && d.refused);   // round 3 (MAJOR item 2): the store failed its mark — fail CLOSED (every standing grant paused)
-    const entries = [], nameById = {};   // lane vault-agent-own r20: each ref's Vault-window name (its row label) for cardFactsOf — a ref with no row falls to the model's shortRefId
+    const entries = [], nameById = {}, noteById = {};   // lane vault-agent-own r20: each ref's Vault-window name (its row label) for cardFactsOf — a ref with no row falls to the model's shortRefId; noteById: lane vault-entry-description r2 — its SHARED description (a legacy owner note never)
     const admitted = [];   // a GRANT that opened a closed entry (lane vault-manual-and-lock) — a once-grant is spent before the run starts
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
       if (row && row.label != null) nameById[r.id] = String(row.label);
+      if (row && row.noteShared === true && row.note) noteById[r.id] = String(row.note);
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
       const own = !!row && VR.ownsAgentEntry(r, caller), pv = (own && row.provenance) || {};   // lane vault-agent-own: an entry it made itself — open to it by construction
       const sw = !refused && !!(row && d && d.runnable.has(r.id)), g = row && !own ? grantOf(scope, r.id) : null;
@@ -2152,7 +2153,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // r8 (MINOR 3): no window line — its words ride facts.window   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
         if (shown.length > DETAIL_MAX) return named('card_too_long');
         // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
-        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own'), ...(cmdToken && !shape.always ? { command: VUG.commandWords(cmdToken) } : {}) });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
+        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, notes: noteById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own'), ...(cmdToken && !shape.always ? { command: VUG.commandWords(cmdToken) } : {}) });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
         if (plan0.length && facts.always) { const at = shape.always ? facts.always : facts.always.command; if (at && typeof at === 'object') at.changes = changeFactsOf(plan0, planMs, { many }); }   // r4 (B): the words beside «Always» / «Always (this command)» (foryou-actions runCardOf)
         if (wfacts) facts.window = wfacts;   // r7: the words beside «Allow for 1 hour» (foryou-actions runCardOf); r8: their only home
         else if (excepted.length) facts.window = { offered: false, excepted };   // r8: why it is not offered («you excluded this conversation from “X” in the Vault window»)

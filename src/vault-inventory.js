@@ -113,10 +113,11 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
     // <the conversation>» and the hosts the request named (the search finds it by either; a vault-use grant's `@entry`)
     const asked = s && s.askedBy && typeof s.askedBy === 'object' && s.askedBy.conv ? { conv: clip(s.askedBy.conv, 160), name: clip(s.askedBy.name, 80) } : null;
     const hosts = Array.isArray(s && s.hosts) ? s.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [];
-    // lane vault-entry-description: its DESCRIPTION is the row's `note` (its own line in the window — no longer the meta's
-    // detail); `noteShared` = every agent that may use it reads it (words written under that rule, or an agent's request — a note
-    // the owner wrote before it, under «never shown to an agent», stays his until he saves it again)
-    return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: '', note: String((s && s.note) || ''), noteShared: !!(s && (s.noteShared === true || asked)), createdAt: at, ...(asked ? { origin: 'request', askedBy: asked } : {}), ...(hosts.length ? { hosts } : {}) };
+    // lane vault-entry-description: its DESCRIPTION is the row's `note` (its own line in the window); `detail` keeps the same words
+    // as before (r2, MINOR a: the run door's policy judge reads `detail` as the purpose and keys its memo on it — an unchanged
+    // entry keeps its key); `noteShared` = every agent that may use it reads it (words written under that rule, or an agent's
+    // request — a note the owner wrote before it, under «never shown to an agent», stays the owner's until it is saved again)
+    return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), note: String((s && s.note) || ''), noteShared: !!(s && (s.noteShared === true || asked)), createdAt: at, ...(asked ? { origin: 'request', askedBy: asked } : {}), ...(hosts.length ? { hosts } : {}) };
   }
   const am = AGENT_ENTRY_RE.exec(name);
   if (am) {

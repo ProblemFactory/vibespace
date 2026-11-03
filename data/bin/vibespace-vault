@@ -312,6 +312,7 @@ async function mint(rest) {
   if (out['--for'] !== undefined) body.for = out['--for'];
   const d = await call('POST', '/api/agent/vault/mint', body);
   console.log('minted ' + d.name);
+  if (d.rotated) console.log('  ' + d.rotated);   // lane vault-entry-description r2: a re-mint rotates the value, never the words
   console.log('  reference: ' + d.ref);
   console.log('  ' + (d.provenance || 'agent minted · never shown to the agent') + ' — the value is sealed; you never see it.');
   console.log('  The user can reveal it in ⚙ System ▸ Vault… behind the second password (it is meant to be typed somewhere).');
@@ -374,6 +375,7 @@ async function put(rest) {
   if (!value) { console.error('vibespace-vault: the value is empty'); process.exit(1); }
   const d = await call('POST', '/api/agent/vault/put', { name, value, ...(out['--note'] !== undefined ? { note: out['--note'] } : {}) });   // note: lane vault-entry-description
   console.log('stored ' + d.name);
+  if (d.rotated) console.log('  ' + d.rotated);   // lane vault-entry-description r2
   console.log('  reference: ' + d.ref);
   console.log('  ' + (d.provenance || 'agent stored · the agent saw the plaintext'));
   if (d.hint) console.log('  ' + d.hint);
@@ -404,7 +406,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.note ? `\n    what it is: ${e.note}` : '\n    what it is: (no description — if you know it, propose one: vibespace-vault describe ' + e.ref + ' --note "…")'}${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}${e.note ? `\n    what it is: ${e.note}` : '\n    what it is: (no description — if you know it, propose one: vibespace-vault describe ' + e.ref + ' --note "…")'}`);   // own: lane vault-agent-own · standing: lane vault-use-grants   // lane vault-entry-description r2 (MINOR d): line 1 = the base's reference line, its access fact on it; the description its OWN next line
     return;
   }
   if (cmd === 'uses') return usesCmd();

@@ -47,7 +47,7 @@ const ENTRY_KEY = 'Where it goes: a new vault entry «{label}» ({kind})', NOTE_
 
 /** THE BOX for one request (DOM nodes — every word textContent): the field + 存入保险库 + 拒绝, and its state line below
  *  (the vault locked / not set up — each with its door — or the last refusal's words). lane vault-entry-description: a NEW
- *  entry's name and description as the agent proposed them, above the field — the owner's to edit before he saves (his win). */
+ *  entry's name and description as the agent proposed them, above the field — the owner's to edit before saving (the owner's words win). */
 export function secretBoxEl(item) {
   const box = mk('div', 'ut-secret');
   box.dataset.req = String(item.action.requestId);

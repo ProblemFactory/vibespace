@@ -147,7 +147,9 @@ refused). The user sees your words in the paste box and may change them before p
 To change them LATER — any agent, the one that created it too — propose: `vibespace-vault describe <vault://…> --name "…"
 --note "…"`. Nothing changes until the user allows it on ONE card in their For you tray; your next turn says **APPLIED** or
 **REFUSED** (then do not propose it again for 10 minutes); a vault lock **WITHDRAWS** it. Only entries in your own `list` can be
-named. An entry with no description says so in `list` — if you know what it is for, propose one.
+named, one proposal per entry at a time (another conversation's waiting one refuses yours — `words_pending`). Rotating a value
+(`mint` / `put` of the same name) keeps its name and description; `--note` on an existing name is refused (`words_later`) —
+change the words with `describe`. An entry with no description says so in `list` — if you know what it is for, propose one.
 
 ## A secret you do not have — `request "<what>"` (the paste box)
 

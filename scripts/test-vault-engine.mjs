@@ -492,7 +492,7 @@ console.log('O  agent mint / put (q-043 §9)');
   const Mod = require('module');
   const ef = path.join(REPO, 'src/server/vault-engine.js');
   const esrc = fs.readFileSync(ef, 'utf8');
-  const ecut = esrc.replace('ref: V.vaultRefOf(name) };\n    } finally { V.zero(value); }', "ref: V.vaultRefOf(name), value: value.toString('utf8') };\n    } finally { V.zero(value); }");
+  const ecut = esrc.replace('ref: V.vaultRefOf(name), ...(kept ? { rotated: true } : {}) };\n    } finally { V.zero(value); }', "ref: V.vaultRefOf(name), ...(kept ? { rotated: true } : {}), value: value.toString('utf8') };\n    } finally { V.zero(value); }");   // lane vault-entry-description r2: the return line carries `rotated`
   const em = new Mod(ef); em.filename = ef; em.paths = Mod._nodeModulePaths(path.dirname(ef)); em._compile(ecut, ef);
   { const { dir: d2 } = world(); const me = em.exports.create({ dataDir: d2, kdf: CHEAP, log: quiet, idleTimer: false, register: false }); await me.setup(PW, {}); const mm = me.agentMint('agent:c/z', {}); ok(ecut !== esrc && 'value' in mm, 'MUTANT (agentMint echoes the value) ⇒ the value IS in the return — the real engine never puts it there (would RED a mint-never-returns assert)'); me.close(); }
 

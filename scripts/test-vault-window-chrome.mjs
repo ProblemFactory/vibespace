@@ -9,7 +9,7 @@
 //   ②d (lane vault-paste-request, the owner's 「我压根没法添加啊」): 添加… ▸ 其他密钥或密码… adds a FREE entry (name, kind, a masked
 //      value, a note) — its row under Passwords & keys (Password · By you), 显示 behind 验证是你, a bearer refused human_only, 删除
 //      through the usual confirm; lane vault-entry-description: the note IS its description — its own line under the name, and
-//      Edit… changes the name and the description (the owner's own words: no card), the row reads them, the audit line names him
+//      Edit… changes the name and the description (the owner's own words: no card), the row reads them, the audit line names the owner
 //   ③ 「显示」 ⇒ 「验证是你」: a wrong second password says so; the right one ⇒ the value appears in ITS row's field, the
 //      countdown chip shows; the HTML payload stays text (no element made, no handler ran)
 //   ④ a second 「显示」 inside the window asks nothing more; the SAME cookie without the page secret (a second tab) and

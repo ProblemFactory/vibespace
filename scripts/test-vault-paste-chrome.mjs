@@ -17,10 +17,11 @@
 //      the phone's tray sheet saying vault_locked with 解锁… inline; 解锁… opens THE unlock dialog; unlocked ⇒ the box is ready
 //      (a 16 px field, ≥ 36 px targets) and the paste stores a `secret:<id>` entry the Vault window lists by its label;
 //      lane vault-entry-description: the ask carries `--note` — the box shows the agent's name and description in their own
-//      fields (16 px on the phone), the owner renames it before pasting and HIS name wins, the agent's description stands
-//   ⑥b (lane vault-entry-description) a LATER change waits for him: the agent's `describe` ⇒ ONE tray card (old → new, 允许 / 拒绝),
+//      fields (16 px on the phone), the owner renames it before pasting and the owner's name wins, the agent's description stands
+//   ⑥b (lane vault-entry-description) a LATER change waits for the owner: the agent's `describe` ⇒ ONE tray card (old → new, 允许 / 拒绝),
 //      the Vault row's description + «An agent proposes new words» + Edit…; a real click on Allow ⇒ the row and `list` read
-//      the new words, the agent's next turn says APPLIED (VAULT_WORDS_SHOTS=<dir> keeps the three PNGs)
+//      the new words, the agent's next turn says APPLIED; r2: the RUN card of a held `vibespace-vault run` with it says «What it is:
+//      …» (Deny ends the run) (VAULT_WORDS_SHOTS=<dir> keeps the four PNGs)
 //   ⑦ RED CONTROL (saved by Enter in the box): a mutant hub whose paste door logs the value and files it on an item ⇒ the same checks find it in the server
 //      log, the DOM and a WebSocket frame (they see a leak when there is one)
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
@@ -224,7 +225,7 @@ try {
   const words3 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const n = b.querySelector('input.ut-secret-name'), d = b.querySelector('textarea.ut-secret-desc'); return n && d ? { name: n.value, note: d.value, nfont: parseFloat(getComputedStyle(n).fontSize), dfont: parseFloat(getComputedStyle(d).fontSize), right: Math.max(n.getBoundingClientRect().right, d.getBoundingClientRect().right), vw: innerWidth, above: n.getBoundingClientRect().bottom <= b.querySelector('input.ut-secret-input').getBoundingClientRect().top } : null; })()`);
   check('the box shows the agent\'s NAME and DESCRIPTION in their own fields above the masked one (16 px on the phone, inside the screen)', !!words3 && words3.name === 'Router admin' && words3.note === NOTE3 && words3.nfont >= 16 && words3.dfont >= 16 && words3.right <= words3.vw && words3.above, words3);
   await evalJs(`(() => { const n = document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input.ut-secret-name')}); n.focus(); n.select(); return true; })()`);
-  await cdp('Input.insertText', { text: 'Home router admin' });   // the owner renames it before he pastes (the keyboard's own road)
+  await cdp('Input.insertText', { text: 'Home router admin' });   // the owner renames it before pasting (the keyboard's own road)
   const fit = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const i = b.querySelector('input.ut-secret-input'); const s = b.querySelector('.ut-secret-save').getBoundingClientRect(), d = b.querySelector('.ut-secret-deny').getBoundingClientRect(); return { font: parseFloat(getComputedStyle(i).fontSize), ih: i.getBoundingClientRect().height, sh: s.height, dh: d.height, right: Math.max(s.right, d.right, i.getBoundingClientRect().right), vw: innerWidth }; })()`);
   check('the phone box: a 16 px field (no zoom), targets ≥ 36 px, all inside the screen', fit.font >= 16 && fit.ih >= 36 && fit.sh >= 36 && fit.dh >= 36 && fit.right <= fit.vw, fit);
   await evalJs(`document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input.ut-secret-input')}).focus(); true`);
@@ -271,6 +272,17 @@ try {
   const lst1 = await cli(['list'], TOKEN);
   check('the agent\'s next turn: APPLIED with the words now; its `list` says the new description', /APPLIED/.test(turn4) && turn4.includes(NEW3) && lst1.out.includes('what it is: ' + NEW3), { turn4: turn4.slice(0, 600), lst1: lst1.out.slice(0, 600) });
   await shot('vault-row-applied.png');
+  // lane vault-entry-description r2 (the ruling): the RUN card says what the entry is — a held `vibespace-vault run` with it
+  const runP = new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-vault'), 'run', '--env', `K=${REF3}`, '--', process.execPath, '-e', 'process.exit(0)'], { cwd: CWD, env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: TOKEN } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out })); });
+  const runCard = await until(`(() => { const c = [...document.querySelectorAll(${JSON.stringify(TRAY + ' .ut-item')})].find((x) => x.querySelector('.ut-run') && /Home router admin/.test(x.innerText)); return c ? { id: c.dataset.id, text: c.innerText } : null; })()`, { timeout: 20000 });
+  check('the RUN card a held `vibespace-vault run` draws says what the entry is (its description under the name)', !!runCard && runCard.text.includes('What it is: ' + NEW3), runCard && runCard.text.slice(0, 900));
+  await shot('tray-run-card.png');
+  const asks = await pageApi('GET', '/api/user-todos');
+  const runItem = ((asks.json && asks.json.todos && asks.json.todos.open) || []).find((i) => i.action && i.action.type === 'vault-run-ask');
+  if (runItem) await pageApi('POST', `/api/vault/run/asks/${runItem.action.askId}`, { answer: 'deny' });
+  const ran = await Promise.race([runP, sleep(15000).then(() => null)]);
+  check('denied ⇒ the run is refused and ends (nothing ran)', !!ran && ran.code !== 0, ran);
+
 
 
   console.log('⑦ RED CONTROL — a mutant paste door that logs the value and files it on an item');
