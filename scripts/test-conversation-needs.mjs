@@ -89,7 +89,7 @@ const PRODUCERS = {
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
   'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
   'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: [] },
-  'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request'] },
+  'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request', 'vault-words-ask'] },   // + lane vault-entry-description: an agent's proposal of an entry's words
   'src/server/feedback-forward.js': { origin: 'server', scope: 'group', types: [] },
 };
 // the add() site scanner (test-user-todos-layout ⑪'s shape: every two-argument `.add(` / `?.add(` on any receiver, its
@@ -306,12 +306,13 @@ eq(CN.filedLine({ origin: 'jobs', jobId: 'j-1', sessionKey: 'jobs', text: 'Appro
 const SRC = { status: read('src/agent-routes/status.js'), access: read('src/server/channels-access.js'), vault: read('src/routes/vault.js'), ask: read('data/bin/vibespace-ask'), chan: read('data/bin/vibespace-channels'), vv: read('data/bin/vibespace-vault'), exit: read('data/bin/vibespace-exit') };
 ok(/filed: CN\.filedLine\(item, item\.id, OF\.tray\(\)\)/.test(SRC.status) && /if \(answer\.filed && !item\.existing\) console\.log\(answer\.filed\);/.test(SRC.ask), 'vibespace-ask: the route answers `filed` worded from the ITEM it filed (a notice, a grant, an ask) and the CLI prints it');
 ok(/filed: CN\.filedLine\('open-channel', req\.id, OF\.tray\(\)\)/.test(SRC.access) && /filed: CN\.filedLine\('channel-watch-request', req\.id, OF\.tray\(\)\)/.test(SRC.access) && (SRC.chan.match(/console\.log\(r\.filed\);/g) || []).length === 2, 'vibespace-channels watch --mode wake + request: the engine answers `filed` from ITS row (channel-watch-request / open-channel), the CLI prints it');
-ok(/filed: CN\.filedLine\('vault-grant-ask', r\.todoId, OF\.tray\(\)\)/.test(SRC.vault) && /filed: CN\.filedLine\('secret-request', r\.requestId, OF\.tray\(\)\)/.test(SRC.vault) && (SRC.vv.match(/console\.log\(d\.filed\);/g) || []).length === 3, 'vibespace-vault request (a grant) + a paste request + a STANDING request (lane vault-standing-request): the route answers `filed` from ITS row, the CLI prints it');
+ok(/filed: CN\.filedLine\('vault-grant-ask', r\.todoId, OF\.tray\(\)\)/.test(SRC.vault) && /filed: CN\.filedLine\('secret-request', r\.requestId, OF\.tray\(\)\)/.test(SRC.vault) && /filed: CN\.filedLine\('vault-words-ask', r\.todoId, OF\.tray\(\)\)/.test(SRC.vault) && (SRC.vv.match(/console\.log\(d\.filed\);/g) || []).length === 4, 'vibespace-vault request (a grant) + a paste request + a STANDING request (lane vault-standing-request) + a words proposal (lane vault-entry-description: describe): the route answers `filed` from ITS row, the CLI prints it');
 {
   // every call names a REGISTRY ROW (or passes the item) — never a kind, never a type without a row
   const calls = [...Object.values(SRC).join('\n').matchAll(/CN\.filedLine\(('([^']*)'|[A-Za-z_.]+)/g)].map((m) => m[2] != null ? m[2] : `<${m[1]}>`);
   const off = calls.filter((c) => !c.startsWith('<') && !CN.ROW_OF[c]);
-  ok(calls.length === 5 && !off.length, `the ${calls.length} filedLine calls each name a registry row or pass the item (${calls.join(', ')})`, off);
+  ok(calls.length === 6 && !off.length,   // lane vault-entry-description: + vault-words-ask
+ `the ${calls.length} filedLine calls each name a registry row or pass the item (${calls.join(', ')})`, off);
 }
 ok((SRC.exit.match(/an approval card in this conversation and in the For-you tray|Filed for you: an approval — answer it on the card in this conversation or in the For-you tray/g) || []).length === 2, 'vibespace-exit (ask me each time): the 60 s wait line names the card in this conversation');
 

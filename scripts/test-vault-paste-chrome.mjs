@@ -263,9 +263,10 @@ try {
   const card = await until(`(() => { const c = document.querySelector(${JSON.stringify(CARD)}); if (!c) return null; const a = c.querySelector('.ut-hub-allow'), d = c.querySelector('.ut-hub-deny'); return a && d ? { text: c.innerText, allow: a.textContent, deny: d.textContent } : null; })()`, { timeout: 15000 });
   check('the tray card: who wants to change the description of «Home router admin», the old → new words, 允许 / 拒绝', !!card && /wants to change the description of «Home router admin»/.test(card.text) && card.text.includes(NEW3) && card.text.includes(NOTE3) && card.allow === 'Allow' && card.deny === 'Deny', card);
   await shot('tray-words-card.png');
-  check('a real click on Allow', (await realClick(CARD + ' .ut-hub-allow')) === true);
+  await evalJs(`document.querySelector(${JSON.stringify(CARD + ' .ut-hub-allow')})?.scrollIntoView({ block: 'center' }); true`); await sleep(1500);   // the press-arm rule: an Allow that just appeared under the pointer is not the one the owner read
+  check('a real click on Allow (after the pointer rests — the press-arm rule)', (await realClick(CARD + ' .ut-hub-allow')) === true);
   const after = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROWSEL)}); const d = r && r.querySelector('.vw-desc'), p = r && r.querySelector('.vw-desc-pending'); return d && d.textContent === ${JSON.stringify(NEW3)} && p && p.hidden ? true : null; })()`, { timeout: 15000 });
-  check('allowed ⇒ the Vault row reads the new description, the mark is gone', !!after);
+  check('allowed ⇒ the Vault row reads the new description, the mark is gone', !!after, await evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`));
   const turn4 = await nextTurn(TOKEN);
   const lst1 = await cli(['list'], TOKEN);
   check('the agent\'s next turn: APPLIED with the words now; its `list` says the new description', /APPLIED/.test(turn4) && turn4.includes(NEW3) && lst1.out.includes('what it is: ' + NEW3), { turn4: turn4.slice(0, 600), lst1: lst1.out.slice(0, 600) });
