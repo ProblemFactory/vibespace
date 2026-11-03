@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.373 — 2026-11-02
+
+### Fixed
+- The “waiting for you” strip reads top-down: who asks for what, the command, then the answers; the 1-hour explanation moved into the button's hint and details.
+
 ## 2.369.372 — 2026-11-02
 
 ### Added
