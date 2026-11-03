@@ -11791,4 +11791,6 @@ export default {
   "The entry: {ref}": "エントリ：{ref}",
   "Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.": "「許可」でこの文言をエントリに書き込みます。「拒否」ならそのままです。使えるすべての agent が一覧で名前と説明を読みます — 値は決して読みません。",
   "What it is: {note}": "用途：{note}",
+  "Description now: only you read it (in the Vault window) — Allow replaces it": "現在の説明：あなただけが読めます（保管庫ウィンドウ）— 許可すると置き換わります",
+  "What it is: only you read its description (in the Vault window)": "用途：説明はあなただけが読めます（保管庫ウィンドウ）",
 };

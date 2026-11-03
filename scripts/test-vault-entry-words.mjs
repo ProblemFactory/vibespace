@@ -24,6 +24,11 @@
 //      first); the owner's Edit… withdraws a waiting proposal (no quiet); a pending fork ⇒ 401; `list` line 1 = the base's
 //      reference line (its access fact on it); a free entry's `detail` = its note (the policy judge's purpose and memo key, as
 //      base); the RUN card's facts carry the SHARED description and runCardOf draws «What it is» (a legacy note never)
+//   ⑬ r3 (the acceptance of acf24771a): both REQUEST cards (plain + standing — the asker reads its own items) say a private
+//      description is the owner's, never its text; ONE census: every note-drawing surface reads THE guarded accessor
+//      (sharedNoteOf / privateNoteOf), a planted direct read is RED; every i18nKey of src/vault-paste.js has zh + ja; the
+//      owner-edited receipt is its own (WITHDRAWN, the words now, no quiet claim); a guess of a private note files a card
+//      (never 409 words_same); a re-sent identical SHARED description is idempotent (rotated, 200)
 // Run: node scripts/test-vault-entry-words.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +67,9 @@ function makeWorld(name, dataDir = path.join(ROOT, name)) {
   const integrations = IS.create({ dataDir, broadcast: (m) => FRAMES.push(JSON.stringify(m)), log: { log() {}, warn() {}, error() {} } });
   const deliver = { stashFor: (cid, env) => { STASH.push({ cid, ...env }); return { stored: true }; } };
   const sources = { secrets: () => VC.secretSource({ vault }), integrations: () => ({ vaultRows: () => integrations.vaultRows(), vaultReveal: (e, f) => integrations.vaultReveal(e, f) }) };
-  const vaultRun = RUN.create({ dataDir, vault, sources, userTodos, log: (m) => LOGS.push(String(m)), liveOf: () => true });
+  const grants = require(path.join(REPO, 'src/server/grants-store.js')).create({ dataDir });   // r3: the standing request's road (useGrants)
+  const useGrants = require(path.join(REPO, 'src/server/vault-use-grants.js')).create({ grants: () => grants, vault, dataDir, log: (m) => LOGS.push(String(m)) });
+  const vaultRun = RUN.create({ dataDir, vault, sources, userTodos, log: (m) => LOGS.push(String(m)), liveOf: () => true, useGrants, useFacts: (caller) => ({ conversationKeys: [caller.conversationId], groupIds: [] }) });
   const paste = require(path.join(REPO, 'src/server/vault-paste-door.js')).create({ vault, integrations, userTodos, deliver, vaultRun, log: (m) => LOGS.push(String(m)) });
   const T1 = 'vsst_' + crypto.randomBytes(16).toString('hex'), T2 = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const activeSessions = new Map([
@@ -349,7 +356,51 @@ console.log('⑫ r2 — the acceptance of ef69952f4');
   const flat = JSON.stringify(card);
   ok(f0.secrets[0].note === 'The staging box deploy password.' && /What it is: The staging box deploy password\./.test(flat), 'the run card: its facts carry the description (`note`), runCardOf draws «What it is: …» under the name', f0.secrets[0]);
   const runSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  ok(/if \(row && row\.noteShared === true && row\.note\) noteById\[r\.id\] = String\(row\.note\);/.test(runSrc) && /entries: nameById, notes: noteById,/.test(runSrc), 'the run door hands cardFactsOf the SHARED descriptions only (wiring pin — a legacy note never reaches a card)');
+  ok(/if \(PW\.sharedNoteOf\(row\)\) noteById\[r\.id\] = PW\.sharedNoteOf\(row\);/.test(runSrc) && /entries: nameById, notes: noteById,/.test(runSrc), 'the run door hands cardFactsOf the SHARED descriptions only (wiring pin — a legacy note never reaches a card)');
+}
+
+console.log('⑬ r3 — the acceptance of acf24771a');
+{
+  const VR = require(path.join(REPO, 'src/vault-run.js'));
+  const L3 = ['secret', 'legacy0003'].join(':'), R3 = VR.refFor('secrets', L3, 'secret').ref, PRIV3 = 'PRIVATE owner reminder 3 — the green folder';
+  W.vault.secretPut(L3, VALUE + '-l3', { prov: 'owner', label: 'Old printer', note: PRIV3, kind: 'password' });
+  // MAJOR: both request cards — the asker reads its own items (vibespace-ask list): a private description is the owner's
+  const rq = await S.agent(W.T2, '/api/agent/vault/request', { entry: R3, purpose: 'print the report' });
+  const plain = (W.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-grant-ask' && !i.action.standing && JSON.stringify(i).includes('Old printer'));
+  ok(rq.status === 200 && plain && !JSON.stringify(plain).includes(PRIV3) && plain.detail.includes('What it is: only you read its description (in the Vault window)'), 'the plain request card (filed under the ASKER) says the description is the owner\'s — never its text', plain && plain.detail);
+  const st = await S.agent(W.T1, '/api/agent/vault/request', { entry: R3, purpose: 'print the report', standing: true, hosts: ['printer.example.test'] });
+  const stand = (W.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-grant-ask' && i.action.standing === true && JSON.stringify(i).includes('Old printer'));
+  ok(st.status === 200 && stand && !JSON.stringify(stand).includes(PRIV3) && stand.detail.includes('What it is: only you read its description (in the Vault window)'), 'the STANDING request card (through useGrants) says the same — never the text', { st: st.json, detail: stand && stand.detail });
+  // the census: every note-drawing surface reads THE guarded accessor
+  const SURF = ['src/server/vault-run-door.js', 'src/server/vault-paste-door.js', 'src/routes/vault.js', 'src/vault-run.js', 'src/foryou-actions.js', 'data/bin/vibespace-vault'];
+  const directReads = (src) => src.split('\n').map((l, n) => [n + 1, l.replace(/\/\/.*$/, '')]).filter(([, l]) => /\brow\b\s*(?:&&\s*row\s*)?\??\.note\b|\brow\.noteShared\b|\bs\.noteShared\b/.test(l)).map(([n, l]) => `${n}: ${l.trim().slice(0, 120)}`);
+  const hits = SURF.flatMap((f) => directReads(fs.readFileSync(path.join(REPO, f), 'utf8')).map((x) => `${f}:${x}`));
+  ok(!hits.length, `every card / notice / receipt / answer that draws a description reads THE guarded accessor (sharedNoteOf / privateNoteOf) — no direct row.note read in ${SURF.length} files`, hits);
+  const planted = directReads("const noteOfRow = (row) => String((row && row.note) || '').slice(0, 400);\nconst ok = PW.sharedNoteOf(row);");
+  ok(planted.length === 1, 'RED CONTROL: the r1 accessor (an unguarded row.note) planted ⇒ named', planted);
+  const pasteSrc = fs.readFileSync(path.join(REPO, 'src/vault-paste.js'), 'utf8');
+  ok(/const sharedNoteOf = \(row\) => \(row && row\.noteShared === true && row\.note \?/.test(pasteSrc), 'THE accessor shares a description only when noteShared');
+  // (a) every i18nKey string of src/vault-paste.js has zh + ja
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const keys = [...pasteSrc.matchAll(/i18nKey\('((?:[^'\\]|\\.)*)'\)/g)].map((m) => m[1].replace(/\\'/g, "'")).filter((k) => k !== 's');
+  const missing = keys.filter((k) => !zh.includes('  ' + JSON.stringify(k) + ':') || !ja.includes('  ' + JSON.stringify(k) + ':'));
+  ok(keys.length >= 20 && !missing.length, `every i18nKey of src/vault-paste.js (${keys.length}) has its zh and ja entry`, missing);
+  ok(!['Description now: only you read it (in the Vault window) — Allow replaces it'].filter((k) => !keys.includes(k)).length, '…the census reads the new private-«now» line (a key it misses would be invisible)');
+  // (b) the owner-edited receipt is its own
+  const pe = await S.agent(W.T1, '/api/agent/vault/words', { entry: MREF, note: 'one more proposal' });
+  const s0 = STASH.length;
+  await S.hit('/api/vault/entry-words', { body: { entry: MREF.slice('vault://'.length), note: 'The staging deploy password (owner-edited).' } });
+  const re = STASH.slice(s0).find((e) => e.ref === pe.json.proposalId);
+  ok(pe.status === 200 && re && /WITHDRAWN — the user changed its name and description themselves meanwhile/.test(re.text) && re.text.includes('The staging deploy password (owner-edited).') && !/stay as they were|10 minutes/.test(re.text), 'the owner-edited receipt: WITHDRAWN, the words now — never «stay as they were» nor a quiet period', re && re.text);
+  // (c) a guess of a private description files a card (never confirmed by 409 words_same)
+  W.vaultRun.setRunnable({ id: `secrets:${L3}#secret`, on: true, reauthed: true, by: 'user' });   // in the asker's list (the owner opened it)
+  const g = await S.agent(W.T1, '/api/agent/vault/words', { entry: R3, note: PRIV3 });
+  const gi = open(W, P.WORDS_TYPE).find((i) => i.action.askId === g.json.proposalId);
+  ok(g.status === 200 && gi && /Description now: only you read it/.test(gi.detail) && !gi.detail.includes('Description now: ' + PRIV3), 'proposing the EXACT private description ⇒ a card like any other (no 409 words_same confirms a guess; its «now» stays «only you read it»)', { status: g.status, code: g.json.code, detail: gi && gi.detail });
+  // (d) an identical re-send of the SHARED description is idempotent
+  const cur = box(W, MREF.slice('vault://'.length)).note;
+  const id1 = await S.agent(W.T1, '/api/agent/vault/mint', { name: 'deploy-token', note: cur });
+  ok(id1.status === 200 && id1.json.rotated && box(W, MREF.slice('vault://'.length)).note === cur, 'mint --note with the description it already has (shared) ⇒ 200, rotated, nothing else changes', id1.json);
 }
 
 console.log('⑪ THE SWEEP — the pasted values reach no answer, frame, log, stash or audit line');

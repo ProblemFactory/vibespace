@@ -284,7 +284,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     let s = null;
     try { s = (vault.secretNames() || []).find((x) => x && x.name === entry) || null; } catch { s = null; }
     const row = s ? VI.secretRowOf(s) : null;
-    return row ? { name: String(row.label || ''), note: String(row.note || ''), shared: row.noteShared === true } : null;   // shared: r2 (MAJOR 1)
+    return row ? { name: String(row.label || ''), note: P.sharedNoteOf(row), hidden: P.privateNoteOf(row) } : null;   // r3: THE guarded accessor — a private description is `hidden`, never its text (the card, words_same, the receipt)
   }
   const wrecordOf = (it) => {
     const a = it && it.action;
@@ -299,13 +299,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     catch (e) { log(`${w.who}: the receipt for ${w.proposalId} could not be queued: ${e.message}`); return false; }
   }
   /** Close a proposal's item by THIS door, forget it, tell the agent. outcome: applied | refused | withdrawn | gone. */
-  function wsettle(w, outcome, { why = 'denied', to = null } = {}) {
+  function wsettle(w, outcome, { why = 'denied', to = null, now: nowWords = null } = {}) {
     wforget(w);
-    if (outcome === 'refused' && why !== 'edited') quiet.set(`${w.conv}\nwords:${w.entry}`, now() + P.QUIET_MS);   // r2: the owner's own edit is no refusal of the agent's words
+    if (outcome === 'refused') quiet.set(`${w.conv}\nwords:${w.entry}`, now() + P.QUIET_MS);   // r3: the owner's own edit is its own outcome (`edited`) — no quiet
     if (userTodos && w.todoId) {
-      try { const it = userTodos.get?.(w.todoId); if (it && it.status === 'open') { settling.add(w.todoId); try { const by = outcome === 'applied' ? 'allowed' : outcome === 'withdrawn' ? 'vault_locked' : outcome === 'gone' || why === 'gone' ? 'ask-over' : 'denied'; if (w.fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([w.todoId], by, w.fact); else userTodos.setStatus(w.todoId, 'done', by); } finally { settling.delete(w.todoId); } } } catch (e) { log(`${w.who}: the item of ${w.proposalId} could not be closed: ${e.message}`); }
+      try { const it = userTodos.get?.(w.todoId); if (it && it.status === 'open') { settling.add(w.todoId); try { const by = outcome === 'applied' ? 'allowed' : outcome === 'withdrawn' ? 'vault_locked' : outcome === 'gone' || outcome === 'edited' || why === 'gone' ? 'ask-over' : 'denied'; if (w.fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([w.todoId], by, w.fact); else userTodos.setStatus(w.todoId, 'done', by); } finally { settling.delete(w.todoId); } } } catch (e) { log(`${w.who}: the item of ${w.proposalId} could not be closed: ${e.message}`); }
     }
-    wtell(w, { outcome, why, to });
+    wtell(w, { outcome, why, to, now: nowWords });
   }
   function wonStatus(it, status, by) {
     index();
@@ -332,7 +332,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!from) return named('words_not_here');
     const to = {};
     if (v.name !== undefined && v.name !== from.name) to.name = v.name;
-    if (v.note !== undefined && v.note !== from.note) to.note = v.note;
+    if (v.note !== undefined && (from.hidden || v.note !== from.note)) to.note = v.note;   // r3 (MINOR c): never compared against a private note (no guess is confirmed)
     if (!Object.keys(to).length) return named('words_same');
     if (!userTodos) return named('unfiled');
     index();
@@ -392,7 +392,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!r || !r.ok) return named(String((r && r.code) || '').includes('vault_locked') ? 'vault_locked' : 'store_failed');
     try { vault.contentsChanged && vault.contentsChanged('words'); } catch { }
     index();
-    for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'refused', { why: 'edited' });   // r2 (MINOR b): the owner's edit withdraws a waiting proposal (its «now» is stale) — the agent is told
+    const nowW = wordsNow(e);
+    for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'edited', { now: nowW ? { name: nowW.name, note: nowW.note } : null });   // r2 (MINOR b) + r3: the owner's edit withdraws a waiting proposal — its own receipt (the words now; the SHARED description only)
     return { ok: true, entry: e, name: r.to.label, note: r.to.note };
   }
   /** The open proposals (the Vault window's pending marker — ids and entries; the words are the items'). */

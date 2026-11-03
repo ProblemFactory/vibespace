@@ -11792,4 +11792,6 @@ export default {
   "The entry: {ref}": "条目：{ref}",
   "Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.": "「允许」会把这些文字写到条目上；「拒绝」保持原样。能用它的每个 agent 都会在列表里读到它的名称和描述 — 绝不会读到它的值。",
   "What it is: {note}": "它是干什么用的：{note}",
+  "Description now: only you read it (in the Vault window) — Allow replaces it": "现在的描述：只有你能看到（在保险库窗口里）— 允许后会被替换",
+  "What it is: only you read its description (in the Vault window)": "它是干什么用的：它的描述只有你能看到（在保险库窗口里）",
 };

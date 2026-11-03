@@ -906,7 +906,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   }
   /** lane vault-entry-description: a row's NAME and DESCRIPTION as an agent reads them — each one piece of the peer-text belt
    *  (src/vault-paste.js agentEntryWords); a description the owner wrote before the rule (`noteShared` false) stays the owner's. */
-  const wordsOfRow = (row) => PW.agentEntryWords({ label: row && row.label, note: row && row.noteShared ? row.note : '' });
+  const wordsOfRow = (row) => PW.agentEntryWords({ label: row && row.label, note: PW.sharedNoteOf(row) });   // r3: THE guarded accessor
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
   function runnableFor(caller = {}) {
@@ -1294,8 +1294,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   }
   /** lane vault-entry-description: an entry's DESCRIPTION on the owner's request cards — under its name, what it is for (a
    *  description the owner wrote before the rule is the owner's: the owner's card shows it too). */
-  const noteOfRow = (row) => String((row && row.note) || '').slice(0, 400);
-  const noteLine = (r) => (r.note ? [{ key: 'What it is: {note}', params: { note: r.note } }] : []);
+  // r3 (MAJOR — the acceptance of acf24771a): the card is filed under the ASKING conversation, which reads its own items
+  // (`vibespace-ask list`) — so a description reaches it only through THE guarded accessor; a private one is said as such
+  const noteOfRow = (row) => (PW.privateNoteOf(row) ? { hidden: true } : PW.sharedNoteOf(row));
+  const noteLine = (r) => (r.note && r.note.hidden ? [{ key: 'What it is: only you read its description (in the Vault window)' }] : r.note ? [{ key: 'What it is: {note}', params: { note: r.note } }] : []);
   const requestWords = (r) => [
     { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
     ...noteLine(r),
@@ -1987,7 +1989,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
       if (row && row.label != null) nameById[r.id] = String(row.label);
-      if (row && row.noteShared === true && row.note) noteById[r.id] = String(row.note);
+      if (PW.sharedNoteOf(row)) noteById[r.id] = PW.sharedNoteOf(row);   // r3: THE guarded accessor
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
       const own = !!row && VR.ownsAgentEntry(r, caller), pv = (own && row.provenance) || {};   // lane vault-agent-own: an entry it made itself — open to it by construction
       const sw = !refused && !!(row && d && d.runnable.has(r.id)), g = row && !own ? grantOf(scope, r.id) : null;

@@ -349,7 +349,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       // lane vault-entry-description r2 (MAJOR 2): a re-mint of an EXISTING name rotates the VALUE and keeps its words (name,
       // description, shared mark) — a later change of the words is `describe`, which waits for the owner; `--note` on it is refused
       const kept = wordsKept(name);
-      if (kept && note) return { ok: false, code: 'words_later' };
+      if (kept && note && !(kept.noteShared && kept.note === note)) return { ok: false, code: 'words_later' };   // r3 (MINOR d): a re-send of the SHARED description is idempotent (never compared with a private one)
       const r = secretPut(name, value, { prov: 'minted', actor, forHost, ...(kept ? kept : { note, noteShared: !!note }) });   // note: lane vault-entry-description (`mint --note`, the route judged it)
       if (!r.ok) return r;
       audit('vault-agent-mint', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });   // the name + who — NEVER the value
@@ -362,7 +362,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (value == null || String(value) === '') return { ok: false, code: 'value_required' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const kept = wordsKept(name);   // lane vault-entry-description r2 (MAJOR 2): a re-put rotates the value, never the words
-    if (kept && note) return { ok: false, code: 'words_later' };
+    if (kept && note && !(kept.noteShared && kept.note === note)) return { ok: false, code: 'words_later' };   // r3 (MINOR d)
     const r = secretPut(name, value, { prov: 'stored', actor, ...(kept ? kept : { note, noteShared: !!note }) });   // note: lane vault-entry-description (`put --note`)
     if (!r.ok) return r;
     audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });

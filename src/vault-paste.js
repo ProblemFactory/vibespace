@@ -268,13 +268,13 @@ const NOTE_NONE = i18nKey('(none)');
  *  (the item rides the asking conversation's own list), the owner reads it in the Vault window. */
 const NOTE_PRIVATE = i18nKey('Description now: only you read it (in the Vault window) — Allow replaces it');
 function wordsCardOf({ who, ref, from = {}, to = {} }) {
-  const old = String(from.name || ''), renames = to.name !== undefined && to.name !== old, redescribes = to.note !== undefined && to.note !== String(from.note || '');
+  const old = String(from.name || ''), renames = to.name !== undefined && to.name !== old, redescribes = to.note !== undefined && (from.hidden === true || to.note !== String(from.note || ''));
   const head = renames && redescribes ? i18nKey('{who} wants to rename «{old}» to «{new}» and change its description') : renames ? i18nKey('{who} wants to rename «{old}» to «{new}»') : i18nKey('{who} wants to change the description of «{old}»');
   const hp = { who, old, ...(renames ? { new: to.name } : {}) };
   const noteParam = (n) => (n ? n : { key: NOTE_NONE });
   const lines = [
     ...(renames ? [{ key: RENAME_LINE, params: { old, new: to.name } }] : []),
-    ...(redescribes ? [from.shared === false && from.note ? { key: NOTE_PRIVATE } : { key: NOTE_FROM_LINE, params: { note: noteParam(String(from.note || '')) } }, { key: NOTE_TO_LINE, params: { note: noteParam(to.note) } }] : []),
+    ...(redescribes ? [from.hidden ? { key: NOTE_PRIVATE } : { key: NOTE_FROM_LINE, params: { note: noteParam(String(from.note || '')) } }, { key: NOTE_TO_LINE, params: { note: noteParam(to.note) } }] : []),   // r3: `from.note` is the SHARED description only (sharedNoteOf); `hidden` = a private one exists
     { key: i18nKey('The entry: {ref}'), params: { ref } },
     { key: i18nKey('Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.') },
   ];
@@ -300,10 +300,19 @@ function wordsReceiptText(o = {}) {
   if (o.outcome === 'applied') { const t = o.to || {}; const said = [...(t.name !== undefined ? [`its name is «${piece(t.name, 80)}»`] : []), ...(t.note !== undefined ? [`its description: ${t.note ? `«${piece(t.note, 400)}»` : 'none'}`] : [])]; return `${head}: APPLIED — the user allowed it; ${said.join('; ') || 'nothing changed'}. Every agent that may use it reads its name and description in vibespace-vault list.`; }
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request. Nothing changed. Propose it again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;
   if (o.outcome === 'gone') return `${head}: NOT APPLIED — the entry is not in the vault any more.`;
+  // r3 (MINOR b): the owner changed the words meanwhile — said as itself (the words DID change; there is no quiet period)
+  if (o.outcome === 'edited') { const n = o.now || {}; return `${head}: WITHDRAWN — the user changed its name and description themselves meanwhile. Its words now: name «${piece(n.name, 80)}»${n.note ? `; description «${piece(n.note, 400)}»` : ''}. Propose again only if it still needs a change.`; }
   return `${head}: REFUSED — ${REFUSED_WHY[o.why] || REFUSED_WHY.denied}. Its name and description stay as they were. Do not propose it again in the next ${QUIET_MS / 60e3} minutes.`;
 }
 /** r2 (MINOR b): ONE open proposal per entry — the refusal names the conversation whose proposal waits (its name belted). */
 function pendingWords(who) { return `a change of that entry's name or description by ${PT.toAgentText(String(who == null ? '' : who), { max: 80, kind: 'line' })} already waits on the user — wait for their answer`; }
+/** lane vault-entry-description r3: THE GUARDED ACCESSOR of an entry's description — its text only when every agent that may use
+ *  it reads it (`noteShared`), else '' (a note the owner wrote before the rule is the owner's alone). EVERY card, notice, receipt
+ *  and answer that draws a description reads it through here (test-vault-entry-words ⑬ is the census); only the owner's own
+ *  Vault-window surfaces read `row.note` itself. → string (≤ 400). */
+const sharedNoteOf = (row) => (row && row.noteShared === true && row.note ? String(row.note).slice(0, LIMITS.note) : '');
+/** …and whether the entry HAS a description only the owner reads (a card says so, never its text). */
+const privateNoteOf = (row) => !!(row && row.note && row.noteShared !== true);
 /** THE BELT where an entry's words reach an agent (`vibespace-vault list` / `uses`): its name and its description — words an
  *  agent or the owner wrote, read by ANOTHER agent — each ONE inline piece of the peer-text belt (bounded, folded,
  *  frame-inert). → { name, note } ('' when none). */
@@ -369,5 +378,5 @@ function valueOf(raw) {
 module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
-  WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords,   // lane vault-entry-description
+  WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
 };
