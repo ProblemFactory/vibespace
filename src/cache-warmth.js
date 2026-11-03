@@ -6,7 +6,7 @@
 //
 // PURE (CommonJS, so the hub and the client bundle read ONE table — src/lib imports it as it imports
 // spend-authorizer.js) — no DOM, no clock of its own. The hub states each live conversation's facts in the session list it already
-// answers every poll ({lastRequestAt, cacheTtlSec, cacheLostAt} + its own `serverNow` — routes/sessions warmthDiff,
+// answers every poll ({lastRequestAt, cacheTtlSec, cacheLostAt, inTurn} + its own `serverNow` — routes/sessions warmthDiff,
 // over usage-pool-engine cacheFactsOf: the SAME facts the pool's warm-cache hold judges, so the colour a person sees
 // and the hold the pool applies never disagree). This module places them on the HUB's clock and names the tier.
 
@@ -20,6 +20,7 @@ const WARMTH_TIERS = Object.freeze([
 ]);
 /** every value tierOf can answer, in order (the theme's tokens: --warmth-fresh … --warmth-expired; unknown draws nothing) */
 const WARMTH_STATES = Object.freeze(['fresh', 'mid', 'late', 'critical', 'expired', 'unknown']);
+// (no stamp is never «expired»: an idle conversation whose stream named no request yet is unknown and draws nothing)
 
 /** {agoMs, ttlMs} → 'fresh' | 'mid' | 'late' | 'critical' | 'expired' | 'unknown'. A boundary belongs to the LATER
  *  tier (20:00 exactly is mid; the TTL exactly is expired — the pool's own inequality: warm while ago < ttl). Integer
@@ -37,13 +38,15 @@ function tierOf({ agoMs, ttlMs } = {}) {
  *  now = serverNow + (now − receivedAt) — the For-you deadline cards' rule (user-todos-row hubNow): this device's clock
  *  only ever measures the time SINCE the answer, never an instant (a step backwards counts as none). No serverNow, no
  *  stamp or no TTL ⇒ unknown. An account move at or after the last request ⇒ expired at once (the cache stays with the
- *  account that wrote it), until the next request.
- *  → { tier, leftMs, frac (the time left, 1 → 0: the band's length), lastAt, lostAt } */
+ *  account that wrote it), until the next request. IN A TURN (`inTurn`, the turn law — the pool's hold reads the same
+ *  fact) ⇒ fresh with the whole TTL left: the request in flight is writing the cache, stamp or none.
+ *  → { tier, leftMs, frac (the time left, 1 → 0: the band's length), lastAt, lostAt, inTurn? } */
 function warmthOf(fact, { serverNow, receivedAt, now } = {}) {
   const ttlMs = Number(fact && fact.cacheTtlSec) * 1000;
   const last = Number(fact && fact.lastRequestAt) || 0;
   const sNow = Number(serverNow), rAt = Number(receivedAt), cNow = Number(now);
   const none = { tier: 'unknown', leftMs: null, frac: null, lastAt: last || null, lostAt: null };
+  if (ttlMs > 0 && fact.inTurn === true) return { tier: 'fresh', leftMs: ttlMs, frac: 1, lastAt: last || null, lostAt: null, inTurn: true };
   if (!(ttlMs > 0) || !(last > 0) || !(sNow > 0) || !Number.isFinite(rAt) || !Number.isFinite(cNow)) return none;
   const lost = Number(fact.cacheLostAt) || 0;
   if (lost >= last) return { tier: 'expired', leftMs: 0, frac: 0, lastAt: last, lostAt: lost };
@@ -56,8 +59,9 @@ function warmthOf(fact, { serverNow, receivedAt, now } = {}) {
 /** The hover words for one warmth (en keys; `t` translates, `timeText(ms)` writes an instant as HH:MM):
  *  «Cache: about N min left · last request HH:MM» («about»: the stamp is the request's RESPONSE, at most one response
  *  late; N rounded UP — 30 s left reads 1 min, never 0), «Cache expired · last
- *  request HH:MM», the move's own sentence; unknown ⇒ '' (no words). */
+ *  request HH:MM», the move's own sentence, «Cache: warm — a turn is running»; unknown ⇒ '' (no words). */
 function warmthTitle(w, { t = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m)), timeText = (ms) => new Date(ms).toTimeString().slice(0, 5) } = {}) {
+  if (w && w.inTurn) return t('Cache: warm — a turn is running');
   if (!w || w.tier === 'unknown' || !w.lastAt) return '';
   if (w.lostAt) return t('Cache expired — the conversation moved to another account at {time}', { time: timeText(w.lostAt) });
   if (w.tier === 'expired') return t('Cache expired · last request {time}', { time: timeText(w.lastAt) });

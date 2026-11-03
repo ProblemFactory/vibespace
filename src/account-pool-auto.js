@@ -167,16 +167,24 @@ function cacheTtlSecFor({ harness = 'claude', apiKey = false, onCredits = false 
 }
 // warm while now − the conversation's last model request < its TTL, and no account
 // move since that request (`cacheLostAt`: the cache belongs to the account that wrote
-// it, so a re-point leaves it behind). No request stamp, or an unknown TTL ⇒ not warm
-// (never hold a move on ignorance: the hold is a cost saving, and a conversation with
-// no known request — or no stated cache — has nothing proven to save).
-function warmCache({ lastRequestAt, cacheTtlSec, cacheLostAt = null, nowMs } = {}) {
+// it, so a re-point leaves it behind).
+// THE TURN LAW (主开发, round 2): a conversation IN A TURN is warm by definition — the
+// request in flight is writing the cache; the stamp only says how long AFTER the turn
+// the warmth lasts (`agoSec` null while no request is stamped yet — a new or resumed
+// conversation's first turn, a restore with nothing persisted).
+// Idle with no request stamp, or an unknown TTL ⇒ `warm:false, unknown:true` — never a
+// plain false: unknown is no hold and no colour, never «cold» or «expired» (the hold
+// is a cost saving, and nothing proven is there to save).
+function warmCache({ lastRequestAt, cacheTtlSec, cacheLostAt = null, inTurn = false, nowMs } = {}) {
   const ttlSec = Number(cacheTtlSec) > 0 ? Number(cacheTtlSec) : null;
   const last = Number(lastRequestAt), now = Number(nowMs);
-  if (!Number.isFinite(last) || last <= 0 || !Number.isFinite(now)) return { warm: false, agoSec: null, ttlSec };
-  const agoMs = Math.max(0, now - last);
+  const stamped = Number.isFinite(last) && last > 0 && Number.isFinite(now);
+  const agoMs = stamped ? Math.max(0, now - last) : null;
+  const agoSec = stamped ? Math.floor(agoMs / 1000) : null;
+  if (inTurn === true) return { warm: true, agoSec, ttlSec };
+  if (!stamped || !ttlSec) return { warm: false, unknown: true, agoSec, ttlSec };
   const lost = Number(cacheLostAt) >= last;
-  return { warm: !!ttlSec && !lost && agoMs < ttlSec * 1000, agoSec: Math.floor(agoMs / 1000), ttlSec, ...(lost ? { lost: true } : {}) };
+  return { warm: !lost && agoMs < ttlSec * 1000, agoSec, ttlSec, ...(lost ? { lost: true } : {}) };
 }
 // IS THIS CONVERSATION IN A TURN RIGHT NOW (2026-09-22, the soft-exhaustion defer
 // below). Two protocol facts, both owned by the stdout consumer: `_isStreaming`

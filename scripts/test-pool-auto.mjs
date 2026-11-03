@@ -737,6 +737,20 @@ await (async () => {
       const f20 = factsOf(w2.eng, w2.sessions.get('sess-20'), T0);
       ck('facts: …and pty noise after it never moves it (20 min stays 20 min)', f20.lastRequestAt === T0 - 20 * 60e3, JSON.stringify(f20));
       ck('facts: a record that is no request (no usage) writes nothing', (() => { const x = {}; w2.eng.noteModelRequest?.(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest?.(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })());
+      // ROUND 2 (F2): THE CLI'S OWN RECORD IS NO REQUEST — the ONE writer refuses a `<synthetic>`-model record and one whose usage
+      // counts nothing (message-manager.js syntheticUsage's rule). The row is SHAPED FROM the real capture with a LIVE timestamp
+      // (the capture's own would be judged late — not this pin); both real feeds: test-fable-cap-pool-storm §21.
+      {
+        const capRow = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl'), 'utf8').split('\n')[0]);
+        const synth = { ...capRow, timestamp: new Date().toISOString() };
+        const zero = { type: 'assistant', message: { id: 'm0', model: 'claude-fable-5-1', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } };
+        const cold = { _lastRequestAt: T0 - 3 * 3600e3 };
+        w2.eng.noteModelRequest?.(cold, synth, T0); w2.eng.noteModelRequest?.(cold, zero, T0);
+        ck('F2 (engine): the capture-shaped <synthetic> row (all-zero usage, an error) and a zero-usage record never stamp — a 3-h-cold conversation stays cold (RED on dc59acd80)',
+          capRow.message.model === '<synthetic>' && cold._lastRequestAt === T0 - 3 * 3600e3, String(cold._lastRequestAt - T0));
+        const real = {}; w2.eng.noteModelRequest?.(real, { ...synth, message: { ...synth.message, model: 'claude-fable-5-1', usage: { ...synth.message.usage, output_tokens: 1 } } }, T0);
+        ck('F2 (engine): …the control — the same row naming a real model and counting one token stamps', real._lastRequestAt === T0);
+      }
       // usage credits IN USE on its member ⇒ the 5-minute TTL; credits merely enabled ⇒ still the hour
       const cacheFile = path.join(w2.am.dataDir, 'usage-cache', w2.A + '.json');
       const c0 = fs.readFileSync(cacheFile, 'utf8');
@@ -778,6 +792,61 @@ await (async () => {
       ck('facts: …its next request warms it again', warmCache({ ...factsOf(w2.eng, sW, Date.now() + 2), nowMs: Date.now() + 2 }).warm === true);
       w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' }); // the SAME member again
       ck('facts: a same-target re-point is no move (the cache stays)', factsOf(w2.eng, w2.sessions.get('sess-20'), Date.now()).cacheLostAt === null);
+      // ROUND 2 (F4): A ROW THAT MOVED NOTHING NEVER HIDES THE MOVE BEHIND IT — setPoolTarget's sweep writes a row for EVERY live
+      // link, links already on the target included (from === to); cacheFactsOf reads the newest REAL re-point (lastRepointRow
+      // movesOnly). The REAL sweep, a minute past the move (the ledger folds a repeat inside a minute).
+      {
+        const sR = w2.sessions.get('sess-restored'); // its persisted stamp is 30 min old: warm on the hour, held above
+        const tM = Date.now();
+        w2.am.ensureSessionPoolLink(w2.P, 'sess-restored', w2.Bm, { why: 'per-session-switch' }); // the REAL move A → B
+        const sB = { ...sR, _webuiId: 'sess-onB', name: 'sess-onB', sockName: 'cw-sess-onB' };
+        w2.am.ensureSessionPoolLink(w2.P, 'sess-onB', w2.Bm, { why: 'spawn' }); // born on B: its first link, no move
+        const realNow = Date.now; let sw = null;
+        Date.now = () => realNow() + 61e3;
+        try { sw = w2.am.setPoolTarget(w2.P, w2.Bm, { sweepSessionLinks: true }); } finally { Date.now = realNow; }
+        const T2 = tM + 62e3;
+        const rowsOf = (sid) => w2.am.slotTransitions.all().filter((r) => r.sessionId === sid);
+        const lastR = rowsOf('sess-restored').slice(-1)[0] || {};
+        ck('F4 setup: the real sweep wrote a SAME-TARGET row (B → B) for the conversation after its real move', sw && sw.swept >= 2 && lastR.from === w2.Bm && lastR.to === w2.Bm && /-sweep$/.test(lastR.why || ''), JSON.stringify(rowsOf('sess-restored').slice(-2)));
+        const fF4 = factsOf(w2.eng, sR, T2), wF4 = warmCache({ ...fF4, nowMs: T2 });
+        ck('F4: THE PIN — a real move, then a same-target sweep row ⇒ cacheLostAt is still the move and the hold reads it lost (RED on dc59acd80: the newest row answered «no move», warm on the pre-move stamp)',
+          fF4.cacheLostAt >= tM && fF4.cacheLostAt < tM + 61e3 && wF4.lost === true && wF4.warm === false, JSON.stringify([fF4, wF4]));
+        const fB = factsOf(w2.eng, sB, T2);
+        ck('F4: …a same-target row with no move behind it (born on B, swept onto B) ⇒ no lostAt', fB.cacheLostAt === null && rowsOf('sess-onB').slice(-1)[0]?.from === w2.Bm, JSON.stringify([fB, rowsOf('sess-onB')]));
+      }
+    }
+    // ROUND 2 (F1): THE TURN LAW — a conversation IN A TURN is warm by definition: the request in flight is writing the cache, and
+    // the stamp only says how long AFTER the turn the warmth lasts. A new or --resume'd conversation (or one restored with nothing
+    // persisted) has no stamp until its first usage-carrying record lands; in that window the hold, the first-stop rule and the
+    // projection's warm gate must still apply. Idle with no stamp stays UNKNOWN (r1a′) — `unknown:true`, never a plain false.
+    {
+      const midTurn = (x) => { delete x._lastRequestAt; x._lastPtyDataAt = Date.now(); x._isStreaming = true; x._turnState = 'running'; return x; };
+      const idleNone = (x) => { delete x._lastRequestAt; x._lastPtyDataAt = Date.now(); x._isStreaming = false; x._turnState = 'idle'; return x; };
+      const wT = world(engMod, { extra: [['sess-first', 0], ['sess-idle-none', 0]] });
+      const sF = midTurn(wT.sessions.get('sess-first')); idleNone(wT.sessions.get('sess-idle-none'));
+      const tF = Date.now(), fT = factsOf(wT.eng, sF, tF), wmT = warmCache({ ...fT, nowMs: tF });
+      ck('F1: the facts carry inTurn; an in-turn conversation with NO stamp is WARM (agoSec null, the hour from the caps row) — and warmCache never echoes inTurn (the pool default\'s hold stays the proactive one)',
+        fT.inTurn === true && fT.lastRequestAt === null && wmT.warm === true && wmT.agoSec === null && wmT.ttlSec === 3600 && !('inTurn' in wmT), JSON.stringify([fT, wmT]));
+      const wmI = warmCache({ ...factsOf(wT.eng, wT.sessions.get('sess-idle-none'), tF), nowMs: tF }), wmC = warmCache({ lastRequestAt: tF - 2 * 3600e3, cacheTtlSec: 3600, nowMs: tF });
+      ck('F1: idle with no stamp is UNKNOWN — warm:false, unknown:true; a stamp past the hour is COLD — no unknown flag (a reader tells them apart)',
+        wmI.warm === false && wmI.unknown === true && wmC.warm === false && !('unknown' in wmC), JSON.stringify([wmI, wmC]));
+      const lT = wT.run();
+      ck('F1: THE PIN (the projection shape) — ONE pool pass leaves the in-turn unstamped conversation on A (a projection never moves a warm one: it is decided on the estimate of now, healthy — no switch line names it, as for the stamped warm control) while the idle cold one leaves early (RED on dc59acd80)',
+        wT.linkOf('sess-first') === 'A' && !lT.some((l) => /sess-first/.test(l)) && wT.linkOf('sess-cold') === 'B', ['sess-first', 'sess-cold'].map(wT.linkOf).join(',') + ' | ' + lT.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
+      ck('F1: …the stamped warm control unchanged (held), and the IDLE unstamped control still moves (the r1a′ pin: no hold on a guess)',
+        wT.linkOf('sess-warm') === 'A' && wT.linkOf('sess-idle-none') === 'B', ['sess-warm', 'sess-idle-none'].map(wT.linkOf).join(','));
+      // the SOFT band (A at 7 % — under the hot bar 10, above the hard bar 5), no projection: the first-stop rule
+      const wS = world(engMod, { burnA: 0, extra: [['sess-first', 0], ['sess-idle-none', 0]] });
+      const sF2 = midTurn(wS.sessions.get('sess-first')); idleNone(wS.sessions.get('sess-idle-none'));
+      const cf = path.join(wS.am.dataDir, 'usage-cache', wS.A + '.json');
+      fs.writeFileSync(cf, JSON.stringify({ ...JSON.parse(fs.readFileSync(cf, 'utf8')), fiveHour: { utilization: 0.93, resetsAt: Math.floor(Date.now() / 1000) + 7200 } }));
+      const lS = wS.run();
+      ck('F1: THE PIN (the soft band) — the in-turn unstamped conversation is DEFERRED to its first stop (warm-soft-defer, journalled) — RED on dc59acd80',
+        wS.linkOf('sess-first') === 'A' && lS.some((l) => /^\[pool\] defer sess-first: soft-exhausted \(5h 7% < hot 10%\) but mid-turn with a warm cache — moves at its first stop \(to Member B\)/.test(l)), wS.linkOf('sess-first') + ' | ' + lS.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
+      ck('F1: …the idle ones (stamped warm, cold, unstamped) take the soft move at once (the hold is the proactive one only)', ['sess-warm', 'sess-cold', 'sess-idle-none'].every((x) => wS.linkOf(x) === 'B'), ['sess-warm', 'sess-cold', 'sess-idle-none'].map(wS.linkOf).join(','));
+      sF2._isStreaming = false; sF2._turnState = 'idle';
+      const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { wS.eng.noteTurnStopped(sF2); } finally { console.log = o0; console.warn = o1; }
+      ck('F1: …and it moves at its FIRST STOP (the idle record re-decides it)', wS.linkOf('sess-first') === 'B', wS.linkOf('sess-first'));
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));

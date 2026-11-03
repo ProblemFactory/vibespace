@@ -1878,7 +1878,7 @@ function recentRepointRow(session, at = Date.now()) { return lastRepointRow(sess
  *  the turn pin's birth (a pin older than a re-point files a turn's readings
  *  on the member the CLI has already left — correct for the cache, never a
  *  witness). */
-function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS } = {}) {
+function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS, movesOnly = false } = {}) {
   try {
     const poolId = session?._accountId || null;
     if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
@@ -1900,7 +1900,13 @@ function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHAD
       if (r.at > at) continue;
       if (r.at < minAt) break;
       if (poolId && r.poolId && r.poolId !== poolId) continue;
-      if (hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId) { row = r; break; }
+      if (!(hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId)) continue;
+      // THE CACHE'S QUESTION (cacheFactsOf, `movesOnly`): did the conversation LEAVE an account inside the TTL? A row
+      // that moved nothing — a same-target sweep (setPoolTarget writes one for EVERY live link, links already on the
+      // target included), a re-point onto the member it was on, a 'spawn' first link (this process had sent nothing) —
+      // is passed over: the first REAL move behind it answers (round 2). The shadow keeps its newest-row rule.
+      if (movesOnly && (!r.from || r.from === r.to || r.why === 'spawn')) continue;
+      row = r; break;
     }
     if (!row || !row.from || row.from === row.to) return null;
     return row;
@@ -4021,9 +4027,15 @@ function resetCreditsLeft(session, key) {
  *  every usage-carrying assistant record. Such a record IS one API response, so its request was made at or before this
  *  instant: the stamp is at most one response late — an optimistic band, a longer hold (the safe side). A backlog's
  *  record (recordIsLate — a stalled bridge's catch-up, a re-attach's replay) proves nothing about now. A harness without
- *  a stated cache TTL (codex, antigravity) writes none yet: its writer comes with its row. */
+ *  a stated cache TTL (codex, antigravity) writes none yet: its writer comes with its row.
+ *  THE CLI'S OWN RECORD IS NO REQUEST (round 2): a `<synthetic>`-model record (an API error, a limit or credit refusal,
+ *  «Not logged in» — scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl) or one whose usage counts nothing
+ *  describes no API request — message-manager.js syntheticUsage's rule, gated HERE (the ONE writer), never at a feed. */
 function noteModelRequest(session, rec, now = Date.now()) {
   if (!session || !rec || rec.type !== 'assistant' || !rec.message || !rec.message.usage) return;
+  if (rec.message.model === '<synthetic>') return;
+  const u = rec.message.usage;
+  if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
 }
@@ -4061,8 +4073,11 @@ function flushRequestStamps() {
  *    now (src/spend-authorizer.js overageState: mode 'allowed' is extra usage ENABLED but
  *    NOT in use — that member still serves on the hour) ⇒ the 5-minute TTL.
  *  · cacheLostAt = the slot ledger's last REAL re-point of this conversation inside the
- *    TTL (`lastRepointRow`: from ≠ to, a 'spawn' row is no move; the cache stays with the
- *    account that wrote it) — the move is the event, no stamp of its own. */
+ *    TTL (`lastRepointRow` movesOnly: a same-target row or a 'spawn' first link is passed
+ *    over, never hides the move behind it; the cache stays with the account that wrote
+ *    it) — the move is the event, no stamp of its own.
+ *  · inTurn = conversationInTurn — THE TURN LAW: a conversation in a turn is warm by
+ *    definition (warmCache), stamp or none; idle with none is UNKNOWN, never cold. */
 function cacheFactsOf(session, now = Date.now()) {
   const s = session || {};
   const harness = s.backend || 'claude';
@@ -4075,10 +4090,12 @@ function cacheFactsOf(session, now = Date.now()) {
   // stands in only where no stream names one (a terminal-mode session).
   const streamed = s.mode === 'chat' && !!capsOf(harness).promptCache;
   const lastRequestAt = Number(s._lastRequestAt) || (streamed ? null : Number(s._lastPtyDataAt) || null);
-  // a 'spawn' row is the conversation's FIRST link (its `from` is the pool default's member, made before this process sent
-  // anything) — never a move away from the account that holds the cache
-  const row = cacheTtlSec ? lastRepointRow(s, { at: now, minAt: now - cacheTtlSec * 1000 }) : null;
-  return { lastRequestAt, cacheTtlSec, cacheLostAt: row && row.why !== 'spawn' ? row.at : null };
+  // the newest REAL move inside the TTL — a same-target row or a 'spawn' first link moved nothing (`movesOnly`)
+  const row = cacheTtlSec ? lastRepointRow(s, { at: now, minAt: now - cacheTtlSec * 1000, movesOnly: true }) : null;
+  // THE TURN LAW (round 2): in a turn ⇒ warm by definition (warmCache reads `inTurn`) — the request in flight writes the cache.
+  // warmCache never echoes it, so the pool DEFAULT's hold stays the proactive one (its soft defer is dropped, 2.369.157)
+  const inTurn = conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState });
+  return { lastRequestAt, cacheTtlSec, cacheLostAt: row ? row.at : null, inTurn };
 }
 /** Warm = the conversation is in a turn OR its prompt cache has not gone cold
  *  (the SAME two facts the pool's warm-cache hold reads). */
@@ -7117,7 +7134,7 @@ function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid)
     console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
     return;
   }
-  console.log(`[pool] hold ${sid}: warm cache (last output ${d.agoSec}s ago < ttl ${d.ttlSec}s) — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
+  console.log(`[pool] hold ${sid}: warm cache (${d.agoSec == null ? 'mid-turn, no request stamped yet' : `last output ${d.agoSec}s ago < ttl ${d.ttlSec}s`}) — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
 }
 /** ONE burn read per member per evaluation (the estimator's `burnFor`: learned
  *  rate × the trailing window's ledger + live cost). */
@@ -7440,6 +7457,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
       const w = warmCache({ ...cacheFactsOf(s, now), nowMs: now });
+      // (an in-turn follower with no stamp yet has agoSec null — 0 in the margin below: the whole TTL left, the warmest)
       if (!w.warm) continue;
       if (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec) { defaultWarm = w; defaultWarmSid = sid; }
     }

@@ -7,7 +7,8 @@
 //     belongs to the LATER tier; no TTL ⇒ unknown;
 //   ② warmthOf BY THE HUB'S CLOCK: a device clock an hour off changes nothing; only the time SINCE the answer counts (a
 //     step back counts as none); no serverNow / stamp / TTL ⇒ unknown; an account move at or after the last request ⇒
-//     expired at once, a request after it warms it again; the band's length (frac) runs 1 → 0;
+//     expired at once, a request after it warms it again; the band's length (frac) runs 1 → 0; IN A TURN (round 2, the turn
+//     law) ⇒ fresh with the whole TTL, stamp or none;
 //   ③ the hover words in en / zh / ja (minutes rounded UP, the move's own sentence, unknown says nothing);
 //   ④ THE SESSION-LIST DIFF (src/routes/sessions.js warmthDiff): each live conversation's three facts keyed by its webui
 //     id + the hub's own now; an unknown TTL left out; a throwing fact skipped; the answer carries it ONLY while the switch
@@ -77,6 +78,11 @@ if (HAVE) {
   ok('THE ACCOUNT MOVE: a move after the last request ⇒ expired at once (the cache stays with the account that wrote it)', lost.tier === 'expired' && lost.frac === 0 && lost.lostAt === S - 30e3, JSON.stringify(lost));
   ok('…a move AT the request\'s instant counts as after it', warmthOf({ ...fact, lastRequestAt: S - 60e3, cacheLostAt: S - 60e3 }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'expired');
   ok('…and a request AFTER the move warms it again', warmthOf({ ...fact, lastRequestAt: S - 10e3, cacheLostAt: S - 30e3 }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'fresh');
+  const turn0 = warmthOf({ lastRequestAt: null, cacheTtlSec: 3600, cacheLostAt: null, inTurn: true }, { serverNow: S, receivedAt: 0, now: 0 });
+  const turnOld = warmthOf({ lastRequestAt: S - 59 * 60e3, cacheTtlSec: 3600, cacheLostAt: S - 70 * 60e3, inTurn: true }, { serverNow: S, receivedAt: 0, now: 0 });
+  ok('THE TURN LAW (round 2): in a turn ⇒ fresh with the whole TTL left (frac 1) — no stamp yet, or a stamp 59 min old (the request in flight is writing the cache)',
+    turn0.tier === 'fresh' && turn0.frac === 1 && turn0.leftMs === 3600e3 && turn0.inTurn === true && turnOld.tier === 'fresh' && turnOld.frac === 1, JSON.stringify([turn0, turnOld]));
+  ok('…but never without a TTL (an unknown harness stays unknown, in a turn or not)', warmthOf({ lastRequestAt: null, cacheTtlSec: null, inTurn: true }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'unknown');
   const five = warmthOf({ lastRequestAt: S - 255e3, cacheTtlSec: 300 }, { serverNow: S, receivedAt: 0, now: 0 });
   ok('on credits (5 min) 4 min 15 s is critical with 45 s left (four minutes is still late: 48 of 60)', five.tier === 'critical' && five.leftMs === 45e3 && warmthOf({ lastRequestAt: S - 240e3, cacheTtlSec: 300 }, { serverNow: S, receivedAt: 0, now: 0 }).tier === 'late', JSON.stringify(five));
 }
@@ -98,7 +104,10 @@ if (HAVE) {
   const moved = warmthOf({ lastRequestAt: S - 60e3, cacheTtlSec: 3600, cacheLostAt: S - 30e3 }, { serverNow: S, receivedAt: 0, now: 0 });
   ok('the move says itself: «缓存已过期 — 对话在 14:05 换到了另一个账号»', warmthTitle(moved, { t: tr(zh), timeText }) === '缓存已过期 — 对话在 14:05 换到了另一个账号', warmthTitle(moved, { t: tr(zh), timeText }));
   ok('unknown says nothing', warmthTitle(warmthOf(null, {}), { timeText }) === '' && warmthTitle(null) === '');
-  const keys = ['Cache: about {n} min left · last request {time}', 'Cache expired · last request {time}', 'Cache expired — the conversation moved to another account at {time}'];
+  const turn = warmthOf({ lastRequestAt: null, cacheTtlSec: 3600, inTurn: true }, { serverNow: S, receivedAt: 0, now: 0 });
+  ok('in a turn: «Cache: warm — a turn is running» / «缓存正热 — 回合进行中» (no minutes: the countdown starts when the turn ends)',
+    warmthTitle(turn, { timeText }) === 'Cache: warm — a turn is running' && warmthTitle(turn, { t: tr(zh), timeText }) === '缓存正热 — 回合进行中' && /ターン実行中/.test(warmthTitle(turn, { t: tr(ja), timeText })), warmthTitle(turn, { t: tr(zh), timeText }));
+  const keys = ['Cache: about {n} min left · last request {time}', 'Cache expired · last request {time}', 'Cache expired — the conversation moved to another account at {time}', 'Cache: warm — a turn is running'];
   ok('every hover key has a zh AND a ja entry carrying the same placeholders', keys.every((k) => [zh, ja].every((d) => typeof d[k] === 'string' && (k.match(/\{\w+\}/g) || []).every((p) => d[k].includes(p)))));
 }
 
@@ -124,6 +133,9 @@ console.log('— ④ the session-list diff');
   ok('an unknown TTL (codex) is left out — no colour, never a guess; a throwing fact and a tmux view are skipped', !('sess-codex' in d.warmth) && !('sess-boom' in d.warmth) && !('sess-tmux' in d.warmth));
   ok('…and so is a conversation whose last request is unknown (r1a′: a restart with nothing persisted — no colour)', !('sess-fresh' in d.warmth));
   ok('no producer ⇒ an empty diff (never a throw)', JSON.stringify(R.warmthDiff(live, null, 7)) === '{"warmth":{},"serverNow":7}');
+  const dT = R.warmthDiff(new Map([['sess-turn', { _webuiId: 'sess-turn' }], ['sess-idle', { _webuiId: 'sess-idle' }]]), (s) => ({ lastRequestAt: null, cacheTtlSec: 3600, cacheLostAt: null, inTurn: s._webuiId === 'sess-turn' }), 5);
+  ok('THE TURN LAW (round 2): an in-turn conversation with no stamp yet IS sent, `inTurn: true` (the pool holds it — the list agrees); the idle unstamped one stays out (unknown)',
+    JSON.stringify(dT.warmth) === JSON.stringify({ 'sess-turn': { lastRequestAt: null, cacheTtlSec: 3600, cacheLostAt: null, inTurn: true } }), JSON.stringify(dT));
   const rt = code('src/routes/sessions.js');
   ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed',
     /const answer = \(body\) => \(serverSetting\?\.\('desktop\.cacheWarmth'\) === true \? \{ \.\.\.body, \.\.\.warmthDiff\(activeSessions, ctx\.cacheFactsOf\) \} : body\);/.test(rt)

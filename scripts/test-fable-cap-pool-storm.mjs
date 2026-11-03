@@ -3509,6 +3509,48 @@ console.log('\n§21 the last model request is the stream\'s own request record')
     const t1 = Date.now();
     const cap2 = quiet(); brain.claudeSideEffects(s2, 'sess-req2', reqRec('msg_r2')); cap2.done();
     ok('§21 the device feed stamps it too (claudeSideEffects → the engine\'s ONE writer)', s2._lastRequestAt >= t1, String(s2._lastRequestAt));
+    // ── ROUND 2 (F2): THE CLI'S OWN RECORD IS NO REQUEST — a `<synthetic>`-model record (an API error, a limit or credit
+    // refusal, «Not logged in») or one whose usage counts nothing never stamps (noteModelRequest, the ONE writer — never a
+    // feed). The row is SHAPED FROM the real capture (scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl: model
+    // <synthetic>, all-zero usage, `error`) with a LIVE timestamp (the capture's own is judged late — not this pin), through
+    // BOTH real feeds: the stamp unchanged, a 3-h-cold conversation stays cold, a move's `lost` survives it on the new member.
+    const { warmCache } = require(path.join(REPO, 'src/account-pool-auto.js'));
+    const factsNow = (x) => (w.eng.cacheFactsOf?.(x, Date.now()) || {});
+    const idleWarm = (x) => { x._isStreaming = false; x._turnState = 'idle'; return warmCache({ ...factsNow(x), nowMs: Date.now() }); }; // judged between turns: a turn is warm by definition
+    const capRow = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl'), 'utf8').split('\n')[0]);
+    const synth = (sid, n) => ({ ...capRow, session_id: 'cid-' + sid, uuid: 'u-syn-' + n, timestamp: new Date().toISOString(), message: { ...capRow.message, id: 'syn-' + n } });
+    const zeroUse = (sid, n) => { const r = reqRec('msg_z' + n); return { ...r, session_id: 'cid-' + sid, message: { ...r.message, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }; };
+    ok('§21 F2 fixture: the row is the real capture\'s shape — an assistant record, model <synthetic>, every usage counter zero, an error',
+      capRow.type === 'assistant' && capRow.message.model === '<synthetic>' && capRow.error === 'authentication_failed' && ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'].every((k) => capRow.message.usage[k] === 0));
+    // (b) the parse feed
+    const before = s._lastRequestAt;
+    const cap3 = quiet(); pty.data(JSON.stringify(synth('sess-req', 1)) + '\n'); pty.data(JSON.stringify(zeroUse('sess-req', 1)) + '\n'); cap3.done();
+    ok('§21 F2 THE PIN (parse feed): a <synthetic> refusal and a zero-usage record leave the stamp where it was (RED on dc59acd80)', s._lastRequestAt === before, String(s._lastRequestAt - before));
+    s._lastRequestAt = Date.now() - 3 * 3600e3;
+    const cold3 = s._lastRequestAt;
+    const cap4 = quiet(); pty.data(JSON.stringify(synth('sess-req', 2)) + '\n'); cap4.done();
+    const wc3 = idleWarm(s);
+    ok('§21 F2 THE PIN (parse feed): a 3-h-cold conversation stays COLD through the <synthetic> record', s._lastRequestAt === cold3 && wc3.warm === false && wc3.agoSec >= 3 * 3600 - 5, JSON.stringify(wc3));
+    // (c) the device feed
+    const s3 = w.mkSession('sess-req3', 'personal', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: Date.now() - 3 * 3600e3 });
+    const cold3b = s3._lastRequestAt;
+    const cap5 = quiet(); brain.claudeSideEffects(s3, 'sess-req3', synth('sess-req3', 3)); brain.claudeSideEffects(s3, 'sess-req3', zeroUse('sess-req3', 3)); cap5.done();
+    const wc3b = idleWarm(s3);
+    ok('§21 F2 THE PIN (device feed): the 3-h-cold conversation stays cold — neither record stamps (RED on dc59acd80)', s3._lastRequestAt === cold3b && wc3b.warm === false, JSON.stringify(wc3b));
+    // a REAL re-point leaves the cache behind (lost); the new member's <synthetic> refusal cached nothing there
+    const s4 = w.mkSession('sess-req4', 'personal', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: Date.now() - 60e3 });
+    w.am.ensureSessionPoolLink(w.P, 'sess-req4', w.id.wmax, { why: 'per-session-switch' });
+    w.am.ensureSessionPoolLink(w.P, 'sess-req', w.id.wmax, { why: 'per-session-switch' });
+    s._lastRequestAt = Date.now() - 60e3;
+    const lost0 = idleWarm(s4).lost === true && idleWarm(s).lost === true;
+    const spin = () => { const t = Date.now(); while (Date.now() <= t + 1) { } }; // the record comes AFTER the move (a stamp in the move's own ms reads as before it)
+    spin();
+    const cap6 = quiet(); brain.claudeSideEffects(s4, 'sess-req4', synth('sess-req4', 4)); pty.data(JSON.stringify(synth('sess-req', 5)) + '\n'); cap6.done();
+    const l4 = idleWarm(s4), lP = idleWarm(s);
+    ok('§21 F2 THE PIN: after a real re-point, `lost` survives a <synthetic> record on the new member — device feed AND parse feed (RED on dc59acd80)', lost0 && l4.lost === true && l4.warm === false && lP.lost === true && lP.warm === false, JSON.stringify([l4, lP]));
+    spin();
+    const cap7 = quiet(); brain.claudeSideEffects(s4, 'sess-req4', reqRec('msg_r4')); cap7.done();
+    ok('§21 F2 control: a REAL request on the new member warms it again (the gate is the record, not the feed)', idleWarm(s4).warm === true && !idleWarm(s4).lost, JSON.stringify([idleWarm(s4), factsNow(s4)]));
     const both = (src) => (src.match(/noteModelRequest\?\.\(session, msg\)/g) || []).length;
     ok('§21 WIRING: each feed calls the writer once — no inline twin',
       both(fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8')) === 1 && both(fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8')) === 1

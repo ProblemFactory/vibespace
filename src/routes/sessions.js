@@ -755,7 +755,8 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
     for (const [id, s] of activeSessions || []) {
       if (!s || s.isTmuxView) continue;
       let f = null; try { f = factsOf(s, now); } catch { f = null; }
-      if (f && f.cacheTtlSec && f.lastRequestAt) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null };
+      // in a turn = warm by definition (the turn law — the pool's hold reads the same `inTurn`), stamp or none
+      if (f && f.cacheTtlSec && (f.lastRequestAt || f.inTurn)) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null, ...(f.inTurn ? { inTurn: true } : {}) };
     }
   }
   return { warmth, serverNow: now };
