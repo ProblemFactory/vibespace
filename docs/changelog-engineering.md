@@ -18,6 +18,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### int375 — the .375 hotfix's own notes (lane int361; one pick on 749aa7bf9: hotfix-attach-engine-args 56cde8f80)
 - **A hotfix of one commit, no seams.** The train's src/, public/, scripts/ and data/ equal 56cde8f80 byte for byte; the fast tier's sum is unchanged (919.83 s < 920 s); its block was already headed «## 2.369.375» and is assembled as the ONE .375 block.
+- **The ja line says the UI's word.** The lane's Japanese user line wrote カスタムカーネル; the UI says 独自カーネル (src/lib/i18n-ja.js «Custom kernel»: 独自カーネル), as every earlier ja entry does — the assembly writes 独自カーネル (主开发's acceptance ruling; work/assemble375.py, a per-unit word fix).
 
 ## 2.369.374 — 2026-11-03
 
