@@ -32,20 +32,20 @@
         "v": 2,
         "who": "设备管理",
         "tool": {
-          "name": "unifi-api.sh",
-          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "name": "router-api.sh",
+          "path": "~/workspace/ops/acme-net/router-api.sh",
           "writable": true
         },
-        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/wan /tmp/unifi-work/wan2.json",
+        "cmd": "./acme-net/router-api.sh PUT /api/v1/wan /tmp/router-work/wan2.json",
         "folder": "~/workspace/ops",
         "secrets": [
           {
-            "name": "UniFi 账号 · 用户名",
-            "entry": "unifi-account",
-            "ref": "vault://secrets/unifi-account/username",
+            "name": "Router 账号 · 用户名",
+            "entry": "router-account",
+            "ref": "vault://secrets/router-account/username",
             "as": {
               "kind": "env",
-              "name": "UNIFI_USER"
+              "name": "ROUTER_USER"
             },
             "own": true,
             "provenance": "stored",
@@ -53,12 +53,12 @@
             "sendsTo": null
           },
           {
-            "name": "UniFi 账号 · 密码",
-            "entry": "unifi-account",
-            "ref": "vault://secrets/unifi-account/password",
+            "name": "Router 账号 · 密码",
+            "entry": "router-account",
+            "ref": "vault://secrets/router-account/password",
             "as": {
               "kind": "env",
-              "name": "UNIFI_PASS"
+              "name": "ROUTER_PASS"
             },
             "own": true,
             "provenance": "stored",
@@ -82,14 +82,14 @@
           "notOwn": false,
           "away": [
             {
-              "ref": "vault://secrets/unifi-account/username",
+              "ref": "vault://secrets/router-account/username",
               "forHost": null,
               "host": null,
               "unknown": true,
               "keep": false
             },
             {
-              "ref": "vault://secrets/unifi-account/password",
+              "ref": "vault://secrets/router-account/password",
               "forHost": null,
               "host": null,
               "unknown": true,

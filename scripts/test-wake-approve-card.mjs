@@ -1209,12 +1209,12 @@ try {
     }
   }
   const z1 = look['zh/hosts-unknown'], z2 = look['zh/hosts-known-always'], z3 = look['zh/config-reads'], W1 = V['hosts-unknown'].who, D3 = V['config-reads'].always.directive;
-  ok(!!z1 && z1.headline === `${W1} 想用「UniFi 账号」运行 unifi-api.sh` && z1.order && z1.rows === 4 && z1.first === 'hosts' && z1.warn === 'hosts' && J(z1.answers) === J(['once', 'deny']) && z1.primary && z1.hint === '不提供「总是允许」：发往何处未知' && z1.bodyClean && z1.foldHas,
-    `the owner's card, zh: the headline «${W1} 想用「UniFi 账号」运行 unifi-api.sh» → the command in its own box → 4 fact rows, «发往» FIRST in the warning accent → 允许一次 (the primary accent) · 拒绝 with «不提供「总是允许」：发往何处未知» in the same row → «技术细节» holding the references, the full path, the masking sentence; the body holds none of them`, z1);
+  ok(!!z1 && z1.headline === `${W1} 想用「Router 账号」运行 router-api.sh` && z1.order && z1.rows === 4 && z1.first === 'hosts' && z1.warn === 'hosts' && J(z1.answers) === J(['once', 'deny']) && z1.primary && z1.hint === '不提供「总是允许」：发往何处未知' && z1.bodyClean && z1.foldHas,
+    `the owner's card, zh: the headline «${W1} 想用「Router 账号」运行 router-api.sh» → the command in its own box → 4 fact rows, «发往» FIRST in the warning accent → 允许一次 (the primary accent) · 拒绝 with «不提供「总是允许」：发往何处未知» in the same row → «技术细节» holding the references, the full path, the masking sentence; the body holds none of them`, z1);
   ok(!!z2 && J(z2.answers) === J(['once', 'always', 'deny']) && z2.hint === '' && z2.warn === null && !!z3 && z3.hint === `不提供「总是允许」：它会读取一个本卡片无法显示的配置文件|${D3}|` && z3.warn === 'hosts' && z3.foldHas,
     'the other two variants: hosts known + «Always» offered ⇒ three verbs, no hint, nothing marked; config-reads ⇒ the hint names the reason and its directive (monospace), «发往» (its config decides) marked, the template in the fold', { z2, z3 });
   const l3 = ['en', 'ja'].map((l) => look[`${l}/hosts-unknown`]);
-  ok(l3.every((x) => x && x.order && x.rows === 4 && x.warn === 'hosts' && x.bodyClean && x.foldHas) && l3[0].headline === `${W1} wants to run unifi-api.sh with “UniFi 账号”` && l3[1].headline === `${W1} が「UniFi 账号」を使って unifi-api.sh を実行しようとしています` && l3[0].hint === 'No «Always»: where it sends what it reads is unknown',
+  ok(l3.every((x) => x && x.order && x.rows === 4 && x.warn === 'hosts' && x.bodyClean && x.foldHas) && l3[0].headline === `${W1} wants to run router-api.sh with “Router 账号”` && l3[1].headline === `${W1} が「Router 账号」を使って router-api.sh を実行しようとしています` && l3[0].hint === 'No «Always»: where it sends what it reads is unknown',
     'en / ja: the same order, the same marks, their own words', l3.map((x) => x && { headline: x.headline, hint: x.hint }));
   ok(missed.size === 0, `every word the card said in zh / ja was in its dictionary (no English fell through)`, [...missed]);
   // (c) A RECORD WITHOUT FACTS (an older door) renders today's prose UNCHANGED — the base's bytes, pinned
@@ -1222,7 +1222,7 @@ try {
   const lh = rowHtml(legacy, tt3);
   const BASE_BODY = `<div class="ut-proposal-plan">Program: /usr/bin/curl\nHosts: api.example.com</div><div class="ut-exit-note">The output is scrubbed of the secret&#39;s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.</div><div class="ut-exit-answer ut-hub-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow ut-hub-once" data-answer="once">Allow once</button><button type="button" class="ut-act ut-action-exit ut-exit-deny ut-hub-deny" data-answer="deny">Deny</button></div>`;
   ok(lh.includes(`<div class="ut-text">${legacy.text}</div>`) && lh.includes(BASE_BODY) && !/ut-run/.test(lh), 'a record WITHOUT `facts` (an older door) draws today\'s words and prose byte for byte (98b6fdf7\'s), no facts card', lh.slice(0, 600));
-  const RED_PROSE = facts1 ? rowHtml(run(V['hosts-unknown'], { detail: 'Program: ~/workspace/ops/office-net/unifi-api.sh — in a folder an agent can write' }), tt3) : '';
+  const RED_PROSE = facts1 ? rowHtml(run(V['hosts-unknown'], { detail: 'Program: ~/workspace/ops/acme-net/router-api.sh — in a folder an agent can write' }), tt3) : '';
   ok(facts1 && !RED_PROSE.includes('Program: ') && RED_PROSE.includes('ut-run-cmd'), 'RED CONTROL (98b6fdf7 has no facts renderer): a record WITH facts never shows the prose — on the base it is the prose wall', facts1 ? 'facts drawn' : 'ROW3.runFactsHtml missing — the base draws the prose');
   // (d) codes the client has no words for: monospace, never a sentence; peer words escaped
   const odd = run({ ...V['hosts-unknown'], who: '<img src=x onerror=alert(1)>', cmd: '</pre><script>alert(1)</script>', secrets: [{ name: 'a <b>bold</b> · x', ref: 'vault://secrets/secret:k1/secret', as: { kind: 'pipe', name: 'Z' } }], hosts: { known: false, list: [], why: 'quantum-route' }, always: { offered: false, why: 'moon-phase', directive: null } });

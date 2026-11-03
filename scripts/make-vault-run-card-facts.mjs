@@ -5,7 +5,7 @@
 // (int-C diff-checks it). `buildFixture()` is exported so the gate (test-vault-run) re-derives it and fails on any drift from
 // cardFactsOf. The inputs are genericised (a fixed `~` home, no personal/company paths) so the bytes are deterministic.
 //
-//   variant «hosts-unknown»       — the owner's unifi-api.sh: an agent-writable program, two env secrets, NO host it declares
+//   variant «hosts-unknown»       — an ops run (acme-net/router-api.sh — a neutral shape): an agent-writable program, two env secrets, NO host it declares
 //   variant «hosts-known-always»  — psql to a named host, one env secret, «总是允许» offered
 //   variant «config-reads»        — curl -K with a $VAULT_FILE config template that nests a read ⇒ «总是允许» withheld, host config-driven
 //   variant «late»                — a MINTED own value minted for one host, this run sends it to ANOTHER (reason.away: minted for X, sent to Y)
@@ -29,14 +29,14 @@ const factsOf = (req, cwd, names) => {
 
 export function buildFixture() {
   const hostsUnknown = factsOf(
-    { argv: ['./office-net/unifi-api.sh', 'PUT', '/proxy/network/api/s/default/rest/wan', '/tmp/unifi-work/wan2.json'],
-      env: [['UNIFI_USER', 'vault://secrets/unifi-account/username'], ['UNIFI_PASS', 'vault://secrets/unifi-account/password']],
-      resolved: `${HOME}/workspace/ops/office-net/unifi-api.sh`, programWritable: true },
+    { argv: ['./acme-net/router-api.sh', 'PUT', '/api/v1/wan', '/tmp/router-work/wan2.json'],
+      env: [['ROUTER_USER', 'vault://secrets/router-account/username'], ['ROUTER_PASS', 'vault://secrets/router-account/password']],
+      resolved: `${HOME}/workspace/ops/acme-net/router-api.sh`, programWritable: true },
     `${HOME}/workspace/ops`,
-    { who: '设备管理', cmd: './office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/wan /tmp/unifi-work/wan2.json',
-      entries: { 'secrets:unifi-account#username': 'UniFi 账号 · 用户名', 'secrets:unifi-account#password': 'UniFi 账号 · 密码' },
-      refsInfo: [{ id: 'secrets:unifi-account#username', own: true, prov: 'stored', open: true }, { id: 'secrets:unifi-account#password', own: true, prov: 'stored', open: true }],
-      away: [{ id: 'secrets:unifi-account#username', ref: 'vault://secrets/unifi-account/username', forHost: null, unknown: true, keep: false }, { id: 'secrets:unifi-account#password', ref: 'vault://secrets/unifi-account/password', forHost: null, unknown: true, keep: false }] });
+    { who: '设备管理', cmd: './acme-net/router-api.sh PUT /api/v1/wan /tmp/router-work/wan2.json',
+      entries: { 'secrets:router-account#username': 'Router 账号 · 用户名', 'secrets:router-account#password': 'Router 账号 · 密码' },
+      refsInfo: [{ id: 'secrets:router-account#username', own: true, prov: 'stored', open: true }, { id: 'secrets:router-account#password', own: true, prov: 'stored', open: true }],
+      away: [{ id: 'secrets:router-account#username', ref: 'vault://secrets/router-account/username', forHost: null, unknown: true, keep: false }, { id: 'secrets:router-account#password', ref: 'vault://secrets/router-account/password', forHost: null, unknown: true, keep: false }] });
 
   const hostsKnownAlways = factsOf(
     { argv: ['psql', '-h', 'db.example.com', '-U', 'svc', '-c', 'select 1'],

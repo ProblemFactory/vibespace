@@ -5313,10 +5313,11 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .chat-attn-dock .cad-rows .ut-body > .ut-deadline { flex: 1 1 100%; white-space: normal; line-height: 20px; }
   .chat-attn-dock .cad-rows .ut-run > .ut-run-gist { line-height: 20px; } /* r15: what a run's answers decide on, at the phone's size */
   /* lane foryou-dock-layout: a run card's lines stack — its ask wraps whole on a 44 px tap line, each of its lines reads at 16 px,
-     ⤢ rides the age's line (never a full row between the ask and its command), the fold's summary a 44 px target */
+     ⤢ at the end of the answers' row (never between the age and the command — r2), the fold's summary a 44 px target */
   .chat-attn-dock .cad-rows .ut-body:has(> .ut-run) > .ut-text { flex: 1 1 100%; line-height: 24px; padding-block: 10px; }
   .chat-attn-dock .cad-rows .ut-body:has(> .ut-run) > :is(.ut-deadline, .ut-meta), .chat-attn-dock .cad-rows .ut-run > :is(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-dock-fold) { font-size: 16px !important; line-height: 22px; }
-  .chat-attn-dock .cad-rows .ut-body:has(> .ut-run) > .ut-actions { order: 3; flex: none; margin-left: auto; }
+  .chat-attn-dock .cad-rows .ut-body:has(> .ut-run) > .ut-actions { order: 6; flex: none; margin-left: auto; }
+  .chat-attn-dock .cad-rows .ut-run > .ut-run-answer { flex: 0 1 auto; } /* (r2: room for ⤢ on the answers' row — the r14 rule above gives every other answer row the whole line) */
   .chat-attn-dock .cad-rows .ut-dock-fold > summary { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; }
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-act { flex: none; white-space: nowrap; }
   .chat-attn-dock .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; white-space: normal; line-height: 1.2; padding: 4px 8px; }

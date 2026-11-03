@@ -4250,9 +4250,9 @@ Every failure is named and shown in the form: `plugin_git_spec` (the address or 
   - Boot: the three notification censuses read the live rows without copying — 10 000 conversations 672 → 13 ms.
 - **Round 7 — the vault's run card reads as facts in your language; a card with a deadline shows it** (lane wake-approve-card, acceptance round 7 — the owner: «这个卡片的可读性很差», «…是不是应该显示个倒计时»).
   - **The run card is built from the door's `facts`, not its prose** (lane vault-agent-own r20's `cardFactsOf`; the shared fixture scripts/fixtures/vault-run-card-facts.json):
-    - the headline «{who} 想用「UniFi 账号」运行 unifi-api.sh»;
+    - the headline «{who} 想用「Router 账号」运行 router-api.sh»;
     - the command in its own box, which wraps inside itself at 390 px;
-    - at most four rows. The deciding one comes FIRST in the warning accent, e.g. «发往 — 未知（这个工具没有说明它把读到的东西发往哪里）»; then 程序 (with «agent 可写的目录» when it is), 目录, and 密钥 «UniFi 账号 → UNIFI_USER、UNIFI_PASS»;
+    - at most four rows. The deciding one comes FIRST in the warning accent, e.g. «发往 — 未知（这个工具没有说明它把读到的东西发往哪里）»; then 程序 (with «agent 可写的目录» when it is), 目录, and 密钥 «Router 账号 → ROUTER_USER、ROUTER_PASS»;
     - 允许一次 as the primary button and 拒绝 neutral, with «不提供「总是允许」：发往何处未知» beside them;
     - a «技术细节» fold holding the full path, the references, what «Always» remembers, the masking sentence and the templates.
   - It is the same card in the chat, the tray row (desk and phone) and the For-you window, in zh / en / ja.
