@@ -239,16 +239,33 @@ const ROWS = `(() => {
   const W = innerWidth, H = innerHeight;
   const win = document.querySelector('.window.window-active');
   if (!win) return { rows: 0, bad: ['no window on show'] };
-  const rows = [...win.querySelectorAll('.chat-message-list > .chat-msg')].filter((r) => { const b = r.getBoundingClientRect(); return b.width > 0 && b.height > 0 && b.bottom > 0 && b.top < H; });
+  // int373 — A COVER CHECK SAMPLES ONLY THE VISIBLE PART OF A ROW; AN INVISIBLE ROW IS SKIPPED BY NAME: a row the list's scroll edge
+  // cuts is sampled over what shows; a row fully out of sight is skipped by name. The list clips its rows (it
+  // scrolls): a row inside the viewport but outside the list's own box is not on screen, and sampling it read whatever lies behind
+  // the window (a cascaded neighbour) as a cover. The .373 cut red on exactly that under the runner's fonts; the base passed only
+  // because its invisible row's sample happened to land on the window's own header.
+  const list = win.querySelector('.chat-message-list'), lb = list && list.getBoundingClientRect();
+  const top = Math.max(0, lb ? lb.top : 0), bottom = Math.min(H, lb ? lb.bottom : H);
+  const named = (r, i) => r.dataset.msgId || r.dataset.id || r.id || ('row ' + i);
+  const all = [...win.querySelectorAll('.chat-message-list > .chat-msg')].map((r, i) => ({ r, i, b: r.getBoundingClientRect() }))
+    .filter(({ b }) => b.width > 0 && b.height > 0 && b.bottom > 0 && b.top < H);
+  const seen = ({ b }) => b.bottom > top && b.top < bottom;
+  const rows = all.filter(seen), skipped = all.filter((x) => !seen(x)).map(({ r, i }) => named(r, i));
   const bad = [];
-  for (const r of rows) {
-    const b = r.getBoundingClientRect();
+  for (const { b } of rows) {
     if (b.left < -0.5 || b.right > W + 0.5) { bad.push('outside ' + Math.round(b.left) + '..' + Math.round(b.right) + ' of ' + W); continue; }
-    const hit = document.elementFromPoint(Math.max(0, b.left) + 3, b.top + Math.min(12, b.height / 2));
+    const vt = Math.max(b.top, top), vb = Math.min(b.bottom, bottom);
+    const hit = document.elementFromPoint(Math.max(0, b.left) + 3, vt + Math.min(12, (vb - vt) / 2));
     if (!hit || !win.contains(hit)) bad.push('covered at x ' + Math.round(b.left + 3) + ' by ' + (hit ? (hit.id ? '#' + hit.id : hit.className || hit.tagName) : 'nothing'));
   }
-  return { rows: rows.length, bad: bad.slice(0, 6), scrollX: Math.round(scrollX) };
+  const whole = rows.filter(({ b }) => b.top >= top - 0.5 && b.bottom <= bottom + 0.5).length;   // a REPORTED fact (messages the list shows top to bottom), never asserted
+  return { rows: rows.length, whole, bad: bad.slice(0, 6), scrollX: Math.round(scrollX), skipped, list: lb ? [Math.round(lb.top), Math.round(lb.bottom)] : null };
 })()`;
+// the rows of the active list that are inside the viewport but outside the list's own box — counted independently of ROWS
+const OUT_OF_SIGHT = `(() => { const win = document.querySelector('.window.window-active'); const l = win && win.querySelector('.chat-message-list'); if (!l) return [];
+  const lb = l.getBoundingClientRect(), top = Math.max(0, lb.top), bottom = Math.min(innerHeight, lb.bottom);
+  return [...l.querySelectorAll(':scope > .chat-msg')].map((r, i) => ({ r, i, b: r.getBoundingClientRect() })).filter(({ b }) => b.width > 0 && b.height > 0 && b.bottom > 0 && b.top < innerHeight && !(b.bottom > top && b.top < bottom))
+    .map(({ r, i }) => r.dataset.msgId || r.dataset.id || r.id || ('row ' + i)); })()`;
 const RAIL = `(() => { const r = document.getElementById('sidebar-rail'); const sb = document.getElementById('sidebar').getBoundingClientRect();
   return { rail: !!r && getComputedStyle(r).display !== 'none' && r.getBoundingClientRect().width > 0 && r.getBoundingClientRect().right > 0, sidebarOnScreen: sb.right > 1 && sb.left < innerWidth && sb.width > 0 }; })()`;
 /** ④ the regular class's arrangement: the boxes of the three columns and the bar's buttons in their order. */
@@ -310,7 +327,14 @@ try {
   console.log('② the desktop fold ladder (a mouse): boot 951×585 with two chat windows, fold / unfold without a reload');
   await device(951, 585, { mouse: true }); await load(); await attachBoth(); await putDraft();
   const boot = await evalJs(ROWS);
-  check('the boot: two windows, the active one\'s transcript drawn whole', boot.rows >= 2 && !boot.bad.length, boot);
+  // int373 (主开发's road 1): the one-column dock (the owner's accepted design, lane foryou-dock-layout) is two lines — 63 px under the
+  // runner's DejaVu — and a 400-px-tall active window then shows ONE message at the boot, its top ~1 px under the list's edge (the
+  // list's own scroll cuts it: no cover), where the old dock left two. The leg says what is true — at least one message on show and
+  // nothing over what the list shows (`bad`, the B-1d40 measure); `whole` stays in the JSON as a fact. The short-window dock is a follow-up
+  check('the boot: two windows, the active one\'s transcript shows at least one message and nothing over what the list shows (under DejaVu at 951×585 the one-column dock\'s 28 px leaves ONE message on show, its top ~1 px under the list\'s edge)', boot.rows >= 1 && !boot.bad.length, boot);
+  { const out = await evalJs(OUT_OF_SIGHT);
+    check(`CONTROL (int373): a row the list has scrolled out of sight is SKIPPED by name, never sampled — ${out.length} such row(s) at the boot (${out.join(', ')}), ROWS skipped exactly them and judged none of them`,
+      out.length >= 1 && JSON.stringify(out) === JSON.stringify(boot.skipped) && !boot.bad.length, { out, skipped: boot.skipped, bad: boot.bad }); }
   let step = 0;
   for (const [w, h, pose] of LADDER) {
     step++;
