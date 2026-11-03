@@ -11798,5 +11798,5 @@ export default {
   "Cache: about {n} min left · last request {time}": "キャッシュ残り約 {n} 分 · 最後のリクエスト {time}",
   "Cache expired · last request {time}": "キャッシュ期限切れ · 最後のリクエスト {time}",
   "Cache: warm — a turn is running": "キャッシュは温かい — ターン実行中",
-  "Cache expired — the conversation moved to another account at {time}": "キャッシュ期限切れ — {time} に会話が別のアカウントへ移りました",
+  "Cache expired — the conversation moved to another account · last request {time}": "キャッシュ期限切れ — 会話は別のアカウントへ移りました · 最後のリクエスト {time}",
 };

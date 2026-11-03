@@ -44,6 +44,7 @@ const fs = require('fs');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
+const { noteTurnFlight } = require('../turn-state.js'); // PURE: the turn's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
 function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
@@ -135,6 +136,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       }
     }
     session._isStreaming = true;
+    noteTurnFlight(session, Date.now()); // the request goes out NOW: the in-flight cache fact's start (lane cache-warmth-tiles r3)
     // WORK (the default classification, round 4): the user took the
     // conversation over by hand — the one non-turn signal allowed to
     // clear the loop breaker, because a human at the keyboard is

@@ -13,7 +13,7 @@ const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
 const { get: harnessOf, spawnOf, list: harnessList } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
 const { capsOf } = require('./backend-caps');
 const ConversationOps = require('./server/conversation-ops.js'); // design q-046: the conversations' server-side ops (the ws case and the automation door share them)      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
-const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
+const { noteTurnFlight, reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
@@ -1302,6 +1302,7 @@ function registerWsHandler(wss, ctx) {
                     // leaving 'running' behind would make the NEXT attach undo it
                     session._turnState = 'idle';
                   }
+                  noteTurnFlight(session, Date.now()); // the in-flight cache fact follows the reconciled flags (lane cache-warmth-tiles r3)
                 }
               }
               const isStreaming = session._isStreaming ?? sm.isStreaming;

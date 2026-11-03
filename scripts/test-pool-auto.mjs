@@ -437,6 +437,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
 // move ('edf') of a warm one is held; a FORCED move ('exhausted') never is. ──────
 {
   const { cacheTtlSecFor, warmCache } = require(path.resolve('src/account-pool-auto.js'));
+  const requestInFlight = require(path.resolve('src/turn-state.js')).requestInFlight || (() => null); // round 3 — guarded: a base without it reds BY NAME
   const fs = require('node:fs');
   // THE TTL IS ONE FACT THE HUB STATES (lane cache-warmth-tiles, 2026-11-02): a subscription session rides the 1-hour
   // prompt cache whatever its model; usage credits IN USE ⇒ 5 minutes; a harness that states none ⇒ unknown. RED on
@@ -462,10 +463,24 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const w20c = warmCache({ lastRequestAt: nowMs - 20 * 60e3, cacheTtlSec: cacheTtlSecFor({ harness: 'claude', onCredits: true }), nowMs });
   ck('THE PIN: …and COLD when its account is on credits (5 minutes)', w20c.warm === false && w20c.ttlSec === 300, JSON.stringify(w20c));
   ck('warm: exactly at the hour it is cold', warmCache({ lastRequestAt: nowMs - 3600e3, cacheTtlSec: 3600, nowMs }).warm === false && warmCache({ lastRequestAt: nowMs - 3599e3, cacheTtlSec: 3600, nowMs }).warm === true);
-  const wLost = warmCache({ lastRequestAt: nowMs - 60e3, cacheTtlSec: 3600, cacheLostAt: nowMs - 30e3, nowMs });
-  ck('warm: an account move AFTER the last request ⇒ cold at once (the cache stays with the account that wrote it)', wLost.warm === false && wLost.lost === true, JSON.stringify(wLost));
-  const wBack = warmCache({ lastRequestAt: nowMs - 10e3, cacheTtlSec: 3600, cacheLostAt: nowMs - 30e3, nowMs });
-  ck('warm: …a request AFTER the move warms it again', wBack.warm === true && !wBack.lost, JSON.stringify(wBack));
+  const wLost = warmCache({ lastRequestAt: nowMs - 60e3, cacheTtlSec: 3600, lost: true, nowMs });
+  ck('warm: the link names another member than the one that served the last request ⇒ cold at once (the cache lives where the request was served)', wLost.warm === false && wLost.lost === true, JSON.stringify(wLost));
+  const wBack = warmCache({ lastRequestAt: nowMs - 10e3, cacheTtlSec: 3600, lost: false, nowMs });
+  ck('warm: …on the member that served it ⇒ warm', wBack.warm === true && !wBack.lost, JSON.stringify(wBack));
+  // ROUND 3 (G1): THE TURN LAW, BOUNDED — warm while a request is IN FLIGHT (one TTL from the instant it went out) or while the
+  // last request is within the TTL; 'requires_action' (paused on the owner) is no request in flight
+  ck('inFlight: running ⇒ a request in flight; requires_action ⇒ NOT (paused on the owner), even with _isStreaming true; streaming with no harness word ⇒ in flight; idle ⇒ not',
+    requestInFlight({ turnState: 'running' }) && !requestInFlight({ isStreaming: true, turnState: 'requires_action' }) && requestInFlight({ isStreaming: true }) && requestInFlight({ isStreaming: true, turnState: 'idle' }) && !requestInFlight({ isStreaming: false, turnState: 'idle' }) && !requestInFlight({}));
+  const wF30 = warmCache({ lastRequestAt: null, cacheTtlSec: 3600, inFlight: true, turnStartedAt: nowMs - 30e3, nowMs });
+  ck('warm: a request in flight for 30 s with no stamp ⇒ warm, agoSec = since it went out, `inFlight` said', wF30.warm === true && wF30.agoSec === 30 && wF30.inFlight === true && !('inTurn' in wF30), JSON.stringify(wF30));
+  const wFst = warmCache({ lastRequestAt: null, cacheTtlSec: 3600, inFlight: true, turnStartedAt: nowMs - 2 * 3600e3, nowMs });
+  ck('warm: …a \'running\' state 2 h old with no request stamped is STALE — cold, no `inFlight`, no `unknown`', wFst.warm === false && !wFst.inFlight && !wFst.unknown && wFst.agoSec === 7200, JSON.stringify(wFst));
+  const wFP = warmCache({ lastRequestAt: nowMs - 2 * 3600e3, cacheTtlSec: 3600, inFlight: false, turnStartedAt: null, nowMs });
+  ck('warm: a turn paused on the owner (not in flight) with a 2-h stamp ⇒ cold (ages like idle)', wFP.warm === false && wFP.agoSec === 7200, JSON.stringify(wFP));
+  const wFS = warmCache({ lastRequestAt: nowMs - 50 * 60e3, cacheTtlSec: 3600, inFlight: true, turnStartedAt: nowMs - 55 * 60e3, nowMs });
+  ck('warm: in flight with a 50-min stamp newer than the send ⇒ warm BY THE STAMP (agoSec 3000, no `inFlight`)', wFS.warm === true && wFS.agoSec === 3000 && !wFS.inFlight, JSON.stringify(wFS));
+  const wFL = warmCache({ lastRequestAt: nowMs - 2 * 3600e3, cacheTtlSec: 3600, lost: true, inFlight: true, turnStartedAt: nowMs - 10e3, nowMs });
+  ck('warm: a request in flight that went out after the stamp writes the cache wherever it went — warm even if the old stamp\'s cache is lost', wFL.warm === true && wFL.inFlight === true && !wFL.lost, JSON.stringify(wFL));
 
   // the proactive shape from the tier legs above: A healthy, B resets sooner ⇒ 'edf'
   const edfCaches = { a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) };
@@ -705,7 +720,7 @@ await (async () => {
   };
   const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
   // the engine's facts producer — guarded so a base without it (3f8429cd5) reds BY NAME instead of crashing the suite
-  const factsOf = (eng, s, now) => (typeof eng.cacheFactsOf === 'function' ? eng.cacheFactsOf(s, now) : { lastRequestAt: null, cacheTtlSec: null, cacheLostAt: null, missing: 'cacheFactsOf' });
+  const factsOf = (eng, s, now) => (typeof eng.cacheFactsOf === 'function' ? eng.cacheFactsOf(s, now) : { lastRequestAt: null, cacheTtlSec: null, lost: false, missing: 'cacheFactsOf' });
   const w = world(engMod);
   if (!w) { ck('proj/engine SKIP — pools unsupported on this platform', true); }
   else {
@@ -775,78 +790,146 @@ await (async () => {
         ck('persist: a request record writes NO meta (never per record)', !(metas.get(key) && metas.get(key).lastRequestAt));
         const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { w2.eng.noteTurnEnd(sP, { type: 'result', subtype: 'success', session_id: sP.claudeSessionId }); } finally { console.log = o0; console.warn = o1; }
         ck('persist: the live TURN END writes the turn\'s last request to the session meta', metas.get(key) && metas.get(key).lastRequestAt === T1 - 2e3, JSON.stringify(metas.get(key)));
+        ck('G3 (e): …with the member that served it (round 3: where the cache lives survives a restart)', metas.get(key) && metas.get(key).lastRequestMember === w2.A, JSON.stringify(metas.get(key)));
+        {
+          // …and a conversation restored from that meta (boot-restore's fields — the real restore is test-cache-warmth ⑦) whose
+          // link was moved while the hub was down reads LOST: the restart did not forget where the cache lives
+          const m = metas.get(key), back = { ...sP, _webuiId: 'sess-back', sockName: 'cw-sess-back', _lastRequestAt: m.lastRequestAt, _lastRequestMember: m.lastRequestMember };
+          w2.am.ensureSessionPoolLink(w2.P, 'sess-back', w2.Bm, { why: 'per-session-switch' });
+          const fBack = factsOf(w2.eng, back, T1);
+          ck('G3 (e): a restored conversation whose link now names B reads lost — the stamp\'s member came back with it', fBack.lost === true && warmCache({ ...fBack, nowMs: T1 }).warm === false, JSON.stringify(fBack));
+        }
         w2.eng.noteModelRequest?.(sP, req, T1 - 1e3);
         const n1 = w2.eng.flushRequestStamps?.() ?? -1, n2 = w2.eng.flushRequestStamps?.() ?? -1;
         ck('persist: the shutdown flush writes the newer stamp — and nothing on a second flush (unchanged ⇒ no write)', n1 >= 1 && n2 === 0 && metas.get(key).lastRequestAt === T1 - 1e3, `${n1}/${n2}`);
         const srvTxt = fs.readFileSync(path.resolve('server.js'), 'utf8');
         ck('WIRING: server.js flushes the stamps on SIGTERM / SIGINT (shutdownNow)', /function shutdownNow\(\) \{[\s\S]{0,2500}try \{ flushRequestStamps\(\); \} catch \{\}/.test(srvTxt));
       }
-      // THE ACCOUNT MOVE = THE CACHE LOST: a real re-point after its last request (the slot ledger's row), no stamp of its own
+      // ROUND 3 (G3): «LOST» IS A FACT ABOUT WHERE THE CACHE LIVES — the member that served the last request
+      // (`_lastRequestMember`, stamped by noteModelRequest, the ONE writer) against the member the link names now. No ledger
+      // walk: round 2's moves-only walk read «move, return, then sweep» as lost (the cache is back where it was written).
       const sW = w2.sessions.get('sess-warm');
+      ck('G3 setup: the writer stamps the member that served the request (its link\'s, A) beside the instant', sW._lastRequestMember === w2.A, String(sW._lastRequestMember));
       ck('facts: before any move the 45-s conversation is warm', warmCache({ ...factsOf(w2.eng, sW, Date.now()), nowMs: Date.now() }).warm === true);
-      const tMove = Date.now();
       w2.am.ensureSessionPoolLink(w2.P, 'sess-warm', w2.Bm, { why: 'per-session-switch' });
-      const fM = factsOf(w2.eng, sW, Date.now());
-      ck('facts: a REAL re-point ⇒ cacheLostAt = the ledger row\'s instant, and the hold reads it cold at once', fM.cacheLostAt >= tMove && warmCache({ ...fM, nowMs: Date.now() }).warm === false, JSON.stringify(fM));
-      w2.eng.noteModelRequest?.(sW, req, Date.now() + 1);
-      ck('facts: …its next request warms it again', warmCache({ ...factsOf(w2.eng, sW, Date.now() + 2), nowMs: Date.now() + 2 }).warm === true);
-      w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' }); // the SAME member again
-      ck('facts: a same-target re-point is no move (the cache stays)', factsOf(w2.eng, w2.sessions.get('sess-20'), Date.now()).cacheLostAt === null);
-      // ROUND 2 (F4): A ROW THAT MOVED NOTHING NEVER HIDES THE MOVE BEHIND IT — setPoolTarget's sweep writes a row for EVERY live
-      // link, links already on the target included (from === to); cacheFactsOf reads the newest REAL re-point (lastRepointRow
-      // movesOnly). The REAL sweep, a minute past the move (the ledger folds a repeat inside a minute).
+      const fM = factsOf(w2.eng, sW, Date.now()), wM = warmCache({ ...fM, nowMs: Date.now() });
+      ck('G3 (a): an A → B move after the stamp ⇒ lost, and the hold reads it cold at once', fM.lost === true && wM.warm === false && wM.lost === true, JSON.stringify([fM, wM]));
+      w2.eng.noteModelRequest?.(sW, req, Date.now());
+      const fD = factsOf(w2.eng, sW, Date.now());
+      ck('G3 (d): a NEW request on B moves the stamp to B ⇒ not lost on B, warm again', sW._lastRequestMember === w2.Bm && fD.lost === false && warmCache({ ...fD, nowMs: Date.now() }).warm === true, JSON.stringify([sW._lastRequestMember === w2.Bm, fD]));
       {
-        const sR = w2.sessions.get('sess-restored'); // its persisted stamp is 30 min old: warm on the hour, held above
-        const tM = Date.now();
-        w2.am.ensureSessionPoolLink(w2.P, 'sess-restored', w2.Bm, { why: 'per-session-switch' }); // the REAL move A → B
-        const sB = { ...sR, _webuiId: 'sess-onB', name: 'sess-onB', sockName: 'cw-sess-onB' };
-        w2.am.ensureSessionPoolLink(w2.P, 'sess-onB', w2.Bm, { why: 'spawn' }); // born on B: its first link, no move
+        // (f) a <synthetic> record (the real capture's shape, a live timestamp) never moves the member: back on A, it is lost
+        const capRow = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl'), 'utf8').split('\n')[0]);
+        w2.am.ensureSessionPoolLink(w2.P, 'sess-warm', w2.A, { why: 'per-session-switch' });
+        w2.eng.noteModelRequest?.(sW, { ...capRow, timestamp: new Date().toISOString() }, Date.now());
+        const fF = factsOf(w2.eng, sW, Date.now());
+        ck('G3 (f): a <synthetic> record on A never moves the member (F2 holds) — the cache is still B\'s, A reads lost', sW._lastRequestMember === w2.Bm && fF.lost === true, JSON.stringify(fF));
+      }
+      w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' }); // the SAME member again
+      ck('facts: a same-target re-point is no move (the cache stays)', factsOf(w2.eng, w2.sessions.get('sess-20'), Date.now()).lost === false);
+      {
+        // (b) A → B → A: the return ⇒ NOT lost; (c) then the REAL same-target sweep a minute later ⇒ still not lost
+        const s20 = w2.sessions.get('sess-20'); // its last request was served by A (the persist legs above)
+        ck('G3 (b) setup: the conversation\'s last request was served by A', s20._lastRequestMember === w2.A, String(s20._lastRequestMember));
+        w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.Bm, { why: 'per-session-switch' });
+        const away = factsOf(w2.eng, s20, Date.now()).lost === true;
+        w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' });
+        const fBk = factsOf(w2.eng, s20, Date.now()), wBk = warmCache({ ...fBk, nowMs: Date.now() });
+        ck('G3 (b): THE PIN — A → B → A: back on the member that served its last request ⇒ NOT lost, warm by the stamp (RED on da86012d5: the moves-only walk read the return as the move)',
+          away && fBk.lost === false && wBk.warm === true && !wBk.lost, JSON.stringify([away, fBk, wBk]));
+        w2.am.setPoolTarget(w2.P, w2.Bm);
         const realNow = Date.now; let sw = null;
-        Date.now = () => realNow() + 61e3;
-        try { sw = w2.am.setPoolTarget(w2.P, w2.Bm, { sweepSessionLinks: true }); } finally { Date.now = realNow; }
-        const T2 = tM + 62e3;
-        const rowsOf = (sid) => w2.am.slotTransitions.all().filter((r) => r.sessionId === sid);
-        const lastR = rowsOf('sess-restored').slice(-1)[0] || {};
-        ck('F4 setup: the real sweep wrote a SAME-TARGET row (B → B) for the conversation after its real move', sw && sw.swept >= 2 && lastR.from === w2.Bm && lastR.to === w2.Bm && /-sweep$/.test(lastR.why || ''), JSON.stringify(rowsOf('sess-restored').slice(-2)));
-        const fF4 = factsOf(w2.eng, sR, T2), wF4 = warmCache({ ...fF4, nowMs: T2 });
-        ck('F4: THE PIN — a real move, then a same-target sweep row ⇒ cacheLostAt is still the move and the hold reads it lost (RED on dc59acd80: the newest row answered «no move», warm on the pre-move stamp)',
-          fF4.cacheLostAt >= tM && fF4.cacheLostAt < tM + 61e3 && wF4.lost === true && wF4.warm === false, JSON.stringify([fF4, wF4]));
-        const fB = factsOf(w2.eng, sB, T2);
-        ck('F4: …a same-target row with no move behind it (born on B, swept onto B) ⇒ no lostAt', fB.cacheLostAt === null && rowsOf('sess-onB').slice(-1)[0]?.from === w2.Bm, JSON.stringify([fB, rowsOf('sess-onB')]));
+        Date.now = () => realNow() + 61e3; // a minute on: the ledger folds a repeat inside a minute
+        try { sw = w2.am.setPoolTarget(w2.P, w2.A, { sweepSessionLinks: true }); } finally { Date.now = realNow; }
+        const rows = w2.am.slotTransitions.all().filter((r) => r.sessionId === 'sess-20'), lastR = rows.slice(-1)[0] || {};
+        const T2 = realNow() + 62e3, fSw = factsOf(w2.eng, s20, T2), wSw = warmCache({ ...fSw, nowMs: T2 });
+        ck('G3 (c) setup: the real sweep wrote a SAME-TARGET row (A → A) after the return', sw && lastR.from === w2.A && lastR.to === w2.A && /-sweep$/.test(lastR.why || ''), JSON.stringify(rows.slice(-3)));
+        ck('G3 (c): THE PIN — move, return, then the sweep ⇒ still NOT lost, warm (RED on da86012d5)', fSw.lost === false && wSw.warm === true && !wSw.lost, JSON.stringify([fSw, wSw]));
+        ck('G3: the ledger walk is gone from the facts — lastRepointRow keeps its r1 shape for the shadow alone',
+          !/movesOnly/.test(fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8')) && !/lastRepointRow\(/.test((fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8').match(/function cacheFactsOf[\s\S]*?\n}\n/) || [''])[0]));
       }
     }
-    // ROUND 2 (F1): THE TURN LAW — a conversation IN A TURN is warm by definition: the request in flight is writing the cache, and
-    // the stamp only says how long AFTER the turn the warmth lasts. A new or --resume'd conversation (or one restored with nothing
-    // persisted) has no stamp until its first usage-carrying record lands; in that window the hold, the first-stop rule and the
-    // projection's warm gate must still apply. Idle with no stamp stays UNKNOWN (r1a′) — `unknown:true`, never a plain false.
+    // ROUND 3 (G1): THE TURN LAW, BOUNDED BY THE CACHE — a conversation is warm while a request is IN FLIGHT (for one TTL from
+    // the instant it went out: turn-state requestInFlight + noteTurnFlight's `_turnStartedAt`) or while its last request is
+    // within the TTL. A turn PAUSED on the owner ('requires_action') has no request out: it ages like idle. Round 2's «in a
+    // turn ⇒ warm» held a 2-h-cold paused conversation in every shape below. Idle with no stamp stays UNKNOWN (r1a′).
     {
-      const midTurn = (x) => { delete x._lastRequestAt; x._lastPtyDataAt = Date.now(); x._isStreaming = true; x._turnState = 'running'; return x; };
+      const H2 = 2 * 3600e3;
+      const paused = (x, ago) => { x._lastRequestAt = Date.now() - ago; x._isStreaming = true; x._turnState = 'requires_action'; x._turnStartedAt = null; return x; };
+      const running = (x, { ago = null, sent }) => { if (ago == null) delete x._lastRequestAt; else x._lastRequestAt = Date.now() - ago; x._lastPtyDataAt = Date.now(); x._isStreaming = true; x._turnState = 'running'; x._turnStartedAt = Date.now() - sent; return x; };
       const idleNone = (x) => { delete x._lastRequestAt; x._lastPtyDataAt = Date.now(); x._isStreaming = false; x._turnState = 'idle'; return x; };
-      const wT = world(engMod, { extra: [['sess-first', 0], ['sess-idle-none', 0]] });
-      const sF = midTurn(wT.sessions.get('sess-first')); idleNone(wT.sessions.get('sess-idle-none'));
-      const tF = Date.now(), fT = factsOf(wT.eng, sF, tF), wmT = warmCache({ ...fT, nowMs: tF });
-      ck('F1: the facts carry inTurn; an in-turn conversation with NO stamp is WARM (agoSec null, the hour from the caps row) — and warmCache never echoes inTurn (the pool default\'s hold stays the proactive one)',
-        fT.inTurn === true && fT.lastRequestAt === null && wmT.warm === true && wmT.agoSec === null && wmT.ttlSec === 3600 && !('inTurn' in wmT), JSON.stringify([fT, wmT]));
-      const wmI = warmCache({ ...factsOf(wT.eng, wT.sessions.get('sess-idle-none'), tF), nowMs: tF }), wmC = warmCache({ lastRequestAt: tF - 2 * 3600e3, cacheTtlSec: 3600, nowMs: tF });
-      ck('F1: idle with no stamp is UNKNOWN — warm:false, unknown:true; a stamp past the hour is COLD — no unknown flag (a reader tells them apart)',
-        wmI.warm === false && wmI.unknown === true && wmC.warm === false && !('unknown' in wmC), JSON.stringify([wmI, wmC]));
-      const lT = wT.run();
-      ck('F1: THE PIN (the projection shape) — ONE pool pass leaves the in-turn unstamped conversation on A (a projection never moves a warm one: it is decided on the estimate of now, healthy — no switch line names it, as for the stamped warm control) while the idle cold one leaves early (RED on dc59acd80)',
-        wT.linkOf('sess-first') === 'A' && !lT.some((l) => /sess-first/.test(l)) && wT.linkOf('sess-cold') === 'B', ['sess-first', 'sess-cold'].map(wT.linkOf).join(',') + ' | ' + lT.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
-      ck('F1: …the stamped warm control unchanged (held), and the IDLE unstamped control still moves (the r1a′ pin: no hold on a guess)',
-        wT.linkOf('sess-warm') === 'A' && wT.linkOf('sess-idle-none') === 'B', ['sess-warm', 'sess-idle-none'].map(wT.linkOf).join(','));
-      // the SOFT band (A at 7 % — under the hot bar 10, above the hard bar 5), no projection: the first-stop rule
-      const wS = world(engMod, { burnA: 0, extra: [['sess-first', 0], ['sess-idle-none', 0]] });
-      const sF2 = midTurn(wS.sessions.get('sess-first')); idleNone(wS.sessions.get('sess-idle-none'));
-      const cf = path.join(wS.am.dataDir, 'usage-cache', wS.A + '.json');
-      fs.writeFileSync(cf, JSON.stringify({ ...JSON.parse(fs.readFileSync(cf, 'utf8')), fiveHour: { utilization: 0.93, resetsAt: Math.floor(Date.now() / 1000) + 7200 } }));
+      const G1 = [['g1-paused-cold', 0], ['g1-paused-warm', 0], ['g1-run-fresh', 0], ['g1-run-stale', 0], ['g1-run-stamp50', 0], ['sess-idle-none', 0]];
+      const dress = (x) => {
+        const g = (sid) => x.sessions.get(sid);
+        paused(g('g1-paused-cold'), H2);                        // (1) paused on the owner, last request 2 h ago (TTL 1 h)
+        paused(g('g1-paused-warm'), 10 * 60e3);                 // (2) the same, 10 min ago
+        running(g('g1-run-fresh'), { sent: 30e3 });             // (3) running, no stamp, sent 30 s ago
+        running(g('g1-run-stale'), { sent: H2 });               // (4) running, no stamp, sent 2 h ago — stale
+        running(g('g1-run-stamp50'), { ago: 50 * 60e3, sent: 55 * 60e3 }); // (5) running, its last request 50 min ago
+        idleNone(g('sess-idle-none'));                          // (6) idle, nothing stamped
+        return x;
+      };
+      // the shapes: EDF (A healthy, B's week resets sooner — the proactive jump) and the SOFT band (A at 7 %); no projection
+      const shape = (kind, extra) => {
+        const x = world(engMod, { burnA: 0, extra });
+        const nowS = Math.floor(Date.now() / 1000);
+        const cf = (id) => path.join(x.am.dataDir, 'usage-cache', id + '.json');
+        const rw = (id, f) => fs.writeFileSync(cf(id), JSON.stringify(f(JSON.parse(fs.readFileSync(cf(id), 'utf8')))));
+        if (kind === 'soft') rw(x.A, (c) => ({ ...c, fiveHour: { utilization: 0.93, resetsAt: nowS + 7200 } }));
+        else {
+          rw(x.A, (c) => ({ ...c, fiveHour: { utilization: 0.3, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 6 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.4, resetsAt: nowS + 6 * 86400 }] }));
+          rw(x.Bm, (c) => ({ ...c, sevenDay: { utilization: 0.3, resetsAt: nowS + 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: nowS + 86400 }] }));
+        }
+        return x;
+      };
+      // G2: every hold line names its real reason — an «a < b» it prints is TRUE
+      const falseLess = (lines) => lines.filter((l) => /^\[pool\] hold /.test(l)).filter((l) => { const m = /(\d+)s ago < ttl (\d+)s/.exec(l); return m && !(Number(m[1]) < Number(m[2])); });
+      const wE = shape('edf', G1); dress(wE);
+      const tF = Date.now(), fx = (sid) => factsOf(wE.eng, wE.sessions.get(sid), tF), wc = (sid) => warmCache({ ...fx(sid), nowMs: tF });
+      ck('G1 facts: running ⇒ inFlight with its send instant; paused on the owner ⇒ NOT in flight (no send instant)',
+        fx('g1-run-fresh').inFlight === true && Math.abs(fx('g1-run-fresh').turnStartedAt - (tF - 30e3)) < 2e3 && fx('g1-paused-cold').inFlight === false && fx('g1-paused-cold').turnStartedAt === null, JSON.stringify([fx('g1-run-fresh'), fx('g1-paused-cold')]));
+      ck('G1 (1)–(6) warmCache over the engine\'s facts: paused 2 h COLD · paused 10 min warm · running 30 s warm (in flight) · running 2 h stale COLD · stamp 50 min warm · idle unstamped UNKNOWN',
+        wc('g1-paused-cold').warm === false && wc('g1-paused-warm').warm === true && wc('g1-run-fresh').warm === true && wc('g1-run-fresh').inFlight === true && wc('g1-run-stale').warm === false && wc('g1-run-stamp50').warm === true && wc('sess-idle-none').unknown === true,
+        JSON.stringify(G1.map(([sid]) => [sid, wc(sid)])));
+      const lE = wE.run(), at = (x, sid) => x.linkOf(sid);
+      ck('G1 EDF control: the shape is the proactive jump — the idle cold conversation moves to B, the stamped warm one is held',
+        at(wE, 'sess-cold') === 'B' && at(wE, 'sess-warm') === 'A', ['sess-cold', 'sess-warm'].map((x) => at(wE, x)).join(',') + ' | ' + lE.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 500));
+      ck('G1 (1) THE PIN — EDF: the turn paused on the owner with a 2-h-old request MOVES (RED on da86012d5: held «warm» all afternoon)', at(wE, 'g1-paused-cold') === 'B', lE.filter((l) => /g1-paused-cold/.test(l)).join(' | '));
+      ck('G1 (4) THE PIN — EDF: a \'running\' state 2 h old with nothing stamped is stale, not warm — it MOVES (RED on da86012d5)', at(wE, 'g1-run-stale') === 'B', lE.filter((l) => /g1-run-stale/.test(l)).join(' | '));
+      ck('G1 (2)(3)(5) EDF: held — paused with a 10-min stamp, running 30 s with none (the request in flight), running with a 50-min stamp',
+        ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wE, x) === 'A'), ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].map((x) => at(wE, x)).join(','));
+      ck('G1 (6) EDF: the idle unstamped control still moves (no hold on a guess)', at(wE, 'sess-idle-none') === 'B');
+      const hl = (sid) => lE.find((l) => new RegExp('^\\[pool\\] hold ' + sid + ':').test(l)) || '';
+      ck('G2 THE PIN: each hold names its REAL reason — «a request in flight since 30s» (by the turn), «last request 600s / 3000s ago < ttl 3600s» (by the stamp)',
+        /: warm cache \(a request in flight since (29|30|31)s\) — proactive move to Member B deferred$/.test(hl('g1-run-fresh'))
+        && /: warm cache \(last request (599|600|601)s ago < ttl 3600s\)/.test(hl('g1-paused-warm')) && /: warm cache \(last request (2999|3000|3001)s ago < ttl 3600s\)/.test(hl('g1-run-stamp50')),
+        ['g1-run-fresh', 'g1-paused-warm', 'g1-run-stamp50'].map(hl).join(' | '));
+      ck('G2 THE PIN: no hold line states a false «<», and the cold ones speak no hold (RED on da86012d5: «last output 7200s ago < ttl 3600s»)',
+        falseLess(lE).length === 0 && !hl('g1-paused-cold') && !hl('g1-run-stale'), falseLess(lE).join(' | '));
+      // the SOFT band: soft + COLD + inTurn ⇒ the exhaustion move AT ONCE (the 2026-09-22 law); soft + warm + inTurn ⇒ deferred to its first stop
+      const wS = shape('soft', G1); dress(wS);
       const lS = wS.run();
-      ck('F1: THE PIN (the soft band) — the in-turn unstamped conversation is DEFERRED to its first stop (warm-soft-defer, journalled) — RED on dc59acd80',
-        wS.linkOf('sess-first') === 'A' && lS.some((l) => /^\[pool\] defer sess-first: soft-exhausted \(5h 7% < hot 10%\) but mid-turn with a warm cache — moves at its first stop \(to Member B\)/.test(l)), wS.linkOf('sess-first') + ' | ' + lS.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
-      ck('F1: …the idle ones (stamped warm, cold, unstamped) take the soft move at once (the hold is the proactive one only)', ['sess-warm', 'sess-cold', 'sess-idle-none'].every((x) => wS.linkOf(x) === 'B'), ['sess-warm', 'sess-cold', 'sess-idle-none'].map(wS.linkOf).join(','));
-      sF2._isStreaming = false; sF2._turnState = 'idle';
+      ck('G1 (1) THE PIN — SOFT: the paused 2-h-cold conversation takes the exhaustion move AT ONCE (the 2026-09-22 law: nothing to protect) — RED on da86012d5',
+        at(wS, 'g1-paused-cold') === 'B' && !lS.some((l) => /defer g1-paused-cold/.test(l)), at(wS, 'g1-paused-cold') + ' | ' + lS.filter((l) => /g1-paused-cold/.test(l)).join(' | '));
+      ck('G1 (4) SOFT: the stale running one moves at once too', at(wS, 'g1-run-stale') === 'B');
+      ck('G1 (2)(3)(5) SOFT: warm + in a turn ⇒ warm-soft-defer, journalled — they move at their first stop',
+        ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].every((x) => at(wS, x) === 'A' && lS.some((l) => new RegExp('^\\[pool\\] defer ' + x + ': soft-exhausted \\(5h 7% < hot 10%\\) but mid-turn with a warm cache — moves at its first stop \\(to Member B\\)').test(l))),
+        ['g1-paused-warm', 'g1-run-fresh', 'g1-run-stamp50'].map((x) => at(wS, x)).join(',') + ' | ' + lS.filter((l) => /defer/.test(l)).join(' | ').slice(0, 500));
+      ck('G1 (6) SOFT: the idle ones (stamped warm, cold, unstamped) take the soft move at once', ['sess-warm', 'sess-cold', 'sess-idle-none'].every((x) => at(wS, x) === 'B'));
+      const sF2 = wS.sessions.get('g1-run-fresh'); sF2._isStreaming = false; sF2._turnState = 'idle';
       const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { wS.eng.noteTurnStopped(sF2); } finally { console.log = o0; console.warn = o1; }
-      ck('F1: …and it moves at its FIRST STOP (the idle record re-decides it)', wS.linkOf('sess-first') === 'B', wS.linkOf('sess-first'));
+      ck('G1 SOFT: …and the deferred one moves at its FIRST STOP', at(wS, 'g1-run-fresh') === 'B', at(wS, 'g1-run-fresh'));
+      // the POOL DEFAULT (followers with no link of their own): a paused 2-h-cold follower holds nothing; a 10-min one holds it
+      const follower = (x, sid, dressIt) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: x.P, name: sid, cwd: '/tmp', sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now(), _isStreaming: false, _turnState: 'idle' }; dressIt(s); x.sessions.set(sid, s); return s; };
+      const dflt = (x) => (x.am.poolCurrent(x.P) === x.A ? 'A' : x.am.poolCurrent(x.P) === x.Bm ? 'B' : String(x.am.poolCurrent(x.P)));
+      const wD = shape('edf', []); follower(wD, 'fol-paused', (s) => paused(s, H2)); follower(wD, 'fol-cold', (s) => { s._lastRequestAt = Date.now() - 70 * 60e3; });
+      const lD = wD.run();
+      ck('G1 (1) THE PIN — POOL DEFAULT: a paused 2-h-cold follower holds nothing — the default jumps to B (RED on da86012d5)', dflt(wD) === 'B' && !lD.some((l) => /hold fol-paused/.test(l)), dflt(wD) + ' | ' + lD.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
+      const wD2 = shape('edf', []); follower(wD2, 'fol-paused-warm', (s) => paused(s, 10 * 60e3));
+      const lD2 = wD2.run();
+      ck('G1 (2) POOL DEFAULT: a paused follower with a 10-min stamp holds the default, and its line is true (by the stamp, «(pool default)»)',
+        dflt(wD2) === 'A' && lD2.some((l) => /^\[pool\] hold fol-paused-warm: warm cache \(last request (599|600|601)s ago < ttl 3600s\) — proactive move to Member B deferred \(pool default\)$/.test(l)) && falseLess(lD2).length === 0,
+        dflt(wD2) + ' | ' + lD2.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));

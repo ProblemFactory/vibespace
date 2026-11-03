@@ -748,15 +748,17 @@ function setup(ctx) {
  *  facts — usage-pool-engine `cacheFactsOf`, the SAME producer the pool's warm-cache hold judges — keyed by its webui
  *  id, beside the hub's own clock: a client places the instants on THIS clock, never on its own alone (the deadline
  *  cards' rule). A conversation whose TTL or last request is unknown is left out (no colour, never a guess); a fact that
- *  throws too. */
+ *  throws too. Each entry: {lastRequestAt, cacheTtlSec, lost, inFlight, turnStartedAt} (round 3). */
 function warmthDiff(activeSessions, factsOf, now = Date.now()) {
   const warmth = {};
   if (typeof factsOf === 'function') {
     for (const [id, s] of activeSessions || []) {
       if (!s || s.isTmuxView) continue;
       let f = null; try { f = factsOf(s, now); } catch { f = null; }
-      // in a turn = warm by definition (the turn law — the pool's hold reads the same `inTurn`), stamp or none
-      if (f && f.cacheTtlSec && (f.lastRequestAt || f.inTurn)) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null, ...(f.inTurn ? { inTurn: true } : {}) };
+      // a request in flight writes the cache from the instant it went out (the bounded turn law, round 3), stamp or none;
+      // `lost` is decided hub-side (the member that served the last request ≠ the link's) — never a member id to a client
+      const flying = !!(f && f.inFlight && f.turnStartedAt);
+      if (f && f.cacheTtlSec && (f.lastRequestAt || flying)) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, lost: f.lost === true, inFlight: flying, turnStartedAt: flying ? f.turnStartedAt : null };
     }
   }
   return { warmth, serverNow: now };

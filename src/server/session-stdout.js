@@ -16,6 +16,7 @@ const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the pa
 const { createStdoutRegistry } = require('./stdout/index.js'); // protocol → consumer (S5)
 const { exitFacts, tombExpired, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS } = require('../exit-facts.js'); // PURE: the exit record's facts (B-3052)
 const fs = require('fs');
+const { noteTurnFlight } = require('../turn-state.js'); // PURE: the turn's send instant (lane cache-warmth-tiles r3)
 const { timedSync } = require('../timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const path = require('path');
 const pty = require('node-pty');
@@ -219,6 +220,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     let midTurn = !!session._isStreaming;
     try { midTurn = midTurn || (session._normalizer?.backgroundTasks?.() || []).length > 0; } catch { }
     session._isStreaming = false;
+    noteTurnFlight(session, Date.now()); // nothing is in flight from a dead process (lane cache-warmth-tiles r3)
     // THE THIRD EXIT OF THE COMPACTION CLAIM (§2.11, round 7). `_streamingKind
     // === 'compacting'` is a statement about a process that is now gone, and
     // this path clears `_isStreaming` but used to leave the kind set — so a

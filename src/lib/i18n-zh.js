@@ -11799,5 +11799,5 @@ export default {
   "Cache: about {n} min left · last request {time}": "缓存还剩约 {n} 分钟 · 上次请求 {time}",
   "Cache expired · last request {time}": "缓存已过期 · 上次请求 {time}",
   "Cache: warm — a turn is running": "缓存正热 — 回合进行中",
-  "Cache expired — the conversation moved to another account at {time}": "缓存已过期 — 对话在 {time} 换到了另一个账号",
+  "Cache expired — the conversation moved to another account · last request {time}": "缓存已过期 — 对话已换到另一个账号 · 上次请求 {time}",
 };

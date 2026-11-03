@@ -183,5 +183,25 @@ function stallVerdict({ streaming = false, turnState = null, pendingAsks = 0, in
   return 'reattach';
 }
 
+/** IS A REQUEST IN FLIGHT (lane cache-warmth-tiles round 3) — the turn is RUNNING: the harness said 'running', or
+ *  `_isStreaming` while the harness has not said the turn is PAUSED on the user. A turn in 'requires_action' (a
+ *  permission, a question waiting on the owner) is still a turn, but no request is out: its prompt cache ages like an
+ *  idle one's. The prompt-cache facts read it (usage-pool-engine cacheFactsOf); "is a turn running" for every other
+ *  reader stays turnStateEffect's `streaming`. */
+function requestInFlight({ isStreaming, turnState } = {}) {
+  return turnState === 'running' || (isStreaming === true && turnState !== 'requires_action');
+}
+/** THE INSTANT THE TURN'S REQUEST WENT OUT — the ONE writer of `session._turnStartedAt` (round 3), called right after
+ *  every write of the turn flags (the send — user-input, auto-resume's continue —, the claude parse's result / turn
+ *  state / user record, the attach reconciliation, the exit road). Entering flight stamps `now` (a send; a 'running'
+ *  after a pause on the owner: the answer sends the request again); leaving it clears the field (a pause, the turn's
+ *  end). A restore never carries it: a restored conversation is not in flight until the stream says so. */
+function noteTurnFlight(session, now) {
+  if (!session) return;
+  if (!requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState })) session._turnStartedAt = null;
+  else if (!(Number(session._turnStartedAt) > 0)) session._turnStartedAt = Number(now) || null;
+}
+
 module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
-  turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH };
+  turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
+  requestInFlight, noteTurnFlight };

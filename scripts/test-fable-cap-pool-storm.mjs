@@ -2745,7 +2745,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     ok('§17 THE RULE: the WARM conversation (output 60 s ago < 3600 s) stays where its cache is', w.linkOf('sess-warm') === 'far', w.linkOf('sess-warm') + ' | ' + pool.join(' | ').slice(0, 300));
     ok('§17 …and a conversation idle 20 min is still warm (the 1-hour cache — a [1m] spawn answered by the base id too)', w.linkOf('sess-1m') === 'far', w.linkOf('sess-1m'));
     ok('§17 the hold SPEAKS in the journal, naming the conversation, its ago/ttl and where it would have gone — by the member\'s NAME (verifier INFO-a)',
-      pool.some((l) => l === `[pool] hold sess-warm: warm cache (last output 60s ago < ttl 3600s) — proactive move to Member Soon deferred`), pool.join(' | ').slice(0, 400));
+      pool.some((l) => l === `[pool] hold sess-warm: warm cache (last request 60s ago < ttl 3600s) — proactive move to Member Soon deferred`), pool.join(' | ').slice(0, 400));
     const cap2 = quiet();
     w.eng.maybePoolAutoSwitchForPool(w.P, { force: true });
     const again = cap2.done().filter((l) => /\[pool\] hold sess-warm/.test(l));
@@ -2777,7 +2777,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     const cd = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const dl = cd.done().filter((l) => /\[pool\]/.test(l));
     ok('§17 POOL DEFAULT: a warm default-following conversation defers the default\'s proactive move', wd.am.poolCurrent(wd.P) === wd.id.far, wd.am.poolCurrent(wd.P) + ' | ' + dl.join(' | ').slice(0, 300));
     ok('§17 POOL DEFAULT: …and says so, naming the conversation that holds it',
-      dl.some((l) => l === `[pool] hold sess-follow: warm cache (last output 30s ago < ttl 3600s) — proactive move to Member Soon deferred (pool default)`), dl.join(' | ').slice(0, 300));
+      dl.some((l) => l === `[pool] hold sess-follow: warm cache (last request 30s ago < ttl 3600s) — proactive move to Member Soon deferred (pool default)`), dl.join(' | ').slice(0, 300));
     follower._lastRequestAt = Date.now() - 61 * 60e3; // the cache went cold on its own (past the hour)
     const cd2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); cd2.done();
     ok('§17 POOL DEFAULT: once the cache is cold the next cycle makes the move', wd.am.poolCurrent(wd.P) === wd.id.soon, wd.am.poolCurrent(wd.P));
@@ -2798,7 +2798,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       const c = quiet(); wl.eng.maybePoolAutoSwitchForPool(wl.P); const lines = c.done().filter((l) => /\[pool\]/.test(l));
       ok('§17 THE TTL IS THE ACCOUNT\'S: every lock spelling and a plain model, idle 20 min, are WARM on the hour ⇒ all held (RED on 3f8429cd5: the bare lock and the plain model moved at 5 min)',
         ['lock-bare', 'lock-answered', 'lock-1m', 'plain'].every((sid) => wl.linkOf(sid) === 'far'), ['lock-bare', 'lock-answered', 'lock-1m', 'plain'].map(wl.linkOf).join(',') + ' | ' + lines.join(' | ').slice(0, 300));
-      ok('§17 …and each hold speaks the hour', lines.some((l) => l === `[pool] hold lock-bare: warm cache (last output 1200s ago < ttl 3600s) — proactive move to Member Soon deferred`), lines.join(' | ').slice(0, 400));
+      ok('§17 …and each hold speaks the hour', lines.some((l) => l === `[pool] hold lock-bare: warm cache (last request 1200s ago < ttl 3600s) — proactive move to Member Soon deferred`), lines.join(' | ').slice(0, 400));
     }
 
     // ── LOW-B (the verifier): THE POOL DEFAULT'S HOLD IS ONE DEFERRAL. Keyed on
@@ -2835,7 +2835,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       const inTen = holds.filter((h) => h.tick <= 20);
       ok('§17 LOW-B: five rotating warm followers ⇒ exactly ONE pool-default hold line in 10 min', inTen.length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
       ok('§17 LOW-B: …the line still names the conversation holding it, scoped "(pool default)"',
-        inTen.length === 1 && inTen[0].l === `[pool] hold ${inTen[0].sid}: warm cache (last output 1s ago < ttl 3600s) — proactive move to Member Soon deferred (pool default)`, inTen[0]?.l || '');
+        inTen.length === 1 && inTen[0].l === `[pool] hold ${inTen[0].sid}: warm cache (last request 1s ago < ttl 3600s) — proactive move to Member Soon deferred (pool default)`, inTen[0]?.l || '');
       ok('§17 LOW-B: …and it speaks again once the 10-min floor has passed (a floor, not a gag)', holds.filter((h) => h.tick === 21).length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
       ok('§17 LOW-B: the default never moved while a follower was warm', wr.am.poolCurrent(wr.P) === wr.id.far, wr.am.poolCurrent(wr.P));
     }
@@ -3538,12 +3538,14 @@ console.log('\n§21 the last model request is the stream\'s own request record')
     const wc3b = idleWarm(s3);
     ok('§21 F2 THE PIN (device feed): the 3-h-cold conversation stays cold — neither record stamps (RED on dc59acd80)', s3._lastRequestAt === cold3b && wc3b.warm === false, JSON.stringify(wc3b));
     // a REAL re-point leaves the cache behind (lost); the new member's <synthetic> refusal cached nothing there
-    const s4 = w.mkSession('sess-req4', 'personal', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: Date.now() - 60e3 });
+    const s4 = w.mkSession('sess-req4', 'personal', { _spawnModel: 'claude-fable-5-1' });
+    const cap4a = quiet(); brain.claudeSideEffects(s4, 'sess-req4', reqRec('msg_r4a')); cap4a.done(); // a real request on its member (round 3: the writer stamps WHERE it was served)
+    s4._lastRequestAt = Date.now() - 60e3;
     w.am.ensureSessionPoolLink(w.P, 'sess-req4', w.id.wmax, { why: 'per-session-switch' });
     w.am.ensureSessionPoolLink(w.P, 'sess-req', w.id.wmax, { why: 'per-session-switch' });
     s._lastRequestAt = Date.now() - 60e3;
     const lost0 = idleWarm(s4).lost === true && idleWarm(s).lost === true;
-    const spin = () => { const t = Date.now(); while (Date.now() <= t + 1) { } }; // the record comes AFTER the move (a stamp in the move's own ms reads as before it)
+    const spin = () => { const t = Date.now(); while (Date.now() <= t + 1) { } }; // the records come after the move
     spin();
     const cap6 = quiet(); brain.claudeSideEffects(s4, 'sess-req4', synth('sess-req4', 4)); pty.data(JSON.stringify(synth('sess-req', 5)) + '\n'); cap6.done();
     const l4 = idleWarm(s4), lP = idleWarm(s);

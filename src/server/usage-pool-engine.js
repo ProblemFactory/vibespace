@@ -65,6 +65,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
 const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { requestInFlight } = require('../turn-state.js'); // PURE: is a request in flight (never a turn paused on the owner) — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
@@ -1878,7 +1879,7 @@ function recentRepointRow(session, at = Date.now()) { return lastRepointRow(sess
  *  the turn pin's birth (a pin older than a re-point files a turn's readings
  *  on the member the CLI has already left — correct for the cache, never a
  *  witness). */
-function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS, movesOnly = false } = {}) {
+function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS } = {}) {
   try {
     const poolId = session?._accountId || null;
     if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
@@ -1900,13 +1901,7 @@ function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHAD
       if (r.at > at) continue;
       if (r.at < minAt) break;
       if (poolId && r.poolId && r.poolId !== poolId) continue;
-      if (!(hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId)) continue;
-      // THE CACHE'S QUESTION (cacheFactsOf, `movesOnly`): did the conversation LEAVE an account inside the TTL? A row
-      // that moved nothing — a same-target sweep (setPoolTarget writes one for EVERY live link, links already on the
-      // target included), a re-point onto the member it was on, a 'spawn' first link (this process had sent nothing) —
-      // is passed over: the first REAL move behind it answers (round 2). The shadow keeps its newest-row rule.
-      if (movesOnly && (!r.from || r.from === r.to || r.why === 'spawn')) continue;
-      row = r; break;
+      if (hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId) { row = r; break; }
     }
     if (!row || !row.from || row.from === row.to) return null;
     return row;
@@ -4038,6 +4033,26 @@ function noteModelRequest(session, rec, now = Date.now()) {
   if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
+  session._lastRequestMember = servedMemberOf(session); // WHERE the cache now lives (round 3)
+}
+/** THE MEMBER THAT SERVED THIS REQUEST (round 3: «lost» is a fact about WHERE the cache lives) — the turn's pinned
+ *  reading slot (`_turnReadingSlot`, readingSlotFor's pin: resolved ONCE per turn with the lag shadow applied, so a
+ *  re-point inside the turn does not move it — a running claude follows its link from the NEXT turn), else the member
+ *  the link names now (the turn's first record before any reading: this turn's requests go where its link pointed
+ *  when it began). READ, never pinned here: the readings' own pin and its shadow are left to them. null = no pool. */
+function servedMemberOf(session) {
+  const pin = session && session._turnReadingSlot;
+  const poolId = session && session._accountId;
+  if (pin && pin.key && pin.key !== poolId) return pin.key;
+  return linkMemberOf(session);
+}
+/** The pool member a conversation's link names now — the member its NEXT request goes to (null when it is no pool's). */
+function linkMemberOf(session) {
+  try {
+    const poolId = session && session._accountId;
+    if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
+    return accounts.poolCurrentFor(poolId, session._webuiId || null) || null;
+  } catch { return null; }
 }
 /** THE STAMP SURVIVES A RESTART (主开发's ruling, r1a′): written to the session meta at a live TURN END and in the shutdown
  *  flush — never per record (a turn makes many requests; one write per turn) — and read back by boot-restore as the
@@ -4046,9 +4061,10 @@ function persistRequestStamp(session) {
   try {
     const at = Number(session && session._lastRequestAt) || 0;
     if (!at || !session.sockName) return false;
+    const member = session._lastRequestMember || null; // the member that served it travels with it (round 3)
     const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
-    if (prev === undefined || (prev && prev.lastRequestAt === at)) return false; // the store is not wired / nothing new
-    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), lastRequestAt: at });
+    if (prev === undefined || (prev && prev.lastRequestAt === at && (prev.lastRequestMember || null) === member)) return false; // the store is not wired / nothing new
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), lastRequestAt: at, lastRequestMember: member });
     return true;
   } catch (e) { console.warn('[pool] request stamp not persisted:', e.message); return false; }
 }
@@ -4061,7 +4077,8 @@ function flushRequestStamps() {
 /** THE CONVERSATION'S PROMPT-CACHE FACTS (lane cache-warmth-tiles, 2026-11-02) — ONE
  *  producer for the pool's warm-cache hold (warmCache over these) AND the session list's
  *  warmth fields (routes/sessions → the person's colour), so the two never disagree:
- *  {lastRequestAt (ms|null), cacheTtlSec (s|null = unknown), cacheLostAt (ms|null)}.
+ *  {lastRequestAt (ms|null), cacheTtlSec (s|null = unknown), lost (bool), inFlight (bool),
+ *  turnStartedAt (ms|null)}.
  *  · lastRequestAt = the conversation's LAST MODEL REQUEST: `_lastRequestAt`, written by
  *    noteModelRequest from the stream's own request records, persisted at turn end and
  *    in the shutdown flush, restored by boot-restore. A chat session with none yet is
@@ -4072,12 +4089,15 @@ function flushRequestStamps() {
  *    (unknown), usage credits IN USE — `overageState().inUse === 'yes'`, money flowing
  *    now (src/spend-authorizer.js overageState: mode 'allowed' is extra usage ENABLED but
  *    NOT in use — that member still serves on the hour) ⇒ the 5-minute TTL.
- *  · cacheLostAt = the slot ledger's last REAL re-point of this conversation inside the
- *    TTL (`lastRepointRow` movesOnly: a same-target row or a 'spawn' first link is passed
- *    over, never hides the move behind it; the cache stays with the account that wrote
- *    it) — the move is the event, no stamp of its own.
- *  · inTurn = conversationInTurn — THE TURN LAW: a conversation in a turn is warm by
- *    definition (warmCache), stamp or none; idle with none is UNKNOWN, never cold. */
+ *  · lost = WHERE THE CACHE LIVES (round 3 — no ledger walk): the member that served the
+ *    last request (`_lastRequestMember`, stamped by the same writer, persisted with the
+ *    stamp) is not the member the conversation's link names now. A move and a return is
+ *    not lost; a same-target sweep moves nothing. No member stamped (a terminal-mode
+ *    session: no stream names a request; a stamp older than round 3) ⇒ not lost.
+ *  · inFlight + turnStartedAt = THE TURN LAW, BOUNDED (round 3): a request is out
+ *    (turn-state requestInFlight — never a turn paused on the owner) and the instant it
+ *    went out (`_turnStartedAt`, turn-state noteTurnFlight); warmCache keeps it warm for
+ *    one TTL from that instant. A paused turn ages by its stamp, like idle. */
 function cacheFactsOf(session, now = Date.now()) {
   const s = session || {};
   const harness = s.backend || 'claude';
@@ -4090,15 +4110,17 @@ function cacheFactsOf(session, now = Date.now()) {
   // stands in only where no stream names one (a terminal-mode session).
   const streamed = s.mode === 'chat' && !!capsOf(harness).promptCache;
   const lastRequestAt = Number(s._lastRequestAt) || (streamed ? null : Number(s._lastPtyDataAt) || null);
-  // the newest REAL move inside the TTL — a same-target row or a 'spawn' first link moved nothing (`movesOnly`)
-  const row = cacheTtlSec ? lastRepointRow(s, { at: now, minAt: now - cacheTtlSec * 1000, movesOnly: true }) : null;
-  // THE TURN LAW (round 2): in a turn ⇒ warm by definition (warmCache reads `inTurn`) — the request in flight writes the cache.
-  // warmCache never echoes it, so the pool DEFAULT's hold stays the proactive one (its soft defer is dropped, 2.369.157)
-  const inTurn = conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState });
-  return { lastRequestAt, cacheTtlSec, cacheLostAt: row ? row.at : null, inTurn };
+  // the cache lives on the member that served the last request; the link names where the next one goes
+  const servedBy = (Number(s._lastRequestAt) && s._lastRequestMember) || null;
+  const linkNow = servedBy ? linkMemberOf(s) : null;
+  const lost = !!(servedBy && linkNow && linkNow !== servedBy);
+  // a request OUT (never a turn paused on the owner) and the instant it went out — warm for one TTL from it
+  const inFlight = requestInFlight({ isStreaming: s._isStreaming, turnState: s._turnState });
+  const turnStartedAt = inFlight ? (Number(s._turnStartedAt) || null) : null;
+  return { lastRequestAt, cacheTtlSec, lost, inFlight, turnStartedAt };
 }
-/** Warm = the conversation is in a turn OR its prompt cache has not gone cold
- *  (the SAME two facts the pool's warm-cache hold reads). */
+/** Warm = a request is in flight OR its prompt cache has not gone cold (warmCache over
+ *  cacheFactsOf — the SAME facts the pool's warm-cache hold reads); `inTurn` beside it. */
 function conversationWarmth(session, now = Date.now()) {
   const w = warmCache({ ...cacheFactsOf(session, now), nowMs: now });
   return { ...w, inTurn: conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }) };
@@ -7134,7 +7156,16 @@ function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid)
     console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
     return;
   }
-  console.log(`[pool] hold ${sid}: warm cache (${d.agoSec == null ? 'mid-turn, no request stamped yet' : `last output ${d.agoSec}s ago < ttl ${d.ttlSec}s`}) — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
+  console.log(`[pool] hold ${sid}: ${warmHoldWhy(d)} — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
+}
+/** WHY A WARM HOLD HOLDS — the ONE formatter of the EDF hold, the spare-lane hold and the pool-default hold (round 3:
+ *  a turn-law hold printed «last output 7200s ago < ttl 3600s»). It names the real reason and never states an
+ *  inequality that is false: «a request in flight since Ns» (warm by the turn — warmCache `inFlight`), «last request
+ *  Ns ago < ttl Ts» (warm by the stamp, printed only when it holds). */
+function warmHoldWhy(d) {
+  if (d.inFlight && d.agoSec != null) return `warm cache (a request in flight since ${d.agoSec}s)`;
+  if (d.agoSec != null && d.ttlSec && d.agoSec < d.ttlSec) return `warm cache (last request ${d.agoSec}s ago < ttl ${d.ttlSec}s)`;
+  return 'warm cache';
 }
 /** ONE burn read per member per evaluation (the estimator's `burnFor`: learned
  *  rate × the trailing window's ledger + live cost). */

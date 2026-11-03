@@ -37,7 +37,7 @@ const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../norma
 const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
-const { isTurnState, turnStateEffect } = require('../../turn-state.js');
+const { isTurnState, turnStateEffect, noteTurnFlight } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
@@ -998,6 +998,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             const authoritative = session._turnStateSeen === true;
             if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
               if (!authoritative) session._isStreaming = false;
+              noteTurnFlight(session, Date.now()); // the turn's in-flight instant follows the flags (lane cache-warmth-tiles r3)
               session._fallbackStopFired = false; // one auto-stop per turn (claude.disableModelFallback belt)
               retireCompaction(session, id); // says so if one was in flight (§2.11) — and it is the ONLY writer of the cleared kind
               newLabel = '';
@@ -1022,6 +1023,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               const changed = session._turnState !== st;
               session._turnState = st;
               session._isStreaming = eff.streaming;
+              noteTurnFlight(session, Date.now()); // 'running' after a pause sends the request again; a pause or idle clears it (r3)
               if (!eff.streaming) { session._fallbackStopFired = false; retireCompaction(session, id); }
               // THE FIRST STOP (2026-09-22): under this authority the `result`
               // boundary still reads 'running', so a pool move deferred to this
@@ -1069,6 +1071,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               }
               if (!/^<local-command-/.test(uText.trim())) {
                 if (!authoritative) session._isStreaming = true;
+                noteTurnFlight(session, Date.now()); // (lane cache-warmth-tiles r3)
                 newLabel = 'thinking...';
               }
             } else if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain) {

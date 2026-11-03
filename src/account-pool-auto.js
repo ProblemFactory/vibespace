@@ -165,26 +165,35 @@ function cacheTtlSecFor({ harness = 'claude', apiKey = false, onCredits = false 
   if (!pc || apiKey) return null;
   return onCredits ? pc.creditsTtlSec : pc.subscriptionTtlSec;
 }
-// warm while now − the conversation's last model request < its TTL, and no account
-// move since that request (`cacheLostAt`: the cache belongs to the account that wrote
-// it, so a re-point leaves it behind).
-// THE TURN LAW (主开发, round 2): a conversation IN A TURN is warm by definition — the
-// request in flight is writing the cache; the stamp only says how long AFTER the turn
-// the warmth lasts (`agoSec` null while no request is stamped yet — a new or resumed
-// conversation's first turn, a restore with nothing persisted).
-// Idle with no request stamp, or an unknown TTL ⇒ `warm:false, unknown:true` — never a
-// plain false: unknown is no hold and no colour, never «cold» or «expired» (the hold
-// is a cost saving, and nothing proven is there to save).
-function warmCache({ lastRequestAt, cacheTtlSec, cacheLostAt = null, inTurn = false, nowMs } = {}) {
+// warm while now − the conversation's last model request < its TTL, and the conversation is still on the member that
+// served that request (`lost`: the cache lives where the request was served — usage-pool-engine cacheFactsOf compares
+// the member noteModelRequest stamped with the member its link names now).
+// THE TURN LAW, BOUNDED BY THE CACHE (主开发, round 3 — round 2's «in a turn ⇒ warm» held a turn PAUSED on the owner
+// warm all afternoon): a conversation is warm while a request is IN FLIGHT or while its last request is within the
+// TTL. `inFlight` (turn-state requestInFlight: running — never 'requires_action') + `turnStartedAt` (the instant the
+// turn's request went out): a request in flight that went out AFTER the last stamped one — or with none stamped — is
+// the cache's newest write, so it is warm for one TTL from its send (a 'running' state older than a TTL with no
+// request stamped is stale, not warm). A paused turn has no request out: it ages by its stamp, like idle.
+// → {warm, agoSec, ttlSec, inFlight?, lost?, unknown?}. `agoSec` = seconds since the cache's newest write we know of:
+// the last stamped request, or — `inFlight: true` in the answer, set only when that is what keeps it warm — the
+// instant the request in flight went out. No `inTurn` echo: the pool DEFAULT's hold stays the proactive one (its soft
+// defer was dropped, 2.369.157); the per-session site adds `inTurn` itself.
+// Nothing written and nothing in flight, or an unknown TTL ⇒ `warm:false, unknown:true` — never a plain false:
+// unknown is no hold and no colour, never «cold» or «expired» (the hold is a cost saving, and nothing proven is there
+// to save).
+function warmCache({ lastRequestAt, cacheTtlSec, lost = false, inFlight = false, turnStartedAt = null, nowMs } = {}) {
   const ttlSec = Number(cacheTtlSec) > 0 ? Number(cacheTtlSec) : null;
   const last = Number(lastRequestAt), now = Number(nowMs);
   const stamped = Number.isFinite(last) && last > 0 && Number.isFinite(now);
-  const agoMs = stamped ? Math.max(0, now - last) : null;
-  const agoSec = stamped ? Math.floor(agoMs / 1000) : null;
-  if (inTurn === true) return { warm: true, agoSec, ttlSec };
-  if (!stamped || !ttlSec) return { warm: false, unknown: true, agoSec, ttlSec };
-  const lost = Number(cacheLostAt) >= last;
-  return { warm: !lost && agoMs < ttlSec * 1000, agoSec, ttlSec, ...(lost ? { lost: true } : {}) };
+  const sent = inFlight === true && Number(turnStartedAt) > 0 && Number.isFinite(now) ? Number(turnStartedAt) : 0;
+  const byFlight = sent > (stamped ? last : 0); // the request in flight is newer than the last stamped one
+  const at = byFlight ? sent : (stamped ? last : 0);
+  const agoMs = at ? Math.max(0, now - at) : null;
+  const agoSec = at ? Math.floor(agoMs / 1000) : null;
+  if (!at || !ttlSec) return { warm: false, unknown: true, agoSec, ttlSec };
+  const young = agoMs < ttlSec * 1000;
+  if (byFlight) return { warm: young, agoSec, ttlSec, ...(young ? { inFlight: true } : {}) }; // it writes wherever it went
+  return { warm: lost !== true && young, agoSec, ttlSec, ...(lost === true ? { lost: true } : {}) };
 }
 // IS THIS CONVERSATION IN A TURN RIGHT NOW (2026-09-22, the soft-exhaustion defer
 // below). Two protocol facts, both owned by the stdout consumer: `_isStreaming`
@@ -1016,7 +1025,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   if (placing && spareGain > 0 && spareClaim) return spareMove();
   //    Never a PINNED conversation waiting off its pin (`pinned`, verify r1): the owner chose its member.
   if (proactive && !pinned && !curOwnLane && curSpare != null && spareGain > SPARE_MOVE_MARGIN_PCT) {
-    if (warm && (warm.warm || warm.inTurn)) return none(warm.warm ? 'warm-cache' : 'spare-hold', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name, why: 'spare-lane' });
+    if (warm && (warm.warm || warm.inTurn)) return none(warm.warm ? 'warm-cache' : 'spare-hold', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, ...(warm.inFlight ? { inFlight: true } : {}), wouldTo: bestSettle.id, wouldToName: bestSettle.name, why: 'spare-lane' });
     return spareMove();
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
@@ -1032,7 +1041,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // …and never while the conversation's prompt cache is still warm: the jump
     // is VOLUNTARY, and a re-point cold-starts it (THE WARM CACHE, above). The
     // pool asks again next cycle; the cache goes cold on its own.
-    if (warm && warm.warm) return none('warm-cache', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name });
+    if (warm && warm.warm) return none('warm-cache', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, ...(warm.inFlight ? { inFlight: true } : {}), wouldTo: bestSettle.id, wouldToName: bestSettle.name });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
   return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
