@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.374 — 2026-11-03
+
+### Added
+- Turn on Settings → Window → Prompt-cache warmth on conversation boxes to see how long each conversation's cache has left and which ones are about to go cold.
+
+### Fixed
+- The pool no longer moves a conversation whose prompt cache is still warm: a subscription conversation keeps its cache an hour, 5 minutes on usage credits.
+
 ## 2.369.373 — 2026-11-02
 
 ### Added
