@@ -688,9 +688,9 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
 // ═══ ⑤ THE SWITCH (r3's finding) ═══════════════════════════════════════════
 console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a profile\'s backend directly (a proposal); admitted ⇒ direct; a remote session never');
 {
-  const { wiredCloak } = await import('./fixtures/browser-switcher-views.mjs');
+  const { wired, FIXTURE_ID, FIXTURE_INTEGRATION } = await import('./fixtures/browser-switcher-views.mjs');
   const resolveKey = () => ({ source: 'cluster', key: 'cb_x', clusterLabel: 'Team' });
-  const base = { target: 'cloak', rowOf: wiredCloak.row, controlOf: wiredCloak.control, resolveKey, seats: { cloak: { tier: 'free', total: 1, at: 1 } }, majors: {}, hex: '0000002a', leases: [], by: { kind: 'agent' }, byKey: Bk, now: 1 };
+  const base = { target: FIXTURE_ID, rowOf: wired.row, controlOf: wired.control, resolveKey, seats: { [FIXTURE_INTEGRATION]: { tier: 'free', total: 1, at: 1 } }, majors: { [FIXTURE_ID]: { major: 146, at: 1 } }, hex: '0000002a', leases: [], by: { kind: 'agent' }, byKey: Bk, now: 1 };
   const prof = (owner) => ({ id: 'bp-1', label: 'p-secret', provider: 'chromium', dir: '/x', lastChromiumMajor: 140, owner });
   const T = [
     ['list only[A], B not admitted', prof({ kind: 'only', who: [{ kind: 'session', id: A }] }), false, 'proposal'],
@@ -705,12 +705,11 @@ console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a pr
   ok(!bad.length, `switchVerdict (${T.length} rows): an agent's switch of a profile it is NOT admitted to (a list, a task list, the pre-list shape) is a proposal; admitted ⇒ direct; not judged ⇒ proposal (fail closed); the user's switch is never a proposal for admission`, bad);
   const v0 = SW.switchVerdict({ ...base, profile: T[0][1], admitted: false });
   ok(/may not use the profile/.test(v0.reason) && /Who can use it/.test(v0.reason), 'the proposal\'s reason names the list ("Who can use it")', v0.reason);
-  // the keeper over the wired-cloak world: B (not admitted) ⇒ proposal; A (admitted) ⇒ the real switch runs (a stop + a start); R ⇒ proposal
-  const CLOAK_EXE = path.join(BIN, 'cloakbrowser'); fs.writeFileSync(CLOAK_EXE, `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o755 });
-  const kw = mkKeeper({ providers: wiredCloak, keys: { keyFor: () => ({ source: 'cluster', key: 'cb_x', clusterLabel: 'Team' }), sourceOf: () => ({ source: 'cluster' }) }, dataDir: path.join(ROOT, 'data-sw'), serverSetting: (key) => (key === 'browser.cloak.executablePath' ? CLOAK_EXE : undefined) });
+  // the keeper over the fixture world (its in-place row wired): B (not admitted) ⇒ proposal; A (admitted) ⇒ the real switch runs (a stop + a start); R ⇒ proposal
+  const kw = mkKeeper({ providers: wired, keys: { keyFor: () => ({ source: 'cluster', key: 'k_x', clusterLabel: 'Team' }), sourceOf: () => ({ source: 'cluster' }) }, dataDir: path.join(ROOT, 'data-sw') });
   const pw = kw.createProfile({ label: 'kept' }, { owner: { kind: 'only', who: [{ kind: 'session', id: A }] }, createdBy: A });
-  kw.reshapeStore((reg) => { const p = reg.profiles.find((x) => x.id === pw.id); p.lastChromiumMajor = 140; reg.seats.cloak = { tier: 'free', total: 3, at: clock, source: 'cluster' }; });
-  const sw = async (bk, extra = {}) => { try { return await kw.switchBackend({ profileId: pw.id, target: 'cloak', by: { kind: 'agent' }, browserKey: bk, sessionId: 'x', ...extra }); } catch (e) { return { threw: e.code, error: e.message }; } };
+  kw.reshapeStore((reg) => { const p = reg.profiles.find((x) => x.id === pw.id); p.lastChromiumMajor = 140; reg.seats[FIXTURE_INTEGRATION] = { tier: 'free', total: 3, at: clock, source: 'cluster' }; reg.majors[FIXTURE_ID] = { major: 146, at: clock }; });
+  const sw = async (bk, extra = {}) => { try { return await kw.switchBackend({ profileId: pw.id, target: FIXTURE_ID, by: { kind: 'agent' }, browserKey: bk, sessionId: 'x', ...extra }); } catch (e) { return { threw: e.code, error: e.message }; } };
   const vB = await sw(Bk);
   ok(vB.ok && vB.mode === 'proposal' && /may not use/.test(vB.reason) && kw.profile(pw.id).provider === 'chromium', 'the keeper: B\'s switch of a profile kept to A is a PROPOSAL — nothing stopped, the provider unchanged', vB);
   const vR = await sw(Rk);
@@ -719,7 +718,7 @@ console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a pr
   ok(vG.ok && vG.mode === 'proposal', 'the keeper: B in a Task Group the list does not name — still a proposal', vG);
   storeOf(path.join(ROOT, 'data-sw')).set('browser-profile', pw.id, { to: [{ kind: 'group', id: 'T-G' }] }, 'user');   // lane grants-unify: the list is the store's row
   const vG2 = await sw(Bk, { taskIds: ['T-G'] });
-  ok(vG2.ok && vG2.mode !== 'proposal' && kw.profile(pw.id).provider === 'cloak', 'the keeper: B admitted THROUGH its Task Group ⇒ the switch runs (provider now cloak)', vG2);
+  ok(vG2.ok && vG2.mode !== 'proposal' && kw.profile(pw.id).provider === FIXTURE_ID, 'the keeper: B admitted THROUGH its Task Group ⇒ the switch runs (provider now the fixture row)', vG2);
   try { await kw.stop(pw.id, { why: 'user' }); } catch { /* fake */ }
   // CONTROL (j): the pre-fix rule restored (owner.kind === 'session') ⇒ the list shapes switch directly — RED
   const swsrc = read('src/browser-switch.js');

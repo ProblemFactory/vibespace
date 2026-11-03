@@ -41,9 +41,7 @@
   "src/lib/settings-view.js": 1
  },
  "browser": {
-  "src/desktop-serve.js": 1,
-  "src/lib/browser-build-model.js": 1,
-  "src/server/browser-keeper.js": 1
+  "src/desktop-serve.js": 1
  },
  "plugin": {},
  "appkind": {

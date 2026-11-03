@@ -11,12 +11,12 @@
 //   · keyed in-place patch (reconcileKeyed): a broadcast never rebuilds a button
 //     the pointer is on, never closes an opened Details fold, never moves focus;
 //   · `st.gen`: a slower fetch never paints over a newer one; `st.pending`: the
-//     click's own overlay (switching / installing) until the POST answers — no
+//     click's own overlay (switching) until the POST answers — no
 //     control is ever shown disabled;
-//   · the two confirmations (a downgrade nobody can judge; a download) are the
-//     house showConfirmDialog — separate overlays, untouched by a patch;
-//   · every answer is worded by the model (switchOutcomeWords / installOutcome-
-//     Words / dismissOutcomeWords / viewErrorWords); the raw `error` sentence is
+//   · the confirmation (a downgrade nobody can judge) is the house
+//     showConfirmDialog — a separate overlay, untouched by a patch;
+//   · every answer is worded by the model (switchOutcomeWords /
+//     dismissOutcomeWords / viewErrorWords); the raw `error` sentence is
 //     the agent's and the CLI's — it goes to the console with its code, never
 //     into the DOM;
 //   · worded buttons are the house `mounts-btn` (btn()) and the footer's Close
@@ -37,7 +37,7 @@ import { UI_ICONS } from './icons.js';
 import { reconcileKeyed } from './user-todos-row.js';
 import { track } from './telemetry-client.js';
 import * as R from '../integration-registry.js';
-import { switcherModel, switchOutcomeWords, installOutcomeWords, dismissOutcomeWords, viewErrorWords, chipWords, choicesOf, backendFactOf } from './browser-switcher-model.js';
+import { switcherModel, switchOutcomeWords, dismissOutcomeWords, viewErrorWords, chipWords, choicesOf, backendFactOf } from './browser-switcher-model.js';
 import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: the build row's Change build…
 import { cardBuildLine } from './browser-build-model.js';
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: the browser runs headless (no desktop session) — said under the now line
@@ -206,7 +206,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       entries.push({ kind: 'now', ...m.now });
       { const dt = displayFactText(displayFactOf(app._browserProfiles, profileId)); if (dt) entries.push({ key: 'display', kind: 'display', text: dt }); } // one sentence (the default create/patch)
       // lane browser-admin 2a: THE CHROME BUILD row — which build this profile runs (and what its browser reports), with its
-      // ONE act, Change build… (a chromium profile only; CloakBrowser runs its own measured build)
+      // ONE act, Change build… (a chromium profile only)
       { const b = st.view.build ? cardBuildLine(st.view.build, t) : null; if (b) entries.push({ key: 'build', kind: 'empty', text: b.text, action: { kind: 'build', label: t('Change build…') } }); }
       if (m.notice) entries.push({ kind: 'notice', ...m.notice });
       for (const tg of m.targets) {
@@ -228,12 +228,10 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
     if (!a || st.pending) return;
     if (a.kind === 'switch') return doSwitch(e, false);
     if (a.kind === 'switch-confirm') { if (await showConfirmDialog({ ...a.confirm })) return doSwitch(e, true); return; }   // ONE options object (the approval census §1b)
-    if (a.kind === 'install') { if (await showConfirmDialog({ ...a.confirm })) return doInstall(e); return; }
     if (a.kind === 'handback') return doHandback(a);
     // an act that SENDS the user somewhere closes the dialog first: the modal overlay would sit over the very window it
     // opened (the button says where it goes — Settings, the key's card, the Agent browser panel)
     if (a.kind === 'integration') { close(); app.openIntegration?.(a.integrationId || e.integrationId); return; }
-    if (a.kind === 'settings') { close(); app._settingsUI?.open({ search: 'CloakBrowser' }); return; }
     if (a.kind === 'profiles') { close(); app.openBrowserProfiles?.(); return; }
     if (a.kind === 'build') { close(); openBuildDialog(app, profileId, { label: st.view?.profile?.label || '' }); return; } // lane browser-admin 2a
     // BROWSE YOURSELF (B-6ae8): open the profile's browser for the user (his own window — the dialog closes first), or close
@@ -260,15 +258,6 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
     st.pending = null;
     if (r && r.error) console.warn('[browser-switcher] switch answered', r.code, r.error);
     toast(switchOutcomeWords(r, { t, from, to: e.id, label })); // the toast reaches the user even when the window was closed
-    if (!st.closed) { render(); refresh(); }
-  }
-  async function doInstall(e) {
-    st.pending = { id: e.id, state: 'installing' };
-    render();
-    const r = await fetchJson('/api/browser/install', { method: 'POST' });
-    st.pending = null;
-    if (r && r.error) console.warn('[browser-switcher] install answered', r.code, r.error);
-    toast(installOutcomeWords(r, { t, name: e.name }));
     if (!st.closed) { render(); refresh(); }
   }
   /** "Hand it back to your agent" (the driven card): the act itself, here — the dialog stays open and the broadcast the
@@ -308,7 +297,7 @@ export function installBrowserSwitcher(App) {
   App.prototype.browserBackendFor = function (profileId) { return backendFactOf(this._browserProfiles, profileId); };
   /** The backends a switch dialog would draw a card for; [] ⇒ no entry point offers the dialog. */
   App.prototype.browserChoicesFor = function (profileId) { return choicesOf(this._browserProfiles, profileId); };
-  /** The chip's WORDS for a profile (`Chromium` / `CloakBrowser` / …) — an older server's raw chip when it sends no facts. */
+  /** The chip's WORDS for a profile (`Chromium` / …) — an older server's raw chip when it sends no facts. */
   App.prototype.browserChipFor = function (profileId) {
     const d = this._browserProfiles;
     if (!d || !profileId) return null;

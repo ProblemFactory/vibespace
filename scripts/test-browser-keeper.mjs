@@ -567,7 +567,7 @@ await sleep(50);
 ok(!dlive.has('da-orphan') && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-orphan') && dlive.has(recA2.displaySession.id), 'the tick stops a display session whose browser record is not live (and keeps the one a live record names)');
 await k2.stop(pA.id, { why: 'user' });
 // the wiring pins: the road decided in start() before the display fact; the api seam
-ok(/const road = AT\.launchRoad\(\{ local: true, starts: !!prow\.starts, ownLaunch: argvPrefix\.length > 0 \|\| prow\.executable === 'installed', headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper \? \(\(await cliNow\(\)\) \|\| \{\}\)\.version \|\| null : null, xpra: await displayHasXpra\(\), exe: attachExe \}\);/.test(ks) && /setDisplaySessions: \(dk\) =>/.test(ks), 'the keeper decides the road before the driver\'s display fact; server.js wires the desktop keeper through setDisplaySessions');
+ok(/const road = AT\.launchRoad\(\{ local: true, starts: !!prow\.starts, ownLaunch: argvPrefix\.length > 0, headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper \? \(\(await cliNow\(\)\) \|\| \{\}\)\.version \|\| null : null, xpra: await displayHasXpra\(\), exe: attachExe \}\);/.test(ks) && /setDisplaySessions: \(dk\) =>/.test(ks), 'the keeper decides the road before the driver\'s display fact; server.js wires the desktop keeper through setDisplaySessions');
 ok(/browserKeeper\?\.setDisplaySessions\?\.\(desktopKeeper\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')), 'server.js hands the desktop keeper over');
 // the road table (PURE)
 const R = (o) => AT.launchRoad({ local: true, starts: true, ownLaunch: false, headed: null, wired: true, driverVersion: '0.38.2', xpra: true, exe: '/usr/bin/google-chrome', ...o });

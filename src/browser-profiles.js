@@ -928,95 +928,7 @@ function isProfileId(v) { return PROFILE_ID_RE.test(String(v || '')); }
 /** The user-data-dir NAME for a minted profile: `~/.agent-browser/vs-bp-<id>`.
  *  Adopted directories keep their own path; the LABEL never reaches a path. */
 function profileDirName(id) { return 'vs-' + String(id); }
-// ── §7.2.1 the egress records — lane dc-browser-backends (F4): a backend's measured record lives in ITS file
-// (src/browser-backends/<id>.js `egressProof`, moved there verbatim); this module keeps the DISCIPLINE over any record
-// (egressHostsOf / proofVerdict / blockedCell) and the old names for the readers that ask it.
 const { BROWSER_BACKENDS } = require('./browser-backends/index.js');
-const PROOFS = Object.freeze(BROWSER_BACKENDS.map((b) => b.egressProof).filter(Boolean));
-const PROOFED = BROWSER_BACKENDS.find((b) => b.egressProof) || {};
-const CLOAK_EGRESS_RUNS = PROOFED.egressRuns || Object.freeze([]);
-/** The PHASES a target may belong to: `npm` = the package manager fetching the
- *  wrapper (the registry, not the vendor — named, not proxied); `download` =
- *  the wrapper fetching the pinned Chromium (THE install allowlist); `launch` =
- *  anything a running browser (or its driver) reached (THE run allowlist). */
-const EGRESS_PHASES = Object.freeze(['npm', 'download', 'launch']);
-const CLOAK_EGRESS_PROOF = PROOFED.egressProof || null;
-/** A loopback / resolver address is never an egress host (it is named by what it is). */
-function isLocalAddr(a) { const s = String(a || '').toLowerCase(); return /^127\./.test(s) || s === '::1' || s === 'localhost'; }
-/** THE ALLOWLISTS A RECORD IMPLIES, derived from its phase-tagged targets (the
- *  record is the one source — the proxy never carries a second hand-written
- *  list): `install` = what the pinned download reached, `run` = what a running
- *  browser reached beyond loopback, `npm` = the package manager's registry
- *  (named, not proxied), `unnamed` = a non-local target the record cannot name. */
-function egressHostsOf(proof) {
-  const out = { install: [], run: [], npm: [], unnamed: [], badPhase: [] };
-  if (!proof || typeof proof !== 'object') return out;
-  const all = [...(Array.isArray(proof.install) ? proof.install : []), ...(Array.isArray(proof.runs) ? proof.runs : [])];
-  for (const r of all) for (const t of (r && Array.isArray(r.targets) ? r.targets : [])) {
-    if (!t || isLocalAddr(t.addr)) continue;
-    const h = String(t.host || '').toLowerCase();
-    if (!h || h === '?' || !/^[a-z0-9.-]+$/.test(h)) { out.unnamed.push(`${t.addr}:${t.port}`); continue; }
-    const bucket = t.phase === 'download' ? out.install : t.phase === 'launch' ? out.run : t.phase === 'npm' ? out.npm : null;
-    if (!bucket) { out.badPhase.push(h); continue; }
-    if (!bucket.includes(h)) bucket.push(h);
-  }
-  return out;
-}
-/** THE PINNED DOWNLOAD's allowlist (the install step runs under the egress proxy with exactly these). */
-function cloakInstallAllowlist(proof = CLOAK_EGRESS_PROOF) { return egressHostsOf(proof).install; }
-/** A RUNNING cloak browser's allowlist: what the record says the browser itself
- *  needs (measured: nothing) + the sites this deployment names for its profiles
- *  (`browser.cloak.egressAllowlist`). Loopback is never admitted by a rule. */
-function cloakRunAllowlist(proof = CLOAK_EGRESS_PROOF, sites = '') {
-  const out = [];
-  for (const h of [...egressHostsOf(proof).run, ...parseEgressAllowlist(sites)]) if (!out.includes(h)) out.push(h);
-  return out;
-}
-/** The local-oracles discipline over a proof record + the rows it claims to
- *  explain: `{ok:true}` or `{ok:false, error}`. A record with no counts is
- *  not a record; a `blocks` claim must name a cell that IS false; a measured
- *  record must carry every run §7.2.1 names, each with an INET count, name
- *  the build it describes (version + Chromium + platform) and name every
- *  non-local address it reached, each under one of the EGRESS_PHASES. */
-function proofVerdict(proof, rows = PROVIDERS) {
-  if (!proof || typeof proof !== 'object') return { ok: false, error: 'no proof record' };
-  for (const k of ['tool', 'date', 'version', 'runs']) if (!(k in proof)) return { ok: false, error: `proof record lacks ${k}` };
-  if (!Array.isArray(proof.runs)) return { ok: false, error: 'proof.runs is not a list' };
-  if (proof.status === 'measured') {
-    if (proof.blocks) return { ok: false, error: 'a measured record may not carry a blocks claim (the cell it would explain is not explained by a measurement that succeeded)' };
-    if (!proof.version) return { ok: false, error: 'a measured record names the version it describes' };
-    // a record that measured a DOWNLOAD names the build it fetched (lane dc-browser-backends: the record's own shape, not its id)
-    if (proof.download && (!proof.chromium || !proof.platform)) return { ok: false, error: `a measured ${proof.provider} record names the Chromium build and the platform it describes (the install pins both)` };
-    const want = proof.expectedRuns || CLOAK_EGRESS_RUNS;
-    for (const w of want) {
-      const r = proof.runs.find((x) => x && x.what === w);
-      if (!r) return { ok: false, error: `measured record lacks the run "${w}"` };
-      if (!Number.isInteger(r.inetConnects) || r.inetConnects < 0) return { ok: false, error: `run "${w}" has no INET connect count` };
-    }
-    const hosts = egressHostsOf(proof);
-    if (hosts.unnamed.length) return { ok: false, error: `a measured record names every address it reached — unnamed: ${hosts.unnamed.join(', ')}` };
-    if (hosts.badPhase.length) return { ok: false, error: `a reached host sits in no phase (${EGRESS_PHASES.join(' / ')}): ${hosts.badPhase.join(', ')}` };
-    return { ok: true };
-  }
-  if (proof.status !== 'refused') return { ok: false, error: `unknown proof status ${JSON.stringify(proof.status)}` };
-  if (!proof.refusal) return { ok: false, error: 'a refused record names its refusal' };
-  if (proof.runs.length) return { ok: false, error: 'a refused record carries no runs (a run with counts is a measurement)' };
-  const m = /^([a-z:-]+)\.([a-zA-Z]+)$/.exec(String(proof.blocks || ''));
-  if (!m) return { ok: false, error: 'a refused record must say which capability cell it blocks (`<provider>.<cell>`)' };
-  const row = rows[m[1]];
-  if (!row) return { ok: false, error: `blocks names an unknown provider ${m[1]}` };
-  if (row[m[2]] !== false) return { ok: false, error: `blocks claims ${proof.blocks} is false, but the cell reads ${JSON.stringify(row[m[2]])} — re-enabled without re-measuring` };
-  return { ok: true };
-}
-/** The proof record that explains a false cell, or null (`blockedCell('cloak','wired')`). */
-function blockedCell(provider, cell) {
-  return PROOFS.find((p) => p.blocks === `${provider}.${cell}`) || null;
-}
-/** A proofed row's `wired` cell, DERIVED: a measured record the discipline
- *  accepts (asked with no rows — a measured record's verdict never reads
- *  them). A refused record ⇒ false, and its `blocks` claim names this cell. */
-const proofWires = (proof) => !!proof && proof.status === 'measured' && proofVerdict(proof, {}).ok;
-const CLOAK_WIRED = proofWires(CLOAK_EGRESS_PROOF);
 
 // ═══ P4 — PROVIDERS ARE ROWS, NOT AN `if` CHAIN (§7.1's two tables, §7.2.1,
 // §7.3, §7.6). `provider` IS the backend and the TIER is derived from it
@@ -1025,7 +937,7 @@ const CLOAK_WIRED = proofWires(CLOAK_EGRESS_PROOF);
 // failing at use time (the backend-caps discipline). Cells:
 //   tier         1 CDP undisguised · 2 fingerprint (still CDP) · 3 no CDP at all
 //   wired        this build can START/REACH one — false ⇒ `provider_unavailable`
-//                naming why (a row that carries a §7.2.1 record: DERIVED from it — its backend file)
+//                naming why (`unwiredWhy`)
 //   keyScope     'none' | 'local-only' (D34: a key-bearing provider is REFUSED
 //                on `host != null` — `provider_needs_local_key`)
 //   canSwitchTo  §7.4: 'in-place' | 'export-only' | 'no'
@@ -1052,19 +964,17 @@ const CLOAK_WIRED = proofWires(CLOAK_EGRESS_PROOF);
 //   buildChoice  a Chrome build is choosable for it (Change build…; the chosen build's executable rides the launch env)
 //   automationFlag  the launch stamps AUTOMATION_FLAG (a build of ours; a vendor build carries its own patches)
 //   launchArgs   the browser's own arguments (agent-browser's AGENT_BROWSER_ARGS); null = the CLI's defaults
-//   seeded       it carries a fingerprint seed (`--fingerprint=<seed>` rides launchArgs; §7.4)
 //   launchFlags  it is started with flags of its own, so a heal's bare `get cdp-url` never relaunches it
-//   executable   'installed' = its own binary (the `exeSetting` setting names one installed some other way); null = none
-//   egressProxy  it reaches the world only through the keeper's allowlisting egress proxy (§7.2.1)
 //   integrationId  the integration-registry row its key lives in (null = needs none; cloud rows: their own id)
-const NO_LAUNCH = Object.freeze({ buildChoice: false, automationFlag: false, launchArgs: null, seeded: false, launchFlags: false, executable: null, exeSetting: null, egressProxy: false, integrationId: null });
+// (lane engine-spi-egress L3: the seed / own-binary / egress-proxy cells left with the one row that had them — a wrapped
+// browser is an engine plugin's, its proxy the keeper's per profile: src/browser-engines.js)
+const NO_LAUNCH = Object.freeze({ buildChoice: false, automationFlag: false, launchArgs: null, launchFlags: false, integrationId: null });
 /** The provider an empty / absent `provider` means (a record from before providers, a kept directory adopted as it is) —
  *  the FIRST registered backend. */
 const DEFAULT_PROVIDER = BROWSER_BACKENDS[0].id;
 // lane dc-browser-backends (F4): THE ROWS ARE DECLARED BY THEIR BACKENDS (src/browser-backends/<id>.js, one line each in
-// its index.js) — this table is DERIVED: the launch defaults, the backend's cells, its `wired` read against its own §7.2.1
-// record when it carries one (no record the discipline accepts ⇒ not wired), its words (i18n keys the client t()s).
-const PROVIDERS = Object.freeze(Object.fromEntries(BROWSER_BACKENDS.map((b) => [b.id, Object.freeze({ ...NO_LAUNCH, ...b.row, wired: !!b.row.wired && (!b.egressProof || proofWires(b.egressProof)), words: b.words })])));
+// its index.js) — this table is DERIVED: the launch defaults, the backend's cells, its words (i18n keys the client t()s).
+const PROVIDERS = Object.freeze(Object.fromEntries(BROWSER_BACKENDS.map((b) => [b.id, Object.freeze({ ...NO_LAUNCH, ...b.row, wired: !!b.row.wired, words: b.words })])));
 /** `cloud:<name>` is a FAMILY of rows (§7.1): each vendor's own browser,
  *  reached with a key from the integration store (§7.5). The key half
  *  LANDED (P4 second half): the local `agent-browser` daemon is started with
@@ -1090,21 +1000,15 @@ function providerRow(id) {
   if (m && CLOUD_PROVIDERS.includes(m[1])) return Object.freeze({ ...CLOUD_ROW, wired: !CLOUD_UNWIRED[m[1]], unwiredWhy: CLOUD_UNWIRED[m[1]] || null, label: `${m[1]} (cloud, key required)`, cloud: m[1], integrationId: s, words: cloudWords(m[1]) });
   return null;
 }
-/** lane dc-browser-backends (F6): THE ANTI-BOT ROW — the backend a site's bot check is answered with (the propose
- *  runner's switch / new-profile target, the route's one-click words): the row declaring `antiBot: true`, tier 2, with
- *  no remote transport (it runs on this machine). `{id, name}` (name = its words' name), or null when none is declared. */
-function antiBotRow() {
-  const id = Object.keys(PROVIDERS).find((k) => PROVIDERS[k].antiBot && PROVIDERS[k].tier === 2 && !PROVIDERS[k].remote);
-  return id ? { id, name: String((PROVIDERS[id].words || {}).name || id) } : null;
-}
+// (lane engine-spi-egress L3: the anti-bot ROW left with the backend that declared it — the proposal targets none in this
+// version; L4 derives its target from an engine whose probe declares the `anti-bot` feature, design-desk q-056 §3)
 function providerIds() { return [...Object.keys(PROVIDERS), ...CLOUD_PROVIDERS.map((n) => 'cloud:' + n)]; }
 
 /**
  * THE ONE ANSWER to "may this provider be used here" — the typed refusal a
  * disabled control shows, before anything is spawned or resolved:
  *   provider_unknown           not a row
- *   provider_unavailable       the row is not wired (the reason names why —
- *                              for cloak, §7.2.1's refusal by name)
+ *   provider_unavailable       the row is not wired (the reason names why)
  *   provider_needs_local_key   keyScope local-only on host != null (D34)
  *   provider_local_only        the row has no remote transport
  *   provider_needs_consent     the row names a consent SETTING and it does not
@@ -1123,11 +1027,7 @@ function providerControl(provider, { host = null, desktopConsent = undefined } =
     if (row.keyScope === 'local-only') return { ok: false, code: 'provider_needs_local_key', error: `provider "${id}" needs a key that lives in this instance's registry and has no channel to another machine (D34) — a profile on ${host} may use chromium or cdp` };
     if (!row.remote) return { ok: false, code: 'provider_local_only', error: `provider "${id}" runs only on this machine (no remote transport)` };
   }
-  if (!row.wired) {
-    const why = blockedCell(id, 'wired');
-    const reason = why ? `its §7.2.1 egress measurement is recorded as ${why.refusal} (${why.date}): ${why.detail}` : (row.unwiredWhy || 'not wired in this release');
-    return { ok: false, code: 'provider_unavailable', error: `provider "${id}" (${row.label}) cannot be used on this build — ${reason}` };
-  }
+  if (!row.wired) return { ok: false, code: 'provider_unavailable', error: `provider "${id}" (${row.label}) cannot be used on this build — ${row.unwiredWhy || 'not wired in this release'}` };
   if (row.consent && desktopConsent !== true) return { ok: false, code: 'provider_needs_consent', error: `provider "${id}" addresses windows on the user's REAL desktop and is off until the user turns on "${row.consent}" (Settings → Desktop apps, a switch with its own confirmation) — nothing on the desktop is listed or addressable before that`, consent: row.consent };
   return { ok: true, row };
 }
@@ -1212,11 +1112,11 @@ function providerRows({ host = null, desktopConsent = undefined } = {}) {
     const row = providerRow(id);
     const local = providerControl(id, { desktopConsent });
     const onHost = host ? providerControl(id, { host, desktopConsent }) : null;
-    return { id, ...row, control: local.ok ? { ok: true } : { ok: false, code: local.code, error: local.error }, ...(onHost ? { onHost: onHost.ok ? { ok: true, host } : { ok: false, host, code: onHost.code, error: onHost.error } } : {}), proof: blockedCell(id, 'wired') };
+    return { id, ...row, control: local.ok ? { ok: true } : { ok: false, code: local.code, error: local.error }, ...(onHost ? { onHost: onHost.ok ? { ok: true, host } : { ok: false, host, code: onHost.code, error: onHost.error } } : {}) };
   });
 }
 
-// ── §7.2.1 the cloak egress ALLOWLIST ────────────────────────────────────
+// ── the egress ALLOWLIST — the keeper's per-profile proxy of a wrapped engine (src/server/egress-proxy.js) ────
 /** Does the allowlist admit this host? Entries are exact hostnames or
  *  `.suffix` (a leading dot admits every sub-domain — and the bare domain).
  *  Loopback and link-local are NEVER admitted by a rule (the browser must
@@ -2924,7 +2824,7 @@ const HEAL_DAY_BUDGET = 10;
 const HEAL_DAY_MS = 24 * 60 * 60 * 1000;
 /** A closure a relaunch attempt made (a failed relaunch, a browser that died before it was identified) is retried by the
  *  tick after this — counted from THAT close; a refusal that attempted nothing (another browser holds the directory, a
- *  cloak record) never arms it. A verb retries at once. */
+ *  provider that cannot start) never arms it. A verb retries at once. */
 const HEAL_RETRY_MS = 30000;
 // ── LANE H VERIFY r6 (2026-09-25) MINOR 1: A FAILED RELAUNCH ASK IS NOT A RELAUNCH ──
 // r5 counted the attempt BEFORE `get cdp-url`, so an ask the binary refused (no CDP url — "Chrome exited early", nothing
@@ -3563,8 +3463,8 @@ module.exports = {
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, HEAL_FRESH_AT, healLedger, healBudgetVerdict, rejudgeVerdict, freshDaemonDue, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair
-  DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, antiBotRow, providerIds, providerControl, capabilityRefusal, providerRows,
-  CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, EGRESS_PHASES, CLOAK_WIRED, proofVerdict, blockedCell, egressHostsOf, cloakInstallAllowlist, cloakRunAllowlist,
+  DEFAULT_PROVIDER, CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
+
   isCdpPair, forwardedCdpUrl, cdpPortOf,
   parseEgressAllowlist, egressVerdict,
   // P1 second half (§3.7/§3.8): the attachment set, handles, the two refusals, the audit line

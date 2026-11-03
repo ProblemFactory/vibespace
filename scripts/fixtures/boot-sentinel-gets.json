@@ -112,7 +112,6 @@
   "/api/browser/engines",
   "/api/browser/floor",
   "/api/browser/housekeeping",
-  "/api/browser/install",
   "/api/browser/kept",
   "/api/browser/passkeys",
   "/api/browser/profiles",

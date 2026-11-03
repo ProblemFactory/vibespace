@@ -40,7 +40,7 @@ console.log('① the row + the door (PURE)');
   const ids = B.providerIds();
   ok(ids.indexOf('desktop-app') >= 0 && ids.indexOf('desktop-app') === ids.indexOf('local-window') - 1 && ids.indexOf('desktop-app') > ids.indexOf('cdp'), `the row sits BEFORE local-window in the ladder (${ids.join(', ')})`);
   const r = B.providerRow('desktop-app');
-  const want = { tier: 3, wired: true, keyScope: 'none', canSwitchTo: 'no', ownsDir: true, leaseKind: 'window-target', remote: null, starts: true, headed: true, binary: null, cdp: false, allowedDomains: false, pinTab: false, consent: null, egressProxy: false };
+  const want = { tier: 3, wired: true, keyScope: 'none', canSwitchTo: 'no', ownsDir: true, leaseKind: 'window-target', remote: null, starts: true, headed: true, binary: null, cdp: false, allowedDomains: false, pinTab: false, consent: null };
   const bad = Object.entries(want).filter(([k, v]) => r[k] !== v);
   ok(!bad.length, 'the row\'s cells (§E2.1): tier 3, window-target lease, no CDP, no domain fence, no egress proxy, canSwitchTo no', bad);
   ok(B.providerControl('desktop-app').ok === true && B.providerControl('desktop-app', { host: 'box-2' }).ok === false, 'usable on this machine; a paired machine refused (remote null — v1)');

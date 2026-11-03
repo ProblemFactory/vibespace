@@ -217,7 +217,7 @@ function countItems(kind, merged, source = null) {
 }
 
 /** One item in the device's words: "3 Google clients", "1 Lark app",
- *  "CloakBrowser key". `t` is the caller's translator. */
+ *  "Browserbase key". `t` is the caller's translator. */
 function itemWords(it, { t = (s, p) => fill(s, p) } = {}) {
   const n = Number(it.n) || 0;
   if (it.kind === 'gdrive') return n === 1 ? t('1 Google client') : t('{n} Google clients', { n });

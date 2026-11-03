@@ -3,7 +3,7 @@
 // a conversation's card menu, a label and nothing else). Fast, in-process, no browser, no binary, port 0, scratch only.
 //
 //   ① the PURE model (src/lib/browser-new-profile-model.js): every provider is a ROW (never hidden) with its state for the
-//      chosen machine and its words; CloakBrowser not installed offers Install…; a machine a provider cannot run on is
+//      chosen machine and its words (no row installs a program of its own — lane engine-spi-egress L3); a machine a provider cannot run on is
 //      greyed WITH its reason; the ONE body; a refusal worded by its CODE — in en / zh / ja;
 //   ② the REAL keeper: "Who can use it" chosen AT the create is judged before anything is minted (a refusal writes
 //      nothing) and the record is born with its list — ONE write;
@@ -38,28 +38,23 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 console.log('— ① the PURE model: provider rows, machine rows, the body, the refusal words (en / zh / ja)');
 const ROWS = B.providerRows({ host: null, desktopConsent: false });
 const HOST_ROWS = B.providerRows({ host: 'dev-1', desktopConsent: false });
-const NOT_INSTALLED = { ok: true, npm: true, state: { running: false, failed: false } };
 function judgeProviders(MM) {
   const bad = [];
-  const local = MM.providerChoices({ providers: ROWS, install: NOT_INSTALLED, host: null, t: tEn });
+  const local = MM.providerChoices({ providers: ROWS, host: null, t: tEn });
   if (local.length !== ROWS.length) bad.push(`HIDDEN: ${ROWS.length} provider rows in, ${local.length} out`);
   const by = Object.fromEntries(local.map((c) => [c.id, c]));
-  const want = { chromium: 'ready', cloak: 'needs-install', cdp: 'needs-port', 'local-window': 'not-a-profile', 'cloud:browserbase': 'needs-key', 'cloud:agentcore': 'unavailable' };
+  const want = { chromium: 'ready', cdp: 'needs-port', 'local-window': 'not-a-profile', 'cloud:browserbase': 'needs-key', 'cloud:agentcore': 'unavailable' };
   for (const [id, st] of Object.entries(want)) if (!by[id] || by[id].state !== st) bad.push(`${id}: ${by[id] && by[id].state} ≠ ${st}`);
-  if (by.cloak && by.cloak.offer !== 'install') bad.push('cloak not installed offers no Install…');
-  if (by.cloak && by.cloak.pickable) bad.push('cloak not installed is pickable');
+  if (by.cloak) bad.push('a removed backend still has a row');
+  if (local.some((c) => c.offer)) bad.push('a row offers an install');
   for (const c of local) if (c.pickable !== M.PICKABLE.includes(c.state)) bad.push(`${c.id}: pickable ${c.pickable} for ${c.state}`);
   for (const c of local) if (!c.pickable && !c.note) bad.push(`${c.id}: not pickable and says no reason`);
   return bad;
 }
 {
-  ok(judgeProviders(M).length === 0, 'every provider row comes out (never hidden), each in its state, a row that cannot be picked says why, CloakBrowser not installed offers Install… and is not pickable', judgeProviders(M));
-  const pc = (install) => M.providerChoices({ providers: ROWS, install, t: tEn }).find((c) => c.id === 'cloak');
-  ok(pc({ code: 'already_installed', ok: false }).state === 'ready' && pc({ ok: true, npm: true, state: { running: true } }).state === 'installing' && pc({ ok: true, npm: true, state: { failed: true } }).offer === 'install-again'
-    && pc({ ok: true, npm: false, state: {} }).state === 'unavailable' && pc({ ok: true, npm: false, state: {} }).offer === null && pc(null).state === 'ready',
-  'CloakBrowser: installed ⇒ ready · running ⇒ installing · failed ⇒ Install again… · no npm ⇒ no button (the words say who can) · no verdict (an old server) ⇒ its row as the server says');
-  const onHost = Object.fromEntries(M.providerChoices({ providers: HOST_ROWS, install: NOT_INSTALLED, host: 'dev-1', t: tEn }).map((c) => [c.id, c]));
-  ok(onHost.cloak.state === 'other-machine' && onHost['cloud:browserbase'].state === 'other-machine' && onHost.chromium.state === 'ready' && onHost.cdp.state === 'needs-port',
+  ok(judgeProviders(M).length === 0, 'every provider row comes out (never hidden), each in its state, a row that cannot be picked says why; no row offers an install', judgeProviders(M));
+  const onHost = Object.fromEntries(M.providerChoices({ providers: HOST_ROWS, host: 'dev-1', t: tEn }).map((c) => [c.id, c]));
+  ok(onHost['cloud:browserbase'].state === 'other-machine' && onHost.chromium.state === 'ready' && onHost.cdp.state === 'needs-port',
     'on a paired machine: a key-bearing / local-only provider is that machine\'s "runs only here" (shown, not pickable), chromium and cdp stay', Object.values(onHost).map((c) => c.id + ':' + c.state));
   const consent = M.providerChoices({ providers: B.providerRows({ host: null, desktopConsent: true }), t: tEn }).find((c) => c.id === 'local-window');
   ok(consent.state === 'not-a-profile', 'tier 3 is NOT a profile even with the desktop consent on (a window target)');
@@ -80,7 +75,7 @@ function judgeProviders(MM) {
   // verify r1 (F7): the form the picker's door draws is the SERVER's plan (rung D keeps too); only an unanswered ask falls back to the rung
   const forms = [M.adoptFormOf(null), M.adoptFormOf({ browserVariant: 'D', adoptKeeps: true }), M.adoptFormOf({ browserVariant: 'C', adoptKeeps: false }), M.adoptFormOf({ browserVariant: 'C' }), M.adoptFormOf({ browserVariant: 'D' })];
   ok(JSON.stringify(forms) === JSON.stringify([null, 'keep', 'empty', 'keep', 'empty']), 'adoptFormOf: the panel\'s own dialog ⇒ no adopt; the server\'s plan decides keep / empty; no plan ⇒ the rung (C keeps)', forms);
-  const keep = M.createBody({ label: 'x', provider: 'cloak', host: 'dev', adopt: 'keep' });
+  const keep = M.createBody({ label: 'x', provider: 'cdp', host: 'dev', adopt: 'keep' });
   ok(keep.ok && !('provider' in keep.body) && !('host' in keep.body), 'a conversation\'s kept browser (the adopt rung) sends no browser / machine — they are its own');
   const fk = M.createBody({ label: 'x', adopt: 'keep' }), fe = M.createBody({ label: 'x', adopt: 'empty' }), fn = M.createBody({ label: 'x' });
   ok(fk.body.form === 'keep' && fe.body.form === 'empty' && !('form' in fn.body), 'verify r2 (B4): the picker\'s door names the FORM it drew (keep | empty); the panel\'s own create names none', [fk.body, fe.body, fn.body]);
@@ -91,15 +86,14 @@ function judgeProviders(MM) {
   // i18n: every sentence the model can say exists in zh and ja (the dictionary IS the census — a missing key falls back to English silently)
   const said = new Set();
   const recT = (k) => { said.add(k); return k; };
-  M.providerChoices({ providers: ROWS, install: NOT_INSTALLED, t: recT }); M.providerChoices({ providers: HOST_ROWS, install: NOT_INSTALLED, host: 'h', t: recT });
-  for (const ins of [{ ok: true, npm: true, state: { running: true } }, { ok: true, npm: true, state: { failed: true } }, { ok: true, npm: false, state: {} }]) M.providerChoices({ providers: ROWS, install: ins, t: recT });
+  M.providerChoices({ providers: ROWS, t: recT }); M.providerChoices({ providers: HOST_ROWS, host: 'h', t: recT });
   M.providerChoices({ providers: B.providerRows({ host: null, desktopConsent: false }).map((r) => (r.id === 'local-window' ? { ...r, leaseKind: 'tab' } : r)), t: recT });
   M.machineChoices({ machines: [{ hostId: 'local' }, { hostId: 'a', connected: false }, { hostId: 'b', connected: true }, { hostId: 'c', connected: true, capabilities: ['browser-serve'] }], providerOnHost: { ok: false }, t: recT });
   for (const c of CODES) M.createRefusalWords({ code: c, why: 'remote' }, recT), M.createRefusalWords({ code: c }, recT);
   const noZh = [...said].filter((k) => !(k in zh)), noJa = [...said].filter((k) => !(k in ja));
   ok(said.size > 30 && !noZh.length && !noJa.length, `every sentence the model says (${said.size}) has a zh and a ja entry`, { noZh, noJa });
-  const zhLocal = M.providerChoices({ providers: ROWS, install: NOT_INSTALLED, t: tZh }).find((c) => c.id === 'cloak');
-  ok(/安装/.test(zhLocal.note) && /インストール/.test(M.providerChoices({ providers: ROWS, install: NOT_INSTALLED, t: tJa }).find((c) => c.id === 'cloak').note), 'the device\'s own language: zh / ja words, never the server\'s English');
+  const zhLocal = M.providerChoices({ providers: ROWS, t: tZh }).find((c) => c.id === 'cdp');
+  ok(zhLocal.note && zhLocal.note === zh[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note] && M.providerChoices({ providers: ROWS, t: tJa }).find((c) => c.id === 'cdp').note === ja[M.providerChoices({ providers: ROWS, t: tEn }).find((c) => c.id === 'cdp').note], 'the device\'s own language: zh / ja words, never the server\'s English');
 }
 
 // ═══ ② the REAL keeper ══════════════════════════════════════════════════════
@@ -156,7 +150,7 @@ async function adoptKeepLeg(R) {
   const plan = await jj('GET', '/api/browser/adopt?sessionId=sess-d'), planN = await jj('GET', '/api/browser/adopt?sessionId=sess-e');
   const refused = [];
   refused.push(await jj('POST', '/api/browser/adopt', { sessionId: 'sess-d', label: 'Old build', provider: 'chromium', browser: { kind: 'build', version: '146.0.7680.153' } }));
-  refused.push(await jj('POST', '/api/browser/adopt', { sessionId: 'sess-d', label: 'Cloaked', provider: 'cloak' }));
+  refused.push(await jj('POST', '/api/browser/adopt', { sessionId: 'sess-d', label: 'Connected', provider: 'cdp', cdpPort: 9222 }));
   refused.push(await jj('POST', '/api/browser/adopt', { sessionId: 'sess-d', label: 'On dev', provider: 'chromium', host: 'dev-1' }));
   const made = k.list().profiles.length - n0, dirStill = fs.existsSync(kept);
   const plain = await jj('POST', '/api/browser/adopt', { sessionId: 'sess-d', label: 'Kept as is' });

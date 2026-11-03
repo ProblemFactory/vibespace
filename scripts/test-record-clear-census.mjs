@@ -1905,8 +1905,7 @@ const I_RECV = {
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],
   'src/lib/browser-live-window.js|dw': ['words', 'a PURE outcome\'s sentence (browser-switcher-model)'],
   'src/lib/browser-live-window.js|sw': ['words', 'a PURE step\'s sentence (browser-new-profile-model machineStepWords: a paired machine with no browser — the machine\'s id + its one command; lane remote-profile-start)'],
-  'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'], 'src/lib/browser-new-profile.js|o': ['browser profile', 'an install outcome\'s words (the New profile… dialog, lane browser-admin)'],
-  'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/server/jobs-wiring.js|e': ['error', 'the For you store\'s refusal (lane job-notify-user r2: its code and its open COUNT — a number, never an item\'s text)'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
+  'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'],   'src/server/jobs-wiring.js|e': ['error', 'the For you store\'s refusal (lane job-notify-user r2: its code and its open COUNT — a number, never an item\'s text)'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   // lane owner-press-attended: the refused hand-over's toast (PURE stash-summary handOverRefusalWords — the route's code + the
   // 429 body's account name, cap and next free slot, never a notice's words); the handback verdict's `reason` is a spend
   // reason CODE (browser-handback | browser-handback-idle), compared, never shown
@@ -1928,7 +1927,7 @@ const I_RECV = {
   'src/lib/integrations-window.js|v': ['integration', 'a key label'],
   'src/lib/manage-agents.js|a': ['account', 'an account'], 'src/lib/manage-agents.js|c.account': ['account', 'an account'], 'src/lib/manage-agents.js|fin.account': ['account', 'an account'],
   'src/lib/manage-agents.js|fin.movedTo': ['account', 'an account'], 'src/lib/manage-agents.js|last.account': ['account', 'an account'], 'src/lib/manage-agents.js|last': ['account', 'an account'],
-  'src/lib/manage-agents.js|o': ['words', 'a PURE outcome\'s sentence'], 'src/lib/manage-agents.js|p': ['account', 'a pool'], 'src/lib/manage-agents.js|r2.account': ['account', 'an account'],
+  'src/lib/manage-agents.js|p': ['account', 'a pool'], 'src/lib/manage-agents.js|r2.account': ['account', 'an account'],
   'src/lib/manage-agents.js|r.account': ['account', 'an account'], 'src/lib/manage-agents.js|r.retargeted': ['account', 'an account'], 'src/lib/manage-agents.js|r': ['account', 'an account'], 'src/lib/manage-agents.js|sa': ['account', 'an account'],
   'src/lib/open-with.js|fv': ['file', 'a viewer verdict\'s app label'], 'src/lib/open-with.js|OFFICE_MODULES[fv.module]': ['file', 'an office module label'],
   'src/lib/plugin-client.js|def': ['plugin', 'a plugin window\'s label'], 'src/lib/plugin-client.js|d': ['plugin', 'a plugin\'s own notify text'],

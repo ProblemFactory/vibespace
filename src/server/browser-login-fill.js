@@ -2,7 +2,7 @@
 /**
  * HUB-SIDE LOGIN FORM INSPECTION & CDP FILL ON STANDARD CHROME — ORCH (lane vault-login-chrome / vault-login-fill, R1 + R4).
  *
- * When a browser has no custom kernel `credentials` sink (standard Chrome on the `chromium`, `cloak` or `cdp` providers),
+ * When a browser has no custom kernel `credentials` sink (standard Chrome on the `chromium` or `cdp` providers),
  * VibeSpace inspects the conversation's current tab over its own browser-endpoint CDP session and types the vault login's
  * secret values directly from the hub into the page's visible login fields:
  *

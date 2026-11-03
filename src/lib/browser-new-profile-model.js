@@ -1,13 +1,11 @@
 // THE NEW PROFILE… DIALOG, AS A PURE MODEL (lane browser-admin, 2026-10-01 — the owner: "不能手动创建profile"; the only
 // create was a conversation's card menu, a label and nothing else). DOM-free, imports only the switch dialog's PURE word
 // module, `t` injected. The server sends STRUCTURE — the provider rows with their verdicts (GET /api/browser/providers,
-// `?host=` for the per-machine verdict), the install verdict (GET /api/browser/install), the machines (GET
-// /api/desktop/machines) — and this file turns it into the choices the dialog draws, the ONE body it POSTs and the
+// `?host=` for the per-machine verdict), the machines (GET /api/desktop/machines) — and this file turns it into the choices the dialog draws, the ONE body it POSTs and the
 // words a refusal is said in (by the server's CODE; the server's English sentence is the agent's).
 //
 // Laws (the switch dialog's, kept): every provider is a row — one that cannot be a profile HERE is shown with its
-// reason in words, never hidden; a row that needs a step first (CloakBrowser not installed) offers that step (Install…,
-// behind the download confirm), and is chosen once it is done; a machine a provider cannot run on is shown greyed WITH
+// reason in words, never hidden; a machine a provider cannot run on is shown greyed WITH
 // the reason as text (P4's rule — never a tooltip-only "you can't"); "Who can use it" defaults to every conversation
 // (owner ruling A).
 import { backendName, blurbOf, learnBackendRows } from './browser-switcher-model.js';
@@ -26,12 +24,11 @@ const isCloud = (id) => /^cloud:[a-z0-9-]+$/.test(String(id || ''));
 
 /**
  * The provider rows, for the machine the profile will run on. `providers` = the route's rows (each `{id, label, tier,
- * leaseKind, control:{ok, code}, onHost?:{ok, code}}`); `host` = null for this machine; `install` = the CloakBrowser
- * install verdict (`{ok, code, state:{running, failed}, npm}` — null when the server has none).
+ * leaseKind, control:{ok, code}, onHost?:{ok, code}}`); `host` = null for this machine.
  * → `[{id, name, blurb, state, pickable, note, offer}]` — `note` = the sentence under the name (null when nothing needs
- * saying), `offer` = 'install' / 'install-again' / null.
+ * saying), `offer` = null (lane engine-spi-egress L3: no row installs a program of its own any more).
  */
-export function providerChoices({ providers = [], install = null, host = null, t = (s) => s } = {}) {
+export function providerChoices({ providers = [], host = null, t = (s) => s } = {}) {
   const out = [];
   learnBackendRows(providers);
   for (const r of Array.isArray(providers) ? providers : []) {
@@ -42,17 +39,11 @@ export function providerChoices({ providers = [], install = null, host = null, t
     if (r.leaseKind === 'window-target') { state = 'not-a-profile'; note = t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.')); }
     else if (v.ok === false && (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only')) { state = 'other-machine'; note = t(i18nKey('Runs only on the computer VibeSpace runs on — pick This computer to use it.')); }
     else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
-    else if (r.install && !host && install && install.code !== 'already_installed') {
-      const s = install.state || {};
-      if (s.running) { state = 'installing'; note = t(i18nKey('Installing… it can be chosen once it is done.')); }
-      else if (s.failed) { state = 'install-failed'; note = t(i18nKey("The last install of {name} didn't finish."), { name: backendName(id, t) }); offer = install.npm === false ? null : 'install-again'; }
-      else if (install.ok && install.npm !== false) { state = 'needs-install'; note = t(i18nKey('Not installed yet — install it first, then choose it.')); offer = 'install'; }
-      else { state = 'unavailable'; note = t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name: backendName(id, t) }); }
-    } else if (id === 'cdp') { state = 'needs-port'; note = t(i18nKey('Connects to a browser that is already running with a debugging port — enter its port.')); }
+    else if (id === 'cdp') { state = 'needs-port'; note = t(i18nKey('Connects to a browser that is already running with a debugging port — enter its port.')); }
     else if (isCloud(id)) { state = 'needs-key'; note = t(i18nKey('Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.')); }
     // the switch dialog's names and blurbs speak of SWITCHING ("…so it can't be switched from here"); a row here names what
     // a new profile would BE — its own head for the two that are not a browser VibeSpace starts, the blurb only where it
-    // describes the browser itself (Chromium, CloakBrowser); the note says the rest
+    // describes the browser itself (Chromium); the note says the rest
     // lane dc-browser-backends (F5): a row's own `newProfileName` (cdp, local-window) else its name; the blurb only for a
     // browser VibeSpace starts on a directory of its own (`ownsDir` — the others' blurbs speak of switching)
     const name = r.words && r.words.newProfileName ? t(r.words.newProfileName) : backendName(id, t);

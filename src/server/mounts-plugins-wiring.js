@@ -985,8 +985,8 @@ function createSessionMessages(session, sessionId) {
     let cdpMediator = null;
     try { cdpMediator = require('./cdp-mediator').create({ log: console }); } catch (e) { console.warn('[browser] cdp mediator unavailable — instance sharing stays refused: ' + (e && e.message)); }
     // lane browser-propose (a HEAVY-GATE aid, env-gated like VIBESPACE_CHANNELS_FAKE): `VIBESPACE_TEST_EGRESS_MAP="a.test=127.0.0.1,…"`
-    // points the cloak egress proxy's upstream for RESERVED `.test` hosts (RFC 2606 — never a real site) at loopback, so a
-    // throwaway server's CloakBrowser can open a local fixture page by a name; anything else in the variable is ignored
+    // points a wrapped browser's egress proxy upstream for RESERVED `.test` hosts (RFC 2606 — never a real site) at loopback, so a
+    // throwaway server's engine browser can open a local fixture page by a name; anything else in the variable is ignored
     const testEgressMap = new Map(String(process.env.VIBESPACE_TEST_EGRESS_MAP || '').split(',').map((kv) => kv.split('=').map((x) => String(x || '').trim().toLowerCase())).filter(([h, ip]) => /^[a-z0-9-]+(\.[a-z0-9-]+)*\.test$/.test(h || '') && ip === '127.0.0.1'));
     // lane browser-resume (§3.9, the owner's ruling 1): THE KEPT BROWSERS — a conversation's own browser's logins
     // directory + its tabs outlive the browser (src/server/browser-kept.js); the keeper is its one feeder, its shutdown
@@ -1353,7 +1353,7 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser] handback announcer unavailable — ' + (e && e.message)); }
     // lane browser-propose step 3 (the owner, 2026-09-30: the agent PROPOSES the switch, the user approves with one click):
     // a tier-2 claim's ONE card (in the chat, patched in place) + ONE For-you item; the user's Approve runs exactly the
-    // frozen proposal — install, the one site, the switch / a new CloakBrowser profile — and the agent is told through the
+    // frozen proposal (a site reset; a backend switch is unavailable in this version) — and the agent is told through the
     // handback's ONE ladder site, for free (never a wake)
     try {
       const N = require('../normalizers');

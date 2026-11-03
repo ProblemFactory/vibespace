@@ -165,7 +165,7 @@ const TIER3_MEASUREMENTS = Object.freeze({
       Object.freeze({ site: 'nowsecure.nl', outcome: 'no Cloudflare challenge marker (title "nowsecure.nl", 7.4 s)' }),
       Object.freeze({ site: 'browserscan.net/bot-detection', outcome: 'FLAGGED — the page\'s verdict reads "Robot" (6.2 s)' }),
     ]) }),
-    tier2: Object.freeze({ status: 'refused', refusal: 'binary_absent', why: 'cloakbrowser is not installed (CLOAK_EGRESS_PROOF) and no cloud:* key is configured — the reading is the refusal' }),
+    tier2: Object.freeze({ status: 'refused', refusal: 'binary_absent', why: 'no anti-bot browser is installed and no cloud:* key is configured — the reading is the refusal' }),
     tier3: Object.freeze({ status: 'refused', refusal: 'needs_user', why: 'the user\'s own browser window is addressed only after the D27 (b) switch; a script driving it would be the user\'s act, not a measurement' }),
     banks: Object.freeze({ status: 'refused', refusal: 'owner_act', why: 'a real login page driven by an automated browser from the owner\'s address is the owner\'s act — D31 "measure first" stands as owed, with the public demo pages above as the only tier-1 reading this round' }),
   }),
@@ -212,7 +212,7 @@ function hintAction(hint, { rowOf = () => null } = {}) {
   if (![1, 2, 3].includes(t)) return null;
   return { kind: 'suggestion', tier: t, backend: null, auto: false, by: hint.by || null,
     act: t === 3 ? 'open-window-target' : t === 2 ? 'switch-by-user' : 'none',
-    text: t === 3 ? `tier 3 = a window on the user's own desktop: the user turns on "${SETTING_LABEL}" (Settings → Desktop apps), then the agent addresses their browser window with vibespace-window — no profile is created or re-pointed, and nothing escalates by itself` : t === 2 ? 'tier 2 = a fingerprint backend (cloak / cloud:*): the user picks it in the backend switcher — nothing escalates by itself' : 'tier 1 needs no act' };
+    text: t === 3 ? `tier 3 = a window on the user's own desktop: the user turns on "${SETTING_LABEL}" (Settings → Desktop apps), then the agent addresses their browser window with vibespace-window — no profile is created or re-pointed, and nothing escalates by itself` : t === 2 ? 'tier 2 = a fingerprint backend (an engine plugin / cloud:*): the user picks it (Change build… / the backend switcher) — nothing escalates by itself' : 'tier 1 needs no act' };
 }
 
 module.exports = {

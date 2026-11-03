@@ -79,7 +79,7 @@ console.log('§1 the PURE table');
   const ids = R.rowIds();
   ok(new Set(ids).size === ids.length && ids.length >= 4, `row ids are unique (${ids.join(', ')})`);
   for (const row of R.ROWS) { const errs = R.checkRow(row); ok(!errs.length, `row ${row.id} passes its own checks`, errs.join('; ')); }
-  ok(['fake', 'lark', 'gmail', 'cloak'].every((id) => R.rowById(id)), 'the four P0b rows exist: fake, lark, gmail, cloak');
+  ok(['fake', 'lark', 'gmail'].every((id) => R.rowById(id)) && !R.rowById('cloak'), 'the P0b rows exist: fake, lark, gmail (lane engine-spi-egress L3: the anti-bot backend\'s key row left with it)');
   ok(R.TEST_KINDS.length === 3 && Object.keys(R.TEST_BUTTON_LABEL).sort().join() === [...R.TEST_KINDS].sort().join(), 'test.kind is a CLOSED set of 3 and every kind has its button wording');
   const fake = R.rowById('fake');
   ok(fake.consumers.length === 1 && fake.setup && fake.setup.callbackUrl && fake.setup.prerequisites.length >= 1 && fake.test.caveat, 'the fake row has a LIVE consumer, a setup block with a callback URL + prerequisites, and a caveat (§19 r7/r8 exits)');
@@ -90,8 +90,7 @@ console.log('§1 the PURE table');
   const gmail = R.rowById('gmail');
   ok(gmail.delegate && gmail.delegate.to === 'drive-presets' && gmail.delegate.prefer === 'channels' && gmail.delegate.multi === true && !gmail.clusterEnv, 'gmail DELEGATES to drive-presets with prefer:channels + multi and declares NO env of its own (decision 5)');
   ok(gmail.test.kind === 'shape-only' && /shape/i.test(gmail.test.caveat), 'gmail: shape-only and says so');
-  const cloak = R.rowById('cloak');
-  ok(cloak.test.kind === 'shape-only' && cloak.fields[0].key === 'licenseKey' && cloak.fields[0].secret && !cloak.fields[0].required, 'cloak: shape-only, one secret licenseKey, NOT required (empty = nothing saved, which resolves to no key)');
+  const cloak = R.rowById('cloud:browserbase'); // a pure-key browser row (the fixture the census controls below copy)
   for (const row of R.ROWS) if (!row.consumers.length) ok(!!row.wiredIn, `${row.id}: no live consumer ⇒ names the phase it is wired in (decision 25, ${row.wiredIn})`);
   // negative controls on checkRow
   const noCaveat = { ...lark, test: { ...lark.test, caveat: '' } };
@@ -104,14 +103,14 @@ console.log('§1 the PURE table');
   ok(R.checkRow(publicCb).some((e) => /loopback/.test(e)), 'CONTROL: a per-instance public callback URL is refused (decision 4/21)');
   ok(storeMod.envFieldName('lark', 'appSecret') === 'VIBESPACE_INTEGRATION_LARK_APPSECRET' && storeMod.envFieldName('cloud:kernel', 'api-key') === 'VIBESPACE_INTEGRATION_CLOUD_KERNEL_API_KEY', 'envFieldName (the STORE\'s since r3) upper-cases and maps - and : to _');
   ok(R.ROWS.filter((r) => r.clusterEnv).every((r) => storeMod.envFieldName(r.id, 'x').startsWith(r.clusterEnv.prefix)), 'every declared prefix IS what the store derives from the row id (one declaration, one derivation)');
-  ok(R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).length === 6 && R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup), 'the agent-browser track contributes six pure-key rows (cloak + five cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
-  ok(R.rowById('cloak').test.kind === 'shape-only' && R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange'), 'cloak\'s Test is shape-only (zero network), the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
+  ok(R.ROWS.filter((r) => r.id.startsWith('cloud:')).length === 5 && R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup), 'the agent-browser track contributes five pure-key rows (cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
+  ok(R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange'), 'the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
   // r4 (2.369.165, design-integrations-per-account §2.3): the ACCOUNT-BOUND rows
   ok(R.ROWS.filter((r) => r.bindsPerAccount).map((r) => r.id).join() === 'fake,lark,gmail,slack', 'bindsPerAccount = exactly fake, lark, gmail, slack (their sign-in is chosen per account — Slack\'s is a pasted token, design 012)');
   ok(R.ROWS.filter((r) => r.signin).map((r) => `${r.id}:${r.signin}`).join() === 'slack:paste' && !R.checkRow(R.rowById('slack')).length && R.checkRow({ ...R.rowById('slack'), signin: 'carrier-pigeon' }).some((e) => /signin must be one of/.test(e)) && R.checkRow({ ...R.rowById('slack'), fields: [], setup: undefined }).some((e) => /paste/.test(e)) && R.checkRow({ ...R.rowById('slack'), clusterEnv: undefined }).some((e) => /paste/.test(e)), 'design 012 / 018: the ONE paste row (slack) also declares a workspace client with its cluster env; an unknown signin kind, a field-less paste row with an env, and a client without one are refused by name');
   ok(R.ROWS.filter((r) => r.bindsPerAccount).every((r) => typeof r.clientHint === 'string' && r.clientHint.length > 20) && R.ROWS.filter((r) => !r.bindsPerAccount).every((r) => r.clientHint === undefined && r.bindsPerAccount === undefined), 'each account-bound row declares ONE clientHint; the six browser rows declare neither (untouched)');
   ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']) && R.clientFieldsOf('lark').id.label === 'App ID' && R.clientFieldsOf('gmail').secret.label === 'OAuth client secret', 'clientFieldsOf maps each row\'s custom client onto its declared fields (Lark App ID / App Secret, Google client id / secret) with the row\'s own labels');
-  ok(R.bindsPerAccount('gmail') === true && R.bindsPerAccount('cloak') === false && R.bindsPerAccount('nope') === false, 'bindsPerAccount(id) answers by the row');
+  ok(R.bindsPerAccount('gmail') === true && R.bindsPerAccount('cloud:browserbase') === false && R.bindsPerAccount('nope') === false, 'bindsPerAccount(id) answers by the row');
   // lane remoteapp-r1b (design q-024 r1 §1.3): THE PER-MACHINE ROW — a paired Windows machine's RemoteApp sign-in
   const ra = R.rowById('remoteapp');
   ok(ra && ra.bindsPerMachine === true && !ra.bindsPerAccount && !ra.clusterEnv && !ra.delegate && !ra.setup && !ra.wiredIn && ra.test.kind === 'shape-only' && ra.test.caveat && JSON.stringify(ra.consumers) === '["src/server/desktop-access.js"]' && R.bindsPerMachine('remoteapp') && !R.bindsPerMachine('cloak'), 'remoteapp: ONE record per paired machine — no cluster env (a machine\'s sign-in is nobody\'s company preset), no setup, not account-bound, shape-only with its caveat, consumed by the RemoteApp launch (desktop-access)');
@@ -136,11 +135,11 @@ console.log("§1b the window's groups");
   // the store's list() leaves it out and groupOf answers null for it BY THAT FLAG (asserted, with its control, below)
   const table = R.ROWS.filter((r) => r.bindsPerMachine !== true).map((r) => [r.id, R.groupOf(r)]);
   const perMachine = R.ROWS.filter((r) => r.bindsPerMachine === true);
-  ok(perMachine.map((r) => r.id).join() === 'remoteapp,desktop-signin' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloak'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp + desktop-signin — lane desktop-vnc-remember) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
+  ok(perMachine.map((r) => r.id).join() === 'remoteapp,desktop-signin' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloud:browserbase'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp + desktop-signin — lane desktop-vnc-remember) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
   const ids = (g) => table.filter(([, x]) => x === g).map(([id]) => id).sort().join();
   ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
   ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
-  ok(ids('browser') === R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 6, `browser = cloak + every cloud:* row (${ids('browser')})`);
+  ok(ids('browser') === R.ROWS.filter((r) => r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 5, `browser = every cloud:* row (${ids('browser')})`);
   const named = [...Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean), ...R.ROWS.filter((r) => r.consumers.includes(R.PLUGIN_INSTALL_CONSUMER)).map((r) => r.id)].sort().join();
   ok(ids('plugins') === named && /\bllm\b/.test(named) && /dropline/.test(named) && /plugin-git/.test(named), `plugins = exactly the rows a built-in plugin's settings table names + the plugin installer's credential (lane engine-distribution) (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
   ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true),
@@ -152,7 +151,7 @@ console.log("§1b the window's groups");
   const quoted = R.rowIds().filter((id) => body.includes(`'${id}'`) || body.includes(`"${id}"`));
   ok(body.length > 50 && !quoted.length, `groupOf names no row id — the group is derived (${quoted.join(', ') || 'none named'})`);
   // CONTROLS — each must be null (the census above is RED for such a row)
-  const cloak = R.rowById('cloak'), dec = R.rowById('llm');
+  const cloak = R.rowById('cloud:browserbase'), dec = R.rowById('llm');
   ok(R.groupOf({ ...cloak, id: 'brand-new', consumers: ['src/server/brand-new.js'] }) === null, 'CONTROL: a new row whose consumer is neither a channel adapter nor the browser backend and that no plugin names is null (RED)');
   ok(R.groupOf({ ...dec, id: 'llm-2' }) === null, 'CONTROL: the Language model row under an id no plugin names is null (the plugins group comes from the plugin table, not the row\'s look)');
   ok(R.groupOf({ ...cloak, consumers: ['src/server/browser-backend.js', 'src/channels/fake.js'] }) === null, 'CONTROL: a row consumed by both a channel adapter and the browser backend (two groups) is null');
@@ -189,8 +188,7 @@ console.log('§2 masking + validation');
   ok(!badId.ok && /cli_/.test(badId.errors.appId), `a bad App ID is a NAMED complaint (${badId.errors.appId})`);
   const unknown = R.validateValues('lark', { bogus: 'x' });
   ok(!unknown.ok && /not a field/.test(unknown.errors.bogus), 'an unknown field is a named error, never silently dropped');
-  ok(R.validateValues('cloak', { licenseKey: '' }).ok && R.validateValues('cloak', { licenseKey: 'cb_abcdefghij' }).ok && !R.validateValues('cloak', { licenseKey: 'nope' }).ok, 'cloak: empty ok (nothing saved), cb_… ok, other shapes named');
-  ok(R.missingFields('lark', { appId: 'cli_x' }).join() === 'appSecret' && R.missingFields('cloak', {}).length === 0, 'missingFields names the required gap and nothing for optional fields');
+  ok(R.missingFields('lark', { appId: 'cli_x' }).join() === 'appSecret' && R.missingFields('lark', { appId: 'cli_x', appSecret: 's' }).length === 0, 'missingFields names the required gap and nothing for optional fields');
 }
 
 // ═══ §3 precedence, pure ══════════════════════════════════════════════════
@@ -260,7 +258,7 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is not a card either
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 9 && cards[6] === 'dropline' && cards[7] === 'llm' && cards[8] === 'plugin-git', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the llm row + the plugin installer's Git credential (lane engine-distribution) ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[5] === 'dropline' && cards[6] === 'llm' && cards[7] === 'plugin-git', `GET /api/integrations lists the five browser key rows + the Dropline voice key row + the llm row + the plugin installer's Git credential (lane engine-distribution) ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
@@ -390,9 +388,9 @@ store.registerTest(CARD, shapeRunner);
   ok(ngWrote && fs.readFileSync(path.join(dG, 'integrations.json'), 'utf-8').includes('"lark"'), 'CONTROL: a store copy without the card guard writes a Lark card again — the 404s above are the guard, not an accident');
 
   // Test: dispatch to the consumer's runner, refusal by name, single flight
-  const notWired = await api('POST', '/api/integrations/cloak/test');
-  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `cloak's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below) (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
-  ok(store.publicView('cloak').testedAt === null, 'a refusal is not a verdict — nothing was recorded');
+  const notWired = await api('POST', '/api/integrations/cloud%3Abrowserbase/test');
+  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `a browser key row's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below) (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
+  ok(store.publicView('cloud:browserbase').testedAt === null, 'a refusal is not a verdict — nothing was recorded');
   await api('PUT', CARDP, { values: { apiKey: 'good-key-12345678', apiUrl: 'https://chrome.example.net' } });
   const t1 = await api('POST', `${CARDP}/test`);
   ok(t1.status === 200 && t1.json.ok === true && t1.json.caveat && t1.json.kind === 'credential-exchange', 'Test dispatched to the registered runner: ok, WITH the caveat and the kind');
@@ -415,17 +413,18 @@ store.registerTest(CARD, shapeRunner);
   void before;
 
   // undecryptable stored value ⇒ SAID, never mis-read as "not configured"
-  await api('PUT', '/api/integrations/cloak', { values: { licenseKey: 'cb_1234567890abcd' } });
+  await api('PUT', '/api/integrations/cloud%3Abrowserbase', { values: { apiKey: 'bb_1234567890abcd' } });
   const keyFile = path.join(dataDir, '.integrations-key');
   const keyBytes = fs.readFileSync(keyFile);
   fs.writeFileSync(keyFile, 'f'.repeat(64));
   const store2 = storeMod.create({ dataDir, env, drivePresets: () => [], log: { log() {}, warn() {}, error() {} } });
-  const v = store2.publicView('cloak');
+  const v = store2.publicView('cloud:browserbase');
   ok(v.source === 'none' && /could not be decrypted/.test(v.why), `a stored value the key cannot open is SAID (${v.why}) — the opposite sentence from "nothing configured"`);
-  ok(v.hasOwnValues === true && v.storeError && v.storeError.code === 'values-undecryptable' && v.storeError.fields.join() === 'licenseKey', 'CONTROL (no cluster default): hasOwnValues stays TRUE and the view carries the typed values-undecryptable storeError (r3)');
+  ok(v.hasOwnValues === true && v.storeError && v.storeError.code === 'values-undecryptable' && v.storeError.fields.join() === 'apiKey', 'CONTROL (no cluster default): hasOwnValues stays TRUE and the view carries the typed values-undecryptable storeError (r3)');
   fs.writeFileSync(keyFile, keyBytes);
   const store3 = storeMod.create({ dataDir, env, drivePresets: () => [], log: { log() {}, warn() {}, error() {} } });
-  ok(store3.resolveIntegration('cloak').values.licenseKey === 'cb_1234567890abcd', 'with the right key back, the value is readable again — nothing was destroyed');
+  ok(store3.resolveIntegration('cloud:browserbase').values.apiKey === 'bb_1234567890abcd', 'with the right key back, the value is readable again — nothing was destroyed');
+  await api('DELETE', '/api/integrations/cloud%3Abrowserbase'); // cleared: the rotated-key legs below judge ONE row's ciphertext
 
   // (r3) THE ROTATED KEY WITH A CLUSTER DEFAULT PRESENT — the round-2
   // verifier's MEDIUM: a user secret the current key cannot open used to fall
@@ -648,7 +647,7 @@ console.log('§4c the per-machine row (remoteapp/<hostId>) through the real stor
   const g = await get('/api/integrations/remoteapp');
   const put = await api('PUT', '/api/integrations/remoteapp', { values: { user: 'x' } });
   ok(g.status === 404 && g.json.code === 'binds-per-machine' && put.status === 404 && !g.text.includes(PW), 'the generic integrations routes answer 404 binds-per-machine (no route reads or writes it but its machine card\'s)', { g: g.status, put: put.status });
-  const refs = [() => store.machineView('remoteapp', 'local'), () => store.machineView('remoteapp', 'a b'), () => store.machineView('cloak', HOST), () => store.machineView('nope', HOST), () => store.setMachineValues('remoteapp', HOST, { user: 'a"b' }), () => store.setMachineValues('remoteapp', HOST, { color: 'x' })].map((fn) => { try { fn(); return 'answered'; } catch (e) { return e.code; } });
+  const refs = [() => store.machineView('remoteapp', 'local'), () => store.machineView('remoteapp', 'a b'), () => store.machineView('cloud:browserbase', HOST), () => store.machineView('nope', HOST), () => store.setMachineValues('remoteapp', HOST, { user: 'a"b' }), () => store.setMachineValues('remoteapp', HOST, { color: 'x' })].map((fn) => { try { fn(); return 'answered'; } catch (e) { return e.code; } });
   ok(JSON.stringify(refs) === JSON.stringify(['bad-request', 'bad-request', 'not-per-machine', 'unknown-integration', 'invalid-values', 'invalid-values']), 'this machine / a bad id / a card row / an unknown row / an invalid user / an unknown field — each refused by name', refs);
   const fp = Array.from({ length: 32 }, (_, i) => ((i * 7 + 3) % 256).toString(16).padStart(2, '0')).join(':');
   const v2 = store.setMachineValues('remoteapp', HOST, { certFp: fp });
@@ -1026,7 +1025,7 @@ if (tracked.length) {
   const registered = bb.registerTests();
   // Dropline voice input (q-029 P0): the wiring registers the `dropline` row's Test (GET /v1/me) from THE vendor module
   store.registerTest('dropline', require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store }).testRunner);
-  ok(registered.length === 6 && registered.includes('cloak') && registered.includes('cloud:agentcore'), `browser-backend registered its six rows' runners through the real store (${registered.join(', ')})`);
+  ok(registered.length === 5 && registered.includes('cloud:browserbase') && registered.includes('cloud:agentcore'), `browser-backend registered its five rows' runners through the real store (${registered.join(', ')})`);
   // lane decision-core: the decision engine's one-question Test, registered the way mounts-plugins-wiring does
   const de = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: (() => { const d = path.join(ROOT, 'decision'); fs.mkdirSync(d, { recursive: true }); return d; })(), integrations: store, log: { warn() {} } });
   store.registerTest(de.ROW_ID, de.testRunner);
@@ -1038,7 +1037,7 @@ if (tracked.length) {
   const ENGINE = /\b(judge[sd]?|judg(e)?ments?|records?|rows?|first screen|route[sd]?|routing|predicates?)\b/i;
   const dv = store.publicView('llm');
   ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'llm: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
-  ok(R.ROWS.every((r) => r.id === 'llm' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloak').choiceWords === null && store.publicView('cloak').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
+  ok(R.ROWS.every((r) => r.id === 'llm' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloud:browserbase').choiceWords === null && store.publicView('cloud:browserbase').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
   // lane plugin-settings-p0: the three switches are settings rows now (src/plugin-settings.js llm) — label + example hint
   const featRows = require(path.join(REPO, 'src/plugin-settings.js')).PLUGIN_SETTINGS['llm'].rows.filter((r) => ['attention', 'rules', 'routing'].includes(r.key));
   const feats = featRows.flatMap((r) => [r.label, Array.isArray(r.description) ? r.description[0] : r.description]);
@@ -1172,7 +1171,7 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   // the view carries a COPY (a caller mutating it never reaches the registry); a row without it says null
   const view = store.publicView('dropline');
   view.connect.whys.operator = 'x';
-  ok(JSON.stringify(Object.keys(view.connect)) === JSON.stringify(Object.keys(dl.connect)) && dl.connect.whys.operator !== 'x' && store.publicView('cloak').connect === null, 'publicView carries the connect block as a copy; a row without one says null');
+  ok(JSON.stringify(Object.keys(view.connect)) === JSON.stringify(Object.keys(dl.connect)) && dl.connect.whys.operator !== 'x' && store.publicView('cloud:browserbase').connect === null, 'publicView carries the connect block as a copy; a row without one says null');
   // RED controls — each plant is refused BY NAME
   const plant = (patch) => R.checkRow({ ...dl, ...patch(dl) });
   const has = (errs, re) => errs.some((e) => re.test(e));

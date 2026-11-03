@@ -1071,7 +1071,7 @@ function browserCliGoneText({ version, current = null } = {}) {
   const cur = typeof current === 'string' && CLI_VERSION_RE.test(current) && current !== String(version) ? ` (${current})` : '';
   return `this browser runs on ${CLI_PACKAGE} ${version}, which is no longer installed here — nothing ran (a command from another version would restart the browser and lose its tabs); it keeps its pages until it stops — restart it to use the current CLI${cur}`;
 }
-/** THE CLI INSTALL VERDICT (a user act; the keeper's ONE install slot — the cloak install's): the version is a dotted
+/** THE CLI INSTALL VERDICT (a user act; the keeper's ONE install slot): the version is a dotted
  *  triple · on this machine only · nothing running in the slot · not already installed · npm here. → `{ok, spec, version,
  *  package, record}` | `{ok:false, code, error}`. `record` = the measured numbers when it IS the table's version. */
 function cliInstallVerdict({ version = TABLE_VERSION, host = null, running = false, installed = null, npm = true } = {}) {

@@ -7,7 +7,7 @@
 // is always taken on the NAME, before the request). A spy `unzip` first on the keeper's PATH logs every call.
 //
 //   ① the lists: nothing is fetched at boot or for the facts (the poll); the channel list is read fresh per picker, every row
-//      with its verdict in structure (census relation, CloakBrowser reach, this profile's ladder); the known-good list is kept
+//      with its verdict in structure (census relation, this profile's ladder); the known-good list is kept
 //      24 h, then asked with If-Modified-Since (a 304 keeps it);
 //   ② the whole path: the slot taken (the marker names `chrome-build`), md5 vs the object's own, `unzip -Z1`/`-Zs` before `-q`,
 //      `chrome --version`, THE witness inside, ONE rename — then the build is simply one more row (listed, choosable);
@@ -133,7 +133,7 @@ console.log('— ① the lists: no fetch at boot / for the facts; the channel li
   // Canary is the row still newer than the census
   const censusWant = (v) => { const r = CC.chromeRelation(v); return { relation: r === 'between' ? 'older' : r, census: CC.CENSUS_CHROME }; };
   const ca = (c.channels || []).find((r) => r.channel === 'Canary'), want = censusWant(st.version);
-  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && ca && chip(ca, 'census').relation === 'newer' && chip(ca, 'census').census === CC.CENSUS_CHROME && chip(st, 'cloak').reach === 'none' && chip(st, 'profile').wrote === 156 && chip(st, 'cli') && st.verdict.offer === true,
+  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && ca && chip(ca, 'census').relation === 'newer' && chip(ca, 'census').census === CC.CENSUS_CHROME && !chip(st, 'cloak') && chip(st, 'profile').wrote === 156 && chip(st, 'cli') && st.verdict.offer === true,
     `Stable ${st.version}: ${want.relation} than the census (${want.census}; Canary ${ca && ca.version} newer than it), can't switch to CloakBrowser later, older than the Chrome that last opened "Old logins" (156) — chips, not refusals (offered)`, { stable: st.verdict, canary: ca && ca.verdict });
   await kk.chromeBuildsAvailable({ lists: 'channels' });
   ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 2, 'opened again: read again (fresh every time a person opens it)');
@@ -144,7 +144,7 @@ console.log('— ① the lists: no fetch at boot / for the facts; the channel li
   const v146 = await kk.chromeBuildsAvailable({ major: 146 });
   const v151 = await kk.chromeBuildsAvailable({ major: 151 });
   const v153 = await kk.chromeBuildsAvailable({ major: 153 });
-  ok(v146.versions.length === 4 && v146.versions.every((v) => chip(v, 'cloak').reach === 'both') && v151.versions.every((v) => chip(v, 'cloak').reach === 'pro') && chip(v153.versions.find((v) => v.version === '153.0.8010.47'), 'census').relation === 'censused' && kgReads().length === 1,
+  ok(v146.versions.length === 4 && [...v146.versions, ...v151.versions].every((v) => !chip(v, 'cloak')) && chip(v153.versions.find((v) => v.version === '153.0.8010.47'), 'census').relation === 'censused' && kgReads().length === 1,
     'a major expands to its versions from the KEPT list (no read): 146 can still switch to CloakBrowser Free or Pro, 151 to Pro only; 153.0.8010.47 is censused');
   clock += 25 * 3600e3;
   const o2 = await kk.chromeBuildsAvailable({ lists: 'older' });
@@ -394,25 +394,24 @@ module.exports = { create };
     const dir = path.join(ROOT, 'data-rows-' + label);
     const k1 = mkKeeper(dir, {}, KA);
     const started = k1.installAcme();
-    const cv = k1.installVerdict(), cf = k1.chromeBuildFacts().install;
+    const cf = k1.chromeBuildFacts().install;
     const e = await thr(() => k1.installChromeBuild({ version: '154.0.8099.0' }));
     k1.shutdown();
     const k2 = mkKeeper(dir, {}, KA); // a restart while the fake's step (this pid) still runs
-    const re = k2._reattached(), cv2 = k2.installVerdict();
+    const re = k2._reattached(), cf2 = k2.chromeBuildFacts().install;
     k2.shutdown();
-    return { started: !!(started && started.ok), cv: { ok: cv.ok, code: cv.code, other: cv.otherInstall || null, running: cv.state && cv.state.running }, cfOther: cf.other, refusal: e && e.code, words: e && e.message, re, cv2: { ok: cv2.ok, code: cv2.code } };
+    return { started: !!(started && started.ok), cfOther: cf.other, refusal: e && e.code, words: e && e.message, re, cf2Other: cf2.other };
   };
   const a = await leg('fake', { [SLOT]: withFake(slot0) });
-  ok(a.started && a.cv.ok === false && a.cv.code === 'install_running' && a.cv.other === 'acme' && a.cv.running === false && a.cfOther === 'acme',
-    'the fake holds THE slot: CloakBrowser\'s verdict refuses (install_running) naming the other row (otherInstall: acme, its own state not "installing"); the Chrome-build row says other: acme', a);
+  ok(a.started && a.cfOther === 'acme', 'the fake holds THE slot: the Chrome-build row says other: acme', a);
   ok(a.refusal === 'install_running' && /an install is already running \(the Acme tool\)/.test(a.words || ''), 'a Chrome download is refused in the fake row\'s own words', a);
-  ok(a.re === 'running' && a.cv2.ok === false && a.cv2.code === 'install_running', 'a restart RE-ATTACHES to the fake\'s marker (its row is registered) — the slot stays busy', a);
+  ok(a.re === 'running' && a.cf2Other === 'acme', 'a restart RE-ATTACHES to the fake\'s marker (its row is registered) — the slot stays busy', a);
   // controls: the slot / the refusal with their old kind lists restored ⇒ the fake is not known
   const oldGuard = withFake(slot0).replace('    const row = m ? rows.get(m.kind) : null;', "    const row = m && ['cli', 'cloak', 'chrome-build'].includes(m.kind) ? rows.get(m.kind) : null;");
   const oldWords = cb0.replace('(${busyWords()})', "(${installState.kind === 'chrome-build' ? 'Chrome ' + cbState.version : installState.kind === 'cli' ? 'the browser CLI' : 'CloakBrowser'})");
   ok(oldGuard !== withFake(slot0) && oldWords !== cb0, 'control: the patches (the old kind list in the re-attach, the old words ladder) apply');
   const c = await leg('old', { [SLOT]: oldGuard, [CB]: oldWords });
-  ok(c.re === null && c.cv2.ok !== false && !/the Acme tool/.test(c.words || ''), 'control: …the old lists drop the fake\'s marker at a restart (a second install admitted) and name it "CloakBrowser" — exactly what ⑩ catches', c);
+  ok(c.re === null && c.cf2Other !== 'acme' && !/the Acme tool/.test(c.words || ''), 'control: …the old lists drop the fake\'s marker at a restart (the slot free again) and misname it — exactly what ⑩ catches', c);
 }
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

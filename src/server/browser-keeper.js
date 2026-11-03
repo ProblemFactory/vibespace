@@ -160,10 +160,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // getter) the key consumer resolves through; `keys` = src/server/browser-
   // backend.js's `{keyFor, sourceOf}` (built here over `integrations` when
   // not injected); `providers` = `{row, control}` overriding the PURE table
-  // (the gate drives a world where cloak is wired over the fake binary)
+  // (a gate drives a world of its own rows)
   integrations = null, keys = null, providers = null,
-  // lane-cloak: where the egress proxies connect an ADMITTED name (identity in production; the gate maps the vendor's
-  // download host to a loopback target so an admitted CONNECT never leaves the machine)
+  // where the egress proxies connect an ADMITTED name (identity in production; a gate maps a reserved `.test` host to a
+  // loopback target so an admitted CONNECT never leaves the machine)
   egressResolve = null,
   // lane chrome-builds-download: where the build download's ONE fetch connects an ADMITTED url (identity in production; the gate
   // maps the two Chrome for Testing names to a loopback fake — the verdict is always taken on the name, before the request)
@@ -413,10 +413,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // the tier-3 row is usable only while it is true (a user act; agents cannot write settings)
   const desktopConsent = () => setting(require('../window-desktop').SETTING_KEY, false) === true;
   const control = (id, opts) => (providers && typeof providers.control === 'function' ? providers.control(id, opts) : B.providerControl(id, { desktopConsent: desktopConsent(), ...(opts || {}) }));
+  // the row LIST the dialog, the digest's choices and the hint check judge by — the same override as rowOf / control (lane
+  // engine-spi-egress L3: a table driven with a row the shipped one lacks must see it everywhere, or the seam is inconsistent)
+  const providerIds = () => (providers && typeof providers.ids === 'function' ? providers.ids() : B.providerIds());
   let keysMemo = keys || null;
   const keysOf = () => { if (!keysMemo) keysMemo = require('./browser-backend.js').create({ integrations, log }); return keysMemo; };
-  // lane-cloak: does a key row REFUSE to run without a key? The key consumer answers (browser-backend keyRequired =
-  // the PURE table: cloak no — measured —, every cloud row yes); ONE answer for the gate, the view and start()
+  // does a key row REFUSE to run without a key? The key consumer answers (browser-backend keyRequired = the PURE table:
+  // every cloud row yes); ONE answer for the gate, the view and start()
   const keyRequired = (id) => { const k = keysOf(); return typeof k.keyRequired === 'function' ? !!k.keyRequired(id) : SW.keyRequiredFor(id); };
   const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
   const uid = () => (typeof process.getuid === 'function' ? process.getuid() : null);
@@ -865,7 +868,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       ...digestExtra(),
     };
   }
-  /** `chromium 146` / `cloak 146 (free)`: the profile's backend + the major it
+  /** `chromium 146`: the profile's backend + the major it
    *  is known to write (its own record first, else the backend's last launch). */
   function chipFor(p) {
     const f = SW.backendFact(p, { seats: reg.seats, majors: reg.majors });
@@ -873,7 +876,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** The digest's `backends[id]`: the chip's fact + the switch choices (the dialog's cards, never the key/binary/version). */
   function backendFactFor(p) {
-    return { ...SW.backendFact(p, { seats: reg.seats, majors: reg.majors }), choices: SW.switchChoices({ profile: p, providerIds: B.providerIds(), rowOf, controlOf: control }) };
+    return { ...SW.backendFact(p, { seats: reg.seats, majors: reg.majors }), choices: SW.switchChoices({ profile: p, providerIds: providerIds(), rowOf, controlOf: control }) };
   }
   /** Every key row's seat reading in its three states (known-fresh / known-
    *  stale / unknown) with `used` = this instance's own count. */
@@ -984,7 +987,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** lane browser-propose (step 1): does the file for (kind, mark) carry the automation flag? Only a record LAUNCHED
    *  with it (`rec.automationFlag`, stamped at its launch from `browser.automationFlag` — the holdDialogs precedent: a
    *  different launch config relaunches Chrome, so a browser running at the update keeps its file until its next launch).
-   *  No mark (a lease's session never launches) ⇒ no. A cloak launch is never stamped (its own build, `launchEnvFor`). */
+   *  No mark (a lease's session never launches) ⇒ no. */
   function automationFlagFor(kind, mark) {
     if (!mark) return false;
     try {
@@ -1092,9 +1095,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const d = dir ? String(dir) : (ownsHere ? path.join(homeDir, '.agent-browser', B.profileDirName(id)) : null);
     if (!dir && d) { try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); } catch (e) { throw namedError('dir_unwritable', `cannot create the profile directory ${d}: ${e.message}`); } }
     const { ownsDir, ...fields } = v.value;
-    // §7.4: a seeded backend's fingerprint seed is minted ONCE, here, and
-    // carried through every later switch (never re-minted per launch)
-    if (SW.providerNeedsSeed(fields.provider) && !Number.isInteger(fields.fingerprintSeed)) fields.fingerprintSeed = SW.mintSeed(crypto.randomBytes(4).toString('hex'));
     const rec = B.newProfileRecord({ id, ...fields, dir: d, owner, legacy, now: now(), createdBy });
     if (choice.kind !== 'default') rec.browser = choice;
     if (clonedFrom) rec.clonedFrom = { ...clonedFrom }; // lane browser-profile-clone: born with where its logins came from (ONE write)
@@ -2220,7 +2220,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const closedText = (p, why) => `"${p.label}"'s browser was closed (its window or process ended) and could not be started again${why ? ' — ' + why : ''}; stop it from the Browser panel, then run the command again`;
   const leasedNow = (profileId) => holdersOn(profileId).length > 0; // BROWSE YOURSELF: the user browsing it is a holder too (a heal is for somebody)
   /** r5 LOW 5: a closure a relaunch ATTEMPT made carries `retryAt` (its close + HEAL_RETRY_MS) and the tick waits for it; a
-   *  refusal that attempted nothing (another browser holds the directory, a cloak record) carries none — the tick re-reads
+   *  refusal that attempted nothing (another browser holds the directory) carries none — the tick re-reads
    *  the lock every pass (a /proc read), so the heal follows the human's close within one tick. */
   const healGated = (rec) => !!(rec && rec.closed && Number.isFinite(rec.closed.retryAt) && now() < rec.closed.retryAt);
   // ── LANE BROWSER-DISPLAY-HOLDERS (the owner 2026-10-25, «可以»): A PERSON'S STOP IS A FACT THE KEEPER KEEPS, NEVER A CRASH ──
@@ -2456,7 +2456,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // gone from this machine ⇒ closed BY NAME (a binary of another version would replace the daemon and its identity),
       // never counted as a failed relaunch — a restart (Stop, then the next command) runs the current CLI
       { const c = cliOptOf(rec); if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
-      // a browser launched with the provider's own flags (cloak's executable + fingerprint) is never relaunched by a bare
+      // a browser launched with the provider's own flags (its own executable + arguments) is never relaunched by a bare
       // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
       // (lane dc-browser-providers: the pre-r4 record rung — no flag, the provider said — is gone with the row's `launchFlags`)
       if (rec.launchFlags === true) {
@@ -4008,30 +4008,26 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // spawns anything (a silent fallback to chromium is what D33 rejects).
     const pc = control(p.provider, { host: p.host || null });
     if (!pc.ok) throw namedError(pc.code === 'provider_unavailable' ? 'backend_unavailable' : pc.code, pc.error, { provider: p.provider, missing: (rowOf(p.provider) || {}).binary || null });
-    const intId = p.host ? null : SW.integrationIdFor(p.provider);
+    const intId = p.host ? null : SW.integrationIdFor(p.provider, rowOf); // the keeper's own table, as the gate reads it
     let key = null, vendorEnv = {};
     if (intId) {
       key = keysOf().keyFor(intId);
-      // lane-cloak: a row whose key is OPTIONAL (cloak — measured: the free build needs none) starts without one
+      // a row whose key is OPTIONAL (its key row declares keyRequired: false) starts without one
       if ((!key || key.source === 'none') && keyRequired(intId)) throw namedError('backend_no_key', `${p.provider} needs a key and none is configured for ${intId}${key && key.why ? ' (' + key.why + ')' : ''} — open ⚙ → Integrations → ${intId} and paste yours, or use the cluster default there`, { provider: p.provider, integrationId: intId, action: { openIntegration: intId, label: 'open Integrations' } });
-      vendorEnv = key && key.source !== 'none' ? SW.vendorEnvFor(p.provider, key.values) : {};
+      vendorEnv = key && key.source !== 'none' ? SW.vendorEnvFor(p.provider, key.values, rowOf) : {};
     }
     let argvPrefix = [];
-    // lane-cloak (measured on 0.38.1): cloak's executable + arguments ride agent-browser's own ENV names, carried by
-    // EVERY call of the keeper's session (`rec.launchEnv`) — as argv they rode `open` only, and the keeper's own
-    // `get cdp-url` right after it relaunched the browser without them (measured; without --no-sandbox it then died)
+    // a launch's own executable / arguments ride agent-browser's own ENV names, carried by EVERY call of the keeper's
+    // session (`rec.launchEnv`) — as argv they rode `open` only, and the keeper's own `get cdp-url` right after it
+    // relaunched the browser without them (measured on 0.38.1)
     let providerEnv = {};
     // lane dc-browser-providers: THE ROW's launch shape (src/browser-profiles.js PROVIDERS) — never the provider's id
-    const prow = B.providerRow(p.provider) || {};
+    const prow = rowOf(p.provider) || {}; // the keeper's own table (a gate's `providers` override reaches the launch too — one seam)
     // lane browser-admin 2a: a profile pinned to one Chrome build (a `buildChoice` row) — judged NOW (a build gone since it
-    // was chosen is refused by name before any record exists); its executable rides the launch view of EVERY call, as cloak's does
+    // was chosen is refused by name before any record exists); its executable rides the launch view of EVERY call
     let buildEnv = !p.host ? launchBuildOf(p) : {}; // lane engine-plugin: `let` — an engine choice is resolved inside p0 below
     if (!p.host && prow.buildChoice && buildEnv.executablePath) providerEnv = SW.launchEnvFor(p.provider, { executablePath: buildEnv.executablePath });
-    if (!p.host && prow.executable === 'installed') {
-      const exe = cloakExecutable();
-      if (!exe.ok) throw namedError('backend_unavailable', exe.error, { provider: p.provider, missing: prow.binary });
-      providerEnv = SW.launchEnvFor(p.provider, { seed: p.fingerprintSeed, executablePath: exe.path, proxy: prow.egressProxy ? await cloakEgressUrl(p.id) : '' });
-    } else if (!p.host) argvPrefix = SW.launchArgsFor(p.provider);
+    if (!p.host) argvPrefix = SW.launchArgsFor(p.provider);
     // lane browser-stderr-pipe: a local launch that starts a Chrome carries the quiet log switches — in its config (a record
     // stamped `quietLog`, quietLogFor) and in a provider's own AGENT_BROWSER_ARGS (an env list replaces the config's)
     const quietLog = !p.host && !!prow.starts && !argvPrefix.length;
@@ -4056,9 +4052,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // P4: WHERE the process is (a paired machine) / that there is no
         // process of ours at all (an external browser over CDP), the hub-side
         // forward of its loopback port, and the machine's own url + dir
-        hostId: p.host || null, external: !(B.providerRow(p.provider) || {}).starts, forward: null, remoteCdpUrl: null, dir: null,
+        hostId: p.host || null, external: !prow.starts, forward: null, remoteCdpUrl: null, dir: null,
         // lane browser-propose (step 1): a chromium launch on THIS machine stops announcing automation (stamped before the
-        // display fact reads the base file; a cloak launch carries its own build's patches — never stamped)
+        // display fact reads the base file)
         automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag,
         quietLog }; // lane browser-stderr-pipe: launched with the quiet log switches (its config carries them)
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
@@ -4067,7 +4063,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // lane profile-lock-roll (L1): the LAUNCH-HOST lineage rides every new record too (a refused start keeps the witness;
       // this machine's name is added only at the launch below)
       { const lh = launchHostsFor(prevRec, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prevRec && prevRec.host ? prevRec.host : lh[lh.length - 1]; } }
-      rec.egress = !p.host && (buildEnv.egress || (prow.egressProxy && prow.executable === 'installed')) ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port this launch view names (cloak's or an engine's)
+      rec.egress = !p.host && buildEnv.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port this launch view names (a wrapped engine's)
       reg.browsers[profileId] = rec;
       commit();
       const failed = (code, msg) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg); };
@@ -4128,7 +4124,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // lane one-browser-b1 (design q-026 §2.1 B1): THE ROAD — xpra here ⇒ the keeper spawns Chrome on a display session of
       // its own and agent-browser ATTACHES (attachStart); anything else is today's driver launch below — the why on the record
       const attachExe = buildEnv.executablePath || ATL.chromeExecutable(rtEnv);
-      const road = AT.launchRoad({ local: true, starts: !!prow.starts, ownLaunch: argvPrefix.length > 0 || prow.executable === 'installed', headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper ? ((await cliNow()) || {}).version || null : null, xpra: await displayHasXpra(), exe: attachExe });
+      const road = AT.launchRoad({ local: true, starts: !!prow.starts, ownLaunch: argvPrefix.length > 0, headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper ? ((await cliNow()) || {}).version || null : null, xpra: await displayHasXpra(), exe: attachExe });
       rec.launch = road.launch; rec.launchWhy = road.why;
       if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns, engineLaunch: buildEnv.engine ? buildEnv : null }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
       // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here (the launch's view carries the plan: HEADED and the
@@ -4150,11 +4146,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record — the witness the next pod reads
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
-      rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (cloak: its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
+      rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
       rec.browserChoice = recordedChoice(p, buildEnv); // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
-      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: lane-cloak's provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
+      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: the provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
         // verify r2 (F1): the directory may have been taken between the verdict and this launch — the holder said by name
@@ -4196,10 +4192,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.state = 'ready';
       if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: a restarted browser ⇒ live mediated connections close 1012, the SAME url reconnects
       p.lastUsedAt = now(); p.lastBackend = p.provider;
-      // §7.4 (round 8 #2): the seat TIER is read back from the FIRST REAL
-      // LAUNCH of this key — a by-product of a launch the user asked for,
-      // never a poll; nothing recognisable ⇒ the reading stays unknown
-      if (intId === 'cloak' && key) { const t = SW.tierFromLaunch(`${r.stdout || ''}\n${r.stderr || ''}`); if (t) reg.seats[intId] = { ...t, at: now(), source: key.source, clusterKey: key.clusterKey || null }; }
       // the Chromium major this backend WRITES, for the version ladder: from
       // the browser's own /json/version (never guessed); the profile records
       // the HIGHEST major that ever wrote its directory
@@ -6229,48 +6221,29 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
 
   // ── P4 second half (§7.4): the live backend switch, the agent's `blocked` claim, per-site memory ──
-  /** The CloakBrowser BROWSER this machine has: the setting first (an explicit path to a chrome file), else the
-   *  MEASURED build this keeper installed — `{ok, path}` or `{ok:false, error}` naming what is missing (never a
-   *  download: installing it is the user's act). lane-cloak (measured 2026-09-28): the `cloakbrowser` command a
-   *  package puts on PATH is the vendor's MANAGEMENT CLI (install / info / login …), not a browser, so PATH is not
-   *  asked; and the installed build counts only once the install's own check passed (its stamp names the Chromium
-   *  and the SHA-256 the §7.2.1 record describes). */
   const usableExe = (f) => { try { fs.accessSync(f, fs.constants.X_OK); return fs.statSync(f).isFile(); } catch { return false; } };
   const whichOnPath = (name) => { for (const d of String(env().PATH || process.env.PATH || '').split(':')) { if (!d) continue; const f = path.join(d, name); if (usableExe(f)) return f; } return null; };
-  function cloakExecutable() {
-    const cfg = String(setting('browser.cloak.executablePath', '') || '').trim();
-    if (cfg) return usableExe(cfg) ? { ok: true, path: cfg } : { ok: false, error: `CloakBrowser is not runnable at the configured path ${cfg} (browser.cloak.executablePath) — point it at the browser's chrome file, or clear it to use the one installed from Manage agents` };
-    const mine = installedCloakBin();
-    if (mine && usableExe(mine) && installedStamp().ok) return { ok: true, path: mine };
-    return { ok: false, error: 'CloakBrowser is not installed on this machine (browser.cloak.executablePath is empty and the measured build is not installed under data/browser-tools) — install it from Manage agents; nothing is downloaded by asking' };
-  }
-  // ── §7.2.1 THE ENFORCED BOUNDARY of a running cloak browser (lane-cloak) — lane engine-spi-egress: of ANY wrapped browser ──
+  // ── THE ENFORCED BOUNDARY of a wrapped browser (lane engine-spi-egress) ──
   // ONE allowlisting proxy PER PROFILE (verify r1 V1 of lane browser-propose: a refusal must reach the agent whose
   // browser was refused — and only it; one shared proxy could not say whose request it refused), started at a wrapped launch.
   // r2 (主开发's acceptance): its PORT rides the browser record (`rec.egress`, persisted beside the launch view that names it) —
   // a browser SURVIVES a hub restart, so the boot that adopts it re-binds THAT port before it is ready (adoptAll / bootReown →
   // egressAdopt), never another; a port another program holds ⇒ the browser is ended by identity and said by name (never left
   // behind a dead or a foreign proxy); a new proxy never takes a port a live record names; a stop / a removal frees it. WHOSE list it admits is the
-  // entry's `of`, re-read per request: CloakBrowser's = the record's RUN hosts (measured: none — the browser itself needs no
-  // site) + the sites this deployment names (`browser.cloak.egressAllowlist`), the browser getting `--proxy-server` +
-  // `<-loopback>` from browser-switch launchEnvFor (everything else the record names — the download hosts, the vendor's
-  // update / licence hosts — is refused); an ENGINE declaring `egress-allowlist` = its reserved row `plugin.<id>.egressAllowlist`
+  // entry's `of`, re-read per request: an ENGINE declaring `egress-allowlist` = its reserved row `plugin.<id>.egressAllowlist`
   // (the stored value, else its manifest's default), the arguments appended by the keeper itself (src/browser-engines.js
   // engineArgs). Loopback / link-local is never admitted (egressVerdict).
   const EgressProxy = require('./egress-proxy');
-  const CLOAK_EGRESS = Object.freeze({ cloak: true }); // CloakBrowser's own road (its backend row) — an engine's `of` names its id
-  const egressProxies = new Map(); // profile id → {px, of} — its egress proxy and whose list it admits
-  const cloakSites = () => String(setting('browser.cloak.egressAllowlist', '') || '');
-  const cloakRunList = () => B.cloakRunAllowlist(proofOf(), cloakSites());
+  const egressProxies = new Map(); // profile id → {px, of} — its egress proxy and whose list it admits (`of` names the engine)
   const engineSites = (of) => { let v; try { v = serverSetting(of.setting); } catch { v = undefined; } return typeof v === 'string' ? v : String(of.fallback || ''); };
-  const egressListOf = (of) => (of.cloak ? cloakRunList() : B.parseEgressAllowlist(engineSites(of)));
-  const egressName = (of) => (of.cloak ? 'CloakBrowser' : ENG.engineWords({ id: of.engine, label: of.label }));
-  async function egressUrlFor(profileId = null, of = CLOAK_EGRESS, { port = 0 } = {}) {
+  const egressListOf = (of) => B.parseEgressAllowlist(engineSites(of));
+  const egressName = (of) => ENG.engineWords({ id: of.engine, label: of.label });
+  async function egressUrlFor(profileId, of, { port = 0 } = {}) {
     const k0 = String(profileId || '');
     const have = egressProxies.get(k0);
     if (have && have.px.port() && (!port || have.px.port() === port)) { have.of = of; return have.px.url(); }
     const ent = { px: null, of };
-    const w = egressName(of), extra = of.cloak ? { provider: 'cloak' } : { engine: of.engine };
+    const w = egressName(of), extra = { engine: of.engine };
     // r2: `port` = the one a surviving browser's launch view names (adoption) — that port or a refusal, never another; a NEW proxy
     // (port 0) never keeps a port another live record names (that browser's proxy is re-bound on it at its adoption)
     const named = new Set(Object.values(reg.browsers).filter((r) => r && r.egress && Number.isInteger(r.egress.port) && String(r.profileId) !== k0 && B.isLiveBrowser(r)).map((r) => r.egress.port));
@@ -6290,19 +6263,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
     if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
     egressProxies.set(k0, ent);
-    if (of.cloak) log.log?.(`[browser] cloak egress proxy for ${k0 || '?'} on ${px.url()} — admits: ${cloakRunList().join(', ') || 'nothing (no sites named in browser.cloak.egressAllowlist)'}`);
-    else log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`}`);
+    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`}`);
     return px.url();
   }
-  const cloakEgressUrl = (profileId = null) => egressUrlFor(profileId, CLOAK_EGRESS);
   /** r2: what a launch RECORDS of its proxy (`rec.egress`, persisted with the record): the port its launch view names + whose list
-   *  (CloakBrowser's, or an engine's reserved row) — what the boot needs to re-bind it. null = this profile has none. */
+   *  (an engine's reserved row) — what the boot needs to re-bind it. null = this profile has none. */
   function egressRecordOf(profileId) {
     const e = egressProxies.get(String(profileId || ''));
     if (!e || !e.px.port()) return null;
-    return e.of.cloak ? { port: e.px.port(), cloak: true } : { port: e.px.port(), engine: String(e.of.engine || ''), label: String(e.of.label || ''), setting: String(e.of.setting || ''), fallback: String(e.of.fallback == null ? '' : e.of.fallback) };
+    return { port: e.px.port(), engine: String(e.of.engine || ''), label: String(e.of.label || ''), setting: String(e.of.setting || ''), fallback: String(e.of.fallback == null ? '' : e.of.fallback) };
   }
-  const egressOfRecord = (e) => (e.cloak ? CLOAK_EGRESS : { engine: String(e.engine || ''), label: String(e.label || ''), setting: String(e.setting || ''), fallback: String(e.fallback || '') });
+  const egressOfRecord = (e) => ({ engine: String(e.engine || ''), label: String(e.label || ''), setting: String(e.setting || ''), fallback: String(e.fallback || '') });
   /** r2: THE ADOPTION of a wrapped browser — its proxy listening again on the port its record names (the list read live as before,
    *  its refusals this profile's) → `{ok:true}` | `{ok:false, port, error}` (the port is another program's: never rebound elsewhere). */
   async function egressAdopt(rec) {
@@ -6323,19 +6294,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** A record removed ⇒ its proxy closed (removeProfile). */
   function dropEgress(profileId) { const k0 = String(profileId || ''), e = egressProxies.get(k0); if (!e) return; egressProxies.delete(k0); e.px.close().catch(() => {}); }
-  /** What a wrapped browser may reach right now and what was refused (the dialog / the proof read it; no secrets) — one
-   *  profile's proxy when named, else every CloakBrowser one (the url of the most recently started one). */
+  /** What ONE profile's wrapped browser may reach right now and what was refused (no secrets): its proxy's url, the list it
+   *  admits, the sites its row names, the counts and the last refusals; nothing for a profile with no proxy. */
   function egressFor(profileId = null) {
-    const ents = profileId != null ? [egressProxies.get(String(profileId))].filter(Boolean) : [...egressProxies.values()].filter((x) => x.of.cloak);
-    const of = ents.length ? ents[0].of : CLOAK_EGRESS;
-    const live = ents.map((x) => x.px).filter((px) => px.port());
-    const stats = live.length ? live.reduce((a, px) => ({ allowed: a.allowed + px.stats.allowed, refused: a.refused + px.stats.refused, errors: a.errors + px.stats.errors }), { allowed: 0, refused: 0, errors: 0 }) : null;
-    const recent = live.flatMap((px) => px.recent()).sort((a, b) => a.at - b.at).slice(-20);
-    return { url: live.length ? live[live.length - 1].url() : null, allowlist: egressListOf(of), sites: B.parseEgressAllowlist(of.cloak ? cloakSites() : engineSites(of)), stats, recent, ...(of.cloak ? {} : { engine: of.engine }) };
+    const e = profileId != null ? egressProxies.get(String(profileId)) || null : null;
+    const of = e ? e.of : null;
+    const px = e && e.px.port() ? e.px : null;
+    return { url: px ? px.url() : null, allowlist: of ? egressListOf(of) : [], sites: of ? B.parseEgressAllowlist(engineSites(of)) : [], stats: px ? { allowed: px.stats.allowed, refused: px.stats.refused, errors: px.stats.errors } : null, recent: px ? px.recent().slice(-20) : [], ...(of ? { engine: of.engine } : {}) };
   }
-  /** lane engine-spi-egress: the ENGINE a profile's proxy wraps (`{id, label}`; null for CloakBrowser's / none) — the verb answer
-   *  names its site list by it. */
-  function egressEngineOf(profileId) { const e = egressProxies.get(String(profileId || '')); return e && !e.of.cloak ? { id: e.of.engine, label: e.of.label || '' } : null; }
+  /** lane engine-spi-egress: the ENGINE a profile's proxy wraps (`{id, label}`; null = none) — the verb answer names its site
+   *  list by it. */
+  function egressEngineOf(profileId) { const e = egressProxies.get(String(profileId || '')); return e ? { id: e.of.engine, label: e.of.label || '' } : null; }
   /** verify r1 V1: the hosts THIS profile's wrapped browser was refused at or after `since` (a verb's start) — by name,
    *  deduplicated, bounded; what the agent's verb answer carries so it can ask for exactly those sites. */
   function egressRefusals(profileId, since = 0) {
@@ -6347,19 +6316,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return out.slice(0, 8);
   }
   const installDir = path.join(dataDir, 'browser-tools');
-  const proofOf = () => (providers && providers.proof) || B.CLOAK_EGRESS_PROOF;
   const hereTag = () => SW.platformTag(process.platform, process.arch);
-  // ── §7.4 failure form (1): THE INSTALL SLOT — one install at a time (CloakBrowser's, the browser CLI's, a Chrome build's) ──
+  // ── §7.4 failure form (1): THE INSTALL SLOT — one install at a time (the browser CLI's, a Chrome build's) ──
   // rv-browser F7 (lane dc-browser-installs): the slot is src/server/browser-installs.js and each installable is a row its
-  // own file declares (browser-cloak-install.js, browser-cli-install.js, browser-builds-keeper.js — one INSTALLERS line
+  // own file declares (browser-cli-install.js, browser-builds-keeper.js — one INSTALLERS line
   // each); this keeper hands them what they read (its later consts and its reassigned lets at call time) and names no kind.
-  const installs = BI.create({ dataDir, installDir, installTimeoutMs, cloakExecutable, egressResolve, env, hereTag, log, namedError, notify, now, proofOf, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
+  const installs = BI.create({ dataDir, installDir, installTimeoutMs, egressResolve, env, hereTag, log, namedError, notify, now, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
     get cliPrefix() { return cliPrefix; }, get cliWitnessOf() { return cliWitnessOf; }, get isMusl() { return isMusl; }, get inputsView() { return inputsView; },
     get reg() { return reg; }, get dirty() { return dirty; }, set dirty(v) { dirty = v; }, get inFlightReader() { return inFlightReader; },
     get cliGen() { return cliGen; }, set cliGen(v) { cliGen = v; }, get cliMemo() { return cliMemo; }, set cliMemo(v) { cliMemo = v; } });
-  const { installVerdict, installedCloakBin, installedStamp, fallBackFromChange, announceRelaunch } = installs.api; // what this keeper still asks (the switch, rung 3, the heal)
+  const { fallBackFromChange, announceRelaunch } = installs.api; // what this keeper still asks (the switch, rung 3, the heal)
   // ── lane browser-admin 2b: THE BROWSER CLI VERSION VIBESPACE DRIVES (`browser.cli`: path | pinned | x.y.z) ──
-  // Installed with THE install slot above (one install at a time, cloak's or this one): `npm install --prefix
+  // Installed with THE install slot above (one install at a time): `npm install --prefix
   // <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts agent-browser@<v>` — the registry only (the package's
   // postinstall, which fetches a binary from GitHub when the tarball lacks one, never runs). The npm child is DETACHED and
   // named in a marker file, so a server restart RE-ATTACHES to it (never a second install) and verifies its result. The pin
@@ -6558,20 +6526,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const p = profile(profileId);
     if (!p) throw namedError('not-found', `no profile ${profileId}`);
     const dirMajor = readDirMajor(p.dir);
-    const install = installVerdict({ host: p.host || null });
     const leases = reg.leases.filter((l) => l.profileId === p.id);
     // the rebuilt dialog: the rows carry their STATE — so the gate sees the real leases + who drives (a driven profile
-    // is `in-use-by-hand`), the cloak executable re-shaped (null for every row the user installs nothing for) and the install facts
-    const binaryOf = (id) => {
-      const r = B.providerRow(id);
-      if (!r || r.executable !== 'installed' || p.host) return null;
-      const exe = cloakExecutable();
-      return { needed: r.binary, present: !!exe.ok, configured: String(setting(r.exeSetting, '') || '').trim() !== '' };
-    };
-    // lane-cloak: `sitesOf` = what a cloak browser may open behind the egress proxy (the ready card says when it is none)
-    const rows = SW.switcherRows({ profile: p, providerIds: B.providerIds(), rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => keysOf().sourceOf(id), seats: reg.seats, majors: reg.majors, dirMajor, now: now(), runningOf, leases, inputs: inputsView({ withHumans: !forAgent }), binaryOf, install, keyRequiredOf: keyRequired, sitesOf: (id) => ((B.providerRow(id) || {}).egressProxy && !p.host ? cloakRunList() : null), humans: forAgent ? [] : humanRowsOn(p.id) });
+    // is `in-use-by-hand`)
+    const rows = SW.switcherRows({ profile: p, providerIds: providerIds(), rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => keysOf().sourceOf(id), seats: reg.seats, majors: reg.majors, dirMajor, now: now(), runningOf, leases, inputs: inputsView({ withHumans: !forAgent }), keyRequiredOf: keyRequired, humans: forAgent ? [] : humanRowsOn(p.id) });
     const rec1 = reg.browsers[p.id] || null; // lane browser-admin 2a: the Chrome build line (chromium only) — the choice + the build its browser reports
-    return { build: (B.providerRow(p.provider) || {}).buildChoice ? { choice: forAgent ? BB.agentChoiceView(p.browser) : BB.choiceView(p.browser), running: rec1 ? BB.runningBuildOf(rec1.cdpBrowser) : null, missing: p.buildMissing ? (forAgent ? BB.agentMissingView(p.buildMissing) : { ...p.buildMissing }) : null, live: B.isLiveBrowser(rec1) } : null, /* verify r1 (F5): an agent's view names a chrome file by kind only */ profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } }, install };
+    return { build: (B.providerRow(p.provider) || {}).buildChoice ? { choice: forAgent ? BB.agentChoiceView(p.browser) : BB.choiceView(p.browser), running: rec1 ? BB.runningBuildOf(rec1.cdpBrowser) : null, missing: p.buildMissing ? (forAgent ? BB.agentMissingView(p.buildMissing) : { ...p.buildMissing }) : null, live: B.isLiveBrowser(rec1) } : null, /* verify r1 (F5): an agent's view names a chrome file by kind only */ profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } } };
   }
   /**
    * THE SWITCH (§7.4's sequence, the gate first and nothing moving until it
@@ -6610,7 +6570,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const from = v.from, to = v.to;
     if (v.mode === 'proposal') {
       log.log?.(`[browser] ${p.id} "${p.label}": switch ${from} → ${to} proposed by ${by.kind}${browserKey ? ' ' + browserKey : ''} (${v.reason})`);
-      return { ok: true, mode: 'proposal', from, to, reason: v.reason, affected: v.affected, fingerprint: v.fingerprint, seats: v.seats, text: `switch "${p.label}" from ${from} to ${to}`, detail: `${v.reason}. Sessions affected: ${v.affected.join(', ') || 'none'}.${v.fingerprint ? ' ' + v.fingerprint : ''}` };
+      return { ok: true, mode: 'proposal', from, to, reason: v.reason, affected: v.affected, seats: v.seats, text: `switch "${p.label}" from ${from} to ${to}`, detail: `${v.reason}. Sessions affected: ${v.affected.join(', ') || 'none'}.${v.fingerprint ? ' ' + v.fingerprint : ''}` };
     }
     switching.add(p.id);
     const reopened = [];
@@ -6619,7 +6579,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const wasLive = B.isLiveBrowser(rec0);
       if (wasLive) await stop(p.id, { why: 'switch' });
       p.provider = to;
-      if (Number.isInteger(v.seed)) p.fingerprintSeed = v.seed;
       if (makeDefault) p.defaultBackend = to;
       p.lastSwitchAt = now();
       commit();
@@ -6631,7 +6590,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // arrived with the profile stranded on a backend that cannot start. Put it back, try the old one ONCE, and
         // answer the original refusal with the facts: restored (did the old backend come back), from, to.
         p.provider = from;
-        if (v.seedMinted) p.fingerprintSeed = null;
         commit();
         // `restored` = the profile is as it was: back on `from`, and its browser running again when it ran before the
         // switch (a browser that was not running is not started by a rollback — nobody asked for it)
@@ -6647,8 +6605,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       reopened.push(...await reopenLeaseTabs(p, leases));
       if (v.ladder && Number.isInteger(v.ladder.recordMajor)) p.lastChromiumMajor = Math.max(Number(p.lastChromiumMajor) || 0, v.ladder.recordMajor);
       commit();
-      log.log?.(`[browser] ${p.id} "${p.label}" switched ${from} → ${to} by ${by.kind}${browserKey ? ' ' + browserKey : ''}: ${reopened.length} lease tab(s) re-opened${v.seedMinted ? ', seed minted' : ''}${v.ladder && v.ladder.disagreement ? ', version stamps disagreed (' + v.ladder.disagreement.recorded + ' vs ' + v.ladder.disagreement.dir + ', took ' + v.ladder.disagreement.taken + ')' : ''}`);
-      return { ok: true, mode: 'switch', from, to, seed: p.fingerprintSeed, seedMinted: v.seedMinted, fingerprint: v.fingerprint, ladder: v.ladder, seats: v.seats, reopened, browser, chip: chipFor(p), profile: B.publicProfileView(p) };
+      log.log?.(`[browser] ${p.id} "${p.label}" switched ${from} → ${to} by ${by.kind}${browserKey ? ' ' + browserKey : ''}: ${reopened.length} lease tab(s) re-opened${v.ladder && v.ladder.disagreement ? ', version stamps disagreed (' + v.ladder.disagreement.recorded + ' vs ' + v.ladder.disagreement.dir + ', took ' + v.ladder.disagreement.taken + ')' : ''}`);
+      return { ok: true, mode: 'switch', from, to, ladder: v.ladder, seats: v.seats, reopened, browser, chip: chipFor(p), profile: B.publicProfileView(p) };
     } finally { switching.delete(p.id); commit(); }
   }
   /** §7.4 step 4, shared by the backend switch and Change build… (lane browser-admin 2a): every lease's tab re-opened in
@@ -6666,7 +6624,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // never the directory (a second Chrome on it dies on SingletonLock); a mediated lease's tab is admitted below
         const o = await leaseCliOpts(p.id, l.browserKey);
         if (!o) throw new Error(noCdpError(p));
-        // lane-cloak (the first switch on the REAL binaries, 2026-09-28): the lease's session is PINNED to its tab in the
+        // (the first switch on the REAL binaries, 2026-09-28): the lease's session is PINNED to its tab in the
         // browser that was just stopped — 0.38.1's pin is sticky per session, so `--pin-tab open <url>` answered
         // `tab_gone` ("bound tab is gone … Run `tab new <url>`") and every later verb of the lease did too; `tab new` is
         // the binary's own recovery: it opens the tab in the NEW browser and binds the session to it
@@ -6711,17 +6669,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     let proposal = null;
     if (cv === 'new') {
-      // the cloak ROW first (a build whose §7.2.1 record is not a measurement leaves it unwired — nothing to install or switch to)
-      const cc = control('cloak', { host: null });
-      const install = cc && cc.ok ? SW.proposalInstall({ exeOk: !!cloakExecutable().ok, verdict: installVerdict(), npm: whichOnPath('npm') !== null }) : { install: 'unavailable', installWhy: 'provider_unavailable', installError: String((cc && cc.error) || 'CloakBrowser is not wired on this instance').slice(0, 300) };
+      // lane engine-spi-egress L3 (D1): no plan kind targets a browser in this version — the plan says why nothing is offered
       const target = proposalTargetFor(profileId, browserKey);
-      // verify r1 V1: a CloakBrowser browser whose list lacks the host (or a host its sign-in page loads from) asks for the site
-      const dep = SW.signinDependenciesOf(v.value.host);
-      const listNow = cloakRunList().join(',');
-      const siteListed = [v.value.host, ...(dep ? dep.also : [])].every((h) => SW.siteAdmitted(listNow, h));
-      const siteAdmissible = B.egressVerdict(v.value.host, [v.value.host]).allow === true; // verify r1: never a loopback / link-local site
-      const plan = SW.proposalPlan({ remote: !!remote || (browserKey ? isRemoteKey(browserKey) : false), target, install, cloakMajor: SW.chromiumMajorFor('cloak', { tier: reg.seats.cloak ? reg.seats.cloak.tier : null, majors: reg.majors }), sessionName, labelTaken: (l) => { const f = profileByRef(l); return !!f; }, siteListed, siteAdmissible });
-      proposal = SW.proposalFor({ claim: v.value, plan, install, at: now() });
+      const plan = SW.proposalPlan({ remote: !!remote || (browserKey ? isRemoteKey(browserKey) : false), target });
+      proposal = SW.proposalFor({ claim: v.value, plan, at: now() });
     }
     const entry = proposal ? { ...v.value, proposal } : v.value;
     // a claim-only claim (tier 1 / 3) replaces the conversation's previous claim on the host (the pre-lane rule); an entry
@@ -6732,7 +6683,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     reg.blocked = kept.keep;
     commit();
     for (const d of kept.dropped) if (d.proposal && SW.blockedRank(d) >= 2) { log.warn?.(`[browser] the claim store is full — proposal ${d.id} (${d.proposal.state}, ${d.host}) was dropped to make room`); emitProposal({ ...d, dropped: true }); }
-    log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host}${why ? ' (' + why + ')' : ''}, suggests tier ${v.value.tier}${proposal ? ` — proposal ${entry.id}: ${proposal.plan.kind}${proposal.plan.why ? ' (' + proposal.plan.why + ')' : ''}, install ${proposal.install}` : ''}`);
+    log.log?.(`[browser] ${browserKey || '?'} claims blocked on ${v.value.host}${why ? ' (' + why + ')' : ''}, suggests tier ${v.value.tier}${proposal ? ` — proposal ${entry.id}: ${proposal.plan.kind}${proposal.plan.why ? ' (' + proposal.plan.why + ')' : ''}` : ''}`);
     if (proposal) emitProposal(entry);
     return { claim: v.value, text: SW.blockedText(v.value), hint: SW.siteHintFor(reg.siteHints, v.value.host), ...(proposal ? { proposal: { ...proposal } } : {}) };
   }
@@ -6942,7 +6893,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  who made it; `tier` is legal only while `backend` is null. */
   function addSiteHint(h = {}) {
     ensureLoaded();
-    const v = SW.siteHintVerdict({ ...h, at: now(), providerIds: B.providerIds() });
+    const v = SW.siteHintVerdict({ ...h, at: now(), providerIds: providerIds() });
     if (!v.ok) throw namedError(v.code, v.error);
     reg.siteHints = [...reg.siteHints.filter((x) => x.host !== v.value.host), v.value];
     commit();
@@ -7197,7 +7148,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -7587,11 +7538,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4 (§7.3): the paired-machine question the routes ask before a create is judged
     hostKnown: knownHost, isLocalRec, probeCdp, desktopConsent,
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
-    switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, cloakExecutable, readDirMajor, keys: () => keysOf(),
+    switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
     proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
-    installDir, retiredInstall: () => installs.slot.retiredAtBoot(), cloakEgress: egressFor, cloakRefusals: egressRefusals, egressEngineOf, // lane engine-spi-egress: the two names read every wrapped browser's proxy (CloakBrowser's and an engine's); installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
+    installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
     onLease, addDigest, updateProfile,
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)

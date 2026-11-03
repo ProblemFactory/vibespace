@@ -808,8 +808,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   /** settings-prune verify r1: a boot migration may rewrite data/settings.json AFTER something read it into the cache —
    *  server.js drops the cache once they ran, so GET (and the next save) start from what the file now holds. */
   router.reloadSettings = () => { _settingsCache = null; };
-  /** lane browser-propose: a SERVER act that writes a setting the user approved (the proposal's site on the CloakBrowser
-   *  list) — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
+  /** lane browser-propose: a SERVER act that writes a setting the user approved — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
     const merged = { ...readSettings(), ...patch };

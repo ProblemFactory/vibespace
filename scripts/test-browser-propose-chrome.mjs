@@ -1,33 +1,27 @@
 #!/usr/bin/env node
-// test-browser-propose-chrome — A REFUSED SIGN-IN BECOMES ONE PROPOSAL WITH ONE APPROVE, on a real page (lane
-// browser-propose; the owner, 2026-09-30: the agent PROPOSES the switch, the user only presses Approve; D31 stands).
+// test-browser-propose-chrome — A REFUSED SIGN-IN BECOMES ONE PROPOSAL, on a real page (lane browser-propose; the owner,
+// 2026-09-30: the agent PROPOSES, the user decides; D31 stands). lane engine-spi-egress L3 (主开发's D1 / D5): the
+// anti-bot backend left the core with every plan that switched a browser — the proposal now offers nothing, and its card
+// says the one sentence that is true with or without a browser plugin.
 //
 // A THROWAWAY server in a git worktree (own data/, a scratch HOME whose ~/.agent-browser/browsers links the real
-// browsers dir, VIBESPACE_TEST_EGRESS_MAP — the reserved `.test` fixture host mapped to loopback for the cloak egress
-// proxy) + headless chrome over raw CDP. A stub `claude` runs behind the REAL chat-wrapper through the REAL create path;
-// on the user's turn it runs the SHIPPED data/bin/vibespace-browser: `open` of a LOCAL fixture page that reads like
+// browsers dir) + headless chrome over raw CDP. A stub `claude` runs behind the REAL chat-wrapper through the REAL create
+// path; on the user's turn it runs the SHIPPED data/bin/vibespace-browser: `open` of a LOCAL fixture page that reads like
 // Google's refusal (its title + its /signin/rejected path — never the real site: the host is `signin.test`, mapped to
 // 127.0.0.1 by the chromium config's host-resolver-rules), then `blocked --tier 2`.
 //   ① the agent's own chromium browser opened the page with the AUTOMATION FLAG (step 1, production shape): the page's
 //      beacon reads navigator.webdriver = false
-//   ② ONE proposal card appears AT THE CLAIM'S POSITION (after the agent's Bash card, before its closing words) saying
-//      what Approve runs (the download, a new CloakBrowser profile, ONLY signin.test added); ONE For-you item
-//   ③ the phone (390 px): the card fits — nothing wider than the screen, every word wraps, Approve / Reject ≥ 44 px
-//   ④ an agent's bearer on Approve ⇒ 403 agent_forbidden, nothing moved
-//   ⑤ a REAL click on Approve ⇒ the product's own install over the measured CloakBrowser build (package + its cache
-//      linked in: nothing downloaded), ONLY signin.test on the site list, a NEW CloakBrowser profile the conversation is
-//      pinned to, the CloakBrowser Chrome launched on it under the egress proxy, the page REOPENED there (its beacon
-//      arrives from the CloakBrowser build, through the proxy), the card says done in place, the For-you item answered
-//   ⑥ the agent is TOLD: its next prompt-context injection carries "Approved: your browser is now CloakBrowser …
-//      re-run the sign-in at <url>" and the chat draws that card
-// SKIPs by name: no chrome / dtach (everything); no real agent-browser (① and the cloak legs); no measured CloakBrowser
-// build (VIBESPACE_TEST_CLOAK_PREFIX + VIBESPACE_TEST_CLOAK_CACHE, the test-browser-share ⑧ pair — ⑤⑥ then run the
-// REJECT path instead: nothing is ever downloaded). VS_SHOT_DIR=<dir> keeps the screenshots. ~90 s.
+//   ② ONE proposal card appears AT THE CLAIM'S POSITION (after the agent's Bash card, before its closing words): the
+//      claim, then D5's sentence — no plan, no Approve, no Reject; ONE For-you NOTICE carrying the same words
+//   ③ the phone (390 px): the card fits — nothing wider than the screen, its sentence wraps
+//   ④ an agent's bearer on Approve ⇒ 403 agent_forbidden; the user's Approve ⇒ 409 proposal_unavailable; nothing moved
+//   ⑤ a reload draws the same card from the keeper's record (unavailable, still no buttons); the For-you popup row shows
+//      the sentence and offers no Approve
+// SKIPs by name: no chrome / dtach (everything); no real agent-browser (①). VS_SHOT_DIR=<dir> keeps the screenshots. ~40 s.
 import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -36,8 +30,6 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (nev
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
 const SW = require('../src/browser-switch.js');
-const B = require('../src/browser-profiles.js');
-
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
@@ -50,19 +42,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── what this machine has ──
 const isShim = (p) => { try { return /vibespace-browser/.test(fs.readFileSync(p, 'utf8').slice(0, 4096)); } catch { return false; } };
 const realAb = V.resolveRealBinary({ PATH: process.env.PATH || '', exists: (p) => fs.existsSync(p), isShim });
-const P = B.CLOAK_EGRESS_PROOF;
-const CP = process.env.VIBESPACE_TEST_CLOAK_PREFIX || '', CC = process.env.VIBESPACE_TEST_CLOAK_CACHE || '';
-let cloakWhy = null;
-if (!realAb.ok) cloakWhy = 'the real agent-browser is not on PATH (only the VibeSpace shim, or nothing)';
-else if (!CP || !CC) cloakWhy = 'VIBESPACE_TEST_CLOAK_PREFIX / VIBESPACE_TEST_CLOAK_CACHE are not set (no measured CloakBrowser build named for this run)';
-else {
-  let pkgV = null; try { pkgV = JSON.parse(fs.readFileSync(path.join(CP, 'node_modules', 'cloakbrowser', 'package.json'), 'utf8')).version; } catch { pkgV = null; }
-  const cbin = SW.cloakBinaryPath({ cacheDir: CC, chromium: P.chromium, platform: P.platform });
-  if (pkgV !== P.version) cloakWhy = `the prefix holds cloakbrowser ${pkgV}, the record describes ${P.version}`;
-  else if (!cbin || !fs.existsSync(cbin)) cloakWhy = `no CloakBrowser at ${cbin}`;
-  else { const h = crypto.createHash('sha256').update(fs.readFileSync(cbin)).digest('hex'); if (h !== P.binary.sha256) cloakWhy = `the browser's SHA-256 ${h.slice(0, 12)}… is not the record's`; }
-}
-console.log(`machine: agent-browser ${realAb.ok ? realAb.path : 'absent'} · CloakBrowser ${cloakWhy ? 'unavailable — ' + cloakWhy : P.version + ' / Chromium ' + P.chromium}`);
+console.log(`machine: agent-browser ${realAb.ok ? realAb.path : 'absent'}`);
 
 // ── scratch roots ──
 const [PORT, CDP_PORT, PAGE_PORT] = await freePorts(3);
@@ -101,14 +81,6 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'browser.cloak.egressAllowlist': '' }));
-if (!cloakWhy) {
-  // the measured build, LINKED in (the product's own install then finds the pinned package + its cache: nothing is downloaded)
-  const TOOLS = path.join(wt, 'data', 'browser-tools');
-  fs.mkdirSync(path.join(TOOLS, 'node_modules'), { recursive: true, mode: 0o700 });
-  fs.symlinkSync(path.join(CP, 'node_modules', 'cloakbrowser'), path.join(TOOLS, 'node_modules', 'cloakbrowser'));
-  fs.symlinkSync(CC, path.join(TOOLS, 'cloak-cache'));
-}
 const CLI = path.join(wt, 'data', 'bin', 'vibespace-browser');
 // the shipped CLI reads the ACCOUNT's home off its passwd entry — the scratch HOME stands in for it through a preload
 const PW = path.join(stubDir, 'passwd.cjs');
@@ -158,7 +130,7 @@ process.stdin.on('data', (d) => {
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m || m.type !== 'user') continue;
     if (/sign in to the portal/.test(JSON.stringify(m.message || ''))) chain = chain.then(() => toolTurn(1, 'sign in to the portal', ${JSON.stringify(CMD)},
-      [['open', ${JSON.stringify(REJECTED)}], ['blocked', '--url', ${JSON.stringify(SIGNIN)}, '--why', 'sign-in-refused', '--evidence', 'the page says: This browser or app may not be secure', '--tier', '2']], 'The site refused this browser. A card in the chat waits for your Approve to switch it to CloakBrowser.'));
+      [['open', ${JSON.stringify(REJECTED)}], ['blocked', '--url', ${JSON.stringify(SIGNIN)}, '--why', 'sign-in-refused', '--evidence', 'the page says: This browser or app may not be secure', '--tier', '2']], 'The site refused this browser — I told you on the card in the chat.'));
   }
 });
 process.stdin.on('end', () => process.exit(0));
@@ -166,7 +138,7 @@ process.stdin.on('end', () => process.exit(0));
 
 let srv = null;
 const LOG = path.join(stubDir, 'server.log');
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_TEST_EGRESS_MAP: `${HOST}=127.0.0.1` }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 startServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -260,180 +232,57 @@ try {
   // ── ① + ② the turn: open the refusal page, file the claim ──
   console.log('① ② the agent opens a page that reads like a sign-in refusal and files `blocked --tier 2` ⇒ ONE card at the claim\'s position');
   await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'sign in to the portal' }); true`);
-  const gotCard = await waitFor(`!!document.querySelector('${CARD}') && [...document.querySelectorAll('.chat-msg')].some((m) => /A card in the chat waits for your Approve/.test(m.textContent))`, 90000);
+  const gotCard = await waitFor(`!!document.querySelector('${CARD}') && [...document.querySelectorAll('.chat-msg')].some((m) => /I told you on the card in the chat/.test(m.textContent))`, 90000);
   const turns = () => (fs.existsSync(path.join(stubDir, 'turns.log')) ? fs.readFileSync(path.join(stubDir, 'turns.log'), 'utf8').slice(0, 3000) : null);
-  check('the turn ran: the CLI opened the page and filed the claim', gotCard && /proposal bl-[0-9a-f]{8}: open/.test(turns() || ''), turns());
+  check('the turn ran: the CLI opened the page and filed the claim (its proposal offers nothing)', gotCard && /proposal bl-[0-9a-f]{8}: nothing can be offered here/.test(turns() || ''), turns());
   if (realAb.ok) {
     const b0 = hits.find((h) => h.path === '/beacon' && h.host.startsWith(HOST));
     check('① the agent\'s own chromium browser reached the fixture page by its name (host-resolver-rules) and its script read navigator.webdriver = false — the AUTOMATION FLAG, in the production shape (rung D\'s spawn config)', !!b0 && b0.wd === 'false', hits.slice(0, 6));
   } else skip('① the automation flag on a real browser: ' + realAb.error);
   const c0 = await cardState();
-  const order = await evalJs(`(() => { const all = [...document.querySelectorAll('.chat-msg')]; const card = all.findIndex((m) => m.matches('${CARD}')); const bash = all.findIndex((m) => m.matches('[data-tool-id="toolu_bp1"]') || !!m.querySelector('[data-tool-id="toolu_bp1"]')); const words = all.findIndex((m) => /A card in the chat waits for your Approve/.test(m.textContent) && !m.matches('${CARD}')); return { card, bash, words, n: all.length }; })()`);
+  const order = await evalJs(`(() => { const all = [...document.querySelectorAll('.chat-msg')]; const card = all.findIndex((m) => m.matches('${CARD}')); const bash = all.findIndex((m) => m.matches('[data-tool-id="toolu_bp1"]') || !!m.querySelector('[data-tool-id="toolu_bp1"]')); const words = all.findIndex((m) => /I told you on the card in the chat/.test(m.textContent) && !m.matches('${CARD}')); return { card, bash, words, n: all.length }; })()`);
   check('② ONE card, AT THE CLAIM\'S POSITION: after the agent\'s Bash card, before its closing words', c0 && c0.n === 1 && order.bash >= 0 && order.card > order.bash && (order.words < 0 || order.card < order.words), { c0, order });
-  const wantInstall = !cloakWhy;
   const prop0 = c0 ? ((await api('GET', `/api/browser/proposals/${c0.id}`)).body || {}).proposal : null;
-  const LABEL = prop0 && prop0.plan && prop0.plan.label;
-  check('② the proposal (GET, the user\'s route): a NEW CloakBrowser profile for this conversation (its browser is the temporary one), named after it', !!prop0 && prop0.plan.kind === 'new-profile' && prop0.plan.why === 'ephemeral' && / · CloakBrowser$|^CloakBrowser$/.test(LABEL || '') && prop0.site === HOST, prop0);
-  check('② the card says what Approve runs: the claim (who says what), the new CloakBrowser profile, ONLY signin.test added, the agent told — and the download when CloakBrowser is not installed', c0 && c0.state === 'open' && /signin\.test refused to sign in this browser/.test(c0.claim) && c0.plan.some((l) => l.includes(`new CloakBrowser profile "${LABEL}"`)) && c0.plan.some((l) => /signin\.test is added \(only that host/.test(l)) && c0.plan.some((l) => /The agent is told when it is done/.test(l)) && (!wantInstall || c0.plan.some((l) => /about \d+ MB is downloaded once from its maker/.test(l))) && c0.approve === 'Approve' && c0.reject === 'Reject', c0);
+  check('② the proposal (GET, the user\'s route): unavailable from birth — plan none, the site = signin.test', !!prop0 && prop0.state === 'unavailable' && prop0.plan.kind === 'none' && prop0.plan.why === 'unavailable' && prop0.site === HOST, prop0);
+  const D5 = SW.NO_SWITCH_WORDS.unavailable;
+  check('② the card says who claims what, then D5\'s sentence (⚙ → Plugins → Install plugin…, Change build…) — no plan list, no Approve, no Reject', c0 && c0.state === 'unavailable' && /The agent says a site refused its browser/.test(c0.title) && /signin\.test refused to sign in this browser/.test(c0.claim) && c0.plan.length === 0 && c0.none === D5 && !c0.approve && !c0.reject, c0);
   await shot('proposal-card-desktop', CARD);
   const items = ((await api('GET', '/api/user-todos')).body || {}).todos;
-  const item = items && (items.open || []).find((i) => i.action && i.action.type === 'browser-proposal' && i.action.id === c0.id);
-  check('② ONE For-you item (origin browser) carrying the same Approve (the proposal id + its digest)', !!item && item.origin === 'browser' && /^pd-[0-9a-f]{8}$/.test(item.action.shown) && (items.open || []).filter((i) => i.action && i.action.type === 'browser-proposal').length === 1, items && items.open);
+  const mine = (items && items.open || []).filter((i) => i.origin === 'browser' && /signin\.test refused its browser/.test(i.text || ''));
+  check('② ONE For-you NOTICE (origin browser, no Approve) carrying the card\'s words', mine.length === 1 && mine[0].kind === 'notice' && !mine[0].action && String(mine[0].detail || '').includes(D5), items && items.open);
 
   // ── ③ the phone ──
-  console.log('③ the phone (390 px): the card fits, its buttons are thumb-sized');
+  console.log('③ the phone (390 px): the card fits, its sentence wraps');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
   check('③ the chat attaches on the phone', await attach(sid));
   await waitFor(`!!document.querySelector('${CARD}')`, 20000);
-  const phone = await evalJs(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const vw = window.innerWidth; const r = c.getBoundingClientRect(); const over = [...c.querySelectorAll('*')].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && (q.right > vw + 0.5 || q.left < -0.5 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible'); }).map((e) => e.className || e.tagName); const btn = (s) => { const b = c.querySelector(s); if (!b) return null; const q = b.getBoundingClientRect(); return { h: q.height, w: q.width, visible: !!b.offsetParent }; }; return { vw, card: { left: r.left, right: r.right, width: r.width }, over, approve: btn('.chat-browser-proposal-approve'), reject: btn('.chat-browser-proposal-reject'), lines: [...c.querySelectorAll('.chat-browser-proposal-plan li')].map((l) => { const rg = document.createRange(); rg.selectNodeContents(l); return new Set([...rg.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size; }) }; })()`);
+  const phone = await evalJs(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const vw = window.innerWidth; const r = c.getBoundingClientRect(); const over = [...c.querySelectorAll('*')].filter((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && (q.right > vw + 0.5 || q.left < -0.5 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible'); }).map((e) => e.className || e.tagName); const none = c.querySelector('.chat-browser-proposal-none'); const rows = (() => { if (!none) return 0; const rg = document.createRange(); rg.selectNodeContents(none); return new Set([...rg.getClientRects()].filter((q) => q.width > 0.5).map((q) => Math.round(q.top))).size; })(); return { vw, card: { left: r.left, right: r.right, width: r.width }, over, rows, buttons: [...c.querySelectorAll('button')].filter((b) => b.offsetParent).length }; })()`);
   check('③ nothing of the card is wider than the 390 px screen, and nothing inside it scrolls sideways', phone && phone.vw <= 390 && phone.card.right <= phone.vw + 0.5 && phone.card.left >= -0.5 && phone.over.length === 0, phone);
-  check('③ Approve and Reject are ≥ 44 px tall (thumb-sized) and visible; the long plan lines wrap', phone && phone.approve && phone.approve.visible && phone.approve.h >= 44 && phone.reject && phone.reject.h >= 44 && phone.lines.some((n) => n > 1), phone);
+  check('③ its sentence wraps, and no button shows', phone && phone.rows > 1 && phone.buttons === 0, phone);
   await shot('proposal-card-phone', CARD);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.reload', {}); await waitApp(); await sleep(800);
   check('back on the desktop, the chat re-attaches with the card', await attach(sid) && await waitFor(`!!document.querySelector('${CARD}')`, 20000));
 
-  // ── ④ an agent never approves ──
-  console.log('④ owner-only');
-  const ag = await api('POST', `/api/browser/proposals/${c0.id}/approve`, { shown: item ? item.action.shown : 'pd-x' }, { Authorization: 'Bearer ' + TOKEN });
-  check('④ the agent\'s own bearer on Approve ⇒ 403 agent_forbidden; the card still open', ag.status === 403 && ag.body && ag.body.code === 'agent_forbidden' && (await cardState()).state === 'open', ag);
+  // ── ④ nobody approves what offers nothing ──
+  console.log('④ owner-only, and nothing to approve');
+  const ag = await api('POST', `/api/browser/proposals/${c0.id}/approve`, { shown: prop0 ? prop0.digest : 'pd-x' }, { Authorization: 'Bearer ' + TOKEN });
+  check('④ the agent\'s own bearer on Approve ⇒ 403 agent_forbidden', ag.status === 403 && ag.body && ag.body.code === 'agent_forbidden', ag);
+  const us = await api('POST', `/api/browser/proposals/${c0.id}/approve`, { shown: prop0 ? prop0.digest : 'pd-x' });
+  check('④ the user\'s Approve of it ⇒ 409 proposal_unavailable (the card offers none; nothing ran)', us.status === 409 && us.body && us.body.code === 'proposal_unavailable', us);
+  const profs = ((await api('GET', '/api/browser/profiles')).body || {}).profiles || [];
+  check('④ …and nothing moved: the card still unavailable, no profile made', (await cardState()).state === 'unavailable' && profs.length === 0, { card: await cardState(), profs: profs.map((p) => p.label) });
 
-  if (cloakWhy) {
-    skip(`⑤ ⑥ Approve → CloakBrowser: ${cloakWhy} — the REJECT path runs instead (nothing is ever downloaded)`);
-    check('the Reject button is a REAL click', await realClick(`${CARD} .chat-browser-proposal-reject`), lastMiss);
-    check('Rejected: the card says so in place (no Approve)', await waitFor(`document.querySelector('${CARD}').dataset.state === 'rejected'`, 10000) && /Rejected — the agent is told the next time it opens signin\.test/.test((await cardState()).line) && !(await cardState()).approve, await cardState());
-    const itemsR = ((await api('GET', '/api/user-todos')).body || {}).todos || {};
-    check('…and the For-you item is answered', !(itemsR.open || []).some((i) => i.action && i.action.type === 'browser-proposal'), itemsR.open);
-  } else {
-    // ── ④b verify r1: an Approve that just APPEARED under the pointer does not count (the press-arm rule of every approval) ──
-    // lane fleet-image-2 (the fleet e2e: ④b red 3 runs of 7 on a pod — after the reload the card moved ~22 px BETWEEN the
-    // leg's position read and its press, so the press landed on an unclassed element and no toast came): the leg presses
-    // THE ELEMENT IT CHECKED. A page-side recorder names every click's target; a press that missed (the card moved under
-    // it) is pressed again at a FRESH rect of the same element handle (bounded); the verdict reads the press that landed.
-    console.log('④b a press on Approve the instant the card appears under the pointer does not count — nothing runs, the card says why');
-    await cdp('Page.reload', {}); await waitApp();
-    await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'Portal work', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
-    await evalJs(`(() => { window.__apClicks = []; window.__apToasts = []; document.addEventListener('click', (e) => { const b = window.__apBtn; window.__apClicks.push({ on: !!b && (e.target === b || b.contains(e.target)), target: String((e.target && (e.target.className || e.target.tagName)) || '').slice(0, 60) }); }, true); new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList && n.classList.contains('global-toast')) window.__apToasts.push(n.textContent.slice(0, 160)); }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
-    // the Approve's own handle, its fresh centre, whether the point hits it, and how long ago it appeared or moved (the
-    // rule's clock — read for the evidence, never to decide). Out of the window, or covered at its centre (the chat's own
-    // scroller clips it): scrolled into view, and the NEXT read takes the rect it has then
-    const freshPoint = () => evalJs(`(() => { const b = window.__apBtn || document.querySelector('${CARD} .chat-browser-proposal-approve'); if (!b || !b.isConnected || !b.offsetParent) return null; window.__apBtn = b; const q = b.getBoundingClientRect(); if (q.bottom > window.innerHeight || q.top < 0) { b.scrollIntoView({ block: 'center' }); return null; } const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); if (!(hit === b || b.contains(hit))) { b.scrollIntoView({ block: 'center' }); return null; } return { x, y, top: q.top, armAge: b._armSince != null ? Math.round(performance.now() - b._armSince) : null }; })()`).catch(() => null);
-    const pressTheApprove = async (first = null) => {
-      const tries = [];
-      for (let i = 0; i < 40 && tries.length < 8; i++) {
-        const p = i === 0 && first ? first : await freshPoint();
-        if (!p) { await sleep(50); continue; }
-        const n0 = await evalJs('window.__apClicks.length');
-        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
-        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 });
-        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 });
-        const clicks = await evalJs(`window.__apClicks.slice(${n0})`);
-        tries.push({ x: Math.round(p.x), y: Math.round(p.y), armAge: p.armAge, clicks });
-        if (clicks.some((c) => c.on)) return { landed: true, tries };
-      }
-      return { landed: false, tries };
-    };
-    const toastsSaid = () => evalJs(`window.__apToasts.filter((x) => /moved under the pointer just now/.test(x)).length`);
-    let ap = null;
-    for (let i = 0; i < 400 && !ap; i++) { ap = await freshPoint(); if (!ap) await sleep(20); }
-    if (ap) {
-      const r1 = await pressTheApprove(ap);
-      await sleep(1500);
-      const cm = await cardState();
-      const said = await toastsSaid();
-      check('④b the press the instant the card appeared under the pointer did NOT run it: the press landed on the Approve itself, the card still open, its Approve still there, and it says why', r1.landed && cm && cm.state === 'open' && cm.approve === 'Approve' && said >= 1, { tries: r1.tries, cm, said });
-      // ④b' THE POD'S RACE, CONSTRUCTED (the dev box never shows it): the card moves 60 px between the leg's read and its
-      // press. The press at the read point misses the Approve (the recorder names what it hit), the leg presses the same
-      // element at a fresh rect — and an Approve that MOVED under the pointer does not count either. The card keeps its
-      // 60 px for the rest of the run: taking it back would be one more move, and ⑤'s press would then wait out the rule.
-      await sleep(900); // past ARM_MS: the Approve sat still and counts again — only the move below may refuse the press
-      const stale = await freshPoint();
-      await evalJs(`(() => { document.querySelector('${CARD}').style.transform = 'translateY(60px)'; return true; })()`);
-      const r2 = stale ? await pressTheApprove(stale) : { landed: false, tries: [] };
-      await sleep(1000);
-      const cm2 = await cardState();
-      const said2 = await toastsSaid();
-      check('④b\' the race constructed: the press at the point read before the card moved 60 px missed the Approve, and the leg pressed THE Approve at a fresh rect', !!stale && r2.landed && r2.tries.length >= 2 && !r2.tries[0].clicks.some((c) => c.on), { stale, tries: r2.tries });
-      check('④b\' …and a press on an Approve that moved under the pointer did NOT run it either: still open, said again', cm2 && cm2.state === 'open' && cm2.approve === 'Approve' && said2 > said, { cm2, said, said2 });
-    } else skip('④b the card\'s Approve never became pressable after the reload');
-    // ── ⑤ the REAL click on Approve ──
-    console.log('⑤ a REAL click on Approve: the install (nothing downloaded), ONLY the host, a new CloakBrowser profile, the page reopened');
-    const t0 = Date.now();
-    check('the Approve button is a REAL click', await realClick(`${CARD} .chat-browser-proposal-approve`), lastMiss);
-    const sawProgress = await waitFor(`/^Approved — /.test(document.querySelector('${CARD} .chat-browser-proposal-state').textContent)`, 15000);
-    check('the card says what it is doing, in place (Approved — …)', sawProgress, await cardState());
-    const done = await waitFor(`['done', 'failed'].includes(document.querySelector('${CARD}').dataset.state)`, 180000);
-    const cd = await cardState();
-    check('⑤ DONE: the card, in place, says the conversation now uses the new CloakBrowser profile and the agent hears it with the next message', done && cd.state === 'done' && cd.line.includes(`Done — this conversation now uses the new CloakBrowser profile "${LABEL}". The agent hears it with your next message.`) && !cd.approve && cd.n === 1, { cd, log: fs.readFileSync(LOG, 'utf8').split('\n').filter((l) => /browser-propose|\[browser\] install|cloak/.test(l)).slice(-12) });
-    await shot('proposal-card-done', CARD);
-    const st = (await api('GET', '/api/settings')).body || {};
-    check('⑤ ONLY signin.test was added to the sites CloakBrowser may open', st['browser.cloak.egressAllowlist'] === HOST, st['browser.cloak.egressAllowlist']);
-    const inst = (await api('GET', '/api/browser/install')).body || {};
-    check('⑤ the product\'s own install ran over the measured build (the stamp names it; nothing downloaded — the package and its cache were already there)', inst.code === 'already_installed' && inst.state && inst.state.step === 'done' && !inst.state.failed, inst.state);
-    const prof = ((await api('GET', '/api/browser/profiles')).body || {}).profiles || [];
-    const np = prof.find((p) => p.label === LABEL);
-    const ses = (await api('GET', `/api/browser/session/${sid}`)).body || {};
-    check('⑤ a NEW CloakBrowser profile, this conversation pinned to it and holding its lease', !!np && np.provider === 'cloak' && ses.pin && ses.pin.profileId === np.id && (ses.attachments || []).some((a) => a.profileId === np.id), { np, pin: ses.pin, att: ses.attachments });
-    const cbin = fs.realpathSync(SW.cloakBinaryPath({ cacheDir: CC, chromium: P.chromium, platform: P.platform }));
-    const mainCloak = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map((pid) => { try { const exe = fs.readlinkSync(`/proc/${pid}/exe`); const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '); return { pid, exe, cmd }; } catch { return null; } }).find((p) => p && p.exe === cbin && np && p.cmd.includes(np.dir) && !/ --type=/.test(p.cmd));
-    check('⑤ the CloakBrowser Chrome runs on that profile\'s directory, under the egress proxy, with its seed', !!mainCloak && /--proxy-server=http:\/\/127\.0\.0\.1:\d+/.test(mainCloak.cmd) && /--fingerprint=\d+/.test(mainCloak.cmd), mainCloak && mainCloak.cmd.slice(0, 600));
-    const reopened = await (async () => { for (let i = 0; i < 60; i++) { const b = hits.find((h) => h.at >= t0 && h.path === '/beacon' && /Chrome\/146\./.test(decodeURIComponent(h.ua))); if (b) return b; await sleep(250); } return null; })();
-    check('⑤ the page REOPENED on CloakBrowser: its beacon arrived from the CloakBrowser build (Chrome 146) through the proxy to the fixture host', !!reopened && reopened.host.startsWith(HOST), { reopened, recent: hits.filter((h) => h.at >= t0).slice(-6) });
-    const items2 = ((await api('GET', '/api/user-todos')).body || {}).todos || {};
-    check('⑤ the For-you item is answered (the user\'s press)', !(items2.open || []).some((i) => i.action && i.action.type === 'browser-proposal') && (items2.resolved || []).some((i) => i.id === (item && item.id) && i.status === 'done'), { open: items2.open, resolved: (items2.resolved || []).slice(0, 3) });
-
-    // ── ⑥ the agent is told ──
-    console.log('⑥ the agent is TOLD: its next prompt-context carries the approved words, and the chat draws that card');
-    const pc = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + TOKEN });
-    const ctxText = JSON.stringify(pc.body || '');
-    check('⑥ the agent\'s next injection (what its hook asks) carries "Approved: your browser is now CloakBrowser … Re-run the sign-in at <the page>" — free, never a wake', pc.status === 200 && /Approved: your browser is now CloakBrowser/.test(ctxText) && ctxText.includes('Re-run the sign-in at ' + SIGNIN), ctxText.slice(0, 600));
-    check('⑥ …and the chat draws that notice card where the agent received it', await waitFor(`[...document.querySelectorAll('.chat-msg')].some((m) => !m.matches('${CARD}') && /your browser is now CloakBrowser/.test(m.textContent))`, 10000));
-
-    // ── ⑦ verify r1 V7: the SAME Approve / Reject where the item appears in For you — the popup row and the window ──
-    console.log('⑦ For you: the proposal\'s row (popup) answers Approve, the For-you window answers Reject — the same routes, the same card patched');
-    const claimFor = async (h) => { const r = await api('POST', '/api/agent/browser/blocked', { url: `http://${h}:${PAGE_PORT}/x`, why: 'egress-refused', tier: 2 }, { Authorization: 'Bearer ' + TOKEN }); return r.body && r.body.claim && r.body.claim.id; };
-    const pA = await claimFor('parts.test');
-    const pvA = pA ? ((await api('GET', `/api/browser/proposals/${pA}`)).body || {}).proposal : null;
-    check('⑦ the agent\'s claim for a site its CloakBrowser list lacks is a SITE card (its browser already is CloakBrowser)', !!pvA && pvA.plan.kind === 'site' && pvA.state === 'open', pvA);
-    check('⑦ the For-you button opens the popup', await realClick('#taskbar-user-todos') && await waitFor(`!!document.querySelector('#user-todos-popup:not(.hidden) .ut-proposal-approve')`, 10000), lastMiss);
-    const rowWords = await evalJs(`(() => { const b = document.querySelector('#user-todos-popup .ut-proposal-approve'); const row = b && b.closest('[data-id]'); return row ? row.textContent : null; })()`);
-    check('⑦ the popup row shows what Approve runs ABOVE its Approve (the card\'s words: parts.test is added)', /parts\.test is added \(only that host\)/.test(rowWords || ''), rowWords && rowWords.slice(0, 400));
-    // a person's press where the row already shows (no scrollIntoView: the popup's arm samples at its row passes and at the
-    // press, so a scroll of the popup between them re-arms the press — the held LOW of verify r1)
-    const rowAt = await evalJs(`(() => { const b = document.querySelector('#user-todos-popup .ut-proposal-approve'); if (!b) return null; const q = b.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === b || b.contains(hit)), inView: q.top >= 0 && q.bottom <= window.innerHeight }; })()`);
-    let pressedRow = false;
-    if (rowAt && rowAt.hits && rowAt.inView) {
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rowAt.x, y: rowAt.y });
-      await sleep(900);
-      const armDiag = `(() => { const b = document.querySelector('#user-todos-popup .ut-proposal-approve'); return b ? { top: b.getBoundingClientRect().top, armTop: b._armTop ?? null, armSince: b._armSince ?? null, now: performance.now(), toasts: [...document.querySelectorAll('#global-toasts *')].map((e) => e.textContent).filter(Boolean).slice(-2) } : null; })()`;
-      rowAt.before = await evalJs(armDiag);
-      await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: rowAt.x, y: rowAt.y, button: 'left', clickCount: 1 });
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rowAt.x, y: rowAt.y, button: 'left', clickCount: 1 });
-      await sleep(150);
-      rowAt.after = await evalJs(armDiag);
-      console.log('    · the row press: ' + JSON.stringify(rowAt));
-      pressedRow = true;
-    }
-    check('⑦ a REAL click on the row\'s Approve (where it shows)', pressedRow, rowAt);
-    let doneA = null; for (let i = 0; i < 80 && !doneA; i++) { const q = ((await api('GET', `/api/browser/proposals/${pA}`)).body || {}).proposal; if (q && ['done', 'failed'].includes(q.state)) doneA = q; else await sleep(250); }
-    const stA = (await api('GET', '/api/settings')).body || {};
-    const diagA = doneA ? null : await evalJs(`(() => ({ toasts: [...document.querySelectorAll('#global-toasts *')].map((e) => e.textContent).filter(Boolean).slice(-4), popupOpen: !document.getElementById('user-todos-popup').classList.contains('hidden'), btn: (() => { const b = document.querySelector('#user-todos-popup .ut-proposal-approve'); return b ? { disabled: b.disabled, since: b._armSince, now: performance.now(), row: b.closest('[data-id]') && b.closest('[data-id]').dataset.id } : null; })() }))()`).catch((e) => String(e));
-    check('⑦ the row\'s Approve ran the SITE plan: done, parts.test on CloakBrowser\'s list (nothing else switched)', !!doneA && doneA.state === 'done' && doneA.outcome && doneA.outcome.code === 'site-added' && String(stA['browser.cloak.egressAllowlist']).split(',').includes('parts.test'), { doneA, list: stA['browser.cloak.egressAllowlist'], diagA, proposal: ((await api('GET', `/api/browser/proposals/${pA}`)).body || {}).proposal });
-    check('⑦ …and the chat card of it says done, in place', await waitFor(`[...document.querySelectorAll('${CARD}')].some((c) => c.dataset.proposal === ${JSON.stringify(pA)} && c.dataset.state === 'done' && /CloakBrowser may now open parts\.test/.test(c.textContent))`, 10000));
-    await evalJs(`document.getElementById('taskbar-user-todos').click(); true`); // close the popup
-    const pB = await claimFor('parts2.test');
-    const itB = ((((await api('GET', '/api/user-todos')).body || {}).todos || {}).open || []).find((i) => i.action && i.action.type === 'browser-proposal' && i.action.id === pB);
-    check('⑦ a second site claim ⇒ its For-you item', !!itB, pB);
-    if (itB) {
-      await evalJs(`app.openInbox({ itemId: ${JSON.stringify(itB.id)} }); true`);
-      check('⑦ the For-you window shows the item with Approve and Reject', await waitFor(`!!document.querySelector('.iw-act[data-act="proposal-approve"]') && !!document.querySelector('.iw-act[data-act="proposal-reject"]')`, 10000));
-      check('⑦ a REAL click on the window\'s Reject', await realClick('.iw-act[data-act="proposal-reject"]'), lastMiss);
-      let rjB = null; for (let i = 0; i < 40 && !rjB; i++) { const q = ((await api('GET', `/api/browser/proposals/${pB}`)).body || {}).proposal; if (q && q.state === 'rejected') rjB = q; else await sleep(250); }
-      const stB = (await api('GET', '/api/settings')).body || {};
-      check('⑦ the window\'s Reject rejected it: nothing added, the card says so in place', !!rjB && !String(stB['browser.cloak.egressAllowlist']).split(',').includes('parts2.test') && await waitFor(`[...document.querySelectorAll('${CARD}')].some((c) => c.dataset.proposal === ${JSON.stringify(pB)} && c.dataset.state === 'rejected')`, 10000), rjB);
-    }
-  }
+  // ── ⑤ the same words everywhere it shows ──
+  console.log('⑤ a reload draws the same card; the For-you popup row says the sentence and offers no Approve');
+  await cdp('Page.reload', {}); await waitApp(); await sleep(800);
+  check('⑤ the chat re-attaches', await attach(sid));
+  check('⑤ the reloaded card is the keeper\'s record: the same id, unavailable, still no buttons', await waitFor(`!!document.querySelector('${CARD}')`, 20000) && await (async () => { const c = await cardState(); return c && c.id === c0.id && c.state === 'unavailable' && c.none === D5 && !c.approve && !c.reject; })(), await cardState());
+  check('⑤ the For-you button opens the popup', await realClick('#taskbar-user-todos') && await waitFor(`[...document.querySelectorAll('#user-todos-popup:not(.hidden) [data-id]')].some((r) => /signin\\.test refused its browser/.test(r.textContent))`, 10000), lastMiss);
+  const row = await evalJs(`(() => { const r = [...document.querySelectorAll('#user-todos-popup [data-id]')].find((x) => /signin\\.test refused its browser/.test(x.textContent)); return r ? { text: r.textContent.slice(0, 600), approve: !!r.querySelector('.ut-proposal-approve') } : null; })()`);
+  check('⑤ the popup row: the notice\'s words, no Approve', !!row && !row.approve, row);
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`); // close the popup
   check('no page error in the client', pageErrors.length === 0, pageErrors.slice(0, 4));
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

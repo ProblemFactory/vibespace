@@ -66,7 +66,7 @@ function create(ctx, slot) {
     Object.assign(installState, { running: true, kind: ROW.id, startedAt: now(), finishedAt: null, exitCode: null, spec: v0.spec, pid: child.pid || null, error: null, step: 'package', refused: [] });
     const st0 = child.pid ? F.procStart(child.pid) : null;
     markInstall({ kind: ROW.id, spec: v0.spec, version: v0.version, pid: child.pid || null, starttime: st0, startedAt: installState.startedAt, stepAt: now(), prefix });
-    // verify r1 (F8): the npm child's wall clock (cloak's steps always had one) — past it, the npm group is stopped and said
+    // verify r1 (F8): the npm child's wall clock — past it, the npm group is stopped and said
     let stalled = false;
     // (in-process the identity is the HANDLE: node has not reaped a child whose exit it has not reported, so its pid is still
     // that npm — no starttime needed, which a machine without /proc could not read)

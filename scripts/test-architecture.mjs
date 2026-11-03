@@ -1456,9 +1456,15 @@ for (const [edge] of EXCEPTIONS) {
   ok(Array.isArray(RETIRED_SETTING_KEYS) && RETIRED_SETTING_KEYS.length >= 7 && RETIRED_SETTING_KEYS.includes('agents.vibespaceChannel'), `44d the schema re-exports RETIRED_SETTING_KEYS (${(RETIRED_SETTING_KEYS || []).length} keys)`);
   const asRow = (schema) => (RETIRED_SETTING_KEYS || []).filter((k) => Object.prototype.hasOwnProperty.call(schema, k));
   ok(asRow(SETTINGS_SCHEMA).length === 0, `44d no retired key is a schema row${asRow(SETTINGS_SCHEMA).length ? ' — back: ' + asRow(SETTINGS_SCHEMA).join(', ') : ''}`);
+  // lane engine-spi-egress L3: a key a LATER retirement carries is named by the ONE migration that carries it — inside that
+  // migration's own function only (its id in this table, its body found by name); anywhere else it is a reader, red
+  const CARRIED = Object.freeze({ 'browser.cloak.executablePath': 'function migrateCloakToPlugin(', 'browser.cloak.egressAllowlist': 'function migrateCloakToPlugin(' });
+  const carrierBody = (text, fn) => { const i = text.indexOf(fn); if (i < 0) return ''; const j = text.indexOf('\n  }\n', i); return text.slice(i, j < 0 ? undefined : j); };
   const quoted = (texts) => {
     const hits = [];
-    for (const [f, text] of texts) for (const k of RETIRED_SETTING_KEYS || []) {
+    for (const [f, text0] of texts) for (const k of RETIRED_SETTING_KEYS || []) {
+      // the migration's constant block + its function carry it; the rest of the file is judged as any other
+      const text = f === 'src/server/migrations.js' && CARRIED[k] ? text0.replace(carrierBody(text0, CARRIED[k]), '').replace(/const CLOAK_OLD = Object\.freeze\(\{[\s\S]*?\n\}\);/, '') : text0;
       if (new RegExp('[\'"`]' + k.replace(/\./g, '\\.') + '[\'"`]').test(text)) hits.push(f + ': ' + k);
     }
     return hits;
@@ -1475,8 +1481,9 @@ for (const [edge] of EXCEPTIONS) {
   ok(srcTexts.length > 300 && reads.length === 0, `44d no retired key is read or named in quotes under src/ or server.js (${srcTexts.length} files)${reads.length ? ' — ' + reads.slice(0, 6).join('; ') : ''}`);
   ok(asRow({ ...SETTINGS_SCHEMA, 'agents.vibespaceChannel': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Integration' } }).length === 1
     && quoted([['src/planted.js', "if (serverSetting('agents.vibespaceChannel') === true) spawnTheSocket();"]]).length === 1
-    && quoted([['src/planted.js', "settings?.get(\"sessionCard.detailTruncation\") ?? 'left'"]]).length === 1,
-    'NEGATIVE CONTROL: a re-added retired row and a planted serverSetting / settings.get read of a retired key are what 44d reports');
+    && quoted([['src/planted.js', "settings?.get(\"sessionCard.detailTruncation\") ?? 'left'"]]).length === 1
+    && quoted([['src/server/migrations.js', "function other() { return settings['browser.cloak.executablePath']; }\n  function migrateCloakToPlugin() {\n  }\n"]]).length === 1,
+    'NEGATIVE CONTROL: a re-added retired row, a planted serverSetting / settings.get read of a retired key, and a read of a CARRIED key outside the migration that carries it are what 44d reports');
 }
 
 // 45. THE PER-ITEM SPAWN CENSUS (2026-09-09, userW's pod: 27 of 27 session
@@ -4279,7 +4286,7 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
     `§78 NEGATIVE CONTROL (dc-browser-providers): the keeper with one \`=== 'chromium'\` branch restored is a browser rise (${(baseIB.browser || {})[KEEPER] || 0} → ${kc.counts.browser[KEEPER]})`);
   // NEGATIVE CONTROLS — the id-branch regexes and exclusions
   const PLANT = {
-    'src/zz-shared.js': ["if (kind === 'slack') x();", "switch (b) { case 'codex': break; }", 'const M = { xpra: 1, vnc: 2 };', 'const R = {', '  cloak: a,', '  chromium: b,', '};', "if ('frp' !== id) y();",
+    'src/zz-shared.js': ["if (kind === 'slack') x();", "switch (b) { case 'codex': break; }", 'const M = { xpra: 1, vnc: 2 };', 'const R = {', "  'agent-browser': a,", '  chromium: b,', '};', "if ('frp' !== id) y();",
       'spawn(c, { shell: true });', 'const o = { agents: 0, title: 1 };', "// if (kind === 'lark') z();", "const label = kind === 'gmail' ? 'Gmail' : 'x'; // counted once per family"].join('\n'),
     'src/channels/zz.js': "if (kind === 'slack') a(); if (backend === 'claude') b();",
     'src/desktop-backends.js': ['const DISPLAY_BACKENDS = Object.freeze([', "  Object.freeze({ id: 'xpra', ok: s === 'vnc' }),", ']);', "if (stream === 'x11vnc') c();"].join('\n'),
@@ -4536,7 +4543,6 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
     'test-browser-mediation.mjs': [[4321, 9222], 'the mediated-URL / answer rewriters — ' + PURE],
     'test-browser-pin.mjs': [[9333], 'attachedEnvFor — ' + PURE],
     'test-browser-profiles.mjs': [[7890], 'a proxy VALUE written into a config and read back'],
-    'test-browser-propose.mjs': [[5173], 'a blocked page\'s URL posted to the route as data'],
     'test-browser-providers.mjs': [[4444, 5555, 9222, 19222], 'attachedEnvFor / forwardedCdpUrl / cdpPortOf — ' + PURE],
     'test-browser-share-model.mjs': [[43181], 'a DevToolsActivePort file\'s text — ' + PURE],
     'test-browser-site-reset.mjs': [[8080], 'a recorded journey\'s page host — ' + PURE],
@@ -7110,6 +7116,33 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(stale105.length === 0, `§105 every ENGINE_ID_ROWS row still names an engine id (a row whose file names none is stale) — ${stale105.join(', ') || 'none'}`, stale105);
   const planted105 = scan105("const CLOAK = 'plugin:vibespace.cloak-browser'; // planted");
   ok(planted105.length === 2 && scan105('const ok = engineRowPath(id); // \'plugin:other.id:x\' is a command id').length === 0, `§105 CONTROL: a planted id is named (${planted105.join(', ')}); a derived one is not`);
+}
+
+// ── §106 (lane engine-spi-egress L3, 主开发's ruling 2026-11-03 — the owner: 「cloakbrowser直接去掉吧」): THE CORE KEEPS NO ANTI-BOT
+// BACKEND OF ITS OWN — no line of src/ names it, but the rows below, each with its reason. A bare «grep = 0» cannot be the census:
+// Windows' DWM window attribute is spelled the same way. The dictionaries are a row ONLY for the keys the migration's notice
+// uses (its exported WORDS table): any other entry naming it is red, and so is a comment.
+{
+  const RE106 = /cloak/i;
+  const req106 = (await import('node:module')).createRequire(import.meta.url);
+  const W106 = (() => { try { return new Set(Object.values(req106('../src/server/migrations.js').CLOAK_PLUGIN_WORDS || {})); } catch { return new Set(); } })();
+  const dictLineOk = (line) => { const m = /^\s*"((?:[^"\\]|\\.)*)"\s*:/.exec(line); if (!m) return false; let k; try { k = JSON.parse('"' + m[1].replace(/\\'/g, "'") + '"'); } catch { k = m[1]; } return W106.has(k); };
+  const ROWS106 = Object.freeze({
+    'src/agentd/wgc-helper-source.js': { why: 'Windows DWM: DWMWA_CLOAKED (a window the shell hides) — not a browser', line: () => true },
+    'src/stream-window.js': { why: "the window picker's `cloaked` field (the same DWM attribute)", line: () => true },
+    'src/server/migrations.js': { why: 'the one-shot 2026-11-cloak-to-plugin reads the old records, rows and keys it moves to the plugin', line: () => true },
+    'src/retired-settings.js': { why: 'RETIRED_SETTING_KEYS names the two retired browser.cloak.* rows (append-only; test-architecture 44d refuses a reader of either)', line: () => true },
+    'src/lib/i18n-zh.js': { why: "the migration notice's own keys (CLOAK_PLUGIN_WORDS) — no other entry", line: dictLineOk },
+    'src/lib/i18n-ja.js': { why: "the migration notice's own keys (CLOAK_PLUGIN_WORDS) — no other entry", line: dictLineOk },
+  });
+  const scan106 = (f, text) => text.split('\n').map((l, i) => [l, i + 1]).filter(([l]) => RE106.test(l) && !(ROWS106[f] && ROWS106[f].line(l))).map(([l, n]) => `${f}:${n}: ${l.trim().slice(0, 90)}`);
+  const files106 = trackedFiles(REPO, 'src');
+  const red106 = files106.flatMap((f) => scan106(f, read(f)));
+  ok(files106.length > 100 && W106.size >= 10 && red106.length === 0, `§106 no anti-bot backend is named in src/ outside its ${Object.keys(ROWS106).length} rows (${files106.length} tracked files; the dictionaries: ${W106.size} notice keys) — ${red106.slice(0, 6).join(' | ') || 'none'}`, red106.slice(0, 20));
+  const dead106 = Object.keys(ROWS106).filter((f) => !files106.includes(f) || !RE106.test(read(f)));
+  ok(dead106.length === 0, `§106 every row still names it (a row whose file no longer does is stale) — ${dead106.join(', ') || 'none'}`, dead106);
+  const planted106 = [...scan106('src/server/browser-keeper.js', "  if (p.provider === 'cloak') return x; // planted"), ...scan106('src/lib/i18n-zh.js', '  "Switch to CloakBrowser": "切换到 CloakBrowser",'), ...scan106('src/lib/i18n-zh.js', '  // a comment naming CloakBrowser')];
+  ok(planted106.length === 3 && scan106('src/lib/i18n-zh.js', `  ${JSON.stringify([...W106][0] || '')}: "x",`).length === 0, `§106 CONTROL: a planted provider id, a planted dictionary entry and a planted dictionary comment are each named (${planted106.length}); a notice key is not`, planted106);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

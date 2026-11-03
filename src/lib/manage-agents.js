@@ -41,7 +41,6 @@ import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = 
 import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
 import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
-import { installVerdictWords, installOutcomeWords, installConfirmWords } from './browser-switcher-model.js'; // the CloakBrowser row's words = the switch dialog's (PURE)
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
@@ -2369,42 +2368,6 @@ export function installManageAgents(App, ctx = {}) {
         // Account roster for THIS backend, right under its status row.
         await renderRoster(b.key);
         if (stale()) return;
-      }
-      // ── CloakBrowser (a browser the agent can use, design §7.4 failure form (1)) — local machine only. Installing
-      // it is a USER act that comes AFTER the §7.2.1 egress measurement. The row is worded by the PURE
-      // installVerdictWords (src/lib/browser-switcher-model.js, the same words the switch dialog says): the state
-      // word, and ONE button only when it works — `Install…` behind the same download confirm; no disabled
-      // control with a tooltip, no measurement notes. A refused verdict is a 200 carrying {ok:false, code}; a
-      // transport failure hides the row (the browser keeper may simply not be wired on this server).
-      if (!selectedHost) {
-        let iv = null;
-        try { iv = await fetchJson('/api/browser/install'); } catch { iv = null; }
-        if (stale() || !body.isConnected) return;
-        // a build without CloakBrowser lists no row for it (the naive-user verifier, 2026-09-28: "this version of VibeSpace
-        // doesn't have CloakBrowser" in red named a feature nobody here can act on); red only for a real failure
-        const w = iv && typeof iv.ok === 'boolean' && (iv.ok || iv.code) ? installVerdictWords(iv, { t, name: 'CloakBrowser' }) : null;
-        if (w && w.state !== 'not-in-this-version') {
-          const row = document.createElement('div'); row.className = 'ob-backend ob-cloak';
-          const left = document.createElement('div'); left.className = 'ob-backend-id';
-          const cls = w.state === 'installed' ? 'ob-ok' : (w.state === 'install-failed' || w.state === 'unavailable') ? 'ob-bad' : 'ob-ver';
-          left.innerHTML = `<b>CloakBrowser</b> <span class="${cls}">${w.state === 'installed' ? '✓ ' : ''}${escHtml(w.text)}</span>`;
-          if (w.title) left.title = w.title; // the path rides the title, never the text
-          const actions = document.createElement('div'); actions.className = 'agent-actions';
-          if (w.offer) {
-            const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary';
-            instBtn.textContent = w.offer === 'install-again' ? t('Install again…') : t('Install…');
-            instBtn.onclick = async () => {
-              if (!(await showConfirmDialog({ ...installConfirmWords('CloakBrowser', t, iv) }))) return; // lane-cloak: the measured sizes + host ride the verdict
-              const r = await fetchJson('/api/browser/install', { method: 'POST' });
-              if (r && r.error) console.warn('[manage-agents] cloak install answered', r.code, r.error);
-              const o = installOutcomeWords(r, { t, name: 'CloakBrowser' });
-              showToast(o.text, { type: o.tone === 'error' ? 'error' : o.tone === 'warn' ? 'warn' : 'info', duration: 9000 });
-            };
-            actions.appendChild(instBtn);
-          }
-          row.append(left, actions);
-          body.appendChild(row);
-        }
       }
       // ── VibeSpace integration (task context hook) — local machine only.
       // Auto-installed at server start; this row makes the state VISIBLE and

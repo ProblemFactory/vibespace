@@ -461,7 +461,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const traceBtn = document.createElement('button'); traceBtn.className = 'file-tool-btn browser-live-side-btn'; traceBtn.dataset.pane = 'trace';
   const timeline = createTraceTimeline(app, { sessionId, browserKey: H ? H.key : null }); // BROWSE YOURSELF: his window's Actions pane = HIS recorded acts (by his key)
   const reBtn = document.createElement('button'); reBtn.className = 'file-tool-btn browser-live-reconnect'; reBtn.textContent = t('Reconnect'); reBtn.style.display = 'none';
-  // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / `CloakBrowser`, the digest's
+  // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / an engine's name, the digest's
   // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
   // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.
   const backendBtn = document.createElement('button'); backendBtn.className = 'file-tool-btn browser-live-backend'; backendBtn.style.display = 'none'; backendBtn.title = t('Your agent’s browser; click to switch it'); backendBtn.dataset.baseTitle = backendBtn.title;

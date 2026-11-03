@@ -9,18 +9,10 @@
  *   · SHOWS it — ONE chat card at the claim's position (normalizers.feedProposalCard: a VibeSpace notice keyed by the
  *     claim id, PATCHED IN PLACE on every change, never re-created; a rebuild places it by time from the keeper's record)
  *     and ONE For-you item (origin `browser`) carrying the card's words line for line and the same Approve;
- *   · RUNS APPROVE — exactly the proposal's FROZEN fields, by id + digest (never re-derived from text):
- *       (a) the install when CloakBrowser does not answer — the keeper's pinned, signature- and SHA-checked runner; the
- *           card's words ARE the download's confirm (no second dialog); its progress streams onto the card;
- *       (b) the claim's host added to `browser.cloak.egressAllowlist` — ONLY that host and, for a known vendor's sign-in
- *           host, the sites its page loads from (SW.SIGNIN_DEPENDENCIES, frozen on the proposal — the card named them);
- *       (c) the plan: the §7.4 in-place switch of THIS conversation's profile (`switchBackend`, the user's act — its
- *           gate still runs and refuses by name), or a NEW CloakBrowser profile this conversation is pinned + attached to
- *           with the claim's page opened in its own tab;
- *       (d) the agent TOLD through the handback's ONE ladder site — free: joining a running turn where that costs
- *           nothing, else the next-turn stash (a switch is not a wake; no billed turn is opened for it);
- *     a failure is a state with its step + error ON THE CARD (and a `browser-proposal-updated` broadcast the pressing
- *     client toasts), Approve again runs the same frozen fields;
+ *   · RUNS APPROVE — exactly the proposal's FROZEN fields, by id + digest (never re-derived from text). lane engine-spi-egress
+ *     L3 (主开发's D1): the backend-switch plans (install the anti-bot backend, add the site to its list, switch in place,
+ *     a new profile on it) left the core with that backend — such a proposal is `unavailable` from birth (its card says why;
+ *     Approve answers 409 proposal_unavailable). L4 brings plan kinds over an engine. What still runs is a site reset (below);
  *   · RUNS REJECT — the card says so; the agent hears it ONCE, at its next navigation to that host (the audit route).
  * Owner-only: the routes refuse an agent's bearer (agent_forbidden) and the PURE step refuses any actor but `user`.
  *
@@ -31,25 +23,14 @@
  * views told in one line (`browser-site-reset`), the agent told for free — and nothing else.
  */
 const SW = require('../browser-switch.js');
-// lane dc-browser-backends (F6): the proposal's target is the ANTI-BOT ROW (antiBot: true, tier 2, local), named by its words
-const ANTI = require('../browser-profiles.js').antiBotRow() || { id: null, name: 'the anti-bot browser' };
 
 function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = null, activeSessions = null,
-  patchSettings = null, serverSetting = () => undefined, tell = null, pinConversation = null, broadcast = null,
+  tell = null, broadcast = null,
   // lane site-reset: clear ONE site's stored login in a profile's browser (the wiring: the dialog watch's clearSite, the
   // browser started first when it does not run — `onStart` is said on the card) → {ok, cookies, cookieDomains, origins}
   clearSite = null,
-  // the install half — production: the keeper's own runner; a suite hands a FAKE one (start / progress / exeOk)
-  install = null,
-  log = console, now = () => Date.now(), pollMs = 500, installTimeoutMs = 20 * 60 * 1000, progressEveryMs = 1000, stallMs = 60 * 1000,
-  sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); }) } = {}) {
+  log = console, now = () => Date.now() } = {}) {
   if (!keeper) throw new Error('browser-propose: keeper is required');
-  const inst = install || {
-    start: () => keeper.installCloak(),
-    progress: () => keeper.installProgress(),
-    exeOk: () => !!keeper.cloakExecutable().ok,
-  };
-  const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null ? d : v; } catch { return d; } };
   /** The live session carrying this claim (its webui id first, else its conversation key). */
   function sessionFor(entry) {
     if (!activeSessions || !entry) return null;
@@ -112,113 +93,10 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
   }
   async function run(entry, { pressed = null } = {}) {
     if (entry && entry.proposal && entry.proposal.kind === 'site-reset') return runSiteReset(entry, { pressed }); // lane site-reset
-    const id = entry.id;
-    const p = entry.proposal;
-    let step = 'starting';
-    const progress = (s, percent = null, stalledSec = null) => { step = s; keeper.stepProposal(id, { event: 'progress', progress: { step: s, percent, ...(stalledSec !== null ? { stalledSec } : {}) } }); };
-    const fail = (error, code = 'failed') => {
-      log.warn?.(`[browser-propose] ${id}: failed while ${step} — ${error}`);
-      return keeper.stepProposal(id, { event: 'fail', outcome: { code, step, error: String(error || 'failed').slice(0, 400) } });
-    };
-    // verify r1 V2: the card is THIS conversation's proposal — its conversation must still be running when anything runs
-    // (before the install, and again before the switch: an install takes minutes). Gone ⇒ refused by name, nothing ran —
-    // never the 217 MB, never a site, never a switch of a profile ANOTHER conversation may now be using
-    const gone = (what) => fail(`the conversation that proposed this is not running any more — ${what}; resume it, then press Approve again`, 'session-gone');
-    // verify r1 V2: a switch card names how many OTHER conversations use the profile (their tabs reopen on CloakBrowser,
-    // their pages then limited to its site list) — more of them now than the card said ⇒ nothing runs (asked before
-    // anything runs, and again before the switch); the agent's next claim makes a new card with the count as it stands
-    // (SW.claimVerdict: a stale failure is not the same card)
-    const staleOthers = () => {
-      if (!p.plan || p.plan.kind !== 'switch' || typeof keeper.proposalOthers !== 'function') return null;
-      const n = keeper.proposalOthers(p.plan.profileId, entry.browserKey);
-      const said = Number(p.plan.others) || 0;
-      return Number.isInteger(n) && n > said ? fail(`${n} other conversation${n === 1 ? ' uses' : 's use'} "${p.plan.profileLabel || p.plan.profileId}" now — this card said ${said}; nothing was switched. Ask the agent to claim again for a card that says so, or switch it yourself in the live view`, 'proposal_stale') : null;
-    };
-    try {
-      if (!sessionFor(entry)) return gone('nothing was installed, added or switched');
-      { const st0 = staleOthers(); if (st0) return st0; }
-      // (a) THE INSTALL — only when CloakBrowser does not answer; the card's words were its confirm
-      if (!inst.exeOk()) {
-        // verify r1 V2: a card that said CloakBrowser IS installed carried no download line — its Approve never fetches the
-        // 217 MB (it went away after the card was drawn: refused by name, the one way back named)
-        if (p.install !== 'needed') return fail(`${ANTI.name} is not installed any more, and this card did not include its download — nothing was downloaded. Install it from Manage agents (${ANTI.name}), then press Approve again`, 'install_gone');
-        progress('install');
-        const pr0 = inst.progress() || {};
-        if (!pr0.running) {
-          try { await inst.start(); } catch (e) { return fail(e && e.message ? e.message : String(e), (e && e.code) || 'install_failed'); }
-        }
-        const t0 = now();
-        let lastPct = null, lastAt = 0;
-        // verify r1 V3: a download that shows NO sign of life (neither its percent nor a byte of its output) for stallMs is
-        // SAID on the card — a frozen "downloading 34 %" read as progress for the 15 min the step waits before giving up
-        let sign = null, signAt = now(), saidStall = null;
-        for (;;) {
-          const pr = inst.progress() || {};
-          if (!pr.running) break;
-          const pct = Number.isFinite(pr.percent) ? pr.percent : null;
-          const sign1 = `${pct}|${Number.isFinite(pr.logBytes) ? pr.logBytes : ''}`;
-          if (sign1 !== sign) { sign = sign1; signAt = now(); if (saidStall !== null) { saidStall = null; progress('install', pct); lastPct = pct; lastAt = now(); } }
-          const still = now() - signAt;
-          if (still >= stallMs) {
-            const sec = Math.floor(still / 1000);
-            if (saidStall === null || sec - saidStall >= 30) { progress('install', pct, sec); saidStall = sec; }
-          } else if (pct !== lastPct && now() - lastAt >= progressEveryMs) { progress('install', pct); lastPct = pct; lastAt = now(); }
-          if (now() - t0 > installTimeoutMs) return fail(`the install did not finish in ${Math.round(installTimeoutMs / 60000)} min`, 'install_timeout');
-          await sleep(pollMs);
-        }
-        const end = inst.progress() || {};
-        if (end.failed) return fail(end.error || 'the install failed', 'install_failed');
-        if (!inst.exeOk()) return fail(`the install finished but ${ANTI.name} does not answer`, 'install_failed');
-      }
-      if (!sessionFor(entry)) return gone(`${ANTI.name} is installed, nothing else was added or switched`);
-      // (b) THE SITE — only the claim's host (+ the frozen sites its sign-in page loads from), added to the list CloakBrowser may open
-      progress('site');
-      const aw = SW.allowlistWith(setting('browser.cloak.egressAllowlist', ''), [p.site, ...(Array.isArray(p.alsoSites) ? p.alsoSites : [])]);
-      if (aw.added) {
-        if (typeof patchSettings !== 'function') return fail('the settings store is not wired here — nothing was switched', 'site_unwritable');
-        try { patchSettings({ 'browser.cloak.egressAllowlist': aw.list }); } catch (e) { return fail(`the site could not be added: ${e && e.message}`, 'site_unwritable'); }
-      }
-      // (c) THE PLAN — exactly the frozen one
-      let outcome;
-      if (p.plan.kind === 'switch') {
-        const st1 = staleOthers(); if (st1) return st1;
-        progress('switch');
-        let r;
-        try { r = await keeper.switchBackend({ profileId: p.plan.profileId, target: ANTI.id, by: { kind: 'user' }, browserKey: entry.browserKey, sessionId: entry.sessionId, confirmDowngrade: !!p.plan.confirm }); }
-        catch (e) { return fail(e && e.message ? e.message : String(e), (e && e.code) || 'switch_failed'); }
-        if (!r || r.mode !== 'switch') return fail(r && r.reason ? r.reason : 'the switch did not run', 'switch_refused');
-        outcome = { code: 'switched', label: p.plan.profileLabel || null, profileId: p.plan.profileId, newProfile: false, reopened: (r.reopened || []).filter((x) => x && x.ok).length, siteAdded: aw.added };
-      } else if (p.plan.kind === 'new-profile') {
-        progress('profile');
-        const sess = sessionFor(entry);
-        if (!sess) return fail('the conversation is not running any more — nothing was created', 'session-gone');
-        let prof;
-        try { prof = keeper.createProfile({ label: p.plan.label, provider: ANTI.id }, { owner: { kind: 'instance', id: null }, createdBy: entry.browserKey || null }); }
-        catch (e) { return fail(e && e.message ? e.message : String(e), (e && e.code) || 'profile_failed'); }
-        try { if (typeof pinConversation === 'function') await pinConversation({ sessionId: sess.id, session: sess.s, browserKey: entry.browserKey, profileId: prof.id }); }
-        catch (e) { return fail(`the new profile "${prof.label}" was made but this conversation could not be pointed at it: ${e && e.message}`, (e && e.code) || 'pin_failed'); }
-        progress('open');
-        try { await keeper.attach({ profileId: prof.id, browserKey: entry.browserKey, sessionId: sess.id, by: 'user' }); }
-        catch (e) { return fail(`${ANTI.name} did not start for "${prof.label}": ${e && e.message}`, (e && e.code) || 'launch_failed'); }
-        progress('reopen');
-        const o = await keeper.openInLease({ profileId: prof.id, browserKey: entry.browserKey, url: p.url });
-        outcome = { code: 'new-profile', label: prof.label, profileId: prof.id, newProfile: true, reopened: o.ok ? 1 : 0, siteAdded: aw.added, ...(o.ok ? {} : { reopenError: o.error }) };
-      } else if (p.plan.kind === 'site') {
-        // verify r1 V1: the browser already IS CloakBrowser — the site list was the whole of it (added above)
-        outcome = { code: 'site-added', label: p.plan.profileLabel || null, profileId: p.plan.profileId || null, newProfile: false, reopened: 0, siteAdded: aw.added };
-      } else {
-        return fail('this proposal offers nothing to run', 'proposal_unavailable');
-      }
-      // (d) THE AGENT IS TOLD — free (the running turn where joining it costs nothing, else the next-turn stash)
-      progress('tell');
-      let told = 'failed';
-      const text = SW.approvedText({ ...p, outcome });
-      if (typeof tell === 'function') { try { const r = await tell({ sessionId: entry.sessionId, browserKey: entry.browserKey, text, pressed }); told = (r && r.told) || 'failed'; } catch (e) { log.warn?.(`[browser-propose] ${id}: the agent was not told — ${e && e.message}`); } }
-      try { if (typeof keeper.tell === 'function' && entry.browserKey) keeper.tell(entry.browserKey); } catch { /* the set's fingerprint: our message IS the telling */ }
-      const done = keeper.stepProposal(id, { event: 'done', outcome: { ...outcome, told } });
-      log.log?.(`[browser-propose] ${id}: done — ${outcome.code} (profile ${outcome.profileId || '?'}), ${outcome.siteAdded ? p.site + ' added to the cloak sites' : p.site + ' already on the cloak sites'}, the agent ${told}`);
-      return done;
-    } catch (e) { return fail(e && e.message ? e.message : String(e)); }
+    // lane engine-spi-egress L3: no backend-switch plan runs in this version (the step refuses an unavailable proposal first;
+    // this is the belt for one that reached here anyway)
+    log.warn?.(`[browser-propose] ${entry && entry.id}: this proposal offers nothing to run`);
+    return keeper.stepProposal(entry.id, { event: 'fail', outcome: { code: 'proposal_unavailable', step: 'starting', error: 'this proposal offers nothing to run in this version of VibeSpace' } });
   }
   /** lane site-reset: THE USER's Approve of a site-reset proposal — exactly the frozen (profile, host), nothing else. */
   async function runSiteReset(entry, { pressed = null } = {}) {

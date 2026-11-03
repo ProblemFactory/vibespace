@@ -4,8 +4,7 @@
 // for one live conversation, a fake agent-browser 0.38.1 on the server's PATH (every call's launch view logged; its
 // /json/version answers the build the last launch ran), a fake builds folder in the server's HOME, headless chrome:
 //
-//   ① en 1280×800: the Agent browser panel's New profile… opens THE dialog — every provider a row (CloakBrowser, not
-//      installed, offers Install… and is not pickable), the machine section, the build section (its first answer HELD by
+//   ① en 1280×800: the Agent browser panel's New profile… opens THE dialog — every provider a row, the machine section, the build section (its first answer HELD by
 //      the leg: "Reading the list of Chrome builds…" + aria-busy while asked, then the builds), "All my conversations";
 //      a name + "Chrome 151.0.7922.34" + Create ⇒ ONE POST carrying the build; the panel gains the row IN PLACE (the row
 //      that was there is the same node) and says "Chrome 151.0.7922.34 (pinned)";
@@ -343,8 +342,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
   const nProv = (await api('GET', '/api/browser/providers')).json.providers.length;
   const dlg = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d) return null; const rows = [...d.querySelectorAll('.bnew-provider')]; return rows.length ? { rows: rows.map((r) => ({ id: r.dataset.provider, state: r.dataset.state, off: r.classList.contains('is-off'), install: !!(r.querySelector('.bnew-install') && getComputedStyle(r.querySelector('.bnew-install')).display !== 'none') })), builds: [...d.querySelectorAll('.bnew-build')].map((x) => x.dataset.key), who: !!d.querySelector('.pp-chip[data-key="everyone:*"]') && !d.querySelector('input[name=bnew-who]'), title: d.querySelector('.dialog-header h3').textContent, busy: d.querySelector('.bnew-builds-wrap')?.getAttribute('aria-busy') || null, notes: [...d.querySelectorAll('.bnew-builds .bbuild-note')].map((x) => x.textContent) } : null; })()`), 15000, 100);
   ok(dlg && dlg.title === 'New profile' && dlg.rows.length === nProv && dlg.rows.find((r) => r.id === 'chromium').state === 'ready', `the dialog draws EVERY provider as a row (${dlg && dlg.rows.length} of ${nProv}) — never hidden`, dlg);
-  const ck = dlg && dlg.rows.find((r) => r.id === 'cloak');
-  ok(ck && ck.state === 'needs-install' && ck.off && ck.install, 'CloakBrowser (not installed here): shown, not pickable, its ONE step offered (Install…)', ck);
+  ok(dlg && !dlg.rows.some((r) => r.install), 'no provider row offers an install (lane engine-spi-egress L3: the one that did left the core — a browser of another build is a plugin)', dlg && dlg.rows);
   const asked = await ev(`typeof window.__bprofRelease === 'function'`);
   ok(dlg && asked && dlg.busy === 'true' && dlg.notes.length === 1 && dlg.notes[0] === 'Reading the list of Chrome builds…' && !dlg.builds.some((k) => k.startsWith('v:')), 'while the build list is ASKED and not answered (held): the section is aria-busy and says "Reading the list of Chrome builds…" — never "could not be read"', dlg && { asked, busy: dlg.busy, notes: dlg.notes, builds: dlg.builds });
   await ev(`(() => { if (window.__bprofRelease) window.__bprofRelease(); window.fetch = window.__bprofFetch; return true; })()`);
@@ -405,8 +403,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await load(lang, 1280, 800);
     await openPanel();
     await click('.bprof-new');
-    const d = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d || !d.querySelector('.bnew-provider')) return null; return { title: d.querySelector('.dialog-header h3').textContent, heads: [...d.querySelectorAll('.bnew-section-head')].map((x) => x.textContent), create: d.querySelector('.bnew-create').textContent, cloak: (d.querySelector('.bnew-provider[data-provider=cloak] .bnew-note') || {}).textContent || '' }; })()`), 15000, 100);
-    ok(d && d.title === tr(lang, 'New profile') && d.heads.includes(tr(lang, 'Browser')) && d.heads.includes(tr(lang, 'Chrome build')) && d.heads.includes(tr(lang, 'Who can use it')) && d.create === tr(lang, 'Create') && d.cloak === tr(lang, 'Not installed yet — install it first, then choose it.'),
+    const d = await until(() => ev(`(() => { const d = document.querySelector('#browser-new-profile-dialog'); if (!d || !d.querySelector('.bnew-provider')) return null; return { title: d.querySelector('.dialog-header h3').textContent, heads: [...d.querySelectorAll('.bnew-section-head')].map((x) => x.textContent), create: d.querySelector('.bnew-create').textContent }; })()`), 15000, 100);
+    ok(d && d.title === tr(lang, 'New profile') && d.heads.includes(tr(lang, 'Browser')) && d.heads.includes(tr(lang, 'Chrome build')) && d.heads.includes(tr(lang, 'Who can use it')) && d.create === tr(lang, 'Create'),
       `${lang}: the New profile… dialog speaks the dictionary's words`, d);
     await shot(`3-new-profile-${lang}`);
     await ev("document.querySelector('#browser-new-profile-dialog .bnew-cancel').click()");
@@ -467,8 +465,8 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await click('#browser-build-dialog .bbuild-download');
     const pk = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const rows = [...d.querySelectorAll('.bdl-row')]; if (!rows.length) return null; const st = rows.find((x) => x.dataset.version === ${J(STABLE)}); return { intro: d.querySelector('.bdl-intro').textContent, n: rows.length, head: st && st.querySelector('.bwho-answer-head').textContent, chips: st ? [...st.querySelectorAll('.bdl-chip')].map((x) => x.textContent) : [], rowsHidden: getComputedStyle(d.querySelector('.bbuild-rows')).display === 'none', free: (d.querySelector('.bdl-free') || {}).textContent || '' }; })()`), 20000, 150);
     ok(pk && pk.n === 4 && pk.rowsHidden && pk.intro === tr(lang, "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser CLI's own install picks.") && pk.head === `Stable · ${STABLE}` && cftHits.filter((h) => h.includes('last-known-good')).length === lists0 + 1
-      && pk.chips.includes(((r) => (r === 'newer' ? tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: CC.CENSUS_CHROME }) : tr(lang, 'Older than the census: a few methods it lacks are listed harmlessly')))(CC.chromeRelation(STABLE))) && pk.chips.includes(tr(lang, "A profile opened with it can't switch to CloakBrowser later (Free {free} / Pro {pro}): switching down is refused", { free: 146, pro: 151 })),
-      `${lang}: the picker opens IN the dialog (the rows step aside), reads the channel list once, four rows; Stable's chips say the census and CloakBrowser in the device's words`, pk);
+      && pk.chips.includes(((r) => (r === 'newer' ? tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: CC.CENSUS_CHROME }) : tr(lang, 'Older than the census: a few methods it lacks are listed harmlessly')))(CC.chromeRelation(STABLE))) && !pk.chips.some((c) => /CloakBrowser/.test(c)),
+      `${lang}: the picker opens IN the dialog (the rows step aside), reads the channel list once, four rows; Stable's chips say the census in the device's words (no anti-bot backend chip: it left the core)`, pk);
     await shot(`3b-picker-${lang}`);
     await click(`#browser-build-dialog .bdl-row[data-version="${STABLE}"]`);
     const cf = await until(() => ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); if (!p) return null; let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; const bs = [...ov.querySelectorAll('button')]; return { title: (ov.querySelector('h3') || {}).textContent || '', msg: p.textContent, buttons: bs.map((b) => b.textContent) }; })()`), 15000, 100);

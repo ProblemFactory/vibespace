@@ -173,7 +173,7 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   // the id names one is the keeper's question (test-browser-providers); a key-bearing
   // row is refused there by name (D34), and a non-machine id never reaches the keeper
   ok(B.validateProfileInput({ label: 'x', host: 'remote-1' }).ok === true && B.validateProfileInput({ label: 'x', host: 'remote-1' }).value.host === 'remote-1', 'a host is admitted by the chromium row (P4: the keeper judges whether it is paired)');
-  ok(B.validateProfileInput({ label: 'x', host: 'remote-1', provider: 'cloak' }).code === 'provider_needs_local_key', 'a key-bearing provider on another machine is refused BY NAME (D34)');
+  ok(B.validateProfileInput({ label: 'x', host: 'remote-1', provider: 'cloud:browserbase' }).code === 'provider_needs_local_key', 'a key-bearing provider on another machine is refused BY NAME (D34)');
   ok(B.validateProfileInput({ label: 'x', host: 'not a host!' }).code === 'unsupported-host', 'a host that is not a machine id is refused BY NAME');
   ok(B.validateProfileInput({ label: 'x', sharing: 'instance' }).code === 'sharing_refused', 'sharing:instance is refused until the mediating proxy ships (D6)');
   ok(B.validateProfileInput({ label: 'x', allowedDomains: ['example.com'] }).code === 'fence_refused', 'a domain fence on a persistent profile is refused (§6.3)');

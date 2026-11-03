@@ -1767,7 +1767,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       })(path.join(r, 'data'), '');
       return h.digest('hex');
     };
-    ok(RETIRED_SETTING_KEYS.length === 7 && ['agents.vibespaceChannel', 'window.enableBounceOnFocus', 'terminal.preserveCustomTitle', 'sessionCard.detailTruncation', 'agentd.dataPlane', 'agentd.remoteSessions', 'agentd.sessions'].every((k) => RETIRED_SETTING_KEYS.includes(k)) && Object.isFrozen(RETIRED_SETTING_KEYS), 'the retired list names the seven keys of the design (frozen)');
+    ok(RETIRED_SETTING_KEYS.length >= 7 && require('../src/retired-settings.js').RETIRED_2026_10.length === 7 && ['agents.vibespaceChannel', 'window.enableBounceOnFocus', 'terminal.preserveCustomTitle', 'sessionCard.detailTruncation', 'agentd.dataPlane', 'agentd.remoteSessions', 'agentd.sessions'].every((k) => RETIRED_SETTING_KEYS.includes(k)) && Object.isFrozen(RETIRED_SETTING_KEYS), 'the retired list names the seven keys of the design (frozen)');
     // the PURE strip: input untouched, order kept, an own "__proto__" stays an own key
     {
       const input = JSON.parse('{"a":1,"agents.vibespaceChannel":true,"__proto__":{"x":1},"b":[2]}');
@@ -1862,6 +1862,25 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const noArchive = M.load('src/server/migrations.js', src.replace(ret, "    return { settings: 'rewritten', stripped: {} };\n"), 'no-archive');
       const c2 = (await scenario(noArchive.create, 'mut2')).out;
       ok(!c2.archived && c2.stripsExactly, 'NEGATIVE CONTROL: a copy that strips without archiving is caught by the archive leg');
+      // 主开发's pin (lane engine-spi-egress L3 interim, 2026-11-03): THIS migration strips ITS OWN seven keys, ever — re-run where
+      // its ledger was lost, it must not take the two keys a LATER retirement appended (browser.cloak.*), which
+      // 2026-11-cloak-to-plugin still has to READ and carry. The control: the pre-correction call (the whole retired list)
+      const ownSeven = (createFn, tag) => {
+        const r0 = mkRoot(tag);
+        const P1 = 'browser.cloak.executablePath', P2 = 'browser.cloak.egressAllowlist';
+        fs.writeFileSync(settingsOf(r0), JSON.stringify({ 'agents.vibespaceChannel': true, [P1]: '/opt/x/chrome', [P2]: 'a.example', 'chat.compactMode': true }), { mode: 0o600 });
+        runOnly(createFn({ rootDir: r0, homeDir: scratchHomeDir, serverNotice: () => { } }), r0);
+        const after = JSON.parse(fs.readFileSync(settingsOf(r0), 'utf8'));
+        return { after, kept: after[P1] === '/opt/x/chrome' && after[P2] === 'a.example', own: !('agents.vibespaceChannel' in after) && after['chat.compactMode'] === true };
+      };
+      const o7 = ownSeven(create, 'own-seven');
+      ok(o7.own && o7.kept && RETIRED_SETTING_KEYS.includes('browser.cloak.executablePath') && !require('../src/retired-settings.js').RETIRED_2026_10.includes('browser.cloak.executablePath'),
+        '2026-10-settings-rows-retired strips ITS OWN seven keys only: re-run where its ledger was lost, it keeps the two later-retired browser.cloak.* values for 2026-11-cloak-to-plugin to carry', o7.after);
+      const cut7 = 'stripRetiredSettings(doc, RETIRED_2026_10)';
+      ok(src.split(cut7).length === 2, 'CONTROL scope: the own-seven call is present once');
+      const wholeList = M.load('src/server/migrations.js', src.replace(cut7, 'stripRetiredSettings(doc)'), 'whole-list');
+      const c7 = ownSeven(wholeList.create, 'own-seven-mut');
+      ok(c7.own && !c7.kept, 'NEGATIVE CONTROL: the pre-correction call (the whole retired list) strips the browser.cloak.* values a lost ledger re-runs over — the leg above would be red', c7.after);
     }
     // settings-prune verify r1: the strip must SURVIVE the running server. Boot reads settings.json into the persistence
     // cache BEFORE the migrations run, so GET kept serving the stripped keys and the first save (the client POSTs its whole

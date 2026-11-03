@@ -687,7 +687,7 @@ const SETTINGS_SCHEMA = {
   'browser.automationFlag': {
     type: 'boolean', default: true,
     label: t('Do not announce the agent browser as automated'),
-    description: t('ON (default): the agent\'s browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.'),
+    description: t('ON (default): the agent\'s browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser is told to you by the agent. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts.'),
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
@@ -734,18 +734,8 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (default): when your takeover lapses on its own, the agent is told nothing until its next browser command succeeds or you send your next message — no billed turn is opened by a timer. ON: the lapse is announced into the conversation like an explicit Hand back (a turn the agent is billed for), under the same unattended-spend ceiling (Settings → Spending).'),
     category: t('Agent browser'), liveApply: true,
   },
-  // ── AGENT BROWSER P4 (design-agent-browser-v2 §7.2 / §7.2.1) ──────────
-  // lane-cloak (2026-09-28): the §7.2.1 record is a measurement, and cloak as a
-  // PROFILE's browser is opt-in by the user's own acts — the install
-  // (Manage agents) and the switch (the profile's browser dialog). lane
-  // dc-browser-providers: the CONTAINER form's switch (browser.cloak.enabled,
-  // a docker plan that was never run) is deleted, and the two live cloak rows
-  // below are no longer hidden behind it.
-  // P4 second half (§7.4): the in-place switch opens the SAME profile directory
-  // with the CloakBrowser Chromium (+ `--fingerprint=<seed>`); this names that
-  // program when it was installed some other way. Empty = the one Manage
-  // agents installed (lane-cloak: the pinned, measured build — never a PATH
-  // guess: the `cloakbrowser` command is the vendor's management CLI).
+  // ── AGENT BROWSER P4 (design-agent-browser-v2 §7.2) — lane engine-spi-egress L3: the anti-bot backend's two rows are
+  // retired (src/retired-settings.js; the L3 boot migration carried their values into its plugin's own rows) ──
   // lane browser-admin 2b: THE BROWSER CLI VibeSpace drives — the one on PATH (as before), or the version its flag table was
   // measured on, installed by VibeSpace into its data folder (the Agent browser panel's Install the measured version…), or a
   // version you name (installed the same way; its flags are judged both ways — the table was measured on another). Read by
@@ -774,23 +764,6 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
     fact: 'browser-engine',
-  },
-  'browser.cloak.executablePath': {
-    type: 'string', default: '',
-    label: t('CloakBrowser program file'),
-    description: t('The CloakBrowser browser program (its chrome file), for when it was installed some other way. Leave it empty to use the one installed from Manage agents.'),
-    tier: 'advanced',
-    category: t('Agent browser'), liveApply: true,
-  },
-  // lane-cloak: THE SITES a running cloak browser may reach — the keeper's
-  // egress proxy admits exactly the §7.2.1 record's run hosts (measured: none)
-  // + these (src/browser-profiles cloakRunAllowlist)
-  'browser.cloak.egressAllowlist': {
-    type: 'string', default: '',
-    label: t('Sites CloakBrowser may open (hosts, comma-separated)'),
-    description: t('The only sites a CloakBrowser browser may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default): it opens no site at all. Measured: CloakBrowser itself needs no site of its own, so this list is all it can reach — its maker\'s download and update hosts are refused. Loopback and link-local addresses are never admitted.'),
-    tier: 'advanced',
-    category: t('Agent browser'), liveApply: true,
   },
   'browser.actionTrace': {
     // D35 (owner 2026-09-13): default ON — the first action that ever needs a

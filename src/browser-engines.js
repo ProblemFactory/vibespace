@@ -11,7 +11,7 @@
  *   `protocol !== 1` ⇒ browser_engine_protocol; a launch answer's `env` keys outside ENGINE_ENV_KEYS (today: none) ⇒
  *   browser_engine_env; an argument that opens a debugging endpoint, picks the profile's directory or names a PROXY (all
  *   VibeSpace's) ⇒ browser_engine_protocol; HTTP 409 `no_binary` ⇒ browser_engine_kernel_missing.
- *   THE FEATURES (lane engine-spi-egress, design-desk cloak-plugin §1): a CLOSED set of words (ENGINE_FEATURES — a word
+ *   THE FEATURES (lane engine-spi-egress, design-desk q-056 §1): a CLOSED set of words (ENGINE_FEATURES — a word
  *   outside it means nothing here and is dropped from the fact). `surfaces` is OPTIONAL: an engine without it takes Chrome's
  *   dialog road (the dialog watch asks each browser's own `VibeSpace.getVersion`). `egress-allowlist` ⇒ the keeper wraps
  *   the browser in ITS allowlisting proxy (the plugin gives the list, never the proxy, and cannot turn it off): the list is
@@ -131,8 +131,8 @@ function engineArgs({ args = [], egress = null } = {}) { return [...V.splitLaunc
 /** The keeper's OWN list for a wrapped launch (the config's switches it carries onto an engine's env list — L2's F4) without any
  *  proxy switch: Chromium ranks `--no-proxy-server` / `--proxy-pac-url` / `--proxy-auto-detect` ABOVE `--proxy-server`, so a
  *  user's own proxy switch would undo the boundary. */
-// ── lane engine-spi-egress L1b (design-desk cloak-plugin-addendum §0/§1 — the owner 2026-11-02: «用更系统的方式支持“自定义内核”，只是其中一个
-// 选项是用户自行安装cloakbrowser»): ONE engine interface, TWO kernel sources. `download` = the package's kernel.json (the receipt
+// ── lane engine-spi-egress L1b (design-desk q-056 addendum §0/§1 — the owner 2026-11-02: «用更系统的方式支持“自定义内核”» — one of
+// the options being a browser the user installs themselves): ONE engine interface, TWO kernel sources. `download` = the package's kernel.json (the receipt
 // road); `user` = the manifest's RESERVED row `executablePath` (a string) — the program the OWNER names in the plugin's settings
 // (`plugin.<id>.executablePath`, read live; written by the owner's cookie only). The plugin never names it: its process cannot even
 // read a path outside its package + state dir (node --permission), so VibeSpace JUDGES the file and its word on installed /

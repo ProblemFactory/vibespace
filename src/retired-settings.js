@@ -14,7 +14,14 @@ const RETIRED_SETTING_KEYS = Object.freeze([
   'agentd.dataPlane',             // graduated in 2.175.0 — stored without a row, no reader
   'agentd.remoteSessions',
   'agentd.sessions',
+  // lane engine-spi-egress L3: the anti-bot backend left the core — 2026-11-cloak-to-plugin carries both values into its
+  // plugin's reserved rows (plugin.<id>.executablePath / .egressAllowlist) and strips them; nothing reads them any more
+  'browser.cloak.executablePath',
+  'browser.cloak.egressAllowlist',
 ]);
+/** The keys 2026-10-settings-rows-retired shipped with — that migration strips exactly these, ever (a ledger lost on an
+ *  instance re-runs it, and it must not strip a key a LATER retirement's own migration still has to carry). */
+const RETIRED_2026_10 = Object.freeze(RETIRED_SETTING_KEYS.slice(0, 7));
 
 /** Strip `keys` from a parsed settings document. Returns `{ doc, stripped }`: `doc` is a NEW object holding every other
  *  key in its original order (the input is never mutated), `stripped` maps each removed key to its stored value (the
@@ -27,4 +34,4 @@ function stripRetiredSettings(doc, keys = RETIRED_SETTING_KEYS) {
   return { doc: Object.fromEntries(entries.filter(([k]) => !drop.has(k))), stripped: Object.fromEntries(entries.filter(([k]) => drop.has(k))) };
 }
 
-module.exports = { RETIRED_SETTING_KEYS, stripRetiredSettings };
+module.exports = { RETIRED_SETTING_KEYS, RETIRED_2026_10, stripRetiredSettings };

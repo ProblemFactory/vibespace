@@ -64,9 +64,9 @@
  *   DELETE /api/browser/blocked/:id           dismiss an agent's blocked claim
  *   GET    /api/browser/proposals/:id         lane browser-propose: a tier-2 claim's PROPOSAL as its card draws it
  *                                             (SW.proposalCardBlock) — the user's; an agent's bearer 403 agent_forbidden
- *   POST   /api/browser/proposals/:id/approve { shown }   THE USER's Approve: runs EXACTLY the frozen proposal (the install,
- *                                             ONLY the claim's host on browser.cloak.egressAllowlist, the in-place switch or
- *                                             a new CloakBrowser profile, the page, the agent told for free); `shown` = the
+ *   POST   /api/browser/proposals/:id/approve { shown }   THE USER's Approve: runs EXACTLY the frozen proposal (a site
+ *                                             reset; a backend-switch proposal is `unavailable` in this version — lane
+ *                                             engine-spi-egress L3 — so 409 proposal_unavailable); `shown` = the
  *                                             digest of the card pressed — another ⇒ 409 proposal_changed, none ⇒ 400
  *                                             shown_required; 409 proposal_state / proposal_unavailable; agent bearer 403
  *   POST   /api/browser/proposals/:id/reject  the user's Reject (the agent hears it once, at its next navigation to the host)
@@ -177,8 +177,8 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // P4 second half (§7.4 / §7.5): the switch's typed refusals — three named backend refusals (D33), the ladder, seats, the gap
   backend_unavailable: 400, backend_no_key: 409, backend_seat_taken: 409, backend_seat_ceiling: 409, downgrade_refused: 409, downgrade_unknown: 409,
   switch_refused: 400, switch_export_only: 400, switch_noop: 409, browser_restarting: 409, hint_tier_with_backend: 400, host_underivable: 400, no_profile: 409,
-  // §7.4 failure form (1): the INSTALL action's typed refusals (src/browser-switch.js INSTALL_CODES)
-  install_local_only: 400, already_installed: 409, install_running: 409, kernel_credential_unusable: 409 /* lane kernel-asset-credential */, install_precondition_unmet: 409, install_unmeasured_platform: 409, install_unavailable: 503,
+  // the install slot's typed refusals (the browser CLI's install, a Chrome build's download, an engine's kernel)
+  install_local_only: 400, already_installed: 409, install_running: 409, kernel_credential_unusable: 409 /* lane kernel-asset-credential */, install_unavailable: 503,
   // takeover C3 (design-browser-takeover §5): the managed ephemeral browser — the shared ceiling (D2), a record that is
   // never attached / edited by id, pairs that name no browser of this conversation, the real CLI missing on this machine
   browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503,
@@ -580,9 +580,7 @@ router.get('/api/browser/providers', (req, res) => {
   const h = LOCAL.has(host) ? null : host;
   try {
     const rows = B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined });
-    // lane-cloak: `egress` = the allowlists the record IMPLIES (derived — egressHostsOf), `cloakSites` = what a running
-    // cloak browser may reach here now (the record's run hosts + the deployment's named sites)
-    res.json({ providers: rows, proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [] });
+    res.json({ providers: rows, host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [] });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/profiles/:id', (req, res) => {
@@ -731,7 +729,7 @@ router.post('/api/browser/profiles/:id/build', async (req, res) => {
  *  too: only a PERSON opening the picker reads Google's lists — never an agent, a timer or a boot). GET = the facts, no fetch
  *  (the progress poll) | `?lists=channels` (the 10 KB channel list, fresh) | `?lists=older` (the majors of the known-good list,
  *  kept 24 h) | `?major=N` (its versions) | `?version=X` (ONE HEAD: its size + the disk row); `profile=<id>` adds that profile's
- *  row. POST `{version}` = the download, in THE install slot (the CLI's and CloakBrowser's); DELETE = remove a build VibeSpace
+ *  row. POST `{version}` = the download, in THE install slot (the CLI's too); DELETE = remove a build VibeSpace
  *  downloaded (its witness, nobody choosing or running it). A refusal carries its facts as `build`. */
 const failBuild = (res, e) => res.status(STATUS[e && e.code] || 500).json({ error: String((e && e.message) || e), code: (e && e.code) || null, ...(e && e.build ? { build: e.build } : {}) });
 router.get('/api/browser/builds/available', async (req, res) => {
@@ -1307,27 +1305,10 @@ router.delete('/api/browser/site-hints/:host', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   try { res.json({ removed: k.dropSiteHint(String(req.params.host || '')), siteHints: k.siteHints() }); } catch (e) { fail(res, e); }
 });
-/** §7.4 failure form (1): the INSTALL action — GET = the verdict (no side
- *  effect; a refusal is a 200 carrying `{ok:false, code, error}` so a card
- *  can render the disabled control WITH its reason), POST = the act (a
- *  refusal is the typed 4xx). Local only: a paired machine's binary is its
- *  own to install. "Measure first, then install" — the keeper spawns nothing
- *  on a refusal. */
-router.get('/api/browser/install', (req, res) => {
-  if (refuseHost(req, res)) return;
-  const k = keeperOr503(res); if (!k) return;
-  try { res.json(k.installVerdict()); } catch (e) { fail(res, e); }
-});
-router.post('/api/browser/install', async (req, res) => {
-  if (refuseHost(req, res)) return;
-  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return; // lane browser-admin 2b: a download is the user's act (both installs of the ONE slot)
-  const k = keeperOr503(res); if (!k) return;
-  try { res.json(await k.installCloak()); } catch (e) { fail(res, e); }
-});
 /** lane browser-admin 2b: THE BROWSER CLI VIBESPACE DRIVES — GET = the facts the panel row says (the version the flag table
  *  was measured on + its download numbers, the choice `browser.cli`, the pinned install, the one on PATH, the one in use and
  *  its drift, the install slot); POST `{version?}` = install it (the user's act — an agent token refused by name; the ONE
- *  install slot cloak's install uses; `npm install --prefix <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts
+ *  install slot; `npm install --prefix <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts
  *  agent-browser@<v>` — the npm registry only). */
 router.get('/api/browser/cli', async (req, res) => {
   if (refuseHost(req, res)) return;
@@ -1973,12 +1954,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
         try { rejected = ctx.proposals.rejectionFor({ browserKey: f.browserKey, host: u }); } catch { rejected = null; }
       }
     }
-    // verify r1 V1 (lane browser-propose): what CloakBrowser's site list REFUSED while this verb ran — its own profile's
-    // proxy (one per wrapped profile: cloak's, and since lane engine-spi-egress an engine's), a profile this conversation HOLDS a lease on (never another's refusals), since the
-    // verb's /resolve — by name, so the agent asks for exactly that site (one card) instead of reading a blank page
+    // verify r1 V1 (lane browser-propose): what a wrapped browser's site list REFUSED while this verb ran — its own profile's
+    // proxy (one per wrapped engine profile), a profile this conversation HOLDS a lease on (never another's refusals), since the
+    // verb's /resolve — by name, so the agent can tell the user exactly which site the page needs instead of reading a blank page
     let egressRefused = null;
-    if (profileId && since > 0 && typeof k.cloakRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
-      try { const hosts = k.cloakRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts, typeof k.egressEngineOf === 'function' ? k.egressEngineOf(profileId) : null) }; } catch { egressRefused = null; } // lane engine-spi-egress: an engine's own list by its name
+    if (profileId && since > 0 && typeof k.egressRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
+      try { const hosts = k.egressRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts, typeof k.egressEngineOf === 'function' ? k.egressEngineOf(profileId) : null) }; } catch { egressRefused = null; } // lane engine-spi-egress: an engine's own list by its name
     }
     // lane browser-viewport-answer (B-6dae ①): the agent's own `set viewport|device` — the page's size read AFTER it (or instead
     // of it: a pin ruled), ONE line the CLI prints and ONE trace row (the bridge's)
@@ -2387,7 +2368,7 @@ router.get('/api/agent/browser/providers', async (req, res) => {
   try { builds = typeof k.buildsFor === 'function' ? B0.buildsView(await k.buildsFor(h)) : null; } catch { builds = null; }
   if (builds && builds.ok) builds = { ok: true, missing: builds.missing, cut: builds.cut, builds: builds.builds }; // no root path for an agent
   try { const c = typeof k.cliFacts === 'function' ? await k.cliFacts() : null; cli = c ? { table: c.table, mode: c.choice.mode, chosen: c.choice.version || null, inUse: c.inUse.version || null, inUsePinned: !!c.inUse.pinned, onPath: c.onPath.version || null, pinnedInstalled: c.pinned ? !!c.pinned.installed : null, drift: c.drift || null } : null; } catch { cli = null; }
-  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, builds, cli });
+  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), host: h, hostKnown: h ? k.hostKnown(h) : true, builds, cli });
 });
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
@@ -2502,22 +2483,13 @@ router.post('/api/agent/browser/pin', (req, res) => {
   try { res.json(pinAnswer(k, f, req.body?.profile, { by: 'agent' })); } catch (e) { fail(res, e); }
 });
 /** lane browser-propose step 3: what the agent is told when its claim filed (or found) a PROPOSAL — the ONE next step
- *  (tell the user in one sentence) and what it must not do (work around the refusal). */
-// lane dc-browser-backends (F6): the switch the agent is told about names the ANTI-BOT ROW (src/browser-profiles.js antiBotRow)
-const antiName = () => (require('../browser-profiles.js').antiBotRow() || { name: 'the anti-bot browser' }).name;
+ *  (tell the user in one sentence) and what it must not do (work around the refusal). lane engine-spi-egress L3 (D1 / D5):
+ *  every backend-switch proposal is `unavailable` in this version — nothing waits for an Approve. */
 function proposalNext(r) {
   const p = r.proposal || {};
-  const id = r.claim && r.claim.id;
-  if (r.rejected) return `the user REJECTED switching your browser to ${antiName()} for ${p.site} — do not work around the refusal (no copied session, no other browser); tell the user which page needs them and carry on with what you can`;
-  if (p.state === 'unavailable') {
-    const why = p.plan && p.plan.why === 'remote' ? 'this conversation runs on another machine' : p.plan && p.plan.why === 'other-machine' ? 'your browser runs on a paired machine' : p.plan && p.plan.why === 'already-cloak' ? 'your browser already is CloakBrowser' : p.plan && p.plan.why === 'never-admitted' ? `CloakBrowser never opens ${p.site} — a loopback / link-local address` : p.installWhy === 'provider_unavailable' ? 'CloakBrowser is not available in this version' : `CloakBrowser cannot be installed here (${p.installWhy || 'unavailable'})`;
-    return `no switch can be offered on this machine (${why}) — the user sees your claim as a card in the chat; tell them in ONE sentence which page refused you: signing in there is theirs (the live view's Take over). Do not work around it`;
-  }
-  // verify r1: a REJECT is not pushed — it is said at the agent's next navigation to the host (or its next claim on it)
-  if (r.duplicate) return `the same card still waits for the user (proposal ${id}, ${p.state}) — no second card was made. Do not ask again and do not work around the refusal; when they approve you are told (with their next message if your turn has ended); if they reject it, your next navigation to ${p.site} says so`;
-  const what = p.plan && p.plan.kind === 'switch' ? `switch this browser to ${antiName()} in place` : p.plan && p.plan.kind === 'site' ? `let your ${antiName()} browser open ${p.site}` : `a new ${antiName()} profile for this conversation`;
-  const also = Array.isArray(p.alsoSites) && p.alsoSites.length ? `, with the sites ${p.site}'s sign-in page loads from` : '';
-  return `a card in the user's chat now waits for their Approve (proposal ${id}: ${what}${also}${p.install === 'needed' ? `, installing ${antiName()} first` : ''}). Tell the user in ONE sentence that the card waits for their Approve — then stop: do NOT work around the refusal (no copied session, no other browser, no switch of your own). When they approve, you are told (with their next message if your turn has ended); re-run the sign-in then`;
+  if (r.rejected) return `the user REJECTED your proposal for ${p.site} — do not work around the refusal (no copied session, no other browser); tell the user which page needs them and carry on with what you can`;
+  const why = p.plan && p.plan.why === 'remote' ? 'this conversation runs on another machine' : p.plan && p.plan.why === 'other-machine' ? 'your browser runs on a paired machine' : 'this version of VibeSpace offers no one-click switch of browser';
+  return `no switch can be offered (${why}) — the user sees your claim as a card in the chat; tell them in ONE sentence which page refused you: signing in there is theirs (the live view's Take over). Do not work around it`;
 }
 /** P4 (§7.4): the profile an agent's backend verb acts on — a named handle/id, else the set's default / only member; the
  *  ephemeral browser has no registry record, so it is refused with the remedy (a switch is a property of a PROFILE). */
@@ -2643,11 +2615,11 @@ router.post('/api/agent/browser/blocked', (req, res) => {
     let choices = [];
     try { choices = profileId && typeof k.choicesFor === 'function' ? k.choicesFor(profileId) : []; } catch { choices = []; }
     const next = r.proposal ? proposalNext(r)
-      : choices.includes((require('../browser-profiles.js').antiBotRow() || {}).id)
-        ? `the user sees your claim in the live view with a one-click "Switch to ${antiName()}…" — the switch is THEIR act; \`vibespace-browser backend <name>\` proposes it yourself`
+      : choices.length
+        ? 'the user sees your claim in the live view with a one-click switch — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself'
         : 'the user sees your claim in the live view; no other browser is available on this instance, so the switch is not offered there — it is THEIR act to arrange one; `vibespace-browser backend` lists the rows';
     const { proposal, ...rest } = r;
-    res.json({ ...rest, ...(proposal ? { proposal: { id: r.claim.id, state: proposal.state, install: proposal.install, plan: { kind: proposal.plan.kind, why: proposal.plan.why || null, label: proposal.plan.label || proposal.plan.profileLabel || null }, site: proposal.site } } : {}), remembered, next });
+    res.json({ ...rest, ...(proposal ? { proposal: { id: r.claim.id, state: proposal.state, plan: { kind: proposal.plan.kind, why: proposal.plan.why || null, label: proposal.plan.label || proposal.plan.profileLabel || null }, site: proposal.site } } : {}), remembered, next });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/site-hint', (req, res) => {

@@ -76,7 +76,7 @@ const g = (key, secret, label) => ({ key, label: label || key, clientId: `${key}
 console.log('§1 PURE preset-layers');
 {
   // the env readers' rules, verbatim
-  const ints = PL.parseIntegrations([{ id: 'lark', values: { appId: 'cli_1', appSecret: 7 } }, { id: 'cloak', key: 'k1', label: 'L', values: { licenseKey: 'cb_x' } }, { values: {} }, { id: 'x' }, null]);
+  const ints = PL.parseIntegrations([{ id: 'lark', values: { appId: 'cli_1', appSecret: 7 } }, { id: 'cloud:browserbase', key: 'k1', label: 'L', values: { apiKey: 'cb_x' } }, { values: {} }, { id: 'x' }, null]);
   ok(ints.length === 2 && ints[0].key === 'default' && ints[0].label === null && ints[0].values.appSecret === '7' && ints[1].key === 'k1' && ints[1].label === 'L', 'parseIntegrations: a missing key is default, values stringified, an entry without id / values skipped');
   const drv = PL.parseDriveClients([g('org1', 'x'), { key: 'k', clientId: 'c' }, { key: 'n', clientId: 'c', clientSecret: 's' }]);
   ok(drv.length === 2 && drv[1].label === 'n', 'parseDriveClients: an entry missing key / clientId / clientSecret skipped, the label defaults to the key');
@@ -95,8 +95,8 @@ console.log('§1 PURE preset-layers');
   ok(PL.mergeLayers('gdrive', { release: rel }).entries.length === 2, 'a release layer alone (no cluster Secret yet) still serves');
   const dup = PL.mergeLayers('gdrive', { cluster: [g('a', '1'), g('a', '2')] });
   ok(dup.entries.length === 1 && dup.entries[0].clientSecret === '1', 'within one layer the FIRST entry of a key wins (what find() over the env list always answered)');
-  const im = PL.mergeLayers('integrations', { cluster: PL.parseIntegrations([{ id: 'lark', values: { appId: 'a', appSecret: 'x' } }, { id: 'cloak', values: { licenseKey: 'cb_1' } }]), release: PL.parseIntegrations([{ id: 'lark', values: { appId: 'b', appSecret: 'y' } }]) });
-  ok(im.entries.length === 2 && im.entries[0].values.appId === 'b' && im.entries[1].id === 'cloak', 'integrations: the identity is row id + preset key — the release\'s lark/default replaces the cluster\'s, cloak/default (same key, another row) stays');
+  const im = PL.mergeLayers('integrations', { cluster: PL.parseIntegrations([{ id: 'lark', values: { appId: 'a', appSecret: 'x' } }, { id: 'cloud:browserbase', values: { apiKey: 'cb_1' } }]), release: PL.parseIntegrations([{ id: 'lark', values: { appId: 'b', appSecret: 'y' } }]) });
+  ok(im.entries.length === 2 && im.entries[0].values.appId === 'b' && im.entries[1].id === 'cloud:browserbase', 'integrations: the identity is row id + preset key — the release\'s lark/default replaces the cluster\'s, cloak/default (same key, another row) stays');
   let threwKind = false; try { PL.mergeLayers('nope', {}); } catch { threwKind = true; }
   ok(threwKind, 'an unknown kind throws (never a silent null)');
 
@@ -122,9 +122,9 @@ console.log('§1 PURE preset-layers');
   const ago = (ms) => `${Math.round(ms / 60000)} min ago`;
   const none = PL.presetsLine(PL.summarize({}), { t, ago });
   ok(none.none && none.text === 'Company presets: none — ask your admin.', `no presets ⇒ "${none.text}"`);
-  const sum = PL.summarize({ dir: '/etc/vibespace/presets', updatedAt: 1000, items: [{ kind: 'gdrive', source: 'cluster', n: 3 }, { kind: 'lark', source: 'cluster', n: 1 }, { kind: 'gdrive', source: 'release', n: 1 }, { kind: 'cloak', source: 'env', n: 1 }, { kind: 'lark', source: 'release', n: 0 }] });
+  const sum = PL.summarize({ dir: '/etc/vibespace/presets', updatedAt: 1000, items: [{ kind: 'gdrive', source: 'cluster', n: 3 }, { kind: 'lark', source: 'cluster', n: 1 }, { kind: 'gdrive', source: 'release', n: 1 }, { kind: 'cloud:browserbase', source: 'env', n: 1 }, { kind: 'lark', source: 'release', n: 0 }] });
   const line = PL.presetsLine(sum, { t, ago, now: 1000 + 120000 });
-  ok(line.text === 'Company presets: 3 Google clients, 1 Lark app — from the cluster, updated 2 min ago; 1 Google client — from this release’s own values, updated 2 min ago; CloakBrowser key — from the environment (a restart is needed to change them)', `the brief's sentence, per source: "${line.text}"`);
+  ok(line.text === 'Company presets: 3 Google clients, 1 Lark app — from the cluster, updated 2 min ago; 1 Google client — from this release’s own values, updated 2 min ago; Browserbase (cloud browser) key — from the environment (a restart is needed to change them)', `the brief's sentence, per source: "${line.text}"`);
   ok(sum.groups.map((x) => x.source).join() === 'cluster,release,env' && !sum.groups.some((x) => x.items.some((i) => i.n === 0)), 'summarize keeps the source order and drops zero counts');
   const errs = PL.presetsLine(PL.summarize({ items: [{ kind: 'gdrive', source: 'cluster', n: 1 }], errors: [{ layer: 'release', file: 'integrations.json', code: 'unparseable', kept: true }, { layer: 'cluster', file: 'gdrive-clients.json', code: 'too-large', kept: false }] }), { t });
   ok(errs.errors.length === 2 && /override\/integrations\.json.*previous presets are kept/.test(errs.errors[0]) && /gdrive-clients\.json.*no presets until it is fixed/.test(errs.errors[1]), 'an unreadable file is SAID — kept (it had presets) or offering none (it never read)');
@@ -376,13 +376,13 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
     if (state === 'malformed') process.env.VIBESPACE_GDRIVE_CLIENTS = `[{"key":"ek","clientId":"c","clientSecret":"${SENT.env.gdrive}"},]`;
     const d = MountManager.drivePresets();
     const dataDir = path.join(ROOT, 'cell-env-' + state); fs.mkdirSync(dataDir, { recursive: true });
-    const envI = state === 'present' ? JSON.stringify([{ id: 'cloak', values: { licenseKey: SENT.env.integrations } }]) : state === 'malformed' ? `[{"id":"cloak","values":{"licenseKey":"${SENT.env.integrations}"}},]` : undefined;
+    const envI = state === 'present' ? JSON.stringify([{ id: 'cloud:browserbase', values: { apiKey: SENT.env.integrations } }]) : state === 'malformed' ? `[{"id":"cloud:browserbase","values":{"apiKey":"${SENT.env.integrations}"}},]` : undefined;
     const lines = []; const st = IS.create({ dataDir, env: envI === undefined ? {} : { VIBESPACE_INTEGRATIONS: envI }, presets: none, log: { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error: (...a) => lines.push(a.join(' ')) } });
-    const res = st.resolveIntegration('cloak');
+    const res = st.resolveIntegration('cloud:browserbase');
     return { d, res, errs: errs.slice(), lines };
   };
   const p = envCell('present');
-  ok(p.d.length === 1 && p.d[0].clientSecret === SENT.env.gdrive && p.res.source === 'cluster' && p.res.values.licenseKey === SENT.env.integrations, 'env=present, directory silent: Google clients from VIBESPACE_GDRIVE_CLIENTS, the cloak row from VIBESPACE_INTEGRATIONS (source cluster)');
+  ok(p.d.length === 1 && p.d[0].clientSecret === SENT.env.gdrive && p.res.source === 'cluster' && p.res.values.apiKey === SENT.env.integrations, 'env=present, directory silent: Google clients from VIBESPACE_GDRIVE_CLIENTS, the cloak row from VIBESPACE_INTEGRATIONS (source cluster)');
   const a = envCell('absent');
   ok(a.d.length === 0 && a.res.source === 'none' && a.res.whyCode === 'no-preset', 'env=absent, directory silent: no Google client, the row says no-preset (the dialogs: ask your admin)');
   const m = envCell('malformed');
@@ -393,8 +393,8 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const spoken = CP.create({ dir: cellDir({ cluster: 'present', release: 'absent' }), log: quiet.log });
   CP.setSharedPresets(spoken);
   const d2 = MountManager.drivePresets();
-  const st2 = IS.create({ dataDir: path.join(ROOT, 'cell-env-spoken'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'cloak', values: { licenseKey: SENT.env.integrations } }]) }, presets: spoken, log: quiet.log });
-  ok(d2.map((x) => x.key).join() === 'k' && d2[0].clientSecret === SENT.cluster.gdrive && st2.resolveIntegration('cloak').source === 'none' && st2.resolveIntegration('lark', { credentialKey: 'cluster:k' }).values.appSecret === SENT.cluster.integrations, 'the directory answers ⇒ the env is NOT consulted for that kind (one rung, never a mix): the env\'s ek and its cloak key are invisible');
+  const st2 = IS.create({ dataDir: path.join(ROOT, 'cell-env-spoken'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'cloud:browserbase', values: { apiKey: SENT.env.integrations } }]) }, presets: spoken, log: quiet.log });
+  ok(d2.map((x) => x.key).join() === 'k' && d2[0].clientSecret === SENT.cluster.gdrive && st2.resolveIntegration('cloud:browserbase').source === 'none' && st2.resolveIntegration('lark', { credentialKey: 'cluster:k' }).values.appSecret === SENT.cluster.integrations, 'the directory answers ⇒ the env is NOT consulted for that kind (one rung, never a mix): the env\'s ek and its cloak key are invisible');
 
   // THE USER'S OWN KEY WINS — AT THE CONSUMER
   const own = MountManager._driveClient({ clientId: 'mine.apps.googleusercontent.com', clientPreset: 'k' });

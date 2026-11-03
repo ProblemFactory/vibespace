@@ -20,7 +20,7 @@
  *     agent's pairs carry) and the lease config (the file the agent's commands name);
  *   · `navigator.webdriver` is true from the debugging port alone (M0) — this argv hides it (AutomationControlled).
  * The DRIVER road (agent-browser launches Chrome itself) stays the rung below: no xpra, a headless ask, a provider with
- * its own launch (cloak), a paired machine, a conversation's own temporary browser — its argv always carries
+ * its own launch flags, a paired machine, a conversation's own temporary browser — its argv always carries
  * --disable-sync, so it cannot sign in to Google, and the record says so.
  */
 
@@ -153,8 +153,8 @@ function attachCall(args, env, { cdp, socketDir } = {}) {
 }
 /**
  * THE ROAD of one launch → `{launch: 'attach' | 'driver', why}` (the record carries both — the fact the panel and the agent
- * read). Attach needs: a launch on THIS machine of a row that STARTS its own browser without its own launch flags (cloak
- * keeps its build's), a window wanted (an explicit headless ask keeps the driver's headless launch), the display keeper
+ * read). Attach needs: a launch on THIS machine of a row that STARTS its own browser without its own launch flags, a
+ * window wanted (an explicit headless ask keeps the driver's headless launch), the display keeper
  * wired, the driver at the version the attach facts were measured on (ATTACH_MIN_DRIVER), xpra + xauth on the machine, and
  * a Chrome executable found. Everything else is the driver road, said.
  */

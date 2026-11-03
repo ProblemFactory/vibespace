@@ -18,13 +18,11 @@
  *                    below IS the census's evidence; `{source, values, …}`
  *   sourceOf(id)   → the MASKED view's `{source, clusterKey, clusterLabel,
  *                    why}` for the switcher's SOURCE chip — never a value
- *   registerTests  → `store.registerTest(id, runner)` for all six rows (a row
+ *   registerTests  → `store.registerTest(id, runner)` for all five rows (a row
  *                    that declares a `test` and registers nothing is a dead
  *                    control ⇒ the shared census goes red)
  *
- * THE RUNNERS' EGRESS DECLARATION (§7.5, three clauses): `cloak` is
- * shape-only — ZERO network, no process, no bytes (the tier comes from the
- * first real launch); each `cloud:*` runner makes exactly ONE bounded
+ * THE RUNNERS' EGRESS DECLARATION (§7.5): each `cloud:*` runner makes exactly ONE bounded
  * read-only request to the ONE host `browser-switch.testHostFor` derives
  * from that row's own fields (browserless / kernel: the host inside the URL
  * the user typed; agentcore: its region; the two others: their constant API
@@ -74,22 +72,6 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
   }
 
   // ── the runners ──
-  /** `cloak` — shape-only. Zero network, starts no process, downloads no
-   *  byte: it validates the `cb_…` shape through the row's own validator.
-   *  lane-cloak (MEASURED 2026-09-28): NO key is a PASSING test — the free
-   *  build VibeSpace installs runs with no key and no sign-in, and a switch or
-   *  a start no longer refuses it (browser-switch keyRequiredFor('cloak') is
-   *  false). A key present is only checked for its shape; the installed build
-   *  sends it nowhere (the §7.2.1 record's run 3). The seat tier is NOT read
-   *  here (that needs a launch). */
-  async function cloakTest({ resolved, row }) {
-    const f = (row && row.fields || []).find((x) => x.key === 'licenseKey');
-    const v = resolved && resolved.values ? String(resolved.values.licenseKey || '') : '';
-    if (!v) return { ok: true, detail: { network: 'none', key: 'none needed — the free CloakBrowser runs without one', source: resolved ? resolved.source : 'none' } };
-    const r = f && typeof f.validate === 'function' ? f.validate(v) : { ok: true };
-    if (!r || r.ok !== true) return { ok: false, error: `validate: licenseKey ${(r && r.why) || 'invalid'}` };
-    return { ok: true, detail: { network: 'none', shape: 'cb_ key present', used: 'not by the free build VibeSpace installs (measured: it sends a key nowhere)', tier: 'read back from a launch, not from this check', source: resolved ? resolved.source : 'none' } };
-  }
   /** `cloud:*` — credential-exchange: ONE bounded read-only request to the
    *  ONE derived host; the key rides a header. */
   function cloudTest(id) {
@@ -108,7 +90,6 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
     };
   }
   const runners = Object.freeze({
-    cloak: cloakTest,
     'cloud:browserbase': cloudTest('cloud:browserbase'),
     'cloud:browserless': cloudTest('cloud:browserless'),
     'cloud:kernel': cloudTest('cloud:kernel'),
@@ -119,7 +100,7 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
    *  time. Returns the ids registered (empty when there is no store, said). */
   function registerTests() {
     const st = store();
-    if (!st || typeof st.registerTest !== 'function') { log.warn?.('[browser-backend] no integration store — the six key rows keep no Test runner'); return []; }
+    if (!st || typeof st.registerTest !== 'function') { log.warn?.('[browser-backend] no integration store — the five key rows keep no Test runner'); return []; }
     const done = [];
     for (const id of KEY_IDS) { try { st.registerTest(id, runners[id]); done.push(id); } catch (e) { log.warn?.(`[browser-backend] ${id}: runner not registered — ${e && e.message}`); } }
     return done;

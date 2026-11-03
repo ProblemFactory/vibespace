@@ -139,9 +139,9 @@ console.log('§4 the shipped schema');
   ok(misses.length === 0, `V1: EVERY one of the ${Object.keys(SCHEMA).length - heldKeys.length} drawable rows is reachable by searching its key with the switch OFF and every fact false (a loop, not a sample; ${heldKeys.length} held)`, misses.slice(0, 5));
   ok(heldKeys.every((p) => !real(all, { query: p, showAdvanced: true }).sections.some((s) => s.rows.some((r) => r.path === p))),
     `V1: …and a HELD row is reachable by NO search, every fact true (${heldKeys.join(', ') || 'none held'})`);
-  const cloak = real(none, { query: 'cloakbrowser' });
-  { const cr = cloak.sections.flatMap((s) => s.rows).filter((r) => r.path === 'browser.cloak.executablePath' || r.path === 'browser.cloak.egressAllowlist');
-    ok(cr.length === 2 && cr.every((r) => !r.chips.some((c) => c.kind === 'unused')) && !('browser.cloak.enabled' in SCHEMA), 'the switch dialog\'s deep link ("CloakBrowser") reaches both live CloakBrowser rows with no "not in use here" chip — lane dc-browser-providers deleted the never-run container switch they hid behind', cr.map((r) => r.path)); }
+  // lane engine-spi-egress L3: the anti-bot backend's two rows are RETIRED (src/retired-settings.js) — no search reaches them
+  { const gone = real(all, { query: 'browser.cloak', showAdvanced: true }).sections.flatMap((s) => s.rows).filter((r) => /^browser\.cloak\./.test(r.path));
+    ok(gone.length === 0 && !('browser.cloak.executablePath' in SCHEMA) && !('browser.cloak.egressAllowlist' in SCHEMA), 'the retired browser.cloak.* rows are gone: no schema row, no search reaches one'); }
   const adv = Object.entries(SCHEMA).filter(([, r]) => r.tier === 'advanced').map(([k]) => k);
   const whens = Object.entries(SCHEMA).filter(([, r]) => r.when).length;
   console.log(`    tier census: ${adv.length} advanced of ${Object.keys(SCHEMA).length} rows; ${whens} rows carry a \`when\`; default view draws ${real(all).drawn} rows, ${real(all).hiddenAdvanced} advanced folded`);

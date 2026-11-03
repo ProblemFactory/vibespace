@@ -75,12 +75,12 @@ const log = { log: (...a) => lines.push(a.join(' ')), error: (...a) => lines.pus
 const DIR = path.join(ROOT, 'presets');
 const DATA = path.join(ROOT, 'data'); fs.mkdirSync(DATA, { recursive: true });
 project(DIR, {
-  'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }, { id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_cluster', appSecret: LARK_A } }, { id: 'lark', key: 'other', label: 'Other', values: { appId: 'cli_other', appSecret: LARK_A } }],
+  'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }, { id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_cluster', appSecret: LARK_A } }, { id: 'lark', key: 'other', label: 'Other', values: { appId: 'cli_other', appSecret: LARK_A } }],
   'gdrive-clients.json': [g('org1', G_A, 'Org'), g('channels', G_A, 'Channels')],
   'override/integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis (mine)', values: { appId: 'cli_release', appSecret: LARK_U } }],
 });
 // the env handle carries OTHER values: the file must win where it speaks
-const env = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'cloak', values: { licenseKey: 'cb_env_license_ZZZZZZZZZZZZZZZZ' } }, { id: 'cloud:browserless', values: { apiKey: 'env-browserless-key-0000000' } }]) };
+const env = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'cloud:browserbase', values: { apiKey: 'cb_env_license_ZZZZZZZZZZZZZZZZ' } }, { id: 'cloud:browserless', values: { apiKey: 'env-browserless-key-0000000' } }]) };
 const reader = CP.create({ dir: DIR, log, debounceMs: 30, pollMs: 300 });
 CP.setSharedPresets(reader);                             // MountManager.drivePresets reads the same instance
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
@@ -97,8 +97,8 @@ const get = (p) => new Promise((res, rej) => http.get({ host: '127.0.0.1', port:
 // ═══ §1 the file rung ═══════════════════════════════════════════════════
 console.log('§1 the file rung');
 {
-  const c = store.resolveIntegration('cloak');
-  ok(c.source === 'cluster' && c.values.licenseKey === CLOAK_A, 'cloak (a card row): the cluster default comes from the presets DIRECTORY — the env handle\'s other key is not consulted');
+  const c = store.resolveIntegration('cloud:browserbase');
+  ok(c.source === 'cluster' && c.values.apiKey === CLOAK_A, 'cloud:browserbase (a card row): the cluster default comes from the presets DIRECTORY — the env handle\'s other key is not consulted');
   const bl = store.resolveIntegration('cloud:browserless');
   ok(bl.source === 'none', 'cloud:browserless: the directory speaks for integrations, the env JSON is not merged into it (one rung, never a mix)');
   ok(JSON.stringify(store.presetsFor('lark')) === JSON.stringify([{ key: 'jarvis', label: 'Jarvis (mine)' }, { key: 'other', label: 'Other' }]), 'lark (account-bound): presetsFor = the directory\'s presets, the release override REPLACING jarvis per key, the company\'s other preset kept');
@@ -109,9 +109,9 @@ console.log('§1 the file rung');
   const bare = CP.create({ dir: path.join(ROOT, 'empty-dir'), log: { log() {}, error() {}, warn() {} } });
   fs.mkdirSync(path.join(ROOT, 'empty-dir'), { recursive: true });
   const envOnly = require(STORE_PATH).create({ dataDir: path.join(ROOT, 'data-envonly'), env, presets: bare, log: { log() {}, error() {}, warn() {} } });
-  ok(envOnly.resolveIntegration('cloak').values.licenseKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ' && envOnly.resolveIntegration('cloud:browserless').source === 'cluster', 'a directory with no integrations file: the env is the fallback rung (a release still on env works unchanged)');
+  ok(envOnly.resolveIntegration('cloud:browserbase').values.apiKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ' && envOnly.resolveIntegration('cloud:browserless').source === 'cluster', 'a directory with no integrations file: the env is the fallback rung (a release still on env works unchanged)');
   const items = store.presetItems();
-  ok(items.some((i) => i.kind === 'cloak' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'release' && i.n === 1), `presetItems: counted by the layer each preset came from (${JSON.stringify(items)})`);
+  ok(items.some((i) => i.kind === 'cloud:browserbase' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'cluster' && i.n === 1) && items.some((i) => i.kind === 'lark' && i.source === 'release' && i.n === 1), `presetItems: counted by the layer each preset came from (${JSON.stringify(items)})`);
 }
 
 // ═══ §2 LIVE ═════════════════════════════════════════════════════════════
@@ -123,15 +123,15 @@ console.log('§2 live re-derive + notify');
   const listened = []; store.onChange((id, why) => listened.push([id, why]));
   frames.length = 0; lines.length = 0;
   project(DIR, {
-    'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_B } }, { id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_cluster', appSecret: LARK_A } }],
+    'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_B } }, { id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_cluster', appSecret: LARK_A } }],
     'gdrive-clients.json': [g('org1', G_B, 'Org'), g('channels', G_A, 'Channels')],
     'override/integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis (mine)', values: { appId: 'cli_release', appSecret: LARK_U } }],
   });
   const ms = await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
   ok(ms >= 0, `the swap reached the clients (${ms} ms after the rename)`);
   const cards = frames.filter((f) => f.type === 'integrations-updated');
-  const cloak = cards.find((f) => f.id === 'cloak');
-  ok(cloak && cloak.why === 'presets' && cloak.integration.source === 'cluster' && cloak.integration.masked.licenseKey === '••••' + CLOAK_B.slice(-4), `the cloak card's RECOMPUTED view is pushed (masked ••••${CLOAK_B.slice(-4)}, why: presets)`);
+  const cloak = cards.find((f) => f.id === 'cloud:browserbase');
+  ok(cloak && cloak.why === 'presets' && cloak.integration.source === 'cluster' && cloak.integration.masked.apiKey === '••••' + CLOAK_B.slice(-4), `the cloak card's RECOMPUTED view is pushed (masked ••••${CLOAK_B.slice(-4)}, why: presets)`);
   const cardIds = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is no card either (never re-broadcast as one)
   ok(cards.length === cardIds.length && cardIds.every((id) => cards.filter((f) => f.id === id).length === 1) && !cards.some((f) => ['lark', 'gmail', 'fake'].includes(f.id)), `every CARD row re-broadcast exactly once (${cards.length} of the registry's ${cardIds.length}), no account-bound row (not a card)`);
   ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks every adapter and re-pushes its digest)');
@@ -139,8 +139,8 @@ console.log('§2 live re-derive + notify');
   ok(sumF.length === 1 && sumF[0].presets.groups.find((gr) => gr.source === 'cluster').items.some((i) => i.kind === 'gdrive' && i.n === 2), 'ONE cluster-presets-updated frame with the recomputed summary');
   ok(!SECRETS.some((s) => JSON.stringify(frames).includes(s)), 'no frame carries a secret — not the old, not the new');
   const jl = lines.filter((l) => /\[presets\] changed/.test(l));
-  ok(jl.length === 1 && /rotated org1/.test(jl[0]) && /rotated cloak\/default/.test(jl[0]) && /removed lark\/other/.test(jl[0]) && !SECRETS.some((s) => jl[0].includes(s)), `ONE journal line naming what changed: ${jl[0]}`);
-  ok(store.resolveIntegration('cloak').values.licenseKey === CLOAK_B, 'the consumers\' call answers the rotated key now — no restart');
+  ok(jl.length === 1 && /rotated org1/.test(jl[0]) && /rotated cloud:browserbase\/default/.test(jl[0]) && /removed lark\/other/.test(jl[0]) && !SECRETS.some((s) => jl[0].includes(s)), `ONE journal line naming what changed: ${jl[0]}`);
+  ok(store.resolveIntegration('cloud:browserbase').values.apiKey === CLOAK_B, 'the consumers\' call answers the rotated key now — no restart');
   const gone = store.resolveIntegration('lark', { credentialKey: 'cluster:other' });
   ok(gone.source === 'none' && gone.whyCode === 'preset-gone' && gone.whyParams.key === 'other', 'a preset the cluster withdrew answers preset-gone BY NAME on the account rung — never another preset');
   ok(store.resolveIntegration('gmail', { credentialKey: 'cluster:org1' }).values.clientSecret === G_B && MountManager._driveClient({ clientPreset: 'org1' }).clientSecret === G_B, 'the rotated Google client reaches the gmail row AND the storage mounts\' _driveClient — the same instance, no restart');
@@ -152,18 +152,18 @@ console.log('§2 live re-derive + notify');
 console.log('§3 malformed');
 {
   frames.length = 0; lines.length = 0;
-  project(DIR, { 'integrations.json': `[{"id":"cloak","values":{"licenseKey":"${CLOAK_A}"}},`, 'gdrive-clients.json': [g('org1', G_B, 'Org'), g('channels', G_A, 'Channels')], 'override/integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis (mine)', values: { appId: 'cli_release', appSecret: LARK_U } }] });
+  project(DIR, { 'integrations.json': `[{"id":"cloud:browserbase","values":{"apiKey":"${CLOAK_A}"}},`, 'gdrive-clients.json': [g('org1', G_B, 'Org'), g('channels', G_A, 'Channels')], 'override/integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis (mine)', values: { appId: 'cli_release', appSecret: LARK_U } }] });
   await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
-  ok(store.resolveIntegration('cloak').values.licenseKey === CLOAK_B, 'a malformed integrations file: the PREVIOUS presets stay in effect (cloak keeps the last good key)');
+  ok(store.resolveIntegration('cloud:browserbase').values.apiKey === CLOAK_B, 'a malformed integrations file: the PREVIOUS presets stay in effect (cloak keeps the last good key)');
   const el = lines.filter((l) => /could not be read/.test(l));
   ok(el.length === 1 && /integrations\.json/.test(el[0]) && !el[0].includes(CLOAK_A.slice(-6)), `ONE journal line, no secret bytes: ${el[0]}`);
   const sf = frames.find((f) => f.type === 'cluster-presets-updated');
   ok(sf && sf.presets.errors.length === 1 && sf.presets.errors[0].code === 'unparseable' && sf.presets.errors[0].kept === true, 'the summary says it to every client (kept: true) — and no card was re-broadcast (the presets did not change)');
   ok(!frames.some((f) => f.type === 'integrations-updated'), '…no card frame: nothing to re-derive');
   frames.length = 0;
-  project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
+  project(DIR, { 'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
   await until(() => frames.some((f) => f.type === 'integrations-updated'));
-  ok(store.resolveIntegration('cloak').values.licenseKey === CLOAK_A && (await get('/api/integrations')).presets.errors.length === 0, 'fixed: it serves again and the error is gone from the summary');
+  ok(store.resolveIntegration('cloud:browserbase').values.apiKey === CLOAK_A && (await get('/api/integrations')).presets.errors.length === 0, 'fixed: it serves again and the error is gone from the summary');
 }
 
 // ═══ §4 the fleet's relay page (lane oauth-relay-one-source) ════════════
@@ -173,14 +173,14 @@ console.log('§4 fleet.json — the relay page, live');
   ok(store.fleetRelayUrl() === '', 'no fleet.json and no relay env ⇒ no fleet relay page');
   const listened = []; const off = store.onChange((id, why) => listened.push([id, why]));
   frames.length = 0; lines.length = 0;
-  project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')], 'fleet.json': { relayUrl: RELAY } });
+  project(DIR, { 'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')], 'fleet.json': { relayUrl: RELAY } });
   const ms = await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
   ok(ms >= 0 && store.fleetRelayUrl() === RELAY, `a fleet.json added by a Secret edit answers at the store\'s fleetRelayUrl() ${ms} ms after the rename — no restart`);
   ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks its adapters and re-pushes its digest: the setup card\'s relay pages follow)');
   const jl = lines.filter((l) => /\[presets\] changed/.test(l));
   ok(jl.length === 1 && jl[0].endsWith(`relay page changed (now ${RELAY})`) && !SECRETS.some((x) => JSON.stringify(frames).includes(x)), `ONE journal line, no secret in any frame: ${jl[0]}`);
   frames.length = 0;
-  project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
+  project(DIR, { 'integrations.json': [{ id: 'cloud:browserbase', values: { apiKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
   await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
   ok(store.fleetRelayUrl() === '', 'fleet.json withdrawn ⇒ no fleet relay page again (no env here)');
   off();
@@ -193,7 +193,7 @@ console.log('§4 fleet.json — the relay page, live');
   ok(src.includes(anchor), 'the control\'s anchor exists in the store');
   const envOnly = M.load('src/server/integration-store.js', src.replace(anchor, '    const fromFile = null;'), 'envonly');
   const s2 = envOnly.create({ dataDir: path.join(ROOT, 'data-ctl'), env, presets: reader, log: { log() {}, error() {}, warn() {} } });
-  ok(s2.resolveIntegration('cloak').values.licenseKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ', 'CONTROL: a store without the file rung keeps serving the env\'s boot-time key — the §1/§2 asserts are red on it');
+  ok(s2.resolveIntegration('cloud:browserbase').values.apiKey === 'cb_env_license_ZZZZZZZZZZZZZZZZ', 'CONTROL: a store without the file rung keeps serving the env\'s boot-time key — the §1/§2 asserts are red on it');
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);

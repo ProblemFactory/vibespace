@@ -12,7 +12,7 @@
 const i18nKey = (s) => s;
 
 /** The closed set — equal to src/browser-switch.js ROW_STATES (the fast suite asserts it). */
-export const ROW_STATES = Object.freeze(['current', 'not-a-switch', 'other-machine', 'not-in-this-version', 'installing', 'path-not-runnable', 'install-failed', 'not-installed', 'not-installed-here', 'needs-key', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'in-use-by-hand', 'ready-confirm', 'ready', 'unavailable']);
+export const ROW_STATES = Object.freeze(['current', 'not-a-switch', 'other-machine', 'not-in-this-version', 'needs-key', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'in-use-by-hand', 'ready-confirm', 'ready', 'unavailable']);
 /** The states that never draw a card (the current browser, and every row that is not a switch of THIS profile). */
 export const HIDDEN_STATES = Object.freeze(['current', 'not-a-switch', 'other-machine', 'not-in-this-version']);
 
@@ -26,7 +26,7 @@ export function learnBackendRows(rows) {
   for (const r of Array.isArray(rows) ? rows : []) if (r && r.id && r.words && typeof r.words === 'object') ROWS.set(String(r.id), { words: r.words, canSwitchTo: r.canSwitchTo || r.switchKind || null });
 }
 const wordsOf = (id) => { const r = ROWS.get(String(id || '')); return r ? r.words : null; };
-// `brand: true` = its name and chip are a brand name, said as they are in every language (Chromium, CloakBrowser)
+// `brand: true` = its name and chip are a brand name, said as they are in every language (Chromium)
 const said = (w, key, t) => (!w || !w[key] ? null : w.brand && (key === 'name' || key === 'chip') ? String(w[key]) : t(w[key], w.vendor ? { vendor: w.vendor } : undefined));
 // a row that is not switched in place (somebody else's browser, a desktop window, a cloud vendor's) has no switch card
 const isStructural = (id) => { const r = ROWS.get(String(id || '')); return !!r && !!r.canSwitchTo && r.canSwitchTo !== 'in-place'; };
@@ -58,38 +58,22 @@ const S = (text, warn = false) => ({ text, warn: !!warn });
 /** BROWSE YOURSELF (B-6ae8): the user's own browsing holder's key (src/browser-human.js HUMAN_KEY_RE — this file imports nothing). */
 const HUMAN_KEY_RE = /^hu-[0-9a-f]{8}$/;
 const countOf = (l) => (Array.isArray(l) ? l.length : (Number(l) || 0));
-/** THE download confirm (the dialog's not-installed / install-failed cards and the Manage Agents row share it).
- *  lane-cloak: `iv` = the install verdict (`GET /api/browser/install` / the switcher view's `install`) — its MEASURED
- *  record says how big the download is, where it comes from and how big it unpacks, so the words are the record's
- *  numbers, never a guess; without one (an old server) the generic sentence. */
-export function installConfirmWords(name, t, iv = null) {
-  const p = iv && iv.proof ? iv.proof : null;
-  const mb = (b) => Math.max(1, Math.round(Number(b) / 1e6));
-  const measured = !!(p && p.status === 'measured' && Number(p.downloadBytes) > 0 && Number(p.installedBytes) > 0);
-  const message = measured
-    ? t(i18nKey("About {down} MB is downloaded once from {host}, its maker, and unpacked to about {size} MB in VibeSpace's data folder. VibeSpace checks it is the exact copy it tested; in that test the browser itself connected to nothing on the internet. No account or key is needed."), { down: mb(p.downloadBytes), host: String(p.downloadHost || name), size: mb(p.installedBytes) })
-    : t(i18nKey("About 200 MB is downloaded from {name}'s maker and kept in VibeSpace's data folder."), { name });
-  return { title: t(i18nKey('Install {name}?'), { name }), message, confirmText: t(i18nKey('Download and install')), danger: false };
-}
 /** The credential codes that mean a key EXISTS and cannot be used — the only ones the needs-key card explains (every
  *  "nothing configured" code — no-values / no-preset / own-missing / no-store — says nothing past the first line). */
 const KEY_UNUSABLE = new Set(['undecryptable', 'store-unreadable', 'preset-gone', 'rebound', 'ambiguous', 'unknown-credential']);
-/** The lines both switch cards share: what a switch does, the fingerprint note, (live, 2 or more) who else it moves,
- *  and — lane-cloak — a browser behind the egress allowlist with no site named yet (it would open nothing). */
-function readyLines(ctx, t, facts = {}) {
+/** The lines both switch cards share: what a switch does and (live, 2 or more) who else it moves. */
+function readyLines(ctx, t) {
   const { name, label } = ctx;
   const out = [S(ctx.live
     ? t(i18nKey('Switching restarts the browser; open pages reopen by themselves and saved logins come along. You can switch back any time.'))
     : t(i18nKey("The browser isn't open right now; the next time your agent opens “{label}” it opens in {name}. You can switch back any time."), { label, name }))];
-  if (ctx.fingerprintChange === 'gains' || ctx.fingerprintChange === 'loses') out.push(S(t(i18nKey('A few sites may still ask you to sign in again.')), true));
   const n = countOf(ctx.leases);
   if (ctx.live && n >= 2) out.push(S(t(i18nKey('{n} conversations use this browser now; their pages reopen too and their work pauses briefly.'), { n })));
-  if (facts && facts.sites === 0) out.push(S(t(i18nKey('{name} opens only the sites you list in Settings → Agent browser, and none are listed yet.'), { name }), true));
   return out;
 }
 /**
  * One card's sentences + its ONE control, from the row's state and facts.
- * ctx = {name, label, live, leases, fingerprintChange, integrationId, credentialWhy, sessionOf, hostName, install}. `install` = the view's install verdict (the download confirm reads its measured sizes).
+ * ctx = {name, label, live, leases, integrationId, credentialWhy, sessionOf, hostName}.
  * → { sentences: [{text, warn}], action: null | {kind, label, primary, confirm, sessionId?, integrationId?} }
  */
 export function stateWords(state, facts, ctx, t) {
@@ -100,11 +84,11 @@ export function stateWords(state, facts, ctx, t) {
   const act = (kind, text, extra = {}) => ({ kind, label: text, primary: false, confirm: null, ...extra });
   switch (state) {
     case 'ready': {
-      return { sentences: readyLines(c, t, f), action: act('switch', t(i18nKey('Switch to {name}'), { name }), { primary: true }) };
+      return { sentences: readyLines(c, t), action: act('switch', t(i18nKey('Switch to {name}'), { name }), { primary: true }) };
     }
     case 'ready-confirm': {
       const warn = t(i18nKey("VibeSpace can't check that {name} isn't older than the browser that last opened “{label}”. If it is, “{label}” may stop opening, along with its saved logins."), { name, label });
-      return { sentences: [...readyLines(c, t, f), S(warn, true)], action: act('switch-confirm', t(i18nKey('Switch to {name}'), { name }), { primary: true, confirm: { title: t(i18nKey('Switch to {name}?'), { name }), message: warn, confirmText: t(i18nKey('Switch anyway')), danger: true } }) };
+      return { sentences: [...readyLines(c, t), S(warn, true)], action: act('switch-confirm', t(i18nKey('Switch to {name}'), { name }), { primary: true, confirm: { title: t(i18nKey('Switch to {name}?'), { name }), message: warn, confirmText: t(i18nKey('Switch anyway')), danger: true } }) };
     }
     case 'in-use-by-hand': {
       // BROWSE YOURSELF (B-6ae8): the user browses it HIMSELF (the driver is his own holder, `hu-…`) — a switch restarts the
@@ -128,16 +112,6 @@ export function stateWords(state, facts, ctx, t) {
       }
       return { sentences: s, action: act('integration', t(i18nKey('Enter license key…')), { integrationId: c.integrationId || null }) };
     }
-    case 'not-installed':
-      return { sentences: [S(t(i18nKey("{name} isn't installed on the computer VibeSpace runs on."), { name }))], action: act('install', t(i18nKey('Download and install…')), { confirm: installConfirmWords(name, t, c.install || null) }) };
-    case 'not-installed-here':
-      return { sentences: [S(t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name }))], action: act('settings', t(i18nKey('Set location in Settings…'))) };
-    case 'installing':
-      return { sentences: [S(t(i18nKey('Installing {name}; this can take a few minutes. You can close this window, it keeps going.'), { name }))], action: null };
-    case 'install-failed':
-      return { sentences: [S(t(i18nKey("The last install of {name} didn't finish."), { name }), true)], action: act('install', t(i18nKey('Install again…')), { confirm: installConfirmWords(name, t, c.install || null) }) };
-    case 'path-not-runnable':
-      return { sentences: [S(t(i18nKey("The {name} set in Settings won't start; the location may be wrong."), { name }), true)], action: act('settings', t(i18nKey('Set location in Settings…'))) };
     case 'older-browser':
       return { sentences: [S(t(i18nKey("{name} is older than the browser “{label}” uses now; opening it there would damage its saved logins, so it can't be switched. A new profile can start in {name}."), { name, label }), true)], action: null };
     case 'all-in-use-own':
@@ -188,7 +162,7 @@ export function noticeWords(state, facts, name, label, t) {
 }
 /**
  * THE DIALOG, as data: `{title, switching, claims, now, notice, targets, empty}` — every entry keyed for the patch.
- * `pending` = the local overlay a click sets before the POST answers ({state:'switching', to} or {id, state:'installing'});
+ * `pending` = the local overlay a click sets before the POST answers ({state:'switching', to});
  * `sessionOf(browserKey)` → a webui id (the driver's live view); `hostNameOf(hostId)` → the machine's name.
  */
 export function switcherModel(view, { t, preselect = null, pending = null, sessionOf = () => null, hostNameOf = (id) => id, credentialWhy = null } = {}) {
@@ -206,8 +180,8 @@ export function switcherModel(view, { t, preselect = null, pending = null, sessi
   const nLeases = Array.isArray(v.leases) ? v.leases.length : 0;
   out.targets = rows.filter((r) => r && r.switchKind === 'in-place' && !HIDDEN_STATES.includes(r.state)).map((r) => {
     const name = backendName(r.id, t);
-    const state = pending && pending.state === 'installing' && pending.id === r.id ? 'installing' : r.state;
-    const w = stateWords(state, r.facts || {}, { name, label, live: !!v.live, leases: nLeases, fingerprintChange: r.fingerprintChange || null, integrationId: r.integrationId || null, credentialWhy, sessionOf, hostName, install: v.install || null }, t);
+    const state = r.state;
+    const w = stateWords(state, r.facts || {}, { name, label, live: !!v.live, leases: nLeases, integrationId: r.integrationId || null, credentialWhy, sessionOf, hostName }, t);
     return { key: 'target:' + r.id, id: r.id, name, blurb: blurbOf(r.id, t), state, sentences: w.sentences, action: w.action, integrationId: r.integrationId || null, code: r.code || null };
   });
   if (preselect) {
@@ -219,9 +193,9 @@ export function switcherModel(view, { t, preselect = null, pending = null, sessi
   }
   let empty = emptyWords(v, out, t);
   // BROWSE YOURSELF (B-6ae8): not running, on this computer ⇒ the empty line's ONE button opens it for the user.
-  // The .197 integration (cloak × browse-yourself): offered whenever the browser is not open here — INDEPENDENT of the
-  // switch cards (lane-cloak's CloakBrowser Install card made this dialog never empty, and the line vanished); the two
-  // are different rows: a card switches the browser, this line opens the one there is
+  // The .197 integration: offered whenever the browser is not open here — INDEPENDENT of the switch cards (a card that made
+  // this dialog never empty once made the line vanish); the two are different rows: a card switches the browser, this line
+  // opens the one there is
   const canSelfOpen = !v.live && !p.host && !isStructural(p.provider || 'chromium');
   if (!empty && canSelfOpen) empty = t(i18nKey("The browser isn't open right now. If a site blocks your agent, open “{label}” yourself and get past the check."), { label });
   const selfOpen = !!empty && canSelfOpen;
@@ -260,40 +234,6 @@ export function switchOutcomeWords(r, { t, name = null, from = null, to = null, 
   if (code === 'not-found') return { tone: 'error', text: t(i18nKey('This profile no longer exists.')) };
   if (code === 'unavailable') return { tone: 'error', text: t(i18nKey("Browser profiles aren't available on this server.")) };
   return { tone: 'error', text: t(i18nKey("The switch didn't go through.")), refresh: true };
-}
-/** `POST /api/browser/install` → `{tone, text}`. */
-export function installOutcomeWords(r, { t, name = 'CloakBrowser' } = {}) {
-  if (!r || typeof r !== 'object') return { tone: 'error', text: t(i18nKey('Could not reach the server')) };
-  if (r.ok && !r.error) return { tone: 'ok', text: t(i18nKey('Installing {name}; this can take a few minutes.'), { name }) };
-  switch (String(r.code || '')) {
-    case 'install_running': return { tone: 'warn', text: t(i18nKey('An install is already running.')) };
-    case 'already_installed': return { tone: 'ok', text: t(i18nKey('{name} is already installed.'), { name }) };
-    case 'install_unavailable': return { tone: 'error', text: t(i18nKey("VibeSpace can't install {name} here by itself."), { name }) };
-    case 'install_precondition_unmet': return { tone: 'error', text: t(i18nKey("{name} isn't part of this version of VibeSpace."), { name }) };
-    case 'install_unmeasured_platform': return { tone: 'error', text: t(i18nKey("VibeSpace can't install {name} here by itself."), { name }) };
-    case 'install_local_only': return { tone: 'error', text: t(i18nKey('{name} can only be installed on the computer VibeSpace runs on.'), { name }) };
-    default: return { tone: 'error', text: t(i18nKey("The install didn't start.")) };
-  }
-}
-/**
- * The Manage Agents CloakBrowser row, from `GET /api/browser/install`: `{text, state, offer, title}` — the state word or
- * sentence, and the ONE act the row offers (`install` / `install-again`, both behind the download confirm) or none.
- * The order mirrors the dialog's rule 6: a finished-but-failed run, then an installable one (VibeSpace can do it here
- * only with npm), then a build that has none of this. A disabled Install with a tooltip is gone.
- */
-export function installVerdictWords(iv, { t, name = 'CloakBrowser' } = {}) {
-  const v = iv || {};
-  if (v.code === 'already_installed') return { text: t(i18nKey('installed')), state: 'installed', offer: null, title: v.path ? String(v.path) : '' };
-  if (v.state && v.state.running) return { text: t(i18nKey('installing…')), state: 'installing', offer: null, title: '' };
-  if (v.state && v.state.failed) return { text: t(i18nKey("The last install of {name} didn't finish."), { name }), state: 'install-failed', offer: v.npm === false ? null : 'install-again', title: '' };
-  // lane-cloak: a machine the measurement never covered — VibeSpace will not install it here (the same words as no npm)
-  if (v.code === 'install_unmeasured_platform') return { text: t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name }), state: 'not-installed-here', offer: null, title: '' };
-  if (v.ok) {
-    if (v.npm === false) return { text: t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name }), state: 'not-installed-here', offer: null, title: '' };
-    return { text: t(i18nKey('not installed')), state: 'not-installed', offer: 'install', title: '' };
-  }
-  if (v.code === 'install_precondition_unmet') return { text: t(i18nKey("{name} isn't part of this version of VibeSpace."), { name }), state: 'not-in-this-version', offer: null, title: '' };
-  return { text: t(i18nKey("{name} can't be used right now. Check back later."), { name }), state: 'unavailable', offer: null, title: '' };
 }
 /** `DELETE /api/browser/blocked/:id` → `{tone, text, refresh?}` | null (a removal is quiet: the broadcast removes the row). */
 export function dismissOutcomeWords(r, t) {

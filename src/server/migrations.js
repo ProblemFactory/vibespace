@@ -10,7 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { runMigrations, failedLine } = require('../migration-runner.js'); // failedLine: an error's first line as a screen may carry it
-const { RETIRED_SETTING_KEYS, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it)
+const { RETIRED_2026_10, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it); 2026-10-settings-rows-retired strips the keys it shipped with
 const { redactSecrets } = require('../secret-shapes.js'); // PURE: the one secret-shape rule (2026-10-job-secrets-retired shows no name it flags)
 
 /** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
@@ -1165,7 +1165,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       for (const e of Array.isArray(doc.blocked) ? doc.blocked : []) {
         const pr = e && e.proposal;
         if (!pr || pr.kind === 'site-reset' || !['open', 'approved', 'failed'].includes(pr.state) || !pr.plan || pr.plan.kind === 'none') continue;
-        Object.assign(pr, { state: 'unavailable', plan: { kind: 'none', why: 'install-unavailable' }, install: 'unavailable', installWhy: 'provider_unavailable', progress: null });
+        Object.assign(pr, { state: 'unavailable', plan: { kind: 'none', why: 'unavailable' }, install: 'unavailable', installWhy: 'provider_unavailable', progress: null }); // the why a new claim's plan carries (SW.proposalPlan)
         for (const k of ['installError', 'installBytes', 'installFrom']) delete pr[k];
         pr.digest = SW.proposalDigest(pr);
         rep.proposals.push({ id: String(e.id || ''), site: String(pr.site || ''), itemId: pr.itemId || null });
@@ -1235,7 +1235,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { settings: 'absent', stripped: {} }; throw e; }
     let doc;
     try { doc = JSON.parse(text); } catch { return { settings: 'unparseable', stripped: {} }; }   // never rewrite what we cannot read
-    const { doc: kept, stripped } = stripRetiredSettings(doc, RETIRED_SETTING_KEYS);
+    const { doc: kept, stripped } = stripRetiredSettings(doc, RETIRED_2026_10); // the keys THIS migration shipped with — a later retirement carries its own
     if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };
     let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;

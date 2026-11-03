@@ -136,7 +136,7 @@ export function engineOptions(r, stored, t) {
  * THE PROFILE CARD'S LINE (the Agent browser panel row, the switch dialog): the choice, "(pinned)" when it is one, and —
  * while the browser runs — the build it REPORTS (the fact, which for the default build is the only way to know which).
  * A chosen build that vanished says so first (the browser does not start until another is picked). null for a profile
- * whose provider runs its own build (CloakBrowser, a connected / cloud browser) — its row's `buildChoice` cell is false
+ * whose provider runs no build of ours (a connected / cloud browser) — its row's `buildChoice` cell is false
  * (lane dc-browser-providers: the server stamps the cell on the profile view; never the provider's id here).
  */
 export function cardBuildLine({ buildChoice = true, choice = null, running = null, missing = null, live = false } = {}, t) {
@@ -296,9 +296,6 @@ export function verdictLines(v, t) {
     else if (c.kind === 'census' && c.relation === 'newer') out.push({ text: t(i18nKey('Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works'), { census: String(c.census || '') }), warn: false });
     else if (c.kind === 'census' && c.relation === 'older') out.push({ text: t(i18nKey('Older than the census: a few methods it lacks are listed harmlessly')), warn: false });
     else if (c.kind === 'profile') out.push({ text: t(i18nKey("Older than the Chrome that last opened {label} ({wrote}) — can't be picked for it; fine for a new profile"), { label: String(c.label || ''), wrote: c.wrote }), warn: true });
-    else if (c.kind === 'cloak') out.push({ text: c.reach === 'both' ? t(i18nKey('A profile opened with it can still switch to CloakBrowser (Free or Pro) later'))
-      : c.reach === 'pro' ? t(i18nKey('A profile opened with it can switch to CloakBrowser Pro (Chromium {pro}) later, not to Free ({free}): switching down is refused'), { free: c.free, pro: c.pro })
-        : t(i18nKey("A profile opened with it can't switch to CloakBrowser later (Free {free} / Pro {pro}): switching down is refused"), { free: c.free, pro: c.pro }), warn: c.reach !== 'both' });
     // verify r1 (H1): newer than every build here = the browser CLI's next default (it launches its newest build)
     else if (c.kind === 'default') out.push({ text: (c.users || []).length ? t(i18nKey("Becomes the browser CLI's default build (now {from}): {who} and every conversation's browser start with it next time — after that they can't go back to an older Chrome"), { from: String(c.from || '—'), who: c.users.join(', ') }) : t(i18nKey("Becomes the browser CLI's default build (now {from}): every conversation's browser starts with it next time — after that it can't go back to an older Chrome"), { from: String(c.from || '—') }), warn: true });
   }
@@ -344,7 +341,7 @@ export function downloadProgressWords(i, t) {
     if (i.step === 'verify') return { text: t(i18nKey('Verifying Chrome {version}…'), { version }), busy: true };
     return { text: t(i18nKey('Downloading Chrome {version}… {got} MB of {total} MB'), { version, got: Math.floor(Number(i.bytes || 0) / 1e6), total: Number(i.total) > 0 ? mb(i.total) : '?' }), busy: true };
   }
-  if (i.other) return { text: t(i18nKey('Another install is running ({what}) — downloads wait for it.'), { what: i.other === 'cli' ? t(i18nKey('the browser CLI')) : 'CloakBrowser' }), busy: true };
+  if (i.other) return { text: t(i18nKey('Another install is running ({what}) — downloads wait for it.'), { what: i.other === 'cli' ? t(i18nKey('the browser CLI')) : String(i.other) }), busy: true };
   if (i.done) return { text: t(i18nKey('Chrome {version} is ready — pick it in the list.'), { version: String(i.done) }), done: true };
   if (i.failed) return { text: t(i18nKey("Chrome {version} didn't download — {reason}"), { version, reason: downloadRefusalWords({ code: i.code }, t) || String(i.error || '') }), warn: true, failed: true };
   return null;

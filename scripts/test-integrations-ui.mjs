@@ -4,7 +4,7 @@
 // r4 §2.5 / §3 / §8.1, chunk 3; gate row `test-integrations-ui`, heavy tier —
 // a real worktree server and headless chrome at 375×667).
 //
-// Since r4 the Integrations window holds ONLY the rows the registry does not bind per account (the six
+// Since r4 the Integrations window holds ONLY the rows the registry does not bind per account (the five
 // agent-browser key rows, and since 2.369.260 / .261 the Dropline row and the LLM plugin's)
 // (a Lark / Gmail OAuth client is chosen where the ACCOUNT is added, exactly
 // like a storage mount's), so ①–⑨ drive the browser rows and ⑩ drives the
@@ -22,7 +22,8 @@
 //   ⑦ two clients see one change
 //   ⑧ the Test button's wording follows `test.kind`; a verdict is NEVER drawn
 //      without the caveat; a failed Test draws the words (only zero-network
-//      Tests are clicked: cloak's shape check, a keyless cloud row's refusal)
+//      Tests are clicked: a keyless cloud row's refusal — lane engine-spi-egress L3: the
+//      window's one shape-only row left the core, so no Test there passes without a vendor)
 //   ⑨ at 375×667 every control of every card is inside the viewport
 //   ⑩ THE ACCOUNT CARD + DIALOGS (r4, the storage mount's grammar), against a
 //      VENDOR STUB (scripts/fixtures/channels-vendor-stub.cjs preloaded into
@@ -136,7 +137,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const R = require(path.join(repo, 'src/integration-registry.js'));
 const LARK_CB = require(path.join(repo, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
-const BROWSER_ROWS = ['cloak', 'cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
+const BROWSER_ROWS = ['cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
 // int260 + int258 (voice P0's dropline row and D1's llm row — the Language model card — = cards 7 and 8): the window's cards are THE REGISTRY'S OWN CENSUS — every row that is not
 // `bindsPerAccount` (an account-bound row's OAuth client is chosen where the account is added) — never a literal count;
 // .293 (the .292 mirror's red): nor `bindsPerMachine` — R1b's remoteapp row is ONE paired machine's own sign-in, set on that machine's card: never listed, never a card;
@@ -389,33 +390,8 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 
 // ── ⑧ Test: wording by kind; verdict never without the caveat; failure words (zero-network Tests only) ──
 {
-  ok((await p1.evaljs(`${CARD('cloak')}.querySelector('.integ-test').textContent`)) === 'Check format (no network)', 'cloak (shape-only): the button says "Check format (no network)"');
-  ok((await p1.evaljs(`${CARD(BL)}.querySelector('.integ-test').textContent`)) === 'Test connection', 'Browserless (credential-exchange): the button says "Test connection" (never clicked — it would reach a vendor)');
-  // Test the cloak row, waiting for THE verdict asked (a card keeps its last result drawn until the next one lands)
-  // (the .197 integration) the drawn verdict is marked stale BEFORE the click, so two Passed in a row are two answers
-  const cloakTestUntil = (want) => p1.evaljs(`(async () => { for (const o of ${CARD('cloak')}.querySelectorAll('.integ-test-result .integ-verdict')) o.dataset.stale = '1'; ${CARD('cloak')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloak')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && !v.dataset.stale && v.textContent === ${JSON.stringify(want)}) return { verdict: v.textContent, caveat: !!r.querySelector('.integ-caveat'), err: (r.querySelector('.integ-test-error') || {}).textContent || '', text: r.textContent }; await new Promise((r) => setTimeout(r, 100)); } const r = ${CARD('cloak')}.querySelector('.integ-test-result'); return { verdict: null, text: r ? r.textContent : null }; })()`);
-  // lane browser-dialog (the naive-user verifier, 2026-09-28) required the card and the switch dialog to say ONE thing about
-  // an empty cloak key. lane-cloak (MEASURED 2026-09-28, the .197 integration) made that one thing "no key needed": the
-  // free CloakBrowser build VibeSpace installs runs with no key and no sign-in, so a switch / a start no longer answers
-  // backend_no_key for cloak (keyRequiredFor('cloak') === false; every cloud row still requires its key) — and the
-  // shape check PASSES with no key, beside its caveat
-  const SW = require(path.join(wt, 'src/browser-switch.js'));
-  ok(SW.keyRequiredFor('cloak') === false && SW.keyRequiredFor('cloud:browseruse') === true, 'the switch rule (the dialog\'s side): cloak needs NO key, a cloud row still does');
-  const t0 = await cloakTestUntil('Passed');
-  ok(t0 && t0.verdict === 'Passed' && !t0.err && t0.caveat, `a cloak Test with NO key resolved draws Passed beside the caveat — the card agrees with the switch, which no longer refuses a keyless cloak (${JSON.stringify(t0 && (t0.err || t0.text)).slice(0, 160)})`);
-  // a well-formed cb_ key saved the user's way (Set → password input → Save), then the shape check passes
-  const saved = await p1.evaljs(`(async () => {
-    const row = ${CARD('cloak')}.querySelector('.integ-field[data-field="licenseKey"]');
-    row.querySelector('.integ-replace').click();
-    const inp = row.querySelector('input[type="password"]');
-    if (!inp) return { why: 'no password input after Set' };
-    inp.value = 'cb_' + 'ShapeOnly0001';
-    row.querySelector('.mounts-btn-primary').click();
-    for (let i = 0; i < 60; i++) { const c2 = ${CARD('cloak')}; const m = c2 && c2.querySelector('.integ-field[data-field="licenseKey"] .integ-mask'); if (m && /••••/.test(m.textContent) && !c2.querySelector('input[type="password"]')) return { mask: m.textContent }; await new Promise((r) => setTimeout(r, 100)); }
-    return { why: 'never re-rendered' };
-  })()`);
-  const t1 = saved && saved.mask ? await cloakTestUntil('Passed') : null;
-  ok(t1 && t1.verdict === 'Passed' && t1.caveat, `a passing Test (cloak, a well-formed cb_ key saved) draws Passed WITH the caveat, never a bare tick (${JSON.stringify({ saved, t1: t1 && t1.text }).slice(0, 160)})`);
+  const words = await p1.evaljs(`${JSON.stringify(BROWSER_ROWS)}.map((id) => { const c = document.querySelector('.integ-card[data-integ="' + id + '"]'); return c ? c.querySelector('.integ-test').textContent : null; })`);
+  ok(words.every((w) => w === 'Test connection'), `every browser row's Test is a credential exchange and says "Test connection" (never clicked with a key — it would reach a vendor): ${JSON.stringify(words)}`);
   const t2 = await p1.evaljs(`(async () => { ${CARD('cloud:browseruse')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloud:browseruse')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && v.textContent === 'Failed') return { err: (r.querySelector('.integ-test-error') || {}).textContent || '', caveat: !!r.querySelector('.integ-caveat') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   ok(t2 && /no key resolved/.test(t2.err) && t2.caveat, `a failing Test (a keyless cloud row — refused before any request) draws the words on the card, beside the caveat (${JSON.stringify(t2)})`);
 }

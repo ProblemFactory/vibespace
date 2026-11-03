@@ -305,7 +305,7 @@ cluster.
   previous presets (or none) stay in effect.
 - **Which rows suit a company preset**: register-once, everyone-may-use
   credentials (a Lark app — same tenant only; a Google OAuth client). **Not**
-  per-seat keys (a CloakBrowser license): one cluster key there means the
+  per-seat keys (a cloud browser's API key): one cluster key there means the
   cluster pays for every user, and users share the vendor's concurrent-session
   cap.
 - **Who can read them**: the files are readable by the instance's own user —

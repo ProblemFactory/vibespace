@@ -22,7 +22,7 @@ function create(ctx, slot) {
   const { INSTALL_TIMEOUT_MS, busyWords, installMarker, installState, mine: isMine, markInstall, otherOf, runStep, stalledWords } = slot;
   const inputsView = (...a) => ctx.inputsView(...a); // declared later in the keeper (read at call time)
   // ── lane chrome-builds-download (design 004, B-80c1 — the owner: 「能不能自动从网上下载对应的版本？…下载前让用户检查是否互相兼容」) ──
-  // DOWNLOAD ANOTHER BUILD: THE install slot's third kind (`chrome-build`, one at a time with the CLI's and CloakBrowser's).
+  // DOWNLOAD ANOTHER BUILD: THE install slot's third kind (`chrome-build`, one at a time with the CLI's).
   // Google's two version documents are read only when a PERSON opens the picker (the routes are cookie-only; no timer, no boot
   // path, no agent route): the 10 KB channel list fresh each time, the 5.2 MB known-good list on "Older versions…" (kept under
   // data/browser-tools/chrome-builds/, re-read with If-Modified-Since after 24 h). The download is OUR fetch (no proxy process:

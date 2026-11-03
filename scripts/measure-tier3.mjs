@@ -213,7 +213,7 @@ async function sitesLeg() {
     console.log(`  · ${url} (${Date.now() - t0} ms): ${readSite(url, title, text)}`);
   }
   await run(ab, ['close', '--all'], env, 15000);
-  console.log('  tier 2 (cloak / cloud:*): NOT measured — the cloakbrowser binary is absent on this box (src/browser-profiles CLOAK_EGRESS_PROOF: binary_absent) and no cloud key is configured; the reading is the refusal.');
+  console.log('  tier 2 (an anti-bot browser plugin / cloud:*): NOT measured — the core ships no anti-bot browser (a plugin brings one) and no cloud key is configured; the reading is the refusal.');
   console.log('  tier 3 (local-window): NOT measured by this script — it is the user\'s own browser window, addressed only after the D27 (b) switch is on; a script driving it would be the user\'s act, not a measurement.');
   console.log('  banks: NOT attempted — a real login page driven by an automated browser from the owner\'s address is the owner\'s act (D31 "measure first" stands as owed to the owner, with the public demo pages above as the only tier-1 reading this round).');
 }

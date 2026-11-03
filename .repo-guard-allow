@@ -99,3 +99,8 @@ expired-refresh-token
 u-echo-bearer-000
 # the Windows account / group word in scripts, comments and docs (the probe install scripts, the device agent): a dictionary word, never a credential value — written as a regex so this row does not flag itself
 Administrat(or|ors)\b
+# lane engine-spi-egress L3: the synthetic cloud-browser keys the suites moved to when the anti-bot row's licence fixtures left (test-browser-backend, test-integration-registry, dbg-comm-surfaces) — not real
+bb_clusterkey000000
+bb_userkey0000000000
+bb_1234567890abcd
+kk_1234567890abcd

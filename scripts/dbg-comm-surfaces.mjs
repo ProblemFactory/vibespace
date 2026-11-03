@@ -746,7 +746,7 @@ async function pass({ lang, viewport, theme }) {
   // ── BOOT B: an EXPIRED token record (through the encrypted store) + a
   //    ROTATED secret key (the undecryptable Integrations rows) + user keys ──
   await closeAllWindows(page);
-  await api('PUT', '/api/integrations/cloak', { values: { licenseKey: 'cb_1234567890abcd' } });
+  await api('PUT', '/api/integrations/cloud:kernel', { values: { apiKey: 'kk_1234567890abcd' } }); // a key row written before the rotation ⇒ undecryptable after it (lane engine-spi-egress L3: the anti-bot row it used left the core)
   await sleep(1500);   // the adapters store's debounced write
   srv.kill('SIGKILL'); await waitDown();
   try { log('expire lark:', expireLarkToken()); } catch (e) { log('expire lark failed:', e.message); }
@@ -766,14 +766,13 @@ async function pass({ lang, viewport, theme }) {
     await capture(page, tag, 'panel-10b-B-preset-gone', SEC('gmail'), { pad: 4 });
     await capture(page, tag, 'panel-11-B-full', '#sidebar');
   }
-  // INTEGRATIONS (r4: the six agent-browser key rows only): the window, two cards, Test passed /
-  // failed (zero-network Tests only — cloak's shape check, a keyless cloud row's refusal), the
-  // undecryptable row, a secret being replaced
-  await page.evaljs(`(() => { const w = window.app.openIntegration('cloak'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
-  await waitFor(page, `document.querySelectorAll('.integ-card').length >= 6`, 40);
+  // INTEGRATIONS (r4: the agent-browser key rows only — five since lane engine-spi-egress L3): the window, two cards, a
+  // failed Test (zero-network only — a keyless cloud row's refusal), the undecryptable row, a secret being replaced
+  await page.evaljs(`(() => { const w = window.app.openIntegration('cloud:kernel'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
+  await waitFor(page, `document.querySelectorAll('.integ-card').length >= 5`, 40);
   await sleep(400);
   await capture(page, tag, 'integ-01-window', '[data-shot="win"]');
-  for (const id of ['cloak', 'cloud:browserless']) {
+  for (const id of ['cloud:kernel', 'cloud:browserless']) {
     await page.evaljs(`(() => { const c = document.querySelector('.integ-card[data-integ="${id}"]'); if (c) c.scrollIntoView({ block: 'start' }); return 1; })()`);
     await sleep(200);
     await capture(page, tag, `integ-02-card-${id.replace(':', '-')}`, `.integ-card[data-integ="${id}"]`, { pad: 4 });

@@ -93,7 +93,7 @@ function pureLegs(H, tag = '') {
     ['remote_profile', { profile: P({ host: 'dev-1' }), hostKnown: false }], // lane remote-profile-start: a machine no longer paired (a known one is browsed)
     ['not_ours', { row: { starts: false } }],
     ['not_ours', { row: { starts: true, leaseKind: 'window-target' } }],
-    ['backend_unavailable', { control: { ok: false, error: 'cloakbrowser is not installed' } }],
+    ['backend_unavailable', { control: { ok: false, error: 'this backend is not wired in this release' } }],
     ['browser_restarting', { switching: true }],
     ['profile_locked', { closed: { code: 'profile_locked', holderPid: 4242 } }],
     ['browser_unstable', { closed: { code: 'browser_unstable' } }],
@@ -1060,11 +1060,11 @@ let work, solo, shop;
 // a backend switch while he browses is a PROPOSAL (never a stop under his page)
 {
   const W = await import('./fixtures/browser-switcher-views.mjs');
-  const ks = mkKeeper(K, { dataDir: path.join(ROOT, 'data-s'), providers: W.wiredCloak, serverSetting: (x) => (x === 'browser.cloak.executablePath' ? '/bin/true' : settings[x]), keys: { keyFor: () => ({ source: 'user', values: { licenseKey: 'k' } }), sourceOf: () => ({ source: 'user' }) } });
+  const ks = mkKeeper(K, { dataDir: path.join(ROOT, 'data-s'), providers: W.wired, keys: { keyFor: () => ({ source: 'user', values: { apiKey: 'k' } }), sourceOf: () => ({ source: 'user' }) } }); // the fixture world's in-place row (lane engine-spi-egress L3)
   const sp = ks.createProfile({ label: 'Sw' }, { owner: { kind: 'instance', id: null } });
   await ks.browse(sp.id);
-  const row = ks.switcherView(sp.id).rows.find((x) => x.id === 'cloak');
-  const r = await ks.switchBackend({ profileId: sp.id, target: 'cloak', by: { kind: 'user' }, confirmDowngrade: true }).catch((x) => ({ code: x.code, error: x.message }));
+  const row = ks.switcherView(sp.id).rows.find((x) => x.id === W.FIXTURE_ID);
+  const r = await ks.switchBackend({ profileId: sp.id, target: W.FIXTURE_ID, by: { kind: 'user' }, confirmDowngrade: true }).catch((x) => ({ code: x.code, error: x.message }));
   ok(row && row.state === 'in-use-by-hand' && row.facts.driver === HM.humanKeyFor(sp.id) && r.mode === 'proposal' && ks.browserOf(sp.id).state === 'ready' && ks.humanOf(sp.id), 'a switch while he browses: the dialog\'s row is in-use-by-hand (driver = his key: "Close my browsing"), the switch itself a PROPOSAL — the Chrome under his page never stops', { state: row && row.state, driver: row && row.facts.driver, r });
   await ks.stop(sp.id, { why: 'user' });
 }
@@ -1319,8 +1319,8 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // verify r1 F6 (lane browser-admin): "Who can use it" is the user's — the PATCH with a list (USE_IS_USERS; the create / adopt
       // above refuse a list the same way, walked through their build rows)
       ['PATCH', '/api/browser/profiles/:id', `/api/browser/profiles/${liveP.id}`, { use: { mode: 'all' } }],
-      // lane browser-admin 2b: a download is the user's act — both installs of the ONE slot (CloakBrowser, the browser CLI)
-      ['POST', '/api/browser/install', '/api/browser/install', {}],
+      // lane browser-admin 2b: a download is the user's act — the install of the ONE slot (the browser CLI; lane engine-spi-egress L3:
+      // the anti-bot backend's install route left the core with it)
       ['POST', '/api/browser/cli/install', '/api/browser/cli/install', { version: '0.38.1' }],
       // lane chrome-builds-download (design 004): the list Google offers, a download and a removal are the user's (BUILDS_DOWNLOAD_IS_USERS)
       ['GET', '/api/browser/builds/available', '/api/browser/builds/available'],

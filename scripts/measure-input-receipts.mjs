@@ -1,4 +1,4 @@
-// lane S2 MEASUREMENT (not a test — never in ci.mjs, like measure-cloak-egress.mjs): what does agent-browser 0.38.1's stream server do with an input record,
+// lane S2 MEASUREMENT (not a test — never in ci.mjs, like the other scripts/measure-*.mjs): what does agent-browser 0.38.1's stream server do with an input record,
 // and how many CDP Input.* calls does ONE record become — measured through the REAL mediator (the mediated
 // live view path), with a Chrome we launch ourselves on a scratch dir.
 import fs from 'node:fs'; import path from 'node:path'; import { spawn, execFile } from 'node:child_process';

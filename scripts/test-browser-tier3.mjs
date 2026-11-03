@@ -111,7 +111,7 @@ console.log('§1 PURE src/window-desktop.js');
   const h3 = DESK.hintAction({ tier: 3, by: 'agent' }, { rowOf });
   ok(h3 && h3.kind === 'suggestion' && h3.tier === 3 && h3.auto === false && h3.act === 'open-window-target' && /no profile is created or re-pointed/.test(h3.text), 'a tier-3 suggestion acts by OPENING A WINDOW TARGET, never automatically');
   ok(DESK.hintAction({ tier: 2 }, { rowOf }).act === 'switch-by-user' && DESK.hintAction({ tier: 1 }, { rowOf }).act === 'none', 'tier 2 = the user\'s switch; tier 1 needs nothing');
-  const hb = DESK.hintAction({ backend: 'cloak', by: 'user' }, { rowOf });
+  const hb = DESK.hintAction({ backend: 'cloud:browserbase', by: 'user' }, { rowOf });
   ok(hb.kind === 'preference' && hb.tier === 2 && hb.auto === false && hb.act === 'switch-by-user', 'a backend hint DERIVES its tier from the row and still asks the user');
   ok(DESK.hintAction({ backend: 'local-window' }, { rowOf }).act === 'open-window-target' && DESK.hintAction({ backend: 'local-window' }, { rowOf }).tier === 3, 'a local-window backend hint opens a window target (tier 3 derived)');
   ok(DESK.hintAction(null) === null && DESK.hintAction({ tier: 9 }) === null && [1, 2, 3].every((t) => DESK.hintAction({ tier: t }).auto === false), 'garbage ⇒ null; no shape ever answers auto:true');

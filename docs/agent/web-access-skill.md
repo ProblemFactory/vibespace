@@ -218,7 +218,7 @@ When content is in images, use `eval` to extract the image URL from DOM, then fe
 ## Anti-Detection
 
 - If a site still blocks: `vibespace-browser eval "JSON.stringify({webdriver: navigator.webdriver})"` to see what it sees.
-- Don't switch anything yourself when blocked: `vibespace-browser blocked --url <u> --why <code>` records your claim; the user sees it in the live view with a one-click "Open with CloakBrowser", and `--remember` files a per-site hint.
+- Don't switch anything yourself when blocked: `vibespace-browser blocked --url <u> --why <code>` records your claim; the user sees it in the live view, and `--remember` files a per-site hint.
 - A User-Agent or fingerprint change is a property of a named profile (its backend), not a per-command flag.
 - Pace interactions: 1-2 second delays between clicks to avoid triggering rate limits.
 

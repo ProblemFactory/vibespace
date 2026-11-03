@@ -12,8 +12,8 @@
 //      `browser.automationFlag: false`, keeps the user's own value and says so ONCE in the journal; the child config
 //      inherits it with its own mark last.
 //   ③ ORCH the REAL keeper over a fake agent-browser: a named chromium profile's launch config carries the flag + the
-//      mark last and the record is stamped; the setting off ⇒ neither; a CloakBrowser launch is untouched (its own build:
-//      no flag in its config, none in its AGENT_BROWSER_ARGS); a browser launched before the change keeps its file
+//      mark last and the record is stamped; the setting off ⇒ neither; a row whose launch is not ours to stamp (its
+//      `automationFlag` cell false — the fixture's in-place row) is untouched; a browser launched before the change keeps its file
 //      (the holdDialogs precedent — a different launch config relaunches Chrome).
 //   ④ Controls (scripts/mutant-copy.mjs): a verdict that ignores the user's value, and a browser-env that never passes
 //      the setting, are both RED against the rows above.
@@ -27,7 +27,7 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
-import { wiredCloak } from './fixtures/browser-switcher-views.mjs';
+import { wired, FIXTURE_ID } from './fixtures/browser-switcher-views.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
@@ -150,7 +150,7 @@ console.log('— ②b lane hooks-create H5: the window preference on a machine w
 }
 
 // ═══ ③ the REAL keeper over a fake agent-browser ══════════════════════════════
-console.log('— ③ the keeper: named chromium launch stamped + flagged, cloak untouched, setting off, a browser launched before');
+console.log('— ③ the keeper: named chromium launch stamped + flagged, a row not ours to stamp untouched, setting off, a browser launched before');
 const K = require('../src/server/browser-keeper.js');
 const cdpSrv = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ Browser: 'Chrome/151.0.7922.34' })); });
 servers.add(cdpSrv);
@@ -162,20 +162,21 @@ const SYSBIN = path.join(ROOT, 'sysbin'); fs.mkdirSync(SYSBIN, { recursive: true
 for (const d of ['/usr/bin', '/bin']) { try { if (fs.statSync(path.join(d, 'sleep')).isFile()) { fs.symlinkSync(path.join(d, 'sleep'), path.join(SYSBIN, 'sleep')); break; } } catch { /* next */ } }
 const PATH_ENV = `${path.join(ROOT, 'bin')}:${path.dirname(process.execPath)}:${SYSBIN}`;
 function mkKeeper(dataDir, settings) {
-  return K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: (k) => settings[k], liveKeys: () => new Set(), install: false, log: { log() {}, warn() {}, error() {} }, providers: wiredCloak, hostKnown: () => false });
+  return K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: (k) => settings[k], liveKeys: () => new Set(), install: false, log: { log() {}, warn() {}, error() {} }, providers: wired, hostKnown: () => false,
+    keys: { keyFor: (id) => ({ integrationId: id, source: 'user', values: { apiKey: 'k' } }), sourceOf: (id) => ({ integrationId: id, source: 'user' }) } }); // the fixture row's key resolves (its integration is a cloud row's)
 }
 fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
 {
-  const settings = { 'browser.cloak.executablePath': fake.cloakExe };
+  const settings = {};
   const k = mkKeeper(path.join(ROOT, 'data-k1'), settings);
   const p = k.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
   await k.start(p.id, { why: 'test' });
   const L1 = fake.launches().at(-1);
   ok(L1 && L1.config && argList(L1.config.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${p.id}` && !L1.args && k._reg().browsers[p.id].automationFlag === true && k._reg().browsers[p.id].quietLog === true, 'a named chromium profile\'s launch ran with the flag + the quiet log switches (lane browser-stderr-pipe) (the user\'s args kept, the mark last) and its record is stamped', L1);
-  const pc = k.createProfile({ label: 'Cloaked', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
+  const pc = k.createProfile({ label: 'Other build', provider: FIXTURE_ID }, { owner: { kind: 'instance', id: null } });
   await k.start(pc.id, { why: 'test' });
   const L2 = fake.launches().at(-1);
-  ok(L2 && L2.exe === fake.cloakExe && !argList(L2.config && L2.config.args).includes(FLAG) && !argList(L2.args).includes(FLAG) && /--fingerprint=/.test(L2.args) && k._reg().browsers[pc.id].automationFlag === false, 'a CloakBrowser launch is untouched: no flag in its config, none in its AGENT_BROWSER_ARGS (its own build\'s patches), never stamped', L2);
+  ok(L2 && L2 !== L1 && !argList(L2.config && L2.config.args).includes(FLAG) && !argList(L2.args).includes(FLAG) && k._reg().browsers[pc.id].automationFlag === false, 'a row whose launch is not ours to stamp (its automationFlag cell false) is untouched: no flag in its config, none in its env list', L2);
   await k.stop(p.id, { why: 'test' }); await k.stop(pc.id, { why: 'test' });
   // a browser launched BEFORE the change keeps its file: a record without the stamp names the file without the flag
   const rec = k._reg().browsers[p.id];

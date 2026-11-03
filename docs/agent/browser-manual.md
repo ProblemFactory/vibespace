@@ -60,7 +60,7 @@ are refused by name (below) — the refusal tells you what to do instead.
 ## 1. The one tool
 
 ```
-vibespace-browser open <url>                    navigate (a real 403/429 prints a "may-need-cloak" HINT)
+vibespace-browser open <url>                    navigate (a real 403/429 prints a "may-need-anti-bot" HINT)
 vibespace-browser snapshot [-i] [-c]            the accessibility tree with @refs — read this FIRST
 vibespace-browser click @ref                    click (use this, not a script's .click())
 vibespace-browser fill @ref "text"              clear the field and type
@@ -722,50 +722,34 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   start a download — when a site needs another Chrome, tell the user so. When the user
   changes a build, the browser restarts: you are told what was interrupted —
   read the page, then run it again.
-* **Being blocked — you PROPOSE, the user approves.** When a sign-in page
+* **Being blocked — you RECORD it, the user decides.** When a sign-in page
   says the browser may not be secure (your navigation's result then carries
-  `hint: may-need-cloak — … sign-in page says this browser may not be secure`),
+  `hint: may-need-anti-bot — … sign-in page says this browser may not be secure`),
   or a captcha wall / a 403 / a 429 / an anti-bot page stops you: run
   `vibespace-browser blocked --url <the page> --why <code> --tier 2` AT ONCE
   (`--why sign-in-refused` for a refused sign-in, `http-403` / `http-429` /
-  `captcha` otherwise) and tell the user in ONE sentence that a card in the chat
-  waits for their Approve. Do NOT explain workarounds, do NOT copy a session or
-  its cookies from anywhere, do NOT open another browser, and never switch
-  anything yourself — the switch is the user's Approve (D31: nothing escalates
-  by itself). The claim puts ONE card in the chat (and one "For you" item) that
-  says exactly what Approve does: install CloakBrowser if it is missing, add
-  ONLY that page's host to the sites CloakBrowser may open (for a known
-  vendor's sign-in host — Google, Microsoft, GitHub, Apple — also the sites
-  that sign-in page loads its parts from, named on the card), then switch THIS
-  conversation's browser to CloakBrowser (your profile in place — or a new
-  CloakBrowser profile for you when your browser is the temporary one or a
-  newer Chromium wrote it), and reopen the page. A second `blocked` for the
-  same site while the card waits is the same card (`duplicate`) — never ask
-  again. When the user approves you are told ("Approved: your browser is now
-  CloakBrowser …; re-run the sign-in at <url>") — in your running turn when that
-  is free, else with their next message — then re-read the page and sign in
-  again; on the new profile the sign-in is the USER's (take-over in the live
-  view). When they REJECT it, your next `open` of that site prints `note: the
-  user rejected switching … [proposal_rejected]` once — do not work around it.
-  When nothing can be offered here (another machine, CloakBrowser cannot be
-  installed, your browser already is CloakBrowser) the answer's `next` says why:
-  tell the user which page needs them. `--tier 3` / `--tier 1` records the claim
-  only (no card). `--remember` files a per-site hint; `backend` lists the hints.
+  `captcha` otherwise) and tell the user in ONE sentence which page refused you.
+  Do NOT explain workarounds, do NOT copy a session or its cookies from anywhere,
+  do NOT open another browser, and never switch anything yourself (D31: nothing
+  escalates by itself). The claim puts ONE card in the chat (and one "For you"
+  item) that says no switch can be offered by this version of VibeSpace — the
+  user may install a browser plugin (⚙ → Plugins → Install plugin…) and choose
+  it for the profile with Change build…. A second `blocked` for the same site
+  is the same card (`duplicate`) — never ask again. The answer's `next` says
+  what to tell the user. `--tier 3` / `--tier 1` records the claim only (no
+  card). `--remember` files a per-site hint; `backend` lists the hints.
   `backend <name>` is still a PROPOSAL of its own: it happens directly only when
   you are the only session attached and nobody drives; otherwise it becomes a
   "For you" item. While a switch restarts the browser, commands answer
   `browser_restarting` — retry in a moment, never in a loop.
-* **On CloakBrowser** (`backend` says `cloak`): the browser reaches ONLY the
-  sites the user listed (Settings → Agent browser → "Sites CloakBrowser may
-  open"); `providers` prints them. A site not on that list does not load — an
-  http page opens as one line, `egress refused: <host> is not in the egress
-  allowlist (…)`, an https one fails to open, and a part of a page (a script,
-  a font) from such a site is simply missing. Every page command whose page was
-  refused a site prints `note: CloakBrowser's site list refused <host>, … [egress_refused]`:
-  run the `blocked --url https://<host>/ --why egress-refused --tier 2` it names
-  (one claim per site) — that card asks the user to let CloakBrowser open it,
-  nothing else changes. Never retry in a loop, never ask for a switch back to
-  get around it.
+* **On a browser plugin's browser with a site list** (the plugin's settings
+  name the sites it may open): a site not on that list does not load — an http
+  page opens as one line, `egress refused: <host> is not in the egress
+  allowlist (…)`, an https one fails to open, and a part of a page (a script, a
+  font) from such a site is simply missing. Every page command whose page was
+  refused a site prints `note: <the plugin's browser>'s site list refused
+  <host>, … [egress_refused]`: tell the user which site the page needs — they
+  add it in ⚙ → Plugins → that plugin → its settings. Never retry in a loop.
 * **Separate tabs** (`new <label> --sharing instance`) is an ISOLATION option,
   not "who may use it": it confines every attached session to its own tabs
   through a mediated connection: `tab

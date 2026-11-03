@@ -164,7 +164,7 @@ console.log('— ① the trace model, the retention plan, the recording gate, th
   const onePerRow = B.providerRows().map((r) => ({ id: 'bp-' + r.id.replace(/[^a-z]/g, '').padEnd(8, '0').slice(0, 8), label: r.id, provider: r.id, dir: '/d/' + r.id, host: null }));
   const expected = B.providerRows().filter((r) => r.ownsDir).map((r) => r.id).sort();
   const got = T.sweepScope(onePerRow).map((p) => p.provider).sort();
-  ok(JSON.stringify(got) === JSON.stringify(expected) && expected.includes('chromium') && expected.includes('cloak') && !expected.includes('cdp') && !expected.includes('local-window') && !expected.some((x) => x.startsWith('cloud:')), `the sweep's scope IS the ownsDir rows: ${expected.join(', ')}`);
+  ok(JSON.stringify(got) === JSON.stringify(expected) && expected.includes('chromium') && !expected.includes('cloak') && !expected.includes('cdp') && !expected.includes('local-window') && !expected.some((x) => x.startsWith('cloud:')), `the sweep's scope IS the ownsDir rows: ${expected.join(', ')}`);
   ok(T.sweepScope([{ ...chrom, host: 'h1' }]).length === 0, 'a chromium profile on a paired machine is not in scope either — that directory is that machine\'s');
   for (const prov of ['cloud:browserbase', 'local-window', 'cdp']) { const v = T.queueVerdict({ ...chrom, provider: prov }); ok(!v.ok && v.code === 'not_ours' && /not a directory we own|ownsDir/.test(v.error), `queuing a ${prov} record for the sweep is refused not_ours (negative control)`); }
   ok(T.queueVerdict({ ...chrom, provider: 'nope' }).code === 'not_ours' && T.queueVerdict({ ...chrom, host: 'h1' }).code === 'not_ours' && T.queueVerdict({ ...chrom, dir: '' }).code === 'not_ours' && T.queueVerdict(chrom).ok, 'unknown provider / remote / no dir refused; a local chromium is ours');

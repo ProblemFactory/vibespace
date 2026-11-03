@@ -7,12 +7,12 @@
 //      ORDER — the pinned install FIRST, then PATH; a pin that is missing or a shim is skipped (PATH answers);
 //   ② the REAL keeper: `browser.cli` = path / pinned / x.y.z read live; the install = ONE `npm install --prefix
 //      <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts agent-browser@<v>` (the registry only) in THE
-//      install slot cloak's install uses (never two at once — either way), verified off the folder AND the program's own
+//      install slot every installable shares (never two at once), verified off the folder AND the program's own
 //      --version; the pin file follows the setting; the keeper's runtime then RUNS the pinned binary; a restart mid-install
 //      RE-ATTACHES (no second install) and a dead install's result is verified;
 //   ③ the agent's CLI reads the pin beside itself (data/bin/vibespace-browser) and browser-env judges the floor on it;
-//   ④ the routes: GET /api/browser/cli, POST /api/browser/cli/install — an agent's token refused by name (and the cloak
-//      install's POST too: a download is the user's act);
+//   ④ the routes: GET /api/browser/cli, POST /api/browser/cli/install — an agent's token refused by name (a download is the
+//      user's act);
 //   ⑤ the client words (en / zh / ja) + the panel wiring;
 //   ⑥ patched copies as controls.
 import fs from 'node:fs';
@@ -52,7 +52,7 @@ fs.appendFileSync(${JSON.stringify(NPM_LOG)}, JSON.stringify({ argv, pid: proces
 if (process.env.FAKE_NPM_FAIL) process.exit(1);
 if (process.env.FAKE_NPM_HANG) { setInterval(() => {}, 1e9); return; } // verify r1 (F8): a registry that stalls — npm never ends by itself
 const prefix = argv[argv.indexOf('--prefix') + 1]; const spec = argv.find((a) => /^agent-browser@/.test(a));
-// verify r1 (F3): any other package (the CloakBrowser install's npm step) — sleeps the delay, writes nothing, exits 0
+// verify r1 (F3): any other package — sleeps the delay, writes nothing, exits 0
 if (!spec) { setTimeout(() => process.exit(0), Number(process.env.FAKE_NPM_DELAY_MS || 0)); } else {
 const v = spec.split('@')[1];
 // verify r1 (F2): what a REAL npm leaves on disk seconds before it ends — package.json + the 0755 launcher first, the native
@@ -130,8 +130,8 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   ok(r.ok && r.started && call && JSON.stringify(call.argv) === JSON.stringify(['install', '--prefix', path.join(TOOLS, 'agent-browser-' + V.TABLE_VERSION), '--no-audit', '--no-fund', '--no-save', 'agent-browser@' + V.TABLE_VERSION, '--ignore-scripts']),
     'ONE npm install into its own prefix under data/browser-tools, pinned to the version, --no-save, --ignore-scripts (the registry only: no package script runs)', call);
   const e2 = (() => { try { k.installCli({ version: '0.39.2' }); return null; } catch (e) { return e; } })();
-  const iv = k.installVerdict();
-  ok(e2 && e2.code === 'install_running' && iv.ok === false && iv.code === 'install_running' && iv.otherInstall === 'cli' && iv.state.running === false, 'THE slot is ONE: a second CLI install and a CloakBrowser install are both refused install_running while it runs (the cloak row does not claim the CLI\'s install as its own)', { e2: e2 && e2.code, iv: { code: iv.code, other: iv.otherInstall, running: iv.state.running } });
+  const iv = k.installProgress();
+  ok(e2 && e2.code === 'install_running' && iv.running === true, 'THE slot is ONE: a second CLI install is refused install_running while it runs', { e2: e2 && e2.code, iv: { running: iv.running, step: iv.step } });
   ok(fs.existsSync(path.join(TOOLS, 'install-running.json')), 'the running install is named in its marker (a restart re-attaches)');
   ok(await waitFor(async () => !(await k.cliFacts()).install.running, 10000), 'the install finishes');
   f = await k.cliFacts();
@@ -198,7 +198,7 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   fs.writeFileSync(path.join(T3, 'install-running.json'), JSON.stringify({ kind: 'cli', spec: 'agent-browser@' + V.TABLE_VERSION, version: V.TABLE_VERSION, pid: slow.pid, starttime: F.procStart(slow.pid), startedAt: Date.now(), prefix: path.join(T3, 'agent-browser-' + V.TABLE_VERSION) }));
   const n0 = npmCalls().length;
   const k3 = mkKeeper(D3);
-  ok(k3._reattached() === 'running' && k3.installVerdict().code === 'install_running', 'a restart mid-install RE-ATTACHES to the running npm (the slot stays busy)');
+  ok(k3._reattached() === 'running' && k3.installProgress().running === true, 'a restart mid-install RE-ATTACHES to the running npm (the slot stays busy)');
   const e = (() => { try { k3.installCli({}); return null; } catch (x) { return x; } })();
   ok(e && e.code === 'install_running' && npmCalls().length === n0, '…so no second install starts (zero npm calls)');
   // the "npm" ends without having installed anything ⇒ verified: failed, said
@@ -214,22 +214,8 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   const k4 = mkKeeper(D4);
   ok(k4._reattached() === 'ended', 'a marker naming a pid that is gone ⇒ its result is checked now');
   ok(await waitFor(async () => { const x = await k4.cliFacts(); return !x.install.running && x.pinned && x.pinned.installed; }, 6000) && fs.existsSync(path.join(T4, 'cli-pin.json')), '…the package npm left (it finished while VibeSpace was down) is verified and pinned');
-  // verify r1 (F3): the CLOAKBROWSER install is re-attached the same way — its running step's pid rides THE marker; before,
-  // a restart mid-install freed the slot at once and a second npm + download started beside the first (the build's HELD item)
-  const Dc = path.join(ROOT, 'data-5c');
-  const kc = mkKeeper(Dc, { FAKE_NPM_DELAY_MS: '2500' });
-  const ivc = kc.installVerdict();
-  const sc = await kc.installCloak().catch((e) => e);
-  await waitFor(() => fs.existsSync(path.join(Dc, 'browser-tools', 'install-running.json')), 3000);
-  let mc = null; try { mc = JSON.parse(fs.readFileSync(path.join(Dc, 'browser-tools', 'install-running.json'), 'utf8')); } catch { mc = null; }
-  ok(ivc.ok && sc && sc.started && mc && mc.kind === 'cloak' && Number.isInteger(mc.pid) && mc.step === 'package' && F.pidAlive(mc.pid), 'a CloakBrowser install names its running step\'s pid in THE marker (kind cloak, step package)', { ivc: ivc.code, sc: sc && (sc.code || sc.started), mc });
-  const kc2 = mkKeeper(Dc); // = the restarted server, the npm step still running
-  const ec = await kc2.installCloak().then(() => null, (x) => x); // async: the refusal is a rejection
-  const ivc1 = kc2.installVerdict();
-  ok(kc2._reattached() === 'running' && ivc1.code === 'install_running' && ivc1.state.running === true && ec && ec.code === 'install_running', 'a restart mid-CloakBrowser-install RE-ATTACHES: the slot stays busy, a second install is refused by name', { re: kc2._reattached(), code: ivc1.code, ec: ec && ec.code });
-  ok(await waitFor(() => !kc2.installVerdict().state.running && !kc.installVerdict().state.running, 8000), 'the re-attached step ends');
-  const ivc2 = kc2.installVerdict();
-  ok(/restarted during the install/.test(ivc2.state.error || '') && ivc2.state.exitCode === 1 && !fs.existsSync(path.join(Dc, 'browser-tools', 'install-running.json')), '…and what it left is judged now: no verified browser ⇒ failed BY NAME (install again — a finished download is reused), the marker gone', ivc2.state);
+  // (lane engine-spi-egress L3: the anti-bot backend's install re-attach legs left with its installer — a marker of a kind
+  // no row registers is ended by identity at the restart: test-browser-orphans ⑧'s retired-kind legs)
   // verify r1 (F8): THE SLOT IS BOUNDED — a step that never ends (a stalled registry) is stopped at the wall clock, in-process
   // AND after a restart (the re-attach waited on the pid for ever: both installs refused for as long as npm lived)
   const f8 = await slotBoundLeg(K);
@@ -247,7 +233,7 @@ async function slotBoundLeg(KK) {
     const r8 = k8.installCli({ version: '0.41.0' }); kids.add(r8.pid);
     const ended = await waitFor(async () => !(await k8.cliFacts()).install.running, 5000);
     const f = await k8.cliFacts();
-    out.inProcess = { ended, error: f.install.error, npmAlive: Fb.pidAlive(r8.pid), slotFree: k8.installVerdict().code !== 'install_running' };
+    out.inProcess = { ended, error: f.install.error, npmAlive: Fb.pidAlive(r8.pid), slotFree: !k8.installProgress().running };
     try { process.kill(-r8.pid, 'SIGKILL'); } catch { try { process.kill(r8.pid, 'SIGKILL'); } catch { } }
   }
   for (const [name, proven] of [['reattach', true], ['stranger', false]]) { // a restart with the step still running, its deadline already due
@@ -260,7 +246,7 @@ async function slotBoundLeg(KK) {
     const ended = await waitFor(async () => !(await k8.cliFacts()).install.running, 5000);
     await sleep(150);
     const f = await k8.cliFacts();
-    out[name] = { re, ended, error: f.install.error, stepAlive: Fb.pidAlive(step.pid), slotFree: k8.installVerdict().code !== 'install_running' };
+    out[name] = { re, ended, error: f.install.error, stepAlive: Fb.pidAlive(step.pid), slotFree: !k8.installProgress().running };
     try { process.kill(-step.pid, 'SIGKILL'); } catch { try { process.kill(step.pid, 'SIGKILL'); } catch { } }
   }
   return out;
@@ -308,8 +294,6 @@ console.log('— ④ the routes: GET /api/browser/cli · POST /api/browser/cli/i
   for (const tok of [TOKEN, 'jbt_' + 'd'.repeat(24)]) {
     r = await j('POST', '/api/browser/cli/install', { version: V.TABLE_VERSION }, { Authorization: 'Bearer ' + tok });
     ok(r.status === 403 && r.json.code === 'agent_forbidden', `an agent's ${tok.slice(0, 5)} token on the CLI install ⇒ 403 agent_forbidden`);
-    r = await j('POST', '/api/browser/install', {}, { Authorization: 'Bearer ' + tok });
-    ok(r.status === 403 && r.json.code === 'agent_forbidden', `…and on the CloakBrowser install (a download is the user's act) ⇒ 403`);
   }
   ok(npmCalls().length === n0, '…zero npm calls');
   r = await j('POST', '/api/browser/cli/install', { version: 'latest' });
@@ -331,7 +315,7 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
     && W.cliRowWords({ ...base, choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, t).warn
     && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { running: true } }, t).offer === null
     && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, npm: false }, t).offer === null
-    && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { other: 'cloak' } }, t).offer === null,
+    && W.cliRowWords({ ...base, choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { other: 'chrome-build' } }, t).offer === null,
   'ONE act per state: none when PATH is the measured one · Use it when installed · Use PATH when pinned · nothing while installing / without npm / while the slot is busy');
   // verify r1 (F10): a version the user NAMED (browser.cli = 0.39.2) — the button installs it by its number (never "the measured
   // version"), and once in use the row says it drifts exactly as PATH's does (the agent's providers line says the same)
@@ -543,17 +527,6 @@ console.log('— ⑥ controls');
   const fw = await kw.cliFacts();
   ok(fw.install.running && fw.pinned.installed === true && fw.pinned.path.endsWith('agent-browser.js') && fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json')), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
   await waitFor(async () => !(await kw.cliFacts()).install.running, 6000);
-  // verify r1 (F3): a keeper whose re-attach knows the CLI install only ⇒ a restart mid-CloakBrowser-install frees the slot
-  const cliOnly = kbi.replace("    const row = m ? rows.get(m.kind) : null;", "    const row = m && m.kind === 'cli' && Number.isInteger(m.pid) ? rows.get(m.kind) : null;");
-  ok(cliOnly !== kbi, 'control (d): the patch (a re-attach that drops a CloakBrowser marker) applies');
-  const Kr = keeperWithInstalls(MUT, REPO, { [SLOT]: cliOnly }, 'cli-only');
-  const Dr = path.join(ROOT, 'data-cr'); const Tr = path.join(Dr, 'browser-tools'); fs.mkdirSync(Tr, { recursive: true });
-  const slow2 = spawn('sleep', ['2'], { stdio: 'ignore', detached: true }); kids.add(slow2.pid);
-  const Fr = require('../src/browser-facts.js');
-  await sleep(50);
-  fs.writeFileSync(path.join(Tr, 'install-running.json'), JSON.stringify({ kind: 'cloak', spec: 'cloakbrowser@0.5.10', step: 'binary', pid: slow2.pid, starttime: Fr.procStart(slow2.pid), startedAt: Date.now(), prefix: Tr }));
-  const kr = Kr.create({ dataDir: Dr, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false });
-  ok(kr._reattached() === null && kr.installVerdict().ok === true && !fs.existsSync(path.join(Tr, 'install-running.json')), 'control (d): …the running CloakBrowser install was forgotten and a second one admitted at once — exactly what ②\'s re-attach leg catches', { re: kr._reattached(), ok: kr.installVerdict().ok });
   // verify r1 (F4): a pin served off the memo alone ⇒ a wiped install still reads "installed"
   const memoOnly = ks.replace("      if (!cliMemo.pin.path || usableExe(cliMemo.pin.path)) return cliMemo.pin;\n      cliGen++;", "      return cliMemo.pin;");
   ok(memoOnly !== ks, 'control (e): the patch (a pin that never re-checks its program) applies');

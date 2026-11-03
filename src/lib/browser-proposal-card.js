@@ -16,7 +16,7 @@ import { pressVerdict } from './press-arm.js'; // verify r1: an Approve counts o
 import { passkeyCardWords } from '../browser-passkey.js'; // lane passkey-ui: THE passkey card's words (tray = chat = live banner)
 
 // ── verify r1: THE PRESS-ARM RULE on the chat card (the outbox card's F6, the For-you rows' V1) — reproduced in chrome: a
-// press the instant the card appeared under the pointer ran the whole proposal (the install, the site, the switch). An
+// press the instant the card appeared under the pointer ran the whole proposal. An
 // Approve counts only once it has stayed where it is ARM_MS since it appeared, moved (a scroll of the chat, a resize, a
 // row landing above it) or changed its words; an earlier press does nothing and says so. Reject is never gated. ──
 function armNow(btn) { btn._armSince = performance.now(); btn._armTop = btn.isConnected ? btn.getBoundingClientRect().top : null; }
@@ -50,29 +50,13 @@ const say = (l, tt) => (l ? tt(l.key, l.params || {}) : '');
 export function proposalStateText(b, tt = t) {
   const x = b || {};
   const o = x.outcome || {};
-  const pr = x.progress || {};
   if (x.state === 'open' || x.state === 'unavailable') return null;
   if (x.kind === 'site-reset') return siteResetStateText(x, tt); // lane site-reset: the same card, its own state words
-  if (x.state === 'approved') {
-    // verify r1 V3: a stalled download is SAID (it gives up by itself after 15 min; Approve again then starts it over)
-    if (pr.step === 'install' && Number.isFinite(pr.stalledSec)) return Number.isFinite(pr.percent) ? tt(i18nKey('Approved — installing CloakBrowser: stuck at {percent} % — nothing has arrived for {sec} s. It gives up by itself after 15 min; Approve again then starts it over.'), { percent: pr.percent, sec: pr.stalledSec }) : tt(i18nKey('Approved — installing CloakBrowser: nothing has arrived for {sec} s. It gives up by itself after 15 min; Approve again then starts it over.'), { sec: pr.stalledSec });
-    if (pr.step === 'install') return Number.isFinite(pr.percent) ? tt(i18nKey('Approved — installing CloakBrowser: downloading {percent} %'), { percent: pr.percent }) : tt(i18nKey('Approved — installing CloakBrowser…'));
-    if (pr.step === 'site') return tt(i18nKey('Approved — adding {host} to the sites CloakBrowser may open…'), { host: x.site });
-    if (pr.step === 'switch') return tt(i18nKey('Approved — switching the browser to CloakBrowser…'));
-    if (pr.step === 'profile' || pr.step === 'open') return tt(i18nKey('Approved — opening the new CloakBrowser profile…'));
-    if (pr.step === 'reopen') return tt(i18nKey('Approved — reopening the page…'));
-    if (pr.step === 'tell') return tt(i18nKey('Approved — telling the agent…'));
-    return tt(i18nKey('Approved — starting…'));
-  }
-  if (x.state === 'done') {
-    const head = o.code === 'site-added' ? tt(i18nKey('Done — CloakBrowser may now open {host}.'), { host: x.site }) : o.newProfile ? tt(i18nKey('Done — this conversation now uses the new CloakBrowser profile "{label}".'), { label: o.label || '' }) : tt(i18nKey('Done — this conversation\'s browser "{label}" is now CloakBrowser.'), { label: o.label || '' });
-    const told = o.told === 'steered' ? tt(i18nKey('The agent was told in its running turn.')) : o.told === 'stashed' || o.told === 'noticed' ? tt(i18nKey('The agent hears it with your next message.')) : tt(i18nKey('The agent could not be told — tell it yourself that its browser is CloakBrowser now.'));
-    return `${head} ${told}`;
-  }
-  if (x.state === 'failed') {
-    const where = o.step === 'install' ? tt(i18nKey('installing CloakBrowser')) : o.step === 'site' ? tt(i18nKey('adding the site')) : o.step === 'switch' ? tt(i18nKey('switching the browser')) : o.step === 'profile' || o.step === 'open' ? tt(i18nKey('opening the new profile')) : o.step === 'reopen' ? tt(i18nKey('reopening the page')) : tt(i18nKey('starting'));
-    return tt(i18nKey('Failed while {step}: {error}'), { step: where, error: o.error || tt(i18nKey('no reason was given')) });
-  }
+  // lane engine-spi-egress L3: a backend-switch proposal is `unavailable` from birth in this version — these lines are for one
+  // decided before the update (its steps' words left with the backend they ran)
+  if (x.state === 'approved') return tt(i18nKey('Approved — starting…'));
+  if (x.state === 'done') return tt(i18nKey('Done.'));
+  if (x.state === 'failed') return tt(i18nKey('Failed while {step}: {error}'), { step: tt(i18nKey('starting')), error: o.error || tt(i18nKey('no reason was given')) });
   if (x.state === 'rejected') return x.told ? tt(i18nKey('Rejected — the agent was told.')) : tt(i18nKey('Rejected — the agent is told the next time it opens {host}.'), { host: x.site });
   return null;
 }
@@ -174,7 +158,7 @@ export function listenProposalUpdates(app) {
   listening = true;
   app.ws.onGlobal((m) => {
     if (!m || m.type !== 'browser-proposal-updated' || !pressed.has(m.id)) return;
-    if (m.state === 'failed') { pressed.delete(m.id); const why = (m.outcome && m.outcome.error) || t('no reason was given'); showToast(String(m.id).startsWith('sr-') ? t('Clearing the site\'s login failed: {error}', { error: why }) : t('Switching to CloakBrowser failed: {error}', { error: why }), { type: 'error' }); } // lane site-reset: its own words
+    if (m.state === 'failed') { pressed.delete(m.id); const why = (m.outcome && m.outcome.error) || t('no reason was given'); showToast(String(m.id).startsWith('sr-') ? t('Clearing the site\'s login failed: {error}', { error: why }) : t('The proposal failed: {error}', { error: why }), { type: 'error' }); } // lane site-reset: its own words
     else if (m.state === 'done') pressed.delete(m.id);
   });
 }
@@ -219,7 +203,7 @@ export function patchProposalCard(el0, msg) {
   const set = (sel, text) => { const n = el0.querySelector(sel); if (!n) return; const v = text || ''; if (n.textContent !== v) n.textContent = v; n.style.display = v ? '' : 'none'; };
   const L = SW.proposalLines(b);
   el0.dataset.state = String(b.state || '');
-  set('.chat-browser-proposal-title', t('VibeSpace · {what}', { what: b.kind === 'site-reset' ? t('The agent proposes clearing a site\'s stored login') : b.state === 'unavailable' ? t('The agent says a site refused its browser') : b.plan && b.plan.kind === 'site' ? t('The agent asks you to let CloakBrowser open {site}', { site: b.site }) : t('The agent proposes switching its browser to CloakBrowser') })); // lane site-reset: + its kind
+  set('.chat-browser-proposal-title', t('VibeSpace · {what}', { what: b.kind === 'site-reset' ? t('The agent proposes clearing a site\'s stored login') : t('The agent says a site refused its browser') })); // lane site-reset: + its kind (lane engine-spi-egress L3: a backend-switch proposal is always the refusal's card)
   set('.chat-browser-proposal-claim', say(L.claim, t));
   set('.chat-browser-proposal-evidence', b.evidence ? t('What it saw: {evidence}', { evidence: b.evidence }) : '');
   // the plan list, keyed by line index — rewritten only where a line's words changed

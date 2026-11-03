@@ -13,6 +13,11 @@
      "head": "432a5bdcdf",
      "why": "lane path-field: src/lib/autocomplete.js DELETED — THE path field (src/lib/path-field.js) replaced setupDirAutocomplete at every door",
      "at": "2026-10-23"
+    },
+    {
+     "head": "90746e5065",
+     "why": "lane engine-spi-egress L3 (2026-11-03): the anti-bot backend left the core, and its measurement harness read the removed egress record",
+     "at": "2026-11-03"
     }
    ],
    "rows": [

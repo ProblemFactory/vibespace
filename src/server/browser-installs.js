@@ -27,7 +27,6 @@ const F = require('../browser-facts.js');
 // THE INSTALLERS — one line per installable kind (each file declares its row + its steps, its verify and its words)
 const INSTALLERS = [
   require('./browser-cli-install.js'),
-  require('./browser-cloak-install.js'),
   require('./browser-builds-keeper.js'),
 ];
 
@@ -35,7 +34,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
   const rows = new Map(); // row id → the row its installer registered
   const INSTALL_TIMEOUT_MS = Number.isFinite(installTimeoutMs) && installTimeoutMs > 0 ? installTimeoutMs : 15 * 60 * 1000;
   /** verify r1 (F8): THE slot's bound — every step of either install ends at INSTALL_TIMEOUT_MS: the browser CLI's detached
-   *  npm (it had no wall clock: a stalled registry held the ONE slot, CloakBrowser's install too, for as long as npm lived)
+   *  npm (it had no wall clock: a stalled registry held the ONE slot, every other install too, for as long as npm lived)
    *  and a step RE-ATTACHED after a restart (the marker's `stepAt`; the re-attach waited on the pid for ever). In-process the
    *  npm is identified by its unreaped child handle; a re-attached step is stopped (`endStalledStep`) only when it is provably
    *  the one the marker names (pid + starttime) — one that cannot be proven is let go: the slot released and said, never a
@@ -61,7 +60,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
       try { child = spawn(cmd, argv, { cwd: installDir, env: childEnv, stdio: ['ignore', fd, fd] }); } catch (e) { try { fs.closeSync(fd); } catch {} resolve({ ok: false, error: `${path.basename(cmd)} could not be started: ${e.message}` }); return; }
       try { fs.closeSync(fd); } catch {}
       Object.assign(installState, { step, pid: child.pid || null });
-      // verify r1 (F3): a row's running step rides THE marker when the row says `markSteps` (CloakBrowser's) (the CLI install's) — a server restart
+      // verify r1 (F3): a row's running step rides THE marker when the row says `markSteps` — a server restart
       // mid-install re-attaches to it (the slot stays busy, never a second npm / download into the same folder)
       if ((rows.get(installState.kind) || {}).markSteps) markInstall({ kind: installState.kind, spec: installState.spec, step, pid: child.pid || null, starttime: child.pid ? F.procStart(child.pid) : null, startedAt: installState.startedAt, stepAt: now(), prefix: installDir });
       // lane chrome-builds-download: a Chrome build's `unzip` rides THE marker too (its version + files ride `mark`) — a restart re-attaches to it
@@ -98,7 +97,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
   const otherOf = (id) => (installState.running && installState.kind !== id ? installState.kind : null);
   const busyWords = () => { const row = rows.get(installState.kind); return row ? row.words(installState) : String(installState.kind); };
   /** A server restart mid-install RE-ATTACHES (the marker names the running step's pid — the CLI install's npm, or any step
-   *  of the CloakBrowser install, verify r1 F3): still running ⇒ the slot stays busy until it exits; gone ⇒ its result is
+   *  of a row that marks its steps, verify r1 F3): still running ⇒ the slot stays busy until it exits; gone ⇒ its result is
    *  judged now. Never a second install. */
   function reattachInstall() {
     let m = null; try { m = JSON.parse(fs.readFileSync(installMarker(), 'utf8')); } catch { return null; }

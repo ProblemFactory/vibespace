@@ -83,7 +83,7 @@
  *    verdict. A row declaring `setup.prerequisites` MUST declare `test.caveat`.
  *  · `consumers` are the files that actually call `resolveIntegration('<id>')`.
  *    Decision 25: a row lands WITH its adapter. Where the orchestrator placed a
- *    row ahead of its consumer (lark / gmail / cloak — their consoles' setup
+ *    row ahead of its consumer (lark / gmail — their consoles' setup
  *    blocks and callback URL are the point of shipping them now), the row says
  *    so BY NAME in `wiredIn`, `consumers` is EMPTY, and its Test is a NAMED
  *    `not-wired` refusal. A row with neither live consumers nor a `wiredIn`
@@ -130,13 +130,6 @@ const V = {
   nonEmpty: (v) => (String(v).length ? okV : bad('must not be empty')),
   noSpaces: (v) => (/\s/.test(String(v)) ? bad('must not contain whitespace') : okV),
   minLen: (n) => (v) => (String(v).length >= n ? okV : bad(`at least ${n} characters`)),
-  cloakLicense: (v) => {
-    const s = String(v);
-    if (!s) return okV;                       // empty is a valid FIELD (nothing saved) — it resolves to no key, never to a free tier
-    if (/\s/.test(s)) return bad('must not contain whitespace');
-    if (!/^cb_[A-Za-z0-9_-]{8,}$/.test(s)) return bad('a CloakBrowser license key starts with cb_');
-    return okV;
-  },
   /** A URL with a host — the ONE host a `cloud:*` Test may reach is derived
    *  from THIS field (design-agent-browser-v2 §7.5's egress rule). */
   httpUrl: (v) => {
@@ -229,44 +222,20 @@ const ROWS = Object.freeze([
   // no vendor. A new vendor's row is its manifest's `integrationRow`, never an edit here.
   ...VendorList.integrationRows({ V, okV, bad }),
 
-  // ── THE AGENT-BROWSER TRACK'S SIX KEY ROWS (docs/design-agent-browser-v2.md §7.5, P4 second half) ──
-  // One module declares them, registers their six Test runners and resolves
+  // ── THE AGENT-BROWSER TRACK'S FIVE KEY ROWS (docs/design-agent-browser-v2.md §7.5, P4 second half) ──
+  // One module declares them, registers their five Test runners and resolves
   // their keys — src/server/browser-backend.js (`keyFor` = the literal
   // resolveIntegration('<id>') table the keeper asks THROUGH, exactly once
   // before a spawn). The field names are the installed 0.32.0 binary's own env
   // names (measured with `strings`); the vendor's name appears ONLY in the
   // environment of the one child the keeper spawns for that provider (never
-  // a file, never argv, never a log line, never agentEnv). None of the six
+  // a file, never argv, never a log line, never agentEnv). None of the five
   // declares a `setup`: they are pure keys — no consent page, nothing to copy
-  // into a vendor console. Tests: `cloak` is shape-only (ZERO network — a real
-  // probe needs the 200 MB binary and §7.2.1's egress proof, neither of which
-  // a card opened to paste a key may trigger; the seat tier is read back from
-  // the FIRST REAL LAUNCH); each `cloud:*` Test is ONE bounded read-only
+  // into a vendor console. Tests: each `cloud:*` Test is ONE bounded read-only
   // request to the ONE host DERIVED from that row's own fields (browserless /
   // kernel: the host inside the URL the user typed; agentcore: its region;
   // browserbase / browseruse: their constant API host) — a host that cannot
   // be derived is a named refusal, never a default host.
-  {
-    id: 'cloak',
-    label: 'CloakBrowser',
-    fields: [
-      { key: 'licenseKey', label: i18nKey('License key'), secret: true, required: false, placeholder: 'cb_…',
-        // lane-cloak (MEASURED 2026-09-28): the free CloakBrowser build runs with NO key and no sign-in, and a key in its
-        // environment is sent nowhere — so a switch / a start no longer refuses an empty key (keyRequiredFor('cloak')
-        // is false) and the help says what the measurement found (the naive-user verifier's rule: the card and the
-        // dialog say the same thing)
-        help: i18nKey('Not needed: the free CloakBrowser that VibeSpace installs runs without a key or a sign-in, and does not use one. A key (it starts with cb_) only unlocks the maker\'s newer build, which VibeSpace does not install.'), validate: V.cloakLicense },
-    ],
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOAK_' },
-    setup: null,
-    test: {
-      kind: 'shape-only',
-      describe: i18nKey('Checks the key\'s shape, offline. No key passes: the free CloakBrowser needs none.'),
-      caveat: i18nKey('Shape only. The seat tier is read back from the first real launch, not from this check.'),
-    },
-    consumers: ['src/server/browser-backend.js'],
-    docs: 'docs/design-agent-browser-v2.md',
-  },
   {
     id: 'cloud:browserbase',
     label: i18nKey('Browserbase (cloud browser)'),

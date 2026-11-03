@@ -489,8 +489,7 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
   ok(C({ present: true }).ok && C({ present: true }).offer === false && chip(C({ present: true }), 'present'), 'present: a chip ("Already on this computer"), the row offers nothing — not a refusal');
   ok(chip(C({ census: 'newer', censusChrome: '154.0.8037.57' }), 'census').census === '154.0.8037.57' && chip(C({ census: 'between' }), 'census').relation === 'older' && chip(C({ census: 'censused' }), 'census').relation === 'censused', 'the census chip: the relation chromeRelation gave (between reads as older)');
   ok(chip(C({ profile: { label: 'Work', lastChromiumMajor: 156 } }), 'profile').wrote === 156 && !chip(C({ profile: { label: 'Work', lastChromiumMajor: 155 } }), 'profile') && !chip(C({ profile: { lastChromiumMajor: null } }), 'profile'), 'this profile: a chip only for a build OLDER than the major that last opened it');
-  const reach = (v) => chip(BB.buildCompatVerdict({ version: v, platform: 'linux', arch: 'x64' }), 'cloak').reach;
-  ok(reach('146.0.1.1') === 'both' && reach('147.0.1.1') === 'pro' && reach('151.0.1.1') === 'pro' && reach('152.0.1.1') === 'none', 'CloakBrowser later: ≤ 146 both tiers, 147–151 Pro only, ≥ 152 neither (CLOAK_TIERS, F7)');
+  ok(!['146.0.1.1', '151.0.1.1', '152.0.1.1'].some((v) => chip(BB.buildCompatVerdict({ version: v, platform: 'linux', arch: 'x64' }), 'cloak')), 'no chip about switching to the anti-bot backend later (lane engine-spi-egress L3: it left the core)');
   const pl = BB.downloadPlan({ version: '154.0.8037.92', buildsRoot: '/h/.agent-browser/browsers' });
   ok(pl.ok && pl.part === '/h/.agent-browser/browsers/chrome-154.0.8037.92.part' && pl.unpackDir === '/h/.agent-browser/browsers/.unpack-154.0.8037.92' && pl.targetDir === '/h/.agent-browser/browsers/chrome-154.0.8037.92' && pl.removingDir === '/h/.agent-browser/browsers/.removing-154.0.8037.92'
     && ['../x', '154.0.8037.92/../../x', '154.0.8037.92/x', ''].every((v) => BB.downloadPlan({ version: v, buildsRoot: '/h' }).code === 'build_version_invalid') && !BB.parseBuildDir('chrome-154.0.8037.92.part') && !BB.parseBuildDir('.unpack-154.0.8037.92'),
@@ -516,7 +515,7 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
   ok(W.installHint({ command: 'ab install', local: true, download: { offered: true } }, t) === null && /Linux x64.*darwin-arm64.*ab install/.test(W.installHint({ command: 'ab install', local: true, download: { offered: false, machine: 'darwin-arm64' } }, t)) && /paired machine aren't offered yet.*ab install/.test(W.installHint({ command: 'ab install', local: false, download: { offered: false } }, t)),
     'the hand command: gone where the row is; elsewhere said WITH the reason (another machine kind, a paired machine)');
   const lines = W.verdictLines(BB.buildCompatVerdict({ version: '155.0.1.2', platform: 'linux', arch: 'x64', census: 'newer', censusChrome: '154.0.8037.57', profile: { label: 'Work', lastChromiumMajor: 156 }, cli: '0.38.1', zipBytes: 100e6, freeBytes: 1e6, freePath: '/h' }), t).map((x) => x.text);
-  ok(/Needs about 300 MB free, 1 MB left on \/h/.test(lines[0]) && lines.includes('Driven by agent-browser 0.38.1') && lines.some((x) => /Newer than the census \(154\.0\.8037\.57\)/.test(x)) && lines.some((x) => /last opened Work \(156\)/.test(x)) && lines.some((x) => /can't switch to CloakBrowser later \(Free 146 \/ Pro 151\)/.test(x)), 'a row\'s lines: the HARD refusal first with its numbers, then every chip in words', lines);
+  ok(/Needs about 300 MB free, 1 MB left on \/h/.test(lines[0]) && lines.includes('Driven by agent-browser 0.38.1') && lines.some((x) => /Newer than the census \(154\.0\.8037\.57\)/.test(x)) && lines.some((x) => /last opened Work \(156\)/.test(x)) && !lines.some((x) => /CloakBrowser/.test(x)), 'a row\'s lines: the HARD refusal first with its numbers, then every chip in words', lines);
   const cf = W.downloadConfirmWords({ version: '154.0.8037.92', host: 'storage.googleapis.com', bytes: 196202491, root: '/h/.agent-browser/browsers' }, t);
   ok(cf.title === 'Download Chrome 154.0.8037.92?' && /About 196 MB comes from storage\.googleapis\.com and unpacks to about 392 MB in \/h\/\.agent-browser\/browsers/.test(cf.message) && /Google publishes no separate one/.test(cf.message) && /Nothing restarts/.test(cf.message) && /never auto-updates/.test(cf.message) && cf.confirmText === 'Download',
     'THE CONFIRM: the version, the host, the size, where it lands, how it is checked (and that Google publishes no checksum), nothing restarts, no auto-update; one button');
@@ -526,7 +525,7 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
     'installed builds: Remove only on a build VibeSpace downloaded that nobody uses; in use names who');
   for (const [lang, d] of [['zh', zh], ['ja', ja]]) {
     const tt = mkT(d); const said = new Set(); const rec = (k, pp) => { said.add(k); return tt(k, pp); };
-    W.verdictLines({ hard: [{ code: 'build_platform_unsupported', machine: 'm', command: 'c' }, { code: 'disk', need: 1, free: 1, path: '/' }], chips: [{ kind: 'present' }, { kind: 'cli', version: '1' }, { kind: 'census', relation: 'censused' }, { kind: 'census', relation: 'newer' }, { kind: 'census', relation: 'older' }, { kind: 'profile', label: 'x', wrote: 1 }, { kind: 'cloak', reach: 'both' }, { kind: 'cloak', reach: 'pro' }, { kind: 'cloak', reach: 'none' }] }, rec);
+    W.verdictLines({ hard: [{ code: 'build_platform_unsupported', machine: 'm', command: 'c' }, { code: 'disk', need: 1, free: 1, path: '/' }], chips: [{ kind: 'present' }, { kind: 'cli', version: '1' }, { kind: 'census', relation: 'censused' }, { kind: 'census', relation: 'newer' }, { kind: 'census', relation: 'older' }, { kind: 'profile', label: 'x', wrote: 1 }] }, rec);
     W.pickerIntro(rec); W.downloadConfirmWords({ bytes: 1 }, rec); W.downloadConfirmWords({}, rec); W.majorLabel({ major: 1, newest: '1', count: 1 }, rec);
     for (const c of ['install_running', 'build_present', 'unzip_unavailable', 'build_url_offhost', 'build_version_unknown', 'build_list_unreachable', 'build_list_invalid', 'disk', 'build_check_failed', 'build_zip_shape', 'build_unpack_failed', 'build_verify_failed', 'build_stalled', 'build_in_use', 'build_not_downloaded', 'build_removing', 'build_platform_unsupported']) W.downloadRefusalWords({ code: c }, rec);
     for (const st of ['fetch', 'check', 'unpack', 'verify']) W.downloadProgressWords({ running: true, step: st }, rec);
@@ -1099,12 +1098,12 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   settingsG[ROWK] = 'listed.test';
   ok(r5.status === 200 && fake.launches().length === n1 && r6.status === 403 && /empty — deny by default/.test(r6.body),
     'V3: the list is read LIVE per request from the reserved row (a site added passes at once, no relaunch); no stored value ⇒ the manifest row\'s default (empty) ⇒ deny by default', { r5, r6 });
-  const hosts = kg.cloakRefusals(pe.id, tq), eng = kg.egressEngineOf ? kg.egressEngineOf(pe.id) : null, said = SW.egressRefusedText(hosts, eng), view = kg.cloakEgress(pe.id);
+  const hosts = kg.egressRefusals(pe.id, tq), eng = kg.egressEngineOf ? kg.egressEngineOf(pe.id) : null, said = SW.egressRefusedText(hosts, eng), view = kg.egressFor(pe.id);
   ok(hosts.includes('unlisted.test') && hosts.includes('127.0.0.1') && eng && eng.id === GID && eng.label === 'Fixture Egress Engine' && /^Fixture Egress Engine's site list refused unlisted\.test/.test(said) && /⚙ → Plugins → Fixture Egress Engine/.test(said) && !/vibespace-browser blocked/.test(said)
-    && view.url === pxUrl && view.engine === GID && view.allowlist.join() === 'listed.test' && kg.cloakEgress().url === null && /^CloakBrowser's site list refused x\.example/.test(SW.egressRefusedText(['x.example'])),
-    'F7: the refusals ride the verb answer as today (THIS profile\'s proxy, by name) — the words name the engine\'s own list, no CloakBrowser card; CloakBrowser\'s view and sentence unchanged', { hosts, eng, said });
+    && view.url === pxUrl && view.engine === GID && view.allowlist.join() === 'listed.test' && kg.egressFor().url === null && /^this browser's site list refused x\.example/.test(SW.egressRefusedText(['x.example'])),
+    'F7: the refusals ride the verb answer as today (THIS profile\'s proxy, by name) — the words name the engine\'s own list, no card; no profile named ⇒ no proxy, and a sentence naming no engine says "this browser"', { hosts, eng, said });
   const rsE = read('src/routes/browser.js');
-  ok(/const hosts = k\.cloakRefusals\(profileId, since\); if \(hosts\.length\) egressRefused = \{ hosts, text: require\('\.\.\/browser-switch\.js'\)\.egressRefusedText\(hosts, typeof k\.egressEngineOf === 'function' \? k\.egressEngineOf\(profileId\) : null\) \}/.test(rsE), 'WIRING: the verb answer\'s egressRefused names the wrapped engine (k.egressEngineOf)');
+  ok(/const hosts = k\.egressRefusals\(profileId, since\); if \(hosts\.length\) egressRefused = \{ hosts, text: require\('\.\.\/browser-switch\.js'\)\.egressRefusedText\(hosts, typeof k\.egressEngineOf === 'function' \? k\.egressEngineOf\(profileId\) : null\) \}/.test(rsE), 'WIRING: the verb answer\'s egressRefused names the wrapped engine (k.egressEngineOf)');
   // r2 (主开发's acceptance, MAJOR) THE RESTART: the browser SURVIVES the hub; the next keeper's boot re-binds ITS proxy on the port
   // its launch view names before it is ready — the listed host passes, the unlisted one is refused, the refusal reaches THIS profile
   const portG = Number((/:(\d+)$/.exec(pxUrl) || [])[1] || 0);
@@ -1114,7 +1113,7 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   await kg.boot();
   const rec2 = kg._reg().browsers[pe.id] || {}, tq2 = Date.now();
   const [b1, b2] = [await pxReq(pxUrl, 'GET', `http://listed.test:${TP}/x`), await pxReq(pxUrl, 'GET', `http://unlisted.test:${TP}/x`)];
-  ok(rDead.status === 0 && rec2.state === 'ready' && rec2.egress && rec2.egress.port === portG && b1.status === 200 && b2.status === 403 && kg.cloakRefusals(pe.id, tq2).includes('unlisted.test') && (kg.egressEngineOf(pe.id) || {}).id === GID,
+  ok(rDead.status === 0 && rec2.state === 'ready' && rec2.egress && rec2.egress.port === portG && b1.status === 200 && b2.status === 403 && kg.egressRefusals(pe.id, tq2).includes('unlisted.test') && (kg.egressEngineOf(pe.id) || {}).id === GID,
     'r2 THE RESTART: a wrapped browser adopted by the next keeper is ready only behind ITS proxy again — the SAME port its launch view names, the listed host passes, the unlisted one refused, the refusal this profile\'s', { rDead, state: rec2.state, egress: rec2.egress, b1, b2 });
   // …and the port HELD by another program at the restart ⇒ NOT ready: refused by name, ended by identity, ONE For-you line — never
   // served by another proxy, never rebound elsewhere
@@ -1127,7 +1126,7 @@ const pxReq = (pxUrl, method, target) => new Promise((resolve) => {
   const rec3 = kg._reg().browsers[pe.id] || {};
   const gone = (() => { try { process.kill(pidG, 0); return false; } catch (e) { return e.code === 'ESRCH'; } })();
   await new Promise((res) => FOREIGN.close(res));
-  ok(rec3.state !== 'ready' && new RegExp(`cannot listen on its port ${portG} again — another program holds it`).test(String(rec3.lastError)) && !kg.cloakEgress(pe.id).url && todos.length === tF + 1 && /"Wrapped" was stopped at the restart: its egress proxy's port \d+ is in use/.test(todos.at(-1).text) && gone,
+  ok(rec3.state !== 'ready' && new RegExp(`cannot listen on its port ${portG} again — another program holds it`).test(String(rec3.lastError)) && !kg.egressFor(pe.id).url && todos.length === tF + 1 && /"Wrapped" was stopped at the restart: its egress proxy's port \d+ is in use/.test(todos.at(-1).text) && gone,
     'r2: the port HELD by another program at the restart ⇒ NOT ready — said by name, the browser ended by identity, ONE For-you line; no proxy of ours took another port for it', { state: rec3.state, lastError: rec3.lastError, todo: todos.at(-1), gone });
   try { await kg.stop(pe.id, { why: 'user' }); } catch { /* ended already */ }
   // L2 acceptance (A): the declaration is STICKY — the word dropped by a later answer ⇒ refused by name; a version that drops the

@@ -12,20 +12,19 @@
  *
  * THE CHOICE. `profile.browser` = `{kind:'default'}` (the CLI's own pick — what every profile ran before this lane)
  * | `{kind:'build', version}` (a build in that machine's list) | `{kind:'path', path}` (a chrome file the user names —
- * a HUMAN act, cookie-only, exactly the rule of `browser.cloak.executablePath`) | `{kind:'plugin', id}` (lane engine-plugin: a
+ * a HUMAN act, cookie-only) | `{kind:'plugin', id}` (lane engine-plugin: a
  * BROWSER ENGINE plugin's kernel — src/browser-engines.js; its probe answer is a fact the caller hands in). The agent can never set one:
  * `--executable-path` stays a refused LAUNCH flag, `install` stays NOT_OFFERED, and `by !== 'user'` is refused here.
  *
  * THE VERDICT (`browserChoiceVerdict`), one order everywhere (the create, Change build…, every launch): a choice is
- * well-formed · the user's · for chromium (CloakBrowser runs its own measured build; a cdp / cloud browser is not
- * started by us) · the build is in THAT machine's list and its `chrome` is a regular executable file (a path: the
+ * well-formed · the user's · for chromium (a cdp / cloud browser is not started by us) · the build is in THAT machine's list and its `chrome` is a regular executable file (a path: the
  * same, read where it runs) · not older than the major that last wrote the profile's directory (the §7.4 version
  * ladder — `SW.versionLadder`; a directory nothing ever wrote has no ladder). A build that VANISHED is refused at the
  * launch by name (`browser_build_missing`) — never a silent fall back to another build.
  *
  * THE LAUNCH. The keeper hands the chosen executable to the CLI through `AGENT_BROWSER_EXECUTABLE_PATH`
  * (`SW.launchEnvFor('chromium', {executablePath})`) on EVERY call of the browser's own session — the measured relaunch
- * rule cloak's executable already rides (a later call whose launch view differs relaunches Chrome, measured on 0.38.1).
+ * rule (a later call whose launch view differs relaunches Chrome, measured on 0.38.1).
  */
 const fs = require('fs');
 const path = require('path');
@@ -131,7 +130,7 @@ function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = n
   if (!c) return { ok: false, code: 'browser_choice_invalid', error: 'a browser build is {kind:"default"} | {kind:"build", version:"151.0.7922.34"} | {kind:"path", path:"/absolute/path/to/chrome"} | {kind:"plugin", id:"publisher.engine"}' };
   if (c.kind === 'default') return { ok: true, choice: c, executablePath: null, version: null, major: null };
   if (by !== 'user') return { ok: false, code: 'browser_choice_user_only', error: 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent never sets one; `vibespace-browser providers` lists the builds this machine has' };
-  if (!(require('./browser-profiles.js').providerRow(provider) || {}).buildChoice) return { ok: false, code: 'browser_choice_provider', error: `a Chrome build is chosen for a Chromium profile only — "${label}" runs ${provider} (CloakBrowser runs its own measured build; a connected or cloud browser is not started by VibeSpace)` };
+  if (!(require('./browser-profiles.js').providerRow(provider) || {}).buildChoice) return { ok: false, code: 'browser_choice_provider', error: `a Chrome build is chosen for a Chromium profile only — "${label}" runs ${provider} (a connected or cloud browser is not started by VibeSpace)` };
   let executablePath, version = null, major = null;
   if (c.kind === 'build') {
     if (!builds || builds.ok === false) {
@@ -353,11 +352,10 @@ function downloadHardRows({ platform = process.platform, arch = process.arch, ma
  * on the builds folder's filesystem against the zip's length × 3, when the length is known). Every other row is a CHIP
  * (structure; the client words it): `present` (already on this computer — the row offers nothing), `cli` (driven by the
  * measured agent-browser), `census` (the CDP census relation), `profile` (older than the Chrome that last opened THIS profile —
- * it can't be picked for it), `cloak` (whether a profile opened with it can still switch to CloakBrowser Free / Pro later).
- * Inputs are facts read by the caller (`census` = cdp-census chromeRelation(version), `censusChrome` = its newest censused
- * Chrome; `cloak` = browser-switch CLOAK_TIERS). → `{ok, offer, code, error, hard, chips, major, needBytes}`.
+ * it can't be picked for it). Inputs are facts read by the caller (`census` = cdp-census chromeRelation(version),
+ * `censusChrome` = its newest censused Chrome). → `{ok, offer, code, error, hard, chips, major, needBytes}`.
  */
-function buildCompatVerdict({ version, channel = null, platform = process.platform, arch = process.arch, present = false, freeBytes = null, zipBytes = null, freePath = '', census = null, censusChrome = null, profile = null, cloak = SW.CLOAK_TIERS, cli = null, command = '', defaultBuild, defaultUsers = [] } = {}) {
+function buildCompatVerdict({ version, channel = null, platform = process.platform, arch = process.arch, present = false, freeBytes = null, zipBytes = null, freePath = '', census = null, censusChrome = null, profile = null, cli = null, command = '', defaultBuild, defaultUsers = [] } = {}) {
   const v = String(version || '');
   if (!VERSION_RE.test(v)) return { ok: false, offer: false, code: 'build_version_invalid', error: `"${v.slice(0, 40)}" is not a Chrome version`, hard: [{ code: 'build_version_invalid' }], chips: [], major: null, needBytes: null };
   const major = Number(v.split('.')[0]);
@@ -368,8 +366,6 @@ function buildCompatVerdict({ version, channel = null, platform = process.platfo
   if (census) chips.push({ kind: 'census', relation: census === 'between' ? 'older' : String(census), census: censusChrome ? String(censusChrome) : null });
   const wrote = profile && Number.isInteger(profile.lastChromiumMajor) ? profile.lastChromiumMajor : null;
   if (wrote != null && major < wrote) chips.push({ kind: 'profile', label: String((profile && profile.label) || ''), wrote });
-  const free = cloak && cloak.free ? cloak.free.chromiumMajor : null, pro = cloak && cloak.pro ? cloak.pro.chromiumMajor : null;
-  if (Number.isInteger(free) && Number.isInteger(pro)) chips.push({ kind: 'cloak', reach: major <= free ? 'both' : major <= pro ? 'pro' : 'none', free, pro });
   // verify r1 (H1): with no executable path the CLI launches its NEWEST build (measured: agent-browser 0.38.1 ran chrome-157 over
   // chrome-150) — a download newer than every build here becomes the default of every default-choice profile and every
   // conversation's browser, and a profile it opens can't go back. Said on the row (`defaultBuild`: the newest build here, null = none).

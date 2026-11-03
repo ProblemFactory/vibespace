@@ -46,7 +46,7 @@ export function cliRowWords(f, t) {
   if (offer === 'install' && f.npm === false) { parts.push(t(i18nKey("VibeSpace can't install it here (npm is missing)"))); offer = null; }
   // the measured version installed while PATH is chosen: the one act is to USE it (no second download)
   if (offer === 'install' && choice.mode === 'path' && f.installedTable) offer = 'use-pinned';
-  if (offer === 'install' && ins.other) offer = null; // the ONE slot is busy with another install (CloakBrowser)
+  if (offer === 'install' && ins.other) offer = null; // the ONE slot is busy with another install (a Chrome build)
   const version = choice.mode !== 'path' && pinned && pinned.version ? String(pinned.version) : String(f.table); // what Install… installs (the panel's own rule)
   return { text: parts.join(' · '), warn, offer, version, title: f.inUse && f.inUse.path ? String(f.inUse.path) : '' };
 }

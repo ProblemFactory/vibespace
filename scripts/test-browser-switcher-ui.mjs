@@ -6,22 +6,21 @@
 //
 //   ① every VIEW × en / zh / ja × 1280×800 (the dialog 420 px) and 360×740 (the phone rule: 95vw, ≤ 360) under
 //      'DejaVu Sans' (the Actions runner's face — proven drawn on the dialog's h3 by CSS.getPlatformFontsForNode):
-//      the REAL view of a real profile (since lane-cloak: the "not installed" card of this build), W1 (a refused
-//      record, with and without `preselect: 'cloak'`) and every card state as a FIXTURE
+//      the REAL view of a real profile (lane engine-spi-egress L3: no in-place switch target is shipped — no card, the
+//      empty line), W1 (the fixture row not in this build, with and without a `preselect` naming it) and every card state as a FIXTURE
 //      view the REAL src/browser-switch.js builds (scripts/fixtures/browser-switcher-views.mjs — the one producer the
 //      fast suite shares), served to the page by a fetch wrapper so a broadcast's refresh re-serves the same view;
 //      per leg: every button / target name / chip on ONE text line; no leaf text box narrower than its longest word
 //      (a CJK character is its own word); no two text boxes intersecting; nothing clipped (every button and every
 //      .brsw-* element); no one-glyph column; no undefined / null / NaN / [object; no developer word (§, src/, a
-//      backtick, tier, cloud:, binary_absent, provider, egress, lease, seeded, backend, npm, the bare id cloak, a
+//      backtick, tier, cloud:, binary_absent, provider, egress, lease, seeded, backend, npm, the bare id fixture-browser, a
 //      three-digit run); zh / ja: no Latin left beyond the product and browser names and the fixture's own data; ja
 //      never “ ”; the dialog 420 ± 1 px on the desktop, ≤ 360 and no sideways page scroll on the phone;
 //   ② the ACTS: Details opens the agent's evidence and a forced refresh keeps it open, Hide details closes it, Dismiss's
-//      answer is worded; "Switch to CloakBrowser" shows the switching line and NO card before the POST answers, and the
+//      answer is worded; "Switch to Fixture Browser" shows the switching line and NO card before the POST answers, and the
 //      answer is judged by its rollback facts (restored ⇒ "is back on"; not restored ⇒ "didn't start again either") —
-//      never by its code; the downgrade and the download each open the house confirm and NOTHING is requested before
-//      the confirm; "Set location in Settings…" opens Settings searched for CloakBrowser with the program-file row on
-//      screen; "Open Agent browser…" opens the panel; the driven card has no button on a server that lists no driver, and
+//      never by its code; the downgrade opens the house confirm and NOTHING is requested before the confirm; "Open Agent
+//      browser…" opens the panel; the driven card has no button on a server that lists no driver, and
 //      (2026-09-28) with the driver's session listed its "Hand it back to your agent" POSTs the handback from the dialog,
 //      says so, keeps the dialog open and re-reads it (a refusal worded); nothing configured = one sentence, no "saved key";
 //   ③ CONTROLS: (1) the old 24 px icon class swapped onto the zh buttons ⇒ the measurement reports a clipped / one-glyph
@@ -160,10 +159,10 @@ function WRAPPER() {
 const FONT_SOURCE = "document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.id = 'vs-brsw-face'; st.textContent = \"html, body, button, input, select, textarea { font-family: 'DejaVu Sans', sans-serif !important; }\"; document.head.appendChild(st); });";
 
 // ── the judges (node-side) ──
-const DEV = /§|src\/|\.mjs|`|\btier\b|cloud:|binary_absent|\bprovider\b|\begress\b|\blease\b|\bseeded\b|\bbackend\b|\bnpm\b|\bcloak\b|\d{3}/i;
+const DEV = /§|src\/|\.mjs|`|\btier\b|cloud:|binary_absent|\bprovider\b|\begress\b|\blease\b|\bseeded\b|\bbackend\b|\bnpm\b|fixture-browser|\d{3}/i;
 const BAD = /\bundefined\b|\bnull\b|\bNaN\b|\[object/;
-const ALLOWED_LATIN = ['Amazon Bedrock AgentCore', 'Browser Use', 'CloakBrowser', 'Browserbase', 'Browserless', 'Chromium', 'Chrome', 'VibeSpace', 'Cookie', 'Kernel', 'Agent', 'agent', 'MB', 'CLI']; // product + browser names (the default browser's blurb names Chrome); CLI = the browser CLI's own name, as browser-admin's zh / ja dictionaries spell it (2.369.200 integration)
-const DATA_LATIN = ['Vendor portal', 'shop.example', 'shopping', 'captcha', 'dev-1', 'cloakbrowser.dev']; // the fixtures' own data (a label, a host, the agent's words) + the §7.2.1 record's download host (lane-cloak)
+const ALLOWED_LATIN = ['Amazon Bedrock AgentCore', 'Browser Use', 'Fixture Browser', 'Browserbase', 'Browserless', 'Chromium', 'Chrome', 'VibeSpace', 'Cookie', 'Kernel', 'Agent', 'agent', 'MB', 'CLI']; // product + browser names (the default browser's blurb names Chrome); CLI = the browser CLI's own name, as browser-admin's zh / ja dictionaries spell it (2.369.200 integration)
+const DATA_LATIN = ['Vendor portal', 'shop.example', 'shopping', 'captcha', 'dev-1']; // the fixtures' own data (a label, a host, the agent's words)
 function wordsProblems(lang, texts, { allowDigits = false } = {}) {
   const out = [];
   for (const x of texts) {
@@ -216,12 +215,10 @@ else await (async () => {
   const REAL = made.json && made.json.profile && made.json.profile.id;
   if (!ok(!!REAL, 'a real profile “shopping” was created (the W1 legs read its REAL switcher view)', J(made).slice(0, 300))) return;
   const w1real = await api('GET', `/api/browser/switcher?profile=${encodeURIComponent(REAL)}`);
-  const cloakReal = w1real.json && (w1real.json.rows || []).find((r) => r.id === 'cloak');
-  // lane-cloak (2026-09-28): this build's §7.2.1 record is a MEASUREMENT, so cloak is wired — on a scratch server
-  // (its own data/, nothing installed there) the REAL row says the program is not installed yet: one card, whose one
-  // control is the install (with npm on PATH) or the Settings location (without); `w1*` = a refused record, a fixture
-  const REAL_STATE = cloakReal ? cloakReal.state : null;
-  ok(w1real.status === 200 && cloakReal && ['not-installed', 'not-installed-here'].includes(REAL_STATE) && cloakReal.switchKind === 'in-place' && typeof w1real.json.live === 'boolean' && w1real.json.install && w1real.json.install.ok === true, `the REAL view on this build: the CloakBrowser row is ${REAL_STATE} (wired since the measurement; nothing installed on a scratch server), the install verdict ok, live is a fact`, J(w1real.json).slice(0, 400));
+  // lane engine-spi-egress L3: no row of the SHIPPED table is an in-place switch target, so the REAL view of a real profile
+  // has no card — every row current or another profile's kind; no install facts (no row has a program to install)
+  const realRows = (w1real.json && w1real.json.rows) || [];
+  ok(w1real.status === 200 && realRows.length > 0 && !realRows.some((r) => ['ready', 'ready-confirm', 'needs-key', 'not-in-this-version', 'unavailable'].includes(r.state)) && typeof w1real.json.live === 'boolean' && !('install' in w1real.json), 'the REAL view on this build: every row current or not a switch (no in-place target shipped), no install facts, live is a fact', J(w1real.json).slice(0, 400));
 
   // ── the fixture views, from the ONE producer ──
   const V = FX.views();
@@ -297,13 +294,13 @@ else await (async () => {
   // the views: the REAL one, W1 (a refused record) twice, then every card state as a fixture
   const VIEWS = [
     { name: 'real', pid: REAL },
-    { name: 'w1', pid: 'fx-w1' }, { name: 'w1-pre', pid: 'fx-w1', preselect: 'cloak' },
-    ...['w1-claim', 'ready', 'not-live', 'ready-confirm', 'needs-key', 'needs-key-no-preset', 'not-installed', 'not-installed-here', 'installing', 'install-failed', 'path-not-runnable', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'driven', 'switching', 'current-cdp', 'host-profile'].map((n) => ({ name: n, pid: 'fx-' + n })),
+    { name: 'w1', pid: 'fx-w1' }, { name: 'w1-pre', pid: 'fx-w1', preselect: FX.FIXTURE_ID },
+    ...['w1-claim', 'ready', 'not-live', 'ready-confirm', 'needs-key', 'needs-key-no-preset', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'driven', 'switching', 'current-cdp', 'host-profile'].map((n) => ({ name: n, pid: 'fx-' + n })),
     // the driven card when THIS client lists the driver's session (2026-09-28): the button does the handback itself
     { name: 'driven-listed', pid: 'fx-driven', listDriver: true },
   ];
-  const STATE_OF = { real: REAL_STATE, ready: 'ready', 'not-live': 'ready', 'ready-confirm': 'ready-confirm', 'needs-key': 'needs-key', 'needs-key-no-preset': 'needs-key', 'not-installed': 'not-installed', 'not-installed-here': 'not-installed-here', installing: 'installing', 'install-failed': 'install-failed', 'path-not-runnable': 'path-not-runnable', 'older-browser': 'older-browser', 'all-in-use-own': 'all-in-use-own', 'all-in-use-shared': 'all-in-use-shared', driven: 'in-use-by-hand', 'driven-listed': 'in-use-by-hand' };
-  const ACTION_OF = { real: REAL_STATE === 'not-installed' ? ['Download and install…'] : ['Set location in Settings…'], ready: ['Switch to {name}', true], 'not-live': ['Switch to {name}', true], 'ready-confirm': ['Switch to {name}', true], 'needs-key': ['Enter license key…'], 'needs-key-no-preset': ['Enter license key…'], 'not-installed': ['Download and install…'], 'not-installed-here': ['Set location in Settings…'], 'install-failed': ['Install again…'], 'path-not-runnable': ['Set location in Settings…'], 'all-in-use-own': ['Open Agent browser…'], 'all-in-use-shared': ['Use my own license key…'], 'driven-listed': ['Hand it back to your agent'] };
+  const STATE_OF = { ready: 'ready', 'not-live': 'ready', 'ready-confirm': 'ready-confirm', 'needs-key': 'needs-key', 'needs-key-no-preset': 'needs-key', 'older-browser': 'older-browser', 'all-in-use-own': 'all-in-use-own', 'all-in-use-shared': 'all-in-use-shared', driven: 'in-use-by-hand', 'driven-listed': 'in-use-by-hand' };
+  const ACTION_OF = { ready: ['Switch to {name}', true], 'not-live': ['Switch to {name}', true], 'ready-confirm': ['Switch to {name}', true], 'needs-key': ['Enter license key…'], 'needs-key-no-preset': ['Enter license key…'], 'all-in-use-own': ['Open Agent browser…'], 'all-in-use-shared': ['Use my own license key…'], 'driven-listed': ['Hand it back to your agent'] };
   /** The driver's session listed in THIS client (a sidebar row carrying the fixture's driver key), held across the
    *  sidebar's own re-merges by an accessor pair — or taken away again. */
   const listDriver = (on) => evaluate(`(() => { const sb = window.app.sidebar; const stub = { webuiId: 'w-drv', id: 'w-drv', browserKey: 'bk-0000a001', name: 'Driver', status: 'live' };
@@ -316,7 +313,7 @@ else await (async () => {
       for (const vp of VPS) {
         console.log(`— ${lang} ${vp.w}×${vp.h}`);
         await load(lang, vp);
-        const P = { name: 'CloakBrowser', label: 'shopping' };
+        const P = { name: 'Fixture Browser', label: 'shopping' };
         for (const v of VIEWS) {
           const leg = `${v.name}-${lang}-${vp.tag}`;
           await listDriver(!!v.listDriver);
@@ -337,14 +334,20 @@ else await (async () => {
           const content = [];
           if (title !== want) content.push(`title "${title}" ≠ "${want}"`);
           const tgt = await evaluate(`[...document.querySelectorAll('#browser-switcher-dialog .brsw-target')].map((e) => ({ state: e.dataset.state, key: e.dataset.key, btn: [...e.querySelectorAll('.brsw-actions button')].map((b) => b.textContent) }))`);
-          if (v.name === 'w1' || v.name === 'w1-pre' || v.name === 'w1-claim') {
+          if (v.name === 'real') {
+            if (tgt.length) content.push(`a card on the real view: ${J(tgt)}`);
+            const e = await q('#browser-switcher-dialog .brsw-empty:not([data-key="build"]) .brsw-empty-text');
+            if (e !== tr(lang, "The browser isn't open right now. If a site blocks your agent, open “{label}” yourself and get past the check.", P)) content.push(`the real view's empty line "${e}"`);
+            if ((await q('#browser-switcher-dialog .brsw-notice')) !== null) content.push('a notice on the real view');
+            if ((await q('#browser-switcher-dialog .brsw-now-text')) !== tr(lang, "Your agent's browser: {name}", { name: 'Chromium' })) content.push('the now line');
+          } else if (v.name === 'w1' || v.name === 'w1-pre' || v.name === 'w1-claim') {
             if (tgt.length) content.push(`a card on W1: ${J(tgt)}`);
             if ((await q('#browser-switcher-dialog .brsw-empty')) !== tr(lang, "There's no other browser for “{label}” yet. If a site blocks your agent, take over in the live view and get past the check yourself.", P)) content.push('the W1 empty line');
             const notice = await q('#browser-switcher-dialog .brsw-notice');
             if (v.name === 'w1-pre' ? notice !== tr(lang, "{name} isn't part of this version of VibeSpace.", P) : notice !== null) content.push(`notice "${notice}"`);
             if ((await q('#browser-switcher-dialog .brsw-now-text')) !== tr(lang, "Your agent's browser: {name}", { name: 'Chromium' })) content.push('the now line');
           } else if (STATE_OF[v.name]) {
-            if (tgt.length !== 1 || tgt[0].state !== STATE_OF[v.name] || tgt[0].key !== 'target:cloak') content.push(`cards ${J(tgt)}, want one target:cloak in ${STATE_OF[v.name]}`);
+            if (tgt.length !== 1 || tgt[0].state !== STATE_OF[v.name] || tgt[0].key !== 'target:' + FX.FIXTURE_ID) content.push(`cards ${J(tgt)}, want one target:${FX.FIXTURE_ID} in ${STATE_OF[v.name]}`);
             const a = ACTION_OF[v.name];
             const wantBtn = a ? [tr(lang, a[0], P)] : [];
             if (tgt[0] && J(tgt[0].btn) !== J(wantBtn)) content.push(`the card's control ${J(tgt[0].btn)} ≠ ${J(wantBtn)}`);
@@ -390,7 +393,7 @@ else await (async () => {
           }
           if (v.name === 'ready') {
             await clearToasts();
-            await evaluate(`(() => { window.__brsw.hold = true; window.__brsw.answers.switch.push({ status: 502, body: { error: 'provider "cloak": launch_failed — the browser did not start (a sentence for the agent)', code: 'launch_failed', restored: true, from: 'chromium', to: 'cloak' } }); return true; })()`);
+            await evaluate(`(() => { window.__brsw.hold = true; window.__brsw.answers.switch.push({ status: 502, body: { error: 'provider "fixture-browser": launch_failed — the browser did not start (a sentence for the agent)', code: 'launch_failed', restored: true, from: 'chromium', to: 'fixture-browser' } }); return true; })()`);
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
             const mid = await until(() => evaluate(`(() => { const s = document.querySelector('#browser-switcher-dialog .brsw-now-text'); return s && !document.querySelector('#browser-switcher-dialog .brsw-target') ? s.textContent : null; })()`), 3000, 40);
             const posted = await evaluate(`window.__brsw.calls.filter((c) => c.kind === 'switch').map((c) => c.body)`);
@@ -398,14 +401,14 @@ else await (async () => {
             await evaluate(`(() => { window.__brsw.hold = false; window.__brsw.releases.splice(0).forEach((f) => f()); return true; })()`);
             const t1 = await toastText('error');
             const back = await until(() => evaluate(`(() => { const e = document.querySelector('#browser-switcher-dialog .brsw-target'); return e && e.dataset.state === 'ready'; })()`), 4000);
-            ok(mid === tr(lang, 'Switching to {name}… You can close this window; the switch goes on.', P) && posted.length === 1 && posted[0].provider === 'cloak' && posted[0].profile === 'fx-ready' && !('makeDefault' in posted[0]),
+            ok(mid === tr(lang, 'Switching to {name}… You can close this window; the switch goes on.', P) && posted.length === 1 && posted[0].provider === FX.FIXTURE_ID && posted[0].profile === 'fx-ready' && !('makeDefault' in posted[0]),
               `${leg}: the click shows the switching line and NO card before the POST answers (one POST, no makeDefault)`, J({ mid, posted }));
-            ok(t1 === tr(lang, "{to} didn't start. “{label}” is back on {from}.", { to: 'CloakBrowser', from: 'Chromium', label: 'shopping' }) && back, `${leg}: launch_failed + restored ⇒ "is back on" ("${t1}"), and the card is back in ready`);
+            ok(t1 === tr(lang, "{to} didn't start. “{label}” is back on {from}.", { to: 'Fixture Browser', from: 'Chromium', label: 'shopping' }) && back, `${leg}: launch_failed + restored ⇒ "is back on" ("${t1}"), and the card is back in ready`);
             await clearToasts();
-            await evaluate(`(() => { window.__brsw.answers.switch.push({ status: 409, body: { error: 'cloak needs a key and none is configured for cloak', code: 'backend_no_key', restored: false, from: 'chromium', to: 'cloak' } }); return true; })()`);
+            await evaluate(`(() => { window.__brsw.answers.switch.push({ status: 409, body: { error: 'fixture-browser needs a key and none is configured for cloud:browserbase', code: 'backend_no_key', restored: false, from: 'chromium', to: 'fixture-browser' } }); return true; })()`);
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
             const t2 = await toastText('error');
-            ok(t2 === tr(lang, "{to} didn't start, and {from} didn't start again either. “{label}” stays on {from}; its browser starts the next time your agent uses it.", { to: 'CloakBrowser', from: 'Chromium', label: 'shopping' }),
+            ok(t2 === tr(lang, "{to} didn't start, and {from} didn't start again either. “{label}” stays on {from}; its browser starts the next time your agent uses it.", { to: 'Fixture Browser', from: 'Chromium', label: 'shopping' }),
               `${leg}: backend_no_key + NOT restored ⇒ the facts win over the code ("${t2}")`);
           }
           if (v.name === 'ready-confirm') {
@@ -414,27 +417,6 @@ else await (async () => {
             const cf = await until(() => evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); if (!o) return null; return { title: o.querySelector('h3').textContent, ok: o.querySelector('.dialog-footer button:last-child').textContent, danger: o.querySelector('.dialog-footer button:last-child').classList.contains('danger') }; })()`), 3000, 40);
             if (cf) { await evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); o.id = 'vs-brsw-confirm'; return true; })()`); await record(`${leg}-confirm`, lang, vp, { sel: '#vs-brsw-confirm .dialog', dialogBox: false }); await click('#vs-brsw-confirm .btn-cancel'); }
             ok(cf && cf.title === tr(lang, 'Switch to {name}?', P) && cf.ok === tr(lang, 'Switch anyway') && cf.danger && (await calls('switch')) === n0, `${leg}: the click asks ONE question in the house confirm ("${cf && cf.ok}"), nothing posted on Cancel`, J(cf));
-          }
-          if (v.name === 'not-installed') {
-            const n0 = await calls('install');
-            await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
-            const cf = await until(() => evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); if (!o) return null; o.id = 'vs-brsw-confirm'; return { title: o.querySelector('h3').textContent, msg: o.querySelector('.dialog-hint').textContent, ok: o.querySelector('.dialog-footer button:last-child').textContent }; })()`), 3000, 40);
-            const before = await calls('install');
-            if (cf) { await record(`${leg}-confirm`, lang, vp, { sel: '#vs-brsw-confirm .dialog', dialogBox: false, allowDigits: true }); await click('#vs-brsw-confirm .btn-cancel'); }
-            ok(cf && cf.title === tr(lang, 'Install {name}?', P) && cf.msg === tr(lang, "About {down} MB is downloaded once from {host}, its maker, and unpacked to about {size} MB in VibeSpace's data folder. VibeSpace checks it is the exact copy it tested; in that test the browser itself connected to nothing on the internet. No account or key is needed.", { down: Math.round(FX.MEASURED_PROOF.download.bytes / 1e6), host: 'cloakbrowser.dev', size: Math.round(FX.MEASURED_PROOF.binary.dirBytes / 1e6) }) && cf.ok === tr(lang, 'Download and install') && before === n0 && (await calls('install')) === n0,
-              `${leg}: the download is behind the house confirm and NOTHING is requested before it (install POSTs: ${before - n0})`, J(cf));
-            await clearToasts();
-            await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
-            await until(() => evaluate(`!!document.querySelector('.dialog-overlay:not(#browser-switcher-dialog) .dialog-footer button:last-child')`), 3000, 40);
-            await evaluate(`document.querySelector('.dialog-overlay:not(#browser-switcher-dialog) .dialog-footer button:last-child').click()`);
-            const t1 = await toastText('info');
-            ok((await calls('install')) === n0 + 1 && t1 === tr(lang, 'Installing {name}; this can take a few minutes.', P), `${leg}: confirmed ⇒ ONE install POST and its worded answer ("${t1}")`);
-          }
-          if (v.name === 'not-installed-here') {
-            await click('#browser-switcher-dialog .brsw-target .brsw-actions button');
-            const st = await until(() => evaluate(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'settings'); if (!w) return null; const s = w.content.querySelector('.settings-search'); const row = [...w.content.querySelectorAll('.settings-row-label')].find((l) => l.textContent === ${J(tr(lang, 'CloakBrowser program file'))}); return { search: s && s.value, row: !!row && row.getBoundingClientRect().height > 0, dialog: !!document.getElementById('browser-switcher-dialog'), unused: !!row && !!row.closest('.settings-row').querySelector('.settings-chip-unused') }; })()`), 5000);
-            ok(st && st.search === 'CloakBrowser' && st.row && !st.dialog && st.unused === false, `${leg}: "Set location in Settings…" closes the dialog and opens Settings searched for CloakBrowser, the program-file row on screen — no "not in use here" chip (lane dc-browser-providers: the row no longer hides behind the deleted container switch)`, J(st));
-            await evaluate(`(() => { for (const w of [...window.app.wm.windows.values()]) if (w.type === 'settings') window.app.wm.closeWindow(w.id); return true; })()`);
           }
           if (v.name === 'all-in-use-own') {
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');

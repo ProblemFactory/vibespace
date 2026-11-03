@@ -324,8 +324,8 @@ gdrive:
 # read ONLY by src/server/integration-store.js). Each entry is ONE row id;
 # `values` keys are that row's declared field keys. Never stored in the
 # instance's data. Suitable: register-once, everyone-may-use credentials (a
-# Lark app, a Google OAuth client). NOT suitable: per-seat keys (a CloakBrowser
-# license) — one cluster key there means the cluster pays for every user and
+# Lark app, a Google OAuth client). NOT suitable: per-seat keys (a cloud
+# browser's API key) — one cluster key there means the cluster pays for every user and
 # users share the vendor's concurrent-session cap. Gmail has no entry here: it
 # REUSES the Google client presets (name the one channels should default to
 # `channels` when you provide more than one).

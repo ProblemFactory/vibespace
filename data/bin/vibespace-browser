@@ -132,7 +132,7 @@ const SIZE_HELP = '1280x720 | 1920x1080 | 2560x1440 | your own WxH';
 const SIZE_REFUSALS = new Set(['bad-size', 'size_out_of_bounds']);
 const USAGE = `vibespace-browser — THIS session's browser: every page verb, named profiles, handles
 PAGE VERBS (your own browser, or the attachment you name):
-  vibespace-browser open <url>                    navigate (a 403/429 prints a may-need-cloak HINT)
+  vibespace-browser open <url>                    navigate (a 403/429 prints a may-need-anti-bot HINT)
   vibespace-browser open <url> --size WxH         …and FIX the picture size (${SIZE_HELP}): see \`size\`
   vibespace-browser snapshot [-i] [-c]            the accessibility tree with @refs (read this first)
   vibespace-browser click @ref | fill @ref "…" | type @ref "…" | press Enter | select @ref <v> | hover @ref
@@ -208,7 +208,7 @@ YOURS:
   vibespace-browser backend [<name>] [--confirm-downgrade]   which backend; PROPOSE a switch (the user decides)
   vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2|3] [--remember]
                                                   I was blocked on this page — a CLAIM, not a detection; tier 2 puts ONE
-                                                  proposal card (switch to CloakBrowser) in the user's chat for their Approve
+                                                  card in the user's chat (this version offers no one-click switch)
   vibespace-browser ask-human "<what you need>"  [--withdraw | --status]   ASK A PERSON to take over this browser (a login, a
                                                   captcha, a payment): ONE request they see at the top of the Agent browser
                                                   window and in For you; your next page verb WAITS until they hand back (or
@@ -277,7 +277,7 @@ const LOOP_SHOT_MS = 4000;
 function navHint(text) {
   const m = /\b(?:HTTP\s*|status(?:Code)?\W{0,3})(403|429)\b/i.exec(String(text || ''));
   if (!m) return null;
-  return `hint: may-need-cloak — HTTP ${m[1]} is a hint from the status code, not a detection: the page may need a tier-2 backend; \`vibespace-browser blocked --url <u> --why http-${m[1]}\` records your claim (the user decides)`;
+  return `hint: may-need-anti-bot — HTTP ${m[1]} is a hint from the status code, not a detection: the page may need a tier-2 backend; \`vibespace-browser blocked --url <u> --why http-${m[1]}\` records your claim (the user decides)`;
 }
 /** lane browser-propose step 2: a navigation's FINAL url + title off the browser CLI's own result — `--json`'s
  *  `{data:{url,title}}`, else its text form (0.38.1: "✓ <title>\n  <url>"). The server judges them against its sign-in
@@ -1140,10 +1140,10 @@ async function runPage(c) {
     if (navVerb) { const h = navHint(tail); if (h) console.error(h); }
     // lane browser-propose step 2: the server's hint for this navigation's final page (a known vendor's sign-in refusal) —
     // printed exactly as the 403/429 one is
-    if (navVerb && au && !au._failed && au.hint && au.hint.text) console.error(`hint: ${au.hint.hint || 'may-need-cloak'} — ${au.hint.text}`);
+    if (navVerb && au && !au._failed && au.hint && au.hint.text) console.error(`hint: ${au.hint.hint || 'may-need-anti-bot'} — ${au.hint.text}`);
     // lane browser-propose step 3: the user REJECTED the switch this conversation proposed for that host — said ONCE, here
     if (navVerb && au && !au._failed && au.proposalRejected && au.proposalRejected.text) console.error(`note: ${au.proposalRejected.text} [proposal_rejected]`);
-    // verify r1 V1 (lane browser-propose): the sites CloakBrowser's list refused while this verb ran — by name, any page verb
+    // verify r1 V1 (lane browser-propose): the sites a wrapped browser's list refused while this verb ran — by name, any page verb
     if (au && !au._failed && au.egressRefused && au.egressRefused.text) console.error(`note: ${au.egressRefused.text} [egress_refused]`);
     // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the
     // browser) — the binary's own words name its hidden CLI; the way out is this tool's
@@ -1391,12 +1391,6 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       const v = p.onHost || p.control;
       console.log(`${v.ok ? '✓' : '✗'} ${p.id}  tier ${p.tier}  ${p.label}${v.ok ? (p.remote ? `  (remote: ${p.remote})` : '  (this machine only)') : `\n    cannot be used${r.host ? ' on ' + r.host : ' here'}: ${v.error}`}`);
     }
-    if (r.proof) console.log(`egress measurement (§7.2.1) for cloak: ${r.proof.status}${r.proof.refusal ? ' — ' + r.proof.refusal : ''} (${r.proof.date}${r.proof.version ? ', ' + r.proof.version : ''}${r.proof.chromium ? ', Chromium ' + r.proof.chromium : ''})`);
-    // lane-cloak: what the record implies, and what a cloak browser may reach HERE (the deployment's named sites)
-    if (r.proof && r.proof.status === 'measured' && r.egress) {
-      console.log(`  the browser itself reached: ${(r.egress.run || []).length ? r.egress.run.join(', ') : 'nothing beyond loopback'}; its one-time download: ${(r.egress.install || []).join(', ') || 'none'}`);
-      console.log(`  a cloak browser may open here: ${(r.cloakSites || []).length ? r.cloakSites.join(', ') : 'no site yet — the user names them (Settings → Agent browser); everything else is refused'}`);
-    }
     // lane browser-admin (chunk 3): the Chrome builds there and the browser CLI version in use — FACTS (the user chooses a
     // profile's build in the Agent browser panel; this command never sets one)
     if (r.builds) {
@@ -1502,7 +1496,7 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     const r = await call('POST', '/api/agent/browser/backend', { provider: name, profile: handle || undefined, confirmDowngrade: has('--confirm-downgrade') }, { soft: true });
     if (r._failed) { printRefusal(r); process.exit(1); }
     if (r.mode === 'proposal') { console.log(`proposed: ${r.text} — ${r.reason}${r.filed ? ' (filed to the user\'s "For you" inbox)' : ''}. The switch is the user\'s act; carry on with what you can meanwhile.`); return; }
-    console.log(`switched ${r.from} → ${r.to} (${r.chip})${r.seedMinted ? ' · fingerprint seed minted' : ''}; ${(r.reopened || []).length} tab(s) re-opened at their last URL — your lease survived, re-orient before continuing.${r.fingerprint ? '\n  note: ' + r.fingerprint : ''}`);
+    console.log(`switched ${r.from} → ${r.to} (${r.chip}); ${(r.reopened || []).length} tab(s) re-opened at their last URL — your lease survived, re-orient before continuing.${r.fingerprint ? '\n  note: ' + r.fingerprint : ''}`);
     return;
   }
 

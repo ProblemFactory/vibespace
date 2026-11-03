@@ -113,7 +113,6 @@ export const ROWS = [
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-builds-keeper.js', 'own-tree', 8, null, DATA],
   ['src/server/browser-cli-install.js', 'own-tree', 2, null, DATA],
-  ['src/server/browser-cloak-install.js', 'own-tree', 4, null, DATA],
   ['src/server/browser-clone-run.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-disk-run.js', 'own-tree', 3, null, DATA],
   ['src/server/browser-engines.js', 'user-path', 3, 'DOOR\\.blocked\\(', 'lane engine-spi-egress L1b: the program the OWNER names for an engine (plugin.<id>.executablePath — one stat + its first 4 bytes, the core\'s verdict; asked at the door first: a stalled mount is answered «blocked», never read) + its package\'s kernel.json access (data/plugins/<id>/, the source)'],

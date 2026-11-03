@@ -3,8 +3,7 @@
 // with the conversation's name prefilled and POST to the adopt route, so the conversation's own browser — and on the
 // per-conversation-directory rung its logins — become the profile, exactly as before).
 //
-//   · name · the browser (every provider a row: its verdict for the chosen machine, in words; CloakBrowser offered once
-//     installed, else its Install… behind the download confirm) · the machine (this one / a paired machine, greyed WITH
+//   · name · the browser (every provider a row: its verdict for the chosen machine, in words) · the machine (this one / a paired machine, greyed WITH
 //     the reason when the browser cannot run there) · the Chrome build (lane browser-admin 2a) · who can use it (THE
 //     principal picker; default every conversation — owner ruling A);
 //   · ONE POST with the fields (the existing route), a refusal said by its CODE beside the footer, the panel's list
@@ -12,13 +11,12 @@
 //
 // The arithmetic is PURE (src/lib/browser-new-profile-model.js); the words are the device's t().
 import { t } from './i18n.js';
-import { fetchJson, showToast, createModalShell, showConfirmDialog, copyText } from './utils.js';
+import { fetchJson, showToast, createModalShell, copyText } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
 import { pickerRows, draftWho, EVERYONE_KEY } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
-import { installConfirmWords, installOutcomeWords } from './browser-switcher-model.js';
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
@@ -34,7 +32,7 @@ const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'applic
  */
 export function openNewProfileDialog(app, { label = '', fromSession = null, onCreated = null, onDismissed = null, opener = 'person' } = {}) {
   const adopt = adoptFormOf(fromSession); // verify r1 (F7): the server's plan (the picker asked it), never the rung's guess
-  const st = { cloneKey: 'none', cloneSources: null, cloneFor: undefined, providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
+  const st = { cloneKey: 'none', cloneSources: null, cloneFor: undefined, providers: [], machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
   const names = nameHelpers(app);
   const sb = (app && app.sidebar) || {};
   // not the subject: label — the name a new profile starts with (ONE «New profile» form — asked again it is raised, what was typed kept)
@@ -145,7 +143,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // ── drawing the two lists (keyed by id: a re-draw after a broadcast patches the rows, the choice stays) ──
   function providerRowsNow() {
     const rows = st.host ? (st.hostRows || st.providers) : st.providers;
-    return providerChoices({ providers: rows, install: st.install, host: st.host, t });
+    return providerChoices({ providers: rows, host: st.host, t });
   }
   function drawProviders() {
     if (adopt === 'keep') return;
@@ -172,10 +170,6 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (head.textContent !== c.name) head.textContent = c.name;
       const bl = c.blurb || ''; if (blurb.textContent !== bl) blurb.textContent = bl; blurb.style.display = bl ? '' : 'none';
       const nt = c.note || ''; if (note.textContent !== nt) note.textContent = nt; note.style.display = nt ? '' : 'none';
-      // CloakBrowser not installed: its ONE step, behind the download confirm (the switch dialog's / Manage agents' words)
-      let ib = row.querySelector('.bnew-install');
-      if (c.offer && !ib) { ib = btn('', () => installCloak(), 'bnew-install'); row.querySelector('.bwho-answer-text').appendChild(ib); }
-      if (ib) { ib.style.display = c.offer ? '' : 'none'; ib.textContent = c.offer === 'install-again' ? t('Install again…') : t('Install…'); }
       order.push(row);
     }
     list.replaceChildren(...order);
@@ -318,19 +312,10 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     st.buildDownload = r && !r.error ? r.download || null : null;
     drawBuilds();
   }
-  async function installCloak() {
-    const iv = st.install;
-    if (!(await showConfirmDialog({ ...installConfirmWords('CloakBrowser', t, iv) }))) return;
-    const r = await fetchJson('/api/browser/install', jsonPost({}));
-    const o = installOutcomeWords(r, { t, name: 'CloakBrowser' });
-    showToast(o.text, { type: o.tone === 'error' ? 'error' : o.tone === 'warn' ? 'warn' : 'info', duration: 9000 });
-    await loadFacts();
-  }
   async function loadFacts() {
-    const [pv, iv, mv] = await Promise.all([fetchJson('/api/browser/providers'), fetchJson('/api/browser/install'), fetchJson('/api/desktop/machines')]);
+    const [pv, mv] = await Promise.all([fetchJson('/api/browser/providers'), fetchJson('/api/desktop/machines')]);
     if (st.closed) return;
     st.providers = pv && Array.isArray(pv.providers) ? pv.providers : [];
-    st.install = iv && !iv.error ? iv : null;
     st.machines = mv && Array.isArray(mv.machines) ? mv.machines : [{ hostId: 'local' }];
     // a paired machine's verdicts (the structural rules — a key that cannot leave this computer, a browser with no remote
     // transport — are the same on every paired machine): asked once, of the first machine that could run one

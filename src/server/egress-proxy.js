@@ -8,11 +8,9 @@
  * `403` with the verdict's own sentence as the body, so a blocked fetch is a
  * named refusal in the browser's network log rather than a hang.
  *
- * Who uses it: a local CloakBrowser browser (lane-cloak: the keeper starts ONE
- * of these for cloak, its allowlist = the §7.2.1 record's run hosts + the sites
- * this deployment names, and the browser gets `--proxy-server` pointing here
- * with loopback NOT bypassed; the pinned DOWNLOAD runs through another one whose
- * allowlist is the record's download hosts), and any profile whose `proxy` field names it. Loopback and link-local targets are refused by the
+ * Who uses it: a local wrapped ENGINE's browser (lane engine-spi-egress: the keeper starts ONE of these per profile, its
+ * allowlist = the plugin's reserved row `plugin.<id>.egressAllowlist`, and the browser gets `--proxy-server` pointing here
+ * with loopback NOT bypassed), and any profile whose `proxy` field names it. Loopback and link-local targets are refused by the
  * verdict itself — the proxy is never a way back into the hub's services.
  *
  * Not a general proxy: no auth (loopback only, like the stream port, §6.1),
@@ -36,7 +34,7 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   // The verdict is always taken on the name the client asked for.
   const upstreamHost = (h) => { try { return String(resolve(h) || h); } catch { return h; } };
   const stats = { allowed: 0, refused: 0, errors: 0 };
-  // lane-cloak: the last refusals by NAME (host + the verdict's sentence) — a page that stays blank behind the
+  // the last refusals by NAME (host + the verdict's sentence) — a page that stays blank behind the
   // allowlist is explained by what was refused, never guessed; bounded, no bodies, no paths, no secrets
   const RECENT_MAX = 20;
   const recentRefusals = [];
