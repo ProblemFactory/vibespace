@@ -116,6 +116,7 @@ Every setting is listed below, the advanced ones and the ones that only apply in
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `desktop.dynamicEnabled` | boolean | `false` | **Dynamic desktop (Stage)** — A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md |
+| `desktop.cacheWarmth` | boolean | `false` | **Prompt-cache warmth on conversation boxes** — Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own — it rides the session list the page already asks for. |
 | `desktop.stageKeepAlive` | number | `3` | **Stage: workspaces kept alive** — How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed |
 | `window.tabWrap` | boolean | `false` | **Multi-row tabs** — Allow tab bar to wrap into multiple rows when there are many tabs (like a flow layout) |
 | `window.mergeDropLayout` | enum | `tabs` | **Dropping a window onto another** — What a window dragged onto another window's icon or tab bar becomes: grouped as tabs (a toast offers "Show side by side"), or shown side by side at once — the dragged window on the right, with Undo (it goes back where it was) and Unsplit (stay grouped as tabs). |

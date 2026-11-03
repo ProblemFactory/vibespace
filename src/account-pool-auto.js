@@ -96,6 +96,7 @@ function serveAfterFailure(prev, { why = '', now = Date.now(), fp = '' } = {}) {
 // data" — see the essay in quota-model.js.
 const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC, nowSecOf, resetLanded, memberProofState, windowDisplay } = require('./quota-model.js');
 const { familyOfScopedBucket } = require('./model-family.js');
+const { capsOf } = require('./backend-caps.js'); // PURE: the harness row states its prompt-cache TTL (cacheTtlSecFor)
 
 const SWITCH_THRESHOLD_PCT = 5;
 // PER-BUCKET-KIND thresholds (2.268.2, user-designed: what matters is
@@ -146,22 +147,36 @@ const SPARE_MOVE_MARGIN_PCT = 15;
 // therefore spends the quota it was meant to save; the pool waits until the cache
 // has gone cold on its own. A FORCED move ('exhausted' / 'login-expired' — the
 // member cannot serve) is never held: a wall is a wall.
-// The TTL is a property of the REQUEST model: a '[1m]' variant runs on the
-// 1-hour prompt cache, everything else on the 5-minute default.
-const CACHE_TTL_SEC = 300;
-const CACHE_TTL_1M_SEC = 3600;
-function cacheTtlSecFor(model) {
-  return /\[1m\]\s*$/i.test(String(model || '')) ? CACHE_TTL_1M_SEC : CACHE_TTL_SEC;
+// THE TTL IS ONE FACT THE HUB STATES (lane cache-warmth-tiles, 2026-11-02). Until
+// then it was «a property of the REQUEST model: a '[1m]' variant runs on the 1-hour
+// cache, everything else on the 5-minute default» — the 2026-09-22 belief. Today a
+// SUBSCRIPTION session's requests ride a ONE-HOUR TTL, re-timed at every request, and
+// FIVE minutes once its account is in usage overage (paid with credits). So a plain
+// claude conversation 20 minutes idle read COLD and a proactive move cold-started a
+// still-warm cache (a fleet user measured such a rewrite at 40–80× the cost of a turn
+// inside the hour). The harness row states the TTL (backend-caps `promptCache`); the
+// model's name decides nothing. A harness without the row, or an API-key session (the
+// fact covers subscription billing only), answers null = UNKNOWN: no hold, no colour.
+// ONE reader: the pool's hold below and the session list's warmth fields
+// (usage-pool-engine `cacheFactsOf`) both ask THIS, so the colour a person sees and the
+// hold the pool applies never disagree.
+function cacheTtlSecFor({ harness = 'claude', apiKey = false, onCredits = false } = {}) {
+  const pc = capsOf(harness).promptCache;
+  if (!pc || apiKey) return null;
+  return onCredits ? pc.creditsTtlSec : pc.subscriptionTtlSec;
 }
-// warm while now − the last instant the conversation produced output < its TTL.
-// No stamp ⇒ not warm (never hold a move on ignorance of activity: the hold is a
-// cost saving, and a conversation with no known output has no cache to save).
-function warmCache({ lastActivityMs, nowMs, model } = {}) {
-  const ttlSec = cacheTtlSecFor(model);
-  const last = Number(lastActivityMs), now = Number(nowMs);
+// warm while now − the conversation's last model request < its TTL, and no account
+// move since that request (`cacheLostAt`: the cache belongs to the account that wrote
+// it, so a re-point leaves it behind). No request stamp, or an unknown TTL ⇒ not warm
+// (never hold a move on ignorance: the hold is a cost saving, and a conversation with
+// no known request — or no stated cache — has nothing proven to save).
+function warmCache({ lastRequestAt, cacheTtlSec, cacheLostAt = null, nowMs } = {}) {
+  const ttlSec = Number(cacheTtlSec) > 0 ? Number(cacheTtlSec) : null;
+  const last = Number(lastRequestAt), now = Number(nowMs);
   if (!Number.isFinite(last) || last <= 0 || !Number.isFinite(now)) return { warm: false, agoSec: null, ttlSec };
   const agoMs = Math.max(0, now - last);
-  return { warm: agoMs < ttlSec * 1000, agoSec: Math.floor(agoMs / 1000), ttlSec };
+  const lost = Number(cacheLostAt) >= last;
+  return { warm: !!ttlSec && !lost && agoMs < ttlSec * 1000, agoSec: Math.floor(agoMs / 1000), ttlSec, ...(lost ? { lost: true } : {}) };
 }
 // IS THIS CONVERSATION IN A TURN RIGHT NOW (2026-09-22, the soft-exhaustion defer
 // below). Two protocol facts, both owned by the stdout consumer: `_isStreaming`
@@ -1734,4 +1749,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 module.exports = {
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
-  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

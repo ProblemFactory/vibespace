@@ -89,7 +89,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef, brainRef = null }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
+    modelsMatch, noteSessionProduced, noteModelRequest, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
     noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped,
     noteStreamRecord, recordIsLate } = engine;
 
@@ -809,6 +809,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // un-counts itself). Host-login sessions skip the ring; the
           // harvest is their one ledger path. Account-billed remote
           // sessions keep riding it (their identity is real and global).
+          try { noteModelRequest?.(session, msg); } catch { } // the conversation's LAST MODEL REQUEST (lane cache-warmth-tiles) — the engine's ONE writer, the device feed's twin calls it too
           if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id)
               && !(session.host && !session._accountId) && !recordIsLate?.(session, msg)) { // a backlog's spend is the ledger scan's to book, by time — never the live odometer's (lane-hot-switch)
             try {

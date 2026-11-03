@@ -683,13 +683,16 @@ function setup(ctx) {
       // the cache and ran the full sweep (audit round-2, high)
       // lane fuse-canary-notice (B-b327): while the server's own mount is wedged the sweep's schedule waits — the last
       // answer stands (never an empty list); with no answer yet it runs
-      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(_sessionsCache);
+      // lane cache-warmth-tiles: each answer carries the live conversations' prompt-cache facts, built per answer
+      // (the sweep's 4.5 s cache never ages them) and only while the person's switch is on — off costs nothing
+      const answer = (body) => (serverSetting?.('desktop.cacheWarmth') === true ? { ...body, ...warmthDiff(activeSessions, ctx.cacheFactsOf) } : body);
+      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(answer(_sessionsCache));
       // coalesce: N clients missing the cache together share ONE sweep — the
       // sync handler serialized them for free; the async one must do it itself
       if (!_sweepInFlight) {
         _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
       }
-      res.json(await _sweepInFlight);
+      res.json(answer(await _sweepInFlight));
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -741,6 +744,22 @@ function setup(ctx) {
   });
 }
 
+/** THE SESSION LIST'S WARMTH DIFF (lane cache-warmth-tiles, 2026-11-02): each live conversation's prompt-cache
+ *  facts — usage-pool-engine `cacheFactsOf`, the SAME producer the pool's warm-cache hold judges — keyed by its webui
+ *  id, beside the hub's own clock: a client places the instants on THIS clock, never on its own alone (the deadline
+ *  cards' rule). A conversation whose TTL is unknown is left out (no colour, never a guess); a fact that throws too. */
+function warmthDiff(activeSessions, factsOf, now = Date.now()) {
+  const warmth = {};
+  if (typeof factsOf === 'function') {
+    for (const [id, s] of activeSessions || []) {
+      if (!s || s.isTmuxView) continue;
+      let f = null; try { f = factsOf(s, now); } catch { f = null; }
+      if (f && f.cacheTtlSec) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null };
+    }
+  }
+  return { warmth, serverNow: now };
+}
+
 let _warmSweep = null;
 let _heldRows = null;
 const NO_TRANSCRIPT_HERE = 'no transcript of this conversation was found on this machine — it cannot be reopened here';
@@ -759,4 +778,4 @@ function heldAccountOf(backend, id, rows = _heldRows) {
   try { bound = require('../harnesses').get(backend || 'claude')?.store?.accountBound === true; } catch { bound = false; }
   return bound ? { refuse: NO_TRANSCRIPT_HERE } : null;
 }
-module.exports = { router, setup, mergeKeptStopped, heldAccountOf, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, heldAccountOf, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

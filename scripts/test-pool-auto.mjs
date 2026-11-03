@@ -438,16 +438,34 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
 {
   const { cacheTtlSecFor, warmCache } = require(path.resolve('src/account-pool-auto.js'));
   const fs = require('node:fs');
-  ck('warm: a [1m] model runs on the 1-hour prompt cache', cacheTtlSecFor('claude-fable-5-1[1m]') === 3600 && cacheTtlSecFor('fable[1m]') === 3600);
-  ck('warm: a plain model on the 5-minute default (and no model at all)', cacheTtlSecFor('claude-fable-5-1') === 300 && cacheTtlSecFor(null) === 300);
+  // THE TTL IS ONE FACT THE HUB STATES (lane cache-warmth-tiles, 2026-11-02): a subscription session rides the 1-hour
+  // prompt cache whatever its model; usage credits IN USE ⇒ 5 minutes; a harness that states none ⇒ unknown. RED on
+  // 3f8429cd5: the 2026-09-22 rule answered 300 s for every model without '[1m]'.
+  ck('TTL FACT: a subscription claude conversation rides the 1-hour cache — whatever its model (the [1m] suffix decides nothing)', cacheTtlSecFor({ harness: 'claude' }) === 3600 && cacheTtlSecFor() === 3600, String(cacheTtlSecFor({ harness: 'claude' })));
+  ck('TTL FACT: usage credits in use ⇒ the 5-minute cache', cacheTtlSecFor({ harness: 'claude', onCredits: true }) === 300);
+  const { BACKEND_CAPS } = require(path.resolve('src/backend-caps.js'));
+  const stating = Object.keys(BACKEND_CAPS).filter((h) => BACKEND_CAPS[h].promptCache);
+  ck('TTL FACT: claude is the one shipped row that states a prompt cache; every other row — and an unknown id — answers null (unknown, never a guess)',
+    stating.join() === 'claude' && Object.keys(BACKEND_CAPS).filter((h) => !BACKEND_CAPS[h].promptCache).every((h) => cacheTtlSecFor({ harness: h }) === null) && cacheTtlSecFor({ harness: 'nope' }) === null, stating.join());
+  ck('TTL FACT: an API-key claude session ⇒ unknown (the fact covers subscription billing)', cacheTtlSecFor({ harness: 'claude', apiKey: true }) === null);
+  const ttlSrc = (() => { const t = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8'); const i = t.indexOf('function cacheTtlSecFor('); return i < 0 ? '' : t.slice(i, t.indexOf('\n}\n', i)); })();
+  ck('TTL FACT: no model reaches the rule — cacheTtlSecFor reads the harness row, never a model name or a \'[1m]\'', ttlSrc && /capsOf\(harness\)\.promptCache/.test(ttlSrc) && !/\[1m\]|model/i.test(ttlSrc), ttlSrc.slice(0, 200));
   const nowMs = NOW * 1000;
-  ck('warm: no activity stamp ⇒ NOT warm (a hold never rests on ignorance)', (() => { const w = warmCache({ lastActivityMs: undefined, nowMs, model: 'fable[1m]' }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })());
-  const w1 = warmCache({ lastActivityMs: nowMs - 120e3, nowMs, model: 'claude-fable-5-1' });
-  ck('warm: output 120 s ago on a 300 s cache ⇒ warm, agoSec 120, ttlSec 300', w1.warm === true && w1.agoSec === 120 && w1.ttlSec === 300, JSON.stringify(w1));
-  const wEdge = warmCache({ lastActivityMs: nowMs - 300e3, nowMs, model: 'claude-fable-5-1' });
+  ck('warm: no request stamp ⇒ NOT warm (a hold never rests on ignorance)', (() => { const w = warmCache({ lastRequestAt: undefined, cacheTtlSec: 3600, nowMs }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })());
+  ck('warm: an UNKNOWN ttl ⇒ NOT warm (no hold for a harness that states no cache)', (() => { const w = warmCache({ lastRequestAt: nowMs - 1e3, cacheTtlSec: null, nowMs }); return w.warm === false && w.ttlSec === null && w.agoSec === 1; })());
+  const w1 = warmCache({ lastRequestAt: nowMs - 120e3, cacheTtlSec: 300, nowMs });
+  ck('warm: a request 120 s ago on the 5-minute (credits) cache ⇒ warm, agoSec 120, ttlSec 300', w1.warm === true && w1.agoSec === 120 && w1.ttlSec === 300, JSON.stringify(w1));
+  const wEdge = warmCache({ lastRequestAt: nowMs - 300e3, cacheTtlSec: 300, nowMs });
   ck('warm: exactly at the ttl the cache is COLD (ago >= ttl)', wEdge.warm === false && wEdge.agoSec === 300, JSON.stringify(wEdge));
-  const w1m = warmCache({ lastActivityMs: nowMs - 20 * 60e3, nowMs, model: 'claude-fable-5-1[1m]' });
-  ck('warm: 20 min ago on a [1m] conversation is still warm (1 h cache)', w1m.warm === true && w1m.ttlSec === 3600, JSON.stringify(w1m));
+  const w20 = warmCache({ lastRequestAt: nowMs - 20 * 60e3, cacheTtlSec: cacheTtlSecFor({ harness: 'claude' }), nowMs });
+  ck('THE PIN: a plain claude conversation 20 min idle is WARM (the hour) — it was COLD on the 5-minute belief', w20.warm === true && w20.ttlSec === 3600 && w20.agoSec === 1200, JSON.stringify(w20));
+  const w20c = warmCache({ lastRequestAt: nowMs - 20 * 60e3, cacheTtlSec: cacheTtlSecFor({ harness: 'claude', onCredits: true }), nowMs });
+  ck('THE PIN: …and COLD when its account is on credits (5 minutes)', w20c.warm === false && w20c.ttlSec === 300, JSON.stringify(w20c));
+  ck('warm: exactly at the hour it is cold', warmCache({ lastRequestAt: nowMs - 3600e3, cacheTtlSec: 3600, nowMs }).warm === false && warmCache({ lastRequestAt: nowMs - 3599e3, cacheTtlSec: 3600, nowMs }).warm === true);
+  const wLost = warmCache({ lastRequestAt: nowMs - 60e3, cacheTtlSec: 3600, cacheLostAt: nowMs - 30e3, nowMs });
+  ck('warm: an account move AFTER the last request ⇒ cold at once (the cache stays with the account that wrote it)', wLost.warm === false && wLost.lost === true, JSON.stringify(wLost));
+  const wBack = warmCache({ lastRequestAt: nowMs - 10e3, cacheTtlSec: 3600, cacheLostAt: nowMs - 30e3, nowMs });
+  ck('warm: …a request AFTER the move warms it again', wBack.warm === true && !wBack.lost, JSON.stringify(wBack));
 
   // the proactive shape from the tier legs above: A healthy, B resets sooner ⇒ 'edf'
   const edfCaches = { a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) };
@@ -456,6 +474,9 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('warm: a WARM conversation is not moved by the proactive EDF jump — none(\'warm-cache\') carrying agoSec/ttlSec/wouldTo/wouldToName',
     held.to === null && held.reason === 'warm-cache' && held.agoSec === 120 && held.ttlSec === 300 && held.wouldTo === 'b' && held.wouldToName === 'B', JSON.stringify(held));
   ck('…and without explain it keeps the historical null contract', decidePoolSwitch({ currentId: 'a', members, readCache: (id) => edfCaches[id] ?? null, nowSec: NOW, proactive: true, hot: true, warm: w1 }) === null);
+  const held20 = hot(edfCaches, { warm: w20 });
+  ck('THE PIN: the proactive EDF jump HOLDS the 20-minute-idle conversation (warm-cache, ttlSec 3600)', held20.to === null && held20.reason === 'warm-cache' && held20.ttlSec === 3600 && held20.agoSec === 1200, JSON.stringify(held20));
+  ck('…and moves it on credits (cold at 5 minutes)', hot(edfCaches, { warm: w20c }).reason === 'edf');
   const cold = hot(edfCaches, { warm: wEdge });
   ck('warm: a COLD conversation (ago >= ttl) gets the EDF jump exactly as before', cold.to === 'b' && cold.reason === 'edf', JSON.stringify(cold));
   ck('warm: warm:null is byte-identical to omitting it', JSON.stringify(hot(edfCaches, { warm: null })) === JSON.stringify(hot(edfCaches)));
@@ -480,8 +501,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the PER-SESSION site passes warm:', perSession.length === 1 && /[{,]\s*warm[,:\s}]/.test(perSession[0]), perSession[0]);
   ck('WIRING PIN: the POOL-DEFAULT site passes warm:', poolDefault.length === 1 && /[{,]\s*warm\s*:/.test(poolDefault[0]), poolDefault[0]);
   const warmCalls = [...eng.matchAll(/warmCache\(\{[^\n]*\}\)/g)].map((m) => m[0]);
-  ck('WIRING PIN: warmCache( is called with the pty liveness stamp _lastPtyDataAt (per-session s2 AND the default set)',
-    warmCalls.some((c) => /s2\._lastPtyDataAt/.test(c)) && warmCalls.some((c) => /\bs\._lastPtyDataAt/.test(c)), JSON.stringify(warmCalls));
+  ck('WIRING PIN: warmCache( reads cacheFactsOf at every site (per-session s2 AND the default set) — the ONE producer the session list sends too',
+    warmCalls.some((c) => /cacheFactsOf\(s2, now\)/.test(c)) && warmCalls.some((c) => /cacheFactsOf\(s, now\)/.test(c)) && warmCalls.length >= 3 && warmCalls.every((c) => /\.\.\.cacheFactsOf\(/.test(c)), JSON.stringify(warmCalls));
   ck('WIRING PIN: a warm-cache refusal is journalled through the throttled noteWarmHold at both sites',
     (eng.match(/reason === 'warm-cache'\) \{ noteWarmHold\(/g) || []).length === 2);
   ck('WIRING PIN: the hot bootstrap / placement site stays warm-less (no conversation yet)', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 1);
@@ -505,8 +526,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('inTurn: a truthy non-boolean isStreaming is not the protocol flag', conversationInTurn({ isStreaming: 1 }) === false);
 
   const nowMs = NOW * 1000;
-  const warmW = warmCache({ lastActivityMs: nowMs - 30e3, nowMs, model: 'claude-fable-5-1' });
-  const coldW = warmCache({ lastActivityMs: nowMs - 10 * 60e3, nowMs, model: 'claude-fable-5-1' });
+  const warmW = warmCache({ lastRequestAt: nowMs - 30e3, cacheTtlSec: 300, nowMs });       // the credits TTL: the decision legs below read ttlSec 300
+  const coldW = warmCache({ lastRequestAt: nowMs - 10 * 60e3, cacheTtlSec: 300, nowMs });
   const W = (w, inTurn) => ({ ...w, inTurn });
   // A: 5h at 7 % remaining — under the hot bar (10), above the hard bar (5); B healthy
   const softC = { a: acct(0.3, 6 * D, { u5: 0.93 }), b: acct(0.3, 6 * D) };
@@ -562,7 +583,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   // computes NO inTurn; it still passes `warm` (2.369.149's proactive hold stays)
   ck('WIRING PIN: the pool-default site computes NO inTurn (the soft hold is dropped) but still hands `warm: defaultWarm` to the decision',
     !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
-    && /const w = warmCache\(\{ lastActivityMs: s\._lastPtyDataAt, nowMs: now, model: cacheModelFor\(s\) \}\);/.test(eng)
+    && /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);/.test(eng)
     && /creditsIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng)); // (+ the roster thunk, lane pool-silent-members R2)
   ck('WIRING PIN: the per-session site journals a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts); the default site has none',
     (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
@@ -642,7 +663,7 @@ await (async () => {
     return { hit: true, mod: require(fp) };
   };
   const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
-  const world = (engMod, { burnA = 0.012 } = {}) => {
+  const world = (engMod, { burnA = 0.012, extra = [] } = {}) => {
     const root = fs.mkdtempSync(path.join(scr, 'w-'));
     const dataDir = path.join(root, 'data');
     const am = new AccountManager({ dataDir });
@@ -674,8 +695,9 @@ await (async () => {
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, A, { why: 'spawn' });
       return s;
     };
-    mk('sess-cold', 20 * 60e3);   // output 20 min ago on a 5-min cache: COLD
+    mk('sess-cold', 70 * 60e3);   // output 70 min ago: past the 1-hour cache — COLD (it read 20 min on the 5-minute belief)
     mk('sess-warm', 30e3);        // output 30 s ago: WARM, idle between turns
+    for (const [sid, ago] of extra) mk(sid, ago);
     const linkOf = (sid) => (am.poolCurrentFor(P, sid) === A ? 'A' : am.poolCurrentFor(P, sid) === Bm ? 'B' : String(am.poolCurrentFor(P, sid)));
     const quiet = () => { const o = console.log, w = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); return () => { console.log = o; console.warn = w; return lines; }; };
     const run = () => { const done = quiet(); try { eng.maybePoolAutoSwitchForPool(P); } finally { var lines = done(); } return lines; };
@@ -685,8 +707,51 @@ await (async () => {
   const w = world(engMod);
   if (!w) { ck('proj/engine SKIP — pools unsupported on this platform', true); }
   else {
-    ck('engine setup: the cold/warm split is what warmCache says', warmCache({ lastActivityMs: w.sessions.get('sess-cold')._lastPtyDataAt, nowMs: Date.now(), model: 'claude-fable-5-1' }).warm === false
-      && warmCache({ lastActivityMs: w.sessions.get('sess-warm')._lastPtyDataAt, nowMs: Date.now(), model: 'claude-fable-5-1' }).warm === true);
+    ck('engine setup: the cold/warm split is what warmCache says over the engine\'s own facts', warmCache({ ...w.eng.cacheFactsOf(w.sessions.get('sess-cold'), Date.now()), nowMs: Date.now() }).warm === false
+      && warmCache({ ...w.eng.cacheFactsOf(w.sessions.get('sess-warm'), Date.now()), nowMs: Date.now() }).warm === true);
+    // THE FACTS' ONE PRODUCER (lane cache-warmth-tiles): usage-pool-engine cacheFactsOf — the hold reads it and the session
+    // list sends it. A second world whose conversations' streams named their last requests (45 s and 20 min ago) through the
+    // engine's ONE writer (noteModelRequest — test-fable-cap-pool-storm §21 drives it through both real feeds).
+    {
+      const T0 = Date.now();
+      const w2 = world(engMod, { extra: [['sess-20', 20 * 60e3]] });
+      const req = { type: 'assistant', message: { id: 'msg_x', usage: { input_tokens: 1, output_tokens: 1 } } };
+      w2.eng.noteModelRequest(w2.sessions.get('sess-warm'), req, T0 - 45e3);
+      w2.eng.noteModelRequest(w2.sessions.get('sess-20'), req, T0 - 20 * 60e3);
+      w2.sessions.get('sess-20')._lastPtyDataAt = T0 - 1e3; // pty noise after its request (an attach preamble, an echo)
+      const f0 = w.eng.cacheFactsOf(w.sessions.get('sess-warm'), T0);
+      ck('facts: a conversation whose stream named no request yet ⇒ the pty stamp stands in; the claude hour; no move', f0.lastRequestAt === w.sessions.get('sess-warm')._lastPtyDataAt && f0.cacheTtlSec === 3600 && f0.cacheLostAt === null, JSON.stringify(f0));
+      const fW = w2.eng.cacheFactsOf(w2.sessions.get('sess-warm'), T0);
+      ck('facts: once the stream named a request, THAT is the last model request', fW.lastRequestAt === T0 - 45e3 && fW.cacheTtlSec === 3600, JSON.stringify(fW));
+      const f20 = w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0);
+      ck('facts: …and pty noise after it never moves it (20 min stays 20 min)', f20.lastRequestAt === T0 - 20 * 60e3, JSON.stringify(f20));
+      ck('facts: a record that is no request (no usage) writes nothing', (() => { const x = {}; w2.eng.noteModelRequest(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })());
+      // usage credits IN USE on its member ⇒ the 5-minute TTL; credits merely enabled ⇒ still the hour
+      const cacheFile = path.join(w2.am.dataDir, 'usage-cache', w2.A + '.json');
+      const c0 = fs.readFileSync(cacheFile, 'utf8');
+      fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: true, status: 'allowed', asOf: Date.now() } }));
+      const fCr = w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0);
+      ck('facts: its member paying with usage credits ⇒ the 5-minute TTL — and the 20-minute conversation reads COLD', fCr.cacheTtlSec === 300 && warmCache({ ...fCr, nowMs: T0 }).warm === false, JSON.stringify(fCr));
+      fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: false, status: 'allowed', asOf: Date.now() } }));
+      ck('facts: credits ENABLED but not in use (overageState mode \'allowed\') ⇒ still the hour', w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0).cacheTtlSec === 3600);
+      fs.writeFileSync(cacheFile, c0);
+      // THE PIN on the real engine: the projection moves the unwitnessed cold one, HOLDS the 20-minute one (RED on 3f8429cd5:
+      // the 5-minute belief called it cold and moved it — a 40–80× rewrite)
+      const l2 = w2.run();
+      ck('engine: a conversation whose last request was 20 min ago is HELD on its member (warm on the hour)', w2.linkOf('sess-20') === 'A' && w2.linkOf('sess-warm') === 'A', ['sess-20', 'sess-warm', 'sess-cold'].map(w2.linkOf).join(',') + ' | ' + l2.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
+      ck('engine: …while the one idle past the hour moves', w2.linkOf('sess-cold') === 'B');
+      // THE ACCOUNT MOVE = THE CACHE LOST: a real re-point after its last request (the slot ledger's row), no stamp of its own
+      const sW = w2.sessions.get('sess-warm');
+      ck('facts: before any move the 45-s conversation is warm', warmCache({ ...w2.eng.cacheFactsOf(sW, Date.now()), nowMs: Date.now() }).warm === true);
+      const tMove = Date.now();
+      w2.am.ensureSessionPoolLink(w2.P, 'sess-warm', w2.Bm, { why: 'per-session-switch' });
+      const fM = w2.eng.cacheFactsOf(sW, Date.now());
+      ck('facts: a REAL re-point ⇒ cacheLostAt = the ledger row\'s instant, and the hold reads it cold at once', fM.cacheLostAt >= tMove && warmCache({ ...fM, nowMs: Date.now() }).warm === false, JSON.stringify(fM));
+      w2.eng.noteModelRequest(sW, req, Date.now() + 1);
+      ck('facts: …its next request warms it again', warmCache({ ...w2.eng.cacheFactsOf(sW, Date.now() + 2), nowMs: Date.now() + 2 }).warm === true);
+      w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' }); // the SAME member again
+      ck('facts: a same-target re-point is no move (the cache stays)', w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), Date.now()).cacheLostAt === null);
+    }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
     ck('engine: …and nothing for B (no live conversation on it)', w.eng.projectionRereadFor(w.Bm, Date.now()) === null);
@@ -831,7 +896,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 30 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };
@@ -1262,7 +1327,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 30 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };
@@ -1456,7 +1521,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false, host = null } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 30 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); metas.set(s.sockName, { webuiSessionId: sid }); if (!host) am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };

@@ -264,6 +264,13 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Desktop apps'), liveApply: true,
   },
+  // lane cache-warmth-tiles (the owner 2026-11-02: OPT-IN): while on, the session list carries each live conversation's
+  // prompt-cache facts (routes/sessions warmthDiff — the same facts the pool's warm-cache hold reads); off = not even computed
+  'desktop.cacheWarmth': {
+    type: 'boolean', default: false, label: t("Prompt-cache warmth on conversation boxes"),
+    description: t("Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own \u2014 it rides the session list the page already asks for."),
+    category: t('Window'), liveApply: true,
+  },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
     description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),

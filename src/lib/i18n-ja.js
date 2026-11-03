@@ -11793,4 +11793,9 @@ export default {
   "What it is: {note}": "用途：{note}",
   "Description now: only you read it (in the Vault window) — Allow replaces it": "現在の説明：あなただけが読めます（保管庫ウィンドウ）— 許可すると置き換わります",
   "What it is: only you read its description (in the Vault window)": "用途：説明はあなただけが読めます（保管庫ウィンドウ）",
+  "Prompt-cache warmth on conversation boxes": "会話ボックスのプロンプトキャッシュの温度",
+  "Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own — it rides the session list the page already asks for.": "各会話のプロンプトキャッシュがまだどれだけ温かいかを表示します（ボックスに帯を 1 本。キャッシュの 1 時間で緑から赤へ。期限切れの後は何も表示しません）。既定はオフ。費用はかかりません：リクエストも独自のタイマーもなく、ページがもともと取得しているセッション一覧を使います。",
+  "Cache: about {n} min left · last request {time}": "キャッシュ残り約 {n} 分 · 最後のリクエスト {time}",
+  "Cache expired · last request {time}": "キャッシュ期限切れ · 最後のリクエスト {time}",
+  "Cache expired — the conversation moved to another account at {time}": "キャッシュ期限切れ — {time} に会話が別のアカウントへ移りました",
 };

@@ -414,6 +414,12 @@ const BACKEND_CAPS = {
     permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false },
     // PLACEHOLDER — src/harnesses/index.js writes the DERIVED row from the
     // descriptor at registration (see deriveAutoResume above).
+    // THE PROMPT-CACHE FACT (lane cache-warmth-tiles, 2026-11-02 — replaces the 2026-09-22 belief «5 minutes unless the
+    // request model ends in [1m]»): a SUBSCRIPTION session's requests ride a ONE-HOUR prompt-cache TTL, re-timed at
+    // every request; an account in usage overage (its turns paid with credits) rides the FIVE-MINUTE one. ONE reader —
+    // account-pool-auto `cacheTtlSecFor` — answers the pool's warm-cache hold AND the session list's warmth fields.
+    // Every other row says null: unknown ⇒ no hold and no colour (never a guess).
+    promptCache: Object.freeze({ subscriptionTtlSec: 3600, creditsTtlSec: 300 }),
     terminalOnly: false, oauthUsage: true, globalUsageKey: '__global__', // lane dc-harness-tail: the rows' essay is at capsOf
     subagents: 'virtual', // lane agy-subagent-cards: a live virtual session per helper (essay at subagentView)
     autoResume: NO_AUTO_RESUME,
@@ -422,6 +428,7 @@ const BACKEND_CAPS = {
     pool: true,
     hotSwitch: 'impossible',
     hotSwitchEvidence: null, // the 2026-08-24 P3 experiment (above) predates the record form; 'impossible' grants nothing
+    promptCache: null,    // no stated prompt-cache TTL for this harness (its vendor caches on its own terms) — unknown, never a guess
     planC: false,
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
@@ -470,7 +477,7 @@ const BACKEND_CAPS = {
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
@@ -494,7 +501,7 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
     peerDelivery: 'stash-only',
     compactEnd: null,      // ACP v1 has no compaction verb we send or observe
@@ -544,7 +551,7 @@ const BACKEND_CAPS = {
   // settle), never declared by hand. steerJoinsTurn:false — its steer is a stop + a new turn, so a notification for a
   // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
     peerDelivery: 'rpc-queue',
     compactEnd: null,
@@ -567,7 +574,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed

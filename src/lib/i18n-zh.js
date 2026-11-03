@@ -11794,4 +11794,9 @@ export default {
   "What it is: {note}": "它是干什么用的：{note}",
   "Description now: only you read it (in the Vault window) — Allow replaces it": "现在的描述：只有你能看到（在保险库窗口里）— 允许后会被替换",
   "What it is: only you read its description (in the Vault window)": "它是干什么用的：它的描述只有你能看到（在保险库窗口里）",
+  "Prompt-cache warmth on conversation boxes": "会话框上的提示缓存温度",
+  "Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own — it rides the session list the page already asks for.": "显示每个对话的提示缓存还有多热（会话框上的一条色带；在缓存的一小时里由绿变红；过期后什么都不显示）。默认关闭。它不花任何代价：不发请求，也没有自己的计时器 — 它用的是页面本来就在取的会话列表。",
+  "Cache: about {n} min left · last request {time}": "缓存还剩约 {n} 分钟 · 上次请求 {time}",
+  "Cache expired · last request {time}": "缓存已过期 · 上次请求 {time}",
+  "Cache expired — the conversation moved to another account at {time}": "缓存已过期 — 对话在 {time} 换到了另一个账号",
 };

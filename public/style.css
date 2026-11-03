@@ -6151,6 +6151,15 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
   --warn-text: color-mix(in srgb, var(--yellow, #e5c07b) 47%, var(--text));
   --bad-text: color-mix(in srgb, var(--red, #e55) 55%, var(--text));
   --attn-text: color-mix(in srgb, var(--accent) 78%, var(--text));
+  /* lane cache-warmth-tiles (the owner's palette ruling, 2026-11-02): the FIVE warmth tokens DERIVE from the status
+     vocabulary above, so every theme — built-in, plugin or made in the theme editor — gets coherent warmth with no
+     work of its own; the theme editor lists them for an override (src/lib/theme-editor.js «Cache warmth»). ONE green;
+     the band's LENGTH carries the countdown, the colour only the tier (src/cache-warmth.js). */
+  --warmth-fresh: var(--ok-text);
+  --warmth-mid: var(--accent);
+  --warmth-late: var(--warn-text);
+  --warmth-critical: var(--bad-text);
+  --warmth-expired: var(--border);
 }
 .chan-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
 .chan-ic svg { width: 1em; height: 1em; }

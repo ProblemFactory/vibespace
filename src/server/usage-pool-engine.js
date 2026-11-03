@@ -64,7 +64,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
@@ -916,30 +916,6 @@ function sessionModelFor(s) {
   const picked = s._pickedModel ? { m: s._pickedModel, at: s._pickedModelAt || 0 } : null;
   const newest = served && picked ? (picked.at >= served.at ? picked : served) : (picked || served);
   return (newest && newest.m) || s._spawnModel || null;
-}
-// THE MODEL WHOSE PROMPT CACHE A CONVERSATION RUNS ON (2026-09-22, the warm-cache
-// hold). `sessionModelFor` is the answer, with ONE correction: the '[1m]' variant
-// is a REQUEST-side fact and a served model never carries it (an assistant
-// record's `message.model` is the API's base id, `claude-fable-5-1`), so once an
-// unlocked conversation has been answered its model reads variant-less and the
-// 1-hour cache would read as 5 minutes. The request model that names the SAME
-// model (pick, else spawn — the ladder's order) supplies the variant.
-// …EXCEPT A LOCK SPELLED BY SOMEBODY (the verifier's LOW-A, reproduced on the real
-// engine): a lock is the REQUEST model as it was spelled — `/model fable` asks
-// for the 5-minute cache, and the server re-asserts exactly that spelling at
-// every repin — so a variant-less lock is read as written and never borrows a
-// '[1m]' off the spawn model. Only a lock COPIED off the served model (the
-// target-less latch, `set-model {lock:true}` adopting `_servedModel`) is spelled
-// by the API, which cannot carry the variant: it is recognisable as exactly that
-// string, and only it (like the served rung) takes the read-back. Exact equality,
-// not `modelsMatch`: modelsMatch answers true for an unknown served model and
-// for 'fable' against 'claude-fable-5-1', i.e. in exactly the repro's shapes.
-function cacheModelFor(s) {
-  const m = sessionModelFor(s);
-  if (!m || /\[1m\]\s*$/i.test(m)) return m;
-  if (s._modelLocked && s._lockedModel && m === s._lockedModel && m !== s._servedModel) return m;
-  const req = [s._pickedModel, s._spawnModel].find((x) => x && modelsMatch(x, m));
-  return req && /\[1m\]\s*$/i.test(req) ? req : m;
 }
 
 // WHICH MODEL-SCOPED CAP CAN REFUSE THIS SESSION'S NEXT TURN — the PROJECTION
@@ -4039,10 +4015,51 @@ function resetCreditsLeft(session, key) {
   if (cached !== null) return cached;
   return seen ? n(seen.count) : null;
 }
+/** THE LAST MODEL REQUEST (lane cache-warmth-tiles, 2026-11-02) — the ONE writer of a claude conversation's request
+ *  stamp, called by BOTH feeds (the parse in stdout/claude-stream-json.js and the device stream's claudeSideEffects) for
+ *  every usage-carrying assistant record. Such a record IS one API response, so its request was made at or before this
+ *  instant: the stamp is at most one response late — an optimistic band, a longer hold (the safe side). A backlog's
+ *  record (recordIsLate — a stalled bridge's catch-up, a re-attach's replay) proves nothing about now. A harness without
+ *  a stated cache TTL (codex, antigravity) writes none yet: its writer comes with its row. */
+function noteModelRequest(session, rec, now = Date.now()) {
+  if (!session || !rec || rec.type !== 'assistant' || !rec.message || !rec.message.usage) return;
+  if (recordIsLate(session, rec)) return;
+  session._lastRequestAt = now;
+}
+/** THE CONVERSATION'S PROMPT-CACHE FACTS (lane cache-warmth-tiles, 2026-11-02) — ONE
+ *  producer for the pool's warm-cache hold (warmCache over these) AND the session list's
+ *  warmth fields (routes/sessions → the person's colour), so the two never disagree:
+ *  {lastRequestAt (ms|null), cacheTtlSec (s|null = unknown), cacheLostAt (ms|null)}.
+ *  · lastRequestAt = the conversation's LAST MODEL REQUEST: `_lastRequestAt`, written by
+ *    noteModelRequest from the stream's own request records. `_lastPtyDataAt` (the pool's
+ *    stamp until now) only while the stream has named no request — a terminal-mode
+ *    session, a hub that restarted since its last request: it is ANY pty byte (keystroke
+ *    echo, the dtach attach preamble), so once a request stamp exists pty noise never
+ *    moves it.
+ *  · cacheTtlSec = cacheTtlSecFor (account-pool-auto): the harness row, an API key
+ *    (unknown), usage credits IN USE — `overageState().inUse === 'yes'`, money flowing
+ *    now (src/spend-authorizer.js overageState: mode 'allowed' is extra usage ENABLED but
+ *    NOT in use — that member still serves on the hour) ⇒ the 5-minute TTL.
+ *  · cacheLostAt = the slot ledger's last REAL re-point of this conversation inside the
+ *    TTL (`lastRepointRow`: from ≠ to, a 'spawn' row is no move; the cache stays with the
+ *    account that wrote it) — the move is the event, no stamp of its own. */
+function cacheFactsOf(session, now = Date.now()) {
+  const s = session || {};
+  const harness = s.backend || 'claude';
+  let acct = null; try { acct = s._accountId ? accounts.get(s._accountId) : null; } catch { acct = null; }
+  const apiKey = !!acct && (acct.type || 'api') === 'api';
+  let onCredits = false; try { onCredits = overageState(readRawUsageCache(usageCacheKeyFor(s))).inUse === 'yes'; } catch { onCredits = false; }
+  const cacheTtlSec = cacheTtlSecFor({ harness, apiKey, onCredits });
+  const lastRequestAt = Number(s._lastRequestAt) || Number(s._lastPtyDataAt) || null;
+  // a 'spawn' row is the conversation's FIRST link (its `from` is the pool default's member, made before this process sent
+  // anything) — never a move away from the account that holds the cache
+  const row = cacheTtlSec ? lastRepointRow(s, { at: now, minAt: now - cacheTtlSec * 1000 }) : null;
+  return { lastRequestAt, cacheTtlSec, cacheLostAt: row && row.why !== 'spawn' ? row.at : null };
+}
 /** Warm = the conversation is in a turn OR its prompt cache has not gone cold
  *  (the SAME two facts the pool's warm-cache hold reads). */
 function conversationWarmth(session, now = Date.now()) {
-  const w = warmCache({ lastActivityMs: session._lastPtyDataAt, nowMs: now, model: cacheModelFor(session) });
+  const w = warmCache({ ...cacheFactsOf(session, now), nowMs: now });
   return { ...w, inTurn: conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }) };
 }
 /** Can the pool move this conversation onto another member RIGHT NOW? The same
@@ -7249,13 +7266,14 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       const projected = (id) => projectCacheForFamily(readCache(id), fam);
       // THE WARM CACHE (2026-09-22, owner): a proactive move of a conversation
       // whose prompt cache is still warm cold-starts it — the next request
-      // re-bills the whole context. `_lastPtyDataAt` is the last instant its CLI
-      // produced output (at or after its last API request); a FORCED move is
-      // never held (decidePoolSwitch applies this to 'edf' only).
+      // re-bills the whole context. cacheFactsOf states its last model request,
+      // its TTL (1 h, 5 min on credits) and the last move that left the cache
+      // behind (lane cache-warmth-tiles); a FORCED move is never held
+      // (decidePoolSwitch applies this to 'edf' only).
       // …and `inTurn` (2026-09-22, the owner's first-stop rule): a SOFT-band move
       // of a conversation that is mid-turn with a warm cache waits for its first
       // stop (warm-soft-defer); the turn boundary re-decides it.
-      const warm = { ...warmCache({ lastActivityMs: s2._lastPtyDataAt, nowMs: now, model: cacheModelFor(s2) }), inTurn: conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState }) };
+      const warm = { ...warmCache({ ...cacheFactsOf(s2, now), nowMs: now }), inTurn: conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState }) };
       // THE PROJECTION (B-f69c ③): a COLD conversation decides on the view its
       // members' own burn reaches PROJECTION_LEAD_SEC from now — the stretch no
       // fresh reading can cover — so it leaves a member BEFORE the line instead
@@ -7397,7 +7415,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     let defaultWarm = null, defaultWarmSid = null;
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
-      const w = warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) });
+      const w = warmCache({ ...cacheFactsOf(s, now), nowMs: now });
       if (!w.warm) continue;
       if (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec) { defaultWarm = w; defaultWarmSid = sid; }
     }
@@ -7591,7 +7609,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test

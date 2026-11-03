@@ -174,7 +174,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
     /if \(mode === 'ask'\) \{[\s\S]{0,300}if \(session\._resetCreditAsked === eventKey\) return 'skipped';\s*\n\s*session\._resetCreditAsked = eventKey;[\s\S]{0,900}todos\.add\(sessionKey, \{[\s\S]{0,600}kind: 'action'[\s\S]{0,300}i18n: \{ text: \{ key: i18nKey\('Use a stored reset credit on \{account\}\?'\)[\s\S]{0,200}action: \{ type: 'reset-credit', sessionId: session\._webuiId/.test(eng));
   ok('the pool alternative never counts a pay-per-use (usage credits) member', /return !!\(d && d\.to && !d\.toCredits\);/.test(eng));
   ok('the pool DEFAULT keeps the proactive warm hold but computes NO inTurn (the soft hold is dropped, §8 ③)',
-    /const w = warmCache\(\{ lastActivityMs: s\._lastPtyDataAt, nowMs: now, model: cacheModelFor\(s\) \}\);\s*\n\s*if \(!w\.warm\) continue;/.test(eng)
+    /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);\s*\n\s*if \(!w\.warm\) continue;/.test(eng) // lane cache-warmth-tiles: the facts' ONE producer
     && !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
     && !/':default:soft'/.test(eng) && /':default'\); return; \}/.test(eng));
   for (const f of ['src/message-manager.js', 'src/codex-message-manager.js']) {

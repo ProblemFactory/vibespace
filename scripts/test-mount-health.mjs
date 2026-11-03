@@ -185,7 +185,8 @@ try {
 
   console.log('⑦ wiring pins (the gates ask the verdict at their existing schedule)');
   const sessions = fs.readFileSync(path.join(ROOT, 'src/routes/sessions.js'), 'utf8');
-  ok(sessions.includes("if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(_sessionsCache);") && sessions.includes("ctx.paused('discovery')"), '/api/sessions: the sweep\'s TTL gate asks the discovery verdict (the last answer stands; none yet ⇒ it runs)');
+  // (lane cache-warmth-tiles: answer() adds the switch-gated warmth diff to the same answer; the gate itself is unchanged)
+  ok(sessions.includes("if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return res.json(answer(_sessionsCache));") && sessions.includes("ctx.paused('discovery')"), '/api/sessions: the sweep\'s TTL gate asks the discovery verdict (the last answer stands; none yet ⇒ it runs)');
   const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   ok(server.includes('onProbe: (p) => mountHealth.onProbe(p)') && server.includes("paused: (roots) => mountHealth.paused('usage-walk', roots)") && server.includes('paused: (kind) => mountHealth.paused(kind)'), 'server.js: the canary drives the watch; the usage walk and the sessions route ask it');
   const table = MHW.scanProc('/proc', { perProc: 4, total: 64 });

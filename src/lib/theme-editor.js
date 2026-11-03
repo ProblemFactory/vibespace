@@ -28,6 +28,14 @@ const CSS_VAR_DEFS = [
   { key: '--red', label: 'Red', group: 'Status' },
   { key: '--yellow', label: 'Yellow', group: 'Status' },
   { key: '--blue', label: 'Blue', group: 'Status' },
+  // lane cache-warmth-tiles: the five warmth tokens. `derived` = the theme's own default (public/style.css derives each
+  // from the status vocabulary) — a row starts as that text, so a theme saved from a built-in base keeps deriving from
+  // ITS status colours instead of freezing the base's mix; any CSS colour typed here overrides it
+  { key: '--warmth-fresh', label: 'Fresh (0–20 of 60 min)', group: 'Cache warmth', isText: true, derived: 'var(--ok-text)' },
+  { key: '--warmth-mid', label: 'Mid (20–40)', group: 'Cache warmth', isText: true, derived: 'var(--accent)' },
+  { key: '--warmth-late', label: 'Late (40–50)', group: 'Cache warmth', isText: true, derived: 'var(--warn-text)' },
+  { key: '--warmth-critical', label: 'Critical (50–60)', group: 'Cache warmth', isText: true, derived: 'var(--bad-text)' },
+  { key: '--warmth-expired', label: 'Expired', group: 'Cache warmth', isText: true, derived: 'var(--border)' },
   // Borders
   { key: '--border', label: 'Border', group: 'Borders', isRgba: true },
   { key: '--border-active', label: 'Border Active', group: 'Borders', isRgba: true },
@@ -110,6 +118,7 @@ class ThemeEditor {
       }
     }
     this._cssValues = this.app.themeManager.extractThemeValues(themeName, varNames);
+    for (const d of CSS_VAR_DEFS) if (d.derived) this._cssValues[d.key] = d.derived; // a derived token starts as its derivation (lane cache-warmth-tiles)
     // Terminal colors from THEMES
     const term = THEMES[themeName]?.terminal || THEMES.dark.terminal;
     this._termValues = { ...term };
