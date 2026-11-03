@@ -472,6 +472,11 @@ console.log('— §A7 wiring');
 console.log('— §A8 the first minute of an offset stream is held and replayed at the declaration (the real parse + engine)');
 {
   const SK = 5 * 60e3;
+  // int374 (B-96c4): the stamp is Date.now() − SK and the engine reads the arrival with its own Date.now(), so the declared skew is SK
+  // PLUS the time between the two reads — exact equality red the 2.369.373 master CI at load 6.6 on 300001. The judge takes SK up to
+  // SK + 50 ms (a later stamp is never earlier than SK; 50 ms is far below any real offset a minute declares)
+  const SKEW_SLACK_MS = 50;
+  const skewDeclared = (skew) => typeof skew === 'number' && skew >= SK && skew <= SK + SKEW_SLACK_MS;
   const leg = (engineModule) => {
     const w = mkWorld({ engineModule });
     if (!w) return null;
@@ -490,13 +495,15 @@ console.log('— §A8 the first minute of an offset stream is held and replayed 
   else {
     ok('§A8 the first turn\'s reading (stamped 5 min behind) is late and HELD, not taken: S\'s 5 h still reads 7 %', r.after1.u5 === 0.07 && JSON.stringify(r.after1.held) === '["rate_limit_event"]', JSON.stringify({ u5: r.after1.u5, held: r.after1.held }));
     ok('§A8 …said as "a stalled bridge\'s backlog (or the first minute of a clock offset — the next records decide)"', r.after1.lines.some((l) => /records arriving 5m late — a stalled bridge's backlog \(or the first minute of a clock offset — the next records decide\)/.test(l)), r.after1.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 300));
-    ok('§A8 the third stamped record over 61 s declares the offset and the held reading is REPLAYED through its gate: S\'s 5 h reads 95 % now, nothing held', r.after3.skew === SK && r.after3.u5 === 0.95 && r.after3.held === null, JSON.stringify({ skew: r.after3.skew, u5: r.after3.u5, held: r.after3.held }));
+    ok('§A8 the third stamped record over 61 s declares the offset and the held reading is REPLAYED through its gate: S\'s 5 h reads 95 % now, nothing held', skewDeclared(r.after3.skew) && r.after3.u5 === 0.95 && r.after3.held === null, JSON.stringify({ skew: r.after3.skew, u5: r.after3.u5, held: r.after3.held }));
     ok('§A8 …the journal says the declaration, then the replay by count and kind, then what the first minute did NOT replay (its two turn ends — the next one comes), never "backlog over"', r.after3.lines.some((l) => /a clock offset on the CLI's machine, not a backlog/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: 1 fact\(s\) held from the offset stream's first minute re-judged live by the offset and taken \(1 rate_limit_event\)/.test(l)) && r.after3.lines.some((l) => /^\[stream\] sess-4: the offset stream's first minute over — 2 fact\(s\) not replayed \(2 turn end; a turn end is never replayed/.test(l)) && !r.after3.lines.some((l) => /backlog over/.test(l)), r.after3.lines.filter((l) => /\[stream\]/.test(l)).join(' | ').slice(0, 500));
   }
   const noHold = mutate('src/server/usage-pool-engine.js', 'nohold', [["    replayHeldLate(session); // the first minute's facts, each through its own gate against the offset (verify r7 ④)\n", '']]);
+  ok('§A8 CONTROL (int374, B-96c4): the skew judge takes the declared offset plus the read-to-read time — SK and SK + 1 ms (the runner\'s 300001) pass; SK − 1 ms and SK + 51 ms do not',
+    skewDeclared(SK) && skewDeclared(SK + 1) && !skewDeclared(SK - 1) && !skewDeclared(SK + SKEW_SLACK_MS + 1) && !skewDeclared(undefined));
   ok('§A8 CONTROL: the patch hit the engine', noHold.hit === true, noHold.why || '');
   const r2 = noHold.hit ? leg(noHold.mod) : null;
-  ok('§A8 CONTROL: with the replay removed the declaration takes nothing back — S still reads 7 % (the rows above see the replay)', !!r2 && r2.after3.skew === SK && r2.after3.u5 === 0.07, r2 && JSON.stringify({ skew: r2.after3.skew, u5: r2.after3.u5 }));
+  ok('§A8 CONTROL: with the replay removed the declaration takes nothing back — S still reads 7 % (the rows above see the replay)', !!r2 && skewDeclared(r2.after3.skew) && r2.after3.u5 === 0.07, r2 && JSON.stringify({ skew: r2.after3.skew, u5: r2.after3.u5 }));
 }
 
 // ═══ §B A WALL WHOSE OWN WINDOW REFUTES THE PIN NEVER DEMOTES THE PIN ═══════
