@@ -6186,6 +6186,10 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .warmth-ring { width: 12px; height: 12px; flex: none; pointer-events: none; transform: rotate(-90deg); }
 .warmth-ring circle { fill: none; stroke: var(--warmth-c); stroke-width: 2;
   stroke-dasharray: calc(var(--warmth-frac, 1) * 100) 100; }
+/* r2 (H3): on a TILE the ring rides its icon's bottom-right corner on the bar's own colour — out of the flow, so it adds no
+   width and the 90-px floor keeps its readable word (a chooser row keeps it inline, before its icon) */
+.taskbar-icon:has(> .warmth-ring) { position: relative; }
+.taskbar-icon > .warmth-ring, .taskbar-icon-stack > .warmth-ring { position: absolute; right: -5px; bottom: -5px; z-index: 1; border-radius: 50%; background: var(--bg-taskbar); }
 /* desktop previews: a square takes its tier colour (the waiting blink and the find flash keep theirs); a desktop's ring =
    its worst live tier, just inside the border so neighbours never merge */
 .desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash) { background: var(--warmth-c); }
@@ -6208,9 +6212,11 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .wl-band { width: 60px; height: 3px; flex: none; position: relative; background: var(--bg-input); border-radius: 1.5px; pointer-events: none; }
 .wl-band[data-warmth-tier]::before { content: ''; position: absolute; left: 0; top: 0; height: 3px; border-radius: 1.5px;
   width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
-.wl-left { margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }
+.wl-left { flex: none; margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }
 .warmth-list { max-width: 460px; }
-.warmth-list .wl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* r2 (H1): every list row's label (the ⧉ list, its «Other desktops» rows, the summary list) shrinks with an ellipsis — a
+   «name — /path» title never pushes the words past the row's edge */
+.overlap-switcher-item > .wl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .warmth-list .dk { color: var(--text-dim); font-size: 11px; }
 /* the phone: a session row's / a switcher row's band on its bottom edge + its time in words */
 .sess-warmth { position: absolute; left: 0; bottom: 0; height: 3px; pointer-events: none;

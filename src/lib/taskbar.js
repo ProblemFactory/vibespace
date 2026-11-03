@@ -8,7 +8,7 @@ import { terminalOnly } from './agent-meta.js'; // the harness table's own word 
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
 import { otherDesktopWindows } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
-import { warmthDrawn, warmthRows, paintTile, paintOverflowChip, paintListRow, byRowTimeLeft } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the rings, the «+N» dot, the lists' bands
+import { warmthDrawn, warmthRows, paintTile, paintOverflowChip, paintListRow, byRowTimeLeft, tileIds } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the rings, the «+N» dot, the lists' bands
 
 /** The ⧉ list's «Other desktops» group: folded (the active desktop's windows stay the list's view) until opened; this page's. */
 let otherDesksOpen = false;
@@ -963,7 +963,7 @@ export function showWindowList(app, anchor, opts = {}) {
         const label = document.createElement('span');
         label.textContent = r.title + ' \u00B7 ' + r.deskName;
         item.append(label);
-        if (warm) paintListRow(app, item, { ids: [r.id] }, label);
+        if (warm) paintListRow(app, item, { ids: tileIds(app, r.id) }, label); // a group's host row: its tabs' worst (built or held — r2 H2)
         item.onclick = () => { pop.remove(); goOtherDesk(app, r); };
         pop.appendChild(item);
       }

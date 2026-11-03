@@ -29,7 +29,7 @@ const minutesLeft = (w) => Math.max(1, Math.ceil((Number(w.leftMs) || 0) / 60000
 const wordsOf = (w) => (isKnown(w) ? warmthTitle(w, { t }) : '');
 
 /** The page's ONE warmth state: the last good ON answer, the map this tick computed, the held records' keys, the pass time. */
-const stateOf = (app) => app._warmth || (app._warmth = { last: null, byId: new Map(), held: new Map(), drawn: false, passMs: 0 });
+const stateOf = (app) => app._warmth || (app._warmth = { last: null, byId: new Map(), held: new Map(), heldChains: new Map(), drawn: false, passMs: 0 });
 /** true while the hub's answer carries warmth (the switch is on) — the window list's head row and bands ask it */
 export const warmthDrawn = (app) => !!(app && app._warmth && app._warmth.drawn);
 
@@ -78,7 +78,7 @@ function webuiIdOfRecord(ws, byConv, byId) {
   if (sid && byId.has(sid)) return { id: sid, rung: ws.serverSessionId === sid ? 'serverSessionId' : 'openSpec.serverId' };
   return { id: null, rung: 'none' };
 }
-function heldOf(app, byId) {
+function heldOf(app, byId, chains) {
   const out = new Map(), dm = app.desktopManager, wins = app.wm && app.wm.windows;
   if (!dm || !dm._savedStates || !wins) return out;
   const byConv = new Map();
@@ -88,7 +88,12 @@ function heldOf(app, byId) {
   }
   for (const [deskId, st] of dm._savedStates) for (const ws of (st && st.windows) || []) {
     const id = ws && (ws.winId || ws.id);
-    if (!id || wins.has(id) || out.has(id) || (ws.type !== 'chat' && ws.type !== 'terminal')) continue;
+    if (!id || wins.has(id)) continue;
+    // r2 (H2): a held GROUP — its host entry's chain (`tabChain.tabs`, read as layout.js _recordChainOf reads it: a guest's
+    // entry names none), kept per member whatever its type, so a row / a square of it takes the group's worst
+    const tabs = !ws.isTabGuest && ws.tabChain && Array.isArray(ws.tabChain.tabs) ? ws.tabChain.tabs.map(String) : null;
+    if (tabs && tabs.length > 1) for (const m of tabs) if (!wins.has(m)) chains.set(m, tabs);
+    if (out.has(id) || (ws.type !== 'chat' && ws.type !== 'terminal')) continue;
     const spec = ws.openSpec || {};
     if (spec.agentKind === 'subagent' || spec.sourceKind === 'subagent') continue;
     out.set(id, { ...webuiIdOfRecord(ws, byConv, byId), deskId, title: ws.title || '', type: ws.type });
@@ -105,10 +110,17 @@ function warmthOfOne(app, id) {
   const h = app._warmth && app._warmth.held.get(id);
   return (h && h.id && byIdOf(app).get(h.id)) || null;
 }
-/** A tile's warmth: a group host = the worst live tier over its tabs (the «+N» chip's hidden tiles, the squares). */
-function warmthOfTile(app, id) {
+/** A window's group by its id: a BUILT group's chain, a HELD one's record (heldOf), else the window alone — the tile, the
+ *  square and an «Other desktops» row (taskbar.js) take the worst over it. */
+export function tileIds(app, id) {
   const win = app.wm && app.wm.windows.get(id), chain = win && win._tabChain;
-  return chain && chain.tabs.length > 1 ? worstOf(chain.tabs.map((x) => warmthOfOne(app, x))) : warmthOfOne(app, id);
+  if (chain) return chain.tabs;
+  return (app._warmth && app._warmth.heldChains && app._warmth.heldChains.get(id)) || [id];
+}
+/** A tile's warmth: a group = the worst live tier over its tabs (the «+N» chip's hidden tiles, the squares). */
+function warmthOfTile(app, id) {
+  const ids = tileIds(app, id);
+  return ids.length > 1 ? worstOf(ids.map((x) => warmthOfOne(app, x))) : warmthOfOne(app, id);
 }
 
 /**
@@ -127,14 +139,15 @@ export function noteWarmthAnswer(app, answer) {
   if (!snap && !st.drawn) return; // OFF: nothing computed, nothing drawn
   const t0 = performance.now();
   if (!snap) {
-    st.drawn = false; st.byId = new Map(); st.held = new Map();
+    st.drawn = false; st.byId = new Map(); st.held = new Map(); st.heldChains = new Map();
     clearAll(app);
   } else {
     const clock = { serverNow: snap.serverNow, receivedAt: snap.receivedAt, now: Date.now() };
     const byId = new Map();
     for (const id of Object.keys(snap.map)) byId.set(id, warmthOf(snap.map[id], clock));
     st.byId = byId; st.drawn = true;
-    st.held = heldOf(app, byId);
+    st.heldChains = new Map();
+    st.held = heldOf(app, byId, st.heldChains);
     paintAll(app);
   }
   st.passMs = performance.now() - t0;
@@ -162,6 +175,7 @@ function clearAll(app) {
   for (const el of document.querySelectorAll('.tab-warmth, .warmth-ring, .wl-head, .wl-band, .wl-left, .sess-warmth, .sess-warmth-left, #taskbar-warmth')) el.remove();
   for (const el of document.querySelectorAll('[data-warmth-tier], [data-warmth-tip]')) { el._warmthKey = null; setMark(el, null, null, ''); }
   for (const el of document.querySelectorAll('.mobile-win-row[data-win-id]')) el.removeAttribute('data-win-id');
+  for (const el of document.querySelectorAll('.overlap-switcher:not(.warmth-list) .wl-name')) el.classList.remove('wl-name'); // the ⧉ list's labels as before
   const chip = document.getElementById('taskbar-overflow');
   if (chip) paintOverflowChip(app, chip);
 }
@@ -191,14 +205,16 @@ export function paintTab(app, tab) {
 }
 
 /** §2.3 a taskbar tile's ring (a group tile: the worst live tier over its tabs) — also the group chooser's rows. Expired
- *  = the full ring in --warmth-expired; unknown / not a session = no ring. */
+ *  = the full ring in --warmth-expired; unknown / not a session = no ring. On a TILE it rides its icon's corner (r2 H3:
+ *  it adds no width — the 90-px floor keeps its readable word); a chooser row has the room: before its icon. */
 export function paintTile(app, el) {
   if (!el || !warmthDrawn(app)) return;
   const ids = el.dataset.groupTabs ? el.dataset.groupTabs.split(',') : [el.dataset.winId];
   const w = ids.length > 1 ? worstOf(ids.map((id) => warmthOfOne(app, id))) : warmthOfOne(app, ids[0]);
-  let ring = el.querySelector(':scope > .warmth-ring');
+  const host = el.querySelector(':scope > .taskbar-icon, :scope > .taskbar-icon-stack') || el;
+  let ring = host.querySelector(':scope > .warmth-ring');
   if (!isKnown(w)) { if (ring) ring.remove(); return; }
-  if (!ring) { el.insertAdjacentHTML('afterbegin', RING); ring = el.firstElementChild; }
+  if (!ring) { host.insertAdjacentHTML('afterbegin', RING); ring = host.firstElementChild; }
   setMark(ring, w.tier, w.tier === 'expired' ? 1 : frac3(w), '');
 }
 
@@ -215,7 +231,7 @@ export function paintPreviews(app) {
   for (const win of wins.values()) if (!win._isStagePlaceholder) add(win._desktopId || active, warmthOfWin(app, win));
   for (const h of st.held.values()) if (h.id) add(h.deskId, st.byId.get(h.id));
   for (const sq of root.querySelectorAll('.desktop-preview-win[data-win-id]')) {
-    const win = wins.get(sq.dataset.winId), w = warmthOfTile(app, win && win._tabChain ? win._tabChain.tabs[0] : sq.dataset.winId); // a group's member: the group's worst
+    const w = warmthOfTile(app, sq.dataset.winId); // a group's member (built or held): the group's worst
     setMark(sq, isKnown(w) ? w.tier : null, null, '');
   }
   for (const pv of root.querySelectorAll('.desktop-preview[data-desktop-id]')) {
@@ -320,6 +336,7 @@ export const placeWarmthChip = () => { const chip = document.getElementById('tas
 export function paintListRow(app, item, src, label) {
   if (!item || !warmthDrawn(app)) return;
   item._warmthSrc = src;
+  if (label) label.classList.add('wl-name'); // r2 (H1): the label shrinks with an ellipsis — the band and the words stay whole
   const w = warmthOfSrc(app, src);
   let band = item.querySelector(':scope > .wl-band'), left = item.querySelector(':scope > .wl-left');
   if (!band) { band = markNode('span', 'wl-band'); item.insertBefore(band, label && label.parentNode === item ? label : null); }

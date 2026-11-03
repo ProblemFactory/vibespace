@@ -18,10 +18,16 @@
 //   ⑤ desktops: the squares' tiers (expired = --text-dim, waiting = still yellow), three adjacent preview rings (none for an
 //      all-fresh desktop), the switcher form and «+N» with warmth on at 1100 / 1280, 8 desktops ⇒ the folded button's ring;
 //      a reload: the held windows and which rung of the ladder resolved each
-//   ⑥ «+N»: «+N · k critical» with the critical dot, stable across two ticks and a focus click, at 951 / 1024 / 1100 / 1280
+//   ⑥ «+N»: «+N · k critical» with the critical dot, stable across two ticks and a focus click, at 951 / 1024 / 1100 / 1280;
+//      r2 (H3): at the 90-px floor a tile shows the SAME title characters with warmth on and off (the ring rides the icon;
+//      RED: the r1 DOM re-planted — the ring a flex child before the icon — counts fewer)
 //   ⑦ the summary chip: its counts = the rewrite's ground truth; its list ascending, expired last, unknown absent; a press
 //      groups by desktop; a row on another desktop switches there and raises it; a tick moves the bands, never the rows
-//   ⑧ the window list: a band per row, «By time left» pressed and ascending; a press = creation order
+//   ⑧ the window list: a band per row, «By time left» pressed and ascending; a press = creation order; r2 (H1): a «name —
+//      /path» title never pushes the words past the row (RED: the shrink rule undone); (H2) an «Other desktops» row of a
+//      group = the group's worst, built and held, and so are the group's squares
+//   ⑧b r2 (H4): the switcher's «+N» room at its boundary — ≥ STRIP_MIN_TILES whole tiles with warmth on and off; the warm
+//      chip's longest form (en / zh / ja) fits taskbar-fit.js OVERFLOW_CHIP_WARM_PX (RED: a chip planted wider breaks it)
 //   ⑨ the phone: session rows and switcher rows carry the band and the words; an expired row says «Expired», no band
 //   ⑩ off and on, live: off ⇒ zero marks, «+N» exactly «+N», ZERO warmth mutations over two ticks, a failed poll draws
 //      nothing; the window list as before; on ⇒ the marks return with no reload
@@ -277,7 +283,7 @@ await step('② the tier matrix (the CDP rewrite of EXISTING entries)', async ()
     /^Cache: about 5 min left · last request \d\d:\d\d$/.test(bars[3].title || '') && /^Cache: about 35 min left/.test(bars[1].title || '') && /^Cache expired · last request \d\d:\d\d$/.test(bars[4].title || '') && bars[4].tip
     && /^Cache expired — the conversation moved to another account · last request \d\d:\d\d$/.test(bars[6].title || '') && !bars[7].title && !bars[7].tip, [3, 1, 4, 6, 7].map((k) => bars[k].title));
   // the taskbar ring's arc: stroke-dasharray: calc(var(--warmth-frac) * 100) 100 over pathLength 100 (UNVERIFIED in the brief — measured here)
-  const rings = await evalJs(`[1, 2, 4].map((k) => { const w = [...app.wm.windows.values()].find((x) => app.sessions.get(x.id)?.sessionId === ${J(SIDS)}[k]); const r = document.querySelector('#taskbar-items .taskbar-item[data-win-id="' + w.id + '"] > .warmth-ring'); const c = r && r.querySelector('circle');
+  const rings = await evalJs(`[1, 2, 4].map((k) => { const w = [...app.wm.windows.values()].find((x) => app.sessions.get(x.id)?.sessionId === ${J(SIDS)}[k]); const r = document.querySelector('#taskbar-items .taskbar-item[data-win-id="' + w.id + '"] > .taskbar-icon > .warmth-ring'); const c = r && r.querySelector('circle');
     return r ? { tier: r.getAttribute('data-warmth-tier'), frac: parseFloat(r.style.getPropertyValue('--warmth-frac')), dash: getComputedStyle(c).strokeDasharray, stroke: getComputedStyle(c).stroke } : null; })`);
   const dash0 = (x) => parseFloat((String(x && x.dash).match(/-?\d+(?:\.\d+)?/) || [NaN])[0]); // Chrome serialises it «calc(58.2px), 100px»
   check('the tile rings: Chrome honours calc() in stroke-dasharray — the arc = frac × 100 of the circle (mid / late partial), the expired tile a FULL ring in --warmth-expired',
@@ -331,6 +337,34 @@ await step('⑥ the «+N» chip: the worst tier it hides, in words, stable acros
   }
   console.log('    «+N» per viewport: ' + J(per));
   check('…at desktop-small\'s four viewports (951 / 1024 / 1100 / 1280) the chip\'s words hold across ticks (a shown chip names the dot\'s tier)', per.every((p) => p.a === p.b && p.b === p.c && (!p.shown || /^\+\d+( · \d+ (critical|expired))?$/.test(p.a))), per);
+  // r2 (H3): the floor exists so a tile keeps «an icon and a readable word» (taskbar-fit.js) — the title characters a 90-px
+  // tile shows, warmth on vs off (the same window): the probe counts the characters left of the ellipsis
+  const FLOOR = `(() => { const out = {}, s = document.getElementById('taskbar-items').getBoundingClientRect(), cv = document.createElement('canvas').getContext('2d');
+    for (const tile of document.querySelectorAll('#taskbar-items > .taskbar-item[data-win-id]')) { const r = tile.getBoundingClientRect(); if (r.width > 91.5 || r.left < s.left - 0.5 || r.right > s.right + 0.5) continue;
+      const el = tile.querySelector('.taskbar-title'), tn = el && el.firstChild; if (!tn || tn.nodeType !== 3) continue;
+      const box = el.getBoundingClientRect(); cv.font = getComputedStyle(el).font; const over = el.scrollWidth > el.clientWidth + 0.5;
+      const edge = box.left + el.clientWidth - (over ? cv.measureText('\\u2026').width : 0) + 0.5, rg = document.createRange(); let n = 0;
+      for (let i = 0; i < tn.data.length; i++) { rg.setStart(tn, i); rg.setEnd(tn, i + 1); if (rg.getBoundingClientRect().right <= edge) n++; else break; }
+      out[tile.dataset.winId] = { n, shown: tn.data.slice(0, n), tileW: Math.round(r.width * 10) / 10, titleW: el.clientWidth, ring: !!tile.querySelector('.warmth-ring') }; }
+    return out; })()`;
+  const floor = { on: {}, off: {} };
+  for (const w of [951, 1024, 1100]) { await device(w, 640); await sleep(700); floor.on[w] = await evalJs(FLOOR); }
+  await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
+  for (const w of [951, 1024, 1100]) { await device(w, 640); await sleep(700); floor.off[w] = await evalJs(FLOOR); }
+  await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
+  const cmp = [951, 1024, 1100].map((w) => { const ids = Object.keys(floor.on[w]).filter((id) => floor.off[w][id]);
+    return { w, tiles: ids.length, rings: ids.filter((id) => floor.on[w][id].ring).length, titleW: ids.map((id) => [floor.on[w][id].titleW, floor.off[w][id].titleW]), on: ids.map((id) => floor.on[w][id].shown), off: ids.map((id) => floor.off[w][id].shown), same: ids.every((id) => floor.on[w][id].n === floor.off[w][id].n) }; });
+  console.log('    the 90-px floor — title characters shown per tile, warmth ON vs OFF (the same windows): ' + J(cmp));
+  check(`H3: at the 90-px floor (951 / 1024 / 1100, 10 windows) every tile shows the SAME title characters with warmth on and off — the ring rides the icon's corner (${cmp.map((c) => c.rings).join(' / ')} ringed floor tiles)`,
+    cmp.every((c) => c.tiles > 0 && c.rings > 0 && c.same), cmp);
+  await device(951, 640); await sleep(700); await nextTick(1);
+  await bothThemes('A-desktop-12-floor-951', { x: 0, y: 640 - 60, width: 951, height: 60 });
+  // RED: the r1 DOM re-planted — each ring moved back to its tile's first flex child (12 px + the 6-px gap) ⇒ fewer characters
+  const red = await evalJs(`(() => { for (const r of document.querySelectorAll('#taskbar-items .taskbar-icon > .warmth-ring')) r.closest('.taskbar-item').prepend(r); return ${FLOOR}; })()`);
+  await evalJs(`(() => { for (const r of document.querySelectorAll('#taskbar-items > .taskbar-item > .warmth-ring')) r.parentElement.querySelector(':scope > .taskbar-icon, :scope > .taskbar-icon-stack')?.prepend(r); return 1; })()`);
+  const rid = Object.keys(red).filter((id) => red[id].ring && floor.off[951][id]);
+  console.log('    RED (the r1 ring in the flow) at 951 — shown OFF vs r1-ON: ' + J(rid.map((id) => [floor.off[951][id].shown, red[id].shown])));
+  check('RED: the r1 DOM re-planted (the ring a flex child before the icon) ⇒ the probe counts FEWER characters on a ringed floor tile', rid.length > 0 && rid.some((id) => red[id].n < floor.off[951][id].n), rid.map((id) => [floor.off[951][id].n, red[id].n]));
   await device(1280, 800); await sleep(600);
   await evalJs(`app.wm.applyLayout('grid-2-4')`);
 });
@@ -449,7 +483,12 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
   // a reload: the other desktops come back held (unbuilt) or built — their squares and counts resolve either way
   const before = await evalJs(`document.getElementById('taskbar-warmth')?.textContent || null`);
   // each desktop visited once (its record captured), then back; the records reach the hub (the layout's own save)
-  for (const d of ['d2', 'd3', 'd4', 'd1']) { await evalJs(`app.desktopManager.switchTo(${J(DESKS[d])})`); await sleep(900); }
+  for (const d of ['d2', 'd3', 'd4', 'd1']) {
+    await evalJs(`app.desktopManager.switchTo(${J(DESKS[d])})`); await sleep(900);
+    // r2 (H2): a tab group on d2 and on d3 — its host the FRESH conversation, its guest the worse one (the host's own tier ≠
+    // the group's worst); d2's is built again when ⑦ goes there, d3's stays held
+    if (d === 'd2' || d === 'd3') { const [h, g] = d === 'd2' ? [9, 8] : [11, 10]; await evalJs(`(app.wm.createTabChain(${winOf(h)}, ${winOf(g)}), 1)`); await sleep(500); }
+  }
   await sleep(4000);
   await load(1280, 800); await nextTick(2);
   const held = await evalJs(`[...(app._warmth?.held || new Map())].map(([id, h]) => ({ id, desk: h.deskId, conv: h.id, rung: h.rung }))`);
@@ -521,7 +560,73 @@ await step('⑧ the window list: a band per row, «By time left»', async () => 
   const creation = await evalJs(`(() => { const a = app.desktopManager.activeDesktopId; return [...app.wm.windows].filter(([id, w]) => !(w._tabChain && w._tabChain.tabs[0] !== id) && !(a && w._desktopId && w._desktopId !== a)).map(([id]) => id); })()`);
   check('one press returns the rows to the creation order', plain.map((r) => r.id).join() === creation.join(), { plain: plain.map((r) => r.id), creation });
   await click('.overlap-switcher .wl-sort');
+  // r2 (H1): a «name — /path» title (≥ 40 characters) never pushes a row's words past its edge — the label shrinks
+  if (!(await evalJs(`!!document.querySelector('.overlap-switcher-group.open')`))) await click('.overlap-switcher-group');
+  await waitFor(`!!document.querySelector('.overlap-switcher-other .wl-left')`, 3000);
+  const EDGE = `[...document.querySelectorAll('.overlap-switcher:not(.warmth-list) > .overlap-switcher-item:not(.overlap-switcher-group)')].map((r) => { const l = r.querySelector(':scope > .wl-left'), lab = r.querySelector(':scope > .wl-name'), rr = r.getBoundingClientRect(), lr = l ? l.getBoundingClientRect() : null;
+    return { id: r.dataset.winId, other: r.classList.contains('overlap-switcher-other'), sid: app.sessions.get(r.dataset.winId)?.sessionId || app._warmth?.held.get(r.dataset.winId)?.id || null, title: lab ? lab.textContent : null, words: l ? l.textContent : null, wordsW: lr ? Math.round(lr.width) : 0, past: lr ? Math.round((lr.right - (rr.left + r.clientLeft + r.clientWidth)) * 10) / 10 : null, cut: lab ? lab.scrollWidth > lab.clientWidth : null }; })`;
+  const long = (rows) => rows.filter((r) => r.title && r.title.length >= 40 && r.title.includes('/') && kOfSid(r.sid) >= 0 && WANT[kOfSid(r.sid)] !== 'unknown');
+  const e1 = long(await evalJs(EDGE));
+  check(`H1: every row whose title is a «name — /path» (≥ 40 characters; ${e1.length} rows, ${e1.filter((r) => r.other).length} under «Other desktops») keeps its words whole inside the row — the label ends in an ellipsis`,
+    e1.length >= 6 && e1.some((r) => r.other) && e1.every((r) => r.words && r.wordsW > 0 && r.past <= 0.5 && r.cut), e1.map((r) => [r.title.length, r.words, r.past, r.cut]));
+  await bothThemes('A-desktop-10-window-list-others');
+  await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '.overlap-switcher-item > .wl-name { flex: 0 0 auto !important; min-width: auto !important; }'; document.head.appendChild(s); return 1; })()`);
+  const e2 = long(await evalJs(EDGE));
+  await evalJs(`document.getElementById('__red').remove(), 1`);
+  check('RED: the shrink rule undone by a planted style ⇒ the probe sees the words pushed past the row\'s edge', e2.length > 0 && e2.some((r) => r.past > 0.5), e2.map((r) => r.past));
+  // r2 (H2): an «Other desktops» row of a tab GROUP = the group's worst, never its host's alone (r1 painted the host)
+  const grp = await evalJs(`[${J(SIDS[9])}, ${J(SIDS[11])}].map((sid) => { const r = [...document.querySelectorAll('.overlap-switcher-other')].find((x) => (app.sessions.get(x.dataset.winId)?.sessionId || app._warmth?.held.get(x.dataset.winId)?.id) === sid); if (!r) return { sid, row: false };
+    const id = r.dataset.winId, built = app.wm.windows.has(id), tabs = built ? (app.wm.windows.get(id)._tabChain?.tabs || []) : (app._warmth.heldChains.get(id) || []);
+    return { row: true, built, tabs: tabs.length, tier: r.querySelector(':scope > .wl-band')?.getAttribute('data-warmth-tier') || null, words: r.querySelector(':scope > .wl-left')?.textContent || '', own: app._warmth.byId.get(sid)?.tier || null }; })`);
+  check('H2: an «Other desktops» row of a tab GROUP = its group\'s worst — d2\'s group BUILT: late, d3\'s HELD: mid (each host alone is fresh: what r1 painted)',
+    grp[0]?.row && grp[0].built && grp[0].tabs === 2 && grp[0].tier === 'late' && grp[0].own === 'fresh' && grp[1]?.row && !grp[1].built && grp[1].tabs === 2 && grp[1].tier === 'mid' && grp[1].own === 'fresh', grp);
+  const pq = await evalJs(PREVIEWS);
+  const sqOf = (k) => (pq.previews || []).flatMap((x) => x.squares).find((q) => q.sid === SIDS[k]);
+  const drawn = (ks) => ks.map(sqOf).filter(Boolean);
+  check('…and the groups\' squares take the group\'s worst: d2 (built) late, d3 (held) mid — the host\'s square too (its own tier fresh)',
+    !!sqOf(9) && !!sqOf(11) && drawn([8, 9]).every((q) => q.tier === 'late') && drawn([10, 11]).every((q) => q.tier === 'mid'), [8, 9, 10, 11].map((k) => sqOf(k)?.tier || 'no square'));
+  await click('.overlap-switcher-group'); // folded again, as the list opens by default
   await evalJs(`document.querySelectorAll('[data-popover]').forEach((p) => p.remove()), 1`);
+});
+
+await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tiles with warmth on and off', async () => {
+  const TF = await import(path.join(repo, 'src/lib/taskbar-fit.js'));
+  // r2 commit A: the r1 budget MEASURED (the wiring lands in the next commit) — each verdict printed, never counted
+  const measure = (name, c, e) => console.log(`    (measured on the r1 budget, not counted) ${c ? 'HOLDS' : 'BREAKS'}: ${name}${c ? '' : ' — ' + JSON.stringify(e).slice(0, 900)}`);
+  plan({ ...PLAN_K, 5: { agoMs: M(55) }, 6: { agoMs: M(56) }, 7: { agoMs: M(57) } }); await nextTick(2); // the strip's tail critical ⇒ the chip's long form
+  const FIT = `(() => { const root = document.getElementById('desktop-previews'), c = document.getElementById('taskbar-overflow'), s = document.getElementById('taskbar-items');
+    const tiles = [...s.children].filter((e) => e.classList.contains('taskbar-item')), ids = (c && !c.hidden && c._hiddenIds) || [];
+    return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: c.offsetWidth } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth }; })()`;
+  const at = async (w) => { await device(w, 700); await sleep(450); return evalJs(FIT); };
+  const boundary = async () => { let lo = 700, hi = 2400; if ((await at(hi)).form !== 'full') return { w: null }; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if ((await at(mid)).form === 'full') hi = mid; else lo = mid; } await at(hi); await sleep(500); return { w: hi, ...(await evalJs(FIT)) }; };
+  // the chip's longest forms: the dot + «+88 · 88 …» in en / zh / ja (the dictionaries' own words), measured as the chip draws them
+  const word = (lang, key) => { if (lang === 'en') return key; const l = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8').split('\n').find((x) => x.trim().startsWith(J(key) + ':')); return l ? JSON.parse(l.trim().slice(J(key).length + 1).trim().replace(/,$/, '')) : null; };
+  const LONG = ['en', 'zh', 'ja'].flatMap((lang) => ['+{n} · {k} critical', '+{n} · {k} expired'].map((key) => ({ lang, s: String(word(lang, key)).replace('{n}', '88').replace('{k}', '88') })));
+  const forms = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); const m = (html) => { const x = c.cloneNode(false); x.removeAttribute('id'); x.hidden = false; x.innerHTML = html; c.parentNode.appendChild(x); const w = x.offsetWidth; x.remove(); return w; };
+    const dot = '<span class="wsum-dot" data-warmth-tier="critical" aria-hidden="true"></span>'; return { plain88: m('+88'), forms: ${J(LONG)}.map((f) => ({ ...f, w: m(dot + f.s) })) }; })()`);
+  const longest = Math.max(...forms.forms.map((f) => f.w));
+  const on = await boundary();
+  await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
+  const off = await boundary();
+  await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
+  console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
+  console.log(`    the «+N» chip's forms (px): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest} + the plain room's margin ${TF.OVERFLOW_CHIP_PX - forms.plain88} = ${longest + TF.OVERFLOW_CHIP_PX - forms.plain88}; OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
+  measure(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
+    on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && /critical/.test(on.chip?.text || ''), { on, off });
+  measure(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
+    TF.OVERFLOW_CHIP_WARM_PX >= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 && TF.OVERFLOW_CHIP_WARM_PX <= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 + 8, forms);
+  // RED: a chip planted wider than the budget at the ON boundary ⇒ the probe counts fewer whole tiles than the floor
+  if (on.w) {
+    await device(on.w, 700); await sleep(500);
+    await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '#taskbar-overflow { min-width: ${TF.OVERFLOW_CHIP_WARM_PX + 120}px !important; }'; document.head.appendChild(s); return 1; })()`);
+    await sleep(500); const r = await evalJs(FIT);
+    await evalJs(`document.getElementById('__red').remove(), 1`);
+    measure(`RED: a chip planted ${TF.OVERFLOW_CHIP_WARM_PX + 120} px wide at the ON boundary ⇒ the probe counts fewer than ${TF.STRIP_MIN_TILES} whole tiles (${r.whole})`, r.whole < TF.STRIP_MIN_TILES, r);
+    await sleep(400);
+    const fb = await evalJs(`(() => { const r = document.getElementById('taskbar').getBoundingClientRect(); return { x: 0, y: r.top - 4, width: innerWidth, height: r.height + 4 }; })()`);
+    await bothThemes('A-desktop-12-plusN-boundary', fb);
+  }
+  plan(PLAN_K); await device(1280, 800); await sleep(600); await nextTick(2);
 });
 
 await step('⑤ (cont.) eight desktops at 1100 × 700 fold the previews: the button\'s ring = the worst across all', async () => {
@@ -571,8 +676,8 @@ await step('⑩ off and on, live (the hub\'s answer is the switch)', async () =>
   check('…a FAILED poll draws nothing (it never re-derives from the forgotten ON answer)', (await evalJs(MARKS)) === 0 && RW.failNext === 0, await evalJs(MARKS));
   await click('#taskbar-status');
   await waitFor(`!!document.querySelector('.overlap-switcher .overlap-switcher-item')`, 3000);
-  const wl = await evalJs(`(() => { const p = document.querySelector('.overlap-switcher'); return { head: !!p.querySelector('.wl-head'), band: !!p.querySelector('.wl-band, .wl-left'), ids: [...p.querySelectorAll(':scope > .overlap-switcher-item:not(.overlap-switcher-group):not(.overlap-switcher-other)')].filter((r) => r.dataset.winId).length }; })()`);
-  check('…the window list is as before: no head row, no band, no data-win-id on the active-desktop rows', !wl.head && !wl.band && wl.ids === 0, wl);
+  const wl = await evalJs(`(() => { const p = document.querySelector('.overlap-switcher'); return { head: !!p.querySelector('.wl-head'), band: !!p.querySelector('.wl-band, .wl-left'), name: !!p.querySelector('.wl-name'), ids: [...p.querySelectorAll(':scope > .overlap-switcher-item:not(.overlap-switcher-group):not(.overlap-switcher-other)')].filter((r) => r.dataset.winId).length }; })()`);
+  check('…the window list is as before: no head row, no band, no shrinking label, no data-win-id on the active-desktop rows', !wl.head && !wl.band && !wl.name && wl.ids === 0, wl);
   await evalJs(`document.querySelectorAll('[data-popover]').forEach((p) => p.remove()), 1`);
   const off8 = {}; for (const [w, h] of [[1280, 800], [1100, 700]]) { await device(w, h); await sleep(700); const q = await evalJs(PREVIEWS); off8[`off-${w}`] = { form: q.form, chip: q.chip }; }
   console.log('    warmth OFF — the switcher form and «+N» (8 desktops now): ' + J(off8));

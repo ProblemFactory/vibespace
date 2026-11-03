@@ -31,7 +31,10 @@
 //   ⑨ WIRING + THE LAWS (r1b, comment-stripped code): the poll's ONE call from the SAME answer; warmth-chrome.js computes
 //     once (one warmthOf call site) and owns no timer / rAF / settings listener / _notify / setTitleMeta / colour write;
 //     every builder re-applies from the map; app.js seats the chip beside the lock chip; the CSS block's selectors (the
-//     frame guard, the blink kept, the expired marks dim) and no literal colour in it (a PLANTED control proves the check fires).
+//     frame guard, the blink kept, the expired marks dim) and no literal colour in it (a PLANTED control proves the check fires);
+//     round 2 (the acceptance of ca2670be0): a list row's label shrinks (H1), an «Other desktops» row takes its group's tabs —
+//     built or held (H2, a PLANTED r1 line reds it), a tile's ring rides its icon (H3), the switcher budgets the warm «+N»
+//     chip by a PURE constant while warmth is drawn (H4, the r1 literal planted reds it).
 // Run: node scripts/test-cache-warmth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -324,6 +327,24 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   ok('…NO literal colour in the block (theme vars only) — and nothing in it animates (no transition, no animation)', !!block && !LITERAL.test(block) && !/\b(transition|animation)\s*:/.test(block), (block.match(LITERAL) || [''])[0]);
   ok('…CONTROL: the literal check fires on the blink\'s own literal planted into the block', LITERAL.test(block + '\n.x { background: rgba(250,180,40,0.4); }') && LITERAL.test(block + '\n.x { color: #e5c07b; }'));
   ok('…the five token names are only ever READ in it (⑥\'s exact-5 declarations hold)', !/--warmth-(fresh|mid|late|critical|expired)\s*:/.test(block) && (css.match(/--warmth-(fresh|mid|late|critical|expired)\s*:/g) || []).length === 5);
+  // round 2 (fixups-r2: the acceptance of ca2670be0)
+  ok('r2 H1: a list row\'s label SHRINKS (every ⧉ list row and the summary list\'s: flex 1 1 auto, min-width 0, the ellipsis) and the words never wrap or shrink; paintListRow marks the label; OFF takes the mark back off the ⧉ list',
+    /\.overlap-switcher-item > \.wl-name \{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(block) && /\.wl-left \{ flex: none; margin-left: auto; white-space: nowrap;/.test(block) && !/\.warmth-list \.wl-name/.test(block)
+    && /if \(label\) label\.classList\.add\('wl-name'\);/.test(bodyOf(wc, /\nexport function paintListRow\(app, item, src, label\) /))
+    && /for \(const el of document\.querySelectorAll\('\.overlap-switcher:not\(\.warmth-list\) \.wl-name'\)\) el\.classList\.remove\('wl-name'\);/.test(bodyOf(wc, /\nfunction clearAll\(app\) /)));
+  const otherRow = (src) => /if \(warm\) paintListRow\(app, item, \{ ids: tileIds\(app, r\.id\) \}, label\);/.test(src) && !/paintListRow\(app, item, \{ ids: \[r\.id\] \}, label\)/.test(src);
+  ok('r2 H2: an «Other desktops» row paints its GROUP (tileIds: a built chain, a held record\'s host entry `tabChain.tabs`) — the tile and the square ask the same',
+    otherRow(tb) && /^export function tileIds\(app, id\) \{$/m.test(wc) && /const tabs = !ws\.isTabGuest && ws\.tabChain && Array\.isArray\(ws\.tabChain\.tabs\) \? ws\.tabChain\.tabs\.map\(String\) : null;/.test(wc)
+    && /const ids = tileIds\(app, id\);/.test(bodyOf(wc, /\nfunction warmthOfTile\(app, id\) /)) && /const w = warmthOfTile\(app, sq\.dataset\.winId\);/.test(bodyOf(wc, /\nexport function paintPreviews\(app\) /)));
+  ok('…CONTROL: the r1 line planted back (the host alone, `{ ids: [r.id] }`) reds the pin', !otherRow(tb.replace('{ ids: tileIds(app, r.id) }', '{ ids: [r.id] }')));
+  ok('r2 H3: on a TILE the ring rides its icon\'s corner (absolute — no width, the 90-px floor keeps its word); a chooser row keeps it inline',
+    /\.taskbar-icon > \.warmth-ring, \.taskbar-icon-stack > \.warmth-ring \{ position: absolute; right: -5px; bottom: -5px; z-index: 1;/.test(block) && /\.taskbar-icon:has\(> \.warmth-ring\) \{ position: relative; \}/.test(block)
+    && /const host = el\.querySelector\(':scope > \.taskbar-icon, :scope > \.taskbar-icon-stack'\) \|\| el;/.test(bodyOf(wc, /\nexport function paintTile\(app, el\) /)));
+  const tf = read('src/lib/taskbar-fit.js');
+  const budget = (src) => /let others = warmthDrawn\(this\.app\) \? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;/.test(src) && !/let others = 48;/.test(src);
+  ok('r2 H4: the switcher budgets the «+N» chip by a PURE constant — the warm chip\'s longest form while warmth is drawn (taskbar-fit.js, beside TILE_MIN_PX), never its measured width',
+    budget(dm) && /^export const OVERFLOW_CHIP_PX = 48;$/m.test(tf) && /^export const OVERFLOW_CHIP_WARM_PX = \d+;$/m.test(tf) && /^import \{ paintPreviews, warmthDrawn \} from '\.\/warmth-chrome\.js';/m.test(read('src/lib/desktop-manager.js')));
+  ok('…CONTROL: the r1 literal planted back (`let others = 48;`) reds the pin', !budget(dm.replace('let others = warmthDrawn(this.app) ? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;', 'let others = 48;')));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

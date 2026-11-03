@@ -11,6 +11,13 @@
 
 /** A tile's floor (layout px): its icon and a readable word. */
 export const TILE_MIN_PX = 90;
+/** The «+N» chip's room in the switcher's verdict (src/lib/desktop-manager.js _switcherFormFor) — counted whether the chip
+ *  shows or not, so the verdict never depends on itself: the plain chip… */
+export const OVERFLOW_CHIP_PX = 48;
+/** …and while the prompt-cache warmth is drawn (lane cache-warmth-band r2 H4), its LONGEST form: the dot + «+88 · 88
+ *  critical» / «expired» and their zh / ja words, measured in Chrome (scripts/test-cache-warmth-chrome.mjs ⑧b), plus the
+ *  plain room's own margin over «+88». */
+export const OVERFLOW_CHIP_WARM_PX = 160;
 /** The desktop switcher folds before the tile strip keeps fewer tiles than this… */
 export const STRIP_MIN_TILES = 4;
 /** …or before the previews take more than this share of the taskbar. */
