@@ -997,11 +997,71 @@ await (async () => {
         const callers = files.filter((f) => !/src\/(turn-state|session-schema)\.js$/.test(f)); // the definitions and the field's schema note
         const calls = (name) => { const out = {}; for (const f of callers) { const n = fs.readFileSync(f, 'utf8').split('\n').filter((l) => new RegExp('\\b' + name + '\\b').test(l) && !/^\s*const \{[^}]*\} = require\(|^\s*\*|^\s*\/\//.test(l)).length; if (n) out[path.relative(path.resolve('.'), f)] = n; } return out; };
         const sentAt = calls('noteRequestSent'), flagAt = calls('noteTurnFlight');
-        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send, the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at the parse (result, the state word), the attach reconcile, the exit',
+        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send that starts a request (none in flight before it — r5), the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at a mid-turn send, the parse (result, the state word), the attach reconcile, the exit',
           JSON.stringify(assigns) === JSON.stringify(['src/turn-state.js'])
           && JSON.stringify(sentAt) === JSON.stringify({ 'src/server/session-brain.js': 1, 'src/server/stdout/claude-stream-json.js': 2, 'src/server/user-input.js': 1, 'server.js': 1 })
-          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 3, 'src/ws-handler.js': 1 }),
+          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 3, 'src/server/user-input.js': 1, 'src/ws-handler.js': 1 }),
           JSON.stringify({ assigns, sentAt, flagAt }));
+      }
+      // ROUND 5 (L1): A SEND STARTS A REQUEST ONLY WHEN NONE WAS IN FLIGHT — a message sent WHILE a turn runs (the person's
+      // steer, a peer's dispatch) goes out with nothing: the wrapper holds the frame, and a steer rides the next tool result
+      // (that record re-stamps). The acceptance's probe through the REAL typing path (createUserInputSender), the REAL parse
+      // and the real engine, EDF shape, on a clock moved back: the prompt at T0, the tool_use response at T0 + 5 s, a 3-hour
+      // tool, a steer / a dispatch at T0 + 65 min, the pool pass 60 s later ⇒ the send instant stays T0: cold, it MOVES.
+      // RED on bf8e2b6f9 by name: user-input re-stamped every send ⇒ «a request in flight since 60s», held.
+      {
+        const { createUserInputSender } = require(path.resolve('src/server/user-input.js'));
+        const { createMessageManager } = require(path.resolve('src/normalizers.js'));
+        const wL = shape('edf', [['l1-steer', 0], ['l1-dispatch', 0], ['l1-idle', 70 * 60e3]]);
+        const soDir = fs.mkdtempSync(path.join(scr, 'so-')), BUF = path.join(soDir, 'buffers'), META = path.join(soDir, 'meta');
+        fs.mkdirSync(BUF, { recursive: true }); fs.mkdirSync(META, { recursive: true });
+        const so = require(path.resolve('src/server/session-stdout.js')).create({
+          rootDir: soDir, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(soDir, 'nonexistent'),
+          CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), activeSessions: wL.sessions, engine: wL.eng,
+          checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { },
+          daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }),
+          getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor() { } }),
+        });
+        const adL = new ClaudeCodeAdapter({ buffersDir: BUF });
+        const send = createUserInputSender({ activeSessions: wL.sessions, adapterRegistry: { get: () => adL }, BUFFERS_DIR: BUF, broadcastToSession() { }, feedLive() { },
+          autoResume: null, reattachLocalPty() { }, ptyQuietSince: () => false, writeSessionInput() { }, log() { }, framesDir: path.join(soDir, 'frames') }).send;
+        const realNow = Date.now; let skew = 0;
+        const rec = (sid, r) => JSON.stringify({ parent_tool_use_id: null, session_id: 'cid-' + sid, ...r }) + '\n';
+        const midTurn = (sid, opts) => {
+          const x = wL.sessions.get(sid), p = { data: null, exit: null, onData(cb) { p.data = cb; }, onExit(cb) { p.exit = cb; } };
+          delete x._lastRequestAt; x._turnStartedAt = null; x._normalizer = createMessageManager('claude', sid);
+          so.setupSessionPty(x, sid, p);
+          skew = -(66 * 60e3);                                                     // T0: the prompt — the request goes out
+          send(sid, 'run the soak', { origin: 'ws' });
+          p.data(rec(sid, { type: 'system', subtype: 'session_state_changed', state: 'running', uuid: 'u-st-' + sid }));
+          p.data(rec(sid, { type: 'user', message: { role: 'user', content: 'run the soak' }, uuid: 'u-pr-' + sid }));
+          skew += 5e3;                                                              // the tool_use response: the last stamped request
+          p.data(rec(sid, { type: 'assistant', message: { id: 'msg_tu-' + sid, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: 'tu-' + sid, name: 'Bash', input: { command: 'make soak' } }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 600000 } }, uuid: 'u-tu-' + sid }));
+          skew = -60e3;                                                             // T0 + 65 min: the 3-hour tool still runs
+          return send(sid, 'and read its log when it ends', opts);
+        };
+        const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { };
+        Date.now = () => realNow() + skew;
+        let rS, rD, rI;
+        try {
+          rS = midTurn('l1-steer', { origin: 'ws', steer: true });
+          rD = midTurn('l1-dispatch', { origin: 'dispatch', by: { cid: 'cid-peer', name: 'a peer' } });
+          skew = -60e3; rI = send('l1-idle', 'the next task', { origin: 'ws' }); // the control: an idle conversation's send IS a request going out
+        } finally { Date.now = realNow; console.log = o0; console.warn = o1; }
+        const tL = Date.now(), fL = (sid) => factsOf(wL.eng, wL.sessions.get(sid), tL), wcL = (sid) => warmCache({ ...fL(sid), nowMs: tL });
+        const seen = Object.fromEntries(['l1-steer', 'l1-dispatch', 'l1-idle'].map((sid) => [sid, { ...fL(sid), sentAgoS: fL(sid).turnStartedAt && Math.round((tL - fL(sid).turnStartedAt) / 1000), lastAgoS: fL(sid).lastRequestAt && Math.round((tL - fL(sid).lastRequestAt) / 1000), warm: wcL(sid).warm }]));
+        const lL = wL.run(), lineOf = (sid) => lL.filter((l) => l.includes(' ' + sid)).join(' | ');
+        const heldAt = (sid) => lL.some((l) => l.startsWith('[pool] hold ' + sid + ':'));
+        const cold = (sid) => fL(sid).inFlight === true && Math.abs(fL(sid).turnStartedAt - (tL - 66 * 60e3)) < 2e3 && wcL(sid).warm === false && at(wL, sid) === 'B' && !heldAt(sid);
+        ck('L1 THE PIN — a STEER sent while a 3-hour tool runs is no request: the send instant stays T0 (66 min), cold, the pool MOVES it (RED on bf8e2b6f9: re-stamped ⇒ «a request in flight since 60s», held)',
+          rS && rS.ok === true && cold('l1-steer'), JSON.stringify({ r: rS, f: seen['l1-steer'], link: at(wL, 'l1-steer'), l: lineOf('l1-steer') }));
+        ck('L1 THE PIN — a peer\'s DISPATCH sent mid-turn is no request either: T0 kept, cold, it MOVES (RED on bf8e2b6f9: held)',
+          rD && rD.ok === true && cold('l1-dispatch'), JSON.stringify({ r: rD, f: seen['l1-dispatch'], link: at(wL, 'l1-dispatch'), l: lineOf('l1-dispatch') }));
+        ck('L1 control: an IDLE conversation\'s send IS the request going out — in flight since 60 s, warm, held «a request in flight since 60s»',
+          rI && rI.ok === true && fL('l1-idle').inFlight === true && Math.abs(fL('l1-idle').turnStartedAt - (tL - 60e3)) < 2e3 && wcL('l1-idle').warm === true && at(wL, 'l1-idle') === 'A'
+          && lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l)),
+          JSON.stringify({ r: rI, f: seen['l1-idle'], link: at(wL, 'l1-idle'), l: lineOf('l1-idle') }));
+        console.log = console.warn = () => { }; try { await new Promise((r) => setImmediate(r)); } finally { console.log = o0; console.warn = o1; } // the usage record's kicked pass
       }
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());

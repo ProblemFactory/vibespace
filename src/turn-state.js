@@ -195,11 +195,13 @@ function requestInFlight({ isStreaming, turnState } = {}) {
  *  the flight instant is EVERY request's send, never only the turn's first — a follow-up request after a 70-min tool is a
  *  fresh send). A restore never carries it: a restored conversation is not in flight until the stream says so.
  *  · noteTurnFlight — the FLAG-CHANGE writer, called right after a write of the turn flags that sends nothing by itself
- *    (the claude parse's result / turn state, the attach reconciliation, the exit road): entering flight stamps `now`
+ *    (the claude parse's result / turn state, the attach reconciliation, the exit road, a send made while a request is
+ *    already out): entering flight stamps `now`
  *    when unset (a 'running' after a pause: the pause cleared it); leaving flight (a pause on the owner, the turn's end)
  *    clears it.
- *  · noteRequestSent — the REQUEST-OUT writer, called at each moment a request goes out (the send — user-input,
- *    auto-resume's continue —, a 'running' that is new, a main-thread user record: the prompt's echo or a TOOL RESULT,
+ *  · noteRequestSent — the REQUEST-OUT writer, called at each moment a request goes out (the send that STARTS one —
+ *    user-input's when none was in flight before it (round 5: a steer or a dispatch mid-turn sends nothing, the wrapper
+ *    holds it and a steer rides the next tool result), auto-resume's continue —, a 'running' that is new, a main-thread user record: the prompt's echo or a TOOL RESULT,
  *    at BOTH feeds — the parse and the device stream's claudeSideEffects — unless the record is a backlog's): in flight ⇒
  *    `now`, whatever was there; otherwise cleared, as the flag writer would. */
 function noteTurnFlight(session, now) {

@@ -44,7 +44,7 @@ const fs = require('fs');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
-const { noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
+const { requestInFlight, noteTurnFlight, noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
 function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
@@ -135,8 +135,12 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
         return { ok: false, code: 'too_large', error: refusal };
       }
     }
+    const wasInFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }); // read BEFORE the flag write
     session._isStreaming = true;
-    noteRequestSent(session, Date.now()); // the request goes out NOW: the in-flight cache fact (lane cache-warmth-tiles r4)
+    // the in-flight cache fact (lane cache-warmth-tiles r5): a send STARTS a request only when none was in flight. Mid-turn
+    // (a steer, a dispatch) nothing goes out now — the wrapper holds the frame, a steer rides the next tool result (that
+    // record re-stamps) — so the flag writer, which keeps the instant; else the request goes out NOW
+    (wasInFlight ? noteTurnFlight : noteRequestSent)(session, Date.now());
     // WORK (the default classification, round 4): the user took the
     // conversation over by hand — the one non-turn signal allowed to
     // clear the loop breaker, because a human at the keyboard is
