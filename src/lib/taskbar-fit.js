@@ -15,9 +15,9 @@ export const TILE_MIN_PX = 90;
  *  shows or not, so the verdict never depends on itself: the plain chip… */
 export const OVERFLOW_CHIP_PX = 48;
 /** …and while the prompt-cache warmth is drawn (lane cache-warmth-band r2 H4), its LONGEST form: the dot + «+88 · 88
- *  critical» / «expired» and their zh / ja words, measured in Chrome (scripts/test-cache-warmth-chrome.mjs ⑧b), plus the
- *  plain room's own margin over «+88». */
-export const OVERFLOW_CHIP_WARM_PX = 160;
+ *  期限切れ» (ja, 127 px in Chrome — en «… critical» 117, «… expired» 121; zh 103 / 115), plus the plain room's own margin
+ *  over «+88» (48 − 38 = 10) — measured by scripts/test-cache-warmth-chrome.mjs ⑧b, which reds a form that outgrows it. */
+export const OVERFLOW_CHIP_WARM_PX = 137;
 /** The desktop switcher folds before the tile strip keeps fewer tiles than this… */
 export const STRIP_MIN_TILES = 4;
 /** …or before the previews take more than this share of the taskbar. */

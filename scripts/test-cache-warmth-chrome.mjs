@@ -475,7 +475,9 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
   for (const [w, h] of [[1280, 800], [1100, 700]]) { await device(w, h); await sleep(700); const q = await evalJs(PREVIEWS); FORMS[`off-${w}`] = { form: q.form, chip: q.chip, summary: q.summary }; }
   await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
   console.log('    the switcher form and «+N», 4 desktops, 10 windows on this one — warmth ON vs OFF: ' + J(FORMS));
-  check('the summary chip never folds the previews here (full form at 1280 and 1100, on and off)', ['on-1280', 'on-1100', 'off-1280', 'off-1100'].every((k) => FORMS[k]?.form === 'full'), FORMS);
+  // r2 (H4): while warmth is drawn the verdict budgets the warm «+N» chip's longest form (OVERFLOW_CHIP_WARM_PX) — at 1100 px
+  // with 4 desktops that folds the previews (r1's 48-px budget kept them full and left the strip 3 whole tiles: ⑧b)
+  check(`the previews: full at 1280 on and off and at 1100 off; at 1100 on the warm chip's budget decides — ${FORMS['on-1100']?.form}`, ['on-1280', 'off-1280', 'off-1100'].every((k) => FORMS[k]?.form === 'full') && ['full', 'compact'].includes(FORMS['on-1100']?.form), FORMS);
   await device(1280, 800); await sleep(600); await nextTick(1);
   const r = await evalJs(`(() => { const r = document.getElementById('desktop-previews').getBoundingClientRect(); return { x: Math.max(0, r.left - 6), y: Math.max(0, r.top - 6), width: r.width + 12, height: r.height + 12 }; })()`);
   await bothThemes('A-desktop-11-previews-rings', r);
@@ -591,14 +593,15 @@ await step('⑧ the window list: a band per row, «By time left»', async () => 
 
 await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tiles with warmth on and off', async () => {
   const TF = await import(path.join(repo, 'src/lib/taskbar-fit.js'));
-  // r2 commit A: the r1 budget MEASURED (the wiring lands in the next commit) — each verdict printed, never counted
-  const measure = (name, c, e) => console.log(`    (measured on the r1 budget, not counted) ${c ? 'HOLDS' : 'BREAKS'}: ${name}${c ? '' : ' — ' + JSON.stringify(e).slice(0, 900)}`);
-  plan({ ...PLAN_K, 5: { agoMs: M(55) }, 6: { agoMs: M(56) }, 7: { agoMs: M(57) } }); await nextTick(2); // the strip's tail critical ⇒ the chip's long form
+  const keep = PLAN_K; // plan() makes its argument THE plan — the matrix is put back by name at the end
+  plan({ ...keep, 5: { agoMs: M(55) }, 6: { agoMs: M(56) }, 7: { agoMs: M(57) } }); await nextTick(2); // the strip's tail critical ⇒ the chip's long form
   const FIT = `(() => { const root = document.getElementById('desktop-previews'), c = document.getElementById('taskbar-overflow'), s = document.getElementById('taskbar-items');
     const tiles = [...s.children].filter((e) => e.classList.contains('taskbar-item')), ids = (c && !c.hidden && c._hiddenIds) || [];
-    return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: c.offsetWidth } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth }; })()`;
+    return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: c.offsetWidth } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth, mobile: !!app.isMobile }; })()`;
   const at = async (w) => { await device(w, 700); await sleep(450); return evalJs(FIT); };
-  const boundary = async () => { let lo = 700, hi = 2400; if ((await at(hi)).form !== 'full') return { w: null }; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if ((await at(mid)).form === 'full') hi = mid; else lo = mid; } await at(hi); await sleep(500); return { w: hi, ...(await evalJs(FIT)) }; };
+  // the narrowest DESKTOP-class viewport judged 'full' (a phone-class page has no taskbar: it counts as not full here)
+  const full = (f) => !f.mobile && f.bar > 0 && f.form === 'full';
+  const boundary = async () => { let lo = 600, hi = 2400; if (!full(await at(hi))) return { w: null }; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (full(await at(mid))) hi = mid; else lo = mid; } await at(hi); await sleep(500); return { w: hi, ...(await evalJs(FIT)) }; };
   // the chip's longest forms: the dot + «+88 · 88 …» in en / zh / ja (the dictionaries' own words), measured as the chip draws them
   const word = (lang, key) => { if (lang === 'en') return key; const l = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8').split('\n').find((x) => x.trim().startsWith(J(key) + ':')); return l ? JSON.parse(l.trim().slice(J(key).length + 1).trim().replace(/,$/, '')) : null; };
   const LONG = ['en', 'zh', 'ja'].flatMap((lang) => ['+{n} · {k} critical', '+{n} · {k} expired'].map((key) => ({ lang, s: String(word(lang, key)).replace('{n}', '88').replace('{k}', '88') })));
@@ -609,11 +612,12 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
   const off = await boundary();
   await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
+  await waitFor(`!!app._warmth?.drawn && !!document.getElementById('taskbar-warmth')`, 12000); // drawn again before the RED below
   console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
   console.log(`    the «+N» chip's forms (px): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest} + the plain room's margin ${TF.OVERFLOW_CHIP_PX - forms.plain88} = ${longest + TF.OVERFLOW_CHIP_PX - forms.plain88}; OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
-  measure(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
+  check(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
     on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && /critical/.test(on.chip?.text || ''), { on, off });
-  measure(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
+  check(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
     TF.OVERFLOW_CHIP_WARM_PX >= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 && TF.OVERFLOW_CHIP_WARM_PX <= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 + 8, forms);
   // RED: a chip planted wider than the budget at the ON boundary ⇒ the probe counts fewer whole tiles than the floor
   if (on.w) {
@@ -621,12 +625,12 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
     await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '#taskbar-overflow { min-width: ${TF.OVERFLOW_CHIP_WARM_PX + 120}px !important; }'; document.head.appendChild(s); return 1; })()`);
     await sleep(500); const r = await evalJs(FIT);
     await evalJs(`document.getElementById('__red').remove(), 1`);
-    measure(`RED: a chip planted ${TF.OVERFLOW_CHIP_WARM_PX + 120} px wide at the ON boundary ⇒ the probe counts fewer than ${TF.STRIP_MIN_TILES} whole tiles (${r.whole})`, r.whole < TF.STRIP_MIN_TILES, r);
+    check(`RED: a chip planted ${TF.OVERFLOW_CHIP_WARM_PX + 120} px wide at the ON boundary ⇒ the probe counts fewer than ${TF.STRIP_MIN_TILES} whole tiles (${r.whole})`, r.whole < TF.STRIP_MIN_TILES, r);
     await sleep(400);
     const fb = await evalJs(`(() => { const r = document.getElementById('taskbar').getBoundingClientRect(); return { x: 0, y: r.top - 4, width: innerWidth, height: r.height + 4 }; })()`);
     await bothThemes('A-desktop-12-plusN-boundary', fb);
   }
-  plan(PLAN_K); await device(1280, 800); await sleep(600); await nextTick(2);
+  plan(keep); await device(1280, 800); await sleep(600); await nextTick(2);
 });
 
 await step('⑤ (cont.) eight desktops at 1100 × 700 fold the previews: the button\'s ring = the worst across all', async () => {

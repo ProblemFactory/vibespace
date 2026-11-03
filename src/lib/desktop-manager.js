@@ -1,7 +1,7 @@
 import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
-import { switcherForm, TILE_MIN_PX, STRIP_MIN_TILES } from './taskbar-fit.js'; // PURE (lane desktop-small): the switcher folds to ONE button when the desktops crowd the tiles out
+import { switcherForm, TILE_MIN_PX, STRIP_MIN_TILES, OVERFLOW_CHIP_PX, OVERFLOW_CHIP_WARM_PX } from './taskbar-fit.js'; // PURE (lane desktop-small): the switcher folds to ONE button when the desktops crowd the tiles out
 import { sheetRows } from './desktop-switch-sheet.js'; // int358 seam: the compact list's rows = the phone sheet's (PURE desktopRows over ONE input)
 import { desktopDoors, doorItems } from '../desktop-switch.js'; // lane desktop-doors-table: THE desktop doors — one PURE table for every surface
 import { UI_ICONS } from './icons.js'; // a compact-list row's ⋯ (lane desktop-small r2 ①)
@@ -11,7 +11,7 @@ import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from '
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
-import { paintPreviews } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the previews' prompt-cache tiers
+import { paintPreviews, warmthDrawn } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the previews' prompt-cache tiers
 
 const SPRING_MS = 350; // a window drag held this long on the compact switcher springs its list open (lane desktop-small r2 ①)
 
@@ -1070,7 +1070,9 @@ export class DesktopManager {
       this._barRO.observe(bar);
     }
     const tray = container.parentElement, gap = (el) => (el ? parseFloat(getComputedStyle(el).columnGap) || 0 : 0);
-    let others = 48; // the «+N» chip's room (taskbar.js), counted whether it shows or not — the verdict never depends on itself
+    // the «+N» chip's room (taskbar.js), counted whether it shows or not — the verdict never depends on itself: a PURE constant,
+    // the warm chip's longest form while warmth is drawn (lane cache-warmth-band r2 H4: «+5 · 2 critical» outgrew the 48)
+    let others = warmthDrawn(this.app) ? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;
     if (tray && tray !== bar) for (const el of tray.children) if (el !== container && el.offsetWidth) others += el.offsetWidth + gap(tray);
     const cs = getComputedStyle(bar);
     others += (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + 2 * gap(bar) + 8;
