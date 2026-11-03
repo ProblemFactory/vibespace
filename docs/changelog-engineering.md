@@ -16,6 +16,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The plugin side** is told separately (its launcher drops `--disable-sync` — a one-line change in the plugin's own repo); the hub fix stands on its own. `src/browser-attach.js` rides the agentd bundle (browser-facts) — the signed agentd changes with the cut.
 - Gates: test-browser-keeper ①b (PURE: the strip, the argv without the switch + `dropped`, the PLANTED hub-side control (quiet, mark), a second `--user-data-dir`'s `offending`, the words; CONTROL mutant: a builder that judges the engine's switch refuses the launch; KEEPER: the incident's launch options start on the attach road without it, ONE journal line, the record's fact, the REAL housekeeping row through the panel's `stateLines`; the planted hub-side `bad_argv` through the keeper journaled ONCE before the display stop; the bare `--` sibling the same) — 102/102; the same suite on 749aa7bf9: 12 red by name.
 
+### int375 — the .375 hotfix's own notes (lane int361; one pick on 749aa7bf9: hotfix-attach-engine-args 56cde8f80)
+- **A hotfix of one commit, no seams.** The train's src/, public/, scripts/ and data/ equal 56cde8f80 byte for byte; the fast tier's sum is unchanged (919.83 s < 920 s); its block was already headed «## 2.369.375» and is assembled as the ONE .375 block.
+
 ## 2.369.374 — 2026-11-03
 
 ### cache-warmth-tiles — r1a: the hub's prompt-cache TTL fact corrected (1 h for a subscription session, 5 min on usage credits); the pool's warm-cache hold and the session list's warmth fields read ONE producer; the box drawing waits for the owner's design verdict (q-059)
