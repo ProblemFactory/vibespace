@@ -38,6 +38,10 @@ CC.cliStart({ tool: 'vibespace-vault', flags: ['--call-timeout'] });
 // "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]` — the SAME verb's second shape (the first
 // argument is words, not a vault:// reference): ONE item in the user's For you tray with a masked box; the user pastes the
 // value (or refuses) and this conversation reads a receipt at its next turn — where it went, never the value.
+// lane vault-entry-description (the owner 2026-11-02: an agent that comes later — after a compaction, or another conversation —
+// must tell from `list` alone what each key is for): an entry carries a NAME and a DESCRIPTION. The agent that creates it writes
+// them free (`request "<what>" --name … --note …`, `mint` / `put --note`); a later change is `describe <vault://…> --name …
+// --note …` — ONE card for the user to allow, never applied before; `list` prints both for every entry this conversation may use.
 const fs = require('fs');
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
@@ -58,7 +62,12 @@ const USAGE = [
   '                             conversation) — you never see the password again',
   '                             A seed or a password goes in as ITS KIND (totp add / login add), never as a free `put`.',
   '  vibespace-vault list       the stored secrets you may use in a run (the ones this conversation stored, the ones the user',
-  '                             opened, or granted to you) — a reference each, never a value',
+  '                             opened, or granted to you) — a reference each with its name and description (what it is for —',
+  '                             read it before you use one), never a value',
+  '  vibespace-vault describe <vault://…> [--name "<new name>"] [--note "<what it is for: system, account, what it may do>"]',
+  '                             PROPOSE a new name and/or description for an entry in your list: ONE card for the user — nothing',
+  '                             changes until they allow it (a lock withdraws it); your next turn says «applied» or «refused».',
+  '                             The description is one paragraph, at most 400 characters, never a secret; the name at most 80.',
   '  vibespace-vault request <vault://…> --for "<purpose>"',
   '                             ask the user for an entry, with what you will run with it: ONE question in their For you tray;',
   '                             nothing waits on it — `uses` shows their answer (once: your next run · 8h: every run for 8 hours)',
@@ -72,11 +81,13 @@ const USAGE = [
   '                             it back (a lock does not end it — nothing runs while it is locked). `uses` / `list` show it.',
   '                             When a card asks for each run of a command, this is the way to stop it — ask once.',
   '  vibespace-vault request "<what you need, in the user\'s words>" --purpose "<what you will do with it>"',
-  '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]',
+  '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--note "<what it is for>"] [--host <h>[,<h>…]]',
   '                             ask the user to PASTE a secret you do not have (a password, an API key): ONE item in their For you',
   '                             tray with a masked box — the value goes straight into the vault, never to you. --into = an',
   '                             Integrations field (e.g. llm.apiKey — VibeSpace uses it there itself); otherwise a NEW vault entry',
-  '                             (--kind, --name = its label; --host = where you will use it, e.g. 192.168.1.1 — then, unless the user',
+  '                             (--kind, --name = its label, --note = its description: what it is for, which system and account,',
+  '                             what it may do — every agent that may use it reads both in `list`; the user may edit them before',
+  '                             pasting; a later change is `describe`, which they approve; --host = where you will use it, e.g. 192.168.1.1 — then, unless the user',
   '                             turned it off, THIS conversation may use it in commands to those hosts for 8 hours with no card; a',
   '                             command to any other host still shows a card (name no host and every command does); a vault lock',
   '                             ends it; the card says so).',
@@ -96,14 +107,15 @@ const USAGE = [
   '                             transform, pack or copy what they read (cat, echo, base64, cp …), wrappers (sudo, xargs …), a value',
   '                             on the command line. vibespace-docs vault = the manual.',
   '',
-  '  vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]',
+  '  vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>] [--note "<what it is for>"]',
   '      the HUB makes a random secret and seals it under agent:<this conversation>/<name>; you get the name + a',
   '      vault:// reference and NEVER the value (the user can reveal it in ⚙ System ▸ Vault…). For registering an',
   '      account, setting a service password, generating a token — a secret you do not need to read. --for names the',
   '      host it is for: a run sending it there asks nobody; another host asks the user once per host; a command',
   '      whose destination cannot be told (a shell, a script, a tool naming no host it can read, a config file) asks',
   '      the user — once per command shape on their own machine, every run on a shared instance.',
-  '  vibespace-vault put <name> --from-file <0600 file> | --stdin',
+  '  vibespace-vault put <name> --from-file <0600 file> | --stdin [--note "<what it is for>"]',
+  '      (mint / put: --note = its description — what it is for — which every agent that may use it reads in `list`)',
   '      seal a value you ALREADY have (a key a vendor page gave you) under agent:<this conversation>/<name>. The value',
   '      rides a 0600 file or stdin — NEVER the command line (argv is readable). The vault records that you saw the',
   '      plaintext; rotate it when you can (the transcript\'s copy is not protected). This conversation runs with',
@@ -159,11 +171,11 @@ async function callCoded(method, route, body, verb) {
 }
 
 async function requestCmd(rest) {
-  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value', '--host': 'value', '--standing': 'bool', '--command': 'value', '--tool': 'value' });
+  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value', '--note': 'value', '--host': 'value', '--standing': 'bool', '--command': 'value', '--tool': 'value' });
   if (out['--standing'] || out['--command'] !== undefined || out['--tool'] !== undefined) return standingCmd(positional, out);   // lane vault-standing-request
   // lane vault-paste-request: words (not a vault:// reference) ⇒ the PASTE shape — the user pastes a secret you do not have
   if (positional.length === 1 && !positional[0].startsWith('vault://')) return pasteCmd(positional[0], out);
-  if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined || out['--host'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name / --host belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>"'); process.exit(2); }
+  if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined || out['--note'] !== undefined || out['--host'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name / --note / --host belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>" (a new name or description of a stored entry: describe <vault://…> --name … --note …)'); process.exit(2); }
   const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
   if (positional.length !== 1 || why === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"  ·  or ask the user to paste one: request "<what>" --purpose "<why>"'); process.exit(2); }
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
@@ -181,7 +193,7 @@ async function requestCmd(rest) {
 async function standingCmd(positional, out) {
   const usage = 'vibespace-vault: request <vault://…> --standing --for "<what it is for>" [--host <h>[,<h>…] [--tool <cli>]] [--command "<program> <script>"] — name the hosts its commands connect to (a wildcard host names its CLI with --tool), or the command (an interpreter and its script file)';
   if (!out['--standing']) { console.error('vibespace-vault: --command / --tool belong to a standing request: ' + usage.slice('vibespace-vault: '.length)); process.exit(2); }
-  if (positional.length !== 1 || !positional[0].startsWith('vault://') || out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined) { console.error(usage); process.exit(2); }
+  if (positional.length !== 1 || !positional[0].startsWith('vault://') || out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined || out['--note'] !== undefined) { console.error(usage); process.exit(2); }
   const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
   if (why === undefined || (out['--host'] === undefined && out['--command'] === undefined)) { console.error(usage); process.exit(2); }
   const hosts = out['--host'] !== undefined ? String(out['--host']).split(',').map((h) => h.trim()).filter(Boolean) : null;
@@ -204,6 +216,7 @@ async function pasteCmd(words, out) {
   if (out['--into'] !== undefined) body.into = out['--into'];
   if (out['--kind'] !== undefined) body.kind = out['--kind'];
   if (out['--name'] !== undefined) body.name = out['--name'];
+  if (out['--note'] !== undefined) body.note = out['--note'];   // lane vault-entry-description: its description (the hub judges it)
   if (out['--host'] !== undefined) body.hosts = out['--host'];   // lane vault-use-grants: the hub judges the list (one spelling)
   const d = await callCoded('POST', '/api/agent/vault/secret-request', body, 'request');
   const t = d.target || {};
@@ -213,8 +226,23 @@ async function pasteCmd(words, out) {
   else if (d.filed) { console.log(`asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
   else console.log(`asked the user to paste it (${d.requestId}) — a masked paste box is in ${tray}; nothing waits on it`);
   console.log('  where it goes: ' + where);
+  if (t.note) console.log('  its description: ' + t.note);   // lane vault-entry-description (the user may edit it before pasting)
   console.log('  your next turn says «stored» (where, and how to use it) or «refused» — never the value; do other work meanwhile,');
   console.log('  and never ask for the secret in the chat');
+}
+
+/** lane vault-entry-description: PROPOSE an entry's new name / description — ONE card for the user; nothing changes before
+ *  they allow it. One verb for both (one proposal = one card = one answer). The hub judges every word. */
+async function describeCmd(rest) {
+  const { out, positional } = parseFlags(rest, { '--name': 'value', '--note': 'value' });
+  if (positional.length !== 1 || !positional[0].startsWith('vault://') || (out['--name'] === undefined && out['--note'] === undefined)) { console.error('vibespace-vault: describe <vault://…> [--name "<new name>"] [--note "<what it is for>"] — at least one of them (`list` names the entries you may use)'); process.exit(2); }
+  const d = await callCoded('POST', '/api/agent/vault/words', { entry: positional[0], ...(out['--name'] !== undefined ? { name: out['--name'] } : {}), ...(out['--note'] !== undefined ? { note: out['--note'] } : {}) }, 'describe');
+  if (d.already === 'open') { console.log(`already proposed (${d.proposalId}) — it waits for the user's answer; nothing changed yet`); return; }
+  console.log(`proposed (${d.proposalId}) — nothing changes until the user allows it; nothing waits on it`);
+  if (d.filed) console.log(d.filed);
+  if (d.to && d.to.name !== undefined) console.log('  new name: ' + d.to.name);
+  if (d.to && d.to.note !== undefined) console.log('  new description: ' + (d.to.note || '(none)'));
+  console.log('  your next turn says «applied» or «refused»; do other work meanwhile');
 }
 
 async function usesCmd() {
@@ -222,7 +250,7 @@ async function usesCmd() {
   if (d.state && d.state !== 'unlocked') console.log('vault: ' + (SAYS[d.state] || d.state));
   console.log('grants (this conversation):');
   if (!d.grants || !d.grants.length) console.log('  none');
-  for (const g of d.grants || []) console.log(`  ${g.entry}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}`);
+  for (const g of d.grants || []) console.log(`  ${g.entry}${g.name ? `  «${g.name}»` : ''}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}${g.note ? `\n      what it is: ${g.note}` : ''}`);   // name / note: lane vault-entry-description
   for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until && !perScope(s) ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
@@ -275,9 +303,10 @@ function parseFlags(rest, specs) {
 }
 
 async function mint(rest) {
-  const { out, positional } = parseFlags(rest, { '--length': 'value', '--charset': 'value', '--for': 'value' });
-  if (positional.length !== 1) { console.error('vibespace-vault: mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]'); process.exit(2); }
+  const { out, positional } = parseFlags(rest, { '--length': 'value', '--charset': 'value', '--for': 'value', '--note': 'value' });
+  if (positional.length !== 1) { console.error('vibespace-vault: mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>] [--note "<what it is for>"]'); process.exit(2); }
   const body = { name: positional[0] };
+  if (out['--note'] !== undefined) body.note = out['--note'];   // lane vault-entry-description
   if (out['--length'] !== undefined) body.length = Number(out['--length']);
   if (out['--charset'] !== undefined) body.charset = out['--charset'];
   if (out['--for'] !== undefined) body.for = out['--for'];
@@ -327,8 +356,8 @@ async function loginAdd(rest) {
 }
 
 async function put(rest) {
-  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool' });
-  if (positional.length !== 1) { console.error('vibespace-vault: put <name> --from-file <0600 file> | --stdin\n  (the value NEVER rides the command line — it is readable there; use a 0600 file or stdin)'); process.exit(2); }
+  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool', '--note': 'value' });
+  if (positional.length !== 1) { console.error('vibespace-vault: put <name> --from-file <0600 file> | --stdin [--note "<what it is for>"]\n  (the value NEVER rides the command line — it is readable there; use a 0600 file or stdin)'); process.exit(2); }
   const name = positional[0];
   const hasFile = out['--from-file'] !== undefined, hasStdin = !!out['--stdin'];
   if (hasFile === hasStdin) { console.error('vibespace-vault: put needs exactly one of --from-file <0600 file> or --stdin (never the value on the command line)'); process.exit(2); }
@@ -343,7 +372,7 @@ async function put(rest) {
   }
   value = value.replace(/\r?\n$/, '');   // drop ONE trailing newline a file / echo adds — the value itself is kept
   if (!value) { console.error('vibespace-vault: the value is empty'); process.exit(1); }
-  const d = await call('POST', '/api/agent/vault/put', { name, value });
+  const d = await call('POST', '/api/agent/vault/put', { name, value, ...(out['--note'] !== undefined ? { note: out['--note'] } : {}) });   // note: lane vault-entry-description
   console.log('stored ' + d.name);
   console.log('  reference: ' + d.ref);
   console.log('  ' + (d.provenance || 'agent stored · the agent saw the plaintext'));
@@ -367,6 +396,7 @@ async function main() {
   if (cmd === 'mint') return mint(args.slice(1));
   if (cmd === 'put') return put(args.slice(1));
   if (cmd === 'request') return requestCmd(args.slice(1));
+  if (cmd === 'describe') return describeCmd(args.slice(1));   // lane vault-entry-description
   if (cmd === 'login') { if (args[1] === 'add') return loginAdd(args.slice(2)); console.error('vibespace-vault: login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]\n' + USAGE); process.exit(2); }   // lane vault-agent-own
   if (args.length > 1) { console.log(USAGE); process.exit(2); }
   if (cmd === 'status') return print(await call('GET', '/api/agent/vault/state'));
@@ -374,7 +404,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.note ? `\n    what it is: ${e.note}` : '\n    what it is: (no description — if you know it, propose one: vibespace-vault describe ' + e.ref + ' --note "…")'}${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
     return;
   }
   if (cmd === 'uses') return usesCmd();

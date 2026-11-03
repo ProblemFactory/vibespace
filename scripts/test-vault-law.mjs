@@ -194,7 +194,7 @@ console.log('④ the agent side has no unlock');
   // is the request's id, never a value — the owner's paste goes to the one writer of its place through a person's door)
   // lane vault-agent-own: + the agent's OWN two-step seed and web login (`totp add` / `login add` — CREATE only: the answer names
   // the entry, never the seed or the password; its code answers through the two-step door, its login fills through the kernel)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/totp,/api/agent/vault/login,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code (and its own seed's add), its own login's add, state, lock, mint, put, the session's own link token, the paste request, run and runnable only (${agentDoors.join(', ')})`);
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/totp,/api/agent/vault/login,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/words,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code (and its own seed's add), its own login's add, state, lock, mint, put, the session's own link token, the paste request, run and runnable, and (lane vault-entry-description) a proposal of an entry's words only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
@@ -398,6 +398,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     // lane vault-manual-and-lock (design D4): the agent ASKS the owner for an entry (a For-you question — no value moves) and
     // reads its own grants, open requests and vault-use lines back (names, purposes, codes, receipts)
     request: ['purpose-door', 'files ONE For-you question naming the agent, the entry and its purpose; the answer is the question\'s id (or that the entry is open already)'],
+    // lane vault-entry-description: the agent PROPOSES an entry's new name / description — ONE For-you card; nothing is written
+    // until the owner allows it; the answer is the proposal's id and the words it proposed (the agent's own), never a value
+    describe: ['purpose-door', 'files ONE For-you card proposing an entry\'s new name / description (words, never a value); the answer is its id and the proposed words'],
     uses: ['receipt', 'this conversation\'s grants, open requests and own vault-use lines — references, purposes, times, outcomes, receipts (GET /api/agent/vault/uses)'],
     // lane vault-agent-own: `login add` seals a website login the agent holds (its password from a 0600 file or stdin — never argv)
     login: ['purpose-door', 'login add: a web-login entry the conversation owns (provenance agent-typed); the answer is its origin and user — never the password (the kernel fills it: vibespace-browser login)'],
@@ -416,6 +419,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     // the answer is the request's id and the place it names; the value goes to its writer through the owner's cookie door only
     'POST /api/agent/vault/secret-request': ['purpose-door', 'secret-request: a For-you paste box for the owner — the answer is the request\'s id and its place, never a value (the receipt at the next turn names where, never what)'],
     'GET /api/agent/vault/uses': ['receipt', 'uses: this conversation\'s grants, requests and vault-use lines — names, codes, receipts'],
+    'POST /api/agent/vault/words': ['purpose-door', 'words (lane vault-entry-description): a For-you card proposing an entry\'s new name / description — the answer is its id and the proposed words, never a value'],
     // lane vault-agent-own: what an agent holds itself goes in as ITS KIND — CREATE only, the value taken off the body
     'POST /api/agent/vault/totp': ['purpose-door', 'totp add: seals a two-step seed the agent holds as `totp:<name>` it owns; the answer is the name and entry — never the seed, never a code'],
     'POST /api/agent/vault/login': ['purpose-door', 'login add: seals a website login the agent holds as a web-login entry it owns; the answer is its origin and user — never the password'],
@@ -430,6 +434,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     macOf: 'hub-only',
     useCounts: 'receipt',   // lane vault-use-grants: counts of the vault-use lines per entry / per grant (numbers — never a value)
     contentsChanged: 'hub-only',   // lane vault-use-grants: THE ONE NOTIFY (a counter broadcast to the owner's pages — never a name or a value)
+    editEntryWords: 'hub-only',   // lane vault-entry-description: THE writer of an entry's name and description — the owner's Allow / Edit… doors only (words, never a value)
     usesOf: 'receipt',   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (closed fields — never a value)   // lane vault-run-door: a mark over the run door's own store under a DEK-derived key — the hub's code only
   };
   const SIBLING_KEYS = new Set(['agentMint', 'agentPut']);

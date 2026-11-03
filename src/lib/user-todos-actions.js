@@ -439,6 +439,15 @@ export function inboxModel(app) {
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : code === 'ask_redrawn' ? t('What this card writes changed since you saw it — read it again and answer again') : (r && r.error) || t('server unreachable'), { type: 'error' });   // lane vault-standing-request r4 (B): the card is drawn again in place
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'vault-words-ask') {
+      // lane vault-entry-description: THE person's answer to an agent's proposal of an entry's new name / description (cookie
+      // route; any bearer refused) — words, never a value: a click (no second password). Allow writes them; Deny keeps them.
+      const r = await fetchJson(`/api/vault/words-asks/${encodeURIComponent(rec.action.askId)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: answer === 'deny' ? 'deny' : 'allow' }) });
+      if (r && r.ok) { showToast(r.outcome === 'applied' ? t('Allowed — the entry carries the new words') : t('Refused — the agent is told on its next turn')); return true; }
+      const code = r && r.code;
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone') : code === 'entry_unknown' ? t('That entry is not in the vault any more') : (r && r.error) || t('server unreachable'), { type: 'error' });   // a lock withdraws a proposal (its card is gone)
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'vault-grant-ask') {
       // lane vault-manual-and-lock (design q-043 D4): THE person's answer to an agent's request for a stored secret (cookie
       // route; any bearer is refused human_only) — once (its next run) / 8h (every run for 8 hours) / deny. A click: a grant
@@ -457,7 +466,7 @@ export function inboxModel(app) {
       // lane vault-paste-request: THE owner's answer to an agent's request for a secret (cookie route; any bearer is refused
       // human_only) — store (the field's value, in the request body only) / deny. The server resolves the item and tells the
       // agent on its next turn; a refusal (locked, the field's rule) is said in the box and a toast — never with the value.
-      return postSecretAnswer(rec, answer === 'store' ? 'store' : 'deny', { value: answer === 'store' && extra && typeof extra.value === 'string' ? extra.value : null, onRefusal: extra && extra.onRefusal });
+      return postSecretAnswer(rec, answer === 'store' ? 'store' : 'deny', { value: answer === 'store' && extra && typeof extra.value === 'string' ? extra.value : null, name: answer === 'store' && extra && typeof extra.name === 'string' ? extra.name : undefined, note: answer === 'store' && extra && typeof extra.note === 'string' ? extra.note : undefined, onRefusal: extra && extra.onRefusal });   // name / note: lane vault-entry-description (the owner's words in the box)
     }
     if (rec && rec.action && ['channel-watch-request', 'channel-held-digest'].includes(rec.action.type)) {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item

@@ -290,4 +290,18 @@ function redactSecrets(raw, { runs = false } = {}) {
   return { text, redacted: n };
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, secretName, redactSecrets };
+/** lane vault-entry-description: does `raw` hold a TOKEN's shape — a PEM private-key block (R1), a JWT, a vendor-prefixed token,
+ *  a key-material run (R8) — the shapes a secret IS? The keyword rules (R2 / R5 / R6: «password <word>») are NOT asked: a vault
+ *  entry's description says «the router admin password for 192.168.1.1» and is no secret. Bounded like redactSecrets. → boolean. */
+function hasTokenShape(raw) {
+  let text = String(raw == null ? '' : raw);
+  if (text.length > INPUT_MAX) text = text.slice(0, INPUT_MAX);
+  if (!text) return false;
+  try {
+    if (redactPem(text).n || redactJwt(text).n || text.search(PREFIX_RE) >= 0) return true;   // search ignores a global regex's lastIndex
+    for (const m of text.matchAll(RUN_RE)) if (keyMaterial(m[0])) return true;
+  } catch { return true; }   // a text that cannot be judged is no description (fail closed)
+  return false;
+}
+
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, secretName, redactSecrets, hasTokenShape };

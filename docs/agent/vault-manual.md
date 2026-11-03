@@ -25,12 +25,15 @@ vibespace-vault put <name> --from-file <0600 file> | --stdin
                                     seal a value you ALREADY have (never on the command line)
 vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>
                                     run a command with a stored secret you never see
-vibespace-vault list                what you may use in a run: your own entries, entries the user opened for runs or granted to you
+vibespace-vault list                what you may use in a run: your own entries, entries the user opened for runs or granted to you —
+                                    each with its name and «what it is:» (its description) — read it before you use one
+vibespace-vault describe <vault://…> [--name "<new name>"] [--note "<what it is for>"]
+                                    PROPOSE a new name / description for an entry in your list — the user allows it (one card)
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
 vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…] [--tool <cli>]] [--command "<program> [options] <script>"]
                                     ask ONCE for a STANDING grant — the same as the user setting «Who may use it…» on its row
-vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]
+vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--note "<what it is for>"] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
 vibespace-vault uses                your grants (standing ones too), your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
@@ -131,6 +134,20 @@ and `uses` show it «standing · <scope> · since <when>», each host and comman
 b.example»). A run outside the scope (another host, another script, another program) still shows its card — and that card's
 **«Always (this command)»** (offered where VibeSpace cannot read the destination) writes the same kind of grant from the
 user's side.
+
+## What a key is for — its name and description (`--note`, `describe`)
+
+Every entry you may use shows in `vibespace-vault list` with its **name** and **what it is:** — its description. Another
+conversation, or you after a compaction, knows a key only by these words, so write them when you CREATE one: `request
+"<what>" … --name "acme-api-key" --note "The acme payments sandbox API key (account billing-test): runs the payment tests;
+test charges only."`, and `mint` / `put … --note "…"`. Say what it is for — the system, the account or environment, what it
+may do; one paragraph, at most 400 characters (a name at most 80); never the value or any part of it (a token's shape is
+refused). The user sees your words in the paste box and may change them before pasting — their words win.
+
+To change them LATER — any agent, the one that created it too — propose: `vibespace-vault describe <vault://…> --name "…"
+--note "…"`. Nothing changes until the user allows it on ONE card in their For you tray; your next turn says **APPLIED** or
+**REFUSED** (then do not propose it again for 10 minutes); a vault lock **WITHDRAWS** it. Only entries in your own `list` can be
+named. An entry with no description says so in `list` — if you know what it is for, propose one.
 
 ## A secret you do not have — `request "<what>"` (the paste box)
 

@@ -25,6 +25,7 @@ const OF = require('../server/owner-facts.js'); // lane agent-context-owner-fact
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
 const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
+const PW = require('../vault-paste.js');   // PURE (lane vault-entry-description): THE words rule of an entry (wordsOf) — mint / put `--note`
 const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-request r11 (MINOR 2): the «谁可以用…» writer's codes (STATUS / WORDS below)
 
 // r11 (主开发's acceptance of r10, MINOR 2 — the writer's except_unnamed went out as 400 with the bare code, an older page said
@@ -325,7 +326,9 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const en = V.agentEntryName(p.owner, b.name);   // lane vault-agent-own: named by the durable id
     if (!en.ok) return agentErr(res, en);
     const forWords = typeof b.for === 'string' ? b.for.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').trim().slice(0, 200) || null : null;   // the review: no control / direction characters kept (it is shown to the owner)
-    const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor, forHost: forWords });   // forHost: the one host it goes to without asking
+    const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `mint --note` (the words rule — a secret's shape, a line break refused by name)
+    if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
+    const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor, forHost: forWords, note: nw.note || null });   // forHost: the one host it goes to without asking
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'mint', conv: p.scope }, { outcome: 'ok', purpose: typeof b.for === 'string' ? b.for.slice(0, 200) : 'mint a secret it never sees', actor: p.actor }); } catch { /* the mint still answered — the use law seam (int331): mint is a USE so `uses` reads it back */ } }
     res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null });
@@ -339,7 +342,9 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const en = V.agentEntryName(p.owner, b.name);   // lane vault-agent-own: named by the durable id
     if (!en.ok) return agentErr(res, en);
     if (typeof value !== 'string' || value === '') return agentErr(res, { code: 'value_required' });
-    const r = vault.agentPut(en.name, value, { actor: p.actor });
+    const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `put --note`
+    if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
+    const r = vault.agentPut(en.name, value, { actor: p.actor, note: nw.note || null });
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'put', conv: p.scope }, { outcome: 'ok', purpose: 'store a value it was given', actor: p.actor }); } catch { /* the put still answered — the use law seam (int331): put is a USE so `uses` reads it back */ } }
     res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)' });
@@ -422,14 +427,17 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!caller) return refusal(res, { code: 'unauthorized' });
     if (carried) return refusal(res, { code: 'value_in_request', words: 'a paste request never carries a value — the user pastes it into the box in their tray' });
     let r;
-    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts }); }   // hosts: lane vault-use-grants (`--host`)
+    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts, note: typeof b.note === 'string' ? b.note : undefined }); }   // hosts: lane vault-use-grants (`--host`) · note: lane vault-entry-description (`--note`)
     catch (e) { return refusal(res, { code: 'unfiled' }); }
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
-  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true }); }));   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined }); }));   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
+  // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and edits them himself
+  app.post('/api/vault/words-asks/:id/answer', person((req) => { const b = req.body || {}; return paste.answerWords(String(req.params.id), { answer: b.answer, by: 'user', person: true }); }));
+  app.post('/api/vault/entry-words', person((req) => { const b = req.body || {}; return paste.ownerWords({ entry: typeof b.entry === 'string' ? b.entry : '', name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, by: 'user' }); }));
 }
 
 /**
@@ -500,6 +508,21 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     if (!caller || caller.job) return refusal(res, caller ? { code: 'job_no_use', words: require('../vault-run.js').WORDS.job_no_use } : { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
     const r = run.runnableFor(caller);
     return r.ok ? res.json(r) : refusal(res, r);
+  });
+  // lane vault-entry-description: an agent PROPOSES an entry's new name / description (`vibespace-vault describe`) — an entry of
+  // its OWN list (the run door's runnableFor: what it may reference); nothing is written, ONE card waits for the owner
+  app.post('/api/agent/vault/words', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const caller = runCallerOf(req);
+    if (!caller) return refusal(res, { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
+    if (!paste) return refusal(res, { code: 'failed', words: DOOR.MORE_WORDS.failed });
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const pr = require('../vault-run.js').parseRef(typeof b.entry === 'string' ? b.entry.trim() : '');
+    const list = caller.job ? null : run.runnableFor(caller);
+    const seen = !!(pr && list && list.ok && Array.isArray(list.entries) && list.entries.some((e) => e && e.ref === pr.ref));
+    const r = paste.propose({ caller: { job: !!caller.job, conversationId: caller.conv || caller.conversationId, sessionKey: caller.sessionKey, scope: caller.scope, name: caller.name }, entry: pr && pr.store === 'secrets' ? pr.entry : null, ref: pr ? pr.ref : '', seen, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined });
+    if (!r || !r.ok) return res.status(paste.statusOf((r && r.code) || 'unfiled')).json({ ok: false, code: (r && r.code) || 'unfiled', error: (r && r.words) || paste.words((r && r.code) || 'unfiled'), ...(r && r.until ? { until: r.until } : {}) });
+    return res.json({ ok: true, proposalId: r.proposalId, ref: pr.ref, ...(r.already ? { already: r.already } : { to: r.to, filed: CN.filedLine('vault-words-ask', r.todoId, OF.tray()) }), tray: OF.tray() });
   });
   // lane vault-manual-and-lock: an agent ASKS for an entry with its purpose (one For-you ask — nothing waits on it), and reads
   // its own grants, open requests and use lines back

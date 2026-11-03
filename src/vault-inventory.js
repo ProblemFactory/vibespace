@@ -113,15 +113,19 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
     // <the conversation>» and the hosts the request named (the search finds it by either; a vault-use grant's `@entry`)
     const asked = s && s.askedBy && typeof s.askedBy === 'object' && s.askedBy.conv ? { conv: clip(s.askedBy.conv, 160), name: clip(s.askedBy.name, 80) } : null;
     const hosts = Array.isArray(s && s.hosts) ? s.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [];
-    return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), createdAt: at, ...(asked ? { origin: 'request', askedBy: asked } : {}), ...(hosts.length ? { hosts } : {}) };
+    // lane vault-entry-description: its DESCRIPTION is the row's `note` (its own line in the window — no longer the meta's
+    // detail); `noteShared` = every agent that may use it reads it (words written under that rule, or an agent's request — a note
+    // the owner wrote before it, under «never shown to an agent», stays his until he saves it again)
+    return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: '', note: String((s && s.note) || ''), noteShared: !!(s && (s.noteShared === true || asked)), createdAt: at, ...(asked ? { origin: 'request', askedBy: asked } : {}), ...(hosts.length ? { hosts } : {}) };
   }
   const am = AGENT_ENTRY_RE.exec(name);
   if (am) {
     const prov = AGENT_PROV[s && s.prov] ? s.prov : 'stored';   // default-safe: an unknown provenance is treated as 'the agent saw it'
     const p = AGENT_PROV[prov];
     // lane vault-agent-own: `origin` says mint or put (provenanceOf's chip read it, the row never carried it: a PUT showed «never
-    // shown»); `forHost` = the host a minted value was made for (the run door's one remaining question)
-    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: `Agent secret · ${am[2]}`, detail: p.label, createdAt: at, origin: prov === 'minted' ? 'mint' : 'put', provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, ...(prov === 'minted' && s && s.forHost ? { forHost: String(s.forHost).slice(0, 200) } : {}) } };
+    // shown»); `forHost` = the host a minted value was made for (the run door's one remaining question); lane vault-entry-description:
+    // its name (a rename) and description (mint / put --note, describe) — an agent's entry has no note from before the rule
+    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: (s && s.label) || `Agent secret · ${am[2]}`, detail: p.label, note: String((s && s.note) || ''), noteShared: true, createdAt: at, origin: prov === 'minted' ? 'mint' : 'put', provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, ...(prov === 'minted' && s && s.forHost ? { forHost: String(s.forHost).slice(0, 200) } : {}) } };
   }
   return null;
 }
@@ -237,6 +241,9 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     // lane vault-use-grants: the hosts a request named and the conversation that asked (names — never a value)
     hosts: Array.isArray(raw.hosts) ? raw.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [],
     askedBy: raw.askedBy && typeof raw.askedBy === 'object' && raw.askedBy.conv ? { conv: clip(raw.askedBy.conv, 160), name: clip(raw.askedBy.name, 80) } : null,
+    // lane vault-entry-description: the entry's DESCRIPTION (≤ 400, words a person or an agent wrote — never a value) and
+    // whether agents read it (src/vault-paste.js wordsOf is its rule; the run door's list belts it)
+    note: clip(raw.note, 400), noteShared: raw.noteShared === true,
   };
 }
 
@@ -267,7 +274,7 @@ function searchRows(rows, q, { wordsOf = null } = {}) {
   return (rows || []).filter((r) => {
     const own = typeof wordsOf === 'function' ? (() => { try { return [].concat(wordsOf(r) || []); } catch { return []; } })() : [];
     const pu = PURPOSES.find((p) => p.id === purposeOf(r)), pv = PROVENANCES.find((p) => p.id === provenanceOf(r));
-    const hay = [r.label, r.detail, r.entry, r.field, r.id, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label, pu && pu.label, pv && pv.label, ...(Array.isArray(r.hosts) ? r.hosts : []), r.askedBy && r.askedBy.name, ...own].filter((x) => x != null).join(' ').toLowerCase();
+    const hay = [r.label, r.detail, r.note, r.entry, r.field, r.id, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label, pu && pu.label, pv && pv.label, ...(Array.isArray(r.hosts) ? r.hosts : []), r.askedBy && r.askedBy.name, ...own].filter((x) => x != null).join(' ').toLowerCase();
     return words.every((w) => hay.includes(w));
   });
 }
@@ -391,7 +398,8 @@ function bandDoorsOf(item) {
   if (type === 'automation-ask') return ['once', 'always', 'deny'];
   if (type === 'vault-unlock') return ['unlock'];
   if (type === 'vault-rotate') return ['renew', 'ack'];
-  if (type === 'secret-request') return ['paste', 'deny'];   // lane vault-paste-request: an agent's request for a secret — THE paste box (a dialog here) / refuse
+  if (type === 'secret-request') return ['paste', 'deny'];
+  if (type === 'vault-words-ask') return ['allow', 'deny'];   // lane vault-entry-description: an agent's proposal of an entry's words — 允许 / 拒绝   // lane vault-paste-request: an agent's request for a secret — THE paste box (a dialog here) / refuse
   return ['open', 'ack'];
 }
 

@@ -29,12 +29,38 @@ export function secretInput(placeholder) {
   return i;
 }
 
+/** lane vault-entry-description: a refusal of an entry's WORDS (its name, its description) → what the page says. */
+export function wordsRefusalWords(code, r) {
+  if (code === 'name_required') return t('Give it a name');
+  if (code === 'name_too_long') return t('The name is at most 80 characters');
+  if (code === 'note_too_long') return t('The description is at most 400 characters');
+  if (code === 'note_lines') return t('The description is one paragraph — no line breaks');
+  if (code === 'note_secret' || code === 'name_secret') return t('A name or a description may not contain a secret — say what it is for, never its value');
+  if (code === 'hidden_chars') return t('It holds a hidden or direction character — type it again');
+  if (code === 'vault_locked') return t('The vault is locked (vault_locked) — unlock it, then save');
+  if (code === 'words_not_here') return t('This kind of entry has no name or description of its own');
+  return (r && r.error) || t('server unreachable');
+}
+/** The proposed words of a NEW entry, read back from the request's own lines (the item is the record — src/vault-paste.js cardOf). */
+const lineParam = (item, key, name) => { const l = ((item && item.i18n && Array.isArray(item.i18n.detail)) ? item.i18n.detail : []).find((x) => x && x.key === key); const v = l && l.params && l.params[name]; return typeof v === 'string' ? v : ''; };
+const ENTRY_KEY = 'Where it goes: a new vault entry «{label}» ({kind})', NOTE_KEY = 'Its description, in the agent\'s words: {note}';
+
 /** THE BOX for one request (DOM nodes — every word textContent): the field + 存入保险库 + 拒绝, and its state line below
- *  (the vault locked / not set up — each with its door — or the last refusal's words). */
+ *  (the vault locked / not set up — each with its door — or the last refusal's words). lane vault-entry-description: a NEW
+ *  entry's name and description as the agent proposed them, above the field — the owner's to edit before he saves (his win). */
 export function secretBoxEl(item) {
   const box = mk('div', 'ut-secret');
   box.dataset.req = String(item.action.requestId);
   box.dataset.target = item.action.into ? 'field' : 'entry';
+  if (box.dataset.target === 'entry') {
+    const meta = mk('div', 'ut-secret-meta');
+    const name = mk('input', 'vault-pw ut-secret-name'); name.type = 'text'; name.maxLength = 80; name.autocomplete = 'off'; name.spellcheck = false; name.value = lineParam(item, ENTRY_KEY, 'label'); name.setAttribute('aria-label', t('Name'));
+    const desc = mk('textarea', 'vault-pw ut-secret-desc'); desc.rows = 2; desc.maxLength = 400; desc.value = lineParam(item, NOTE_KEY, 'note'); desc.setAttribute('aria-label', t('Description'));
+    desc.placeholder = t('What it is for — which system, which account, what it may do (agents that may use it read this)');
+    const lab = (w, c) => { const l = mk('label', 'ut-secret-field'); l.append(mk('span', 'ut-secret-label', w), c); return l; };
+    meta.append(lab(t('Name'), name), lab(t('Description'), desc));
+    box.append(meta);
+  }
   const row = mk('div', 'ut-secret-row');
   const input = secretInput(t('Paste it here'));
   input.classList.add('ut-secret-input');
@@ -83,7 +109,7 @@ function refusalSay(code, r) {
   if (code === 'value_too_long') return t('That is too long to be a secret (at most 8192 characters)');
   if (code === 'ask_settled') return t('Already answered');
   if (code === 'ask_unknown') return t('That request is gone');
-  return (r && r.error) || t('server unreachable');
+  return wordsRefusalWords(code, r);   // lane vault-entry-description: the name / description the owner edited
 }
 
 /** THE PRESS (the tray's box, the dialog's): 存入保险库 sends the field's value through the model's ONE verb (the cookie
@@ -93,12 +119,14 @@ export async function submitSecretBox(model, item, box, answer) {
   if (!model || !item || !box || box.dataset.busy === '1') return false;
   const input = box.querySelector('input.ut-secret-input');
   const value = answer === 'store' && input ? input.value : null;
+  const nameEl = box.querySelector('input.ut-secret-name'), descEl = box.querySelector('textarea.ut-secret-desc');   // lane vault-entry-description: the owner's words (a new entry only)
+  const words = answer === 'store' && nameEl ? { name: nameEl.value, note: descEl ? descEl.value.replace(/\s*[\r\n]+\s*/g, ' ') : undefined } : {};
   if (answer === 'store' && !String(value || '').trim()) { applySecretBox(box, { error: t('Paste it first') }); if (input) input.focus(); return false; }
   box.dataset.busy = '1';
   box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
   let done = false;
   try {
-    done = await model.runAction(item, answer, { value, onRefusal: (code, r) => applySecretBox(box, { error: refusalSay(code, r) }) });
+    done = await model.runAction(item, answer, { value, ...words, onRefusal: (code, r) => applySecretBox(box, { error: refusalSay(code, r) }) });
   } finally {
     delete box.dataset.busy;
     box.querySelectorAll('button').forEach((b) => { b.disabled = false; });
@@ -109,8 +137,8 @@ export async function submitSecretBox(model, item, box, answer) {
 }
 
 /** The answer's toast + the box's refusal (the model's runAction hands the refusal back through `onRefusal`). */
-export async function postSecretAnswer(item, answer, { value = null, onRefusal = null } = {}) {
-  const body = answer === 'store' ? { answer, value } : { answer };
+export async function postSecretAnswer(item, answer, { value = null, name, note, onRefusal = null } = {}) {
+  const body = answer === 'store' ? { answer, value, ...(typeof name === 'string' ? { name } : {}), ...(typeof note === 'string' ? { note } : {}) } : { answer };   // name / note: lane vault-entry-description
   const r = await fetchJson(`/api/vault/secret-requests/${encodeURIComponent(item.action.requestId)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;
@@ -141,6 +169,36 @@ export function showSecretPasteDialog(model, item, { words = '', detail = '' } =
   return { dialog, close, box };
 }
 
+/** lane vault-entry-description: Edit… — the OWNER's own name and description of an entry (a row of a kind that carries words):
+ *  the ONE writer (POST /api/vault/entry-words — a person on this page), no card. `refresh()` redraws the window's list. */
+export function showWordsEditDialog({ row, refresh = () => {} } = {}) {
+  if (!row || !row.entry) return null;
+  let saveNow = () => {};
+  const name = mk('input', 'vault-pw vault-words-name'); name.type = 'text'; name.maxLength = 80; name.autocomplete = 'off'; name.value = String(row.label || '');
+  const note = mk('textarea', 'vault-pw vault-words-note'); note.rows = 3; note.maxLength = 400; note.value = String(row.note || ''); note.placeholder = t('What it is for — which system, which account, what it may do');
+  // one subject: one entry's words
+  const { dialog, body, close, raised, ready } = createModalShell({ id: 'vault-words-edit', key: row.id, title: t('Name and description'), dialogClass: 'vault-secret-add-dialog vault-words-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => name.value !== String(row.label || '') || note.value !== String(row.note || ''), save: () => saveNow(), discard: () => {} }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
+  const field = (label, control) => { const l = mk('label', 'vault-secret-field'); l.append(mk('span', 'vault-secret-label', label), control); return l; };
+  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');
+  const foot = mk('div', 'dialog-footer');
+  const cancel = btn(t('Cancel'), 'btn-cancel'), save = btn(t('Save'), 'btn-create');
+  foot.append(cancel, save);
+  body.append(mk('div', 'vault-words-help', t('Every agent that may use it reads its name and description in its list — say what it is for, never the secret itself.')), field(t('Name'), name), field(t('Description'), note), err);
+  dialog.append(foot);
+  cancel.onclick = () => close();
+  save.onclick = saveNow = async () => {
+    save.disabled = true;
+    const r = await fetchJson('/api/vault/entry-words', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry: row.entry, name: name.value, note: note.value.replace(/\s*[\r\n]+\s*/g, ' ') }) });   // one paragraph: a line break folds
+    save.disabled = false;
+    if (r && r.ok) { close(); showToast(t('Saved: {name}', { name: r.name || name.value })); try { refresh(); } catch { } return; }
+    err.textContent = wordsRefusalWords(r && r.code, r);
+  };
+  ready.then((s) => { if (s) setTimeout(() => name.focus({ preventScroll: true }), 0); });   // once it opens (a keyed form may wait behind the open one's ask)
+  return { dialog, close };
+}
+
 /** 「其他密钥或密码…」 — the Vault window's free entry: a name, a kind, the value (the masked field), a note → POST
  *  /api/vault/secrets (a person on this page; unlocked only). `refresh()` redraws the window's list on success. */
 export function showSecretAddDialog({ refresh = () => {} } = {}) {
@@ -154,22 +212,22 @@ export function showSecretAddDialog({ refresh = () => {} } = {}) {
   const kind = mk('select', 'vault-secret-kind');
   for (const [v, w] of [['password', t('Password')], ['api-key', t('API key')], ['secret', t('Secret')]]) { const o = mk('option', null, w); o.value = v; kind.append(o); }
   const value = secretInput(t('Paste or type the value'));
-  const note = mk('textarea', 'vault-pw vault-secret-note'); note.rows = 2; note.maxLength = 400; note.placeholder = t('A note for yourself (optional — never shown to an agent)');
+  const note = mk('textarea', 'vault-pw vault-secret-note'); note.rows = 2; note.maxLength = 400; note.placeholder = t('What it is for — which system, which account, what it may do (agents that may use it read this)');   // lane vault-entry-description: was «a note for yourself — never shown to an agent»
   const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const foot = mk('div', 'dialog-footer');
   const cancel = btn(t('Cancel'), 'btn-cancel');
   const save = btn(t('Save to vault'), 'btn-create');
   foot.append(cancel, save);
-  body.append(field(t('Name'), name), field(t('Kind'), kind), field(t('Value'), value), field(t('Note'), note), err);
+  body.append(field(t('Name'), name), field(t('Kind'), kind), field(t('Value'), value), field(t('Description'), note), err);
   dialog.append(foot);
   cancel.onclick = () => { value.value = ''; close(); };
   save.onclick = saveNow = async () => {
     save.disabled = true;
-    const r = await fetchJson('/api/vault/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name.value, kind: kind.value, note: note.value, value: value.value }) });
+    const r = await fetchJson('/api/vault/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name.value, kind: kind.value, note: note.value.replace(/\s*[\r\n]+\s*/g, ' '), value: value.value }) });   // one paragraph: a line break folds (lane vault-entry-description)
     save.disabled = false;
     if (r && r.ok) { value.value = ''; close(); showToast(t('Saved to the vault: {name}', { name: r.label || name.value })); try { refresh(); } catch { } return; }
     const code = r && r.code;
-    err.textContent = code === 'name_required' ? t('Give it a name') : code === 'value_required' ? t('Paste or type the value') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save') : code === 'note_too_long' ? t('The note is at most 400 characters') : code === 'name_too_long' ? t('The name is at most 80 characters') : (r && r.error) || t('server unreachable');
+    err.textContent = code === 'name_required' ? t('Give it a name') : code === 'value_required' ? t('Paste or type the value') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save') : wordsRefusalWords(code, r);   // lane vault-entry-description: THE words rule's refusals
   };
   value.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); save.onclick(); } });
   setTimeout(() => name.focus(), 0);

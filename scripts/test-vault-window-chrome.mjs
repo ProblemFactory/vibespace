@@ -8,7 +8,8 @@
 //      the three scopes and writes ONE grants row, 删除 in its own words; the password never in the page.
 //   ②d (lane vault-paste-request, the owner's 「我压根没法添加啊」): 添加… ▸ 其他密钥或密码… adds a FREE entry (name, kind, a masked
 //      value, a note) — its row under Passwords & keys (Password · By you), 显示 behind 验证是你, a bearer refused human_only, 删除
-//      through the usual confirm
+//      through the usual confirm; lane vault-entry-description: the note IS its description — its own line under the name, and
+//      Edit… changes the name and the description (the owner's own words: no card), the row reads them, the audit line names him
 //   ③ 「显示」 ⇒ 「验证是你」: a wrong second password says so; the right one ⇒ the value appears in ITS row's field, the
 //      countdown chip shows; the HTML payload stays text (no element made, no handler ran)
 //   ④ a second 「显示」 inside the window asks nothing more; the SAME cookie without the page secret (a second tab) and
@@ -283,6 +284,27 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   const fr = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); if (!r) return null; const p = r.querySelector('.vw-chip-prov'); return { id: r.dataset.id, name: r.querySelector('.vw-name, .vw-label')?.textContent || r.textContent, kind: r.querySelector('.vw-chip-kind')?.textContent, prov: p && p.dataset.prov, del: !!r.querySelector('.vw-del'), show: !!r.querySelector('.vw-show'), rail: document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent }; })()`, { timeout: 8000 });
   check('its row: «Router admin» under Passwords & keys — Password · By you, 显示 and 删除 (the rail counts it)', !!fr && /^secrets:secret:[0-9a-f]{10}#secret$/.test(fr.id) && /Router admin/.test(fr.name) && fr.kind === 'Password' && fr.prov === 'me' && fr.show && fr.del && fr.rail === '1', fr);
   check('the value is in no markup and no field of the page (masked; the dialog\'s field emptied)', !(await pageText()).includes(FREE));
+  // lane vault-entry-description: its DESCRIPTION under the name and its Edit… (the owner's own words — the ONE writer, no card)
+  const desc0 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); const d = r && r.querySelector('.vw-desc'); return d ? { text: d.textContent, shared: !d.classList.contains('vw-desc-private'), edit: !!r.querySelector('.vw-words-edit'), pend: !!r.querySelector('.vw-desc-pending:not([hidden])') } : null; })()`);
+  check('its description is its own line under the name (the dialog\'s note — agents read it), with Edit…, no «proposes» mark', !!desc0 && desc0.text === 'the flat\'s router' && desc0.shared && desc0.edit && !desc0.pend, desc0);
+  await click(ROW_FREE + ' .vw-words-edit');
+  const dlg = await until(`(() => { const d = document.querySelector('.vault-words-dialog'); return d ? { name: d.querySelector('.vault-words-name').value, note: d.querySelector('.vault-words-note').value } : null; })()`, { timeout: 5000 });
+  check('Edit… ⇒ its dialog holds the name and the description', !!dlg && dlg.name === 'Router admin' && dlg.note === 'the flat\'s router', dlg);
+  const NEWD = 'The flat\'s router admin login (192.168.1.1) — DNS and port forwards.';
+  await typeInto('.vault-words-dialog .vault-words-name', 'Flat router admin');
+  await typeInto('.vault-words-dialog .vault-words-note', NEWD);
+  await click('.vault-words-dialog .btn-create');
+  check('Save ⇒ the dialog closes, the row reads the new name and description', !!(await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); return !document.querySelector('.vault-words-dialog') && !!r && r.querySelector('.vw-desc')?.textContent === ${JSON.stringify(NEWD)} && /Flat router admin/.test(r.querySelector('.vw-name, .vw-label')?.textContent || ''); })()`, { timeout: 8000 })));
+  await click(ROW_FREE + ' .vw-words-edit');
+  await until(visible('.vault-words-dialog'), { timeout: 5000 });
+  await typeInto('.vault-words-dialog .vault-words-note', 'a ' + ['sk', 'proj', crypto.randomBytes(20).toString('hex')].join('-'));
+  await click('.vault-words-dialog .btn-create');
+  const refused = await until(`document.querySelector('.vault-words-dialog .vault-secret-error')?.textContent || null`, { timeout: 5000 });
+  check('a token\'s shape in the description ⇒ refused by name in the dialog, nothing written', !!refused && /may not contain a secret/.test(refused) && (await evalJs(`document.querySelector(${JSON.stringify(ROW_FREE + ' .vw-desc')})?.textContent`)) === NEWD, refused);
+  await evalJs(`(() => { const d = document.querySelector('.vault-words-dialog'); const c = d && d.querySelector('.btn-cancel'); if (c) c.click(); return true; })()`);
+  check('Cancel ⇒ the dialog closes, the words as they were', !!(await until(`!document.querySelector('.vault-words-dialog')`, { timeout: 3000 })));
+  const wl = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((x) => x.event === 'vault-entry-words');
+  check('ONE audit line for the edit: the owner proposed and approved it, from → to (words, never the value)', wl.length === 1 && wl[0].proposedBy === 'user' && wl[0].approvedBy === 'user' && wl[0].from.note === 'the flat\'s router' && wl[0].to.note === NEWD && !JSON.stringify(wl).includes(FREE), wl);
   await click(ROW_FREE + ' .vw-show');
   check('显示 ⇒ 验证是你 (the second password again)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 5000 })));
   await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
@@ -294,7 +316,7 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
   check('confirmed ⇒ the row is gone, the rail counts 0', !!(await until(`!document.querySelector(${JSON.stringify(ROW_FREE)}) && document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent === '0'`, { timeout: 8000 })));
   const left = await api('GET', '/api/vault/contents');
-  check('… and the vault holds it no more (the contents list)', !((left.json && left.json.rows) || []).some((r) => r.label === 'Router admin'), left.status);
+  check('… and the vault holds it no more (the contents list)', !((left.json && left.json.rows) || []).some((r) => r.label === 'Router admin' || r.label === 'Flat router admin'), left.status);
   await closeVaultWindow();
   check('the window reopens (its 5-minute reveal window ended with the close)', !!(await openWindow()) && (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0);
 }

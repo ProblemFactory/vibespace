@@ -9238,3 +9238,17 @@ button.vw-chip { cursor: pointer; }
 .chat-diagram-line { display: block; min-height: 1lh; }
 .chat-diagram-line-bad { background: rgba(239, 68, 68, 0.22); box-shadow: inset 3px 0 0 var(--red); }
 .file-viewer-diagram .media-content { background: var(--bg-window); }
+/* lane vault-entry-description: an entry's DESCRIPTION under its name (its own line — wraps, never clipped), the mark while an agent's
+   proposal of new words waits in For you, the paste box's name + description fields, Edit…'s dialog */
+.vw-desc { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.vw-desc-none, .vw-desc-private { color: var(--text-dim); font-style: italic; }
+.vw-desc-pending { margin-top: 2px; font-size: 11px; color: var(--attn-text); }
+.vw-desc-pending[hidden] { display: none; }
+.ut-secret-meta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ut-secret-field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.ut-secret-label { color: var(--text-dim); }
+.ut-secret-name.vault-pw, .ut-secret-desc.vault-pw { width: auto; padding: 4px 8px; font-size: 12px; font-family: inherit; resize: vertical; }
+.vault-words-help { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  .ut-secret-name.vault-pw, .ut-secret-desc.vault-pw { min-height: 40px; font-size: 16px; }   /* lane vault-entry-description: a phone never zooms into them */
+}

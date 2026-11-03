@@ -310,7 +310,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, noteShared = false } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
@@ -320,6 +320,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       if (actor) box.actor = String(actor).slice(0, 128);   // which conversation / group owns it (a name/id, never a value)
       if (label) box.label = String(label).slice(0, 80);    // lane vault-paste-request: a free entry's label, kind and note (words a person wrote — never a value)
       if (note) box.note = String(note).slice(0, 400);
+      if (noteShared === true) box.noteShared = true;   // lane vault-entry-description: words written under the rule that every agent which may use the entry reads them (a note from before had «never shown to an agent» on its box)
       if (kind) box.kind = String(kind).slice(0, 16);
       // lane vault-use-grants: a free entry the owner filled at an agent's REQUEST names the hosts the request named and the
       // conversation that asked (its id and name — words, never a value): the Vault window's search and origin, the
@@ -338,32 +339,53 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   /** MINT: the HUB makes the random value (V.randomSecret) and seals it — the caller is handed the entry name + its
    *  `vault://` reference, never the value. → { ok, name, ref } | { ok:false, code } (a bad length/charset, or a locked
    *  vault refused by name). */
-  function agentMint(name, { length, charset, actor = null, forHost = null } = {}) {
+  function agentMint(name, { length, charset, actor = null, forHost = null, note = null } = {}) {
     if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const mv = V.mintVerdict({ length, charset });
     if (!mv.ok) return mv;
     const value = V.randomSecret(mv.length, mv.charset);
     try {
-      const r = secretPut(name, value, { prov: 'minted', actor, forHost });
+      const r = secretPut(name, value, { prov: 'minted', actor, forHost, note, noteShared: !!note });   // note: lane vault-entry-description (`mint --note`, the route judged it)
       if (!r.ok) return r;
       audit('vault-agent-mint', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });   // the name + who — NEVER the value
       return { ok: true, name, ref: V.vaultRefOf(name) };
     } finally { V.zero(value); }
   }
   /** PUT: the caller hands a value it already has (a vendor key) — sealed, provenance 'stored'. Same shape; no value back. */
-  function agentPut(name, value, { actor = null } = {}) {
+  function agentPut(name, value, { actor = null, note = null } = {}) {
     if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
     if (value == null || String(value) === '') return { ok: false, code: 'value_required' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
-    const r = secretPut(name, value, { prov: 'stored', actor });
+    const r = secretPut(name, value, { prov: 'stored', actor, note, noteShared: !!note });   // note: lane vault-entry-description (`put --note`)
     if (!r.ok) return r;
     audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });
     return { ok: true, name, ref: V.vaultRefOf(name) };
   }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(!b.label && b.note ? { note: b.note } : {}), ...(b.noteShared === true ? { noteShared: true } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
+  /** lane vault-entry-description: THE ONE WRITER of an entry's WORDS after its creation — its name (the box's `label`) and its
+   *  description (its `note`) — for the owner's Allow of an agent's proposal (`proposedBy` the agent, `approvedBy` the owner)
+   *  and his own Edit… in the Vault window (`proposedBy` the owner). Words only: the sealed box is untouched (no DEK read) — and
+   *  still UNLOCKED only (a lock withdraws every ask; the window lists no row while locked). `to` = { label?, note? } judged by
+   *  the caller (src/vault-paste.js wordsOf; '' clears the note); the box is marked `noteShared` (its words are read by
+   *  every agent that may use it). ONE audit line { entry, proposedBy, approvedBy, from, to } — words, never a value.
+   *  → { ok, from, to } | { ok: false, code }. */
+  function editEntryWords(name, to = {}, { proposedBy = null, approvedBy = null } = {}) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    const box = record.entries[name];
+    if (!box) return { ok: false, code: 'entry_unknown' };
+    const from = { label: box.label || null, note: box.note || '' };
+    const nb = { ...box, noteShared: true };
+    if (to.label !== undefined && to.label !== null) nb.label = String(to.label).slice(0, 80);
+    if (to.note !== undefined && to.note !== null) { if (to.note) nb.note = String(to.note).slice(0, 400); else delete nb.note; }
+    const words = { label: nb.label || null, note: nb.note || '' };
+    try { const next = { ...record, entries: { ...record.entries, [name]: nb } }; writeRecord(next); record = next; } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
+    audit('vault-entry-words', { entry: name, proposedBy: proposedBy ? String(proposedBy).slice(0, 80) : null, approvedBy: approvedBy ? String(approvedBy).slice(0, 80) : null, from, to: words });
+    return { ok: true, from, to: words };
+  }
   /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
   function secretDrop(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
@@ -723,6 +745,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
      *  card = { actor, by, key, entry, door, outcome, n, since, at } (names and codes; never a value). */
     onFailing(fn) { if (typeof fn === 'function') failingHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
+    editEntryWords,   // lane vault-entry-description: THE writer of an entry's name and description after its creation
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked
     epoch: () => epoch, resumeSeal,
     close() { if (timer) clearInterval(timer); lock('close', { quiet: true }); unregister(); LIVE.delete(engine); },

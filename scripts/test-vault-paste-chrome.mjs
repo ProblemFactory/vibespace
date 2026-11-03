@@ -15,7 +15,12 @@
 //   ⑤ 拒绝: a second ask refused in the tray ⇒ the agent's next turn says REFUSED
 //   ⑥ THE PHONE (448×850, touch) over a RESTART (the hub boots LOCKED — no lock act): a free-entry ask filed before it waits in
 //      the phone's tray sheet saying vault_locked with 解锁… inline; 解锁… opens THE unlock dialog; unlocked ⇒ the box is ready
-//      (a 16 px field, ≥ 36 px targets) and the paste stores a `secret:<id>` entry the Vault window lists by its label
+//      (a 16 px field, ≥ 36 px targets) and the paste stores a `secret:<id>` entry the Vault window lists by its label;
+//      lane vault-entry-description: the ask carries `--note` — the box shows the agent's name and description in their own
+//      fields (16 px on the phone), the owner renames it before pasting and HIS name wins, the agent's description stands
+//   ⑥b (lane vault-entry-description) a LATER change waits for him: the agent's `describe` ⇒ ONE tray card (old → new, 允许 / 拒绝),
+//      the Vault row's description + «An agent proposes new words» + Edit…; a real click on Allow ⇒ the row and `list` read
+//      the new words, the agent's next turn says APPLIED (VAULT_WORDS_SHOTS=<dir> keeps the three PNGs)
 //   ⑦ RED CONTROL (saved by Enter in the box): a mutant hub whose paste door logs the value and files it on an item ⇒ the same checks find it in the server
 //      log, the DOM and a WebSocket frame (they see a leak when there is one)
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
@@ -191,8 +196,9 @@ try {
   if (await trayOpen()) await realClick('#taskbar-user-todos');
 
   console.log('⑥ THE PHONE over a RESTART — the hub boots LOCKED; 解锁… inline; the free entry');
-  const a3 = await ask(['the router admin password', '--purpose', 'change the router\'s DNS for you', '--kind', 'password', '--name', 'Router admin'], TOKEN);
-  check('a free-entry ask filed while unlocked (a new password entry «Router admin»)', a3.code === 0 && !!a3.id && /new vault entry «Router admin»/.test(a3.out), a3);
+  const NOTE3 = 'The home router\'s admin login (192.168.1.1, user admin) — changes DNS and port forwards.';
+  const a3 = await ask(['the router admin password', '--purpose', 'change the router\'s DNS for you', '--kind', 'password', '--name', 'Router admin', '--note', NOTE3], TOKEN);
+  check('a free-entry ask filed while unlocked (a new password entry «Router admin», its description said back)', a3.code === 0 && !!a3.id && /new vault entry «Router admin»/.test(a3.out) && a3.out.includes('its description: ' + NOTE3), a3);
   await stopServer(); startServer();
   check('the hub is back (LOCKED at boot — no lock act ran, so the request waits)', await ready());
   await cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 2, mobile: true });
@@ -215,20 +221,56 @@ try {
   check('a tap on 解锁… opens THE unlock dialog', (await tap(boxOf(a3.id) + ' .ut-secret-unlock')) === true && !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
   await evalJs(`(() => { const i = document.getElementById('vault-unlock-pw'); i.focus(); i.value = ${JSON.stringify(SECOND)}; document.querySelector('#vault-unlock-dialog .vault-unlock-go').click(); return true; })()`);
   check('unlocked ⇒ the box is ready (its words gone, 解锁… hidden)', !!(await until(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); return !!b && b.dataset.state === 'ready'; })()`, { timeout: 15000 })));
-  const fit = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const i = b.querySelector('input'); const s = b.querySelector('.ut-secret-save').getBoundingClientRect(), d = b.querySelector('.ut-secret-deny').getBoundingClientRect(); return { font: parseFloat(getComputedStyle(i).fontSize), ih: i.getBoundingClientRect().height, sh: s.height, dh: d.height, right: Math.max(s.right, d.right, i.getBoundingClientRect().right), vw: innerWidth }; })()`);
+  const words3 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const n = b.querySelector('input.ut-secret-name'), d = b.querySelector('textarea.ut-secret-desc'); return n && d ? { name: n.value, note: d.value, nfont: parseFloat(getComputedStyle(n).fontSize), dfont: parseFloat(getComputedStyle(d).fontSize), right: Math.max(n.getBoundingClientRect().right, d.getBoundingClientRect().right), vw: innerWidth, above: n.getBoundingClientRect().bottom <= b.querySelector('input.ut-secret-input').getBoundingClientRect().top } : null; })()`);
+  check('the box shows the agent\'s NAME and DESCRIPTION in their own fields above the masked one (16 px on the phone, inside the screen)', !!words3 && words3.name === 'Router admin' && words3.note === NOTE3 && words3.nfont >= 16 && words3.dfont >= 16 && words3.right <= words3.vw && words3.above, words3);
+  await evalJs(`(() => { const n = document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input.ut-secret-name')}); n.focus(); n.select(); return true; })()`);
+  await cdp('Input.insertText', { text: 'Home router admin' });   // the owner renames it before he pastes (the keyboard's own road)
+  const fit = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const i = b.querySelector('input.ut-secret-input'); const s = b.querySelector('.ut-secret-save').getBoundingClientRect(), d = b.querySelector('.ut-secret-deny').getBoundingClientRect(); return { font: parseFloat(getComputedStyle(i).fontSize), ih: i.getBoundingClientRect().height, sh: s.height, dh: d.height, right: Math.max(s.right, d.right, i.getBoundingClientRect().right), vw: innerWidth }; })()`);
   check('the phone box: a 16 px field (no zoom), targets ≥ 36 px, all inside the screen', fit.font >= 16 && fit.ih >= 36 && fit.sh >= 36 && fit.dh >= 36 && fit.right <= fit.vw, fit);
-  await evalJs(`document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input')}).focus(); true`);
+  await evalJs(`document.querySelector(${JSON.stringify(boxOf(a3.id) + ' input.ut-secret-input')}).focus(); true`);
   await cdp('Input.insertText', { text: V_ENTRY });
   check('a tap on Save to vault', (await tap(boxOf(a3.id) + ' .ut-secret-save')) === true);
   check('stored ⇒ the box is gone', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(a3.id))})`, { timeout: 10000 })));
   const contents = await evalJs(`fetch('/api/vault/contents').then((r) => r.json())`);
-  const freeRow = ((contents && contents.rows) || []).find((r) => /^secret:[0-9a-f]{10}$/.test(r.entry) && r.label === 'Router admin');
-  check('the Vault window\'s contents list it: «Router admin», a password, revealable, its delete door — and no value', !!freeRow && freeRow.kind === 'password' && freeRow.revealable === true && !!(freeRow.doors && freeRow.doors.delete) && hitsIn(JSON.stringify(contents), V_ENTRY) === 0, freeRow);
+  const freeRow = ((contents && contents.rows) || []).find((r) => /^secret:[0-9a-f]{10}$/.test(r.entry) && r.label === 'Home router admin');
+  check('the Vault window\'s contents list it: «Home router admin» (the OWNER\'s name won), the agent\'s description, a password, revealable, its delete door — and no value', !!freeRow && freeRow.note === NOTE3 && freeRow.noteShared === true && freeRow.kind === 'password' && freeRow.revealable === true && !!(freeRow.doors && freeRow.doors.delete) && hitsIn(JSON.stringify(contents), V_ENTRY) === 0, freeRow);
   const turn3 = await nextTurn(TOKEN);
   check('the agent\'s next turn: STORED as a vault reference it may run with (granted 8 hours) — never the value', /STORED/.test(turn3) && /vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret/.test(turn3) && /vibespace-vault run --env NAME=/.test(turn3) && hitsIn(turn3, V_ENTRY) === 0, turn3.slice(0, 900));
   await sleep(600);
   check('…and the phone value is in no DOM, frame or log line either', hitsIn(await pageText(), V_ENTRY) === 0 && WS_FRAMES.every((f) => hitsIn(f, V_ENTRY) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), V_ENTRY) === 0);
   await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  // lane vault-entry-description: a LATER change of an entry's words waits for the owner — the agent's `describe` ⇒ ONE card in the
+  // tray (允许 / 拒绝), the Vault window's row marks it; 允许 writes it, the row and the agent's `list` read the new words
+  console.log('⑥b a later description waits for the owner — describe ⇒ one card; the Vault row marks it; 允许 writes it');
+  const SHOTS = process.env.VAULT_WORDS_SHOTS || '';
+  const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const p = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(p.data, 'base64')); };
+  const REF3 = (/vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret/.exec(turn3) || [])[0] || '';
+  const ROWID3 = REF3 ? `secrets:${REF3.slice('vault://secrets/'.length, -'/secret'.length)}#secret` : '';
+  const NEW3 = 'The home router admin login (192.168.1.1, user admin): DNS, DHCP and port forwards — never the Wi-Fi password.';
+  await cdp('Page.navigate', { url: URL }); await splashGone();
+  const lst0 = await cli(['list'], TOKEN);
+  check('`list` names it by the OWNER\'s name and says what it is for (the agent\'s description)', lst0.code === 0 && !!REF3 && lst0.out.includes(REF3) && lst0.out.includes('Home router admin') && lst0.out.includes('what it is: ' + NOTE3), lst0);
+  const dsc = await cli(['describe', REF3, '--note', NEW3], TOKEN);
+  const tid = (/\((ut-[0-9a-z]+)\)/.exec(dsc.out) || [])[1] || '';
+  check('`vibespace-vault describe` ⇒ proposed, nothing changed yet (its filed line names the item)', dsc.code === 0 && /proposed \(ew-[0-9a-f]{12}\)/.test(dsc.out) && /nothing changes until the user allows it/.test(dsc.out) && !!tid, dsc);
+  await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+  const ROWSEL = `.vw-row[data-id=${JSON.stringify(ROWID3)}]`;
+  const mark = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROWSEL)}); if (!r) return null; const d = r.querySelector('.vw-desc'), p = r.querySelector('.vw-desc-pending'); return p && !p.hidden && p.getBoundingClientRect().height > 0 ? { desc: d && d.textContent, pend: p.textContent, edit: !!r.querySelector('.vw-words-edit'), band: !!document.querySelector('.vw-band-row .vw-band-allow') } : null; })()`, { timeout: 15000 });
+  check('the Vault row: its description under the name, «An agent proposes new words» while the card waits, its Edit…; the band offers 允许', !!mark && mark.desc === NOTE3 && /proposes new words/.test(mark.pend) && mark.edit && mark.band, mark);
+  await shot('vault-row-pending.png');
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
+  const CARD = `${TRAY} .ut-item[data-id="${tid}"]`;
+  const card = await until(`(() => { const c = document.querySelector(${JSON.stringify(CARD)}); if (!c) return null; const a = c.querySelector('.ut-hub-allow'), d = c.querySelector('.ut-hub-deny'); return a && d ? { text: c.innerText, allow: a.textContent, deny: d.textContent } : null; })()`, { timeout: 15000 });
+  check('the tray card: who wants to change the description of «Home router admin», the old → new words, 允许 / 拒绝', !!card && /wants to change the description of «Home router admin»/.test(card.text) && card.text.includes(NEW3) && card.text.includes(NOTE3) && card.allow === 'Allow' && card.deny === 'Deny', card);
+  await shot('tray-words-card.png');
+  check('a real click on Allow', (await realClick(CARD + ' .ut-hub-allow')) === true);
+  const after = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROWSEL)}); const d = r && r.querySelector('.vw-desc'), p = r && r.querySelector('.vw-desc-pending'); return d && d.textContent === ${JSON.stringify(NEW3)} && p && p.hidden ? true : null; })()`, { timeout: 15000 });
+  check('allowed ⇒ the Vault row reads the new description, the mark is gone', !!after);
+  const turn4 = await nextTurn(TOKEN);
+  const lst1 = await cli(['list'], TOKEN);
+  check('the agent\'s next turn: APPLIED with the words now; its `list` says the new description', /APPLIED/.test(turn4) && turn4.includes(NEW3) && lst1.out.includes('what it is: ' + NEW3), { turn4: turn4.slice(0, 600), lst1: lst1.out.slice(0, 600) });
+  await shot('vault-row-applied.png');
+
 
   console.log('⑦ RED CONTROL — a mutant paste door that logs the value and files it on an item');
   const doorFile = path.join(wt, 'src/server/vault-paste-door.js');
@@ -245,7 +287,7 @@ try {
   const a4 = await ask(['a mutant key', '--purpose', 'the red control', '--kind', 'secret'], TOKEN);
   await realClick('#taskbar-user-todos');
   await until(visible(boxOf(a4.id)), { timeout: 10000 });
-  await evalJs(`document.querySelector(${JSON.stringify(boxOf(a4.id) + ' input')}).focus(); true`);
+  await evalJs(`document.querySelector(${JSON.stringify(boxOf(a4.id) + ' input.ut-secret-input')}).focus(); true`);
   await cdp('Input.insertText', { text: V_RED });
   for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });   // Enter in the box = 存入保险库 (the panel's one Enter rule)
   check('Enter in the box saves it (the panel\'s Enter rule — no click)', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(a4.id))})`, { timeout: 10000 })));

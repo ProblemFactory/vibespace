@@ -3,7 +3,7 @@
 // 这种不是应该有个统一的注册表之类的吗」, after 「我似乎不能添加两步验证在vault里」 — 两步验证 had a rail category, a row and a route,
 // and no 添加… door). src/vault-kinds.js holds ONE row per kind family; this suite walks it and FAILS a family whose declared
 // surface is absent in the tree:
-//   ① THE REGISTRY'S SHAPE: every family declares all nine surfaces — in `surfaces` or in `deferred`, never both; a NONE
+//   ① THE REGISTRY'S SHAPE: every family declares all ten surfaces (lane vault-entry-description: + `words`) — in `surfaces` or in `deferred`, never both; a NONE
 //      has its words; its category is the rail's; ids, doors and door orders unique; `stores` is a list of the inventory's
 //      stores, or null WITH an entry shape; a deferred surface is { lane, backlog } — the lane's name (^[a-z][a-z0-9-]{2,}$)
 //      or 'unscheduled', and its backlog id (B-xxxx), both required — printed below (⏳), never silently green
@@ -137,7 +137,7 @@ function census(families, facts) {
     for (const s of VK.SURFACES) {
       const inS = Object.prototype.hasOwnProperty.call(sur, s), inD = Object.prototype.hasOwnProperty.call(def, s);
       if (inS && inD) { cell(f, s, '✗', 'declared AND deferred'); continue; }
-      if (!inS && !inD) { cell(f, s, '✗', 'not declared (every family declares all nine surfaces, or defers one with its lane and backlog id)'); continue; }
+      if (!inS && !inD) { cell(f, s, '✗', 'not declared (every family declares all ten surfaces, or defers one with its lane and backlog id)'); continue; }
       if (inD) { const d = deferralOf(def[s]); if (d.words) cell(f, s, '⏳', d.words); else cell(f, s, '✗', `deferred ${JSON.stringify(def[s])}: ${d.bad}`); continue; }
       const v = sur[s];
       if (v && typeof v === 'object' && 'none' in v) { if (NONE_OK(v)) cell(f, s, '—', v.none); else cell(f, s, '✗', 'NONE without its words'); continue; }
@@ -256,6 +256,18 @@ const CHECK = {
     const missing = v.verbs.filter((verb) => !new RegExp(`\\b${v.bin} ${verb}\\b`).test(usage));
     return missing.length ? `${v.bin}'s usage names no «${missing.join(', ')}»` : null;
   },
+  // lane vault-entry-description: an entry's OWN name and description — written at creation by its CLI verbs (`create`), proposed
+  // by the agent's door (`propose` — `vibespace-vault describe`), written by the owner's door (`owner`); its row carries them
+  words(f, v, { facts, mounted }) {
+    if (!v || !Array.isArray(v.create) || !v.create.length || typeof v.propose !== 'string' || typeof v.owner !== 'string') return 'words is { create: [verbs], propose, owner } or NONE(why)';
+    const gone = [v.propose, v.owner].find((r) => !routeParts(r) || !mounted(r));
+    if (gone) return `the words door «${gone}» is not mounted`;
+    const usage = facts.read('data/bin/vibespace-vault') || '';
+    const missing = [...v.create, 'describe'].filter((verb) => !new RegExp(`\\bvibespace-vault ${verb}\\b`).test(usage));
+    if (missing.length) return `vibespace-vault's usage names no «${missing.join(', ')}»`;
+    const row = VI.secretRowOf({ name: f.sample, at: 1, label: 'census', note: 'census words', noteShared: true });
+    return row && row.note === 'census words' ? null : `secretRowOf carries no description for «${f.sample}» (its row's note)`;
+  },
   route(f, v, { mounted }) {
     if (!Array.isArray(v) || !v.length) return 'route is [\'METHOD /path\', …] or NONE(why)';
     const bad = v.filter((r) => !routeParts(r) || !mounted(r));
@@ -364,6 +376,14 @@ console.log('④ RED CONTROLS (in memory)');
   const routes = realRead('src/routes/vault.js');
   const unmounted = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/totp',", "app.post('/api/vault/totp-gone',") })));
   ok(unmounted.problems.length === 1 && /^totp·route: not mounted: POST \/api\/vault\/totp$/.test(unmounted.problems[0]), 'a declared person route that is not mounted ⇒ RED', unmounted.problems);
+  // lane vault-entry-description: the WORDS surface — its doors mounted, its verbs in the usage, its row carrying the description
+  const noWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/entry-words',", "app.post('/api/vault/entry-words-gone',") })));
+  ok(noWords.problems.length === 2 && noWords.problems.every((p) => /^(agent|free)-secret·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p)), 'the owner\'s words door unmounted ⇒ RED on both kinds that carry words', noWords.problems);
+  const usage = realRead('data/bin/vibespace-vault');
+  const noVerb = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('vibespace-vault describe').join('vibespace-vault propose') })));
+  ok(noVerb.problems.some((p) => /^free-secret·words: vibespace-vault's usage names no «describe»$/.test(p)), 'the agent\'s verb gone from the usage ⇒ RED', noVerb.problems);
+  const wordsLess = census(swap({ ...totp, surfaces: { ...totp.surfaces, words: { create: ['totp'], propose: 'POST /api/agent/vault/words', owner: 'POST /api/vault/entry-words' } } }), real);
+  ok(wordsLess.problems.some((p) => /^totp·words: secretRowOf carries no description/.test(p)), 'a kind that claims words its row cannot carry ⇒ RED', wordsLess.problems);
   const rowLess = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace('import { loadTotp, totpExtras, showTotpAddDialog }', 'import { loadTotp, showTotpAddDialog }') })));
   ok(rowLess.problems.some((p) => /^totp·row: the window .* does not import totpExtras/.test(p)), 'the row extras not imported by the window ⇒ RED', rowLess.problems);
   const cliLess = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': realRead('data/bin/vibespace-vault').replace(/vibespace-vault totp/g, 'vibespace-vault code') })));

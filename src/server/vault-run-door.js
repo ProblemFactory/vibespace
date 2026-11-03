@@ -150,6 +150,7 @@ const HC = require('../hidden-chars.js');
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
 const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
+const PW = require('../vault-paste.js');   // lane vault-entry-description: PURE — an entry's words toward an agent (agentEntryWords: the belt)
 const GM = require('../grant-model.js');   // lane vault-standing-request: PURE — a command token's one spelling (commandListOf / commandKeyOf)
 const DM = require('../decision-model.js');   // lane vault-use-grants (R4): PURE — the policy's spelling, its question, the threshold
 
@@ -903,6 +904,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (tid) for (const r of refs) if (!policyApproved[r.id].items.includes(tid)) policyApproved[r.id].items.push(tid);
     save({ runnable: d.runnable, always: d.always, policyApproved });
   }
+  /** lane vault-entry-description: a row's NAME and DESCRIPTION as an agent reads them — each one piece of the peer-text belt
+   *  (src/vault-paste.js agentEntryWords); a description the owner wrote before the rule (`noteShared` false) stays his. */
+  const wordsOfRow = (row) => PW.agentEntryWords({ label: row && row.label, note: row && row.noteShared ? row.note : '' });
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
   function runnableFor(caller = {}) {
@@ -929,7 +933,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
       const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
       const pv = (owns(ref) && row.provenance) || {};
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
+      const ew = wordsOfRow(row);   // lane vault-entry-description: its name and description (another agent's or the owner's words — belted)
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: ew.name, ...(ew.note ? { note: ew.note } : {}), kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
@@ -1731,10 +1736,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const t = now(), mine = [];
     for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
+    const wordsOfId = (id) => { const r = VI.parseRef(id), row = r && rowOf(r); if (!row) return {}; const ew = wordsOfRow(row); return { name: ew.name, ...(ew.note ? { note: ew.note } : {}) }; };   // lane vault-entry-description
     return {
       ok: true,
       state: vaultState(),
-      grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
+      grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), ...wordsOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
       requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString(), ...(q.standing ? { standing: true, hosts: q.hosts, ...(q.commandWords ? { command: q.commandWords } : {}) } : {}) })),
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],

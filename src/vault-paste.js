@@ -28,6 +28,13 @@
  *     certainty (shape.destKnown — ruling C, NOT shape.always) — a new KIND of command (a shell, an interpreter, an unknown program, a config-file read) still draws its
  *     card, so the secret never rides a run whose destination the reader cannot see; a vault lock ends it; the entry's own switch is untouched. The paste opens that run grant to the
  *     requesting conversation only; the receipt tells the agent. With the setting OFF the paste grants nothing.
+ *   · THE WORDS OF AN ENTRY (lane vault-entry-description — the owner 2026-11-02: 「…compact 后或者共享给 context 不同的 agent，此时
+ *     新的 agent 很难知道每个 key 是干啥的…第一次创建 + request key 的 agent 本身可以 request 同时直接加 description，后续修改需要我
+ *     approve。名字也一样」): an entry's NAME is its box's `label` (one line, ≤ 80) and its DESCRIPTION its `note` (one paragraph,
+ *     ≤ 400) — ONE validator (wordsOf) for every writer. The creator writes them free (`request … --name --note`, mint / put
+ *     `--note`; the owner's paste box shows them, editable — his edit wins); later an agent PROPOSES (`vibespace-vault describe`
+ *     ⇒ a For-you card `vault-words-ask`, 允许 / 拒绝 — wordsCardOf) and the owner's Allow writes them through the engine's ONE
+ *     writer (editEntryWords); every agent that may use the entry reads them in its list (agentEntryWords — the belt).
  */
 const IR = require('./integration-registry.js');
 const HC = require('./hidden-chars.js');
@@ -37,6 +44,9 @@ const GM = require('./grant-model.js');   // lane vault-use-grants: ONE spelling
 
 const ACTION_TYPE = 'secret-request';
 const REQUEST_ID_RE = /^sr-[0-9a-f]{12}$/;
+/** lane vault-entry-description: an agent's PROPOSAL to change an entry's words (its For-you card) and its id. */
+const WORDS_TYPE = 'vault-words-ask';
+const PROPOSAL_ID_RE = /^ew-[0-9a-f]{12}$/;
 /** A FREE ENTRY's vault name: `secret:` + the hub's 10 hex characters (src/server/vault-engine.js SECRET_RE holds the
  *  prefix); its inventory row's field is `secret` — the run door's reference `vault://secrets/secret:<id>/secret`. */
 const ENTRY_PREFIX = 'secret:';
@@ -54,6 +64,8 @@ const i18nKey = (s) => s;
 /** The two card lines the request's purpose and a new entry's label ride (wordsOfItem reads them back by their keys). */
 const PURPOSE_LINE = i18nKey('What for, in the agent\'s words: {purpose}');
 const ENTRY_LINE = i18nKey('Where it goes: a new vault entry «{label}» ({kind})');
+/** lane vault-entry-description: the new entry's DESCRIPTION as the agent wrote it (read back by its key). */
+const NOTE_LINE = i18nKey('Its description, in the agent\'s words: {note}');
 /** lane vault-use-grants: the request box's line when the paste grants the asker (read back by its key: `grantOfItem`). */
 /** The kind's words (English keys the page says in its language — the inventory's own KIND_WORDS spelling). */
 const KIND_WORDS = Object.freeze({ 'api-key': i18nKey('API key'), password: i18nKey('Password'), secret: i18nKey('Secret') });
@@ -80,7 +92,47 @@ const WORDS = Object.freeze({
   value_too_long: `a value is at most ${LIMITS.value} characters`,
   bad_host: `--host names where the new entry is used: host names or addresses (e.g. 192.168.1.1,router.lan,*.amazonaws.com), at most ${LIMITS.hosts}, comma-separated — a *.domain wildcard is fine, a lone * or «any host» is not`,   // lane vault-use-grants
   hosts_with_into: '--host names where a NEW vault entry is used; an Integrations field is used by VibeSpace itself — drop --host or --into',
+  // lane vault-entry-description: the words of an entry (its name and its description)
+  note_with_into: '--note describes a NEW vault entry; an Integrations field is described by its card — drop --note or --into',
+  note_lines: 'a description is one paragraph — no line breaks',
+  note_secret: 'a description may not contain a secret — say what the key is for, never its value',
+  name_secret: 'a name may not contain a secret — say what the key is, never its value',
+  describe_required: 'say what changes: vibespace-vault describe <vault://…> --name "<new name>" and/or --note "<what it is for>"',
+  words_same: 'nothing changes — that is already its name and description',
+  words_not_here: 'that entry has no name or description of its own to change — its card, its site or VibeSpace names it',
 });
+/** A text that holds a secret's SHAPE (a token's: PEM, JWT, a vendor prefix, key material — src/secret-shapes.js hasTokenShape;
+ *  never the keyword rules, which read «the router password for 192.168.1.1» as one) — never a name or a description. */
+const secretShaped = (s) => SS.hasTokenShape(s);
+/** THE WORDS of an entry — ONE validator for every writer (lane vault-entry-description): `name` (the box's label: one line,
+ *  ≤ 80, never empty) and `note` (its description: one paragraph, ≤ 400, '' clears it). A hidden or direction character, a line
+ *  break in the description, a secret's shape in either ⇒ refused BY NAME. undefined / null = not given (kept). Plain text: the
+ *  readers escape it (the page) or belt it (agentEntryWords). → { ok, name?, note? } | a refusal. */
+function wordsOf({ name, note } = {}) {
+  const out = { ok: true };
+  if (name !== undefined && name !== null) {
+    const s = String(name);
+    if (s.length > 4 * LIMITS.name) return refuse('name_too_long');
+    if (HC.hiddenCharsOf(s, { max: 1 }).length) return refuse('hidden_chars');
+    const t = s.replace(/\s+/g, ' ').trim();
+    if (!t) return refuse('name_required');
+    if (t.length > LIMITS.name) return refuse('name_too_long');
+    if (secretShaped(t)) return refuse('name_secret');
+    out.name = t;
+  }
+  if (note !== undefined && note !== null) {
+    const s = String(note);
+    if (s.length > 4 * LIMITS.note) return refuse('note_too_long');
+    const t = s.trim();
+    if (/[\r\n\u2028\u2029]/.test(t)) return refuse('note_lines');   // a line break is said as one (before the hidden-character rule, which holds U+2028)
+    if (HC.hiddenCharsOf(t, { max: 1 }).length) return refuse('hidden_chars');
+    const f = t.replace(/\s+/g, ' ');
+    if (f.length > LIMITS.note) return refuse('note_too_long');
+    if (secretShaped(f)) return refuse('note_secret');
+    out.note = f;
+  }
+  return out;
+}
 /** lane vault-use-grants: the request's hosts (a comma / space separated string, or a list) → the one spelling | null when
  *  absent | false when malformed. */
 function hostsOf(raw) {
@@ -129,20 +181,25 @@ function targetOf({ into = null, kind = null, name = null, words = '', hosts = n
   const k = hasKind ? KIND_ALIASES[String(kind).trim().toLowerCase()] : 'secret';
   if (!k) return refuse('bad_kind');
   const hasName = name != null && String(name).trim() !== '';
-  const l = lineOf(hasName ? name : String(words || '').slice(0, LIMITS.name), LIMITS.name, 'name');
+  const l = hasName ? (({ ok, name: text, ...r }) => (ok ? { ok, text } : { ok, ...r }))(wordsOf({ name })) : lineOf(String(words || '').slice(0, LIMITS.name), LIMITS.name, 'name');   // lane vault-entry-description: a name the agent gave is the words rule's (a secret's shape refused, never «redacted»)
   if (!l.ok) return l;
   return { ok: true, target: { kind: 'entry', entryKind: k, label: l.text, hosts: hs || [] } };
 }
 
 /** THE ASK as the agent sent it → { ok, words, purpose, target } | a refusal (its code + its words). */
-function requestVerdict({ words, purpose, into, kind, name, hosts } = {}) {
+function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) {
   const w = lineOf(words, LIMITS.words, 'words');
   if (!w.ok) return w;
   const p = lineOf(purpose, LIMITS.purpose, 'purpose');
   if (!p.ok) return p;
   const t = targetOf({ into, kind, name, words: w.text, hosts });
   if (!t.ok) return t;
-  return { ok: true, words: w.text, purpose: p.text, target: t.target };
+  // lane vault-entry-description: a NEW entry's description (`--note`), the words rule's — '' / absent = none given
+  const hasNote = note != null && String(note).trim() !== '';
+  if (hasNote && t.target.kind === 'field') return refuse('note_with_into');
+  const n = hasNote ? wordsOf({ note }) : { ok: true };
+  if (!n.ok) return n;
+  return { ok: true, words: w.text, purpose: p.text, target: hasNote ? { ...t.target, note: n.note } : t.target };
 }
 
 /** `<row>.<field>` | the entry's label — the target in ONE short spelling (the item's action, the audit). */
@@ -154,7 +211,7 @@ function wordsOfItem(it) {
   const i = it && it.i18n, lines = (i && Array.isArray(i.detail)) ? i.detail : [];
   const param = (key, name) => { const l = lines.find((x) => x && x.key === key); const v = l && l.params && l.params[name]; return typeof v === 'string' ? v : ''; };
   const w = i && i.text && i.text.params && i.text.params.words;
-  return { words: typeof w === 'string' ? w : '', purpose: param(PURPOSE_LINE, 'purpose'), label: param(ENTRY_LINE, 'label') };
+  return { words: typeof w === 'string' ? w : '', purpose: param(PURPOSE_LINE, 'purpose'), label: param(ENTRY_LINE, 'label'), note: param(NOTE_LINE, 'note') };
 }
 /** The target back from an item (the ITEM is the record): its action's { into } ⇒ the field (re-judged against today's
  *  registry — a row that left the registry is no target), else { kind } + the label its words carry ⇒ the entry.
@@ -164,6 +221,8 @@ function targetOfAction(a, { label = '' } = {}) {
   const t = a.into ? targetOf({ into: a.into }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar)
   return t.ok ? t.target : null;
 }
+/** lane vault-entry-description: the request's target with the description its words carry (wordsOfItem's `note`). */
+const withNote = (target, note) => (target && target.kind === 'entry' && note ? { ...target, note } : target);
 
 /** THE CARD: the item's text (the English dedupe key) + its words as lines (i18n keys; a row's / a field's / a kind's
  *  label rides as WORDS `{key}` — the client says it in its language). `replaces` = the field holds a value of the
@@ -176,6 +235,7 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null })
     { key: i18nKey('What: {words}'), params: { words } },
     { key: PURPOSE_LINE, params: { purpose } },
     where,
+    ...(target.kind === 'entry' && target.note ? [{ key: NOTE_LINE, params: { note: target.note } }] : []),   // lane vault-entry-description
     ...(replaces ? [{ key: i18nKey('It replaces the value saved there now.') }] : []),
     // lane vault-use-grants round 5 (MAJOR item 2): said where the owner pastes — a paste opens ONLY an 8-hour run grant to
     // the conversation that asked (requestGrantsRequester, default on); the «Usable by agent runs» switch (who may use it without
@@ -193,6 +253,55 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null })
     detail: lines.map(fill).join('\n'),
     i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: lines },
   };
+}
+
+/** lane vault-entry-description: AN AGENT'S PROPOSAL to change an entry's words — the card's words (head = the English dedupe
+ *  key + its i18n line; the detail lines say the old → new; ≤ 400 each, the store's bounds). `from` = the words now, `to` =
+ *  what changes ({ name?, note? } — absent = kept). The words ride the item's OWN lines (a clear takes them — the proposal
+ *  then is gone); proposalOfItem reads them back by their keys. */
+const RENAME_LINE = i18nKey('Name: «{old}» → «{new}»');
+const NOTE_FROM_LINE = i18nKey('Description now: {note}');
+const NOTE_TO_LINE = i18nKey('Description after: {note}');
+const NOTE_NONE = i18nKey('(none)');
+function wordsCardOf({ who, ref, from = {}, to = {} }) {
+  const old = String(from.name || ''), renames = to.name !== undefined && to.name !== old, redescribes = to.note !== undefined && to.note !== String(from.note || '');
+  const head = renames && redescribes ? i18nKey('{who} wants to rename «{old}» to «{new}» and change its description') : renames ? i18nKey('{who} wants to rename «{old}» to «{new}»') : i18nKey('{who} wants to change the description of «{old}»');
+  const hp = { who, old, ...(renames ? { new: to.name } : {}) };
+  const noteParam = (n) => (n ? n : { key: NOTE_NONE });
+  const lines = [
+    ...(renames ? [{ key: RENAME_LINE, params: { old, new: to.name } }] : []),
+    ...(redescribes ? [{ key: NOTE_FROM_LINE, params: { note: noteParam(String(from.note || '')) } }, { key: NOTE_TO_LINE, params: { note: noteParam(to.note) } }] : []),
+    { key: i18nKey('The entry: {ref}'), params: { ref } },
+    { key: i18nKey('Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.') },
+  ];
+  const fill = (key, params) => key.replace(/\{(\w+)\}/g, (m, k) => { const v = params && params[k]; return v == null ? m : typeof v === 'object' ? String(v.key) : String(v); });
+  return { text: fill(head, hp), detail: lines.map((l) => fill(l.key, l.params)).join('\n'), i18n: { text: { key: head, params: hp }, detail: lines }, renames, redescribes };
+}
+/** The proposal back from its item (the ITEM is the record): `to` = the words it would write — '' once a clear took them. */
+function proposalOfItem(it) {
+  const i = it && it.i18n, lines = (i && Array.isArray(i.detail)) ? i.detail : [];
+  const line = (key) => lines.find((x) => x && x.key === key);
+  const str = (l, k) => { const v = l && l.params && l.params[k]; return typeof v === 'string' ? v : v && typeof v === 'object' && v.key === NOTE_NONE ? '' : null; };
+  const rn = line(RENAME_LINE), nt = line(NOTE_TO_LINE), nf = line(NOTE_FROM_LINE);
+  const to = {};
+  if (rn && typeof str(rn, 'new') === 'string') to.name = str(rn, 'new');
+  if (nt && str(nt, 'note') !== null) to.note = str(nt, 'note');
+  return { to, from: { name: (rn && str(rn, 'old')) || (i && i.text && i.text.params && typeof i.text.params.old === 'string' ? i.text.params.old : ''), note: nf ? str(nf, 'note') || '' : null } };
+}
+/** THE PROPOSAL'S RECEIPT at the asking conversation's next turn (English — the agent's contract; every piece belted). */
+function wordsReceiptText(o = {}) {
+  const piece = (s, max = 200) => PT.toAgentText(String(s == null ? '' : s), { max, kind: 'line' });
+  const head = `[Vault] Your proposal ${piece(o.proposalId, 20)} (vibespace-vault describe) for ${piece(o.ref, 160)}`;
+  if (o.outcome === 'applied') return `${head}: APPLIED — the user allowed it. Its name is «${piece(o.to && o.to.name, 80)}»; its description: ${o.to && o.to.note ? `«${piece(o.to.note, 400)}»` : 'none'}. Every agent that may use it reads them in vibespace-vault list.`;
+  if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request. Nothing changed. Propose it again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;
+  if (o.outcome === 'gone') return `${head}: NOT APPLIED — the entry is not in the vault any more.`;
+  return `${head}: REFUSED — ${REFUSED_WHY[o.why] || REFUSED_WHY.denied}. Its name and description stay as they were. Do not propose it again in the next ${QUIET_MS / 60e3} minutes.`;
+}
+/** THE BELT where an entry's words reach an agent (`vibespace-vault list` / `uses`): its name and its description — words an
+ *  agent or the owner wrote, read by ANOTHER agent — each ONE inline piece of the peer-text belt (bounded, folded,
+ *  frame-inert). → { name, note } ('' when none). */
+function agentEntryWords({ label, note } = {}) {   // the name's bound is an inventory row's own (120: a kind's row names a machine, a site…)
+  return { name: PT.toAgentText(String(label == null ? '' : label), { max: 120, kind: 'line' }), note: note ? PT.toAgentText(String(note), { max: LIMITS.note, kind: 'line' }) : '' };
 }
 
 /** A REFUSAL's cause → its words toward the agent (the item's resolution: 拒绝, ✕, ✓ without a paste, a clear). */
@@ -228,16 +337,14 @@ function receiptText(o = {}) {
 }
 
 /** A FREE ENTRY's facts (the paste box's, and 「其他密钥或密码…」's in the Vault window) → { ok, label, note, kind } | a
- *  refusal: a label (one line, ≤ 80), an optional note (≤ 400, its own lines kept), a kind of ENTRY_KINDS. */
+ *  refusal: its words by THE words rule (wordsOf — a name, a one-paragraph description; lane vault-entry-description: was
+ *  «its own lines kept» — the page folds a line break before it posts), a kind of ENTRY_KINDS. */
 function entryMetaOf({ label, note = '', kind = 'secret' } = {}) {
-  const l = lineOf(label, LIMITS.name, 'name');
-  if (!l.ok) return l;
-  const n = note == null ? '' : String(note);
-  if (n.length > LIMITS.note) return refuse('note_too_long');
-  if (HC.hiddenCharsOf(n, { max: 1 }).length) return refuse('hidden_chars');
+  const w = wordsOf({ name: label == null ? '' : label, note: note == null ? '' : note });
+  if (!w.ok) return w;
   const k = KIND_ALIASES[String(kind == null || kind === '' ? 'secret' : kind).toLowerCase()];
   if (!k) return refuse('bad_kind');
-  return { ok: true, label: l.text, note: n.trim(), kind: k };
+  return { ok: true, label: w.name, note: w.note, kind: k };
 }
 
 /** THE VALUE as the owner pasted it → { ok, value } (its surrounding whitespace trimmed — a copied line's newline, as the
@@ -254,4 +361,5 @@ function valueOf(raw) {
 module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
+  WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords,   // lane vault-entry-description
 };

@@ -36,9 +36,9 @@ import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-gran
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — 用于… (this account / any account on this site / any site) + 网站登录…
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
-import { addOrderOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
+import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
-import { showSecretAddDialog, showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
+import { showSecretAddDialog, showSecretPasteDialog, showWordsEditDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
 
 const ICON = svgIcon16('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/><circle cx="8" cy="10.5" r="1"/>');
 const MASK = '••••••••';
@@ -365,6 +365,10 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     } finally { box._vwBusy = false; }
   }
 
+  /** lane vault-entry-description: does the row's kind carry its OWN name and description (the registry's `words` surface)? */
+  const hasWords = (row) => { const f = familyOf(row.store, row.entry), w = f && f.surfaces && f.surfaces.words; return !!(w && !w.none); };
+  /** Is an agent's proposal of this entry's words waiting in For you? (the same store the band reads) */
+  const wordsPending = (entry) => { try { return ((inbox && inbox.todos && inbox.todos.open) || []).some((i) => i && i.action && i.action.entry === entry && i.status === 'open' && bandDoorsOf(i).includes('allow')); } catch { return false; } };   // the band's own doors name a words ask (src/vault-inventory.js bandDoorsOf)
   function rowFor(row) {
     const e = vwEl('div', 'vw-row');
     const purpose = purposeOf(row) || 'other', prov = provenanceOf(row) || 'me';
@@ -388,6 +392,17 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: whenText(row.createdAt) })}` : labelWord(row);
     else main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
     if (ownRule) main.append(ownRule);
+    // lane vault-entry-description: its DESCRIPTION under the name (or that it has none), and a mark while an agent's proposal of
+    // new words waits in For you; a description the owner wrote before the rule says it is his alone until he saves it again
+    const words = hasWords(row);
+    let pend = null;
+    if (words) {
+      const desc = vwEl('div', `vw-desc${row.note ? '' : ' vw-desc-none'}`, row.note || t('No description yet — Edit… says what it is for'));
+      if (row.note && !row.noteShared) { desc.classList.add('vw-desc-private'); desc.title = t('Only you read this description — save it with Edit… to let the agents that may use it read it'); }
+      pend = vwEl('div', 'vw-desc-pending', t('An agent proposes new words for it — answer it in For you'));
+      pend.hidden = !wordsPending(row.entry);
+      main.append(desc, pend);
+    }
     // THE CHIPS: kind · provenance · state (a fact the row holds — never a hint, never a greyed control)
     const chips = vwEl('div', 'vw-chips');
     chips.append(vwEl('span', 'vw-chip vw-chip-kind', kindWord(row.kind)));
@@ -415,7 +430,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const show = btnEl(t('Show'), 'vw-show', { icon: 'eye', title: showHelp(row) });
     const copy = btnEl(t('Copy'), 'vw-copy', { icon: 'copy' });
     copy.hidden = true;
-    const x = { row, el: e, mask, show, copy, used, plain: null, codeText: null, codeLeft: null, sig: sigOf(row) };
+    const x = { row, el: e, mask, show, copy, used, plain: null, codeText: null, codeLeft: null, sig: sigOf(row), pend };
     let totpTx = null;   // design q-047 L1: lazily holds the ported totpExtras (its box / doors land once `doors` exists)
     if (isTotp(row)) {
       // design q-047 L1 (lane vault-totp): 看码 + its ring + 复制 + 用于… (its own door GET /api/vault/totp/:name) — never a mask for the code;
@@ -432,6 +447,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (row.run && row.run.use) { const ux = useExtras(row, { app, refresh }); main.append(ux.box); doors.append(...ux.doors); x.use = ux; x.useSig = useSigOf(row); }   // lane vault-use-grants: who may use it with no card
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
     if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
+    if (words) { const b = btnEl(t('Edit…'), 'vw-words-edit', { title: t('Its name and description') }); b.onclick = () => showWordsEditDialog({ row, refresh }); doors.append(b); }   // lane vault-entry-description
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }
     show.onclick = () => (x.plain ? hideValue(x) : revealRow(x));
@@ -561,12 +577,12 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // ── 「需要你」 — For you's own open items of origin 'vault' (the same store; answered here = answered there) ──
   const inbox = (() => { try { return inboxModel(app); } catch { return null; } })();
   function bandDoor(item, door) {
-    const label = { once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
-    const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
+    const label = { allow: t('Allow'), once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
+    const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'allow' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
     b.dataset.door = door;
     b.onclick = async () => {
       if (door === 'paste') { showSecretPasteDialog(inbox, item, { words: inbox.wordsOf(item), detail: inbox.detailOf(item) }); return; }   // lane vault-paste-request: THE paste box (the store resolves the item — the band follows)
-      if (door === 'once' || door === 'always' || door === 'deny') { await inbox.runAction(item, door); return; }   // THE tray's own answer (src/lib/user-todos-actions.js)
+      if (door === 'once' || door === 'always' || door === 'deny' || door === 'allow') { await inbox.runAction(item, door); return; }   // allow: lane vault-entry-description (an agent's proposal of an entry's words)   // THE tray's own answer (src/lib/user-todos-actions.js)
       if (door === 'unlock') { showUnlock(); return; }
       if (door === 'ack') { await inbox.setStatus(item.id, 'done'); return; }
       const entry = item.action && item.action.entry;
@@ -610,6 +626,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     }
     for (const id of [...bandEls.keys()]) if (!items.some((i) => i.id === id)) bandEls.delete(id);
     reconcile(bandRows, want);
+    for (const x of rowEls.values()) if (x.pend) x.pend.hidden = !wordsPending(x.row.entry);   // lane vault-entry-description: the rows' «an agent proposes» marks follow the tray
   }
   inbox?.on('todos', () => { if (!st.closed) drawBand(); }, { signal: sig });
 
