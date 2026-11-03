@@ -2104,7 +2104,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     const count = { textContent: '', title: '' }, all = { hidden: true, textContent: '' };
     const dock = { hidden: false, querySelector: (s) => (/cad-count/.test(s) ? count : /cad-all/.test(s) ? all : null) };
     const item = { id: 'ut-r14age', status: 'open' };
-    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null,
+    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null, _dockStrip() {}, /* lane phone-dock-restore: the phone row's words and fold — test-chat-needs-card-chrome's phone legs */
       app: { foryouRows: { reconcileDock: () => { if (self.rebuild) btns = [{ b: 2 }]; }, arm: () => { armed++; for (const b of btns) if (b._armSince == null) b._armSince = clock; } } } };
     let f; try { f = new Function('scope', `with (scope) { return function (waiting) { ${body} }; }`)(new Proxy({ dockOf: (l) => (l.length ? { newest: l[0].item, n: l.length, words: { text: 'waiting for you · 1', title: '' } } : null), t: (k) => k, boxInUse: () => false, inboxModel: () => ({ todos: {} }), console }, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
     f.call(self, [{ item }]); clock += 60e3; // shown, stamped; a minute on
@@ -2300,7 +2300,7 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     const rows = { querySelector: (q) => (/ut-item/.test(q) ? row : null), querySelectorAll: () => [], replaceChildren() {} };
     const count = { textContent: '', title: '' }, all = { hidden: true, textContent: '' };
     const dock = { hidden: false, get offsetHeight() { reads++; return this.hidden ? 0 : h; }, getBoundingClientRect() { reads++; return box(0, 0, 600, h); }, querySelector: (q) => (/cad-count/.test(q) ? count : /cad-all/.test(q) ? all : null) };
-    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null, app: { foryouRows: { reconcileDock: () => { h = self.next; }, arm() {}, chromeMoved: () => { moved++; } } } };
+    const self = { view: { _attnDock: dock }, _dockBuild: () => rows, _dockSig: '', _dockItem: null, _dockStrip() {}, /* lane phone-dock-restore: the phone row's words and fold — test-chat-needs-card-chrome's phone legs */ app: { foryouRows: { reconcileDock: () => { h = self.next; }, arm() {}, chromeMoved: () => { moved++; } } } };
     let f; try { f = new Function('scope', `with (scope) { return function (waiting) { ${src} }; }`)(new Proxy({ dockOf: (l) => (l.length ? { newest: l[0].item, n: l.length, words: { text: 'waiting for you · 1', title: '' } } : null), t: (k) => k, boxInUse: () => false, inboxModel: () => ({ todos: {} }), console }, { has: (o, k) => k in o })); } catch (e) { return { threw: String(e) }; }
     return steps.map(([next, list]) => { moved = 0; reads = 0; self.next = next; f.call(self, list ? [{ item }] : []); return [moved, reads]; });
   };

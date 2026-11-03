@@ -5325,6 +5325,32 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 }
 /* ── end of the touch scale (lane foryou-honest) ── */
 
+/* ── lane phone-dock-restore (the owner 2026-11-02, the iPhone on 2.369.373: «等你操作的那个橙色的菜单，在画面最下方的 iPhone UI 上占据的显示
+   面积过大»; measured at 390×844: a permission ask's strip 254 px = 30 % of the screen, a run card's 338 px = 40 %): ON THE PHONE
+   (the phone classes — html[data-vc], src/viewport-class.js; the desktop's strip is .373's, untouched) THE STRIP IS ONE ROW until
+   tapped: the amber head «waiting for you · N», the newest item's question (its own words, one line, cut with an ellipsis),
+   «View» and the door to all of them. A tap on it opens THAT item in place (chat-needs-card.js _dockFold: `cad-open` — the card as
+   before, at most 45 % of the screen, scrolling inside, its head held at the top; the composer stays on screen); the head folds
+   it. The row answers nothing — an answer is pressed on the open card with its command, facts and clock above it (verify-r4 F4,
+   r15). Gate: test-chat-needs-card-chrome's phone strip legs (RED CONTROL: this block cut out). ── */
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) { flex-wrap: nowrap; align-items: center; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-head > .cad-count { display: none; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-head > .cad-num { display: inline; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows { order: 1; flex: 1 1 0; min-width: 0; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body { flex-wrap: nowrap; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body > :not(.ut-text) { display: none !important; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body::before, html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body::after { content: none; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body > .ut-text { flex: 1 1 auto; min-width: 0; padding-block: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body > .ut-text * { display: inline; } /* (the words' own blocks run on the one line) */
+@media (hover: none) and (pointer: coarse) { html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-rows .ut-item > .ut-body > .ut-text { line-height: 44px; } } /* the question centred on its 44 px line (a run card's ask is 24 px tall, wrapped, when open) */
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-look { display: inline-flex; order: 2; flex: none; align-items: center; justify-content: center; min-height: 26px; padding: 0 10px; border: 1px solid var(--yellow); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all { order: 3; margin-left: 0; font-size: 0 !important; display: inline-flex; align-items: center; justify-content: center; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all[hidden] { display: none; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all::after { content: attr(data-short); content: attr(data-short) / ""; font-size: 15px; } /* «All»: its title and its name keep «N more · View all» */
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max-height: calc(45vh / var(--ui-scale, 1)); max-height: calc(45dvh / var(--ui-scale, 1)); overflow-y: auto; overscroll-behavior: contain; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .cad-head { position: sticky; top: -4px; z-index: 1; background: inherit; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .cad-head::after { content: '▾'; content: '▾' / ""; color: var(--text-dim); } /* the head folds it again */
+
 /* ── Guided CLI modal (embedded login/install terminal) + self-update dialog ── */
 /* Width belongs on the DIALOG, not the body: .dialog is a fixed width:440px
    with overflow:hidden, so a body min-width overflowed and got CLIPPED on the

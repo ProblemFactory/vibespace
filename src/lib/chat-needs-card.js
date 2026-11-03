@@ -442,6 +442,7 @@ export class NeedsCards {
     const sig = entry ? `${entry.item.id}\u0000${entry.resolved ? 'r' : 'o'}\u0000${d ? d.n : 0}` : '';
     if (!entry) {
       if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); }
+      this._dockStrip(dock, null, null);
       this._dockItem = null; this._dockSig = '';
       return;
     }
@@ -454,6 +455,7 @@ export class NeedsCards {
     // lane foryou-dock-layout: the head's line says how many MORE wait beyond the one it draws («5 more · View all»; chat.css:
     // the head's line, the row under it — one column)
     if (d && d.n > 1) { const w = t('{n} more · View all', { n: d.more }); if (all.textContent !== w) all.textContent = w; }
+    this._dockStrip(dock, d, entry);
     const had = new Set(rows.querySelectorAll('button')); // r14: the buttons drawn before this patch (a patch that MAKES one arms the strip)
     this.app.foryouRows?.reconcileDock(rows, [entry]); // r11: THE renderer with the summary + the plain buttons — never a pick (a form exists once per item: the pick is the item's)
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
@@ -473,11 +475,13 @@ export class NeedsCards {
     let rows = dock.querySelector(':scope > .cad-rows');
     if (rows) { if (!this._dockWired) this._dockWire(dock); return rows; }
     const head = document.createElement('div'); head.className = 'cad-head';
-    head.innerHTML = `<span class="cad-icon" aria-hidden="true">${UI_ICONS.inbox}</span><span class="cad-count"></span>`;
+    head.innerHTML = `<span class="cad-icon" aria-hidden="true">${UI_ICONS.inbox}</span><span class="cad-count"></span><span class="cad-num"></span>`;
     rows = document.createElement('div'); rows.className = 'cad-rows';
+    // lane phone-dock-restore: the phone's folded row's ONE action — it opens the item in place (style.css: drawn there only)
+    const look = document.createElement('button'); look.type = 'button'; look.className = 'cad-look'; look.textContent = t('View'); look.setAttribute('aria-expanded', 'false');
     const all = document.createElement('button'); all.type = 'button'; all.className = 'cad-all'; all.hidden = true;
     all.title = t('Open everything this conversation is waiting on in the For-you window');
-    dock.replaceChildren(head, rows, all);
+    dock.replaceChildren(head, rows, look, all);
     this._dockWire(dock);
     return rows;
   }
@@ -494,6 +498,15 @@ export class NeedsCards {
       ev.preventDefault();
       this.land(item.id).catch(() => {});
     };
+    // lane phone-dock-restore: THE PHONE'S STRIP — folded, a tap anywhere on it (the head, the question, «View») opens the item;
+    // open, the head folds it. Capture: before the row's verbs, a link in the question and the question's landing
+    dock.addEventListener('click', (ev) => {
+      if (!this.app.isMobile || ev.target.closest('.cad-all')) return;
+      const open = dock.classList.contains('cad-open'), head = ev.target.closest('.cad-head');
+      if (!head && !ev.target.closest('.cad-look') && (open || !ev.target.closest('.cad-rows'))) return;
+      ev.stopPropagation(); ev.preventDefault();
+      this._dockFold(dock, head ? !open : true);
+    }, { capture: true, signal: own });
     dock.addEventListener('click', (ev) => {
       if (ev.target.closest('.cad-all')) {
         const keys = this.keys() || [];
@@ -507,7 +520,9 @@ export class NeedsCards {
     // the question by its keys (a role=button — never a text box: the reply box answers its own keys through the panel)
     dock.addEventListener('keydown', (ev) => {
       const q = ev.target;
-      if (!(enterSubmits(ev) || (ev.key === ' ' && !imeOwnsKey(ev))) || !q.classList?.contains('ut-text') || q.getAttribute('role') !== 'button') return;
+      if (!(enterSubmits(ev) || (ev.key === ' ' && !imeOwnsKey(ev)))) return;
+      if (this.app.isMobile && (q.classList?.contains('cad-head') || (q.classList?.contains('ut-text') && !dock.classList.contains('cad-open')))) { ev.preventDefault(); this._dockFold(dock, q.classList.contains('cad-head') ? !dock.classList.contains('cad-open') : true); return; } // (the phone's fold)
+      if (!q.classList?.contains('ut-text') || q.getAttribute('role') !== 'button') return;
       landIt(ev, q);
     }, { signal: own });
     // the strip's size moved the list's bottom edge: a pinned view stays at the live tail (a reader in history keeps the
@@ -516,6 +531,37 @@ export class NeedsCards {
     // there): THE ONE ROAD of a strip that changes size — it grew, shrank, went, re-wrapped — is this observer: the announce's
     // stack and the toasts stand clear of it at once (foryouRows.chromeMoved — one move a frame, however many strips)
     if (typeof ResizeObserver === 'function') (this._dockRO = new ResizeObserver(() => { const v = this.view; if (v._pinned && !v._disposed) v._scrollToBottom?.(); this.app.foryouRows?.chromeMoved?.(); })).observe(dock);
+  }
+
+  /** lane phone-dock-restore: THE PHONE'S ONE ROW's words and door, each pass (style.css draws the row; a desktop strip never
+   *  folds) — the count alone («waiting for you · 3»), the door's short word («All»), the head the row's fold (a door on the
+   *  phone only); the opened item gone — nothing waits, a newer one drawn — folds it. */
+  _dockStrip(dock, d, entry) {
+    if (dock.classList.contains('cad-open') && (!entry || this._dockOpenId !== entry.item.id)) this._dockFold(dock, false);
+    if (!entry) return;
+    const num = dock.querySelector(':scope > .cad-head > .cad-num'), all = dock.querySelector(':scope > .cad-all'), nw = d ? t('waiting for you · {what}', { what: String(d.n) }) : '';
+    if (num.textContent !== nw) num.textContent = nw;
+    if (all.dataset.short !== t('All')) all.dataset.short = t('All');
+    const head = dock.querySelector(':scope > .cad-head'), phone = !!this.app.isMobile, open = String(dock.classList.contains('cad-open'));
+    if (phone !== (head.getAttribute('role') === 'button')) {
+      if (phone) { head.setAttribute('role', 'button'); head.tabIndex = 0; } else { head.removeAttribute('role'); head.removeAttribute('tabindex'); head.removeAttribute('aria-expanded'); }
+    }
+    if (phone && head.getAttribute('aria-expanded') !== open) head.setAttribute('aria-expanded', open);
+  }
+
+  /** lane phone-dock-restore (the owner 2026-11-02 on the iPhone, .373: «等你操作的那个橙色的菜单…占据的显示面积过大» — 390×844: a
+   *  permission ask's strip 254 px, a run card's 338 px of the 844): ON THE PHONE the strip is ONE row — the head, the newest
+   *  item's question, «View» (style.css) — and `open` opens THAT item in place (`cad-open`: the card as before, capped at 45 % of
+   *  the screen, scrolling inside); the head folds it again, and so does another item drawn. The row answers nothing: an answer
+   *  is pressed on the open card, its command, facts and clock above it. What the open moved under the finger answers nothing
+   *  for ARM_MS (the press arm). */
+  _dockFold(dock, open) {
+    dock.classList.toggle('cad-open', open);
+    this._dockOpenId = open && this._dockItem ? this._dockItem.id : null;
+    const head = dock.querySelector(':scope > .cad-head'), look = dock.querySelector(':scope > .cad-look');
+    if (head && head.getAttribute('role') === 'button') head.setAttribute('aria-expanded', String(open));
+    if (look) look.setAttribute('aria-expanded', String(open));
+    if (open) { dock.scrollTop = 0; this.app.foryouRows?.arm?.(dock); }
   }
 
   /** The card of item `id` in this list, or null. */

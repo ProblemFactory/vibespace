@@ -691,6 +691,7 @@
 .cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .cad-all:is(:hover, :focus-visible) { background: var(--bg-hover); color: var(--accent); }
 .cad-all[hidden] { display: none; }
+.cad-num, .cad-look { display: none; } /* lane phone-dock-restore: the phone's folded row's count and its «View» (style.css) — never a desktop strip's */
 .chat-attn-dock > .cad-all { margin-left: auto; } /* the head's line: the count at its start, «N more · View all» at its end */
 .cad-rows .ut-item { display: block; padding: 0; cursor: default; }
 .cad-rows .ut-item:hover { background: none; }
