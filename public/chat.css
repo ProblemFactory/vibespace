@@ -667,7 +667,11 @@
    «waiting for you · N» · the NEWEST item's row on ONE line (its question, its age, its verbs — THE For-you row) · «View all · N»
    when several wait. What an answer stands on (an exit's command, a plan) rides one more line, ellipsized (the whole of it is
    the card's, one tap away); option chips one more line, scrolling sideways (never a wall of chips); a reply box opens below.
-   A narrow window (< 520 px of strip) puts the row under the head. Empty ⇒ [hidden] (no empty chrome). Theme vars only. */
+   Empty ⇒ [hidden] (no empty chrome). Theme vars only.
+   lane foryou-dock-layout (the owner 2026-11-02 «这个布局不太好» — a 2840 px window: the run card's explanation of «Allow for 1
+   hour» opened a LEFT column, the ask and its clock a RIGHT one, the head and «View all» two more): ONE COLUMN AT EVERY WIDTH —
+   the head's line («waiting for you · N» … «N more · View all»), the item under it, read top-down (the r12b narrow shape is
+   now every width's). */
 .chat-attn-dock {
   display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 8px; row-gap: 2px; flex-shrink: 0; box-sizing: border-box; min-width: 0;
   padding: 4px 12px; border-top: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
@@ -683,14 +687,11 @@
 .chat-attn-dock.cad-mark { animation: chat-ask-flash-anim 1.6s ease-out; }
 @media (prefers-reduced-motion: reduce) { .chat-attn-dock.cad-mark { animation: none; outline: 2px solid var(--yellow); outline-offset: -2px; } }
 .cad-icon svg { width: 14px; height: 14px; display: block; }
-.cad-rows { flex: 1 1 0; min-width: 0; }
+.cad-rows { order: 3; flex: 1 1 100%; min-width: 0; }
 .cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .cad-all:is(:hover, :focus-visible) { background: var(--bg-hover); color: var(--accent); }
 .cad-all[hidden] { display: none; }
-@container (max-width: 520px) {
-  .cad-rows { order: 3; flex: 1 1 100%; }
-  .cad-all { margin-left: auto; }
-}
+.chat-attn-dock > .cad-all { margin-left: auto; } /* the head's line: the count at its start, «N more · View all» at its end */
 .cad-rows .ut-item { display: block; padding: 0; cursor: default; }
 .cad-rows .ut-item:hover { background: none; }
 .cad-rows .ut-item > .ut-dot { display: none; }
@@ -706,13 +707,36 @@
    are on its card, and no «Always»; every warning row and the «asked again» line always drawn (short by construction —
    foryou-actions runStripOf). THE DEADLINE LAW: the clock everywhere — beside the meta */
 .cad-rows .ut-body > .ut-run { display: contents; }
-.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-run-answer) { display: none !important; } /* the .367 seam 6: what a writing answer writes stays */
-.cad-rows .ut-run > .ut-run-cmd { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-run-answer, .ut-dock-fold) { display: none !important; } /* the .367 seam 6: what a writing answer writes stays */
+.cad-rows .ut-run > .ut-run-cmd { order: 4; flex: 0 1 auto; max-width: 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-run > .ut-run-answer { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.cad-rows .ut-run > .ut-run-gist { order: 4; flex: 1 1 100%; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
+.cad-rows .ut-run > .ut-run-gist { order: 4; flex: 1 1 14em; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
 .cad-rows .ut-run-gist > * { min-width: 0; margin: 0; font-size: inherit; }
 .cad-rows .ut-run-gist .ut-run-lbl { margin-inline-end: 0.3em; }
 .cad-rows .ut-run-answer > .ut-run-hint:not(.ut-run-hint-window) { display: none; } /* the .367 seam 6: «Allow for 1 hour»'s own words stay */
+/* lane foryou-dock-layout — THE STRIP READS TOP-DOWN (the owner's 2840 px strip: what «Allow for 1 hour» writes stood ABOVE who asks
+   for what, at order 0): the ask (it wraps whole — the secret it names is the scope the answers carry; never cut before it) with
+   its clock and age; the command + «Sends to» on one line (wrapping only when they must); what an «Always» replaces (a warning,
+   never folded); the answers; ONE dim line of the hour's consequence — the summary of the item's ONE fold, which holds the hour's
+   long words and the scrub note (user-todos-row.js runFactsHtml `strip`) */
+.cad-rows .ut-body:has(> .ut-run) > .ut-text { flex: 0 1 auto; white-space: normal; overflow-wrap: anywhere; line-height: 20px; padding-block: 3px; }
+/* the line breaks of that order: after the ask's line (::after, order 3 — behind the verbs), before the answers' (::before,
+   order 5 — ahead of what an «Always» replaces); zero tall, a whole line wide */
+.cad-rows .ut-body:has(> .ut-run)::after, .cad-rows .ut-body:has(> .ut-run)::before { content: ''; flex: 1 1 100%; height: 0; }
+.cad-rows .ut-body:has(> .ut-run)::after { order: 3; }
+.cad-rows .ut-body:has(> .ut-run)::before { order: 5; }
+.cad-rows .ut-run > .ut-run-changes { order: 5; flex: 1 1 100%; margin: 0; }
+.cad-rows .ut-body:has(> .ut-run) > .ut-actions { order: 6; margin-left: 12px; } /* ⤢ right after the answers (the row draws its verbs FIRST) — never a line of its own under the ask, never adrift at a wide strip's far edge */
+.cad-rows .ut-run > .ut-dock-fold { order: 7; flex: 1 1 100%; min-width: 0; margin: 0; font-size: 11px; line-height: 16px; }
+.cad-rows .ut-dock-fold > summary { font-size: inherit; color: var(--text-secondary); }
+.cad-rows .ut-dock-fold > summary::before { content: none; }
+.cad-rows .ut-dock-fold > summary > .ut-run-hint { font-size: inherit; }
+.cad-rows .ut-dock-more { white-space: nowrap; color: var(--text-dim); }
+.cad-rows .ut-run-hint-short + .ut-dock-more::before { content: '· '; content: '· ' / ""; }
+.cad-rows .ut-dock-more::after { content: ' ▸'; content: ' ▸' / ""; }
+.cad-rows .ut-dock-fold[open] .ut-dock-more::after { content: ' ▾'; content: ' ▾' / ""; }
+.cad-rows .ut-dock-fold > summary:is(:hover, :focus-visible) .ut-dock-more { color: var(--accent); }
+.cad-rows .ut-dock-fold > .ut-run-tech { display: block; margin: 2px 0 0; padding: 2px 0 2px 8px; border-inline-start: 2px solid var(--warn-text); color: var(--text); overflow-wrap: anywhere; }
 /* r15 (the r14 acceptance: a LATE run's sentence, one line and no ellipsis, ran past a 700 px window's edge): the clock's line
    is a whole line of its own when it must be, and wraps inside it — at every width (r12b: nothing past a window's edge) */
 .cad-rows .ut-body > .ut-deadline { order: 2; flex: 0 1 auto; min-width: 0; margin: 0; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }

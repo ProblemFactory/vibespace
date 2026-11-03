@@ -1335,7 +1335,7 @@ try {
     const d3 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-three.png');
     check(`r10 THREE ⇒ the count «${d3 && d3.count}», the NEWEST (${d3 && d3.q}), «${d3 && d3.all}» — one row, never a «show more» in the strip; the same height as one (${d1 && d1.dock.h} → ${d3 && d3.dock.h} px)`,
-      between(d3) && d3.rows === 1 && d3.id === a3.id && /^View all · 3$/.test(d3.all || '') && Math.abs(d3.dock.h - d1.dock.h) <= 2, d3);
+      between(d3) && d3.rows === 1 && d3.id === a3.id && /^2 more · View all$/.test(d3.all || '') /* lane foryou-dock-layout: how many MORE, on the head's line */ && Math.abs(d3.dock.h - d1.dock.h) <= 2, d3);
     // «View all» ⇒ the For-you window scoped to THIS conversation
     await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return 1; })()`);
     await A.press('.chat-attn-dock .cad-all', { touch: false });
@@ -1379,7 +1379,7 @@ try {
     const d30 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-twenty.png');
     const refused = (cliLog().match(/already has 20 open items/g) || []).length;
-    check(`r10 MANY (29 more asked: the store took ${t20.length - 1}, refused ${refused} — its flood guard, 20 open per conversation) ⇒ «${d30 && d30.count}» + the newest + «${d30 && d30.all}» — still ONE row, the same height (${d30 && d30.dock.h} px)`, t20.length === 20 && refused === 10 && between(d30) && d30.rows === 1 && d30.id === newest20.id && /^View all · 20$/.test(d30.all || '') && Math.abs(d30.dock.h - d1.dock.h) <= 2, { n: t20.length, refused, d30 });
+    check(`r10 MANY (29 more asked: the store took ${t20.length - 1}, refused ${refused} — its flood guard, 20 open per conversation) ⇒ «${d30 && d30.count}» + the newest + «${d30 && d30.all}» — still ONE row, the same height (${d30 && d30.dock.h} px)`, t20.length === 20 && refused === 10 && between(d30) && d30.rows === 1 && d30.id === newest20.id && /^19 more · View all$/.test(d30.all || '') && Math.abs(d30.dock.h - d1.dock.h) <= 2, { n: t20.length, refused, d30 });
     await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, newest20 && newest20.id, '20 questions'); await sleep(400);
     await B.shot('phone-390-dock-twenty.png'); await A.front();
     for (const it of t20.slice(0, 5)) await done(it.id); // (room for the shapes below: 15 open)

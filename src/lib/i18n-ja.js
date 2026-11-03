@@ -11166,7 +11166,8 @@ export default {
   "{n} things to check": "確認事項 {n} 件",
   "waiting for you · {what}": "あなた待ち · {what}",
   "This conversation is waiting for you: {all}": "この会話はあなたを待っています：{all}",
-  "View all · {n}": "すべて表示 · {n}",
+  // lane foryou-dock-layout: the attention dock's head — how many MORE wait beyond the one it shows
+  "{n} more · View all": "ほか {n} 件 · すべて表示",
   "{n} min left": "残り {n} 分",
   "{n} more waiting — open For you": "ほかに {n} 件が待っています — 「あなた宛て」を開く",
   "{n} more waiting": "ほかに {n} 件が待っています",
@@ -11704,6 +11705,8 @@ export default {
   "«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.": "「1 時間許可」は、この会話が“{entry}”に {when} まで持っている 1 時間の承認を置き換えます：その後は {until} までです。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "This conversation's 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.": "この会話の“{entry}”に対する 1 時間の承認は {when} に終わりました — 「1 時間許可」で新しく {until} まで与えます。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 時間、この会話はこのシークレットを確認なしで使います。使うたびに通知が出ます（「あなた宛て」には入りません）。その後はまた確認します。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
+  "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "この会話は 1 時間確認なし・使うたびに通知・その後また確認",
   "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)

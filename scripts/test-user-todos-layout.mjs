@@ -2183,17 +2183,44 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     // the controls: a renderer that offers «Always» whatever fits; a strip grammar that hides the facts again
     const mut = src.replace("answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;');
     const Rm = await import(pathToFileURL(mutantCopies('utrow15', ROOT).write(REL, mut, 'stripall')).href);
-    const gm = seeAll(Rm), gc = seeAll(R, CC.replace(':not(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-run-answer)', ':not(.ut-run-cmd, .ut-run-answer)')); // the .367 seam 6 keeps .ut-run-changes
+    const gm = seeAll(Rm), gc = seeAll(R, CC.replace(/:not\(\.ut-run-cmd, \.ut-run-gist, \.ut-run-changes, \.ut-run-answer(?:, \.ut-dock-fold)?\)/, ':not(.ut-run-cmd, .ut-run-answer)')); // the .367 seam 6 keeps .ut-run-changes
     ok(mut !== src && gm.many.answers.includes('always') && !gm.many.facts.includes('replica-0'), `CONTROL (r15): the mutant that offers «Always» whatever fits puts it beside twelve hosts it does not show (${J(gm.many.answers)}) — the leg goes red`, gm.many);
     ok(!hostSaid(gc.past, 'exfil.attacker.example') && !gc.writable.warn && !/Asked again/.test(gc.again.facts), 'CONTROL (r15): the strip grammar of 2353267f1 (the facts hidden) shows no host, no warning row, no «asked again» — the legs go red', { past: gc.past, writable: gc.writable, again: gc.again });
-    // the .367 seam 6 (× lane vault-standing-request, the integrator's ruling 10-31): a run ask whose card offers «Allow for 1 hour»
-    // (the door's `action.window`) — the strip SHOWS what that answer writes (the card's changes row, vault-standing r5's «what the
-    // row will be») and «Allow for 1 hour»'s own words, through the strip's REAL css; a strip that offers no writing answer draws none
-    const wAsk = runAsk('ut-s6win', { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['TTS API key'] } }, { window: true });
-    const wHtml = R.renderRow(wAsk, ctx).innerHTML, ws = stripSees(wHtml, CC);
-    ok(ws.answers.includes('window') && ws.kids.includes('ut-run-changes') && /«Allow for 1 hour»: this conversation will be able to use “TTS API key”/.test(ws.facts)
-      && /<span class="ut-run-hint ut-run-hint-window">/.test(wHtml) && /\.cad-rows \.ut-run-answer > \.ut-run-hint:not\(\.ut-run-hint-window\) \{ display: none; \}/.test(CC) && !g.many.kids.includes('ut-run-changes'),
-      `RED-able (the .367 seam 6 — the merged tree before it offered «Allow for 1 hour» in the strip with neither line shown: 109 of 143 real cards in the integrator's probe): the strip offering a writing answer (${J(ws.answers)}) shows what it writes («${(ws.facts.match(/«Allow for 1 hour»:[^.]*\./) || [''])[0]}») and its words beside the answers; one offering none draws no such row`, ws);
+    // the .367 seam 6 (× lane vault-standing-request, the integrator's ruling 10-31) — lane foryou-dock-layout (the owner 2026-11-02
+    // «这个布局不太好», a 2840 px strip: «Allow for 1 hour»'s explanation stood ABOVE who asks for what at order 0, the ask was cut,
+    // two sentences said the hour twice): THE STRIP READS TOP-DOWN. A strip offering «Allow for 1 hour» SAYS what the press carries
+    // in ONE dim line (the hour, this conversation) — the summary of the item's ONE fold, which holds the long words (what it
+    // writes, the switch it turns on, the whole hint) and the scrub note; the button's title carries them too; what an «Always»
+    // REPLACES stays a visible row (a warning — never folded); the tray's card keeps its rows as they were
+    const dec = (h) => String(h || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const faceOf = (html) => { const shown = hideList(CC), kids = kidsOf(html), fold = kids.find((k) => k.cls.includes('ut-dock-fold')) || null;
+      const sum = fold ? dec((fold.html.match(/<summary>([\s\S]*?)<\/summary>/) || [, ''])[1]) : '';
+      const face = kids.filter((k) => !k.cls.includes('ut-dock-fold') && k.cls.some((c) => shown.includes(c))).map((k) => dec(k.html)).join(' ') + ' ' + sum;
+      const btn = (html.match(/<button [^>]*data-answer="window"[^>]*>/) || [''])[0];
+      return { face, sum, fold: fold ? dec(fold.html.replace(/<summary>[\s\S]*?<\/summary>/, '')) : '', foldShown: !!fold && shown.includes('ut-dock-fold'), title: dec((btn.match(/ title="([^"]*)"/) || [, ''])[1]), kids: kids.filter((k) => k.cls.some((c) => shown.includes(c))).map((k) => k.cls.includes('ut-dock-fold') ? 'ut-dock-fold' : k.cls[0]) }; };
+    const SHORT = 'For 1 hour in this conversation: no more asking; a notice at each use; then it asks again';
+    const LONG = [/«Allow for 1 hour»: this conversation will be able to use “TTS API key” in any run until/, /also turns on «Usable by agent runs» for this entry/, /For 1 hour this conversation uses this secret without asking; each use shows a notice/];
+    const wAsk = runAsk('ut-s6win', { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['TTS API key'], switchOn: true } }, { window: true });
+    const wHtml = R.renderRow(wAsk, ctx).innerHTML, ws = stripSees(wHtml, CC), wf = faceOf(wHtml);
+    ok(ws.answers.includes('window') && wf.foldShown && wf.sum.includes(SHORT) && (wf.face.match(/1 hour in this conversation|1 hour this conversation/g) || []).length === 1 && LONG.every((re) => !re.test(wf.face) && re.test(wf.fold) && re.test(wf.title)) && /scrubbed of the secret's common spellings/.test(wf.fold) && !wf.kids.includes('ut-run-changes') && J(wf.kids) === J(['ut-run-cmd', 'ut-run-gist', 'ut-exit-answer', 'ut-dock-fold']),
+      `RED-able (lane foryou-dock-layout — 3f8429cd5 drew «Allow for 1 hour»'s explanation as a visible row at order 0, ABOVE the ask, and its whole hint beside the answers): the strip offering «Allow for 1 hour» (${J(ws.answers)}) says the hour in ONE line — «${wf.sum.trim()}» — the summary of its ONE fold (${J(wf.kids)}); the long words (what it writes, the switch, the whole hint) and the scrub note are in the fold and the button's title only («${wf.title.slice(0, 70)}…»)`, { face: wf.face, sum: wf.sum, fold: wf.fold, title: wf.title, kids: wf.kids });
+    const rAsk = runAsk('ut-dlrepl', { ...base, always: { ...base.always, changes: [{ scope: 'api.example.com', until: T0 + 86400e3, end: { days: 30 } }] }, window: { offered: true, until: T0 + 3600e3, entries: ['TTS API key'] } }, { window: true });
+    const rHtml = R.renderRow(rAsk, ctx).innerHTML, rf = faceOf(rHtml), rRow = (kidsOf(rHtml).find((k) => k.cls.includes('ut-run-changes')) || { html: '' }).html;
+    ok(rf.kids.includes('ut-run-changes') && /this replaces that grant/.test(dec(rRow)) && !/«Allow for 1 hour»/.test(dec(rRow)) && LONG[0].test(rf.fold),
+      `what an «Always» REPLACES stays a visible row in the strip («${dec(rRow).slice(0, 80)}») — only the hour's words move into the fold`, { row: dec(rRow), fold: rf.fold });
+    const tHtml = R.renderRow(wAsk, { ...ctx, mini: false, noPick: false }).innerHTML;
+    ok(/<div class="ut-run-changes"[^>]*>[\s\S]*«Allow for 1 hour»: this conversation will be able to use/.test(tHtml) && /<span class="ut-run-hint ut-run-hint-window">For 1 hour this conversation uses this secret without asking/.test(tHtml) && !/ut-dock-fold/.test(tHtml),
+      'the TRAY\'s card keeps its rows as they were (its ask reads first already — the card is where the long words live): what «Allow for 1 hour» writes on its own row, the whole hint beside the answers, no strip fold');
+    // THE STRIP'S LINE ORDER (chat.css — the owner's fault was an order: .ut-run-changes had none, so it stood at 0, before the ask):
+    // the ask (1) · its clock and age (2) · [a break] · the command + where it sends (4) · [a break] · what «Always» replaces, the
+    // answers (5) · ⤢ right after them (6) · the fold (7). Every part of the run card the strip shows has its own order (none at 0)
+    const orderOf = (sel) => { const m = CC.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{[^}]*?\\border: (\\d+);')); return m ? Number(m[1]) : 0; };
+    const ord = { text: orderOf('.cad-rows .ut-body > .ut-text'), deadline: orderOf('.cad-rows .ut-body > .ut-deadline'), meta: orderOf('.cad-rows .ut-body > .ut-meta'), cmd: orderOf('.cad-rows .ut-run > .ut-run-cmd'), gist: orderOf('.cad-rows .ut-run > .ut-run-gist'), changes: orderOf('.cad-rows .ut-run > .ut-run-changes'), answer: orderOf('.cad-rows .ut-run > .ut-run-answer'), verbs: orderOf('.cad-rows .ut-body:has(> .ut-run) > .ut-actions'), fold: orderOf('.cad-rows .ut-run > .ut-dock-fold') };
+    const unordered = hideList(CC).filter((c) => !(orderOf('.cad-rows .ut-run > .' + c) > 1));
+    const breaks = /\.cad-rows \.ut-body:has\(> \.ut-run\)::after, \.cad-rows \.ut-body:has\(> \.ut-run\)::before \{ content: ''; flex: 1 1 100%; height: 0; \}/.test(CC) && /\.cad-rows \.ut-body:has\(> \.ut-run\)::after \{ order: 3; \}/.test(CC) && /\.cad-rows \.ut-body:has\(> \.ut-run\)::before \{ order: 5; \}/.test(CC);
+    const whole = /\.cad-rows \.ut-body:has\(> \.ut-run\) > \.ut-text \{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/.test(CC);
+    ok(!unordered.length && ord.text === 1 && ord.deadline === 2 && ord.meta === 2 && ord.cmd === 4 && ord.gist === 4 && ord.changes === 5 && ord.answer === 5 && ord.verbs === 6 && ord.fold === 7 && breaks && whole,
+      `RED-able (lane foryou-dock-layout — 3f8429cd5: .ut-run-changes had no order ⇒ 0, before the ask): THE STRIP READS TOP-DOWN — ${J(ord)}, every part the strip shows ordered (unordered: ${J(unordered)}), the line breaks after the ask's line and before the answers' (${breaks}), the ask wraps whole — never cut before the secret it names (${whole})`, { ord, unordered, breaks, whole });
   } catch (e) { ok(false, '㉝ A: the row renderer runs under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(hadE)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
   // B — A HELD STACK KEEPS THE READ CARD: the REAL annPlace + annLayout (sliced) over a stack laid out like style.css's (a column,

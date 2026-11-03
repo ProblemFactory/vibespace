@@ -11167,7 +11167,8 @@ export default {
   "{n} things to check": "{n} 件要看的事",
   "waiting for you · {what}": "等你操作 · {what}",
   "This conversation is waiting for you: {all}": "这个对话在等你：{all}",
-  "View all · {n}": "查看全部 · {n}",
+  // lane foryou-dock-layout: the attention dock's head — how many MORE wait beyond the one it shows
+  "{n} more · View all": "还有 {n} 项 · 查看全部",
   "{n} min left": "还剩 {n} 分钟",
   "{n} more waiting — open For you": "还有 {n} 个在等你 — 打开「待你处理」",
   "{n} more waiting": "还有 {n} 个在等你",
@@ -11705,6 +11706,8 @@ export default {
   "«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.": "「允许 1 小时」会替换这个对话在“{entry}”上到 {when} 为止的 1 小时授权：之后到 {until} 为止。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "This conversation's 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.": "这个对话在“{entry}”上的 1 小时授权已于 {when} 结束 — 「允许 1 小时」会给一个新的，到 {until} 为止。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.": "1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。", // lane vault-standing-request r7 («Allow for 1 hour»)
+  // lane foryou-dock-layout: «Allow for 1 hour»'s consequence, shortest form — the strip's ONE dim line under its answers
+  "For 1 hour in this conversation: no more asking; a notice at each use; then it asks again": "这个对话 1 小时内不再问；每次使用提示一条；到期再问",
   "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)

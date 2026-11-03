@@ -248,6 +248,7 @@ const hubAskHtml = (i, t, detail, noPick = false) => (i && i.action && HELD_ASKS
  *  record's fold (the window's answers live in its action row — the hint beside them, as text nodes). */
 const segHtml = (parts) => parts.map((x) => (x.code != null ? `<code class="ut-run-code">${escHtml(x.code)}</code>` : x.mono != null ? `<span class="ut-run-mono">${escHtml(x.mono)}</span>` : x.aside != null ? `<span class="ut-run-aside">${escHtml(x.aside)}</span>` : escHtml(x.text || ''))).join('');
 const linesHtml = (lines) => lines.map((l) => `<span class="ut-run-line">${segHtml(l)}</span>`).join('');
+const segText = (parts) => (Array.isArray(parts) ? parts.map((x) => (x.code != null ? x.code : x.mono != null ? x.mono : x.aside != null ? x.aside : x.text || '')).join('') : ''); // a title's words (lane foryou-dock-layout)
 const runHintHtml = (v) => (v && v.always.hint ? `<span class="ut-run-hint">${segHtml(v.always.hint)}</span>` : '');
 // r7: «Allow for 1 hour»'s own words beside the answers (the card's row above them says what it writes)
 const runWindowHintHtml = (v) => (v && v.window && v.window.hint ? `<span class="ut-run-hint ut-run-hint-window">${segHtml(v.window.hint)}</span>` : '');
@@ -280,7 +281,16 @@ export function runFactsHtml(i, t, { buttons = true, strip = false } = {}) {
     // «Always») is offered with what it writes — the card's own changes row (vault-standing r5: «what the row will be», on every
     // surface that draws the card) and «Allow for 1 hour»'s own words — and named as the card names it (hubAnswerWord with the action)
     const writes = answers.includes('window') || answers.includes('always');
-    return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${writes ? runChangesHtml(v) : ''}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type, i.action))}</button>`).join('')}${answers.includes('window') ? runWindowHintHtml(v) : ''}</div>` : ''}</div>`;
+    // lane foryou-dock-layout (the owner 2026-11-02 «这个布局不太好»: the strip OPENED with «Allow for 1 hour»'s explanation — two
+    // lines above who asks for what — and said the hour's consequence twice): THE STRIP READS TOP-DOWN — the ask (the row's
+    // question), the command + where it sends, what an «Always» replaces (a warning: never folded), the answers, then ONE dim line
+    // of the hour's consequence (the hour, this conversation — what the press carries). The hour's LONG words are the button's
+    // title and the strip's ONE fold — that line is its summary — with the scrub note (style: chat.css .ut-dock-fold)
+    const win = answers.includes('window') && v.window && v.window.offered ? v.window : null, winN = win && Array.isArray(win.lines) ? win.lines.length : 0;
+    const own = writes && v.changes ? { lines: v.changes.lines.slice(0, v.changes.lines.length - winN), redrawn: v.changes.redrawn } : null;
+    const long = win ? [...(win.lines || []), segText(win.hint)].filter(Boolean).join('\n') : '';
+    const fold = win ? `<details class="ut-detail-exp ut-run-fold ut-dock-fold"><summary>${win.short ? `<span class="ut-run-hint ut-run-hint-window ut-run-hint-short">${segHtml(win.short)}</span> ` : ''}<span class="ut-dock-more">${escHtml(t('detail'))}</span></summary><div class="ut-run-tech">${(win.lines || []).map((l) => `<span class="ut-run-line">${escHtml(l)}</span>`).join('')}${win.hint ? `<span class="ut-run-line">${segHtml(win.hint)}</span>` : ''}${v.output && v.output.length ? `<span class="ut-run-line ut-run-output">${segHtml(v.output)}</span>` : ''}</div></details>` : '';
+    return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${own && (own.lines.length || own.redrawn) ? runChangesHtml({ changes: own }) : ''}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}"${a === 'window' && long ? ` title="${escHtml(long)}"` : ''}>${escHtml(hubAnswerWord(a, t, i.action.type, i.action))}</button>`).join('')}</div>` : ''}${fold}</div>`;
   }
   const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
   const answers = buttons && i.action.askId ? heldAnswers(i) : [];

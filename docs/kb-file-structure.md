@@ -1438,6 +1438,7 @@ src/lib/plugins-ui.js relayFactWords + scripts/i18n-check.mjs noticeKeyTables (l
 scripts/test-frp-plugin.mjs h/h2/i/j + test-frps-plugin.mjs ⑦c + test-job-notice.mjs §3 + test-relay-token.mjs ⑧b (lane frp-token-proof) — the incident + the card before a try, the latch, the trial at unlock, records without frpcKnockless, a stub frps 0.70.0, the run reader ⇒ kb-file-structure.md
 src/job-model.js nextFire + src/jobs.js (lane int361, .367) — PURE: the cron scan walks REAL minutes, reads the wall clock; a repeated fall-back time fires once (first pass, or second if not fired at the first), a missing spring-forward time fires at the jump ⇒ kb-file-structure.md
 - **src/plugin-cred-state.js** (PURE, CJS; hotfix 2.369.368): `pluginGitCredOf(answer)` → `{ready, host, kind}`, the ONE reader of /api/integrations/plugin-git's answer (the envelope or a bare view; a locked vault ⇒ not ready) for the Install plugin… dialog; gate test-dialog-yield ⑨ ⇒ essay
+src/lib/user-todos-row.js runFactsHtml `strip` + public/chat.css .cad-rows / .ut-dock-fold + chat-needs-card.js _dockPass (lane foryou-dock-layout) — the dock is ONE column; its run card reads top-down by explicit flex orders; the hour's long words in the one fold ⇒ kb-file-structure.md
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
@@ -1500,6 +1501,13 @@ src/job-model.js nextFire + src/jobs.js (lane int361, .367) — PURE: the cron s
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/lib/user-todos-row.js runFactsHtml `strip` + public/chat.css (the attention dock's run card) + src/lib/chat-needs-card.js _dockPass + src/foryou-actions.js runCardOf `window.short` / `window.lines` / `output` (lane foryou-dock-layout, .373)
+
+- **ONE renderer, two layouts.** The tray, the mini inbox and the For-you window draw a run ask's whole card (runFactsHtml); the attention dock passes `ctx.noPick` ⇒ `strip`: the command, what its answers decide on (runStripOf), what an «Always» REPLACES (`own` — `changes.lines` minus the window's trailing `window.lines`), the answers, and — when «Allow for 1 hour» is offered — ONE `<details class="ut-detail-exp ut-run-fold ut-dock-fold">` whose summary is `window.short` (the hour's consequence, one line) and whose body is `window.lines` + the whole hint + `output` (the scrub note). The «Allow for 1 hour» button's `title` = the same long words. patchRow keeps an open `.ut-run-fold` open through a repaint.
+- **The strip's line order is chat.css's** — every part has its own `order:` (the base's `.ut-run-changes` had none ⇒ 0, before the ask): `.ut-text` 1 (a run card's ask wraps whole: `.ut-body:has(> .ut-run) > .ut-text`), `.ut-deadline` / `.ut-meta` 2, a zero-tall 100 % `::after` break at 3, `.ut-run-cmd` (0 1 auto) / `.ut-run-gist` (1 1 14em) 4, a `::before` break at 5, `.ut-run-changes` / `.ut-run-answer` 5, `.ut-actions` (⤢, 12 px after the answers — never adrift at a wide strip's edge) 6 — the row draws its verbs FIRST in the DOM, so an equal order would put them ahead of the answers — `.ut-dock-fold` 7. The fold's `.ut-run-tech` is `display: block` (it is the card's label/value GRID elsewhere — a grid of plain lines blew a phone strip to 2966 px).
+- **The head's line:** `.cad-rows { order: 3; flex: 1 1 100% }` + `.chat-attn-dock > .cad-all { margin-left: auto }` at every width (r12b's < 520 px shape); `_dockPass` words it `t('{n} more · View all', { n: d.more })`.
+- **The phone (style.css touch block):** the ask on a 44 px tap line (24 px lines, 10 px padding), its lines at 16 px, ⤢ on the age's line (order 3), the fold's summary a 44 px flex target. Gates: test-user-todos-layout ㉝ A; test-conversation-needs.
 
 ### src/lib/desktop-record.js keepNames + src/ws-handler.js layout-sync + src/lib/desktop-manager.js + src/lib/layout.js placeholders + src/lib/session-lifecycle.js `_conversation` + src/server/boot-restore.js retireDeadSocket + src/routes/persistence.js + src/lib/setup-flows.js + scripts/test-layout-stopped-window.mjs + scripts/test-layout-placeholder-ui.mjs — A WINDOW NEVER LOSES ITS NAME; UNBUILT IS NOT DROPPED (lane layout-stopped-window, 2026-10-30, .365; the owner «我的个人桌面丢了很多窗口»)
 

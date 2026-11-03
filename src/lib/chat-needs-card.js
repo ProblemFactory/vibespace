@@ -421,7 +421,7 @@ export class NeedsCards {
    *  drawn by THIS pass from THIS pass's list — the cards and the strip change in the same frame. PURE dockOf decides:
    *  nothing waits ⇒ no strip (`hidden` — no empty chrome); else «waiting for you · N» + the NEWEST one's row — THE row
    *  (foryouRows.reconcile: renderRow / patchRow; its verbs through foryouRows.wire — the tray's routes, ONE answer writer;
-   *  an answer anywhere drops it here in the pass the store's broadcast schedules) — + «View all · N» when several wait
+   *  an answer anywhere drops it here in the pass the store's broadcast schedules) — + «N more · View all» when several wait
    *  (the For-you window scoped to this conversation; never a «show more» inside the strip). THE ROW'S KEEP RULE: a row
    *  whose reply box is in use stays under the typist — its item, open or answered, until the box is left (`ut-box-left`).
    *  A pinned view stays at the live tail while the strip changes size (_dockRO); a reader in history keeps their top
@@ -451,7 +451,9 @@ export class NeedsCards {
     if (count.textContent !== (words ? words.text : '')) count.textContent = words ? words.text : '';
     if (count.title !== (words ? words.title : '')) count.title = words ? words.title : '';
     all.hidden = !(d && d.n > 1);
-    if (d && d.n > 1) { const w = t('View all · {n}', { n: d.n }); if (all.textContent !== w) all.textContent = w; }
+    // lane foryou-dock-layout: the head's line says how many MORE wait beyond the one it draws («5 more · View all»; chat.css:
+    // the head's line, the row under it — one column)
+    if (d && d.n > 1) { const w = t('{n} more · View all', { n: d.more }); if (all.textContent !== w) all.textContent = w; }
     const had = new Set(rows.querySelectorAll('button')); // r14: the buttons drawn before this patch (a patch that MAKES one arms the strip)
     this.app.foryouRows?.reconcileDock(rows, [entry]); // r11: THE renderer with the summary + the plain buttons — never a pick (a form exists once per item: the pick is the item's)
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');

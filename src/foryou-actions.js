@@ -886,7 +886,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }] } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, output: f.masking ? said(RUN_MASKING, f.masking) : null, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }], short: [{ text: t(WINDOW_SHORT_WORDS) }], lines: winLines } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -913,6 +913,11 @@ const WINDOW_WRITES_WORDS = i18nKey('«Allow for 1 hour»: this conversation wil
 const WINDOW_REPLACES_WORDS = i18nKey('«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.');
 const WINDOW_ENDED_WORDS = i18nKey('This conversation\'s 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.');
 const WINDOW_HINT_WORDS = i18nKey('For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.');
+// lane foryou-dock-layout (the owner 2026-11-02 «这个布局不太好» — the strip led with the hour's explanation, above who asks for
+// what): the hour's consequence in its SHORTEST form — the ONE dim line under the strip's answers (the hour, this conversation:
+// what the press carries); the long words (WINDOW_WRITES … WINDOW_SWITCH, the hint above) live in the button's title and the
+// strip's one fold
+const WINDOW_SHORT_WORDS = i18nKey('For 1 hour in this conversation: no more asking; a notice at each use; then it asks again');
 const WINDOW_SWITCH_WORDS = i18nKey('«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');
 // r8 (主开发's acceptance of r7, the 除了 hazard): where the owner EXCEPTED this conversation from an entry's grant, no «Allow for
 // 1 hour» (the press would have taken it out of 除了 for good) — the card says why (vault-run-door `facts.window.excepted`)
