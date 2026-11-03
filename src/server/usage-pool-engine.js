@@ -2577,6 +2577,7 @@ function noteTurnEnd(session, rec = null) {
     session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
     return;
   }
+  persistRequestStamp(session); // the turn's last request outlives a restart (lane cache-warmth-tiles r1a′)
   const sigs = session._turnWallSigs || [];
   const workAfter = session._turnWorkAfterSig || 0;
   // THE LANE DECISION CLOSES WITH THE TURN (2026-09-13). It runs BEFORE the
@@ -4026,16 +4027,35 @@ function noteModelRequest(session, rec, now = Date.now()) {
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
 }
+/** THE STAMP SURVIVES A RESTART (主开发's ruling, r1a′): written to the session meta at a live TURN END and in the shutdown
+ *  flush — never per record (a turn makes many requests; one write per turn) — and read back by boot-restore as the
+ *  stamp. An unchanged stamp is not written again. Returns true when it wrote. */
+function persistRequestStamp(session) {
+  try {
+    const at = Number(session && session._lastRequestAt) || 0;
+    if (!at || !session.sockName) return false;
+    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
+    if (prev === undefined || (prev && prev.lastRequestAt === at)) return false; // the store is not wired / nothing new
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), lastRequestAt: at });
+    return true;
+  } catch (e) { console.warn('[pool] request stamp not persisted:', e.message); return false; }
+}
+/** The SIGTERM / SIGINT flush (server.js shutdownNow): every live conversation's newest stamp. */
+function flushRequestStamps() {
+  let n = 0;
+  for (const [, s] of activeSessions) if (persistRequestStamp(s)) n++;
+  return n;
+}
 /** THE CONVERSATION'S PROMPT-CACHE FACTS (lane cache-warmth-tiles, 2026-11-02) — ONE
  *  producer for the pool's warm-cache hold (warmCache over these) AND the session list's
  *  warmth fields (routes/sessions → the person's colour), so the two never disagree:
  *  {lastRequestAt (ms|null), cacheTtlSec (s|null = unknown), cacheLostAt (ms|null)}.
  *  · lastRequestAt = the conversation's LAST MODEL REQUEST: `_lastRequestAt`, written by
- *    noteModelRequest from the stream's own request records. `_lastPtyDataAt` (the pool's
- *    stamp until now) only while the stream has named no request — a terminal-mode
- *    session, a hub that restarted since its last request: it is ANY pty byte (keystroke
- *    echo, the dtach attach preamble), so once a request stamp exists pty noise never
- *    moves it.
+ *    noteModelRequest from the stream's own request records, persisted at turn end and
+ *    in the shutdown flush, restored by boot-restore. A chat session with none yet is
+ *    UNKNOWN; `_lastPtyDataAt` (the pool's stamp until now — ANY pty byte: keystroke echo,
+ *    the dtach attach preamble) stands in only where no stream names a request (a
+ *    terminal-mode session).
  *  · cacheTtlSec = cacheTtlSecFor (account-pool-auto): the harness row, an API key
  *    (unknown), usage credits IN USE — `overageState().inUse === 'yes'`, money flowing
  *    now (src/spend-authorizer.js overageState: mode 'allowed' is extra usage ENABLED but
@@ -4050,7 +4070,11 @@ function cacheFactsOf(session, now = Date.now()) {
   const apiKey = !!acct && (acct.type || 'api') === 'api';
   let onCredits = false; try { onCredits = overageState(readRawUsageCache(usageCacheKeyFor(s))).inUse === 'yes'; } catch { onCredits = false; }
   const cacheTtlSec = cacheTtlSecFor({ harness, apiKey, onCredits });
-  const lastRequestAt = Number(s._lastRequestAt) || Number(s._lastPtyDataAt) || null;
+  // a chat session of a harness that states a TTL names each request in its stream (noteModelRequest): no stamp there ⇒
+  // UNKNOWN (no colour, no hold) — a pty byte (the attach preamble after a restart) is never a request. The pty stamp
+  // stands in only where no stream names one (a terminal-mode session).
+  const streamed = s.mode === 'chat' && !!capsOf(harness).promptCache;
+  const lastRequestAt = Number(s._lastRequestAt) || (streamed ? null : Number(s._lastPtyDataAt) || null);
   // a 'spawn' row is the conversation's FIRST link (its `from` is the pool default's member, made before this process sent
   // anything) — never a move away from the account that holds the cache
   const row = cacheTtlSec ? lastRepointRow(s, { at: now, minAt: now - cacheTtlSec * 1000 }) : null;
@@ -7609,7 +7633,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
-    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test

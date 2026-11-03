@@ -14,13 +14,18 @@
 //     is on, over usage-pool-engine cacheFactsOf (the pool's warm-cache hold reads the same — test-pool-auto drives the
 //     producer: the request stamp over pty noise, the credits TTL, the re-point = the cache lost; test-fable-cap-pool-storm §21 the
 //     stamp's ONE writer through the real stdout consumer and the device feed);
-//   ⑤ the switch: `desktop.cacheWarmth`, boolean, OFF by default, in the Window group, its words in zh / ja;
+//   ⑤ the switch: `desktop.cacheWarmth`, boolean, OFF by default, in the Window group, its words in zh / ja — HELD (r1a′,
+//     主开发's ruling): the row exists but the Settings window never draws it (no search, no modified row) until r1b's band;
 //   ⑥ the five tokens, each DERIVED from the theme's status vocabulary in the block every theme inherits, and the theme
-//     editor's «Cache warmth» rows starting as those derivations (a saved theme keeps deriving).
+//     editor's «Cache warmth» rows starting as those derivations (a saved theme keeps deriving);
+//   ⑦ THE STAMP OUTLIVES A RESTART (r1a′): the REAL boot-restore over a scratch data dir (a fake fuser says every socket is
+//     alive) reads a persisted `lastRequestAt` back as the conversation's stamp — 30 min old ⇒ warm, 30 min ago; a meta with
+//     none restores none (the engine then calls it UNKNOWN — test-pool-auto).
 // Run: node scripts/test-cache-warmth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -30,11 +35,11 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 
 let CW = null; try { CW = require(path.join(REPO, 'src/cache-warmth.js')); } catch (e) { CW = { why: e.message.split('\n')[0] }; }
 ok('THE TIER FUNCTION exists — src/cache-warmth.js tierOf / warmthOf / warmthTitle (RED on 3f8429cd5: there was none)', !!(CW.tierOf && CW.warmthOf && CW.warmthTitle), CW.why || '');
-if (!CW.tierOf) { console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
-const { tierOf, warmthOf, warmthTitle, WARMTH_TIERS, WARMTH_STATES } = CW;
+const HAVE = !!CW.tierOf; // a base without the module (3f8429cd5) skips ①–③ and still judges ④–⑦ BY NAME
+const { tierOf, warmthOf, warmthTitle, WARMTH_TIERS, WARMTH_STATES } = HAVE ? CW : {};
 
 console.log('— ① the tiers');
-{
+if (HAVE) {
   ok('the table: fresh < 20 · mid < 40 · late < 50 · critical < 60 sixtieths of the TTL', JSON.stringify(WARMTH_TIERS.map((r) => [r.tier, r.below])) === '[["fresh",20],["mid",40],["late",50],["critical",60]]');
   ok('the states, in order', WARMTH_STATES.join(',') === 'fresh,mid,late,critical,expired,unknown');
   for (const [label, ttlS] of [['1 h', 3600], ['5 min', 300]]) {
@@ -52,7 +57,7 @@ console.log('— ① the tiers');
 }
 
 console.log('— ② by the hub\'s clock');
-{
+if (HAVE) {
   const S = 1_800_000_000_000; // the hub's now in its answer
   const fact = { lastRequestAt: S - 45 * 60e3, cacheTtlSec: 3600, cacheLostAt: null };
   const a = warmthOf(fact, { serverNow: S, receivedAt: 5_000, now: 5_000 });
@@ -77,7 +82,7 @@ console.log('— ② by the hub\'s clock');
 }
 
 console.log('— ③ the words');
-{
+if (HAVE) {
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const tr = (dict) => (s, p) => (dict[s] || s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));
   const S = 1_800_000_000_000;
@@ -100,20 +105,24 @@ console.log('— ③ the words');
 console.log('— ④ the session-list diff');
 {
   const R = require(path.join(REPO, 'src/routes/sessions.js'));
+  if (typeof R.warmthDiff !== 'function') R.warmthDiff = () => ({ warmth: {}, serverNow: null }); // a base without it reds by name below
   const live = new Map([
     ['sess-a', { _webuiId: 'sess-a', backend: 'claude' }],
     ['sess-codex', { _webuiId: 'sess-codex', backend: 'codex' }],
     ['sess-boom', { _webuiId: 'sess-boom', backend: 'claude' }],
     ['sess-tmux', { _webuiId: 'sess-tmux', backend: 'claude', isTmuxView: true }],
+    ['sess-fresh', { _webuiId: 'sess-fresh', backend: 'claude' }],
   ]);
   const factsOf = (s, now) => {
     if (s._webuiId === 'sess-boom') throw new Error('boom');
     if (s.backend === 'codex') return { lastRequestAt: now - 1e3, cacheTtlSec: null, cacheLostAt: null };
+    if (s._webuiId === 'sess-fresh') return { lastRequestAt: null, cacheTtlSec: 3600, cacheLostAt: null }; // a restart with nothing persisted
     return { lastRequestAt: now - 5e3, cacheTtlSec: 3600, cacheLostAt: now - 9e3, extra: 'not sent' };
   };
   const d = R.warmthDiff(live, factsOf, 1000000);
   ok('each live conversation\'s THREE facts keyed by its webui id, with the hub\'s now', d.serverNow === 1000000 && JSON.stringify(d.warmth) === JSON.stringify({ 'sess-a': { lastRequestAt: 995000, cacheTtlSec: 3600, cacheLostAt: 991000 } }), JSON.stringify(d));
   ok('an unknown TTL (codex) is left out — no colour, never a guess; a throwing fact and a tmux view are skipped', !('sess-codex' in d.warmth) && !('sess-boom' in d.warmth) && !('sess-tmux' in d.warmth));
+  ok('…and so is a conversation whose last request is unknown (r1a′: a restart with nothing persisted — no colour)', !('sess-fresh' in d.warmth));
   ok('no producer ⇒ an empty diff (never a throw)', JSON.stringify(R.warmthDiff(live, null, 7)) === '{"warmth":{},"serverNow":7}');
   const rt = code('src/routes/sessions.js');
   ok('WIRING: the 5 s poll\'s answer (cached AND fresh sweep) carries the diff ONLY while desktop.cacheWarmth is on — off is not even computed',
@@ -135,6 +144,15 @@ console.log('— ⑤ the switch');
   const words = [...row.matchAll(/t\(("(?:[^"\\]|\\.)*")\)/g)].map((m) => JSON.parse(m[1]));
   ok('its label and description say what it shows, that it is off by default and costs nothing — in zh and ja too',
     words.length === 2 && /Off by default/.test(words[1]) && /no request and no timer/.test(words[1]) && words.every((w) => zh[w] && ja[w]) && /默认关闭/.test(zh[words[1]]) && /既定はオフ/.test(ja[words[1]]), JSON.stringify(words));
+  const SM = await import(path.join(REPO, 'src/lib/settings-schema.js'));
+  const SV = await import(path.join(REPO, 'src/lib/settings-view.js'));
+  const drawn = (schema, query, modified) => SV.settingsViewModel(schema, { categories: SM.SETTINGS_CATEGORIES, query, isModified: () => modified }).sections.flatMap((x) => x.rows.map((r) => r.path));
+  const row0 = SM.SETTINGS_SCHEMA['desktop.cacheWarmth'];
+  ok('HELD (r1a′): the row exists — default off, its why in words — but the window never draws it: not plainly, not by a search, not as a modified row',
+    row0 && row0.default === false && typeof row0.held === 'string' && /r1b/.test(row0.held)
+    && !drawn(SM.SETTINGS_SCHEMA, '', false).includes('desktop.cacheWarmth') && !drawn(SM.SETTINGS_SCHEMA, 'prompt-cache', false).includes('desktop.cacheWarmth') && !drawn(SM.SETTINGS_SCHEMA, 'cacheWarmth', true).includes('desktop.cacheWarmth'));
+  const { held: _h, ...unheld } = row0 || {};
+  ok('…CONTROL: the same row without `held` is drawn (a search finds it) — the field is what hides it', drawn({ ...SM.SETTINGS_SCHEMA, 'desktop.cacheWarmth': unheld }, 'prompt-cache', false).includes('desktop.cacheWarmth'));
 }
 
 console.log('— ⑥ the tokens');
@@ -150,6 +168,35 @@ console.log('— ⑥ the tokens');
   const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: '([^']+)', group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
   ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
   ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', /for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js')));
+}
+
+console.log('— ⑦ the stamp outlives a restart');
+{
+  const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
+  const A = require(path.join(REPO, 'src/account-pool-auto.js'));
+  const d = scratchDir('cwt-restore');
+  const bin = path.join(d, 'bin'), SOCK = path.join(d, 'sockets'), META = path.join(d, 'meta'), BUF = path.join(d, 'buffers');
+  for (const x of [bin, SOCK, META, BUF]) fs.mkdirSync(x, { recursive: true });
+  for (const b of ['fuser', 'pgrep']) fs.writeFileSync(path.join(bin, b), '#!/bin/sh\necho 4242\nexit 0\n', { mode: 0o755 }); // every socket has an owner ⇒ alive
+  const T0 = Date.now();
+  const add = (n, meta) => { const sock = `cw-${n}-${1793300000000 + n}`; fs.writeFileSync(path.join(SOCK, sock), ''); fs.writeFileSync(path.join(META, sock + '.json'), JSON.stringify({ webuiSessionId: 'sess-' + sock.slice(3), createdAt: 1793300000000, cwd: '/srv/u', backend: 'claude', mode: 'chat', ...meta })); return 'sess-' + sock.slice(3); };
+  const idStamped = add(1, { name: 'stamped', claudeSessionId: '11111111-1111-4111-8111-111111111111', lastRequestAt: T0 - 30 * 60e3 });
+  const idBare = add(2, { name: 'bare', claudeSessionId: '22222222-2222-4222-8222-222222222222' });
+  const active = new Map();
+  const readMeta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META, s + '.json'), 'utf8')); } catch { return {}; } };
+  const api = BR.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+    activeSessions: active, sessionCounterRef: { value: 0 }, attachToDtach: () => {}, setupSessionPty: () => {},
+    readSessionMeta: readMeta, writeSessionMeta: (s, m) => fs.writeFileSync(path.join(META, s + '.json'), JSON.stringify(m)), deleteSessionMeta: () => {},
+    broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, sbNoteServerOp: () => {}, getHosts: () => null, getDialBridge: () => null, getExitProxy: () => null, note: () => {} });
+  const p0 = process.env.PATH, l0 = console.log, w0 = console.warn;
+  process.env.PATH = bin + ':' + p0; console.log = console.warn = () => { };
+  try { await api.probeSockets(); api.restoreSessions(); } catch (e) { console.error(e); } finally { process.env.PATH = p0; console.log = l0; console.warn = w0; }
+  const sS = active.get(idStamped), sB = active.get(idBare);
+  ok('the REAL boot-restore brought both conversations back live', !!sS && !!sB, [...active.keys()].join(','));
+  ok('THE PIN (r1a′): the persisted stamp is read back as the conversation\'s last request', sS && sS._lastRequestAt === T0 - 30 * 60e3, String(sS && sS._lastRequestAt));
+  const w = A.warmCache({ lastRequestAt: sS && sS._lastRequestAt, cacheTtlSec: A.cacheTtlSecFor({ harness: 'claude' }), nowMs: T0 });
+  ok('…so a 30-minute-old stamp is WARM, 30 min ago, after the restart (the hold and the colour read it — test-pool-auto)', w.warm === true && w.agoSec === 1800, JSON.stringify(w));
+  ok('…and a meta with none restores none (the engine then calls the conversation UNKNOWN: no colour, no hold — never the attach preamble)', sB && sB._lastRequestAt === undefined, String(sB && sB._lastRequestAt));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

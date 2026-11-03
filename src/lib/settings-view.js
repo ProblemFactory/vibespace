@@ -14,6 +14,11 @@
 //                               charter rule 7), and a search still finds it,
 //                               with a chip that says why in words.
 //
+//   held: '<why>'               (lane cache-warmth-tiles, 2026-11-03) the row EXISTS — its key, its default, its line in
+//                               docs/settings.md, `settings.get` — but the window does NOT draw it, not by a search, not
+//                               when modified: its feature's surface has not landed yet. The words say why and until
+//                               what; test-architecture §44 lists every held row with them (the census note).
+//
 // A clause carries exactly ONE tag of the CLOSED set WHEN_KINDS:
 //   { setting: 'chat.compactMode', is: true }     another row's value equals
 //   { setting: 'channels.offHoursTz', isNot: '' } …or differs from a value
@@ -124,6 +129,7 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
   for (const [path, row] of Object.entries(schema || {})) {
     const sec = byCategory[row && row.category];
     if (!sec) continue;
+    if (row.held) continue; // a HELD row is never drawn (the header's `held`)
     // lane attention-policy: a block's head words find its rows too (typing 需关注 / attention finds 「需关注 · 怎么判断」)
     if (q && !((row.label || '') + ' ' + (row.description || '') + ' ' + path + ' ' + (row.blockTitle || '')).toLowerCase().includes(q)) continue;
     const why = whyHidden(row, ctx, t);

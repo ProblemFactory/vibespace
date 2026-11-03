@@ -132,8 +132,13 @@ console.log('§4 the shipped schema');
   ok(m1.byCategory.Codex.show && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
   ok(!m0.byCategory['Desktop apps'].show && m1.byCategory['Desktop apps'].rows.length === 9 && mu.byCategory['Desktop apps'].show, 'Desktop apps: hidden without a display backend, its 9 rows with one (lane agent-window-no-steal: + Agent-opened windows come to the front; lane app-display-portal: + file dialogs in their own window; lane app-display-notify-sink: + notifications in their own window; lane app-display-secrets: + apps keep their logins), SHOWN while the fact is unknown');
   ok(!m0.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField') && m1.byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField') && real({ channels: null }).byCategory.Channels.rows.some((r) => r.path === 'channels.larkNameField'), 'the Lark-only row: hidden with no Lark account, shown with one, shown when the accounts read failed (V3: a 401 / a timeout hides nothing)');
-  const misses = Object.keys(SCHEMA).filter((p) => !real(none, { query: p }).sections.some((s) => s.rows.some((r) => r.path === p)));
-  ok(misses.length === 0, `V1: EVERY one of the ${Object.keys(SCHEMA).length} rows is reachable by searching its key with the switch OFF and every fact false (a loop, not a sample)`, misses.slice(0, 5));
+  // a HELD row (src/lib/settings-view.js `held`, lane cache-warmth-tiles r1a′) exists but is never drawn — the one named
+  // exception to V1, each listed by test-architecture §44 with its why
+  const heldKeys = Object.keys(SCHEMA).filter((p) => SCHEMA[p].held !== undefined);
+  const misses = Object.keys(SCHEMA).filter((p) => !heldKeys.includes(p) && !real(none, { query: p }).sections.some((s) => s.rows.some((r) => r.path === p)));
+  ok(misses.length === 0, `V1: EVERY one of the ${Object.keys(SCHEMA).length - heldKeys.length} drawable rows is reachable by searching its key with the switch OFF and every fact false (a loop, not a sample; ${heldKeys.length} held)`, misses.slice(0, 5));
+  ok(heldKeys.every((p) => !real(all, { query: p, showAdvanced: true }).sections.some((s) => s.rows.some((r) => r.path === p))),
+    `V1: …and a HELD row is reachable by NO search, every fact true (${heldKeys.join(', ') || 'none held'})`);
   const cloak = real(none, { query: 'cloakbrowser' });
   { const cr = cloak.sections.flatMap((s) => s.rows).filter((r) => r.path === 'browser.cloak.executablePath' || r.path === 'browser.cloak.egressAllowlist');
     ok(cr.length === 2 && cr.every((r) => !r.chips.some((c) => c.kind === 'unused')) && !('browser.cloak.enabled' in SCHEMA), 'the switch dialog\'s deep link ("CloakBrowser") reaches both live CloakBrowser rows with no "not in use here" chip — lane dc-browser-providers deleted the never-run container switch they hid behind', cr.map((r) => r.path)); }

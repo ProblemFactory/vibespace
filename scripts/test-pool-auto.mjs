@@ -663,7 +663,7 @@ await (async () => {
     return { hit: true, mod: require(fp) };
   };
   const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
-  const world = (engMod, { burnA = 0.012, extra = [] } = {}) => {
+  const world = (engMod, { burnA = 0.012, extra = [], metaStore = null } = {}) => {
     const root = fs.mkdtempSync(path.join(scr, 'w-'));
     const dataDir = path.join(root, 'data');
     const am = new AccountManager({ dataDir });
@@ -684,14 +684,14 @@ await (async () => {
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-      getQuotaProbe: () => null, getSessionMetaStore: () => null,
+      getQuotaProbe: () => null, getSessionMetaStore: () => metaStore,
     });
     // the estimator's burn, injected on the engine's OWN instance (the ledger is
     // a stub here): member A burns its 5h at 1.2 %/min, B is idle
     eng.usageEstimator.burnFor = (id) => (id === A && burnA ? { fiveHour: burnA } : {});
     const mk = (sid, lastAgoMs) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - lastAgoMs, _isStreaming: false, _turnState: 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - lastAgoMs, _lastRequestAt: Date.now() - lastAgoMs, _isStreaming: false, _turnState: 'idle' }; // the request stamp the stream's record writes (r1a′)
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, A, { why: 'spawn' });
       return s;
     };
@@ -704,53 +704,80 @@ await (async () => {
     return { eng, am, A, Bm, P, sessions, notices, linkOf, run };
   };
   const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
+  // the engine's facts producer — guarded so a base without it (3f8429cd5) reds BY NAME instead of crashing the suite
+  const factsOf = (eng, s, now) => (typeof eng.cacheFactsOf === 'function' ? eng.cacheFactsOf(s, now) : { lastRequestAt: null, cacheTtlSec: null, cacheLostAt: null, missing: 'cacheFactsOf' });
   const w = world(engMod);
   if (!w) { ck('proj/engine SKIP — pools unsupported on this platform', true); }
   else {
-    ck('engine setup: the cold/warm split is what warmCache says over the engine\'s own facts', warmCache({ ...w.eng.cacheFactsOf(w.sessions.get('sess-cold'), Date.now()), nowMs: Date.now() }).warm === false
-      && warmCache({ ...w.eng.cacheFactsOf(w.sessions.get('sess-warm'), Date.now()), nowMs: Date.now() }).warm === true);
+    ck('engine setup: the cold/warm split is what warmCache says over the engine\'s own facts', warmCache({ ...factsOf(w.eng, w.sessions.get('sess-cold'), Date.now()), nowMs: Date.now() }).warm === false
+      && warmCache({ ...factsOf(w.eng, w.sessions.get('sess-warm'), Date.now()), nowMs: Date.now() }).warm === true);
     // THE FACTS' ONE PRODUCER (lane cache-warmth-tiles): usage-pool-engine cacheFactsOf — the hold reads it and the session
     // list sends it. A second world whose conversations' streams named their last requests (45 s and 20 min ago) through the
     // engine's ONE writer (noteModelRequest — test-fable-cap-pool-storm §21 drives it through both real feeds).
     {
       const T0 = Date.now();
-      const w2 = world(engMod, { extra: [['sess-20', 20 * 60e3]] });
+      const metas = new Map();
+      const metaStore = { readSessionMeta: (k) => metas.get(k) || {}, writeSessionMeta: (k, m) => { metas.set(k, m); } };
+      const w2 = world(engMod, { extra: [['sess-20', 20 * 60e3], ['sess-restored', 30 * 60e3], ['sess-preamble', 70 * 60e3]], metaStore });
+      // AFTER A RESTART (主开发's ruling r1a′): boot-restore reads the persisted stamp back (sess-restored, 30 min — the real restore
+      // is test-cache-warmth ⑦); a conversation with none has only the attach preamble's pty byte (sess-preamble)
+      delete w2.sessions.get('sess-preamble')._lastRequestAt; w2.sessions.get('sess-preamble')._lastPtyDataAt = T0;
       const req = { type: 'assistant', message: { id: 'msg_x', usage: { input_tokens: 1, output_tokens: 1 } } };
-      w2.eng.noteModelRequest(w2.sessions.get('sess-warm'), req, T0 - 45e3);
-      w2.eng.noteModelRequest(w2.sessions.get('sess-20'), req, T0 - 20 * 60e3);
+      w2.eng.noteModelRequest?.(w2.sessions.get('sess-warm'), req, T0 - 45e3);
+      w2.eng.noteModelRequest?.(w2.sessions.get('sess-20'), req, T0 - 20 * 60e3);
       w2.sessions.get('sess-20')._lastPtyDataAt = T0 - 1e3; // pty noise after its request (an attach preamble, an echo)
-      const f0 = w.eng.cacheFactsOf(w.sessions.get('sess-warm'), T0);
-      ck('facts: a conversation whose stream named no request yet ⇒ the pty stamp stands in; the claude hour; no move', f0.lastRequestAt === w.sessions.get('sess-warm')._lastPtyDataAt && f0.cacheTtlSec === 3600 && f0.cacheLostAt === null, JSON.stringify(f0));
-      const fW = w2.eng.cacheFactsOf(w2.sessions.get('sess-warm'), T0);
+      const fP = factsOf(w2.eng, w2.sessions.get('sess-preamble'), T0);
+      ck('facts: THE PIN (r1a′) — a chat conversation whose stream named no request (a restart with nothing persisted) is UNKNOWN: its pty byte of this instant (the attach preamble) never warms it', fP.lastRequestAt === null && warmCache({ ...fP, nowMs: T0 }).warm === false && fP.cacheTtlSec === 3600, JSON.stringify(fP));
+      const tS = { ...w2.sessions.get('sess-preamble'), mode: 'terminal' };
+      ck('facts: …a TERMINAL-mode conversation (no stream names a request) keeps the pty stamp', factsOf(w2.eng, tS, T0).lastRequestAt === T0);
+      const fR = factsOf(w2.eng, w2.sessions.get('sess-restored'), T0);
+      ck('facts: THE PIN (r1a′) — a restored conversation whose persisted stamp is 30 min old is WARM, 30 min ago', warmCache({ ...fR, nowMs: T0 }).warm === true && Math.abs(warmCache({ ...fR, nowMs: T0 }).agoSec - 1800) <= 2, JSON.stringify(fR));
+      const fW = factsOf(w2.eng, w2.sessions.get('sess-warm'), T0);
       ck('facts: once the stream named a request, THAT is the last model request', fW.lastRequestAt === T0 - 45e3 && fW.cacheTtlSec === 3600, JSON.stringify(fW));
-      const f20 = w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0);
+      const f20 = factsOf(w2.eng, w2.sessions.get('sess-20'), T0);
       ck('facts: …and pty noise after it never moves it (20 min stays 20 min)', f20.lastRequestAt === T0 - 20 * 60e3, JSON.stringify(f20));
-      ck('facts: a record that is no request (no usage) writes nothing', (() => { const x = {}; w2.eng.noteModelRequest(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })());
+      ck('facts: a record that is no request (no usage) writes nothing', (() => { const x = {}; w2.eng.noteModelRequest?.(x, { type: 'assistant', message: { id: 'm' } }); w2.eng.noteModelRequest?.(x, { type: 'system', subtype: 'init' }); return x._lastRequestAt === undefined; })());
       // usage credits IN USE on its member ⇒ the 5-minute TTL; credits merely enabled ⇒ still the hour
       const cacheFile = path.join(w2.am.dataDir, 'usage-cache', w2.A + '.json');
       const c0 = fs.readFileSync(cacheFile, 'utf8');
       fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: true, status: 'allowed', asOf: Date.now() } }));
-      const fCr = w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0);
+      const fCr = factsOf(w2.eng, w2.sessions.get('sess-20'), T0);
       ck('facts: its member paying with usage credits ⇒ the 5-minute TTL — and the 20-minute conversation reads COLD', fCr.cacheTtlSec === 300 && warmCache({ ...fCr, nowMs: T0 }).warm === false, JSON.stringify(fCr));
       fs.writeFileSync(cacheFile, JSON.stringify({ ...JSON.parse(c0), overage: { inUse: false, status: 'allowed', asOf: Date.now() } }));
-      ck('facts: credits ENABLED but not in use (overageState mode \'allowed\') ⇒ still the hour', w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), T0).cacheTtlSec === 3600);
+      ck('facts: credits ENABLED but not in use (overageState mode \'allowed\') ⇒ still the hour', factsOf(w2.eng, w2.sessions.get('sess-20'), T0).cacheTtlSec === 3600);
       fs.writeFileSync(cacheFile, c0);
       // THE PIN on the real engine: the projection moves the unwitnessed cold one, HOLDS the 20-minute one (RED on 3f8429cd5:
       // the 5-minute belief called it cold and moved it — a 40–80× rewrite)
       const l2 = w2.run();
       ck('engine: a conversation whose last request was 20 min ago is HELD on its member (warm on the hour)', w2.linkOf('sess-20') === 'A' && w2.linkOf('sess-warm') === 'A', ['sess-20', 'sess-warm', 'sess-cold'].map(w2.linkOf).join(',') + ' | ' + l2.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
+      ck('engine: THE PIN (r1a′) — the restored 30-minute stamp is HELD; the preamble-only conversation is NOT (no hold on a guess)', w2.linkOf('sess-restored') === 'A' && w2.linkOf('sess-preamble') === 'B', ['sess-restored', 'sess-preamble'].map(w2.linkOf).join(','));
       ck('engine: …while the one idle past the hour moves', w2.linkOf('sess-cold') === 'B');
+      // THE STAMP OUTLIVES A RESTART (r1a′): written to the session meta at a live TURN END and in the shutdown flush — never per
+      // record — and read back by boot-restore (test-cache-warmth ⑦)
+      {
+        const sP = w2.sessions.get('sess-20'), key = sP.sockName, T1 = Date.now();
+        metas.delete(key);
+        w2.eng.noteModelRequest?.(sP, req, T1 - 4e3); w2.eng.noteModelRequest?.(sP, req, T1 - 2e3);
+        ck('persist: a request record writes NO meta (never per record)', !(metas.get(key) && metas.get(key).lastRequestAt));
+        const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { w2.eng.noteTurnEnd(sP, { type: 'result', subtype: 'success', session_id: sP.claudeSessionId }); } finally { console.log = o0; console.warn = o1; }
+        ck('persist: the live TURN END writes the turn\'s last request to the session meta', metas.get(key) && metas.get(key).lastRequestAt === T1 - 2e3, JSON.stringify(metas.get(key)));
+        w2.eng.noteModelRequest?.(sP, req, T1 - 1e3);
+        const n1 = w2.eng.flushRequestStamps?.() ?? -1, n2 = w2.eng.flushRequestStamps?.() ?? -1;
+        ck('persist: the shutdown flush writes the newer stamp — and nothing on a second flush (unchanged ⇒ no write)', n1 >= 1 && n2 === 0 && metas.get(key).lastRequestAt === T1 - 1e3, `${n1}/${n2}`);
+        const srvTxt = fs.readFileSync(path.resolve('server.js'), 'utf8');
+        ck('WIRING: server.js flushes the stamps on SIGTERM / SIGINT (shutdownNow)', /function shutdownNow\(\) \{[\s\S]{0,2500}try \{ flushRequestStamps\(\); \} catch \{\}/.test(srvTxt));
+      }
       // THE ACCOUNT MOVE = THE CACHE LOST: a real re-point after its last request (the slot ledger's row), no stamp of its own
       const sW = w2.sessions.get('sess-warm');
-      ck('facts: before any move the 45-s conversation is warm', warmCache({ ...w2.eng.cacheFactsOf(sW, Date.now()), nowMs: Date.now() }).warm === true);
+      ck('facts: before any move the 45-s conversation is warm', warmCache({ ...factsOf(w2.eng, sW, Date.now()), nowMs: Date.now() }).warm === true);
       const tMove = Date.now();
       w2.am.ensureSessionPoolLink(w2.P, 'sess-warm', w2.Bm, { why: 'per-session-switch' });
-      const fM = w2.eng.cacheFactsOf(sW, Date.now());
+      const fM = factsOf(w2.eng, sW, Date.now());
       ck('facts: a REAL re-point ⇒ cacheLostAt = the ledger row\'s instant, and the hold reads it cold at once', fM.cacheLostAt >= tMove && warmCache({ ...fM, nowMs: Date.now() }).warm === false, JSON.stringify(fM));
-      w2.eng.noteModelRequest(sW, req, Date.now() + 1);
-      ck('facts: …its next request warms it again', warmCache({ ...w2.eng.cacheFactsOf(sW, Date.now() + 2), nowMs: Date.now() + 2 }).warm === true);
+      w2.eng.noteModelRequest?.(sW, req, Date.now() + 1);
+      ck('facts: …its next request warms it again', warmCache({ ...factsOf(w2.eng, sW, Date.now() + 2), nowMs: Date.now() + 2 }).warm === true);
       w2.am.ensureSessionPoolLink(w2.P, 'sess-20', w2.A, { why: 'per-session-switch' }); // the SAME member again
-      ck('facts: a same-target re-point is no move (the cache stays)', w2.eng.cacheFactsOf(w2.sessions.get('sess-20'), Date.now()).cacheLostAt === null);
+      ck('facts: a same-target re-point is no move (the cache stays)', factsOf(w2.eng, w2.sessions.get('sess-20'), Date.now()).cacheLostAt === null);
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
@@ -896,7 +923,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };
@@ -1327,7 +1354,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };
@@ -1521,7 +1548,7 @@ await (async () => {
     eng.usageEstimator.burnFor = () => ({});
     const mk = (sid, on, { warm = false, inTurn = false, host = null } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
-        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
       sessions.set(sid, s); metas.set(s.sockName, { webuiSessionId: sid }); if (!host) am.ensureSessionPoolLink(P, sid, id[on], { why: 'spawn' });
       return s;
     };

@@ -1400,6 +1400,11 @@ for (const [edge] of EXCEPTIONS) {
     `every setting reaches a rendered section (${rendered.length}/${all.length}${dropped.length ? ' — DROPPED: ' + dropped.slice(0, 6).join(', ') : ''})`);
   const unlisted = cats.filter((c) => !SETTINGS_CATEGORIES.includes(c));
   ok(unlisted.length === 0, `every schema category is in SETTINGS_CATEGORIES (${unlisted.join(', ') || 'clean'})`);
+  // THE HELD ROWS (lane cache-warmth-tiles r1a′): a row may EXIST without being drawn while its feature's surface has not
+  // landed (src/lib/settings-view.js `held`) — never silently: each one is named here with its why, and the why is words.
+  const heldRows = all.filter((p) => SETTINGS_SCHEMA[p].held !== undefined);
+  ok(heldRows.every((p) => typeof SETTINGS_SCHEMA[p].held === 'string' && SETTINGS_SCHEMA[p].held.length >= 20),
+    `44 held rows exist but are not drawn, each with its why (${heldRows.map((p) => p + ' — ' + SETTINGS_SCHEMA[p].held).join(' · ') || 'none'})`);
   // A listed category with no rows is a nav entry that can never appear — the
   // dead-allowlist-row rule, applied to the other direction of the same list.
   const empty = SETTINGS_CATEGORIES.filter((c) => !cats.includes(c));

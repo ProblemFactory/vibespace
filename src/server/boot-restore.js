@@ -719,6 +719,7 @@ function restoreSessions() {
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
+    session._lastRequestAt = Number(meta.lastRequestAt) || undefined; // lane cache-warmth-tiles r1a′: the last model request survives a restart (the prompt cache does)
     session._taskRecords = (meta.taskRecords && typeof meta.taskRecords === 'object') ? meta.taskRecords : null; // 2.369.140: the live-only task records survive the restart
     session._artifacts = (meta.artifacts && typeof meta.artifacts === 'object') ? meta.artifacts : null; // lane artifacts-model: the deliverable rows (the user's saves live only here) survive the restart
     session._helperAskedAt = (meta.helperAskedAt && typeof meta.helperAskedAt === 'object') ? meta.helperAskedAt : null; // verify r3: each waiting helper ask's first-seen instant — the 60 s inbox clock survives the restart
@@ -878,6 +879,7 @@ function restoreAgentdPipeSessions() {
       agentdSession: true, keeperSid: id, agentdPipe: true,
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
+      _lastRequestAt: Number(meta.lastRequestAt) || undefined, // lane cache-warmth-tiles r1a′: the last model request survives a restart
       _msgReachability: meta.msgReachability || null,
     });
     hosts.device(null).then(async (dm) => {
@@ -992,6 +994,7 @@ async function readoptOrphanKeeperSessions() {
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
+    session._lastRequestAt = Number(meta.lastRequestAt) || undefined; // lane cache-warmth-tiles r1a′: the last model request survives a restart (the prompt cache does)
     session._taskRecords = (meta.taskRecords && typeof meta.taskRecords === 'object') ? meta.taskRecords : null; // 2.369.140: the live-only task records survive the restart
     session._artifacts = (meta.artifacts && typeof meta.artifacts === 'object') ? meta.artifacts : null; // lane artifacts-model: the deliverable rows (the user's saves live only here) survive the restart
     session._helperAskedAt = (meta.helperAskedAt && typeof meta.helperAskedAt === 'object') ? meta.helperAskedAt : null; // verify r3: each waiting helper ask's first-seen instant — the 60 s inbox clock survives the restart

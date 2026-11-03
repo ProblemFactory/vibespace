@@ -356,7 +356,7 @@ const {
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteModelRequest, noteTurnEnd: noteTurnEndEngine, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, catchUpResetCreditFromBuffer, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2) + verify r1: the session path's read before a press over an unsettled attempt
-  usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached, cacheFactsOf, // cacheFactsOf: each live conversation's prompt-cache facts for the session list (lane cache-warmth-tiles)
+  usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached, cacheFactsOf, flushRequestStamps, // cacheFactsOf + flushRequestStamps: each live conversation's prompt-cache facts for the session list (lane cache-warmth-tiles)
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
   estOverlayCache, predictCalib,
 } = require('./src/server/usage-pool-engine.js').create({
@@ -1884,6 +1884,7 @@ function shutdownNow() {
   for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} }
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
+  try { flushRequestStamps(); } catch {} // each conversation's last model request (lane cache-warmth-tiles r1a′) — read back by boot-restore
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { hosts.flushThrottled(); } catch {} // lane-pairing: the throttled dial facts + exit last-run stamps
   try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)

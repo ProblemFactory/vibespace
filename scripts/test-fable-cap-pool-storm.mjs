@@ -2725,15 +2725,17 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     { tag: 'far', name: 'Member Far', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 120 },
     { tag: 'soon', name: 'Member Soon', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 30 },
   ];
+  // (lane cache-warmth-tiles r1a′: a fixture's activity is `_lastRequestAt` — what the stream's request record writes; a chat
+  // conversation with only pty bytes is UNKNOWN to the hold — §21)
   const w = mkWorld({ roster: ROSTER });
   if (!w) { ok('§17 SKIP — pools unsupported on this platform', true); }
   else {
     const now = Date.now();
-    w.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: now - 60e3 });
-    w.mkSession('sess-cold', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: now - 70 * 60e3 }); // past the 1-hour cache (lane cache-warmth-tiles: 10 min read cold on the 5-minute belief)
+    w.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: now - 60e3 });
+    w.mkSession('sess-cold', 'far', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: now - 70 * 60e3 }); // past the 1-hour cache (lane cache-warmth-tiles: 10 min read cold on the 5-minute belief)
     // a [1m] conversation already ANSWERED: its served model is the API's base id (no variant) — the hour holds
     // whatever the model says (lane cache-warmth-tiles: the TTL is the account's fact, not the model's)
-    const s1m = w.mkSession('sess-1m', 'far', { _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: now - 20 * 60e3 });
+    const s1m = w.mkSession('sess-1m', 'far', { _spawnModel: 'claude-fable-5-1[1m]', _lastRequestAt: now - 20 * 60e3 });
     w.eng.noteServedModel(s1m, 'claude-fable-5-1');
     const cap = quiet();
     w.eng.maybePoolAutoSwitchForPool(w.P);
@@ -2758,7 +2760,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     ok('§17 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {
       const wm = mkWorld({ roster: ROSTER, engineModule: mut.mod });
-      wm.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 60e3 });
+      wm.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: Date.now() - 60e3 });
       const c = quiet(); wm.eng.maybePoolAutoSwitchForPool(wm.P); c.done();
       ok('§17 NEGATIVE CONTROL: without the wiring the warm conversation IS moved (the cold start the owner named)', wm.linkOf('sess-warm') === 'soon', wm.linkOf('sess-warm'));
     }
@@ -2769,14 +2771,14 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     const follower = {
       backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-follow', claudeSessionId: 'cid-sess-follow',
       _accountId: wd.P, name: 'sess-follow', cwd: wd.root, sockName: 'cw-sess-follow', buffer: '', createdAt: Date.now(),
-      pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 30e3,
+      pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastRequestAt: Date.now() - 30e3,
     };
     wd.sessions.set('sess-follow', follower); // NO own link — it follows the pool default
     const cd = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const dl = cd.done().filter((l) => /\[pool\]/.test(l));
     ok('§17 POOL DEFAULT: a warm default-following conversation defers the default\'s proactive move', wd.am.poolCurrent(wd.P) === wd.id.far, wd.am.poolCurrent(wd.P) + ' | ' + dl.join(' | ').slice(0, 300));
     ok('§17 POOL DEFAULT: …and says so, naming the conversation that holds it',
       dl.some((l) => l === `[pool] hold sess-follow: warm cache (last output 30s ago < ttl 3600s) — proactive move to Member Soon deferred (pool default)`), dl.join(' | ').slice(0, 300));
-    follower._lastPtyDataAt = Date.now() - 61 * 60e3; // the cache went cold on its own (past the hour)
+    follower._lastRequestAt = Date.now() - 61 * 60e3; // the cache went cold on its own (past the hour)
     const cd2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); cd2.done();
     ok('§17 POOL DEFAULT: once the cache is cold the next cycle makes the move', wd.am.poolCurrent(wd.P) === wd.id.soon, wd.am.poolCurrent(wd.P));
 
@@ -2788,11 +2790,11 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     {
       const wl = mkWorld({ roster: ROSTER });
       const t = Date.now();
-      wl.mkSession('lock-bare', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: t - 20 * 60e3 });
-      const sAns = wl.mkSession('lock-answered', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: t - 20 * 60e3 });
+      wl.mkSession('lock-bare', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastRequestAt: t - 20 * 60e3 });
+      const sAns = wl.mkSession('lock-answered', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastRequestAt: t - 20 * 60e3 });
       wl.eng.noteServedModel(sAns, 'claude-fable-5-1');
-      wl.mkSession('lock-1m', 'far', { _modelLocked: true, _lockedModel: 'fable[1m]', _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: t - 20 * 60e3 });
-      wl.mkSession('plain', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: t - 20 * 60e3 });
+      wl.mkSession('lock-1m', 'far', { _modelLocked: true, _lockedModel: 'fable[1m]', _spawnModel: 'claude-fable-5-1', _lastRequestAt: t - 20 * 60e3 });
+      wl.mkSession('plain', 'far', { _spawnModel: 'claude-fable-5-1', _lastRequestAt: t - 20 * 60e3 });
       const c = quiet(); wl.eng.maybePoolAutoSwitchForPool(wl.P); const lines = c.done().filter((l) => /\[pool\]/.test(l));
       ok('§17 THE TTL IS THE ACCOUNT\'S: every lock spelling and a plain model, idle 20 min, are WARM on the hour ⇒ all held (RED on 3f8429cd5: the bare lock and the plain model moved at 5 min)',
         ['lock-bare', 'lock-answered', 'lock-1m', 'plain'].every((sid) => wl.linkOf(sid) === 'far'), ['lock-bare', 'lock-answered', 'lock-1m', 'plain'].map(wl.linkOf).join(',') + ' | ' + lines.join(' | ').slice(0, 300));
@@ -2813,7 +2815,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
         wr.sessions.set(f, {
           backend: 'claude', mode: 'chat', host: null, _webuiId: f, claudeSessionId: 'cid-' + f,
           _accountId: wr.P, name: f, cwd: wr.root, sockName: 'cw-' + f, buffer: '', createdAt: T0,
-          pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: T0 - 5e3,
+          pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastRequestAt: T0 - 5e3,
         }); // NO own link — every one follows the pool default
       }
       const holds = [];
@@ -2821,7 +2823,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       try {
         for (let tick = 1; tick <= 21; tick++) { // 30 s cadence: ticks 1..20 span 10 min, tick 21 is 600 s after tick 1
           fake = T0 + tick * 30e3;
-          wr.sessions.get(ids[tick % ids.length])._lastPtyDataAt = fake - 1e3; // a different follower is the warmest each tick
+          wr.sessions.get(ids[tick % ids.length])._lastRequestAt = fake - 1e3; // a different follower is the warmest each tick
           const c = quiet(); wr.eng.maybePoolAutoSwitchForPool(wr.P);
           for (const l of c.done()) if (/\[pool\] hold /.test(l)) holds.push({ tick, sid: /hold (\S+):/.exec(l)?.[1], l });
         }
@@ -2865,8 +2867,8 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     { tag: 'alt', name: 'Member Alt', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 48 },
   ];
   const HARD = [{ ...SOFT[0], u5: 0.97 }, SOFT[1]]; // 5h 3 % left: under the hard bar
-  const inTurn = (t) => ({ _isStreaming: true, _turnState: 'running', _lastPtyDataAt: t - 20e3, _spawnModel: 'claude-fable-5-1' });
-  const coldIdle = (t) => ({ _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 70 * 60e3, _spawnModel: 'claude-fable-5-1' }); // past the 1-hour cache (lane cache-warmth-tiles)
+  const inTurn = (t) => ({ _isStreaming: true, _turnState: 'running', _lastRequestAt: t - 20e3, _spawnModel: 'claude-fable-5-1' });
+  const coldIdle = (t) => ({ _isStreaming: false, _turnState: 'idle', _lastRequestAt: t - 70 * 60e3, _spawnModel: 'claude-fable-5-1' }); // past the 1-hour cache (lane cache-warmth-tiles)
   const follow = (w, sid, fields) => {
     const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: w.P, name: sid, cwd: w.root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, ...fields };
     w.sessions.set(sid, s); // NO own link — it follows the pool default
@@ -2898,7 +2900,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     // eval gate — the owed move must still happen IN THIS CALL, not a later tick.
     w.eng._poolAutoLast.set(w.P, Date.now());
     const sh = w.sessions.get('sess-hot');
-    sh._isStreaming = false; sh._turnState = 'idle'; sh._lastPtyDataAt = Date.now() - 1e3; // the cache is still warm at the stop — accepted
+    sh._isStreaming = false; sh._turnState = 'idle'; sh._lastRequestAt = Date.now() - 1e3; // the cache is still warm at the stop — accepted
     const c3 = quiet(); w.eng.noteTurnEnd(sh); const l3 = c3.done().filter((l) => /\[pool\]/.test(l));
     ok('§18 (a) FIRST STOP: the turn-end boundary moves it IN THAT CALL (gate closed, cache still warm)', w.linkOf('sess-hot') === 'alt', w.linkOf('sess-hot') + ' | ' + l3.join(' | ').slice(0, 300));
     ok('§18 (a) …with the normal switch notice', w.notices.some((n) => /conversation "sess-hot" moved to Member Alt/.test(n)), JSON.stringify(w.notices).slice(0, 300));
@@ -2944,7 +2946,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     const out = {};
     const c = quiet();
     feed({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'cid-sess-auth' });
-    s._lastPtyDataAt = Date.now() - 5e3; // the liveness stamp setupSessionPty wires (the fake pty keeps only the LAST onData callback, the consumer's) — the conversation just produced output
+    s._lastRequestAt = Date.now() - 5e3; // the liveness stamp setupSessionPty wires (the fake pty keeps only the LAST onData callback, the consumer's) — the conversation just produced output
     wa.eng.maybePoolAutoSwitchForPool(wa.P);
     out.afterTick = wa.linkOf('sess-auth');
     feed({ type: 'result', subtype: 'success', session_id: 'cid-sess-auth' });
@@ -3013,7 +3015,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     const wd = mkWorld({ roster, sameDeadline: true, engineModule }); // default = roster[0] = cur
     const t = Date.now();
     follow(wd, 'fol-turn', inTurn(t));
-    follow(wd, 'fol-idle', { _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 5e3, _spawnModel: 'claude-fable-5-1' });
+    follow(wd, 'fol-idle', { _isStreaming: false, _turnState: 'idle', _lastRequestAt: t - 5e3, _spawnModel: 'claude-fable-5-1' });
     follow(wd, 'fol-cold', coldIdle(t));
     return wd;
   };
@@ -3074,7 +3076,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     const wn = perSessionWorld(SOFT, engineModule);
     wn.eng._poolAutoLast.set(wn.P, Date.now()); // the gate closed before the pool ever looked at this turn
     const s = wn.sessions.get('sess-hot');
-    s._isStreaming = false; s._turnState = 'idle'; s._lastPtyDataAt = Date.now() - 1e3; // the stop, cache still warm
+    s._isStreaming = false; s._turnState = 'idle'; s._lastRequestAt = Date.now() - 1e3; // the stop, cache still warm
     const c = quiet(); wn.eng.noteTurnEnd(s); const lines = c.done().filter((l) => /\[pool\]/.test(l));
     return { wn, lines };
   };
@@ -3089,7 +3091,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     const out = {};
     const c = quiet();
     feed({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'cid-sess-auth' });
-    s._lastPtyDataAt = Date.now() - 5e3;
+    s._lastRequestAt = Date.now() - 5e3;
     wa.eng._poolAutoLast.set(wa.P, Date.now()); // no tick ever saw the turn, and the gate is closed
     feed({ type: 'result', subtype: 'success', session_id: 'cid-sess-auth' });
     out.afterResult = wa.linkOf('sess-auth');
@@ -3139,7 +3141,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     we.writeCache(we.id.cur, { ...cCur, fetchedAt: Date.now(), fiveHour: { ...cCur.fiveHour, utilization: 0.05 } });
     // episode 2: its next turn, warm, on a member now soft-exhausted — its request comes AFTER the move (lane
     // cache-warmth-tiles: a stamp before the move is the old account's cache, read cold — the move is the cache lost)
-    Object.assign(s, inTurn(Date.now()), { _lastPtyDataAt: Date.now() + 1 });
+    Object.assign(s, inTurn(Date.now()), { _lastRequestAt: Date.now() + 1 });
     run(() => we.eng.maybePoolAutoSwitchForPool(we.P, { force: true }));
     return { we, defers, moved };
   };
@@ -3191,7 +3193,7 @@ console.log('— §19 the spare lane at a spawn');
     {
       const w5 = mkWorld();
       w5.mkSession('sp-opus', 'personal', { _spawnModel: 'claude-opus-4-8' });                                // cold: no output on record
-      w5.mkSession('sp-warm', 'personal', { _spawnModel: 'claude-opus-4-8', _lastPtyDataAt: Date.now() });     // warm: output this second
+      w5.mkSession('sp-warm', 'personal', { _spawnModel: 'claude-opus-4-8', _lastRequestAt: Date.now() });     // warm: output this second
       w5.mkSession('sp-fable', 'personal', { _spawnModel: 'claude-fable-5-1' });
       const c5 = quiet(); w5.eng.maybePoolAutoSwitchForPool(w5.P); const l5 = c5.done();
       ok('§19 S5: a COLD Opus conversation on P moves to a Fable-spent member (F)', w5.linkOf('sp-opus') === 'fish', w5.linkOf('sp-opus') + ' | ' + l5.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 240));
@@ -3475,7 +3477,7 @@ console.log('\n§21 the last model request is the stream\'s own request record')
   else {
     const reqRec = (id, extra = {}) => ({ type: 'assistant', message: { id, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 600000 } }, parent_tool_use_id: null, session_id: 'cid-sess-req', uuid: 'u-' + id, ...extra });
     const s = w.mkSession('sess-req', 'personal', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 50 * 60e3 });
-    ok('§21 before any request record the pty stamp stands in (a terminal-mode session; a hub that restarted since)', w.eng.cacheFactsOf(s, Date.now()).lastRequestAt === s._lastPtyDataAt);
+    ok('§21 before any request record a CHAT conversation is UNKNOWN — its pty stamp never stands in (r1a′: a restart\'s attach preamble is no request)', s.mode === 'chat' && (w.eng.cacheFactsOf?.(s, Date.now()) || {}).lastRequestAt === null, s.mode + ' ' + (w.eng.cacheFactsOf?.(s, Date.now()) || {}).lastRequestAt);
     const { so } = mkStdout(w);
     s._normalizer = createMessageManager('claude', 'sess-req');
     const pty = mkPty();
@@ -3496,7 +3498,7 @@ console.log('\n§21 the last model request is the stream\'s own request record')
     ok('§21 …a record with no usage does not', afterNoUsage === afterReq);
     ok('§21 …nor a BACKLOG record (stamped 3 h ago — a catch-up proves nothing about now)', afterLate === afterReq, String(afterLate - afterReq));
     s._lastPtyDataAt = Date.now() + 5; // pty noise after the request: keystroke echo, a redraw, an attach preamble
-    const f = w.eng.cacheFactsOf(s, Date.now() + 10);
+    const f = (w.eng.cacheFactsOf?.(s, Date.now() + 10) || {});
     ok('§21 THE PIN: pty noise without a request does not move it once a request stamp exists', f.lastRequestAt === afterReq && f.cacheTtlSec === 3600, JSON.stringify(f));
     // the device feed's twin: the SAME writer through session-brain's claudeSideEffects
     const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({

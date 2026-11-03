@@ -747,14 +747,15 @@ function setup(ctx) {
 /** THE SESSION LIST'S WARMTH DIFF (lane cache-warmth-tiles, 2026-11-02): each live conversation's prompt-cache
  *  facts — usage-pool-engine `cacheFactsOf`, the SAME producer the pool's warm-cache hold judges — keyed by its webui
  *  id, beside the hub's own clock: a client places the instants on THIS clock, never on its own alone (the deadline
- *  cards' rule). A conversation whose TTL is unknown is left out (no colour, never a guess); a fact that throws too. */
+ *  cards' rule). A conversation whose TTL or last request is unknown is left out (no colour, never a guess); a fact that
+ *  throws too. */
 function warmthDiff(activeSessions, factsOf, now = Date.now()) {
   const warmth = {};
   if (typeof factsOf === 'function') {
     for (const [id, s] of activeSessions || []) {
       if (!s || s.isTmuxView) continue;
       let f = null; try { f = factsOf(s, now); } catch { f = null; }
-      if (f && f.cacheTtlSec) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null };
+      if (f && f.cacheTtlSec && f.lastRequestAt) warmth[id] = { lastRequestAt: f.lastRequestAt || null, cacheTtlSec: f.cacheTtlSec, cacheLostAt: f.cacheLostAt || null };
     }
   }
   return { warmth, serverNow: now };

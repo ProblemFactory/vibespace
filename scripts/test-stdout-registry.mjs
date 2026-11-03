@@ -78,6 +78,7 @@ const engine = {
     return null;
   },
   noteSessionProduced(s) { calls.produced.push(s); }, noteTurnEnd(s) { calls.turnEnd.push(s); }, noteWallSignal() { },
+  noteModelRequest(s, rec) { if (rec && rec.type === 'assistant' && rec.message && rec.message.usage) s._lastRequestAt = Date.now(); }, // lane cache-warmth-tiles: the request stamp's ONE writer (the real one is pool-storm §21's)
   recordRateLimitEvent() { }, recordCodexQuotaSignal(s, p) { calls.codexQuota.push(p); }, resolveUsageKey: () => '__global__',
   catchUpResetCreditFromBuffer(s, id) { calls.catchUp.push(id); return null; }, // lane reset-path verify r10: the codex consumer reads the wrapper's buffer file back at the attach (the wiring leg below)
   usageEstimator: { noteLive() { } },
