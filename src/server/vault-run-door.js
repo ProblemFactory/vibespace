@@ -1292,8 +1292,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!(g.until > now())) { grants.delete(p); grantEnded(g, 'time'); return null; }
     return g;
   }
+  /** lane vault-entry-description: an entry's DESCRIPTION on the owner's request cards — under its name, what it is for (a
+   *  description the owner wrote before the rule is his: shown to him too). */
+  const noteOfRow = (row) => String((row && row.note) || '').slice(0, 400);
+  const noteLine = (r) => (r.note ? [{ key: 'What it is: {note}', params: { note: r.note } }] : []);
   const requestWords = (r) => [
     { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
+    ...noteLine(r),
     { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
     { key: 'Allow once: its next run with this secret (within 8 hours). For 8 hours: every run with it. Both ask for the second password, as «Usable by agent runs» does; a new kind of command still shows you its card first, and locking the vault ends the grant.' },
     { key: 'To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….' },
@@ -1376,7 +1381,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!askers.has(scope) && askers.size >= REQUEST_CALLERS_MAX) return named('too_many_askers');   // B-4934: a conversation already asking is never refused for others' asks
     const askId = randomBytes(16).toString('hex');
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
-    const q = { askId, pair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null };
+    const q = { askId, pair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), note: noteOfRow(row), purpose: said, detail: '', askedAt: now(), todoId: null };   // note: lane vault-entry-description (what it is for — the owner decides with it)
     const lines = requestWords(q);
     q.detail = lines.map(fill).join('\n');
     if (q.detail.length > DETAIL_MAX) return named('card_too_long');
@@ -1524,6 +1529,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const standingWords = (r) => [
     ...(r.redrawnAt ? [{ key: REDRAWN_LINE, params: { time: new Date(r.redrawnAt).toISOString() } }] : []),   // r5: a card drawn again says so first
     { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
+    ...noteLine(r),   // lane vault-entry-description
     { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
     ...(r.hosts.length ? [{ key: 'For commands to {hosts} — the hosts a command may connect to.', params: { hosts: r.hosts.map((h) => hostWord(h, r.tool)).join(', ') } }] : []),
     ...(r.command ? [{ key: 'For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.', params: { command: r.commandWords } }, { key: 'It runs: {program} {arg}', params: { program: [r.command.program, ...(r.command.pre || [])].join(' '), arg: r.command.arg == null ? '' : r.command.arg } }] : []),   // the real paths on their own line (a path the card links never runs into a sentence)
@@ -1618,7 +1624,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (askers.size >= REQUEST_CALLERS_MAX && !askers.has(scope)) return named('too_many_askers');   // the same two caps as a plain request (B-4934: callers, never requests)
     const askId = randomBytes(16).toString('hex');
     const d1 = load();
-    const q = { askId, pair, quietPair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null, standing: true, hosts: gh, tool: tl, command: token, commandWords: typed,
+    const q = { askId, pair, quietPair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), note: noteOfRow(row), purpose: said, detail: '', askedAt: now(), todoId: null, standing: true, hosts: gh, tool: tl, command: token, commandWords: typed,
       changes: changesOf(caller.conversationId, [ref.id], grant), switchOn: !(d1 && !d1.refused && d1.runnable.has(ref.id)) };
     q.changeSig = changeSigOf(q.changes);   // r4 (B): what the card said it writes — the press compares the words of then with these
     const lines = standingWords(q);

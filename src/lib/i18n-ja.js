@@ -11790,4 +11790,5 @@ export default {
   "{who} wants to change the description of «{old}»": "{who} が「{old}」の説明を変更したいと言っています",
   "The entry: {ref}": "エントリ：{ref}",
   "Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.": "「許可」でこの文言をエントリに書き込みます。「拒否」ならそのままです。使えるすべての agent が一覧で名前と説明を読みます — 値は決して読みません。",
+  "What it is: {note}": "用途：{note}",
 };

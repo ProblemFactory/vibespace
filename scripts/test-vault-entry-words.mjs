@@ -12,7 +12,8 @@
 //   ③ LATER — describe ⇒ ONE For-you card (old → new), NOTHING written; the same again ⇒ its id; refusals by name (no change,
 //      not in its list, a kind with no words, a secret in it); another conversation cannot name it
 //   ④ ALLOW — the owner's answer (a person only) ⇒ the writer, the audit line {proposedBy, approvedBy, from, to}, the receipt;
-//      ⑤ DENY ⇒ refused, the receipt, quiet 10 min; ⑥ the owner's own Edit… (the same writer, no card)
+//      ⑤ DENY ⇒ refused, the receipt, quiet 10 min; ⑥ the owner's own Edit… (the same writer, no card); ⑥b his request card
+//      for the entry says its description
 //   ⑦ A LOCK withdraws an open proposal (its receipt), the owner's edit refused while locked; ⑧ A RESTART answers a proposal
 //      the old door filed (the item IS the record); ⑨ A LEGACY note (before the rule) stays the owner's until he saves it
 //   ⑩ THE CLI — describe / list / request --note / usage refusals (exit 2); ⑪ THE SWEEP — no pasted value in any answer,
@@ -214,6 +215,14 @@ console.log('⑥ THE OWNER\'S OWN EDIT — the same writer, no card');
   const nope = await S.hit('/api/vault/entry-words', { body: { entry: 'totp:acme', note: 'x' } });
   const bearer = await S.agent(W.T1, '/api/vault/entry-words', { entry: ENTRY, note: 'agent wrote this' });
   ok(bad.json.code === 'note_lines' && nope.json.code === 'words_not_here' && (bearer.status === 401 || bearer.status === 403) && box(W, ENTRY).note.startsWith('Owner\'s words'), 'his edit is judged by the same rule; a kind with no words refused; a bearer refused at the gate', { bad: bad.json, nope: nope.json, bearer: bearer.status });
+}
+
+console.log('⑥b THE OWNER\'S REQUEST CARD says what it is for');
+{
+  const rq = await S.agent(W.T2, '/api/agent/vault/request', { entry: REF, purpose: 'run the payment tests' });
+  const it = (W.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-grant-ask');
+  ok(rq.status === 200 && it && it.detail.split('\n')[1] === 'What it is: Owner\'s words: the sandbox key of acme, test mode.' && it.i18n.detail.some((l) => l.key === 'What it is: {note}'), 'another conversation\'s request for it: the card says its description under «Secret: …» (an i18n line)', it && it.detail);
+  // (left open — a decision row has no generic closer; ⑦'s lock act withdraws it)
 }
 
 console.log('⑦ A LOCK withdraws an open proposal');

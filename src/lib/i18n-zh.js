@@ -11791,4 +11791,5 @@ export default {
   "{who} wants to change the description of «{old}»": "{who} 想修改「{old}」的描述",
   "The entry: {ref}": "条目：{ref}",
   "Allow writes these words on the entry; Deny keeps it as it is. Every agent that may use it reads its name and description in its list — never its value.": "「允许」会把这些文字写到条目上；「拒绝」保持原样。能用它的每个 agent 都会在列表里读到它的名称和描述 — 绝不会读到它的值。",
+  "What it is: {note}": "它是干什么用的：{note}",
 };
