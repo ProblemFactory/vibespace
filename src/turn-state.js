@@ -191,17 +191,36 @@ function stallVerdict({ streaming = false, turnState = null, pendingAsks = 0, in
 function requestInFlight({ isStreaming, turnState } = {}) {
   return turnState === 'running' || (isStreaming === true && turnState !== 'requires_action');
 }
-/** THE INSTANT THE TURN'S REQUEST WENT OUT — the ONE writer of `session._turnStartedAt` (round 3), called right after
- *  every write of the turn flags (the send — user-input, auto-resume's continue —, the claude parse's result / turn
- *  state / user record, the attach reconciliation, the exit road). Entering flight stamps `now` (a send; a 'running'
- *  after a pause on the owner: the answer sends the request again); leaving it clears the field (a pause, the turn's
- *  end). A restore never carries it: a restored conversation is not in flight until the stream says so. */
+/** THE INSTANT A REQUEST WENT OUT — `session._turnStartedAt`, written ONLY by the two writers below (round 3; round 4:
+ *  the flight instant is EVERY request's send, never only the turn's first — a follow-up request after a 70-min tool is a
+ *  fresh send). A restore never carries it: a restored conversation is not in flight until the stream says so.
+ *  · noteTurnFlight — the FLAG-CHANGE writer, called right after a write of the turn flags that sends nothing by itself
+ *    (the claude parse's result / turn state, the attach reconciliation, the exit road): entering flight stamps `now`
+ *    when unset (a 'running' after a pause: the pause cleared it); leaving flight (a pause on the owner, the turn's end)
+ *    clears it.
+ *  · noteRequestSent — the REQUEST-OUT writer, called at each moment a request goes out (the send — user-input,
+ *    auto-resume's continue —, a 'running' that is new, a main-thread user record: the prompt's echo or a TOOL RESULT,
+ *    at BOTH feeds — the parse and the device stream's claudeSideEffects — unless the record is a backlog's): in flight ⇒
+ *    `now`, whatever was there; otherwise cleared, as the flag writer would. */
 function noteTurnFlight(session, now) {
   if (!session) return;
   if (!requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState })) session._turnStartedAt = null;
   else if (!(Number(session._turnStartedAt) > 0)) session._turnStartedAt = Number(now) || null;
 }
+function noteRequestSent(session, now) {
+  if (!session) return;
+  session._turnStartedAt = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }) ? (Number(now) || null) : null;
+}
+/** A RECORD THAT SENDS A REQUEST — a main-thread user record that is no local-command echo («<local-command-stdout>Set
+ *  model to …» has no turn behind it): the prompt's echo or a tool result, which the CLI sends to the model at once. The
+ *  ONE predicate the parse's turn-start branch and the device feed both read. */
+function sendsRequest(msg) {
+  if (!msg || msg.type !== 'user' || msg.parent_tool_use_id || msg.isSidechain) return false;
+  const c = msg.message && msg.message.content;
+  const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => (b && b.text) || '').join('') : '');
+  return !/^<local-command-/.test(text.trim());
+}
 
 module.exports = { TURN_STATES, isTurnState, turnStateEffect, reconcileAttachStreaming, SIDECAR_SETTLE_MS, AUTHORITATIVE_SETTLE_MS,
   turnStateInRing, restoredTurnState, waitingOnUser, stallVerdict, STALL_SILENCE_MS, STALL_COOLDOWN_MS, STALL_MAX_REATTACH,
-  requestInFlight, noteTurnFlight };
+  requestInFlight, noteTurnFlight, noteRequestSent, sendsRequest };

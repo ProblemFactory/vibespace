@@ -4033,20 +4033,16 @@ function noteModelRequest(session, rec, now = Date.now()) {
   if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
-  session._lastRequestMember = servedMemberOf(session); // WHERE the cache now lives (round 3)
+  session._lastRequestMember = linkMemberOf(session); // WHERE the cache now lives — the member that served it (round 4)
 }
-/** THE MEMBER THAT SERVED THIS REQUEST (round 3: «lost» is a fact about WHERE the cache lives) — the turn's pinned
- *  reading slot (`_turnReadingSlot`, readingSlotFor's pin: resolved ONCE per turn with the lag shadow applied, so a
- *  re-point inside the turn does not move it — a running claude follows its link from the NEXT turn), else the member
- *  the link names now (the turn's first record before any reading: this turn's requests go where its link pointed
- *  when it began). READ, never pinned here: the readings' own pin and its shadow are left to them. null = no pool. */
-function servedMemberOf(session) {
-  const pin = session && session._turnReadingSlot;
-  const poolId = session && session._accountId;
-  if (pin && pin.key && pin.key !== poolId) return pin.key;
-  return linkMemberOf(session);
-}
-/** The pool member a conversation's link names now — the member its NEXT request goes to (null when it is no pool's). */
+/** THE MEMBER THAT SERVED A REQUEST = the member the conversation's link named when that request went out (round 4). The
+ *  CLI re-reads its credential at EVERY request (inc-mttbrtc0-6049: a re-point inside a single turn reached its very next
+ *  request), so the link at this record is the member this request — and its prompt cache — went to. Never the turn's
+ *  reading pin (`_turnReadingSlot`): that attributes READINGS to one member per turn; it is no credential, and round 3's
+ *  use of it read a cache freshly written on B after a mid-turn A → B re-point as lost. THE ONE RACE: a re-point while a
+ *  request is out stamps the new member for a request the old one served; it lasts until the next request, which the new
+ *  member serves anyway. linkMemberOf is also the «lost» side of cacheFactsOf: where the NEXT request goes (null when the
+ *  conversation is no pool's). */
 function linkMemberOf(session) {
   try {
     const poolId = session && session._accountId;
@@ -4090,13 +4086,15 @@ function flushRequestStamps() {
  *    now (src/spend-authorizer.js overageState: mode 'allowed' is extra usage ENABLED but
  *    NOT in use — that member still serves on the hour) ⇒ the 5-minute TTL.
  *  · lost = WHERE THE CACHE LIVES (round 3 — no ledger walk): the member that served the
- *    last request (`_lastRequestMember`, stamped by the same writer, persisted with the
+ *    last request (`_lastRequestMember`, stamped by the same writer from the link at that
+ *    request — round 4: the CLI re-reads its credential per request —, persisted with the
  *    stamp) is not the member the conversation's link names now. A move and a return is
  *    not lost; a same-target sweep moves nothing. No member stamped (a terminal-mode
  *    session: no stream names a request; a stamp older than round 3) ⇒ not lost.
  *  · inFlight + turnStartedAt = THE TURN LAW, BOUNDED (round 3): a request is out
  *    (turn-state requestInFlight — never a turn paused on the owner) and the instant it
- *    went out (`_turnStartedAt`, turn-state noteTurnFlight); warmCache keeps it warm for
+ *    went out (`_turnStartedAt`, turn-state noteTurnFlight / noteRequestSent — round 4: EVERY
+ *    request's send, a tool result's follow-up too); warmCache keeps it warm for
  *    one TTL from that instant. A paused turn ages by its stamp, like idle. */
 function cacheFactsOf(session, now = Date.now()) {
   const s = session || {};

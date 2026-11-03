@@ -3557,6 +3557,51 @@ console.log('\n§21 the last model request is the stream\'s own request record')
     ok('§21 WIRING: each feed calls the writer once — no inline twin',
       both(fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8')) === 1 && both(fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8')) === 1
       && !/session\._lastRequestAt\s*=/.test(fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8') + fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8')));
+    // ── ROUND 4 (K2): THE FLIGHT INSTANT IS EVERY REQUEST'S SEND — the follow-up request a TOOL RESULT sends is a fresh write
+    // of the cache, re-stamped by turn-state's request-out writer at BOTH feeds (the parity law: the parse's user-record branch
+    // and the device stream's claudeSideEffects read the ONE predicate, sendsRequest, and call the ONE writer). The
+    // acceptance's probe, on a clock moved back: the send at T0, the tool_use response at T0 + 5 s, a 70-min tool, its
+    // tool_result 10 s ago ⇒ in flight since 10 s, warm (the pool pass on these facts: test-pool-auto K2). RED on 16c8b5252
+    // by name: the parse kept T0 (older than the last stamp ⇒ the 70-min stamp read it cold); the device feed wrote nothing.
+    {
+      const realNow = Date.now; let skew = 0;
+      const toolUse = (sid, n) => ({ type: 'assistant', message: { id: 'msg_tu' + n, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: 'tu-' + n, name: 'Bash', input: { command: 'make check' } }], usage: { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 600000 } }, parent_tool_use_id: null, session_id: 'cid-' + sid, uuid: 'u-tu' + n });
+      const toolResult = (sid, n) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-' + n, content: 'ok' }] }, parent_tool_use_id: null, session_id: 'cid-' + sid, uuid: 'u-tr' + n });
+      const prompt = (sid, n) => ({ type: 'user', message: { role: 'user', content: 'run the checks' }, parent_tool_use_id: null, session_id: 'cid-' + sid, uuid: 'u-pr' + n });
+      const s5 = w.mkSession('sess-k2p', 'personal', { _spawnModel: 'claude-fable-5-1' });
+      s5._normalizer = createMessageManager('claude', 'sess-k2p');
+      const pty5 = mkPty(); so.setupSessionPty(s5, 'sess-k2p', pty5);
+      const s6 = w.mkSession('sess-k2d', 'personal', { _spawnModel: 'claude-fable-5-1', _isStreaming: true, _turnState: 'running' }); // the parse wrote its flags
+      const capK = quiet();
+      Date.now = () => realNow() + skew;
+      try {
+        skew = -(70 * 60e3 + 15e3); // T0
+        pty5.data(JSON.stringify({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'cid-sess-k2p', uuid: 'u-st5' }) + '\n');
+        brain.claudeSideEffects(s6, 'sess-k2d', prompt('sess-k2d', 6));
+        skew += 5e3; // the tool_use response
+        pty5.data(JSON.stringify(toolUse('sess-k2p', 5)) + '\n');
+        brain.claudeSideEffects(s6, 'sess-k2d', toolUse('sess-k2d', 6));
+        skew = -10e3; // 70 min of tool, then its result
+        pty5.data(JSON.stringify(toolResult('sess-k2p', 5)) + '\n');
+        brain.claudeSideEffects(s6, 'sess-k2d', toolResult('sess-k2d', 6));
+      } finally { Date.now = realNow; capK.done(); }
+      const tK = Date.now(), fP5 = factsNow(s5), fD6 = factsNow(s6);
+      const wP5 = warmCache({ ...fP5, nowMs: tK }), wD6 = warmCache({ ...fD6, nowMs: tK });
+      const tenS = (f) => f.inFlight === true && Math.abs(Number(f.turnStartedAt) - (tK - 10e3)) < 2e3 && Math.abs(Number(f.lastRequestAt) - (tK - 70 * 60e3 - 10e3)) < 2e3;
+      ok('§21 K2 THE PIN (parse feed): the tool_result re-stamps the send — in flight since 10 s, warm, after a 70-min tool (RED on 16c8b5252: the send instant stayed T0, read cold)',
+        tenS(fP5) && wP5.warm === true && wP5.inFlight === true, JSON.stringify({ fP5: { ...fP5, turnStartedAt: fP5.turnStartedAt && tK - fP5.turnStartedAt, lastRequestAt: fP5.lastRequestAt && tK - fP5.lastRequestAt }, wP5 }));
+      ok('§21 K2 THE PIN (device feed): the SAME writer on the same records — in flight since 10 s, warm (RED on 16c8b5252: the device feed never wrote the instant)',
+        tenS(fD6) && wD6.warm === true && wD6.inFlight === true, JSON.stringify({ fD6: { ...fD6, turnStartedAt: fD6.turnStartedAt && tK - fD6.turnStartedAt, lastRequestAt: fD6.lastRequestAt && tK - fD6.lastRequestAt }, wD6 }));
+      // a BACKLOG's tool result (a stalled bridge's catch-up, stamped 3 h ago) proves nothing about now — noteModelRequest's law
+      const late = (r) => ({ ...r, timestamp: new Date(Date.now() - 3 * 3600e3).toISOString() });
+      const at5 = s5._turnStartedAt, at6 = s6._turnStartedAt;
+      const capL = quiet(); pty5.data(JSON.stringify(late(toolResult('sess-k2p', 7))) + '\n'); brain.claudeSideEffects(s6, 'sess-k2d', late(toolResult('sess-k2d', 8))); capL.done();
+      ok('§21 K2 a backlog\'s tool result (stamped 3 h ago) re-stamps nothing — parse feed AND device feed', s5._turnStartedAt === at5 && s6._turnStartedAt === at6 && at5 > 0 && at6 > 0, JSON.stringify([s5._turnStartedAt - at5, s6._turnStartedAt - at6]));
+      const parseSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8'), brainSrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
+      ok('§21 K2 WIRING: both feeds gate on the ONE predicate (sendsRequest) and call the ONE request-out writer — no inline twin',
+        /if \(sendsRequest\(msg\)\) \{\s*if \(!authoritative\) session\._isStreaming = true;\s*\(recordIsLate\?\.\(session, msg\) \? noteTurnFlight : noteRequestSent\)\(session, Date\.now\(\)\);/.test(parseSrc)
+        && /if \(sendsRequest\(msg\) && !recordIsLate\?\.\(session, msg\)\) noteRequestSent\(session, Date\.now\(\)\);/.test(brainSrc) && !/local-command-/.test(parseSrc.slice(parseSrc.indexOf('if (sendsRequest(msg))') - 400, parseSrc.indexOf('if (sendsRequest(msg))'))));
+    }
   }
 }
 

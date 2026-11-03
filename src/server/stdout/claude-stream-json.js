@@ -37,7 +37,7 @@ const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../norma
 const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
-const { isTurnState, turnStateEffect, noteTurnFlight } = require('../../turn-state.js');
+const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
@@ -1023,7 +1023,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               const changed = session._turnState !== st;
               session._turnState = st;
               session._isStreaming = eff.streaming;
-              noteTurnFlight(session, Date.now()); // 'running' after a pause sends the request again; a pause or idle clears it (r3)
+              (changed && st === 'running' ? noteRequestSent : noteTurnFlight)(session, Date.now()); // a NEW 'running' (an answer after a pause) sends a request; a pause or idle clears it (lane cache-warmth-tiles r4)
               if (!eff.streaming) { session._fallbackStopFired = false; retireCompaction(session, id); }
               // THE FIRST STOP (2026-09-22): under this authority the `result`
               // boundary still reads 'running', so a pool move deferred to this
@@ -1069,9 +1069,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                   try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: echo.id }); } catch {}
                 }
               }
-              if (!/^<local-command-/.test(uText.trim())) {
+              if (sendsRequest(msg)) {
                 if (!authoritative) session._isStreaming = true;
-                noteTurnFlight(session, Date.now()); // (lane cache-warmth-tiles r3)
+                (recordIsLate?.(session, msg) ? noteTurnFlight : noteRequestSent)(session, Date.now()); // the prompt's echo or a TOOL RESULT: a request goes out NOW — a backlog's record proves nothing about now (lane cache-warmth-tiles r4 — the device feed's twin)
                 newLabel = 'thinking...';
               }
             } else if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain) {

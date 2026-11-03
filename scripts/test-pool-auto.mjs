@@ -848,6 +848,33 @@ await (async () => {
         ck('G3: the ledger walk is gone from the facts — lastRepointRow keeps its r1 shape for the shadow alone',
           !/movesOnly/.test(fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8')) && !/lastRepointRow\(/.test((fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8').match(/function cacheFactsOf[\s\S]*?\n}\n/) || [''])[0]));
       }
+      {
+        // ROUND 4 (K1): THE MEMBER THAT SERVED A REQUEST = THE MEMBER THE LINK NAMED WHEN IT WENT OUT — never the turn's
+        // reading pin. The CLI re-reads its credential per REQUEST (inc-mttbrtc0-6049: a re-point inside one turn reached
+        // its very next request); the pin attributes READINGS to one member per turn. The acceptance's shape on the real
+        // engine with a reading pin SET: the first reading pins A, one request, a re-point to B, five more requests (they
+        // write B's cache), the turn's end.
+        const k1 = (sid, repoint) => {
+          const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: w2.P, name: sid, cwd: '/tmp', sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _isStreaming: true, _turnState: 'running' };
+          w2.sessions.set(sid, s); w2.am.ensureSessionPoolLink(w2.P, sid, w2.A, { why: 'spawn' });
+          const pin = w2.eng.readingSlotFor(s, Date.now(), {}); // the turn's first reading: the pin is SET, on A
+          w2.eng.noteModelRequest?.(s, req, Date.now());
+          if (repoint) w2.am.ensureSessionPoolLink(w2.P, sid, w2.Bm, { why: 'per-session-switch' });
+          for (let i = 0; i < 5; i++) w2.eng.noteModelRequest?.(s, req, Date.now());
+          const pinned = s._turnReadingSlot && s._turnReadingSlot.key;
+          s._isStreaming = false; s._turnState = 'idle';
+          const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { }; try { w2.eng.noteTurnEnd(s, { type: 'result', subtype: 'success', session_id: s.claudeSessionId }); } finally { console.log = o0; console.warn = o1; }
+          const f = factsOf(w2.eng, s, Date.now());
+          return { pin: pin && pin.key, pinned, member: s._lastRequestMember, f, wc: warmCache({ ...f, nowMs: Date.now() }), meta: metas.get(s.sockName) || {} };
+        };
+        const kR = k1('k1-repoint', true), kC = k1('k1-control', false);
+        ck('K1 setup: the turn\'s first reading pinned A, and the pin still says A after the re-point (it stays what it is for readings)', kR.pin === w2.A && kR.pinned === w2.A, JSON.stringify([kR.pin === w2.A, kR.pinned === w2.A]));
+        ck('K1 THE PIN — a mid-turn A → B re-point: the requests after it are B\'s ⇒ `_lastRequestMember` = B, NOT lost, warm at the turn\'s end, the persisted meta says B (RED on 16c8b5252: the pin stamped A and read the cache freshly written on B as lost)',
+          kR.member === w2.Bm && kR.f.lost === false && kR.wc.warm === true && !kR.wc.lost && kR.meta.lastRequestMember === w2.Bm,
+          JSON.stringify({ memberIsB: kR.member === w2.Bm, lost: kR.f.lost, warm: kR.wc.warm, metaIsB: kR.meta.lastRequestMember === w2.Bm }));
+        ck('K1 control: the same turn without the re-point stays A — not lost, warm, the meta says A',
+          kC.member === w2.A && kC.f.lost === false && kC.wc.warm === true && kC.meta.lastRequestMember === w2.A, JSON.stringify({ memberIsA: kC.member === w2.A, lost: kC.f.lost, warm: kC.wc.warm }));
+      }
     }
     // ROUND 3 (G1): THE TURN LAW, BOUNDED BY THE CACHE — a conversation is warm while a request is IN FLIGHT (for one TTL from
     // the instant it went out: turn-state requestInFlight + noteTurnFlight's `_turnStartedAt`) or while its last request is
@@ -930,6 +957,52 @@ await (async () => {
       ck('G1 (2) POOL DEFAULT: a paused follower with a 10-min stamp holds the default, and its line is true (by the stamp, «(pool default)»)',
         dflt(wD2) === 'A' && lD2.some((l) => /^\[pool\] hold fol-paused-warm: warm cache \(last request (599|600|601)s ago < ttl 3600s\) — proactive move to Member B deferred \(pool default\)$/.test(l)) && falseLess(lD2).length === 0,
         dflt(wD2) + ' | ' + lD2.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 400));
+      // ROUND 4 (K2): THE FLIGHT INSTANT IS EVERY REQUEST'S SEND — the follow-up request a tool result sends is a fresh write
+      // of the cache, so the request-out writer (turn-state noteRequestSent) re-stamps it; the flag writer (noteTurnFlight)
+      // stamps only on entering flight. The acceptance's probe on the real engine, EDF shape: the send at T0, the tool_use
+      // response at T0 + 5 s, a 70-min tool, its tool_result record, a pool pass 10 s later. Guarded: 16c8b5252 called the
+      // flag writer at these sites, so on it the probe drives noteTurnFlight and reds BY NAME.
+      const TS = require(path.resolve('src/turn-state.js'));
+      const sendW = TS.noteRequestSent || TS.noteTurnFlight;
+      const reqK = { type: 'assistant', message: { id: 'msg_k2', model: 'claude-fable-5-1', usage: { input_tokens: 1, output_tokens: 1 } } };
+      const wK = shape('edf', [['k2-tool', 0], ['k2-still', 0]]);
+      const probe = (sid, toolResult) => {
+        const x = wK.sessions.get(sid), T0 = Date.now() - (70 * 60e3 + 15e3);
+        delete x._lastRequestAt; x._turnStartedAt = null; x._isStreaming = true; x._turnState = 'running';
+        sendW(x, T0);                                         // the send
+        wK.eng.noteModelRequest?.(x, reqK, T0 + 5e3);         // the tool_use response: the last stamped request
+        if (toolResult) sendW(x, Date.now() - 10e3);          // the tool_result, 70 min on: the follow-up request goes out
+        return x;
+      };
+      probe('k2-tool', true); probe('k2-still', false);
+      const tK = Date.now(), fK = factsOf(wK.eng, wK.sessions.get('k2-tool'), tK), wcK = warmCache({ ...fK, nowMs: tK });
+      const lK = wK.run(), hK = lK.find((l) => /^\[pool\] hold k2-tool:/.test(l)) || '';
+      ck('K2 THE PIN — the follow-up request a tool result sends after a 70-min tool is in flight: warm, held, its line «a request in flight since 10s» (RED on 16c8b5252: the send instant stayed T0, older than the last stamp, and the 70-min stamp read it cold — moved)',
+        fK.inFlight === true && Math.abs(fK.turnStartedAt - (tK - 10e3)) < 2e3 && wcK.warm === true && wcK.inFlight === true && at(wK, 'k2-tool') === 'A'
+        && /: warm cache \(a request in flight since (9|10|11)s\) — proactive move to Member B deferred$/.test(hK),
+        JSON.stringify({ fK, wcK, link: at(wK, 'k2-tool'), hK }));
+      ck('K2 control: the same turn with the tool still running (no follow-up sent) ages by its 70-min stamp — cold, it moves (the bound holds)', at(wK, 'k2-still') === 'B', at(wK, 'k2-still') + ' | ' + lK.filter((l) => /k2-still/.test(l)).join(' | '));
+      {
+        const x = { _isStreaming: true, _turnState: 'running', _turnStartedAt: 1000 };
+        TS.noteTurnFlight?.(x, 5000); const keep = x._turnStartedAt;
+        sendW(x, 6000); const re = x._turnStartedAt;
+        x._turnState = 'requires_action'; sendW(x, 7000); const paused = x._turnStartedAt;
+        ck('K2 writers: the flag writer keeps the instant while in flight; the request-out writer re-stamps it; a pause clears it (both writers)', keep === 1000 && re === 6000 && paused === null, JSON.stringify([keep, re, paused]));
+      }
+      {
+        // THE WRITER CENSUS: `_turnStartedAt` is assigned in turn-state.js alone, and each writer is called at exactly its sites
+        const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
+        const files = [...walk(path.resolve('src')), path.resolve('server.js')];
+        const assigns = files.filter((f) => /\._turnStartedAt\s*=[^=]/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(path.resolve('.'), f));
+        const callers = files.filter((f) => !/src\/(turn-state|session-schema)\.js$/.test(f)); // the definitions and the field's schema note
+        const calls = (name) => { const out = {}; for (const f of callers) { const n = fs.readFileSync(f, 'utf8').split('\n').filter((l) => new RegExp('\\b' + name + '\\b').test(l) && !/^\s*const \{[^}]*\} = require\(|^\s*\*|^\s*\/\//.test(l)).length; if (n) out[path.relative(path.resolve('.'), f)] = n; } return out; };
+        const sentAt = calls('noteRequestSent'), flagAt = calls('noteTurnFlight');
+        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send, the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at the parse (result, the state word), the attach reconcile, the exit',
+          JSON.stringify(assigns) === JSON.stringify(['src/turn-state.js'])
+          && JSON.stringify(sentAt) === JSON.stringify({ 'src/server/session-brain.js': 1, 'src/server/stdout/claude-stream-json.js': 2, 'src/server/user-input.js': 1, 'server.js': 1 })
+          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 3, 'src/ws-handler.js': 1 }),
+          JSON.stringify({ assigns, sentAt, flagAt }));
+      }
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));

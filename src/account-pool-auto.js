@@ -171,7 +171,7 @@ function cacheTtlSecFor({ harness = 'claude', apiKey = false, onCredits = false 
 // THE TURN LAW, BOUNDED BY THE CACHE (主开发, round 3 — round 2's «in a turn ⇒ warm» held a turn PAUSED on the owner
 // warm all afternoon): a conversation is warm while a request is IN FLIGHT or while its last request is within the
 // TTL. `inFlight` (turn-state requestInFlight: running — never 'requires_action') + `turnStartedAt` (the instant the
-// turn's request went out): a request in flight that went out AFTER the last stamped one — or with none stamped — is
+// newest request went out — every request's send, round 4: a follow-up after a long tool is a fresh write): a request in flight that went out AFTER the last stamped one — or with none stamped — is
 // the cache's newest write, so it is warm for one TTL from its send (a 'running' state older than a TTL with no
 // request stamped is stale, not warm). A paused turn has no request out: it ages by its stamp, like idle.
 // → {warm, agoSec, ttlSec, inFlight?, lost?, unknown?}. `agoSec` = seconds since the cache's newest write we know of:
