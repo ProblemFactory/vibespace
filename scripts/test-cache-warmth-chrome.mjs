@@ -15,7 +15,8 @@
 //   ④ a tab group: each tab its own band (∝ the TAB's width), none for the expired tab, no frame band; the label's words
 //      survive a switch; a strip rebuild brings the bands back with no tick; the group tile = critical, then expired; the
 //      chooser's rows each carry a ring; a split
-//   ⑤ desktops: the squares' tiers (expired = --text-dim, waiting = still yellow), three adjacent preview rings (none for an
+//   ⑤ desktops: the squares' tiers (r5: expired = the ONE quiet --warmth-expired, on every expired ring, square and dot;
+//      waiting = still yellow), three adjacent preview rings (none for an
 //      all-fresh desktop), the switcher form and «+N» with warmth on at 1100 / 1280, 8 desktops ⇒ the folded button's ring;
 //      a reload: the held windows and which rung of the ladder resolved each
 //   ⑥ «+N»: «+N · k critical» with the critical dot, stable across two ticks and a focus click, at 951 / 1024 / 1100 / 1280;
@@ -25,7 +26,8 @@
 //      LATE, the rest fresh), the strip's room swept 1040 → 1220 px (31 widths): after a 500-ms settle a MutationObserver
 //      over 1 s on the chip sees NO change of its words or its box at any width, warmth on and off; the words still name
 //      the hidden set (an expired-only and a critical tail too); RED: the constant box taken away ⇒ the 60 Hz flip returns
-//   ⑦ the summary chip: its counts = the rewrite's ground truth; its list ascending, expired last, unknown absent; a press
+//   ⑦ the summary chip: its counts = the rewrite's ground truth; its list ascending, expired last, unknown absent; r5: a live
+//      row's words = its tier's 50 % mix toward --text, its band the raw hue, «Expired» --text-dim (dark and light); a press
 //      groups by desktop; a row on another desktop switches there and raises it; a tick moves the bands, never the rows
 //   ⑧ the window list: a band per row, «By time left» pressed and ascending; a press = creation order; r2 (H1): a «name —
 //      /path» title never pushes the words past the row (RED: the shrink rule undone); (H2) an «Other desktops» row of a
@@ -38,7 +40,7 @@
 //      nothing; the window list as before; on ⇒ the marks return with no reload
 //   ⑪ scale and cost: passMs over 3 ticks in the heaviest state (+ the ×150 extrapolation, said as one); NO timer / rAF
 //      from a warmth function over three ticks (a PLANTED control proves the census sees one)
-//   ⑫ Settings → Window draws the row; the theme editor's «Cache warmth» rows
+//   ⑫ Settings → Window draws the row; the theme editor's «Cache warmth» rows (r5: seeded with the raw-hue derivations)
 //   RED controls: the band hidden by a planted style ⇒ the ① / ④ probes say ABSENT; one window rewritten to expired ⇒ its
 //   probe reports no band where it reported one a tick before.
 // Shots: CACHE_WARMTH_SHOTS (default: the scratch root), <leg>-<theme>.png. Requires google-chrome (SKIP without).
@@ -248,6 +250,10 @@ const BAR = (k) => `(() => { const w = ${winOf(k)}; if (!w) return null; const b
   return { id: w.id, tier: bar.getAttribute('data-warmth-tier'), frac: parseFloat(bar.style.getPropertyValue('--warmth-frac')), width, barW: bar.clientWidth, bg: cs.backgroundColor, content: cs.content,
     band: width > 0.5, title: bar.getAttribute('title'), tip: bar.hasAttribute('data-warmth-tip'), blink: af.animationName, waiting: w.element.classList.contains('window-waiting') }; })()`;
 const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
+/** r5: a computed colour as [r, g, b, a] in 0–255 (Chrome writes a color-mix result as «color(srgb r g b / a)», a plain one rgb()) */
+const inkOf = (s) => { const n = (String(s || '').match(/-?\d*\.?\d+(?:e-?\d+)?/g) || []).map(Number); const k = /^color\(srgb/.test(String(s)) ? 255 : 1; return n.length >= 3 ? [n[0] * k, n[1] * k, n[2] * k, n.length > 3 ? n[3] : 1] : []; };
+const sameInk = (a, b) => { const x = inkOf(a), y = inkOf(b); return x.length === 4 && y.length === 4 && x.every((v, i) => Math.abs(v - y[i]) <= (i === 3 ? 0.02 : 1.5)); };
+const EXP_INK = `(() => { const pr = document.createElement('div'); pr.style.cssText = 'position:absolute;background:var(--warmth-expired);color:var(--text-dim)'; document.body.appendChild(pr); const cs = getComputedStyle(pr), v = { exp: cs.backgroundColor, dim: cs.color }; pr.remove(); return v; })()`;
 
 // the tier matrix (TTL 1 h unless said): the plan for k → its expected tier
 const M = (min) => min * 60e3;
@@ -293,6 +299,9 @@ await step('② the tier matrix (the CDP rewrite of EXISTING entries)', async ()
   const dash0 = (x) => parseFloat((String(x && x.dash).match(/-?\d+(?:\.\d+)?/) || [NaN])[0]); // Chrome serialises it «calc(58.2px), 100px»
   check('the tile rings: Chrome honours calc() in stroke-dasharray — the arc = frac × 100 of the circle (mid / late partial), the expired tile a FULL ring in --warmth-expired',
     rings[0]?.tier === 'mid' && near(dash0(rings[0]), rings[0].frac * 100, 1) && rings[1]?.tier === 'late' && near(dash0(rings[1]), rings[1].frac * 100, 1) && rings[1].frac < 0.3 && rings[2]?.tier === 'expired' && near(dash0(rings[2]), 100, 1), rings);
+  const ink2 = await evalJs(EXP_INK);
+  check('r5: the expired tile\'s full ring IS the one quiet value — --warmth-expired (the dim text\'s hue at 45 %), a hairline, never the invisible border',
+    rings[2]?.tier === 'expired' && sameInk(rings[2].stroke, ink2.exp) && inkOf(ink2.exp)[3] < 0.6 && sameInk(inkOf(ink2.exp).slice(0, 3).concat(1).join(' '), inkOf(ink2.dim).join(' ')), { ring: rings[2], ink2 });
   await bothThemes('A-desktop-10-matrix');
   // zh: the dictionary is chosen once at module load ⇒ the language set before a reload
   const { identifier } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
@@ -551,7 +560,14 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
     pv[DESKS.d1]?.tier === 'critical' && pv[DESKS.d2]?.tier === 'late' && pv[DESKS.d3]?.tier === 'mid' && !pv[DESKS.d4]?.tier && pv[DESKS.d1]?.outline === 'solid' && pv[DESKS.d4]?.outline !== 'solid', p.previews?.map((x) => [x.desk, x.tier, x.outline]));
   const sq = (k) => (p.previews || []).flatMap((x) => x.squares).find((s) => s.sid === SIDS[k]);
   check('the squares carry their tier (another desktop\'s too: late / fresh / mid)', sq(8)?.tier === 'late' && sq(9)?.tier === 'fresh' && sq(10)?.tier === 'mid' && sq(1)?.tier === 'mid', [8, 9, 10, 1].map((k) => sq(k)?.tier));
-  check('an EXPIRED square computes --text-dim\'s colour (visible, as drawn), not the faint border token', sq(6)?.tier === 'expired' && sq(6)?.bg === p.dim, { sq: sq(6), dim: p.dim });
+  const ink5 = await evalJs(EXP_INK);
+  check('r5: an EXPIRED square computes the ONE quiet --warmth-expired (the dim text at 45 %) — no longer --text-dim itself, never the faint border',
+    sq(6)?.tier === 'expired' && sameInk(sq(6)?.bg, ink5.exp) && !sameInk(sq(6)?.bg, p.dim) && inkOf(ink5.exp)[3] < 0.6, { sq: sq(6), ink5, dim: p.dim });
+  const one = await evalJs(`(() => ({ rings: [...document.querySelectorAll('.warmth-ring[data-warmth-tier="expired"] circle')].map((c) => getComputedStyle(c).stroke),
+    dots: [...document.querySelectorAll('.wsum-dot[data-warmth-tier="expired"]')].map((d) => getComputedStyle(d).backgroundColor),
+    squares: [...document.querySelectorAll('.desktop-preview-win[data-warmth-tier="expired"]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash)')].map((q) => getComputedStyle(q).backgroundColor) }))()`);
+  check(`r5: ONE expired value — every expired ring (${one.rings.length}), summary / «+N» dot (${one.dots.length}) and square (${one.squares.length}) on the page computes it (the special cases are gone)`,
+    one.dots.length >= 1 && one.squares.length >= 1 && [...one.rings, ...one.dots, ...one.squares].every((c) => sameInk(c, ink5.exp)), { one, exp: ink5.exp });
   check('a WAITING square still computes the yellow (the blink wins over the tier)', sq(2)?.waiting && sq(2)?.bg === p.yellow, { sq: sq(2), yellow: p.yellow });
   for (const [w, h] of [[1280, 800], [1100, 700]]) { await device(w, h); await sleep(700); await nextTick(1); const q = await evalJs(PREVIEWS); FORMS[`on-${w}`] = { form: q.form, chip: q.chip, summary: q.summary }; }
   // the same state with warmth OFF (the live flip): does the summary chip fold the previews / cut a tile?
@@ -611,6 +627,19 @@ await step('⑦ the summary chip and its list (every desktop, by time left)', as
   check(`the list: one row per known conversation (${rows.length}), «By time left» pressed, ascending, expired last, the unknown one absent`,
     rows.length === truth.known && (await evalJs(`document.querySelector('.warmth-list .wl-sort')?.getAttribute('aria-pressed')`)) === 'true' && !ks.includes(7) && lefts.every((x, i) => i === 0 || x >= lefts[i - 1]) && rows.every((r) => r.band), { ks, lefts: lefts.map((x) => (x > 1e11 ? 'expired' : Math.round(x / 1000))) });
   check('…each row says its time («N min left» / «Expired»)', rows.every((r) => /^\d+ min left$|^Expired$/.test(r.left)), rows.map((r) => r.left));
+  // r5: the hue on the marks, legibility on the words — a live row's words = its tier's 50 % mix toward --text, its band the raw hue
+  const INK = `(() => { const pr = document.createElement('span'); document.body.appendChild(pr); const at = (v) => { pr.style.color = v; return getComputedStyle(pr).color; };
+    const out = [...document.querySelectorAll('.warmth-list .overlap-switcher-item')].map((it) => { const l = it.querySelector(':scope > .wl-left'), b = it.querySelector(':scope > .wl-band'); const t = l && l.getAttribute('data-warmth-tier');
+      return { tier: t, words: l ? getComputedStyle(l).color : null, band: b && b.getAttribute('data-warmth-tier') ? getComputedStyle(b, '::before').backgroundColor : null,
+        want: t ? at('color-mix(in srgb, var(--warmth-' + t + ') 50%, var(--text))') : at('var(--text-dim)'), raw: t ? at('var(--warmth-' + t + ')') : null }; });
+    pr.remove(); return out; })()`;
+  for (const th of ['dark', 'light']) {
+    await theme(th); await sleep(120);
+    const ink = await evalJs(INK), live = ink.filter((r) => r.tier), dead = ink.filter((r) => !r.tier);
+    check(`r5 (${th}): a live row's words compute its tier's 50 % mix toward --text — never the raw hue its band wears; an «Expired» row's words stay --text-dim`,
+      live.length >= 3 && new Set(live.map((r) => r.tier)).size >= 2 && live.every((r) => sameInk(r.words, r.want) && !sameInk(r.words, r.raw) && sameInk(r.band, r.raw)) && dead.length >= 1 && dead.every((r) => sameInk(r.words, r.want)), ink);
+  }
+  await theme('dark');
   await bothThemes('A-desktop-12-summary-list');
   await click('.warmth-list .wl-sort');
   const g = await evalJs(ROWS(L));
@@ -802,6 +831,9 @@ await step('⑫ the theme editor\'s «Cache warmth» rows (opened through the pr
   const rows = opened ? await evalJs(`[...document.querySelectorAll('*')].filter((e) => e.childElementCount === 0 && /^--warmth-(fresh|mid|late|critical|expired)$|^(Fresh|Mid|Late|Critical|Expired)/.test(e.textContent.trim()) && e.closest('.theme-editor, [class*=theme-editor]')).map((e) => e.textContent.trim()).slice(0, 12)`) : [];
   const group = opened ? await evalJs(`[...document.querySelectorAll('*')].some((e) => e.childElementCount === 0 && e.textContent.trim() === 'Cache warmth')`) : false;
   check('the theme editor opens through ⚙ → Appearance → ✎, and lists the «Cache warmth» group', opened && group, { head, opened, group, rows });
+  const seeded = opened ? await evalJs(`(() => { const g = [...document.querySelectorAll('.theme-editor-group-label')].find((l) => l.textContent.trim() === 'Cache warmth'); return g ? [...g.parentElement.querySelectorAll('.theme-editor-row')].map((r) => r.querySelector('.theme-editor-text')?.value ?? null) : null; })()`) : null;
+  check('r5: its five rows start as the raw-hue derivations (var(--green) · var(--blue, #3b82f6) · var(--yellow) · var(--red) · the dim text at 45 %)',
+    JSON.stringify(seeded) === JSON.stringify(['var(--green)', 'var(--blue, #3b82f6)', 'var(--yellow)', 'var(--red)', 'color-mix(in srgb, var(--text-dim) 45%, transparent)']), seeded);
   // the shot: the ⚙ menu closed, the «Cache warmth» group scrolled into the editor's view
   await evalJs(`(() => { document.querySelectorAll('.global-settings-popover').forEach((p) => p.remove()); const h = [...document.querySelectorAll('*')].find((e) => e.childElementCount === 0 && e.textContent.trim() === 'Cache warmth'); h?.scrollIntoView({ block: 'start' }); return !!h; })()`);
   await sleep(300);

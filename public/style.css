@@ -6181,15 +6181,19 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
   --warn-text: color-mix(in srgb, var(--yellow, #e5c07b) 47%, var(--text));
   --bad-text: color-mix(in srgb, var(--red, #e55) 55%, var(--text));
   --attn-text: color-mix(in srgb, var(--accent) 78%, var(--text));
-  /* lane cache-warmth-tiles (the owner's palette ruling, 2026-11-02): the FIVE warmth tokens DERIVE from the status
-     vocabulary above, so every theme — built-in, plugin or made in the theme editor — gets coherent warmth with no
-     work of its own; the theme editor lists them for an override (src/lib/theme-editor.js «Cache warmth»). ONE green;
-     the band's LENGTH carries the countdown, the colour only the tier (src/cache-warmth.js). */
-  --warmth-fresh: var(--ok-text);
-  --warmth-mid: var(--accent);
-  --warmth-late: var(--warn-text);
-  --warmth-critical: var(--bad-text);
-  --warmth-expired: var(--border);
+  /* the FIVE warmth tokens DERIVE from the theme, so every theme — built-in, plugin or made in the theme editor — gets
+     coherent warmth with no work of its own; the theme editor lists them for an override (src/lib/theme-editor.js «Cache
+     warmth»). q-059 r5 (lane cache-warmth-ramp, userW: four tiers, four hues): the four live tiers are the theme's OWN raw
+     status hues — green → blue → amber → red — never its TEXT mixes above (.374's --ok-text and --accent read as two
+     greens: 25° apart on the default theme, 1° on monokai). Every built-in theme defines all four; a plugin theme without
+     --blue falls back. A text site that wears a tier mixes toward --text itself (.wl-left, .sess-warmth-left). Expired is
+     ONE quiet value — dim text at 45 % — for the ring, the square, the preview ring and the dots. The band's LENGTH
+     carries the countdown, the colour only the tier (src/cache-warmth.js). */
+  --warmth-fresh: var(--green);
+  --warmth-mid: var(--blue, #3b82f6);
+  --warmth-late: var(--yellow);
+  --warmth-critical: var(--red);
+  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);
 }
 /* q-059 r1b (lane cache-warmth-band): prompt-cache warmth — colour = the tier token, LENGTH = time left / TTL (--warmth-frac,
    written once per session-poll tick by src/lib/warmth-chrome.js); nothing animates; every mark is paint-only */
@@ -6198,10 +6202,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 [data-warmth-tier="late"]     { --warmth-c: var(--warmth-late); }
 [data-warmth-tier="critical"] { --warmth-c: var(--warmth-critical); }
 [data-warmth-tier="expired"]  { --warmth-c: var(--warmth-expired); }
-/* as drawn (Poc.html:133/:184/:189/:195): every SUMMARISING expired mark is --text-dim; only the tile / group tile /
-   chooser-row ring keeps --warmth-expired (round-4 reply ①) */
-.desktop-preview-win[data-warmth-tier="expired"], .desktop-preview[data-warmth-tier="expired"],
-.desktop-switch-compact .warmth-ring[data-warmth-tier="expired"], .wsum-dot[data-warmth-tier="expired"] { --warmth-c: var(--text-dim); }
+/* r5: no expired special case — the ring, the square, the preview ring and the dots all read the ONE quiet --warmth-expired */
 /* the window's band: 3 px over the title bar's bottom border (::after is the waiting blink, which paints over it); a frame
    that hosts a tab strip draws none — each tab carries its own */
 .window:not(.seamless) > .window-titlebar[data-warmth-tier]:not(:has(> .tab-bar-tabs)) { position: relative; }
@@ -6247,7 +6248,7 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .wl-band { width: 60px; height: 3px; flex: none; position: relative; background: var(--bg-input); border-radius: 1.5px; pointer-events: none; }
 .wl-band[data-warmth-tier]::before { content: ''; position: absolute; left: 0; top: 0; height: 3px; border-radius: 1.5px;
   width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
-.wl-left { flex: none; margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }
+.wl-left { flex: none; margin-left: auto; white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .warmth-list { max-width: 460px; }
 /* r2 (H1): every list row's label (the ⧉ list, its «Other desktops» rows, the summary list) shrinks with an ellipsis — a
    «name — /path» title never pushes the words past the row's edge */
@@ -6256,7 +6257,11 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 /* the phone: a session row's / a switcher row's band on its bottom edge + its time in words */
 .sess-warmth { position: absolute; left: 0; bottom: 0; height: 3px; pointer-events: none;
   width: calc(var(--warmth-frac, 0) * 100%); background: var(--warmth-c); }
-.sess-warmth-left { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--warmth-c, var(--text-dim)); }
+.sess-warmth-left { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-dim); }
+/* r5: a tier's WORDS (the window list's, the summary list's, the phone row's) mix the hue toward --text — the hue on the
+   marks, legibility on the text: at 50 % every built-in theme keeps ≥ 4.5:1 on its list and row grounds (60 % fell to
+   4.05:1 in light). Words with no tier («Expired») stay --text-dim. */
+.wl-left[data-warmth-tier], .sess-warmth-left[data-warmth-tier] { color: color-mix(in srgb, var(--warmth-c) 50%, var(--text)); }
 /* ── end of the q-059 r1b warmth block (test-cache-warmth ⑨ reads it whole) ── */
 .chan-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
 .chan-ic svg { width: 1em; height: 1em; }

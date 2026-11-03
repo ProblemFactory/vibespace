@@ -20,8 +20,9 @@
 //     stamp's ONE writer through the real stdout consumer and the device feed);
 //   ⑤ the switch: `desktop.cacheWarmth`, boolean, OFF by default, in the Window group, its words in zh / ja — DRAWN (r1b: the
 //     band landed; it was HELD from r1a′ until then) — the control: the same row WITH `held` is still not drawn;
-//   ⑥ the five tokens, each DERIVED from the theme's status vocabulary in the block every theme inherits, and the theme
-//     editor's «Cache warmth» rows starting as those derivations (a saved theme keeps deriving);
+//   ⑥ the five tokens, each DERIVED in the block every theme inherits — r5 (lane cache-warmth-ramp): the four live tiers
+//     from the theme's RAW hues (--green / --blue / --yellow / --red), expired from --text-dim at 45 % (a PLANTED .374 line
+//     reds it) — and the theme editor's «Cache warmth» rows starting as those derivations (a saved theme keeps deriving);
 //   ⑦ THE STAMP OUTLIVES A RESTART (r1a′): the REAL boot-restore over a scratch data dir (a fake fuser says every socket is
 //     alive) reads a persisted `lastRequestAt` back as the conversation's stamp — 30 min old ⇒ warm, 30 min ago; a meta with
 //     none restores none (the engine then calls it UNKNOWN — test-pool-auto);
@@ -31,7 +32,8 @@
 //   ⑨ WIRING + THE LAWS (r1b, comment-stripped code): the poll's ONE call from the SAME answer; warmth-chrome.js computes
 //     once (one warmthOf call site) and owns no timer / rAF / settings listener / _notify / setTitleMeta / colour write;
 //     every builder re-applies from the map; app.js seats the chip beside the lock chip; the CSS block's selectors (the
-//     frame guard, the blink kept, the expired marks dim) and no literal colour in it (a PLANTED control proves the check fires);
+//     frame guard, the blink kept; r5: no expired special case, a tier's words mixed toward --text — a PLANTED r1b line reds
+//     it) and no literal colour in it (a PLANTED control proves the check fires);
 //     round 2 (the acceptance of ca2670be0): a list row's label shrinks (H1), an «Other desktops» row takes its group's tabs —
 //     built or held (H2, a PLANTED r1 line reds it), a tile's ring rides its icon (H3), the switcher budgets the warm «+N»
 //     chip by a PURE constant while warmth is drawn (H4, the r1 literal planted reds it); round 3 (the acceptance of
@@ -202,14 +204,22 @@ console.log('— ⑥ the tokens');
 {
   const css = read('public/style.css');
   const i = css.indexOf('--warmth-fresh:'), blockStart = css.lastIndexOf('{', i), sel = css.slice(css.lastIndexOf('}', blockStart) + 1, blockStart).trim();
-  const want = { '--warmth-fresh': 'var(--ok-text)', '--warmth-mid': 'var(--accent)', '--warmth-late': 'var(--warn-text)', '--warmth-critical': 'var(--bad-text)', '--warmth-expired': 'var(--border)' };
-  ok('the five tokens DERIVE from the status vocabulary (fresh = ok, mid = accent, late = warn, critical = bad, expired = the border)',
-    Object.entries(want).every(([k, v]) => css.includes(`  ${k}: ${v};`)), Object.keys(want).filter((k) => !css.includes(`  ${k}: ${want[k]};`)).join(','));
+  // q-059 r5 (lane cache-warmth-ramp): .374's TEXT mixes read as «two greens» (--ok-text mint, --accent teal: 25° apart on
+  // the default theme, 1° on monokai) — the four live tiers are the theme's RAW hues, expired one quiet dim value
+  const want = { '--warmth-fresh': 'var(--green)', '--warmth-mid': 'var(--blue, #3b82f6)', '--warmth-late': 'var(--yellow)', '--warmth-critical': 'var(--red)', '--warmth-expired': 'color-mix(in srgb, var(--text-dim) 45%, transparent)' };
+  /** THE DERIVATION: the five declarations (wherever they are), each exactly as wanted */
+  const derivation = (src) => { const decl = [...src.matchAll(/^  (--warmth-(?:fresh|mid|late|critical|expired)): ([^;]+);$/gm)]; const got = Object.fromEntries(decl.map((m) => [m[1], m[2]])); return { ok: decl.length === 5 && Object.entries(want).every(([k, v]) => got[k] === v), got }; };
+  const d0 = derivation(css);
+  ok('r5: the four live tiers derive from the theme\'s RAW hues — fresh ← --green, mid ← --blue (#3b82f6 for a plugin theme without one), late ← --yellow, critical ← --red — and expired from --text-dim at 45 %, never from a text mix (RED on 749aa7bf9: --ok-text / --accent / --warn-text / --bad-text / --border)',
+    d0.ok, JSON.stringify(d0.got));
+  const MID = '  --warmth-mid: var(--blue, #3b82f6);', EXP = '  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);';
+  ok('…CONTROL: the .374 line planted back reds the pin — mid ← --accent (the second green); expired ← --border (the invisible one)',
+    css.includes(MID) && css.includes(EXP) && !derivation(css.replace(MID, '  --warmth-mid: var(--accent);')).ok && !derivation(css.replace(EXP, '  --warmth-expired: var(--border);')).ok);
   ok('…declared in the block every theme inherits (`:root, [data-theme]`) beside the status tokens they read', /\/\*[\s\S]*\*\/\s*:root, \[data-theme\]$|^:root, \[data-theme\]$/.test(sel) || sel.endsWith(':root, [data-theme]'), sel.slice(-80));
   ok('…and no built-in theme block spells a literal warmth colour of its own', (css.match(/--warmth-(fresh|mid|late|critical|expired)\s*:/g) || []).length === 5);
   const ed = read('src/lib/theme-editor.js');
   const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: '([^']+)', group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
-  ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
+  ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation (r5: the raw hues, expired dim)', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
   ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', /for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js')));
 }
 
@@ -323,8 +333,14 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   ok('the CSS block: the frame band rides ::before on a bar that is not seamless and hosts no tab strip (a group frame draws none)',
     /\.window:not\(\.seamless\) > \.window-titlebar\[data-warmth-tier\]:not\(:has\(> \.tab-bar-tabs\)\)::before \{/.test(block));
   ok('…a square keeps the waiting blink and the find flash (the tier rule steps aside for both)', /\.desktop-preview-win\[data-warmth-tier\]:not\(\.desktop-preview-win-waiting\):not\(\.desktop-preview-find-flash\) \{ background: var\(--warmth-c\); \}/.test(block));
-  ok('…every SUMMARISING expired mark is --text-dim (squares, preview rings, the folded button\'s ring, the dots — as drawn)',
-    /\.desktop-preview-win\[data-warmth-tier="expired"\], \.desktop-preview\[data-warmth-tier="expired"\],\s*\.desktop-switch-compact \.warmth-ring\[data-warmth-tier="expired"\], \.wsum-dot\[data-warmth-tier="expired"\] \{ --warmth-c: var\(--text-dim\); \}/.test(block));
+  ok('r5: NO expired special case — the one mapping line stands and nothing re-points an expired mark (the ring, the square, the preview ring and the dots all read --warmth-expired, one quiet value)',
+    (block.match(/\[data-warmth-tier="expired"\]/g) || []).length === 1 && /\[data-warmth-tier="expired"\]  \{ --warmth-c: var\(--warmth-expired\); \}/.test(block) && !/--warmth-c: var\(--text-dim\)/.test(block));
+  const R1B_LEFT = 'font-variant-numeric: tabular-nums; color: var(--text-dim); }';
+  const wordsMix = (b) => /\.wl-left \{[^}]*color: var\(--text-dim\); \}/.test(b) && /\.sess-warmth-left \{[^}]*color: var\(--text-dim\); \}/.test(b)
+    && /\.wl-left\[data-warmth-tier\], \.sess-warmth-left\[data-warmth-tier\] \{ color: color-mix\(in srgb, var\(--warmth-c\) 50%, var\(--text\)\); \}/.test(b) && !/color: var\(--warmth-c\b/.test(b);
+  ok('r5: a tier\'s WORDS mix the hue toward --text (50 %: ≥ 4.5:1 on every built-in theme — 60 % fell to 4.05:1 in light) and words with no tier stay --text-dim; no text site wears the raw hue',
+    wordsMix(block));
+  ok('…CONTROL: the r1b .wl-left planted back (the raw var(--warmth-c, …) as its colour) reds the pin', block.includes(R1B_LEFT) && !wordsMix(block.replace(R1B_LEFT, 'font-variant-numeric: tabular-nums; color: var(--warmth-c, var(--text-dim)); }')));
   const LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/;
   ok('…NO literal colour in the block (theme vars only) — and nothing in it animates (no transition, no animation)', !!block && !LITERAL.test(block) && !/\b(transition|animation)\s*:/.test(block), (block.match(LITERAL) || [''])[0]);
   ok('…CONTROL: the literal check fires on the blink\'s own literal planted into the block', LITERAL.test(block + '\n.x { background: rgba(250,180,40,0.4); }') && LITERAL.test(block + '\n.x { color: #e5c07b; }'));
