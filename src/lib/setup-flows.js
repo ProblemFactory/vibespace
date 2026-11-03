@@ -473,11 +473,17 @@ export function installSetupFlows(App) {
     const { body, close, raised, ready, live } = createModalShell({ id: 'layout-history-dialog', key, title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     if (!(await ready)) return null;   // queued behind the open one's door — null: the person kept that one
-    body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
+    // lane phone-dock-restore (the owner 2026-11-02: «恢复之前的布局…加载速度有点慢，然后也没有任何提示»): A DOOR THAT WAITS SAYS IT WAITS —
+    // the shell paints at once with what it reads; a read that failed is said here, never «no rollback points yet»
+    body.innerHTML = `<div class="empty-hint" role="status">${escHtml(t('Reading the layout history…'))}</div>`;
     const q = e0 ? '?' + new URLSearchParams({ desktop: String(slot.desktopId), win: String(e0.winId || e0.id || ''), type: e0.type === 'terminal' ? 'terminal' : 'chat', title: String(e0.title || ''), cwd: String(e0.cwd || e0.openSpec?.cwd || ''), name: typeof e0.openSpec?.name === 'string' ? e0.openSpec.name : '' }).toString() : '';
     const r = await fetchJson('/api/layout-history' + q).catch(() => null);
     if (!live()) return null;   // another slot's door replaced it meanwhile
-    const entries = r?.entries || [];
+    if (!r || r.error || !Array.isArray(r.entries)) {
+      body.innerHTML = `<div class="usage-note lh-error" role="alert">${escHtml(t('Could not read the layout history: {error}', { error: (r && r.error) || t('no answer') }))}</div>`;
+      return;
+    }
+    const entries = r.entries;
     const pick = e0 && r?.pick && typeof r.pick === 'object' ? r.pick : null;
     if (!entries.length) {
       body.innerHTML = `<div class="usage-note">${escHtml(t('No rollback points yet — one is written whenever your window layout changes shape.'))}</div>`;
@@ -502,6 +508,21 @@ export function installSetupFlows(App) {
             <div class="lh-desks">${desks}</div>` : ''}</div>
           <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(t('Restore'))}</button></div>`;
       }).join('')}</div>`;
+    // THE PRESS SAYS IT RUNS (lane phone-dock-restore — measured: from the confirm's OK to the toast the dialog stood as it was,
+    // the hub's whole restore long): the pressed button's busy words at once, the list held (one restore at a time); a refusal
+    // gives both back. THIS page's own restore is no «other device»: the hub's broadcast reaches the page that asked too —
+    // app.js 'layout-restored' reads `_layoutRestoring` (heard ⇒ restored, whatever became of this answer)
+    const [list] = body.querySelectorAll('.lh-list');
+    const busy = (b) => {
+      const was = b.textContent;
+      b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = true;
+      return (res, done) => {
+        if (res?.success || this._layoutRestoring === 'heard') { close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
+        b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = false;
+        showToast(res?.error || t('Restore failed'), { type: 'error' });
+        return false;
+      };
+    };
     body.querySelectorAll('.lh-restore').forEach((b) => {
       b.onclick = async () => {
         // showConfirmDialog takes an OPTIONS OBJECT (utils.js:91) — a bare
@@ -513,11 +534,9 @@ export function installSetupFlows(App) {
           message: t('Restore this layout? Your current one becomes a rollback point too, so this is undoable.'),
           confirmText: t('Restore'),
         }))) return;
+        const end = busy(b);
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST' }).catch(() => null);
-        if (!res?.success) { showToast(res?.error || t('Restore failed'), { type: 'error' }); return; }
-        close();
-        showToast(t('Layout restored — reloading…'));
-        setTimeout(() => location.reload(), 800);
+        end(res, t('Layout restored — reloading…'));
       };
     });
     body.querySelectorAll('.lh-desk').forEach((b) => {
@@ -528,11 +547,9 @@ export function installSetupFlows(App) {
           message: t('Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', { desktop: desk }),
           confirmText: t('Restore only “{desktop}”', { desktop: desk }),
         }))) return;
+        const end = busy(b);
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktop: desk }) }).catch(() => null);
-        if (!res?.success) { showToast(res?.error || t('Restore failed'), { type: 'error' }); return; }
-        close();
-        showToast(t('“{desktop}” restored — reloading…', { desktop: desk }));
-        setTimeout(() => location.reload(), 800);
+        end(res, t('“{desktop}” restored — reloading…', { desktop: desk }));
       };
     });
     const picked = pick ? [...body.querySelectorAll('.lh-desk')].find((b) => b.dataset.id === pick.id && b.dataset.desk === pick.desk) : null;

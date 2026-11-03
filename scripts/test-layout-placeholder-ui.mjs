@@ -119,8 +119,8 @@ else await (async () => {
   const client = async (wsUrl, { lang = 'zh', phone = false } = {}) => {
     const sock = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 });
     await new Promise((r, e) => { sock.on('open', r); sock.on('error', e); });
-    let seq = 0; const pend = new Map();
-    sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+    let seq = 0; const pend = new Map(); const hear = new Set(); // (⑥: the CDP events — a held request's Fetch.requestPaused)
+    sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method) for (const f of hear) f(m); });
     const send = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(J({ id, method, params })); });
     const ev = async (expr) => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
     await send('Page.enable'); await send('Runtime.enable');
@@ -128,7 +128,7 @@ else await (async () => {
     await send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` });
     if (phone) { await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }); await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); }
     else await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-    const X = { send, ev, close: () => { try { sock.close(); } catch { } } };
+    const X = { send, ev, close: () => { try { sock.close(); } catch { } }, on: (f) => { hear.add(f); return () => hear.delete(f); } };
     X.boot = async () => {
       await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
       const up = await until(async () => { try { return await ev('!!(window.app && window.app.desktopManager && window.app.desktopManager.activeDesktopId)'); } catch { return false; } }, 30000, 200);
@@ -253,6 +253,75 @@ else await (async () => {
     const built = (X) => until(async () => (await X.ev(`${J(point.desktops['desk-p'].autoSave.windows.map((w) => w.winId))}.filter((id) => app.wm.windows.has(id)).length`)) === 12 && (await X.tiles()).length === 11, 20000, 250);
     ok(await built(P1) && await built(P2), '④ on a hub whose sessions are stopped the restored 个人 shows TWELVE windows on both pages — eleven placeholders + the file window, not 0');
     await P1.shot('restored-zh-1440');
+
+    // ⑥ lane phone-dock-restore (the owner 2026-11-02 on the iPhone: «恢复之前布局的那个按钮加载速度有点慢，然后也没有任何提示让人那边
+    //    confused»): A DOOR THAT WAITS SAYS IT WAITS. The hub's answers HELD (CDP Fetch on /api/layout-history*): the dialog's shell
+    //    and «正在读取布局历史…» stand within 300 ms, before the answer; a read that fails is SAID («读取布局历史失败：…» — never «暂无回滚点»);
+    //    a restore's press says «正在恢复…» while the hub works; the page that asked shows ITS toast alone (the base: «布局已在另一台设备上
+    //    恢复» above it — the hub's broadcast reaches the asking page too). RED CONTROL: this tree's bundle with the lane's lines of
+    //    setup-flows.js / app.js put back as 74b98357e had them — the same probe reads «加载中…», «暂无回滚点», the button as it was, two toasts.
+    const probe6 = async (X) => {
+      const held = []; const off = X.on((m) => { if (m.method === 'Fetch.requestPaused' && /\/api\/layout-history/.test(m.params.request.url)) held.push(m.params.requestId); });
+      const next = async (ms = 8000) => { await until(() => held.length > 0, ms, 20); return held.shift(); };
+      const out = {};
+      try {
+        await X.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/layout-history*', requestStage: 'Request' }] });
+        const DLG = `document.getElementById('layout-history-dialog')`;
+        // (a) the shell before the answer: the press's own clock to two frames later
+        out.shell = await X.ev(`(async () => { const t0 = performance.now(); void app._showLayoutHistory(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const d = ${DLG}; return { ms: Math.round(performance.now() - t0), seen: !!d && d.getClientRects().length > 0, says: d ? (d.querySelector('.dialog-body') || d).textContent.trim() : null, list: !!(d && d.querySelector('.lh-list')) }; })()`);
+        let id = await next(); out.heldGet = !!id;
+        await X.send('Fetch.continueRequest', { requestId: id });
+        await until(() => X.ev(`${DLG}?.querySelectorAll('.lh-row').length || 0`), 8000, 50); out.rows = await X.ev(`${DLG}?.querySelectorAll('.lh-row').length || 0`);
+        await X.ev(`(${DLG}?.querySelector('.dialog-close')?.click(), true)`); await sleep(300);
+        // (b) a read that fails is said
+        await X.ev('(void app._showLayoutHistory(), true)'); id = await next();
+        await X.send('Fetch.failRequest', { requestId: id, errorReason: 'ConnectionRefused' });
+        await until(() => X.ev(`!/正在读取|加载中/.test(${DLG}?.textContent || '加载中')`), 8000, 50);
+        out.failSays = await X.ev(`(${DLG}?.querySelector('.dialog-body')?.textContent || '').trim()`);
+        await X.ev(`(${DLG}?.querySelector('.dialog-close')?.click(), true)`); await sleep(300);
+        // (c) the restore's press while the hub works, and the toasts of the page that asked
+        await X.ev('(void app._showLayoutHistory(), true)'); id = await next(); await X.send('Fetch.continueRequest', { requestId: id });
+        await until(() => X.ev(`!!${DLG}?.querySelector('.lh-restore')`), 8000, 50);
+        await X.ev(`(() => { window.__lh6 = []; const g = document.getElementById('global-toasts') || document.body; new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!window.__lh6.includes(t.textContent)) window.__lh6.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
+        await X.click(`${DLG}.querySelector('.lh-restore')`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        id = await next(); await sleep(300);
+        out.busy = await X.ev(`(() => { const b = ${DLG}?.querySelector('.lh-restore[aria-busy="true"]'); return { open: !!${DLG}, words: b ? b.textContent : null, held: !!${DLG}?.querySelector('.lh-list')?.inert }; })()`);
+        await X.ev('window.__lswMark6 = 1; true');
+        await X.send('Fetch.continueRequest', { requestId: id });
+        await until(() => X.ev(`(window.__lh6 || []).some((t) => /布局已恢复/.test(t))`), 8000, 20); await sleep(150);
+        out.toasts = await X.ev('window.__lh6 || []').catch(() => null);
+      } finally { off(); try { await X.send('Fetch.disable'); } catch { } }
+      await until(async () => { try { return (await X.ev('window.__lswMark6 === undefined && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
+      return out;
+    };
+    const good6 = (o) => !!o && !!o.shell && o.shell.seen && o.shell.ms < 300 && o.shell.says === '正在读取布局历史…' && !o.shell.list && o.heldGet && o.rows >= 1;
+    const fail6 = (o) => !!o && /^读取布局历史失败：/.test(o.failSays || '') && !/暂无回滚点/.test(o.failSays || '');
+    const busy6 = (o) => !!o && !!o.busy && o.busy.open && o.busy.words === '正在恢复…' && o.busy.held;
+    const toast6 = (o) => !!o && Array.isArray(o.toasts) && o.toasts.some((t) => /布局已恢复 — 正在刷新/.test(t)) && !o.toasts.some((t) => /另一台设备/.test(t));
+    const g6 = await probe6(P1);
+    ok(good6(g6), `⑥ the GET held: the dialog's shell stands ${g6.shell && g6.shell.ms} ms after the press (< 300) saying «${g6.shell && g6.shell.says}», no list yet; the answer released ⇒ ${g6.rows} rows`, g6);
+    ok(fail6(g6), `⑥ a read that fails is SAID in the dialog: «${g6.failSays}» (never «暂无回滚点»)`, g6.failSays);
+    ok(busy6(g6), `⑥ the restore's press while the hub works: the button says «${g6.busy && g6.busy.words}», the list held`, g6.busy);
+    ok(toast6(g6), `⑥ the page that asked shows ITS toast alone: ${J(g6.toasts)}`, g6.toasts);
+    await P1.shot('history-busy-zh');
+    // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
+    const SF = fs.readFileSync(path.join(wt, 'src/lib/setup-flows.js'), 'utf8'), AP = fs.readFileSync(path.join(wt, 'src/lib/app.js'), 'utf8');
+    const back = [[SF, "t('Reading the layout history…')", "t('Loading…')"], [SF, 'if (!r || r.error || !Array.isArray(r.entries)) {', 'if (false) {'], [SF, 'const entries = r.entries;', 'const entries = r?.entries || [];'],
+      [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = true;", ''],
+      [AP, "if (this._layoutRestoring) { this._layoutRestoring = 'heard'; setTimeout(() => location.reload(), 900); return; }", '']];
+    const anchored = back.every(([src, from]) => src.split(from).length === 2);
+    let mutSF = SF, mutAP = AP; for (const [src, from, to] of back) { if (src === SF) mutSF = mutSF.replace(from, to); else mutAP = mutAP.replace(from, to); }
+    const MUTD = path.join(ROOT, 'mut6'); fs.cpSync(path.join(wt, 'src'), path.join(MUTD, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(MUTD, 'src/lib/setup-flows.js'), mutSF); fs.writeFileSync(path.join(MUTD, 'src/lib/app.js'), mutAP);
+    await esbuild.build({ entryPoints: [path.join(MUTD, 'src/client.js')], bundle: true, outfile: path.join(MUTD, 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent', nodePaths: [path.join(repo, 'node_modules')] });
+    const MB = fs.readFileSync(path.join(MUTD, 'bundle.js')).toString('base64');
+    const offB = P1.on((m) => { if (m.method === 'Fetch.requestPaused' && /bundle\.js/.test(m.params.request.url)) P1.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body: MB }).catch(() => { }); });
+    await P1.send('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+    await P1.boot(); await P1.send('Fetch.disable'); offB();
+    const r6 = await probe6(P1);
+    ok(anchored && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);
   } finally { P1.close(); if (P2) P2.close(); }
 })();
 

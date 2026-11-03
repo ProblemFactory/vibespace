@@ -349,6 +349,9 @@ class App {
         // Another client restored a rollback point. Without this our stale
         // in-memory layout would be written back on the next window change,
         // silently undoing the restore (adversarial review).
+        // lane phone-dock-restore: the broadcast reaches the page that ASKED too (measured: it said «…on another device» above its
+        // own «Layout restored») — that page's press says it (setup-flows `_layoutRestoring`); it reloads all the same
+        if (this._layoutRestoring) { this._layoutRestoring = 'heard'; setTimeout(() => location.reload(), 900); return; }
         showToast(t('Layout restored on another device — reloading…'));
         setTimeout(() => location.reload(), 900);
         return;
