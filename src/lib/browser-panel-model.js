@@ -48,13 +48,17 @@ export function nameChips(r, x = {}) {
 /** The state's sentences by priority: stuck (warn) > unavailable (warn) > leave-page dialogs accepted (warn) > the
  *  row's own why (last used, who uses it). The first is the cell's l2; the fold lists them all. */
 export function stateLines(r, x = {}) {
-  const why = String(W(x, 'why', () => '')(r) || '');
+  const t = T(x), why = String(W(x, 'why', () => '')(r) || '');
   const out = [];
   if (hung(r, x)) out.push({ key: 'unresponsive', text: String(x.unresponsive.tooltip || x.unresponsive.state), tone: 'warn' });
   if (x.stuck && x.stuck.line) out.push({ key: 'stuck', text: String(x.stuck.line), tone: x.stuck.tone === 'info' ? 'info' : 'warn' }); // lane browser-held-not-hung: a blind watch is info
   if (r.browserClosed && why) out.push({ key: 'closed', text: why, tone: 'warn' });
   if (x.autoDialogs && x.autoText) out.push({ key: 'auto-dialogs', text: String(x.autoText), tone: 'warn' });
   if (!r.browserClosed && why) out.push({ key: 'why', text: why, tone: '' });
+  // lane hotfix-attach-engine-args (2.369.375): a switch its ENGINE passed that the attach road cannot carry — the hub dropped it
+  // and the row SAYS so (last: the state's own sentence keeps the row's second line)
+  const ed = r.engineDropped && Array.isArray(r.engineDropped.switches) && r.engineDropped.switches.length ? r.engineDropped.switches.map(String) : null;
+  if (ed) out.push({ key: 'engine-dropped', text: t('Left out {switches}, which its engine asked for: it would stop this browser signing in to Google', { switches: ed.join(' ') }), tone: 'info' });
   return out;
 }
 

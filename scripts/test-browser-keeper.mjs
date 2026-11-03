@@ -7,6 +7,8 @@
 //   ③ the socket dir per config (the rule, the owned-dir check, the call shape) + RED: a shared dir lets close --all cross
 //   ④ the keeper: start on the attach road, every driver call `--cdp` in the config's own root, stop, Chrome's own exit, the
 //     driver road without xpra (said), a display that never came up, cdp_port_missing at the keeper, the boot, the reconcile
+//   ①b lane hotfix-attach-engine-args (2.369.375): an ENGINE's forbidden switch is DROPPED and SAID (never the launch refused);
+//     the hub's own forbidden switch is still RED; every launch the road does not start is journaled by name (④'s engine block)
 //   ⑦ lane browser-display-holders: the display record reads the conversations attached (holders); a PERSON's stop of the
 //     display stamps the record, tells each holder once, and is NEVER healed (RED control: the keeper without the gate heals
 //     it on the next tick); the next command starts a new record with no stamp
@@ -63,6 +65,25 @@ ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '--disable-sync'];").l
 const noAC = mutant('src/browser-attach.js', "\n    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE", "\n    '--disable-background-networking', ...PROFILE_STORE");
 ok(!noAC.attachArgv({ profileDir: '/p' }).ok && AT.argvVerdict(['--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11', '--disable-background-networking']).missing.join() === '--disable-blink-features=AutomationControlled', 'CONTROL: a builder that drops AutomationControlled is RED (its census names the missing flag)');
 const withSync = mutant('src/browser-attach.js', "'--disable-background-networking', ...PROFILE_STORE", "'--disable-background-networking', '--disable-sync', ...PROFILE_STORE");
+// ①b lane hotfix-attach-engine-args (2.369.375; the owner's hub: the custom kernel's plugin passes a driver-road switch, so every
+// profile on it was refused bad_argv — the kernel unusable through a named profile)
+console.log('— ①b an engine\'s forbidden switch: dropped and said, never the launch refused');
+{
+  const sf = typeof AT.stripForbidden === 'function' ? AT.stripForbidden(['--vibespace-engine=x', '--disable-sync', '--disable-sync=1', '--disable-syncx']) : null;
+  ok(sf && JSON.stringify(sf) === JSON.stringify({ kept: ['--vibespace-engine=x', '--disable-syncx'], dropped: ['--disable-sync', '--disable-sync=1'] }), 'stripForbidden (PURE): an engine\'s forbidden switch (bare or =value) is dropped, every other kept in its order (a longer name is another switch)', sf);
+  const ae = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x', '--disable-sync'] });
+  const want = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x'] });
+  ok(ae.ok && JSON.stringify(ae.argv) === JSON.stringify(want.argv) && AT.argvVerdict(ae.argv).ok && JSON.stringify(ae.dropped) === JSON.stringify(['--disable-sync']), 'an ENGINE\'s --disable-sync: the launch is NOT refused — its argv is the one without it, and `dropped` names it for the caller to say', ae);
+  ok(want.ok && Array.isArray(want.dropped) && want.dropped.length === 0, 'an engine with nothing forbidden: `dropped` is empty (nothing to say)', want.dropped);
+  const own = AT.attachArgv({ profileDir: '/p', quiet: [...quiet, '--disable-sync'] });
+  const ownMark = AT.attachArgv({ profileDir: '/p', mark: '--disable-sync=1' });
+  ok(!own.ok && own.code === 'bad_argv' && JSON.stringify(own.offending) === JSON.stringify(['--disable-sync']) && !ownMark.ok && ownMark.code === 'bad_argv', 'PLANTED CONTROL: a forbidden switch the HUB puts in the argv (its quiet switches, its mark) is still refused bad_argv — the strip is the engine\'s part only, and the refusal names the item', { own, ownMark });
+  const dup = AT.attachArgv({ profileDir: '/p', extra: ['--user-data-dir=/elsewhere'] });
+  ok(!dup.ok && dup.code === 'bad_argv' && JSON.stringify(dup.offending) === JSON.stringify(['--user-data-dir=/p', '--user-data-dir=/elsewhere']) && /--user-data-dir ×2/.test(dup.error), 'an engine\'s second --user-data-dir is still refused, the census naming both items (×2 in its words)', dup);
+  ok(typeof AT.droppedWords === 'function' && AT.droppedWords({ engine: 'vibespace.custom-browser', dropped: ['--disable-sync'] }) === "engine vibespace.custom-browser's launch switch --disable-sync dropped on the attach road (driver-only; the attach road needs Chrome's sign-in entry)" && typeof AT.argvItemsText === 'function' && AT.argvItemsText(['--a=1', '--b c', '\t--x']) === '--a=1 "--b c" "\\t--x"', 'the words: one sentence names the engine and its switch(es); an argv item with a space or a control character is quoted (a journal line stays one line)');
+  let judged = null; try { judged = mutant('src/browser-attach.js', '...eng.kept,', '...(Array.isArray(extra) ? extra.map(String) : []),'); } catch (e) { judged = { error: e && e.message }; } // a tree without the strip: red by name, the suite goes on
+  ok(judged && typeof judged.attachArgv === 'function' && !judged.attachArgv({ profileDir: '/p', extra: ['--disable-sync'] }).ok, 'CONTROL (the incident): a builder that JUDGES the engine\'s switch instead of dropping it refuses the whole launch bad_argv', judged && judged.error);
+}
 ok(!withSync.attachArgv({ profileDir: '/p' }).ok && syncCensus(fs.readFileSync(path.join(REPO, 'src/browser-attach.js'), 'utf8').replace("'--disable-background-networking', ...PROFILE_STORE", "'--disable-background-networking', '--disable-sync', ...PROFILE_STORE")).length === 1, 'CONTROL: a builder that adds --disable-sync is RED twice (its own census + the source census)');
 
 // ═══ ② THE PORT FILE ═══
@@ -309,6 +330,71 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   const bad = AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--user-data-dir=/elsewhere'] });
   ok(!bad.ok && bad.code === 'bad_argv', 'CONTROL: an engine argument naming another --user-data-dir fails the builder\'s census (bad_argv) — never spawned', bad);
   await ke.stop(pE.id, { why: 'user' });
+  // ①b lane hotfix-attach-engine-args: THE INCIDENT through the keeper — the engine's launch options carry --disable-sync ⇒ started on the
+  // attach road WITHOUT it, ONE journal line names it, the record carries the fact the Agent browser panel's row words
+  ok(!('engineDropped' in recE), 'an engine launch that dropped nothing carries no engineDropped fact', recE.engineDropped);
+  {
+    const REGS = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['--vibespace-engine=attach-leg', '--disable-sync'], env: {} } }) };
+    const kS = mk({ dataDir: path.join(S, 'data-engine-sync'), engines: REGS });
+    const pS = kS.createProfile({ label: 'Engine sync', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+    setMode('ok');
+    const nS = chromeLog().length, jS = journal.length;
+    const vS = await kS.start(pS.id, { why: 'test' }).then((v) => v, (e) => ({ error: e && e.message, code: e && e.code }));
+    const recS = kS._reg().browsers[pS.id] || {};
+    const clS = chromeLog().slice(nS).pop();
+    ok(vS && vS.state === 'ready' && recS.launch === 'attach' && clS && JSON.stringify(clS.args) === JSON.stringify(AT.attachArgv({ profileDir: pS.dir, mark: B.keeperMarkArg(pS.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && !clS.args.some((a) => a.startsWith('--disable-sync')), 'an engine passing --disable-sync STARTS on the attach road: its Chrome ran with the engine\'s other switch and without the forbidden one (never refused bad_argv)', { v: vS, args: clS && clS.args });
+    const said = journal.slice(jS).filter((l) => l === `[browser] ${pS.id}: engine ${EID}'s launch switch --disable-sync dropped on the attach road (driver-only; the attach road needs Chrome's sign-in entry)`);
+    ok(said.length === 1 && JSON.stringify(recS.engineDropped) === JSON.stringify({ engine: EID, switches: ['--disable-sync'] }), 'SAID, never silent: ONE journal line names the engine and the switch, and the record carries {engine, switches} (the panel\'s fact)', { said, journal: journal.slice(jS), fact: recS.engineDropped });
+    const PM = await import('../src/lib/browser-panel-model.js');
+    const R = require('../src/server/browser-trace.js');
+    const fakeDu = (cmd, args, opts, cb) => { const dirs = args.slice(args.indexOf('--') + 1); setTimeout(() => cb(null, dirs.map((d) => `4096\t${d}`).join('\n'), ''), 1); };
+    const tr = R.create({ dataDir: path.join(S, 'data-engine-sync'), homeDir: HOME, keeper: kS, bridge: null, serverSetting: (x) => settings[x], broadcast: () => { }, log: jlog, now: Date.now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+    const hk = await tr.housekeeping().catch((e) => ({ error: e && e.message }));
+    const row = ((hk && hk.profiles) || []).find((r) => r.id === pS.id) || null;
+    const tw = (s, q) => String(s).replace(/\{(\w+)\}/g, (m, k) => (q && k in q ? String(q[k]) : m)); // the view's t (English: the key, interpolated)
+    const lines = row ? PM.stateLines(row, { w: { t: tw, why: () => 'its browser is running' } }) : [];
+    const line = lines.find((s) => s.key === 'engine-dropped');
+    ok(row && JSON.stringify(row.engineDropped) === JSON.stringify(recS.engineDropped) && line && line.text === 'Left out --disable-sync, which its engine asked for: it would stop this browser signing in to Google' && line.tone === 'info' && lines[0] !== line, 'the Agent browser panel: the profile\'s housekeeping row carries the fact and its state lines SAY it (after the state\'s own sentence — the row\'s second line keeps that)', { row: row && row.engineDropped, lines, hk: hk && hk.error });
+    await kS.stop(pS.id, { why: 'user' }).catch(() => { });
+  }
+  // ①b: EVERY launch the road does not start is journaled BY NAME — the code and the argv item(s) — BEFORE its display session is stopped.
+  // (1) PLANTED CONTROL at the keeper: the HUB's own argv carrying a forbidden switch (the builder's quiet part, planted) is still bad_argv
+  {
+    const orig = AT.attachArgv;
+    let rP = null, jl = [], nP = 0, pP = null, kP = null;
+    try {
+      AT.attachArgv = (o) => orig({ ...o, quiet: [...(o.quiet || []), '--disable-sync'] }); // the keeper calls AT.attachArgv by property: the plant reaches it
+      kP = mk({ dataDir: path.join(S, 'data-engine-planted'), engines: REG });
+      pP = kP.createProfile({ label: 'Engine planted', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+      setMode('ok');
+      nP = chromeLog().length; const jP = journal.length;
+      rP = await kP.start(pP.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+      jl = journal.slice(jP);
+    } finally { AT.attachArgv = orig; }
+    const iSaid = jl.findIndex((l) => l === `[browser] ${pP.id} "Engine planted": NOT started on the attach road [bad_argv] (--disable-sync) — the attach argv failed its census (missing -; forbidden --disable-sync)`);
+    const iStop = jl.findIndex((l) => l.startsWith(`[browser] ${pP.id}: its display session `) && l.endsWith('stopped — its launch was refused'));
+    ok(rP.e && rP.e.code === 'bad_argv' && chromeLog().length === nP && iSaid >= 0 && iStop > iSaid && jl.filter((l) => l.includes('NOT started on the attach road')).length === 1, 'PLANTED CONTROL through the keeper: a forbidden switch in the HUB\'s own argv is still refused bad_argv — and the refusal is journaled ONCE, with its code and the item, BEFORE its display session is stopped; nothing spawned', { code: rP.e && rP.e.code, jl });
+    await kP.stop(pP.id, { why: 'user' }).catch(() => { });
+  }
+  // (2) a sibling on the road (the switch-only wall — the wrapper's wall stubbed away, as L1b r5 below): journaled by name too
+  {
+    const ENGK0 = require('../src/browser-engines.js'), wrap0 = ENGK0.engineWrapperText;
+    let rU = null, jl = [], nU = 0, pU2 = null, kU = null;
+    try {
+      ENGK0.engineWrapperText = (spec) => wrap0({ ...spec, args: [] });
+      const REGU = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['--no-sandbox', '--'], env: {} } }) };
+      kU = mk({ dataDir: path.join(S, 'data-engine-said'), engines: REGU });
+      pU2 = kU.createProfile({ label: 'Engine said', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+      setMode('ok');
+      nU = chromeLog().length; const jU = journal.length;
+      rU = await kU.start(pU2.id, { why: 'test' }).then((v) => ({ v }), (e) => ({ e }));
+      jl = journal.slice(jU);
+    } finally { ENGK0.engineWrapperText = wrap0; }
+    const iSaid = jl.findIndex((l) => l.startsWith(`[browser] ${pU2.id} "Engine said": NOT started on the attach road [browser_engine_protocol] (--) — `));
+    const iStop = jl.findIndex((l) => l.startsWith(`[browser] ${pU2.id}: its display session `) && l.endsWith('stopped — its launch was refused'));
+    ok(rU.e && rU.e.code === 'browser_engine_protocol' && chromeLog().length === nU && iSaid >= 0 && iStop > iSaid, 'a sibling refusal on the road (an engine\'s bare --) is journaled with its code and the item BEFORE its display session is stopped; nothing spawned', { code: rU.e && rU.e.code, jl });
+    await kU.stop(pU2.id, { why: 'user' }).catch(() => { });
+  }
   // lane engine-spi-egress L1b r3: the ATTACH road's own census refuses a switch that starts ANOTHER program (the launch verdict refuses it
   // first; this registry hands it unjudged, as a stub can) — the start is refused by name and nothing is spawned
   const REGL = { ...REG, launchOptions: async () => ({ ok: true, launch: { executablePath: KERN, args: ['--browser-subprocess-path=/usr/bin/true'], env: {} } }) };

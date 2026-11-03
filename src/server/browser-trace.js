@@ -918,6 +918,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       r.disk = keeper && typeof keeper.diskOf === 'function' ? keeper.diskOf(r.id) : null; // lane browser-disk-sample: the keeper's du sample {bytes, at, state} (the row's On disk)
       r.human = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(r.id) : null; // BROWSE YOURSELF (B-6ae8): the user browsing it himself (the row's state line)
       r.display = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).display || null) : null; // lane headless-fallback: its launch's display fact (headless instead of a window, and why)
+      r.engineDropped = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).engineDropped || null) : null; // lane hotfix-attach-engine-args: its engine's switches the attach road dropped (the row says so)
       // lane profile-lock-roll (L3): the machine its browser last started on, and the takeover of a previous name's lock (a day)
       r.launchHost = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).host || null) : null;
       r.renamedFrom = keeper && typeof keeper.profile === 'function' ? require('../browser-profiles.js').renamedFromFact(keeper.profile(r.id), now()) : null;

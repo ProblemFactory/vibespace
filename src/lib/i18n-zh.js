@@ -5877,6 +5877,7 @@ export default {
   "1 conversation uses it": "1 个对话在用",
   "{n} conversations use it": "{n} 个对话在用",
   "its browser is running": "它的浏览器正在运行",
+  "Left out {switches}, which its engine asked for: it would stop this browser signing in to Google": "已去掉它的内核要求的 {switches}：带着它，这个浏览器无法登录 Google",
   "written {ago}; it may still be in use": "{ago}写入过，可能还在使用",
   "unused for {n} days; listed, never deleted by itself": "已有 {n} 天没用；只列出来，不会自动删除",
   "never used yet": "还没用过",

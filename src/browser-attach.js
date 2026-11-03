@@ -57,26 +57,55 @@ const SOCKET_PATH_MAX = 103;
  *  keeper call on an attach record — the endpoint rides `--cdp` instead, the socket root is the config's own. */
 const ATTACH_DROP_ENV = Object.freeze(['AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_CDP', 'AGENT_BROWSER_AUTO_CONNECT', 'AGENT_BROWSER_HEADED', 'AGENT_BROWSER_EXECUTABLE_PATH', 'AGENT_BROWSER_ARGS', 'AGENT_BROWSER_PROVIDER', 'AGENT_BROWSER_SOCKET_DIR']);
 
+/** Is ONE argv item a switch the attach road forbids (the bare switch or its `=value` form)? The census and the engine's
+ *  strip ask this one rule. */
+const isForbiddenSwitch = (x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '='));
 /** The census over ONE argv: `{ok, missing, forbidden, userDataDir}` — every required flag present, none forbidden, exactly
  *  one --user-data-dir. */
 function argvVerdict(argv) {
   const a = Array.isArray(argv) ? argv.map(String) : [];
   const missing = ATTACH_REQUIRED.filter((f) => !a.includes(f));
-  const forbidden = a.filter((x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '=')));
+  const forbidden = a.filter(isForbiddenSwitch);
   const userDataDir = a.filter((x) => x.startsWith('--user-data-dir=')).length === 1;
   return { ok: !missing.length && !forbidden.length && userDataDir, missing, forbidden, userDataDir };
+}
+/** lane hotfix-attach-engine-args (2.369.375; the owner's hub: the custom kernel's plugin passes a driver-road switch, and every
+ *  profile on it was refused `bad_argv`): an ENGINE's launch arguments are additive switches the hub judges — one THIS road
+ *  forbids is the hub's to DROP and SAY, never a reason to refuse the engine (its author cannot know this road's rules; the hub
+ *  owns the attach argv, q-026 §2.1). → `{kept, dropped}`, each in the engine's order. Only the engine's part passes here: a
+ *  forbidden switch the hub itself puts in the argv is still the census's red. */
+function stripForbidden(extra) {
+  const kept = [], dropped = [];
+  for (const x of Array.isArray(extra) ? extra.map(String) : []) (isForbiddenSwitch(x) ? dropped : kept).push(x);
+  return { kept, dropped };
+}
+/** argv items as ONE journal-safe text: a plain switch as it is, anything else (a space, a quote, a control character) JSON-quoted;
+ *  at most 8, each cut at 200 characters. */
+function argvItemsText(items) {
+  const a = (Array.isArray(items) ? items : []).map(String);
+  const shown = a.slice(0, 8).map((x) => (/^[\x21-\x7e]{1,200}$/.test(x) && !/["'\\`]/.test(x) ? x : JSON.stringify(x.slice(0, 200))));
+  return shown.join(' ') + (a.length > 8 ? ` (+${a.length - 8} more)` : '');
+}
+/** The sentence a dropped engine switch is said in (the keeper's journal line): `engine` = the plugin's id. */
+function droppedWords({ engine = '', dropped = [] } = {}) {
+  const list = Array.isArray(dropped) ? dropped.map(String) : [];
+  return `engine ${String(engine || '?').slice(0, 80)}'s launch switch${list.length === 1 ? '' : 'es'} ${argvItemsText(list)} dropped on the attach road (driver-only; the attach road needs Chrome's sign-in entry)`;
 }
 /** THE ARGV of an attach launch (design §2.1): the required flags, the profile's directory, the profile store, the quiet
  *  log switches and the keeper's launch mark (both handed in: browser-stderr / browser-profiles spell them), then
  *  `about:blank` (Chrome's first tab blank — no New Tab page fetching anything). `extra` (lane engine-plugin) = a browser
- *  ENGINE's own launch arguments, before the mark — the same census judges them (a second --user-data-dir or a forbidden
- *  switch refuses the whole argv). → `{ok, argv}` | `{ok:false, code, error}`. */
+ *  ENGINE's own launch arguments, before the mark: a switch this road forbids is DROPPED (stripForbidden — the answer's
+ *  `dropped`, for the caller to say), the rest judged by the same census (a second --user-data-dir refuses the whole argv).
+ *  → `{ok, argv, dropped}` | `{ok:false, code, error, offending, dropped}` (`offending` = the argv items the census names). */
 function attachArgv({ profileDir, mark = null, quiet = [], url = 'about:blank', extra = [] } = {}) {
   if (typeof profileDir !== 'string' || !profileDir.startsWith('/')) return { ok: false, code: 'bad_profile_dir', error: "the attach launch needs the profile's absolute directory" };
+  const eng = stripForbidden(extra);
   const argv = ['--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11',
-    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE, ...(Array.isArray(quiet) ? quiet.map(String) : []), ...(Array.isArray(extra) ? extra.map(String) : []), ...(mark ? [String(mark)] : []), String(url || 'about:blank')];
+    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE, ...(Array.isArray(quiet) ? quiet.map(String) : []), ...eng.kept, ...(mark ? [String(mark)] : []), String(url || 'about:blank')];
   const v = argvVerdict(argv);
-  return v.ok ? { ok: true, argv } : { ok: false, code: 'bad_argv', error: `the attach argv failed its census (missing ${v.missing.join(' ') || '-'}; forbidden ${v.forbidden.join(' ') || '-'})` };
+  if (v.ok) return { ok: true, argv, dropped: eng.dropped };
+  const dirs = argv.filter((x) => x.startsWith('--user-data-dir='));
+  return { ok: false, code: 'bad_argv', error: `the attach argv failed its census (missing ${v.missing.join(' ') || '-'}; forbidden ${v.forbidden.join(' ') || '-'}${v.userDataDir ? '' : `; --user-data-dir ×${dirs.length}`})`, offending: [...v.forbidden, ...(v.userDataDir ? [] : dirs)], dropped: eng.dropped };
 }
 /** `DevToolsActivePort`'s text → `{port, wsPath}` | null (a half-written file is null: line 2 not there yet). */
 function parsePortFile(text) {
@@ -146,5 +175,5 @@ const HIDDEN_WINDOW_WHY = 'no xpra on this machine — the hidden window: the dr
 
 module.exports = {
   ATTACH_REQUIRED, ATTACH_FORBIDDEN, ATTACH_MIN_DRIVER, driverAtLeast, PROFILE_STORE, CHROME_NAMES, PORT_FILE, PORT_WAIT_MS, PORT_STEP_MS, SOCKET_TAIL_BYTES, SOCKET_PATH_MAX, ATTACH_DROP_ENV, HIDDEN_WINDOW_WHY,
-  argvVerdict, attachArgv, parsePortFile, portFileVerdict, cdpUrlOf, portMissing, attachSocketDir, attachCall, launchRoad,
+  argvVerdict, attachArgv, stripForbidden, argvItemsText, droppedWords, parsePortFile, portFileVerdict, cdpUrlOf, portMissing, attachSocketDir, attachCall, launchRoad,
 };

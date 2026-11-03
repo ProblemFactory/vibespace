@@ -4373,7 +4373,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    */
   async function attachStart(p, rec, prevRec, { exe, why, ns, engineLaunch = null }) {
     const profileId = p.id;
-    const failed = (code, msg, extra = {}) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg, extra); };
+    // lane hotfix-attach-engine-args (2.369.375): EVERY launch this road does not start is journaled BY NAME — its code, the argv
+    // items it names — BEFORE its display session is stopped (the owner's hub journaled only «stopped — its launch was refused»;
+    // the CLI alone was told why). `said` = the line was written already (before the display stop)
+    const sayNotStarted = (code, msg, items = []) => log.warn?.(`[browser] ${profileId} "${p.label}": NOT started on the attach road [${code}]${items.length ? ` (${AT.argvItemsText(items)})` : ''} — ${msg}`);
+    const failed = (code, msg, extra = {}, { said = false } = {}) => { if (!said) sayNotStarted(code, msg); rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg, extra); };
+    const refused = async (code, msg, items = []) => { sayNotStarted(code, msg, items); await endDisplay(rec, 'its launch was refused'); return failed(code, msg, {}, { said: true }); };
     if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
     const lk = await clearProfileLock(p, ns, prevRec);
     if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
@@ -4401,13 +4406,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // r4: on the argument's TRIMMED form (src/browser-engines.js switchFormOf — Chromium's own reading), and a padded argument refused too
     const launchers = ENG.launcherArgsOf(engineArgs), padded = ENG.paddedArgsOf(engineArgs);
     const engWho = ENG.engineWords({ id: engineLaunch && engineLaunch.engine && engineLaunch.engine.id, label: engineLaunch && engineLaunch.engine && engineLaunch.engine.label });
-    if (launchers.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`); }
-    if (padded.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho} named an argument that starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x`); }
+    if (launchers.length) throw await refused('browser_engine_protocol', `${engWho}'s launch names another program through ${launchers.join(', ')}; a plugin never names the program it runs`, launchers);
+    if (padded.length) throw await refused('browser_engine_protocol', `${engWho} named an argument that starts or ends with whitespace — an engine switch may not: Chromium would read « --x» as --x`, padded);
     // L1b r5: the switch-only rule on this road too (a bare -- puts the keeper's proxy pair after the end of switches)
     const nonSwitch = ENG.nonSwitchArgsOf(engineArgs);
-    if (nonSwitch.length) { await endDisplay(rec, 'its launch was refused'); throw failed('browser_engine_protocol', `${engWho}'s launch: ${ENG.notSwitchWords(nonSwitch)}`); }
+    if (nonSwitch.length) throw await refused('browser_engine_protocol', `${engWho}'s launch: ${ENG.notSwitchWords(nonSwitch)}`, nonSwitch);
     const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
-    if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
+    if (!av.ok) throw await refused(av.code, av.error, av.offending || []);
+    // lane hotfix-attach-engine-args: a switch the ENGINE passed that this road forbids was dropped by the builder — SAID, never
+    // silent: one journal line + the record's fact (the Agent browser panel's row words it; a new launch writes a new record)
+    if (av.dropped && av.dropped.length) {
+      const engId = (engineLaunch && engineLaunch.engine && engineLaunch.engine.id) || '';
+      rec.engineDropped = { engine: engId || null, switches: av.dropped.slice(0, 8) };
+      log.warn?.(`[browser] ${profileId}: ${AT.droppedWords({ engine: engId, dropped: av.dropped })}`);
+    }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the
     // daemon's short TMPDIR (Chrome's singleton socket must fit sun_path — lane browser-tmpdir-socket-length)
     const env = { ...rtEnv };
@@ -4421,12 +4433,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = await ATL.spawnChrome({ exe, argv: av.argv, env, profileDir: p.dir, logFile: path.join(dataDir, 'browser-env', 'attach', profileId + '.log') });
     if (!r.ok) {
       const lr = lockRefusalAfterLaunch(p, prevRec); // the directory taken meanwhile ⇒ its holder named
+      sayNotStarted(lr ? lr.code : r.code, lr ? lr.error : r.error);
       await endDisplay(rec, 'its browser did not start');
-      if (lr) throw failed(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {});
-      throw failed(r.code, r.error);
+      if (lr) throw failed(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}, { said: true });
+      throw failed(r.code, r.error, {}, { said: true });
     }
     rec.pid = r.pid; rec.starttime = await launchStart(r.pid);
-    if (rec.starttime == null && F.startsReadable()) { try { r.child.kill('SIGKILL'); } catch { /* gone */ } await endDisplay(rec, 'its browser could not be identified'); throw failed('launch_failed', unrecordedLaunch(r.pid)); }
+    if (rec.starttime == null && F.startsReadable()) { try { r.child.kill('SIGKILL'); } catch { /* gone */ } sayNotStarted('launch_failed', unrecordedLaunch(r.pid)); await endDisplay(rec, 'its browser could not be identified'); throw failed('launch_failed', unrecordedLaunch(r.pid), {}, { said: true }); }
     rec.browser = { pid: r.pid, starttime: rec.starttime, dir: p.dir, devtoolsPort: r.port };
     rec.socketDir = so.dir; rec.cdpPort = r.port; rec.cdpUrl = AT.cdpUrlOf(r.port, r.wsPath); rec.executable = exe;
     rec.state = 'ready';

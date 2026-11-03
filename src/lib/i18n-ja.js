@@ -5876,6 +5876,7 @@ export default {
   "1 conversation uses it": "1 件の会話が使用中",
   "{n} conversations use it": "{n} 件の会話が使用中",
   "its browser is running": "ブラウザが動作中です",
+  "Left out {switches}, which its engine asked for: it would stop this browser signing in to Google": "エンジンが指定した {switches} を外しました：付けたままだと、このブラウザは Google にログインできません",
   "written {ago}; it may still be in use": "{ago}に書き込みあり。まだ使用中かもしれません",
   "unused for {n} days; listed, never deleted by itself": "{n} 日間未使用。一覧に表示するだけで、自動では削除しません",
   "never used yet": "まだ使われていません",
