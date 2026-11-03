@@ -122,6 +122,7 @@ Chat mode:
 - **Drag/resize ends at ONE door**: every drag door is fed from the element that CAPTURED the pointer (`src/lib/drag-feed.js`), ended ONCE by the PURE `src/lib/drag-end.js` verdict; `body.wm-dragging` shields every other pane; test-window-drag §5 = the door census ⇒ kb-patterns.md
 - **Never block the event loop**: no sync fs/exec against mountpoints, /dav-sharing processes, or discovery sweeps — child processes/workers with timeouts only (three whole-instance outages: FUSE threadpool, execFileSync sweep freeze, device-mount self-deadlock). The boot too: no step holds it ≥ 250 ms past the first loop turn ⇒ kb-design-lessons §19.
 - **No silent failures**: a failed USER action must reach the user (toast/dialog/server-notice) — telemetry having it ≠ reported; fetchJson never throws, so callers check `r?.error`.
+- **THE CLI LOCATION LAW**: the person's login shell is the truth for where an agent CLI is — no registry, no pins, no managed prefix; found-nothing refuses by name with a card before anything spawns; the census is observed ⇒ kb-design-lessons §24
 - **Working mode**: route every change through the three-tier table above (it names the module AND the gating test); fixes go to git only — the user self-updates; bookkeeping via vibespace-status/-task/-ask each turn.
 
 ## File Structure — INDEX in docs/kb-file-structure.md

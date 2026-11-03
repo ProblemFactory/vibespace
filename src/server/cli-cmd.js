@@ -12,11 +12,12 @@
 // `forSpawn(backend, cmd)` is the ONE spawn-time check every local session
 // spawn passes through (the pty terminal, the chat wrapper and the daemon
 // pipe all run the same argv, built in src/ws-create.js): the resolved path
-// still executable ⇒ untouched (one `access`, no process); gone ⇒ resolveCmd
-// runs ONCE more, the new path is adopted by the adapter (so later spawns are
+// still executable ⇒ untouched (one `access`, no process); gone ⇒ the CLI is
+// looked up ONCE more, the new path is adopted by the adapter (so later spawns are
 // born right) and ONE log line names the old and the new path — creates that
-// arrive together in that window share the one re-resolve; nothing found
-// ⇒ the spawn proceeds exactly as before and fails the way it always did. The
+// arrive together in that window share the one lookup; nothing found ⇒ the
+// create is REFUSED by name (lane cli-shell-truth, below — it used to spawn the
+// dead path «as before» and die in silence). The
 // spawned CLI runs INSIDE a wrapper under dtach, so its ENOENT is never seen by
 // this process — the check before the spawn IS the retry.
 //
@@ -29,9 +30,31 @@
 // read is a person's (Install / Re-check in Manage agents: `force`). A path found
 // is ADOPTED exactly like a spawn-time re-resolve (the adapter gets it, one log
 // line), and the shared lookup is single-flight with forSpawn's.
+//
+// THE PERSON'S LOGIN SHELL IS THE TRUTH FOR WHERE A CLI IS (lane cli-shell-truth, B-fb02; the owner 2026-11-03: a codex
+// installed with `npm -g` under nvm's node v24.12.0 while the hub's systemd unit baked a PATH with v24.22.1/bin only —
+// the boot `which` found nothing, every codex spawn died ~30 s later and the UI said NOTHING, while `command -v codex` in
+// the owner's own zsh found it at once). No registry, no pinned versions, no managed prefix, no list of install methods
+// (the owner refused all of them twice: a hand-kept source of truth goes stale, and a person installs however they like).
+// The rungs, and the provenance each answer carries:
+//   'hub-path' — the boot's cheap `which` + dir walk: the PROVISIONAL answer (§19: the shell is never asked at boot);
+//   'shell'    — `askShell`: the person's login shell, asked ONCE per CLI, lazily (the first spawn or the first status
+//                read), bounded (SHELL_ASK_MS), in a sanitized env, read between sentinels. Its path REPLACES the
+//                provisional one even when that one works (their PATH order is their choice). Asked again when its path
+//                has gone, at a person's Re-check (`force`), and at each create while it found nothing;
+//   'boot'     — an absolute command the operator configured (CLAUDE_CMD=/x): that path, never a lookup.
+// The shell found NOTHING (or an alias / a function) ⇒ the CLI is MISSING for every purpose: a create is REFUSED by name
+// before anything spawns (`forSpawn` throws a CliMissing — ws-create answers `cli-missing`), a status read says not
+// installed; what the hub's own walk saw is a HINT («add that directory to your shell's PATH»), never a spawn. The shell
+// could not be ASKED (timeout, exit, spawn error) ⇒ the provisional path stays and the degradation is NAMED — a probe that
+// cannot answer is not a refusal (ws-create's worktree-preflight law); only when the hub's walk has nothing either is the
+// create refused. `census(backend)` is the OBSERVED row Manage agents shows (path, provenance, who found it).
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { execFileSync, execFile } = require('child_process');
+const { execFileSync, execFile, spawn } = require('child_process');
+const { serviceEnv } = require('../agent-env');
+const LS = require('../login-shell');
 
 // The directories a bare name is looked for in after `which`, in order.
 function candidateDirs(envPath = process.env.PATH) {
@@ -78,36 +101,182 @@ const executable = async (p) => {
  *  CLI per this many ms; a person's Install / Re-check skips it (`force`). */
 const RECHECK_MS = 30000;
 
+/** THE BOUND on one shell ask. Measured on the owner's box (2026-11-03, `-l -i -c 'command -v codex'`, stdin /dev/null):
+ *  zsh ≈ 0.30 s, bash ≈ 0.07 s; a heavy rc ≈ 1 s. */
+const SHELL_ASK_MS = 10000;
+const OUT_CAP = 256 * 1024; // the tail of a chatty rc's printout kept (the sentinels are at its end)
+
+
+/** The person's login shell on THIS machine — src/login-shell.js's ladder (the dial road's too) over facts gathered
+ *  async: process.env.SHELL › the account record (os.userInfo(): the passwd entry `getent passwd` reads) › zsh / bash on
+ *  PATH › /bin/sh. Answers { shell, rung }. */
+async function loginShellOf({ env = process.env, userInfo = () => os.userInfo(), usable = executable } = {}) {
+  let accountShell = '';
+  try { accountShell = (userInfo() || {}).shell || ''; } catch { }
+  const envShell = env.SHELL || '';
+  const first = envShell || accountShell;
+  const firstOk = !!first && await usable(first);
+  const found = {};
+  if (!firstOk) {
+    for (const n of ['zsh', 'bash']) {
+      for (const d of String(env.PATH || '').split(path.delimiter).filter((x) => x.startsWith('/'))) {
+        if (await usable(path.join(d, n))) { found[n] = path.join(d, n); break; }
+      }
+      if (found[n]) break;
+    }
+  }
+  return LS.pickLoginShell({ envShell, accountShell, executable: (p) => p === first && firstOk, onPath: (n) => found[n] || null });
+}
+
+/**
+ * THE SHELL ASK: `<shell> -l -i -c '<line>'` (the three flags spelled apart — fish takes them too), stdin /dev/null,
+ * TERM=dumb, the sanitized env (serviceEnv), its OWN session (`detached`: an rc's `kill 0` or a job-control grab never reaches the
+ * hub's process group), bounded by `timeoutMs` (the child is killed by its pid, then whatever is left in the probe's own
+ * session — an rc's leftover background job that would hold the pipe). The answer is EXACTLY one of:
+ *   { kind:'path', path, shellPath } — ONE absolute path (shellPath = the shell's exported PATH, or null)
+ *   { kind:'alias', text }           — an alias / a function / a builtin: VibeSpace runs programs
+ *   { kind:'none' }                  — the shell answered and nothing stood between the sentinels
+ *   { kind:'unanswered', why }       — 'timeout' | 'exit:<n>' | 'spawn:<err>' | 'no-shell' | 'bad-name'
+ * each with `shell` (the path asked) and `ms`.
+ */
+function askShell(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
+  return new Promise((resolve) => {
+    const t0 = now();
+    let settled = false, child = null, timer = null, out = '';
+    // the probe's own session (detached ⇒ setsid ⇒ pgid = its pid): nothing but this ask's shell and what its rc started
+    const killGroup = () => { if (child && Number.isInteger(child.pid) && child.pid > 1) { try { process.kill(-child.pid, 'SIGKILL'); } catch { } } };
+    const reap = () => {
+      if (!child) return;
+      try { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); } catch { }
+      killGroup();
+      try { child.stdout?.destroy(); } catch { }
+      try { child.stderr?.destroy(); } catch { }
+    };
+    const done = (a) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reap();
+      resolve({ ...a, shell: shell || null, ms: now() - t0 });
+    };
+    const judge = (exitWhy) => {
+      const p = LS.parseShellAnswer(out);
+      if (!p.complete) return done({ kind: 'unanswered', why: exitWhy });
+      const kind = LS.cvKind(p.cv);
+      if (kind === 'path') return done({ kind, path: p.cv, shellPath: p.path });
+      if (kind === 'alias') return done({ kind, text: p.cv.slice(0, 300) });
+      return done({ kind: 'none' });
+    };
+    let line;
+    try { line = LS.shellLine(name); } catch { return done({ kind: 'unanswered', why: 'bad-name' }); }
+    if (!shell) return done({ kind: 'unanswered', why: 'no-shell' });
+    const home = typeof env.HOME === 'string' && env.HOME.startsWith('/') ? env.HOME : undefined;
+    try {
+      // THE ENV IT IS ASKED IN — an ALLOWLIST (serviceEnv): HOME LANG LC_* TMPDIR XDG_RUNTIME_DIR + USER LOGNAME, the
+      // hub's PATH as the baseline its rc builds on, SHELL = itself, TERM=dumb. NEVER a VIBESPACE_* name, a token or npm_*:
+      // a person's rc runs arbitrary code. VIBESPACE_SHELL_PROBE=1 lets that rc skip a tmux autostart or a banner.
+      child = spawn(shell, ['-l', '-i', '-c', line], { stdio: ['ignore', 'pipe', 'pipe'], env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } }), cwd: home, detached: true });
+    } catch (e) { return done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }); }
+    child.on('error', (e) => done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }));
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => { out += d; if (out.length > OUT_CAP) out = out.slice(-OUT_CAP); });
+    child.stderr.on('data', () => { }); // an interactive shell with no tty complains («no job control»): drained, never read
+    let exitWhy = null;
+    child.on('exit', (code, sig) => {
+      exitWhy = sig ? `exit:${sig}` : `exit:${code}`;
+      // the shell is gone: whatever its rc left in the probe's session goes too, so the pipe closes and 'close' comes
+      killGroup();
+      if (LS.parseShellAnswer(out).pathDone) judge(exitWhy); // the whole answer is in (the LAST triple: an rc's decoy printed before the line never ends it)
+    });
+    child.on('close', (code, sig) => judge(exitWhy || (sig ? `exit:${sig}` : `exit:${code}`)));
+    // THE BOUND (the ONE timer in this file: it ENDS an ask, it never starts one — nothing here checks on a timer)
+    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+}
+
+/** A refusal BY NAME: the create that would spawn a CLI nobody can find (ws-create answers it as `cli-missing`). */
+class CliMissing extends Error {
+  constructor(f) {
+    super(f.message);
+    this.code = 'cli-missing';
+    Object.assign(this, f);
+  }
+}
+
 /** @param {object} o
- *  @param {(name:string)=>Promise<string>} [o.resolve] the re-resolve (default resolveCmdAsync)
+ *  @param {(name:string)=>Promise<string>} [o.resolve] the hub's own walk (default resolveCmdAsync)
  *  @param {(p:string)=>Promise<boolean>} [o.usable] is this path spawnable (default: absolute + X_OK)
+ *  @param {(name:string)=>Promise<object>} [o.ask] the shell ask (default: askShell in the person's login shell)
+ *  @param {()=>string[]} [o.looked] the directories the hub's walk looked in (the refusal names them)
  *  @param {(line:string)=>void} [o.log]
  *  @param {number} [o.recheckMs] the read-time lookup bound (RECHECK_MS)
  *  @param {()=>number} [o.now] the clock the bound reads */
-function createCliCmds({ resolve = resolveCmdAsync, usable = executable, log = (l) => console.log(l), recheckMs = RECHECK_MS, now = Date.now } = {}) {
-  const entries = new Map(); // backend → { name, current, apply, pending, lookedAt }
-  // SINGLE-FLIGHT: callers that land in the stale window together share ONE
-  // re-resolve (one lookup, one adapter hand-off, one journal line — the
-  // initiator's `said`). Released the moment it settles, so a binary that stays
-  // missing is asked about again by the next caller — never a cached "missing".
-  // Answers the adopted path, or null when nothing usable was found.
-  const reresolve = (backend, e, said) => {
+function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = null, looked = () => [...new Set(candidateDirs())],
+  log = (l) => console.log(l), recheckMs = RECHECK_MS, now = Date.now } = {}) {
+  const askOf = ask || (async (name) => { const { shell } = await loginShellOf({ usable }); return askShell(name, { shell }); });
+  const entries = new Map(); // backend → { name, current, apply, pending, lookedAt, provenance, answer, shellPath, hubSaw }
+  const isAbs = (p) => typeof p === 'string' && p.startsWith('/');
+  const said = (a) => (a && a.shell ? `your ${LS.shellName(a.shell)}` : 'your login shell');
+  // THE ONE LOOKUP (single-flight: forSpawn and check share it — callers that land together share ONE ask, one adapter
+  // hand-off, one journal line). Released the moment it settles, so a CLI that stays missing is asked about again by the
+  // next caller — never a cached "missing". Answers the adopted path, or null (missing).
+  const lookup = (backend, e) => {
     if (!e.pending) {
       e.pending = (async () => {
-        let fresh = null;
-        try { fresh = await resolve(e.name); } catch { fresh = null; }
+        e.lookedAt = now();
+        let a;
+        try { a = await askOf(e.name); } catch (err) { a = { kind: 'unanswered', why: `spawn:${(err && err.code) || 'error'}` }; }
+        if (!a || typeof a.kind !== 'string') a = { kind: 'unanswered', why: 'exit:?' };
+        if (a.kind === 'path' && !await usable(a.path)) a = { ...a, kind: 'none', notExecutable: a.path };
+        e.answer = { ...a, at: now() };
         const was = e.current;
-        if (fresh && await usable(fresh)) {
-          e.current = fresh;
-          try { e.apply(fresh); } catch (err) { log(`[cli-cmd] ${backend}: could not hand '${fresh}' to the adapter — ${err && err.message}`); }
-          said(was, fresh);
-          return fresh;
+        if (a.kind === 'path') {
+          e.current = a.path; e.provenance = 'shell'; e.shellPath = a.shellPath || null; e.hubSaw = null;
+          if (a.path !== was) {
+            try { e.apply(a.path); } catch (err) { log(`[cli-cmd] ${backend}: could not hand '${a.path}' to the adapter — ${err && err.message}`); }
+            log(`[cli-cmd] ${backend}: ${said(a)} (login shell) found '${e.name}' at '${a.path}' — adopted (it was '${was}', no restart needed)`);
+          }
+          return a.path;
         }
-        said(was, null);
+        e.shellPath = null;
+        let walk = null;
+        try { walk = await resolve(e.name); } catch { walk = null; }
+        const hub = walk && await usable(walk) ? walk : null;
+        if (a.kind === 'unanswered') {
+          // the shell could not be ASKED: the provisional answer stays, the degradation named once per ask
+          e.hubSaw = null;
+          const keep = await usable(e.current) ? e.current : hub;
+          if (keep && keep !== e.current) {
+            e.current = keep;
+            try { e.apply(keep); } catch (err) { log(`[cli-cmd] ${backend}: could not hand '${keep}' to the adapter — ${err && err.message}`); }
+          }
+          e.provenance = 'hub-path';
+          log(`[cli-cmd] ${backend}: ${said(a)} could not be asked where '${e.name}' is (${a.why}) — ${keep ? `using the hub's PATH ('${keep}')` : 'and the hub\'s PATH has none'}`);
+          return keep || null;
+        }
+        // none / alias: MISSING for every purpose — the hub's walk is a hint, never a spawn
+        e.hubSaw = hub;
+        e.provenance = 'hub-path';
         return null;
       })().finally(() => { e.pending = null; });
     }
     return e.pending;
+  };
+  const refusal = (backend, e) => {
+    const a = e.answer || { kind: 'unanswered', why: 'no-shell' };
+    const who = said(a);
+    const sh = a.shell ? LS.shellName(a.shell) : null;
+    const dirs = looked();
+    const hint = e.hubSaw ? `the hub's PATH has ${e.hubSaw} — add that directory to your shell's PATH` : null;
+    const message = isAbs(e.name)
+      ? `${e.name} was not found — the configured path is not an executable file`
+      : a.kind === 'alias'
+        ? `${e.name} is not a program in ${who} (login shell) — it answered «${a.text}»; VibeSpace runs programs: make it a program on your PATH`
+        : a.kind === 'unanswered'
+          ? `${e.name} was not found — ${who} (login shell) could not be asked (${a.why}) and the hub's PATH (${dirs.join(', ')}) has none`
+          : `${e.name} was not found by ${who} (login shell)${a.notExecutable ? ` — it named ${a.notExecutable}, which is not executable` : ''}${hint ? ` — ${hint}` : ` — and the hub's PATH (${dirs.join(', ')}) has none either`}`;
+    return new CliMissing({ backend, cli: e.name, shell: sh, answer: isAbs(e.name) ? 'configured' : a.kind, why: a.why || null, aliasText: a.kind === 'alias' ? a.text : null, looked: dirs, hubPath: e.hubSaw || null, hint, message });
   };
   return {
     /** `name` = what the lookup asks for (the raw command, env override
@@ -115,40 +284,62 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, log = (
      *  re-resolved path to whoever builds the spawn spec. */
     register(backend, { name, current, apply = () => {} }) {
       if (!backend || !name) return;
-      entries.set(backend, { name, current: current || name, apply, pending: null, lookedAt: -Infinity });
+      entries.set(backend, { name, current: current || name, apply, pending: null, lookedAt: -Infinity, provenance: isAbs(name) ? 'boot' : 'hub-path', answer: null, shellPath: null, hubSaw: null });
     },
     current(backend) { const e = entries.get(backend); return e ? e.current : null; },
     /** Every registered backend (the status route checks them all). */
     ids() { return [...entries.keys()]; },
-    /** The command to spawn for `backend`. Only the registered, boot-resolved
-     *  command is ever re-resolved: a spec override, `ssh`, node or a login
-     *  shell pass through untouched. */
+    /** The command to spawn for `backend` — or a THROWN CliMissing (the create is refused by name, nothing spawned).
+     *  Only the registered command is ever looked up: a spec override, `ssh`, node or a login shell pass through. The
+     *  shell's 'path' still executable costs ONE access; never asked yet / its path gone / it found nothing last time ⇒
+     *  the shell is asked (once, shared); could not be asked last time and the provisional path works ⇒ that path. */
     async forSpawn(backend, cmd) {
       const e = entries.get(backend);
       if (!e || !cmd || cmd !== e.current) return cmd;
-      if (await usable(cmd)) return cmd;
-      const fresh = await reresolve(backend, e, (was, p) => log(p
-        ? `[cli-cmd] ${backend}: '${cmd}' is not executable at spawn time — re-resolved '${e.name}' to '${p}' (no restart needed)`
-        : `[cli-cmd] ${backend}: '${cmd}' is not executable at spawn time and re-resolving '${e.name}' found nothing — spawning it as before`));
-      return fresh || cmd;
+      if (isAbs(e.name)) { if (await usable(cmd)) return cmd; const r = refusal(backend, e); log(`[cli-cmd] ${backend}: ${r.message} — the create is refused (cli-missing)`); throw r; }
+      if (e.answer && (e.answer.kind === 'path' || e.answer.kind === 'unanswered') && await usable(cmd)) return cmd; // 'path' = the shell's, adopted
+      const p = await lookup(backend, e);
+      if (p) return p;
+      const r = refusal(backend, e);
+      log(`[cli-cmd] ${backend}: ${r.message} — the create is refused (cli-missing)`);
+      throw r;
     },
+    /** The PATH a spawn of `backend` is born with when the shell found it: the shell's own (so a `#!/usr/bin/env node`
+     *  shim finds the node the person's shell would); null = the hub's (never asked / could not be asked). */
+    spawnPath(backend) { const e = entries.get(backend); return e && e.answer && e.answer.kind === 'path' && e.shellPath ? e.shellPath : null; },
     /** THE READ-TIME CHECK: the usable absolute path of `backend`'s CLI right
-     *  now, or null (not installed / gone). A resolved path costs one `access`
-     *  per read; an unresolved or gone one is looked up at most once per
-     *  `recheckMs` (a read inside the bound answers null without a lookup), and
-     *  `force` (a person's Install / Re-check) looks it up now. */
+     *  now, or null (missing). The first read of a CLI asks the shell (lazily — never at boot); afterwards a found path
+     *  costs one `access`; a missing / gone one is asked again at most once per `recheckMs`, and `force` (a person's
+     *  Install / Re-check) asks now. */
     async check(backend, { force = false } = {}) {
       const e = entries.get(backend);
       if (!e) return null;
-      if (typeof e.current === 'string' && e.current.startsWith('/') && await usable(e.current)) return e.current;
-      const t = now();
-      if (!force && t - e.lookedAt < recheckMs) return null;
-      e.lookedAt = t;
-      return reresolve(backend, e, (was, p) => {
-        if (p && p !== was) log(`[cli-cmd] ${backend}: '${e.name}' found at '${p}' on a status read (it was '${was}') — no restart needed`);
-      });
+      if (isAbs(e.name)) return await usable(e.name) ? e.name : null;
+      if (!force && e.answer) {
+        if ((e.answer.kind === 'path' || e.answer.kind === 'unanswered') && await usable(e.current)) return e.current;
+        if (now() - e.lookedAt < recheckMs) return null;
+      }
+      return lookup(backend, e);
+    },
+    /** THE OBSERVED ROW (Manage agents' census line; /api/backend-status): where the CLI was found and by whom. */
+    census(backend) {
+      const e = entries.get(backend);
+      if (!e) return null;
+      const a = e.answer;
+      const missing = !isAbs(e.name) && !!a && (a.kind === 'none' || a.kind === 'alias');
+      return {
+        provenance: e.provenance,
+        shell: a && a.shell ? LS.shellName(a.shell) : null,
+        askedAt: a ? a.at : null,
+        answer: isAbs(e.name) ? 'configured' : (a ? a.kind : null),
+        unanswered: a && a.kind === 'unanswered' ? a.why : null,
+        aliasText: a && a.kind === 'alias' ? a.text : null,
+        hubPath: missing ? e.hubSaw : null,
+        hint: missing && e.hubSaw ? `the hub's PATH has ${e.hubSaw} — add that directory to your shell's PATH` : null,
+        missing,
+      };
     },
   };
 }
 
-module.exports = { resolveCmd, resolveCmdAsync, createCliCmds, candidateDirs, RECHECK_MS };
+module.exports = { resolveCmd, resolveCmdAsync, createCliCmds, candidateDirs, RECHECK_MS, SHELL_ASK_MS, askShell, loginShellOf, CliMissing };

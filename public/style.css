@@ -5820,6 +5820,15 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    min-content 357 px inside a 352 px phone section (the last mirror red since 2.369.75, named by the roster suite's
    rightmost-element diagnostic); a path may break anywhere */
 .ob-cli-ephemeral .usage-warn { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+/* WHERE THE CLI WAS FOUND (lane cli-shell-truth): one line under the version chip — its own row in the wrapping
+   left column; a path may break anywhere */
+.ob-cli-where { flex-basis: 100%; min-width: 0; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; word-break: break-word; }
+.ob-cli-where-warn { color: var(--yellow); }
+/* the refused create's dialog (cli-missing): what was asked, the sentence, the hint */
+.cli-missing-body { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.5; }
+.cli-missing-asked { color: var(--text-dim); font-size: 12px; }
+.cli-missing-what, .cli-missing-hint { overflow-wrap: anywhere; word-break: break-word; }
+.cli-missing-hint { color: var(--yellow); }
 
 /* Task-group color: Auto swatch + custom picker (2.230.0) */
 .task-detail-swatch.auto { color: #fff; font-size: 10px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }

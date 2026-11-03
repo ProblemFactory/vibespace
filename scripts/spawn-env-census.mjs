@@ -280,6 +280,8 @@ export const FIXED = Object.freeze([
   // lane engine-distribution (P4 of the custom browser kernel): two NEW children, held to their builder from the start
   ['src/server/plugin-install.js', 'gitBin', "a plugin install's git children (init / fetch / checkout / rev-parse / ls-remote, each with its timeout): serviceEnv + the egress door + named git switches — a private repository's credential only through the 0600 files GIT_ASKPASS / GIT_SSH_COMMAND name, never an env value"],
   ['src/server/engine-distribution.js', 'exe', "a browser engine kernel's `--version`, run ONCE after its install / before its first launch (5 s) — the measured version"],
+  // lane cli-shell-truth (B-fb02): a NEW child, held to its builder from the start
+  ['src/server/cli-cmd.js', 'shell', "the person's LOGIN SHELL asked where an agent CLI is (askShell: `<shell> -l -i -c <line>`, a probe the hub awaits, bounded 10 s, its own session): serviceEnv + USER / LOGNAME, SHELL = itself, TERM=dumb, VIBESPACE_SHELL_PROBE=1 — never a VIBESPACE_* name, a token or npm_*"],
 ]);
 /** SSH_ROWS: [file, cmd, builder | 'upstream', why] — the ssh roads NOT on hosts.sshEnv() */
 export const SSH_ROWS = Object.freeze([

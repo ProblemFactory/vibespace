@@ -15,6 +15,7 @@
  */
 const { buildRemoteExec, nodeFinder, buildRemoteShellPrelude } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
+const { S0_SH } = require('../login-shell'); // the login-shell ladder, spelled once (lane cli-shell-truth)
 
 function dialLadder(c) {
   const { ctx, execFileAsync, ws, data, id, SP, sessionMode, session, cwd, spawnAccount, integrationOn,
@@ -167,9 +168,9 @@ function dialLadder(c) {
               // (macOS dscl) → zsh → bash. S0 is resolved in the shellCmd
               // preamble; rcmd0 just execs it.
               const rcmd0 = SP.loginShell ? '"$S0"' : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
-              const shellResolve = SP.loginShell
-                ? `S0="\${SHELL:-}"; [ -n "$S0" ] || S0="$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print \$2}')"; [ -n "$S0" ] || S0="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -x "$S0" ] || S0="$(command -v zsh || command -v bash || echo sh)"; `
-                : '';
+              // THE LADDER is spelled ONCE (src/login-shell.js S0_SH — the hub's own CLI ask reads the same rungs; test-cli-env
+              // runs this string under sh against pickLoginShell on the same inputs).
+              const shellResolve = SP.loginShell ? S0_SH : '';
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
                 // A tool/tunnel setup error degrades to bare env, EXCEPT when

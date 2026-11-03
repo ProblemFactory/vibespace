@@ -23,6 +23,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 import { t } from './i18n.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, billingRow, getBackendMeta } from './agent-meta.js';
@@ -2258,6 +2259,18 @@ export function installManageAgents(App, ctx = {}) {
             ? `<span class="ob-ver">${info.machineLoginState === 'expired' ? t('machine login inactive') : t('machine login not set up')}</span> <span class="ob-ok">${t('{n} named account(s) in use', { n: info.namedLoggedIn })}</span>`
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }`;
+        // THE OBSERVED CENSUS (lane cli-shell-truth): ONE line under the version chip — where this machine's CLI was
+        // found and by whom («found by your zsh at ~/.nvm/…/codex» / «not found by your zsh · the hub's PATH has …» /
+        // «your zsh could not be asked (timed out) · using the hub's PATH»). A remote host's row is its probe's own.
+        if (!selectedHost) {
+          const where = cliWhereWords(info);
+          if (where) {
+            const el = document.createElement('div');
+            el.className = 'ob-cli-where' + (where.tone === 'warn' ? ' ob-cli-where-warn' : '');
+            el.textContent = where.text; // a path the shell printed is data
+            left.appendChild(el);
+          }
+        }
         const actions = document.createElement('div'); actions.className = 'agent-actions';
         if (!info.installed && b.installCmd) {
           const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary'; instBtn.textContent = t('Install');
@@ -2266,13 +2279,14 @@ export function installManageAgents(App, ctx = {}) {
           // the read-time bound's last answer (lane antigravity-card-fixes)
           instBtn.onclick = () => { if (!selectedHost) this._cliRecheckDue = true; run(b.installCmd); };
           actions.appendChild(instBtn);
-          // a CLI installed some other way (a terminal, a package manager): Re-check looks for it now
-          if (!selectedHost) {
-            const reBtn = document.createElement('button'); reBtn.className = 'agent-btn cli-recheck'; reBtn.textContent = t('Re-check');
-            reBtn.title = t('Look for the {cli} command on this machine again', { cli: b.cliName || b.key });
-            reBtn.onclick = () => { this._cliRecheckDue = true; refresh(); };
-            actions.appendChild(reBtn);
-          }
+        }
+        // a CLI installed some other way (a terminal, a package manager): Re-check asks your login shell now — on an
+        // installed row too (lane cli-shell-truth: a newer install under another node version is adopted then)
+        if (!selectedHost && (!info.installed && b.installCmd || info.answer)) {
+          const reBtn = document.createElement('button'); reBtn.className = 'agent-btn cli-recheck'; reBtn.textContent = t('Re-check');
+          reBtn.title = t('Look for the {cli} command on this machine again', { cli: b.cliName || b.key });
+          reBtn.onclick = () => { this._cliRecheckDue = true; refresh(); };
+          actions.appendChild(reBtn);
         }
         // Helper terminals are LOGIN shells — /etc/profile resets PATH, and a
         // host missing ~/.local/bin in ~/.profile made a bare `claude update`

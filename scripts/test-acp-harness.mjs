@@ -695,7 +695,9 @@ console.log('— wiring pins');
   const ce = read('src/server/cli-env.js');
   ok('cli-env resolves each ACP harness executable once (env <ID>_CMD override) and hands acpWrapper/acpCommands to the adapter registry', /ACP_COMMANDS\[h\.id\] = raw\.startsWith\('\/'\) \? raw : \(resolveCmd\(raw\) \|\| null\)/.test(ce) && /acpWrapper: path\.join\(rootDir, 'data', 'bin', 'acp-wrapper\.js'\)/.test(ce) && /acpCommands: ACP_COMMANDS/.test(ce) && /function harnessAvailability\(\)/.test(ce) && /function noteHarnessModels\(backend, models\)/.test(ce));
   const wc = read('src/ws-create.js');
-  ok('ws-create refuses an uninstalled ACP harness BEFORE any spawn (loud error with the fix)', /if \(adapter\.installed === false\)/.test(wc) && /is not installed on this machine/.test(wc));
+  // lane cli-shell-truth: the boot-fact branch FOLDED into THE ONE verdict — cliCmds.forSpawn's cli-missing (the person's
+  // login shell asked, refused by name before the local ladder, dtach or a file), one road for every harness
+  ok('ws-create refuses an uninstalled ACP harness BEFORE any spawn — by THE ONE verdict (cli-missing, its facts named)', !/adapter\.installed === false/.test(wc) && /is refused by THE ONE verdict below/.test(wc) && /code: 'cli-missing', reqId: data\.reqId, backend, cli: e\.cli/.test(wc));
   ok('files.js /api/home carries harness availability for the picker', /harnesses = typeof req\.app\.locals\.harnessAvailability === 'function'/.test(read('src/routes/files.js')));
   const app = read('src/lib/app.js');
   ok('app.js: the picker unhides an ACP backend only when installed; opencode session options row (build/plan, no effort ladder); effort row hidden by the declared ui.effortLevels (hasEffortMenu — lane effort-menu-per-harness: caps.effort is gone)', /opt\.hidden = !h\.installed/.test(app) && /opencode: \{\n    models: \[\{ id: '', label: t\('Default'\) \}\],/.test(app) && /\['row-effort', isShell \|\| !hasEffortMenu\(backend\)\]/.test(app) && /!BACKEND_SESSION_OPTIONS\[be\] \|\| !data\[be\]\?\.length\) continue;/.test(app));

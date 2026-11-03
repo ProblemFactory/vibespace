@@ -23,6 +23,7 @@ import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): 
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { resumeAccountOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
+import { openCliMissingDialog, cliMissingWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: a CLI the person's login shell cannot find is refused by name — a dialog
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
@@ -267,7 +268,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           return true;
         }
         if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = msg.message || t('Session create failed');
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || msg.message || t('Session create failed');
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -360,7 +361,10 @@ export function installSessionLifecycle(App, ctx = {}) {
           });
           return true;
         }
-        showToast(text, { type: 'error' });
+        // lane cli-shell-truth: a CLI the person's login shell cannot find is said in a DIALOG (what was asked, where it
+        // looked, the two doors) — never a toast alone; the failed-RESUME rescue below stays exactly as it is
+        if (msg.code === 'cli-missing') { try { openCliMissingDialog(this, msg); } catch { showToast(text, { type: 'error' }); } }
+        else showToast(text, { type: 'error' });
         if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
           rescueViewOnly();
           // an account the create refused (a resume that never asked — the sidebar card, resume-all; lane

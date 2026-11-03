@@ -19,7 +19,10 @@
 //      a FAKE `claude` in dir A: the binary is renamed to dir B and back
 //      between spawns — each spawn runs the binary where it NOW is, without a
 //      restart (RED on the pre-fix code: the second spawn runs nothing), and
-//      with it gone entirely the spawn fails the way it always did.
+//      with it gone entirely the create is REFUSED by name — cli-missing, no
+//      dtach, one journal line (lane cli-shell-truth: this leg used to pin
+//      «the spawn fails the way it always did», the owner's silent codex
+//      death). The server's SHELL is a scratch login shell: the real road.
 //   ④ the same server's /api/backend-status (lane antigravity-card-fixes): it
 //      booted with no agy; an agy placed in dir B afterwards is INSTALLED at the
 //      next forced read (Manage agents' Install / Re-check), and not installed
@@ -63,42 +66,54 @@ console.log('\n① createCliCmds.forSpawn over injected facts');
 let mod = null;
 try { mod = require('../src/server/cli-cmd.js'); } catch (e) { ok(false, `src/server/cli-cmd.js loads (${e.message.split('\n')[0]})`); }
 if (mod) {
-  const mk = (present, answer) => {
-    const calls = { resolve: 0, logs: [], applied: [] };
+  // lane cli-shell-truth: the lookup is the person's LOGIN SHELL (an injected ask here: `shell` = what it answers — a
+  // path, 'none', a function or a throw), the hub's own walk (`hub`) only a hint / the unanswered fallback
+  const mk = (present, shell, hub = 'claude') => {
+    const calls = { ask: 0, resolve: 0, logs: [], applied: [] };
     const c = mod.createCliCmds({
-      resolve: async (name) => { calls.resolve++; return typeof answer === 'function' ? answer(name) : answer; },
+      ask: async (name) => {
+        calls.ask++;
+        const a = typeof shell === 'function' ? await shell(name) : shell;
+        return a.startsWith('/') ? { kind: 'path', path: a, shell: '/bin/zsh', shellPath: '/sh/bin:/usr/bin' } : { kind: 'none', shell: '/bin/zsh' };
+      },
+      resolve: async () => { calls.resolve++; return hub; },
       usable: async (p) => present.has(p),
       log: (l) => calls.logs.push(l),
     });
     c.register('claude', { name: 'claude', current: '/old/claude', apply: (p) => calls.applied.push(p) });
     return { c, calls };
   };
+  const refusedBy = async (pr) => { try { await pr; return null; } catch (e) { return e; } };
   {
-    const { c, calls } = mk(new Set(['/old/claude']), '/new/claude');
+    const { c, calls } = mk(new Set(['/old/claude']), '/old/claude');
     const r = await c.forSpawn('claude', '/old/claude');
-    ok(r === '/old/claude' && calls.resolve === 0 && !calls.logs.length, 'a path still executable at spawn is spawned as-is — no re-resolve, no log line');
+    ok(r === '/old/claude' && calls.ask === 1 && calls.resolve === 0 && !calls.logs.length && !calls.applied.length, 'the FIRST spawn asks the login shell once; it answers the boot path — spawned as-is, no log line, nothing handed over');
+    ok(await c.forSpawn('claude', '/old/claude') === '/old/claude' && calls.ask === 1, 'the next spawn: one access, no ask');
   }
   {
     const { c, calls } = mk(new Set(['/new/claude']), '/new/claude');
     const r = await c.forSpawn('claude', '/old/claude');
-    ok(r === '/new/claude', `a GONE path is re-resolved and the new one spawned (${r})`);
-    ok(calls.resolve === 1, `resolveCmd ran exactly ONCE (${calls.resolve})`);
+    ok(r === '/new/claude', `a GONE path: the shell is asked and the path it names is spawned (${r})`);
+    ok(calls.ask === 1, `the shell was asked exactly ONCE (${calls.ask})`);
     ok(calls.applied.join() === '/new/claude', 'the new path is handed to the adapter (later spawns are born right)');
     ok(calls.logs.length === 1 && calls.logs[0].includes("'/old/claude'") && calls.logs[0].includes("'/new/claude'"), `ONE log line naming the old AND the new path (${calls.logs[0]})`);
     ok(c.current('claude') === '/new/claude', 'the registry now answers the new path');
     const r2 = await c.forSpawn('claude', '/new/claude');
-    ok(r2 === '/new/claude' && calls.resolve === 1 && calls.logs.length === 1, 'the next spawn with the new path costs nothing more');
+    ok(r2 === '/new/claude' && calls.ask === 1 && calls.logs.length === 1, 'the next spawn with the new path costs nothing more');
   }
   {
-    const { c, calls } = mk(new Set(), 'claude');
-    const r = await c.forSpawn('claude', '/old/claude');
-    ok(r === '/old/claude', 'a re-resolve that finds nothing leaves the command as it was — the existing error path stands');
-    ok(calls.resolve === 1 && !calls.applied.length, 'nothing is handed to the adapter');
-    ok(calls.logs.length === 1 && /found nothing/.test(calls.logs[0]) && calls.logs[0].includes("'/old/claude'"), `and the one line says so (${calls.logs[0]})`);
+    const { c, calls } = mk(new Set(), 'none');
+    const e = await refusedBy(c.forSpawn('claude', '/old/claude'));
+    ok(!!e && e.code === 'cli-missing' && e.cli === 'claude' && e.shell === 'zsh' && e.answer === 'none', `found NOTHING ⇒ the create is REFUSED by name (CliMissing ${e && e.code}) — never «spawning it as before» (lane cli-shell-truth: this leg CHANGED MEANING)`);
+    ok(!calls.applied.length, 'nothing is handed to the adapter');
+    ok(calls.logs.length === 1 && /refused \(cli-missing\)/.test(calls.logs[0]) && /not found by your zsh/.test(calls.logs[0]), `and ONE line says so (${calls.logs[0]})`);
   }
   {
-    const { c, calls } = mk(new Set(), async () => { throw new Error('boom'); });
-    ok(await c.forSpawn('claude', '/old/claude') === '/old/claude' && calls.logs.length === 1, 'a throwing re-resolve is the same as finding nothing');
+    const { c, calls } = mk(new Set(['/old/claude']), async () => { throw new Error('boom'); });
+    ok(await c.forSpawn('claude', '/old/claude') === '/old/claude' && calls.logs.length === 1 && /could not be asked/.test(calls.logs[0]), 'a throwing shell ask could not ANSWER: the provisional path that works is spawned, the degradation named in one line');
+    const { c: c2 } = mk(new Set(), async () => { throw new Error('boom'); });
+    const e = await refusedBy(c2.forSpawn('claude', '/old/claude'));
+    ok(!!e && e.code === 'cli-missing' && e.answer === 'unanswered', '…and with the provisional path gone and the hub\'s walk empty too, refused (unanswered)');
   }
   {
     const { c, calls } = mk(new Set(), '/new/claude');
@@ -106,29 +121,29 @@ if (mod) {
     const b = await c.forSpawn('claude', '/opt/custom/claude-override');
     const d = await c.forSpawn('shell', '/bin/bash');
     const e = await c.forSpawn('codex', '/old/claude');
-    ok(a === '/usr/bin/ssh' && b === '/opt/custom/claude-override' && d === '/bin/bash' && e === '/old/claude' && calls.resolve === 0,
-      'only the registered, boot-resolved command is ever re-resolved: ssh, a spec override, a shell and an unregistered backend pass through untouched');
+    ok(a === '/usr/bin/ssh' && b === '/opt/custom/claude-override' && d === '/bin/bash' && e === '/old/claude' && calls.ask === 0 && calls.resolve === 0,
+      'only the registered, boot-resolved command is ever looked up: ssh, a spec override, a shell and an unregistered backend pass through untouched');
   }
   // SINGLE-FLIGHT (batch r1): creates that land in the stale window TOGETHER
-  // share ONE re-resolve — one `which`, one adapter hand-off, one journal line
+  // share ONE lookup — one shell ask, one adapter hand-off, one journal line
   // — and every one of them spawns the fresh path. (Before: three creates in
   // flight = three lookups, three applies, three identical 'old → new' lines.)
   {
     const { c, calls } = mk(new Set(['/new/claude']), async () => { await new Promise((r) => setTimeout(r, 20)); return '/new/claude'; });
     const rs = await Promise.all([1, 2, 3].map(() => c.forSpawn('claude', '/old/claude')));
     ok(rs.every((r) => r === '/new/claude'), `three concurrent spawns in the stale window all get the fresh path (${rs.join(', ')})`);
-    ok(calls.resolve === 1 && calls.applied.length === 1 && calls.logs.length === 1,
-      `…through ONE shared re-resolve: resolves=${calls.resolve} applies=${calls.applied.length} journal lines=${calls.logs.length}`);
+    ok(calls.ask === 1 && calls.applied.length === 1 && calls.logs.length === 1,
+      `…through ONE shared ask: asks=${calls.ask} applies=${calls.applied.length} journal lines=${calls.logs.length}`);
     const r4 = await c.forSpawn('claude', '/old/claude');
-    ok(r4 === '/old/claude' && calls.resolve === 1, 'a caller still passing the OLD path AFTER the adoption is passed through untouched (it is no longer the registered command)');
+    ok(r4 === '/old/claude' && calls.ask === 1, 'a caller still passing the OLD path AFTER the adoption is passed through untouched (it is no longer the registered command)');
   }
   {
-    const { c, calls } = mk(new Set(), async () => { await new Promise((r) => setTimeout(r, 20)); return 'claude'; });
-    const rs = await Promise.all([1, 2, 3].map(() => c.forSpawn('claude', '/old/claude')));
-    ok(rs.every((r) => r === '/old/claude') && calls.resolve === 1 && calls.logs.length === 1 && /found nothing/.test(calls.logs[0]),
-      `a binary still missing: the concurrent creates share one lookup and one found-nothing line (resolves=${calls.resolve}, lines=${calls.logs.length})`);
-    await c.forSpawn('claude', '/old/claude');
-    ok(calls.resolve === 2 && calls.logs.length === 2, 'and the NEXT create asks again (the shared lookup is released when it settles — never a cached "missing")');
+    const { c, calls } = mk(new Set(), async () => { await new Promise((r) => setTimeout(r, 20)); return 'none'; });
+    const rs = await Promise.all([1, 2, 3].map(() => refusedBy(c.forSpawn('claude', '/old/claude'))));
+    ok(rs.every((e) => e && e.code === 'cli-missing') && calls.ask === 1,
+      `a binary still missing: the concurrent creates share ONE ask and are each refused by name (asks=${calls.ask})`);
+    await refusedBy(c.forSpawn('claude', '/old/claude'));
+    ok(calls.ask === 2, 'and the NEXT create asks again (the shared lookup is released when it settles — never a cached "missing")');
   }
   {
     const { c, calls } = mk(new Set(['/found/claude']), '/found/claude');
@@ -153,7 +168,7 @@ console.log('\n② wiring');
     'server.js holds no resolver of its own — it imports THE one (boot and spawn share one lookup)');
   ok(/cliCmds\.register\('claude'/.test(cliEnv) && /cliCmds\.register\('codex'/.test(cliEnv) && /for \(const id of Object\.keys\(ACP_COMMANDS\)\)[\s\S]{0,40}cliCmds\.register\(id/.test(cliEnv),
     'cli-env registers claude, codex and every ACP harness where they are resolved');
-  const at = wsCreate.indexOf('spawnCmd = await cliCmds.forSpawn(backend, spawnCmd)');
+  const at = wsCreate.indexOf('try { spawnCmd = await cliCmds.forSpawn(backend, spawnCmd); } catch (e) {');
   const argv = wsCreate.indexOf('const r6Line = sessionSpawnLine('); // lane antigravity-spawn-argv: THE line (src/spawn/line.js)
   ok(at > 0 && argv > at && (wsCreate.match(/const r6Line = sessionSpawnLine\(/g) || []).length === 1 && (wsCreate.match(/cliCmds\.forSpawn\(/g) || []).length === 1,
     'ws-create re-checks the command ONCE, right BEFORE the ONE local argv every local spawn runs (pty terminal, chat wrapper, daemon pipe)');
@@ -175,7 +190,13 @@ else {
   for (const d of [A, B, WORK]) fs.mkdirSync(d, { recursive: true });
   fakeHome = scratchHome('cli-cmd-home', fs);
   // A fake CLI: records the path it was run AS, then holds the pty briefly.
-  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\necho "$0" >> '${MARK}'\nexec sleep 15\n`, { mode: 0o755 });
+  const PATHMARK = path.join(ROOT, 'ran-path.txt');
+  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\necho "$0" >> '${MARK}'\necho "$PATH" > '${PATHMARK}'\nexec sleep 15\n`, { mode: 0o755 });
+  // THE PERSON'S LOGIN SHELL (lane cli-shell-truth): a scratch sh script named by the server's SHELL — the REAL road is
+  // driven (never this machine's own zsh under a suite). Its "rc" prints a banner and puts a marker dir first on PATH.
+  const LOGIN_SH = path.join(ROOT, 'login-shell'), SHMARK = path.join(ROOT, 'shell-path-mark');
+  fs.mkdirSync(SHMARK, { recursive: true });
+  fs.writeFileSync(LOGIN_SH, `#!/bin/sh\necho "scratch rc banner"\nPATH="${SHMARK}:$PATH"; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; exec /bin/sh -c "$1";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
   const marks = () => { try { return fs.readFileSync(MARK, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
   execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });
   for (const f of ['src', 'public', 'server.js', 'package.json']) {
@@ -186,7 +207,7 @@ else {
   // PATH: A then B, and NO directory that holds a real claude — the re-resolve
   // must only ever find the fake.
   const basePath = (process.env.PATH || '').split(path.delimiter).filter((d) => d && !hasClaude(d));
-  const env = { ...withoutVendorKeys(), ...VNC_ENV, PATH: [A, B, ...basePath].join(path.delimiter), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' };
+  const env = { ...withoutVendorKeys(), ...VNC_ENV, PATH: [A, B, ...basePath].join(path.delimiter), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', SHELL: LOGIN_SH };
   delete env.CLAUDE_CMD;
   const PORT = await freePort();
   env.PORT = String(PORT);
@@ -217,8 +238,10 @@ else {
     ok(r?.type === 'created' && ran && last === want, `${label}: the spawn ran ${want} (${r?.type}${r?.type === 'error' ? ' ' + String(r.message).slice(0, 80) : ''}; ran=${ran}${ran ? ' as ' + last : ''})`);
   };
 
-  await spawnRuns(path.join(A, 'claude'), 'spawn 1, binary in A (the boot answer)');
-  ok(cliLines().length === 0, 'a spawn whose path is present logs nothing and re-resolves nothing');
+  await spawnRuns(path.join(A, 'claude'), 'spawn 1, binary in A (the boot answer — the login shell, asked now, names the same path)');
+  ok(cliLines().length === 0, 'a spawn whose path is present logs nothing and adopts nothing');
+  let ranPath = ''; try { ranPath = fs.readFileSync(PATHMARK, 'utf8').trim(); } catch { }
+  ok(ranPath.split(':').includes(SHMARK), `the spawn's PATH is the login shell's own (its rc's marker dir rode it: ${ranPath.split(':').slice(0, 3).join(':')}…)`);
 
   fs.renameSync(path.join(A, 'claude'), path.join(B, 'claude'));
   await spawnRuns(path.join(B, 'claude'), 'spawn 2, binary MOVED to B — THE FINDING (pre-fix: the dead A path is spawned, nothing runs)');
@@ -233,11 +256,19 @@ else {
 
   fs.renameSync(path.join(A, 'claude'), path.join(A, 'claude.gone'));
   const before = marks().length;
+  // every dtach master of THIS suite carries ROOT in its argv (its socket lives under the scratch worktree)
+  const dtachPids = () => { const out = new Set(); for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { const c = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8'); if (c.startsWith('dtach\0') || c.includes('/dtach\0')) { if (c.includes(ROOT)) out.add(d); } } catch { } } return out; };
+  const dBefore = dtachPids();
   const r5 = await create();
   await sleep(3000);
-  ok(marks().length === before, `CONTROL: with the binary gone everywhere nothing runs — the spawn fails the way it always did (${r5?.type})`);
+  const dNew = [...dtachPids()].filter((x) => !dBefore.has(x));
+  // lane cli-shell-truth: THIS LEG CHANGED MEANING — it used to pin «the spawn fails the way it always did» (a dead path
+  // spawned, a wrapper dying ~30 s later, the UI silent: the owner's codex incident). Gone everywhere ⇒ REFUSED by name.
+  ok(r5?.type === 'error' && r5.code === 'cli-missing' && r5.cli === 'claude' && r5.shell === 'login-shell' && r5.answer === 'none', `CONTROL: with the binary gone everywhere the create answers cli-missing by name (${r5?.type} ${r5?.code} — ${String(r5?.message || '').slice(0, 160)})`);
+  ok(Array.isArray(r5?.looked) && r5.looked.includes(A) && r5.looked.includes(B), `…naming where the hub looked too (${(r5?.looked || []).length} dirs)`);
+  ok(marks().length === before && dNew.length === 0, `…and NOTHING was spawned: no CLI ran, no new dtach master (${dNew.length})`);
   const l3 = cliLines()[2] || '';
-  ok(cliLines().length === 3 && /found nothing/.test(l3) && l3.includes(`'${path.join(A, 'claude')}'`), `and the journal says the re-resolve found nothing (${l3.trim().slice(0, 200)})`);
+  ok(cliLines().length === 3 && /refused \(cli-missing\)/.test(l3) && /not found by your login-shell/.test(l3), `ONE journal line says the create is refused (${l3.trim().slice(0, 200)})`);
   // ④ (lane antigravity-card-fixes, the owner's 「Antigravity CLI 未安装」 for an agy installed after the hub booted):
   // THE STATUS READ re-checks the CLI paths (src/server/cli-cmd.js `check`) — on THIS server, after its spawn legs (a
   // status read runs `claude --version`, which would add a mark; here the fake claude is already gone)
@@ -251,7 +282,7 @@ else {
     fs.writeFileSync(path.join(B, 'agy'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const s1 = await agyStatus('?recheck=1');
     ok(s1.installed === true && s1.cmdPath === path.join(B, 'agy'), `agy appears in dir B; Manage agents' forced read (Install / Re-check) says INSTALLED there — THE FINDING, no restart (pre-fix: still not installed) (${JSON.stringify(s1)})`);
-    ok(journal.includes(`[cli-cmd] antigravity: 'agy' found at '${path.join(B, 'agy')}'`), 'the adoption is one journal line (later spawns are born with the path)');
+    ok(journal.includes(`[cli-cmd] antigravity: your login-shell (login shell) found 'agy' at '${path.join(B, 'agy')}'`), 'the adoption is one journal line naming who found it (later spawns are born with the path)');
     fs.rmSync(path.join(B, 'agy'));
     const s2 = await agyStatus();
     ok(s2.installed === false && s2.cmdPath === null, `agy removed: the next plain read says not installed (${JSON.stringify(s2)})`);

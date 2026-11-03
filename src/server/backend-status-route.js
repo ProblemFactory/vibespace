@@ -21,6 +21,8 @@
  * uninstall shows) and looks an unresolved one up again — bounded (one lookup
  * per CLI per RECHECK_MS), or now when a person asked (`?recheck=1`: Manage
  * agents after Install, and its Re-check). A path found is adopted for spawns.
+ * Lane cli-shell-truth: the check asks the person's LOGIN SHELL (src/server/cli-cmd.js) and every row carries the
+ * observed census (`provenance`, `shell`, `askedAt`, `answer`, `unanswered`, `hubPath`, `hint`).
  */
 function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = null } = {}) {
   if (!app) throw new Error('backend-status-route: app is required');
@@ -33,7 +35,7 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
     }
     const cmdOf = (id) => (id in live ? live[id] : (cliCmds?.current?.(id) ?? null));
     let out;
-    try { out = await machineProbes.cliFacts({ claudeCmd: cliCmds?.current?.('claude') || claudeCmd, codexCmd: cliCmds?.current?.('codex') || codexCmd }); } catch { out = { claude: {}, codex: {} }; }
+    try { out = await machineProbes.cliFacts({ claudeCmd: live.claude || cliCmds?.current?.('claude') || claudeCmd, codexCmd: live.codex || cliCmds?.current?.('codex') || codexCmd }); } catch { out = { claude: {}, codex: {} }; }
     if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) { out.claude.loggedIn = true; out.claude.loginMethod = 'env-key'; }
     // Named-account nuance (2.267.1): under full pooling the MACHINE login
     // legitimately idles to token-less — count usable named identities so the
@@ -51,6 +53,19 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
       for (const h of require('../harnesses').list()) {
         if (!h.creds || typeof h.creds.machineStatus !== 'function' || out[h.id]) continue;
         out[h.id] = { ...h.creds.machineStatus({ cmd: cmdOf(h.id) }), namedLoggedIn: (l.accounts || []).filter((a) => a.backend === h.id && a.loggedIn).length }; // the CHECKED path (null = not installed now)
+      }
+    } catch {}
+    // THE OBSERVED CENSUS (lane cli-shell-truth): per CLI where it was found and by whom — provenance 'shell' (the
+    // person's login shell) / 'hub-path' (the hub's own walk) / 'boot' (a configured path), the shell asked, when, why
+    // it could not be asked, the hub's PATH as a HINT. A CLI the shell did not find is NOT installed here, whatever the
+    // hub's own PATH holds (a hint, never a spawn).
+    try {
+      for (const id of cliCmds && typeof cliCmds.census === 'function' ? cliCmds.ids() : []) {
+        const c = cliCmds.census(id);
+        if (!c || !out[id]) continue;
+        const { missing, ...row } = c;
+        Object.assign(out[id], row);
+        if (missing && live[id] == null) { out[id].installed = false; out[id].cmdPath = null; out[id].version = null; }
       }
     } catch {}
     res.json(out);

@@ -190,10 +190,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
           }
-          if (adapter.installed === false) { // ACP harness whose executable is not on this machine (S8): refuse loudly BEFORE any spawn/dtach work
-            ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `${backend} is not installed on this machine (no "${adapter.config?.commandName || backend}" on PATH — install it or set ${String(backend).toUpperCase().replace(/-/g, '_')}_CMD).` }));
-            break;
-          }
+          // An ACP harness whose executable is not on this machine (S8) is refused by THE ONE verdict below
+          // (cliCmds.forSpawn's cli-missing, lane cli-shell-truth) — one road for every harness, before any spawn.
           // Writer-sweep options per backend (P1 codex double-writer, see
           // writer-sweep.js): the codex legs get the webui ids of the LIVE
           // codex sessions on the TARGET machine as a protect list — a codex
@@ -1339,6 +1337,22 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             if (!sp) return; // the ladder answered the socket
             ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = sp);
           }
+          // SPAWN-TIME RE-RESOLVE (B-a18e) + THE CLI LOCATION LAW (lane cli-shell-truth): the pty terminal, the chat
+          // wrapper and the daemon pipe all run THIS command — checked here, ONCE, for a new session AND a resume. The
+          // person's login shell is the truth for where the CLI is (src/server/cli-cmd.js); found NOTHING ⇒ the create
+          // is REFUSED by name with what was asked and where it looked, BEFORE the local ladder (its pre-resume writer
+          // sweep), dtach, the socket, the buffer or the meta file — the client draws a dialog (cli-missing). Local
+          // only: every remote branch above already replaced spawnCmd (ssh / node) or answered the socket.
+          let cliShellPath = null;
+          if (!session.host && cliCmds) {
+            try { spawnCmd = await cliCmds.forSpawn(backend, spawnCmd); } catch (e) {
+              if (!e || e.code !== 'cli-missing') throw e;
+              global.__vsEvent?.('spawn-cli-missing', `${backend}/${e.answer || 'none'}`);
+              ws.send(JSON.stringify({ type: 'error', code: 'cli-missing', reqId: data.reqId, backend, cli: e.cli, shell: e.shell || null, answer: e.answer || null, why: e.why || null, aliasText: e.aliasText || null, looked: e.looked || [], hubPath: e.hubPath || null, hint: e.hint || null, message: e.message }));
+              return;
+            }
+            cliShellPath = cliCmds.spawnPath?.(backend) || null; // the shell found it ⇒ its PATH is the spawn's base
+          }
           const usageEnvPairs = [];
           if (!data.hostId) ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = await spawnFor(null)[sessionMode](ladderCtx({ usageEnvPairs })));
           // R6 / session-brain step 4 (2.318.0, FLAG-GATED default OFF —
@@ -1384,12 +1398,6 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               return;
             }
           }
-          // SPAWN-TIME RE-RESOLVE (B-a18e): the pty terminal, the chat wrapper
-          // and the daemon pipe all run THIS argv — the boot-resolved CLI path
-          // is re-checked here, once, and re-resolved when it has gone (an
-          // Update restart inside an installer's window). Local only: every
-          // remote branch above already replaced spawnCmd (ssh / node).
-          if (!session.host && cliCmds) spawnCmd = await cliCmds.forSpawn(backend, spawnCmd);
           let createPty;
           try {
             // THE SESSION'S NAMES (lane antigravity-spawn-argv, 2026-10-21): every pair below rides the spawn's ENV.
@@ -1422,7 +1430,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // AGENT_BIN_DIR (vibespace-* tools), NOT dirname(EDITOR_CMD):
               // the fake `code` lives in editor/ precisely so PATH never
               // resolves it (B-b87b — it shadowed real VS Code locally)
-              `PATH=${integrationOn ? AGENT_BIN_DIR + ':' : ''}${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+              // lane cli-shell-truth: the base is the person's login-shell PATH when the shell found the CLI (a
+              // `#!/usr/bin/env node` shim finds the node their shell would); the hub's own otherwise
+              `PATH=${integrationOn ? AGENT_BIN_DIR + ':' : ''}${cliShellPath || process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
               `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,

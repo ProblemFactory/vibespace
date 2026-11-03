@@ -869,6 +869,17 @@
 - (2026-11-03) A MIGRATION THAT STRIPS BEFORE IT ARCHIVES LIES ON RETRY (engine-spi-egress L3): old values lost on a crash, a cut unpack carried, a failed run's browser adopted. 不变量 = archive before strip; a carried binary is proven by its stamp; an unreadable record is ended ⇒ kb-bugfix-invariants
 - (2026-11-03) A COMPACTED CONVERSATION STAYED «WARM»; THE CACHE TTL WAS INFERRED FROM BILLING (cache-warmth-compact). 不变量 = the cache fact is what the last record said; a compaction resets the old context's fact, never a request sent after it ⇒ kb-bugfix-invariants
 - (2026-11-04) BULLETS SAT ON THE CARD'S LEFT BORDER IN EVERY CARD BUT THE ASSISTANT'S (hotfix-card-list-indent, 圆点挂在左边框): the list rule was bubble-scoped; the `*` reset zeroed the rest. 不变量 = a markdown list indents by its container, never by which bubble it sits in ⇒ kb-bugfix-invariants.md
+- (2026-11-03) A CODEX CONVERSATION DIED IN SILENCE — THE HUB'S PATH HAD NO CODEX, THE OWNER'S SHELL DID (cli-shell-truth, B-fb02): spawned «as before», dead ~30 s later. 不变量 = a CLI is where the person's login shell finds it; a missing CLI is said before anything is spawned ⇒ kb-bugfix-invariants
+
+## A CODEX CONVERSATION DIED IN SILENCE — THE HUB'S PATH HAD NO CODEX, THE OWNER'S SHELL DID (the owner 2026-11-03 10:31 PT; lane cli-shell-truth, B-fb02, 2.369.375)
+
+**What happened.** codex was installed with `npm -g` under nvm's node v24.12.0. The hub's systemd unit bakes a PATH with v24.22.1/bin only, so the boot `which` found nothing. Every codex spawn then logged «… re-resolving 'codex' found nothing — spawning it as before», the wrapper died ~30 s later (wrapper=unfinalized socket=gone), and the UI said nothing. `command -v codex` in the owner's zsh found it at once. The box got a symlink in ~/.local/bin as a workaround.
+
+**The fix.** The person's LOGIN SHELL is the truth for where an agent CLI is (src/server/cli-cmd.js askShell: `-l -i -c`, a sanitized env, its own session, sentinels, a 10 s bound; asked lazily, once per CLI). Its path replaces the hub's provisional one and its PATH rides the spawn. Found nothing (or an alias) ⇒ the create is REFUSED by name, `cli-missing`, before anything is spawned. The client draws a dialog with what was asked, where it looked and two doors. Manage agents shows where each CLI was found. A registry, pinned versions and a managed prefix were refused by the owner twice (kb-design-lessons §24).
+
+不变量: a CLI is where the person's login shell finds it, however it was installed; a missing CLI is said before anything is spawned, never «spawning it as before»; a shell that cannot be asked is a named degradation, not a refusal.
+
+Gates: test-cli-env (fast, scratch shells + four mutants), test-cli-cmd-refresh (heavy: gone everywhere ⇒ cli-missing, no dtach), test-cli-missing-chrome (heavy: the dialog en/zh/ja, the census lines).
 
 ## THE PHONE'S «WAITING FOR YOU» STRIP TOOK A THIRD OF THE SCREEN (the owner 2026-11-02 ~23:20 PT on the iPhone, 2.369.373: «你那个等你操作的那个橙色的菜单，在画面最下方的 iPhone UI 上占据的显示面积过大»; lane phone-dock-restore, .374)
 - THE SYMPTOM: on the phone the amber strip above the message box drew its newest item whole — the head line, the question (wrapped), the clock, the age, ⤢ «打开» as a full-width 44 px row, the command, «发往 未知 …», the three answers and the hour's line. The transcript above it shrank to a slit.
