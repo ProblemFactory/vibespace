@@ -332,7 +332,8 @@ export function tickDeadlines(root = document, now = hubNow()) {
     const late = el.dataset.deadlineLate === '1', lost = el.dataset.deadlineLost === '1';
     const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: 'deadline', ...(late ? { late: true } : {}), ...(lost ? { restartLost: true } : {}) } }, { t: tr, now, clock: hubClock() });
     if (!d) continue;
-    if (el.textContent !== d.text) el.textContent = d.text;
+    const text = el.dataset.deadlineShort ? d.short : d.text; // lane phone-dock-restore r2: the phone's folded strip's clock
+    if (el.textContent !== text) el.textContent = text;
     el.classList.toggle('ut-deadline-warn', d.warn);
     if (el.dataset.state !== d.state) el.dataset.state = d.state;
     if (d.state === 'live') counting++;

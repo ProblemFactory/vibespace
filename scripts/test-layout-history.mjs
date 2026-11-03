@@ -164,6 +164,17 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   const points = R3.listLayoutHistory().slice(0, 2);
   ok(points.length === 2 && points.every((p) => p.writer && p.writer.via === 'restore' && p.writer.from === target.id), 'the restore\'s points (the forced one and its write\'s) name the restore and the point it came from', JSON.stringify(points.map((p) => p.writer)));
   ok(heard.some((m) => m.type === 'layout-restored'), 'every client is told (layout-restored)');
+  // lane phone-dock-restore r2 (P4): THE BROADCAST NAMES THE RESTORE — the asker's `rid` echoed (its page tells its own restore
+  // from another device's); none sent / a malformed one ⇒ none told
+  ok(heard.filter((m) => m.type === 'layout-restored').every((m) => !('rid' in m)), '…a restore that names no rid is told with none', JSON.stringify(heard));
+  heard.length = 0;
+  const sink = { json: () => {}, status: () => ({ json: () => {} }) };
+  await route.route.stack[0].handle({ params: { id: target.id }, body: { rid: 'rk3x9_a-1' } }, sink);
+  await route.route.stack[0].handle({ params: { id: target.id }, body: { rid: '<b>x</b>' } }, sink);
+  await route.route.stack[0].handle({ params: { id: target.id }, body: { desktopId: 'work', rid: 'rdesk2' } }, sink);
+  await tick();
+  const toldR = heard.filter((m) => m.type === 'layout-restored');
+  ok(toldR.length === 3 && toldR[0].rid === 'rk3x9_a-1' && !('rid' in toldR[1]) && toldR[2].rid === 'rdesk2', 'the restore\'s broadcast echoes the asker\'s rid (the whole layout and one desktop); a malformed rid is never echoed', JSON.stringify(toldR));
   fs.rmSync(dd, { recursive: true, force: true });
 }
 

@@ -1444,8 +1444,8 @@ scripts/test-frp-plugin.mjs h/h2/i/j + test-frps-plugin.mjs ⑦c + test-job-noti
 src/job-model.js nextFire + src/jobs.js (lane int361, .367) — PURE: the cron scan walks REAL minutes, reads the wall clock; a repeated fall-back time fires once (first pass, or second if not fired at the first), a missing spring-forward time fires at the jump ⇒ kb-file-structure.md
 - **src/plugin-cred-state.js** (PURE, CJS; hotfix 2.369.368): `pluginGitCredOf(answer)` → `{ready, host, kind}`, the ONE reader of /api/integrations/plugin-git's answer (the envelope or a bare view; a locked vault ⇒ not ready) for the Install plugin… dialog; gate test-dialog-yield ⑨ ⇒ essay
 src/lib/user-todos-row.js runFactsHtml `strip` + public/chat.css .cad-rows / .ut-dock-fold + chat-needs-card.js _dockPass (lane foryou-dock-layout) — the dock is ONE column; its run card reads top-down by explicit flex orders; the hour's long words in the one fold ⇒ kb-file-structure.md
-src/lib/chat-needs-card.js _dockStrip / _dockFold + style.css html[data-vc] .chat-attn-dock + chat.css .cad-num / .cad-look (lane phone-dock-restore) — a phone dock is ONE row until tapped (`cad-open`, ≤ 45 %); the folded row answers nothing ⇒ kb-file-structure.md
-src/lib/setup-flows.js _showLayoutHistory `busy` + app.js `_layoutRestoring` (lane phone-dock-restore) — the history dialog says what it reads and a failed read; a restore press says «Restoring…»; the asking page hears its own broadcast silently ⇒ kb-file-structure.md
+src/lib/chat-needs-card.js _dockStrip / _dockFold + style.css html[data-vc] .chat-attn-dock + chat.css .cad-num / .cad-look / .cad-clock (lane phone-dock-restore) — a phone dock is ONE row until tapped; the row answers nothing, keeps its clock; an open arms every button ⇒ kb-file-structure.md
+src/lib/setup-flows.js _showLayoutHistory `busy` + app.js `_layoutRestoring` (lane phone-dock-restore) — the history dialog says what it reads and a failed read; a restore press says «Restoring…»; the asking page knows its own broadcast by its `rid` ⇒ kb-file-structure.md
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

@@ -262,6 +262,7 @@ else await (async () => {
     //    setup-flows.js / app.js put back as 74b98357e had them — the same probe reads «加载中…», «暂无回滚点», the button as it was, two toasts.
     const probe6 = async (X) => {
       const held = []; const off = X.on((m) => { if (m.method === 'Fetch.requestPaused' && /\/api\/layout-history/.test(m.params.request.url)) held.push(m.params.requestId); });
+      const navs = []; const offN = X.on((m) => { if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navs.push(Date.now()); }); // (r2: the page's reloads)
       const next = async (ms = 8000) => { await until(() => held.length > 0, ms, 20); return held.shift(); };
       const out = {};
       try {
@@ -294,6 +295,7 @@ else await (async () => {
         out.toasts = await X.ev('window.__lh6 || []').catch(() => null);
       } finally { off(); try { await X.send('Fetch.disable'); } catch { } }
       await until(async () => { try { return (await X.ev('window.__lswMark6 === undefined && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
+      await sleep(1200); offN(); out.reloads = navs.length;
       return out;
     };
     const good6 = (o) => !!o && !!o.shell && o.shell.seen && o.shell.ms < 300 && o.shell.says === '正在读取布局历史…' && !o.shell.list && o.heldGet && o.rows >= 1;
@@ -304,22 +306,65 @@ else await (async () => {
     ok(good6(g6), `⑥ the GET held: the dialog's shell stands ${g6.shell && g6.shell.ms} ms after the press (< 300) saying «${g6.shell && g6.shell.says}», no list yet; the answer released ⇒ ${g6.rows} rows`, g6);
     ok(fail6(g6), `⑥ a read that fails is SAID in the dialog: «${g6.failSays}» (never «暂无回滚点»)`, g6.failSays);
     ok(busy6(g6), `⑥ the restore's press while the hub works: the button says «${g6.busy && g6.busy.words}», the list held`, g6.busy);
-    ok(toast6(g6), `⑥ the page that asked shows ITS toast alone: ${J(g6.toasts)}`, g6.toasts);
+    ok(toast6(g6) && g6.reloads === 1, `⑥ the page that asked shows ITS toast alone: ${J(g6.toasts)} — and reloads once (${g6.reloads}; r2: the broadcast that names its rid)`, g6);
     await P1.shot('history-busy-zh');
-    // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
+    // ⑦ round 2 (P4 — the broadcast had no identity: ANY `layout-restored` during this page's press counted as its own, so a press
+    //    the hub refused said «restored» and reloaded, and another device's restore was swallowed): the POST names its rid, the hub
+    //    echoes it, the page matches ITS OWN only (⑥ (c) is the own: one toast, one reload). Here the POST is HELD; another device's
+    //    broadcast injected during it ⇒ that device's words, at once, no «reloading»; the POST then refused (404 «not found») ⇒ the
+    //    error said, the button's words back, NO reload. RED CONTROL: app.js matching any broadcast during the press (round 1).
+    const probe7 = async (X) => {
+      const held = [], navs = []; const off = X.on((m) => { if (m.method === 'Fetch.requestPaused' && /\/api\/layout-history/.test(m.params.request.url)) held.push(m.params); if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navs.push(Date.now()); });
+      const next = async (ms = 8000) => { await until(() => held.length > 0, ms, 20); return held.shift(); };
+      const out = {}, DLG = `document.getElementById('layout-history-dialog')`;
+      try {
+        await X.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/layout-history*', requestStage: 'Request' }] });
+        await X.ev('(void app._showLayoutHistory(), true)'); let p = await next(); await X.send('Fetch.continueRequest', { requestId: p.requestId });
+        await until(() => X.ev(`!!${DLG}?.querySelector('.lh-restore')`), 8000, 50);
+        await X.ev(`(() => { window.__lh7 = []; const g = document.getElementById('global-toasts') || document.body; new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!window.__lh7.includes(t.textContent)) window.__lh7.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
+        await X.click(`${DLG}.querySelector('.lh-restore')`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        p = await next(); try { out.rid = JSON.parse(p.request.postData || '{}').rid || null; } catch { out.rid = null; }
+        await X.ev(`(() => { window.__mark7 = 1; for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: 'r-another-device' }); } catch { } } return 1; })()`);
+        await sleep(400); out.during = await X.ev('[...(window.__lh7 || [])]');
+        const n0 = navs.length;
+        await X.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 404, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(J({ error: 'not found' })).toString('base64') });
+        await sleep(2500); out.reloads = navs.length - n0;
+        out.after = await X.ev(`(() => ({ mark: window.__mark7 === 1, toasts: [...(window.__lh7 || [])], open: !!${DLG}, words: ${DLG}?.querySelector('.lh-restore')?.textContent || null, busy: !!${DLG}?.querySelector('[aria-busy="true"]'), held: !!${DLG}?.querySelector('.lh-list')?.inert }))()`).catch(() => null);
+        await X.ev(`(${DLG}?.querySelector('.dialog-close')?.click(), true)`).catch(() => { }); await sleep(300);
+      } finally { off(); try { await X.send('Fetch.disable'); } catch { } }
+      await until(async () => { try { return (await X.ev('!!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
+      return out;
+    };
+    // (a toast's textContent ends with its close ✕ — the exact words are compared without it: never «… — 正在刷新…»)
+    const own7 = (o) => !!o && /^r[0-9a-z]{6,}$/.test(o.rid || '') && !!o.after && o.after.mark && o.reloads === 0 && o.after.toasts.some((t) => /not found|失败/.test(t)) && !o.after.toasts.some((t) => /布局已恢复 — 正在刷新/.test(t))
+      && (o.during || []).some((t) => t.replace(/✕$/, '') === '布局已在另一台设备上恢复') && o.after.open && o.after.words === '还原' && !o.after.busy && !o.after.held;
+    const g7 = await probe7(P1);
+    ok(own7(g7), `⑦ the press names its restore (rid «${g7.rid}»); another device's broadcast during it says «${(g7.during || []).join(' | ')}»; the hub then refuses the press ⇒ the error said (${J(g7.after && g7.after.toasts)}), the button «${g7.after && g7.after.words}» again, ${g7.reloads} reloads`, g7);
+    // the mutants (a copy of this tree's src/ with lines swapped — this tree's bundle otherwise), served for bundle.js
     const SF = fs.readFileSync(path.join(wt, 'src/lib/setup-flows.js'), 'utf8'), AP = fs.readFileSync(path.join(wt, 'src/lib/app.js'), 'utf8');
+    const mutBoot = async (tag, back) => {
+      const anchored = back.every(([src, from]) => src.split(from).length === 2);
+      let mutSF = SF, mutAP = AP; for (const [src, from, to] of back) { if (src === SF) mutSF = mutSF.replace(from, to); else mutAP = mutAP.replace(from, to); }
+      const MUTD = path.join(ROOT, tag); fs.cpSync(path.join(wt, 'src'), path.join(MUTD, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(MUTD, 'src/lib/setup-flows.js'), mutSF); fs.writeFileSync(path.join(MUTD, 'src/lib/app.js'), mutAP);
+      await esbuild.build({ entryPoints: [path.join(MUTD, 'src/client.js')], bundle: true, outfile: path.join(MUTD, 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent', nodePaths: [path.join(repo, 'node_modules')] });
+      const MB = fs.readFileSync(path.join(MUTD, 'bundle.js')).toString('base64');
+      const offB = P1.on((m) => { if (m.method === 'Fetch.requestPaused' && /bundle\.js/.test(m.params.request.url)) P1.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body: MB }).catch(() => { }); });
+      await P1.send('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+      await P1.boot(); await P1.send('Fetch.disable'); offB();
+      return anchored;
+    };
+    // RED CONTROL (⑦): app.js takes ANY broadcast during the press as its own (round 1's line) — the refused press says «restored»
+    const a7 = await mutBoot('mut7', [[AP, 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }', 'if (own) { own.heard = true; return; }']]);
+    const r7 = await probe7(P1);
+    ok(a7 && !own7(r7), `RED CONTROL (⑦): app.js matching any broadcast during the press${a7 ? '' : ' — AN ANCHOR MOVED'} ⇒ the refused press reads as restored (${J(r7.after && r7.after.toasts)}, ${r7.reloads} reloads) — ⑦ red`, r7);
+    // RED CONTROL: the same probe over the base's dialog (the lane's lines put back) — each leg goes red by name
     const back = [[SF, "t('Reading the layout history…')", "t('Loading…')"], [SF, 'if (!r || r.error || !Array.isArray(r.entries)) {', 'if (false) {'], [SF, 'const entries = r.entries;', 'const entries = r?.entries || [];'],
-      [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = true;", ''],
-      [AP, "if (this._layoutRestoring) { this._layoutRestoring = 'heard'; setTimeout(() => location.reload(), 900); return; }", '']];
-    const anchored = back.every(([src, from]) => src.split(from).length === 2);
-    let mutSF = SF, mutAP = AP; for (const [src, from, to] of back) { if (src === SF) mutSF = mutSF.replace(from, to); else mutAP = mutAP.replace(from, to); }
-    const MUTD = path.join(ROOT, 'mut6'); fs.cpSync(path.join(wt, 'src'), path.join(MUTD, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(MUTD, 'src/lib/setup-flows.js'), mutSF); fs.writeFileSync(path.join(MUTD, 'src/lib/app.js'), mutAP);
-    await esbuild.build({ entryPoints: [path.join(MUTD, 'src/client.js')], bundle: true, outfile: path.join(MUTD, 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent', nodePaths: [path.join(repo, 'node_modules')] });
-    const MB = fs.readFileSync(path.join(MUTD, 'bundle.js')).toString('base64');
-    const offB = P1.on((m) => { if (m.method === 'Fetch.requestPaused' && /bundle\.js/.test(m.params.request.url)) P1.send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body: MB }).catch(() => { }); });
-    await P1.send('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
-    await P1.boot(); await P1.send('Fetch.disable'); offB();
+      [SF, "b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;", ''],
+      [AP, 'if (own && msg.rid && msg.rid === own.rid) { own.heard = true; return; }', ''], [AP, "if (own) { showToast(t('Layout restored on another device')); return; }", '']];
+    const anchored = await mutBoot('mut6', back);
     const r6 = await probe6(P1);
     ok(anchored && !good6(r6) && !fail6(r6) && !busy6(r6) && !toast6(r6), `RED CONTROL (⑥): the base's dialog (the lane's ${back.length} lines put back${anchored ? '' : ' — AN ANCHOR MOVED'}) — the shell says «${r6.shell && r6.shell.says}», a failed read «${r6.failSays}», the pressed button «${r6.busy && r6.busy.words}», the toasts ${J(r6.toasts)} — each ⑥ leg red`, r6);
   } finally { P1.close(); if (P2) P2.close(); }

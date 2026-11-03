@@ -390,6 +390,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // desktop's record ALONE — the point's windows there, stamped now; every other desktop stays as it is NOW, minus a window
     // the point holds on this one (it moves back); a desktop deleted since comes back under its name. Undoable like the rest.
     const want = req.body && typeof req.body === 'object' ? req.body : {};
+    // lane phone-dock-restore r2: the asker's id for this restore, echoed in the broadcast — that page says its own restore once
+    const told = JSON.stringify({ type: 'layout-restored', ...(typeof want.rid === 'string' && /^[\w-]{1,64}$/.test(want.rid) ? { rid: want.rid } : {}) });
     if (want.desktop != null || want.desktopId != null) {
       const only = typeof want.desktopId === 'string' && want.desktopId ? want.desktopId : desktopIdOfKey(saved.layouts, String(want.desktop));
       const rec = only ? saved.layouts.desktops?.[only]?.autoSave : null;
@@ -415,8 +417,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       writeLayouts(doc);
       flushLayouts();
       try {
-        const j = JSON.stringify({ type: 'layout-restored' });
-        wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } });
+        wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(told); } catch {} } });
       } catch {}
       return res.json({ success: true, desktopId: only, windows: back.size, restoredFrom: saved.at });
     }
@@ -456,8 +457,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // seconds later, with nothing in any log. Tell every client to reload,
     // exactly what the restoring client does.
     try {
-      const j = JSON.stringify({ type: 'layout-restored' });
-      wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } });
+      wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(told); } catch {} } });
     } catch {}
     res.json({ success: true, summary: saved.summary, restoredFrom: saved.at });
   });

@@ -63,7 +63,7 @@ import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
-import { agoText, boxInUse, endCodeOf, stripWithholds } from './user-todos-row.js';
+import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
 import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
@@ -455,7 +455,6 @@ export class NeedsCards {
     // lane foryou-dock-layout: the head's line says how many MORE wait beyond the one it draws («5 more · View all»; chat.css:
     // the head's line, the row under it — one column)
     if (d && d.n > 1) { const w = t('{n} more · View all', { n: d.more }); if (all.textContent !== w) all.textContent = w; }
-    this._dockStrip(dock, d, entry);
     const had = new Set(rows.querySelectorAll('button')); // r14: the buttons drawn before this patch (a patch that MAKES one arms the strip)
     this.app.foryouRows?.reconcileDock(rows, [entry]); // r11: THE renderer with the summary + the plain buttons — never a pick (a form exists once per item: the pick is the item's)
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
@@ -463,6 +462,7 @@ export class NeedsCards {
     // the question is the door to its card (a navigation the owner asked for) — a button for the keyboard too
     if (q && q.getAttribute('role') !== 'button') { q.setAttribute('role', 'button'); q.tabIndex = 0; q.title = t('Show it in the conversation'); }
     if (dock.hidden) dock.hidden = false;
+    this._dockStrip(dock, d, entry); // (after the row: its clock reads the row's deadline line — r2)
     // what appeared under the pointer answers nothing for ARM_MS (the press arm) — a new key, AND (r14, the belt: the r13
     // acceptance's age tick rebuilt the Allow and left it unstamped ⇒ «just-moved» for ever) any patch that made a button
     const made = [...rows.querySelectorAll('button')].some((b) => !had.has(b));
@@ -479,9 +479,10 @@ export class NeedsCards {
     rows = document.createElement('div'); rows.className = 'cad-rows';
     // lane phone-dock-restore: the phone's folded row's ONE action — it opens the item in place (style.css: drawn there only)
     const look = document.createElement('button'); look.type = 'button'; look.className = 'cad-look'; look.textContent = t('View'); look.setAttribute('aria-expanded', 'false');
+    const clock = document.createElement('span'); clock.className = 'cad-clock'; clock.hidden = true; // …and its clock (round 2, P2: _dockStrip)
     const all = document.createElement('button'); all.type = 'button'; all.className = 'cad-all'; all.hidden = true;
     all.title = t('Open everything this conversation is waiting on in the For-you window');
-    dock.replaceChildren(head, rows, look, all);
+    dock.replaceChildren(head, rows, clock, look, all);
     this._dockWire(dock);
     return rows;
   }
@@ -503,6 +504,15 @@ export class NeedsCards {
     dock.addEventListener('click', (ev) => {
       if (!this.app.isMobile || ev.target.closest('.cad-all')) return;
       const open = dock.classList.contains('cad-open'), head = ev.target.closest('.cad-head');
+      // round 2 (P1 — measured: «View»'s point was the first chip's, or ✕'s, 150 ms after the tap; only the Allows were armed):
+      // what the open put under the finger answers nothing for ARM_MS — EVERY button of the opened item (its chips, ✓, ✕, Deny,
+      // Reply, ⤢, the Allows), the accordion's rule (_create) and its words
+      if (open && !head && dock._openedAt != null && ev.target.closest('.cad-rows button')) {
+        if (pressVerdict({ since: dock._openedAt, now: performance.now() }).ok) { dock._openedAt = null; return; }
+        ev.stopPropagation(); ev.preventDefault();
+        showToast(t('That button moved under the pointer just now — read it, then press it again'));
+        return;
+      }
       if (!head && !ev.target.closest('.cad-look') && (open || !ev.target.closest('.cad-rows'))) return;
       ev.stopPropagation(); ev.preventDefault();
       this._dockFold(dock, head ? !open : true);
@@ -540,13 +550,26 @@ export class NeedsCards {
     if (dock.classList.contains('cad-open') && (!entry || this._dockOpenId !== entry.item.id)) this._dockFold(dock, false);
     if (!entry) return;
     const num = dock.querySelector(':scope > .cad-head > .cad-num'), all = dock.querySelector(':scope > .cad-all'), nw = d ? t('waiting for you · {what}', { what: String(d.n) }) : '';
-    if (num.textContent !== nw) num.textContent = nw;
     if (all.dataset.short !== t('All')) all.dataset.short = t('All');
     const head = dock.querySelector(':scope > .cad-head'), phone = !!this.app.isMobile, open = String(dock.classList.contains('cad-open'));
     if (phone !== (head.getAttribute('role') === 'button')) {
       if (phone) { head.setAttribute('role', 'button'); head.tabIndex = 0; } else { head.removeAttribute('role'); head.removeAttribute('tabindex'); head.removeAttribute('aria-expanded'); }
     }
     if (phone && head.getAttribute('aria-expanded') !== open) head.setAttribute('aria-expanded', open);
+    // round 2 (P2 — the deadline law: a card with a deadline shows its time left everywhere it renders; the folded row hid it):
+    // the row's clock — the item's line's own stamps, its short words («2 min left»; past the end, its state's), counted by THE
+    // page ticker (tickDeadlines); an item with no line has none
+    const clock = dock.querySelector(':scope > .cad-clock'), line = dock.querySelector(':scope > .cad-rows .ut-deadline[data-deadline-at]');
+    if (clock && !line && !clock.hidden) { clock.hidden = true; clock.textContent = ''; for (const k of Object.keys(clock.dataset)) delete clock.dataset[k]; }
+    if (clock && line) {
+      for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineLate', 'deadlineLost']) { if (line.dataset[k] == null) delete clock.dataset[k]; else if (clock.dataset[k] !== line.dataset[k]) clock.dataset[k] = line.dataset[k]; }
+      clock.dataset.deadlineShort = '1'; clock.hidden = false;
+      tickDeadlines(dock);
+    }
+    // …and beside a clock the head says its number alone — the words keep their room (its name keeps «waiting for you · N»)
+    const said = phone && clock && line && d ? String(d.n) : nw;
+    if (num.textContent !== said) num.textContent = said;
+    if (said !== nw) { if (head.getAttribute('aria-label') !== nw) head.setAttribute('aria-label', nw); } else if (head.hasAttribute('aria-label')) head.removeAttribute('aria-label');
   }
 
   /** lane phone-dock-restore (the owner 2026-11-02 on the iPhone, .373: «等你操作的那个橙色的菜单…占据的显示面积过大» — 390×844: a
@@ -554,14 +577,14 @@ export class NeedsCards {
    *  item's question, «View» (style.css) — and `open` opens THAT item in place (`cad-open`: the card as before, capped at 45 % of
    *  the screen, scrolling inside); the head folds it again, and so does another item drawn. The row answers nothing: an answer
    *  is pressed on the open card, its command, facts and clock above it. What the open moved under the finger answers nothing
-   *  for ARM_MS (the press arm). */
+   *  for ARM_MS (`_openedAt`: every button of the item — round 2, P1 — and the press arm's Allows). */
   _dockFold(dock, open) {
     dock.classList.toggle('cad-open', open);
     this._dockOpenId = open && this._dockItem ? this._dockItem.id : null;
     const head = dock.querySelector(':scope > .cad-head'), look = dock.querySelector(':scope > .cad-look');
     if (head && head.getAttribute('role') === 'button') head.setAttribute('aria-expanded', String(open));
     if (look) look.setAttribute('aria-expanded', String(open));
-    if (open) { dock.scrollTop = 0; this.app.foryouRows?.arm?.(dock); }
+    if (open) { dock.scrollTop = 0; dock._openedAt = performance.now(); this.app.foryouRows?.arm?.(dock); } else dock._openedAt = null;
   }
 
   /** The card of item `id` in this list, or null. */

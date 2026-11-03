@@ -1937,6 +1937,8 @@ try {
     await A.evalJs(`(() => { app.phoneHome?.hide?.(); for (const w of [...app.wm.windows.values()]) if (w.type === 'chat' && app.sessions.get(w.id)?.sessionId !== ${J(s21)}) app.wm.closeWindow(w.id); if (!${CHAT(s21)}) app.attachSession(${J(s21)}, 'clear', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); return 1; })()`);
     await A.waitFor(`!!${CHAT(s21)}`, 8000); await sleep(800);
     await A.evalJs(PUSH21(`[${J({ ...RUN21, createdAt: Date.now() - 5e3, expiresAt: Date.now() + 55e3 })}]`)); await A.waitFor(`!!${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]')`, 8000); await sleep(800);
+    const fc14 = await A.evalJs(`(() => { const d = ${CHAT(s21)}.element.querySelector('.chat-attn-dock'), c = d && d.querySelector(':scope > .cad-clock'); return { folded: !!d && !d.classList.contains('cad-open'), vis: !!c && c.getClientRects().length > 0, text: c ? c.textContent : null, h: d ? Math.round(d.getBoundingClientRect().height) : 0 }; })()`);
+    check(`r14 (lane phone-dock-restore r2 — the deadline law: a card with a deadline shows its time left everywhere it renders) the run ask's FOLDED strip at 375 shows its clock on its one row («${fc14 && fc14.text}», ${fc14 && fc14.h} px)`, !!fc14 && fc14.folded && fc14.vis && /\d/.test(fc14.text || '') && fc14.h <= 56, fc14);
     await openStrip(A); // (lane phone-dock-restore: the phone's row opened — the run card as before)
     const r2 = await A.evalJs(RUNM);
     const top2 = await A.evalJs(`(() => { const row = ${CHAT(s21)}.element.querySelector('.chat-attn-dock .ut-item[data-id="ut-r14run01"]'); return row ? [...row.querySelectorAll('.ut-run-answer > button')].map((b) => { const q = b.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h === b || b.contains(h) ? 'own' : h ? (h.closest('#global-toasts') ? 'toast' : h.closest('.ut-announce') ? 'announce' : (h.className || h.tagName).toString().slice(0, 30)) : 'none'; }) : []; })()`); // (the arrival toasts STAND: on this tier they rise above the composer — r14: and above the strip)
@@ -2290,6 +2292,65 @@ try {
     await A.evalJs(PUSH23(J([newer, SHAPES23.hub.item, ...more23]))); await A.waitFor(`(() => { const x = ${S23}; return !!x && x.id === 'ut-r23newer'; })()`, 8000); await sleep(600); await A.evalJs(noToasts23);
     const nw = await A.evalJs(S23);
     check(`㉓ a NEWER item while the row is open: folded on it — «${nw && nw.q}», «${nw && nw.num}» — and the composer keeps the focus (${nw && nw.focus})`, !!nw && !nw.open && nw.dock.h <= 56 && nw.q === newer.text && /4/.test(nw.num || '') && /^TEXTAREA/.test(nw.focus || ''), nw);
+    // ── round 2 (the acceptance of 6aed457b7). P1: «View» put a chip / ✕ under the finger and a second tap 150 ms later
+    //    answered (only the Allows were armed) — EVERY button of the opened item answers nothing for ARM_MS (700 ms) after the
+    //    open; at 820 ms the same tap answers. Three shapes. RED CONTROL: the open's stamp taken back (round 1's arm — the
+    //    Allows only) ⇒ the leg red by name.
+    const tap23 = async (p) => { await A.cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }] }); await sleep(30); await A.cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); };
+    const SPY23 = `(() => { window.__p23 = []; if (!window.__spy23) { window.__spy23 = 1; const f = window.fetch; window.fetch = function (u, o) { const m = String((o && o.method) || 'GET').toUpperCase(); if (m !== 'GET') window.__p23.push(m + ' ' + String(u).replace(location.origin, '') + ' ' + String((o && o.body) || '').slice(0, 60)); return f.apply(this, arguments); }; } return 1; })()`;
+    const UNDER23 = (p) => `(() => { const e = document.elementFromPoint(${p.x}, ${p.y}), b = e && e.closest('button'); return b ? b.className.split(' ').slice(0, 3).join('.') + ' «' + (b.textContent || '').trim().slice(0, 30) + '»' : (e ? String(e.className) : null); })()`;
+    const plain23 = { id: 'ut-r23plain1', sessionKey: KEY23, status: 'open', kind: 'action', by: 'agent', urgency: 'normal', createdAt: T23 - 60e3, text: 'Did the nightly backup finish on mac1?', detail: '' };
+    const twice23 = async (it, { red = false } = {}) => {
+      await show(it); await A.evalJs(SPY23);
+      const at = await A.evalJs(OPENSTRIP), t0 = Date.now();
+      await tap23(at); if (red) await A.evalJs(`(() => { ${CHAT(s23)}.element.querySelector('.chat-attn-dock')._openedAt = null; return 1; })()`);
+      await sleep(Math.max(0, 150 - (Date.now() - t0))); const under = await A.evalJs(UNDER23(at)), t1 = Date.now() - t0; await tap23(at);
+      await sleep(Math.max(0, 450 - (Date.now() - t0))); const t2 = Date.now() - t0; await tap23(at);
+      await sleep(120); const early = await A.evalJs('[...window.__p23]'), st = await A.evalJs(S23);
+      await sleep(Math.max(0, 820 - (Date.now() - t0))); const t3 = Date.now() - t0; await tap23(at); await sleep(500);
+      const late = await A.evalJs('[...window.__p23]');
+      return { under, at: [t1, t2, t3], early, still: st && { id: st.id, open: st.open }, late };
+    };
+    for (const [name, it] of [['hub', SHAPES23.hub.item], ['q3', SHAPES23.q3.item], ['plain', plain23]]) {
+      const r = await twice23(it);
+      await A.shot(`phone-390-strip-${name}-second-tap.png`);
+      check(`㉓ r2 ${name}: «View», then a tap on the SAME point at ${r.at[0]} and ${r.at[1]} ms (${r.under} under it) answers NOTHING — no POST (${J(r.early)}), the item still open (${J(r.still)}); at ${r.at[2]} ms the same tap answers (${J(r.late)})`,
+        r.early.length === 0 && !!r.still && r.still.id === it.id && r.still.open && r.late.length >= 1 && r.at[1] < 700, r);
+      await A.evalJs(noToasts23);
+    }
+    const rr = await twice23(SHAPES23.q3.item, { red: true });
+    check(`CONTROL (㉓ r2): the open's stamp taken back (round 1's arm, the Allows only) ⇒ the ${rr.at[0]} ms tap on ${rr.under} POSTs (${J(rr.early)}) — «answers NOTHING» goes red`, rr.early.length >= 1, rr);
+    await A.evalJs(noToasts23);
+    // P2 (the deadline law: a card with a deadline shows its time left everywhere it renders — the folded row hid «…40 sec
+    //    left»): the FOLDED row shows the item's clock after its words, counted by the page's ticker; past the end, the state
+    //    the card says (its accent); an item with none shows none. RED CONTROL: the clock's rules cut ⇒ red by name.
+    const CLK23 = `(() => { const d = ${CHAT(s23)}.element.querySelector('.chat-attn-dock'), c = d && d.querySelector(':scope > .cad-clock'), l = d && d.querySelector('.cad-rows .ut-deadline'), vis = !!c && c.getClientRects().length > 0, r = vis ? c.getBoundingClientRect() : null, dr = d.getBoundingClientRect(), q = d.querySelector('.cad-rows .ut-text');
+      return { vis, text: c ? c.textContent : null, state: c ? c.dataset.state || null : null, warn: !!c && c.classList.contains('ut-deadline-warn'), line: l ? { state: l.dataset.state, warn: l.classList.contains('ut-deadline-warn') } : null, inRow: !!r && r.top >= dr.top - 1 && r.bottom <= dr.bottom + 1 && r.right <= innerWidth, after: !!r && !!q && r.left >= q.getBoundingClientRect().right - 1, qw: q ? Math.round(q.getBoundingClientRect().width) : 0, h: Math.round(dr.height), open: d.classList.contains('cad-open'), tab: vis ? getComputedStyle(c).fontVariantNumeric : null }; })()`;
+    const live23 = { ...SHAPES23.hub.item, id: 'ut-r23clk01', createdAt: Date.now() - 19e3, expiresAt: Date.now() + 41e3 };
+    await show(live23); const k1 = await A.evalJs(CLK23); await sleep(2100); const k2 = await A.evalJs(CLK23);
+    await A.shot('phone-390-strip-clock.png');
+    check(`㉓ r2 a FOLDED row with a deadline shows its clock after its words — «${k1 && k1.text}» → «${k2 && k2.text}» 2 s later (${k2 && k2.tab}), inside its one row (${k2 && k2.h} px), the words keeping ${k2 && k2.qw} px`,
+      !!k1 && !!k2 && k1.vis && k2.vis && !k1.open && k1.state === 'live' && /\d/.test(k1.text || '') && k1.text !== k2.text && k2.inRow && k2.after && k2.h <= 56 && /tabular-nums/.test(k2.tab || '') && k2.qw >= 60, { k1, k2 });
+    const due23 = { ...SHAPES23.hub.item, id: 'ut-r23clk02', createdAt: Date.now() - 70e3, expiresAt: Date.now() - 10e3 };
+    await show(due23); const k3 = await A.evalJs(CLK23);
+    check(`㉓ r2 …past its end the folded clock says the card's state («${k3 && k3.text}», ${k3 && k3.state}, its accent ${k3 && k3.warn}) as the item's own line does (${J(k3 && k3.line)})`, !!k3 && k3.vis && k3.state === 'due' && k3.warn && !!k3.line && k3.line.state === 'due' && k3.line.warn && k3.inRow, k3);
+    await show(SHAPES23.q3.item); const k0 = await A.evalJs(CLK23);
+    check(`㉓ r2 …an item with no deadline shows no clock on its row (${k0 && k0.vis})`, !!k0 && !k0.vis && !k0.line, k0);
+    // P3: the folded head's count wears the attention fill while an item is unseen (window-announce) — as the desktop's
+    //    count does; none without. RED CONTROL: the fill rule cut ⇒ red by name.
+    const FILL23 = `(() => { const w = ${CHAT(s23)}, n = w.element.querySelector('.chat-attn-dock > .cad-head > .cad-num'), y = document.createElement('i'); y.style.cssText = 'position:absolute;width:1px;height:1px;background:var(--yellow)'; w.element.appendChild(y); const want = getComputedStyle(y).backgroundColor; y.remove(); return { vis: !!n && n.getClientRects().length > 0, bg: n ? getComputedStyle(n).backgroundColor : null, want }; })()`;
+    const ANN23 = (on) => `(() => { ${CHAT(s23)}.element.classList.toggle('window-announce', ${on}); return 1; })()`;
+    await A.evalJs(ANN23(true)); await sleep(150); const f1 = await A.evalJs(FILL23); await A.shot('phone-390-strip-announce.png');
+    await A.evalJs(ANN23(false)); await sleep(150); const f0 = await A.evalJs(FILL23);
+    check(`㉓ r2 the FOLDED head's count wears the attention fill while an item is unseen (window-announce: ${f1 && f1.bg} = the fill ${f1 && f1.want}), none without (${f0 && f0.bg})`, !!f1 && f1.vis && f1.bg === f1.want && !!f0 && f0.bg === 'rgba(0, 0, 0, 0)', { f1, f0 });
+    const CUT23 = (a, b) => `(() => { let n = 0; const walk = (sheet) => { for (let i = sheet.cssRules.length - 1; i >= 0; i--) { const r = sheet.cssRules[i]; if (r.cssRules && !r.selectorText) { walk(r); continue; } const s = r.selectorText || ''; if (s.includes(${J(a)}) && s.includes(${J(b)})) { sheet.deleteRule(i); n++; } } }; for (const s of document.styleSheets) { try { walk(s); } catch { } } return n; })()`;
+    const cutF = await A.evalJs(CUT23('window-announce', 'cad-num'));
+    await A.evalJs(ANN23(true)); await sleep(150); const fr = await A.evalJs(FILL23); await A.evalJs(ANN23(false));
+    check(`CONTROL (㉓ r2): the fill rule cut out (${cutF}) ⇒ the folded count is bare under window-announce (${fr && fr.bg}) — «wears the attention fill» goes red`, cutF >= 1 && !!fr && fr.vis && fr.bg !== fr.want, { cutF, fr });
+    const cutC = await A.evalJs(CUT23('[data-vc="regular"]', 'cad-clock'));
+    const live23b = { ...live23, id: 'ut-r23clk03', createdAt: Date.now() - 19e3, expiresAt: Date.now() + 41e3 };
+    await show(live23b); const kr = await A.evalJs(CLK23);
+    check(`CONTROL (㉓ r2): the folded clock's rules cut out (${cutC}) ⇒ no clock on the row (${kr && kr.vis}; «${kr && kr.text}» in the DOM) — «shows its clock» goes red`, cutC >= 3 && !!kr && !kr.vis && /\d/.test(kr.text || ''), kr);
     // THE DESKTOP NEVER FOLDS (the .373 strip the owner accepted): the answers on the strip, no «View», the head no door
     await toConv(A, s23, [], 1280, 800, false); await show(SHAPES23.hub.item);
     const dk = await A.evalJs(S23);

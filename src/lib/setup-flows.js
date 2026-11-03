@@ -511,17 +511,20 @@ export function installSetupFlows(App) {
     // THE PRESS SAYS IT RUNS (lane phone-dock-restore — measured: from the confirm's OK to the toast the dialog stood as it was,
     // the hub's whole restore long): the pressed button's busy words at once, the list held (one restore at a time); a refusal
     // gives both back. THIS page's own restore is no «other device»: the hub's broadcast reaches the page that asked too —
-    // app.js 'layout-restored' reads `_layoutRestoring` (heard ⇒ restored, whatever became of this answer)
+    // r2 (P4): the press names it (`rid`, sent with the POST, echoed in the broadcast); app.js 'layout-restored' marks `heard` on
+    // THIS rid only (heard ⇒ restored, whatever became of this answer) — another restore during it is another device's
     const [list] = body.querySelectorAll('.lh-list');
     const busy = (b) => {
-      const was = b.textContent;
-      b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = true;
-      return (res, done) => {
-        if (res?.success || this._layoutRestoring === 'heard') { close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
-        b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = false;
+      const was = b.textContent, own = { rid: 'r' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36), heard: false };
+      b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;
+      const end = (res, done) => {
+        if (res?.success || own.heard) { close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
+        b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = null;
         showToast(res?.error || t('Restore failed'), { type: 'error' });
         return false;
       };
+      end.rid = own.rid;
+      return end;
     };
     body.querySelectorAll('.lh-restore').forEach((b) => {
       b.onclick = async () => {
@@ -535,7 +538,7 @@ export function installSetupFlows(App) {
           confirmText: t('Restore'),
         }))) return;
         const end = busy(b);
-        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST' }).catch(() => null);
+        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rid: end.rid }) }).catch(() => null);
         end(res, t('Layout restored — reloading…'));
       };
     });
@@ -548,7 +551,7 @@ export function installSetupFlows(App) {
           confirmText: t('Restore only “{desktop}”', { desktop: desk }),
         }))) return;
         const end = busy(b);
-        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktop: desk }) }).catch(() => null);
+        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktop: desk, rid: end.rid }) }).catch(() => null);
         end(res, t('“{desktop}” restored — reloading…', { desktop: desk }));
       };
     });

@@ -680,8 +680,8 @@
 .chat-attn-dock[hidden] { display: none; }
 .cad-head { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 26px; color: var(--yellow); font-weight: 600; white-space: nowrap; }
 /* r10 addendum: while an item the announce flashed this window for is UNSEEN (user-todos-panel.js `window-announce`, cleared with
-   the waiting blink), the count wears the attention fill */
-.window-announce .chat-attn-dock .cad-count, .chat-attn-dock.cad-mark .cad-count { padding: 0 8px; border-radius: 999px; background: var(--yellow); color: var(--bg-window); }
+   the waiting blink), the count wears the attention fill — the phone's folded head's too (lane phone-dock-restore r2) */
+.window-announce .chat-attn-dock :is(.cad-count, .cad-num), .chat-attn-dock.cad-mark :is(.cad-count, .cad-num) { padding: 0 8px; border-radius: 999px; background: var(--yellow); color: var(--bg-window); }
 /* r11: a landing that ended at the live end for an open card drawn nowhere MARKS the strip (chat-needs-card.js _dockMark) —
    the ask flash, once, on the strip; its count in the fill while it runs */
 .chat-attn-dock.cad-mark { animation: chat-ask-flash-anim 1.6s ease-out; }
@@ -691,7 +691,7 @@
 .cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .cad-all:is(:hover, :focus-visible) { background: var(--bg-hover); color: var(--accent); }
 .cad-all[hidden] { display: none; }
-.cad-num, .cad-look { display: none; } /* lane phone-dock-restore: the phone's folded row's count and its «View» (style.css) — never a desktop strip's */
+.cad-num, .cad-look, .cad-clock { display: none; } /* lane phone-dock-restore: the phone's folded row's count, its «View» and its clock (style.css) — never a desktop strip's */
 .chat-attn-dock > .cad-all { margin-left: auto; } /* the head's line: the count at its start, «N more · View all» at its end */
 .cad-rows .ut-item { display: block; padding: 0; cursor: default; }
 .cad-rows .ut-item:hover { background: none; }

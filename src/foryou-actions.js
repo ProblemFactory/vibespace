@@ -560,7 +560,7 @@ function expiryWords(item, { t = fmt, now = Date.now() } = {}) {
  *  'open'). Past its end with no settle yet: 'due' («time is up by the server's clock — waiting for the server»), the buttons
  *  kept (a press answers with the door's own words: «too late»). An item its producer marked `action.late` (r7c, the owner's
  *  ruling «A»: the agent's command was refused, an Allow now lets its next run of that command through once — r20b's door)
- *  keeps its buttons and says so. → {at, from, left, total, warn, state: 'live' | 'due' | 'late', text} | null (no live
+ *  keeps its buttons and says so. → {at, from, left, total, warn, state: 'live' | 'due' | 'late', text, short} | null (no live
  *  deadline: a notice words its own window). DEADLINE_WORDS['timed-out'] = a SETTLED ask nobody answered (`ask-expired`). */
 const DEADLINE_LIVE_MS = 60 * 60e3;
 const DEADLINE_WARN_MS = 15e3;
@@ -575,6 +575,8 @@ const DEADLINE_WORDS = Object.freeze({
   'live-device': i18nKey('valid for {total} · {left} left by this device\'s clock'),
   'due-device': i18nKey('time is up by this device\'s clock — waiting for the server'),
 });
+// lane phone-dock-restore r2: the SHORT line — the phone's folded strip («· 2 min left»; past the end, its state's one word)
+const DEADLINE_SHORT = Object.freeze({ live: i18nKey('{left} left'), due: i18nKey('time is up'), late: i18nKey('timed out') });
 const spanWords = (ms, t) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
   if (s < 120) return t('{n} sec', { n: s });
@@ -591,7 +593,8 @@ function deadlineOf(item, { t = fmt, now = Date.now(), clock = 'hub' } = {}) {  
   const lost = marked && item.action.restartLost === true;   // r8: a restart since — an Allow would mint nothing (r23); said, and not offered
   const dev = clock === 'device' ? '-device' : '';
   const text = state === 'live' ? t(DEADLINE_WORDS['live' + dev], { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[lost ? 'late-lost' : state === 'due' ? 'due' + dev : state]);
-  return { at, from, left: Math.max(0, left), total, warn: state !== 'live' || left < DEADLINE_WARN_MS, state, text };
+  const short = state === 'live' ? t(DEADLINE_SHORT.live, { left: spanWords(left, t) }) : t(DEADLINE_SHORT[state]);
+  return { at, from, left: Math.max(0, left), total, warn: state !== 'live' || left < DEADLINE_WARN_MS, state, text, short };
 }
 
 /** WHO MAY DECIDE (lane wake-approve-card — 主开发's ruling 2026-10-27: canDecide is an IDENTITY fact, never a VIEW fact).
