@@ -14,10 +14,15 @@ export const TILE_MIN_PX = 90;
 /** The «+N» chip's room in the switcher's verdict (src/lib/desktop-manager.js _switcherFormFor) — counted whether the chip
  *  shows or not, so the verdict never depends on itself: the plain chip… */
 export const OVERFLOW_CHIP_PX = 48;
-/** …and while the prompt-cache warmth is drawn (lane cache-warmth-band r2 H4), its LONGEST form: the dot + «+88 · 88
- *  期限切れ» (ja, 127 px in Chrome — en «… critical» 117, «… expired» 121; zh 103 / 115), plus the plain room's own margin
- *  over «+88» (48 − 38 = 10) — measured by scripts/test-cache-warmth-chrome.mjs ⑧b, which reds a form that outgrows it. */
+/** …and while the prompt-cache warmth is drawn (lane cache-warmth-band r2 H4), the room of the warm chip's BOX below plus
+ *  the bar's gap before the chip (3) and the floor's three gaps between its four tiles (3 × 2): 128 + 3 + 6. */
 export const OVERFLOW_CHIP_WARM_PX = 137;
+/** The warm chip's BOX (r3 J1): CONSTANT while the warmth is drawn — style.css `.taskbar-overflow.warmth-box { width }` —
+ *  because the fit reads a constant, never the chip's content (its words follow the hidden set; a box that followed them
+ *  moved the flex:1 strip beside it, whose ResizeObserver refit and flipped the words back, every frame). It holds the
+ *  LONGEST form whole: the dot + «+88 · 88 期限切れ» (ja, 127 px in Chrome — en «… critical» 117, «… expired» 121; zh
+ *  103 / 115) — measured by scripts/test-cache-warmth-chrome.mjs ⑧b, which reds a form that outgrows it. */
+export const OVERFLOW_CHIP_WARM_BOX_PX = 128;
 /** The desktop switcher folds before the tile strip keeps fewer tiles than this… */
 export const STRIP_MIN_TILES = 4;
 /** …or before the previews take more than this share of the taskbar. */

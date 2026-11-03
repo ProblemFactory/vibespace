@@ -34,7 +34,9 @@
 //     frame guard, the blink kept, the expired marks dim) and no literal colour in it (a PLANTED control proves the check fires);
 //     round 2 (the acceptance of ca2670be0): a list row's label shrinks (H1), an «Other desktops» row takes its group's tabs —
 //     built or held (H2, a PLANTED r1 line reds it), a tile's ring rides its icon (H3), the switcher budgets the warm «+N»
-//     chip by a PURE constant while warmth is drawn (H4, the r1 literal planted reds it).
+//     chip by a PURE constant while warmth is drawn (H4, the r1 literal planted reds it); round 3 (the acceptance of
+//     6550a3a51): while warmth is drawn the chip's BOX is that constant's box — the fit reads a constant, never the chip's
+//     content (J1, the rule removed reds it).
 // Run: node scripts/test-cache-warmth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -345,6 +347,13 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   ok('r2 H4: the switcher budgets the «+N» chip by a PURE constant — the warm chip\'s longest form while warmth is drawn (taskbar-fit.js, beside TILE_MIN_PX), never its measured width',
     budget(dm) && /^export const OVERFLOW_CHIP_PX = 48;$/m.test(tf) && /^export const OVERFLOW_CHIP_WARM_PX = \d+;$/m.test(tf) && /^import \{ paintPreviews, warmthDrawn \} from '\.\/warmth-chrome\.js';/m.test(read('src/lib/desktop-manager.js')));
   ok('…CONTROL: the r1 literal planted back (`let others = 48;`) reds the pin', !budget(dm.replace('let others = warmthDrawn(this.app) ? OVERFLOW_CHIP_WARM_PX : OVERFLOW_CHIP_PX;', 'let others = 48;')));
+  // round 3 (fixups-r3: the acceptance of 6550a3a51) — J1: the warm chip and the strip refit each other every frame
+  const boxRule = (b) => /\.taskbar-overflow\.warmth-box \{ width: (\d+)px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; \}/.exec(b);
+  const bx = boxRule(block), BOX = Number((/^export const OVERFLOW_CHIP_WARM_BOX_PX = (\d+);$/m.exec(tf) || [])[1]), ROOM = Number((/^export const OVERFLOW_CHIP_WARM_PX = (\d+);$/m.exec(tf) || [])[1]);
+  const gaps = /#taskbar \{[^}]*\bgap: 3px;/.test(css) && /#taskbar-items \{ flex: 1; display: flex; gap: 2px;/.test(css);
+  ok('r3 J1: while warmth is drawn the «+N» chip\'s BOX is CONSTANT — the CSS width = taskbar-fit.js OVERFLOW_CHIP_WARM_BOX_PX (the fit reads a constant, never the chip\'s content); the room the switcher budgets = that box + the bar\'s 3-px gap before it + the floor\'s three 2-px tile gaps; paintOverflowChip toggles the box with the drawing',
+    !!bx && Number(bx[1]) === BOX && ROOM === BOX + 3 + 3 * 2 && gaps && /const ids = chip\._hiddenIds \|\| \[\], n = ids\.length, drawn = warmthDrawn\(app\);\s*chip\.classList\.toggle\('warmth-box', drawn\);/.test(bodyOf(wc, /\nexport function paintOverflowChip\(app, chip\) /)), { css: bx && bx[1], BOX, ROOM, gaps });
+  ok('…CONTROL: the box rule taken out of the block reds the pin', !boxRule(block.replace(/\.taskbar-overflow\.warmth-box \{[^}]*\}/, '')));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

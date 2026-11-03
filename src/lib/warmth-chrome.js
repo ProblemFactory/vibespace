@@ -250,11 +250,15 @@ export function paintPreviews(app) {
 
 /** §2.5 the «+N» chip: a dot in the worst live tier its hidden tiles hold and words that name the dot's tier
  *  («+N · k critical» / «+N · k expired»); warmth not drawn ⇒ exactly the plain «+N». fitTaskbarStrip stores the hidden
- *  ids on the chip and clears its key before each call (it rewrote the text). */
+ *  ids on the chip and clears its key before each call (it rewrote the text). r3 J1: while warmth is drawn the chip sits
+ *  in a CONSTANT box (`warmth-box`, style.css — taskbar-fit.js OVERFLOW_CHIP_WARM_BOX_PX): the fit reads a constant, never
+ *  the chip's content — the words get SHORTER when a live tile joins an expired tail, and a box that followed them would
+ *  widen the strip, refit it and flip the words back every frame. toggle(force) writes nothing when the class stands. */
 export function paintOverflowChip(app, chip) {
   if (!chip) return;
-  const ids = chip._hiddenIds || [], n = ids.length;
-  if (!warmthDrawn(app)) { if (chip._warmthKey) { chip._warmthKey = ''; chip.textContent = '+' + n; } return; }
+  const ids = chip._hiddenIds || [], n = ids.length, drawn = warmthDrawn(app);
+  chip.classList.toggle('warmth-box', drawn);
+  if (!drawn) { if (chip._warmthKey) { chip._warmthKey = ''; chip.textContent = '+' + n; } return; }
   const ws = ids.map((id) => warmthOfTile(app, id));
   const w = worstOf(ws);
   const k = w ? ws.filter((x) => x && x.tier === w.tier).length : 0;

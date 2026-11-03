@@ -21,13 +21,18 @@
 //   ⑥ «+N»: «+N · k critical» with the critical dot, stable across two ticks and a focus click, at 951 / 1024 / 1100 / 1280;
 //      r2 (H3): at the 90-px floor a tile shows the SAME title characters with warmth on and off (the ring rides the icon;
 //      RED: the r1 DOM re-planted — the ring a flex child before the icon — counts fewer)
+//   ⑥b r3 (J1): the warm «+N» chip and the strip never refit each other — 12 tiles (the tail: one EXPIRED, before it one
+//      LATE, the rest fresh), the strip's room swept 1040 → 1220 px (31 widths): after a 500-ms settle a MutationObserver
+//      over 1 s on the chip sees NO change of its words or its box at any width, warmth on and off; the words still name
+//      the hidden set (an expired-only and a critical tail too); RED: the constant box taken away ⇒ the 60 Hz flip returns
 //   ⑦ the summary chip: its counts = the rewrite's ground truth; its list ascending, expired last, unknown absent; a press
 //      groups by desktop; a row on another desktop switches there and raises it; a tick moves the bands, never the rows
 //   ⑧ the window list: a band per row, «By time left» pressed and ascending; a press = creation order; r2 (H1): a «name —
 //      /path» title never pushes the words past the row (RED: the shrink rule undone); (H2) an «Other desktops» row of a
 //      group = the group's worst, built and held, and so are the group's squares
 //   ⑧b r2 (H4): the switcher's «+N» room at its boundary — ≥ STRIP_MIN_TILES whole tiles with warmth on and off; the warm
-//      chip's longest form (en / zh / ja) fits taskbar-fit.js OVERFLOW_CHIP_WARM_PX (RED: a chip planted wider breaks it)
+//      chip's longest form (en / zh / ja) fits taskbar-fit.js OVERFLOW_CHIP_WARM_PX (RED: a chip planted wider breaks it);
+//      r3: the warm chip's box there IS the constant box (OVERFLOW_CHIP_WARM_BOX_PX) and every form fits inside it
 //   ⑨ the phone: session rows and switcher rows carry the band and the words; an expired row says «Expired», no band
 //   ⑩ off and on, live: off ⇒ zero marks, «+N» exactly «+N», ZERO warmth mutations over two ticks, a failed poll draws
 //      nothing; the window list as before; on ⇒ the marks return with no reload
@@ -369,6 +374,85 @@ await step('⑥ the «+N» chip: the worst tier it hides, in words, stable acros
   await evalJs(`app.wm.applyLayout('grid-2-4')`);
 });
 
+// r3 (J1): the chip's words follow the hidden set — an expired-only tail says «+N · k expired», one more LIVE tile hidden and
+// worstOf ranks it above expired ⇒ «+N». Were the chip's box to follow its words, the flex:1 strip beside it would refit
+// (its ResizeObserver), hide one tile fewer, and the words flip back — every frame. The fit reads a constant, never the words.
+await step('⑥b the warm «+N» chip and the strip never refit each other (r3 J1): the strip\'s room swept, warmth on, off, RED', async () => {
+  const TF = await import(path.join(repo, 'src/lib/taskbar-fit.js'));
+  const BOX = TF.OVERFLOW_CHIP_WARM_BOX_PX;
+  await attach([10, 11]);
+  await device(1280, 800); await sleep(400);
+  await evalJs(`(document.getElementById('taskbar-items').scrollLeft = 0, 1)`);
+  // the 12 tiles in the strip's order: tile 11 EXPIRED, tile 10 LATE, the rest FRESH (the acceptance's set)
+  const order = await evalJs(`[...document.querySelectorAll('#taskbar-items > .taskbar-item[data-win-id]')].map((e) => app.sessions.get(e.dataset.winId)?.sessionId || null)`);
+  const ks = order.map((s) => SIDS.indexOf(s));
+  check(`the strip holds twelve tiles, one per conversation (${ks.join(' ')})`, ks.length === 12 && ks.every((k) => k >= 0), order);
+  const tail = (t10, t11) => Object.fromEntries(ks.map((k, i) => [k, { agoMs: i === 11 ? t11 : i === 10 ? t10 : M(5) }]));
+  const TIER = (ms) => (ms >= M(60) ? 'expired' : ms >= M(50) ? 'critical' : ms >= M(40) ? 'late' : ms >= M(20) ? 'mid' : 'fresh');
+  const RANK = { critical: 4, late: 3, mid: 2, fresh: 1 };
+  /** the words the hidden set must say (the plan's tiers: the worst LIVE tier outranks expired; only critical / expired speak) */
+  const wordsOf = (sids) => { const ts = sids.map((s) => TIER(PLAN_K[SIDS.indexOf(s)]?.agoMs ?? M(5))), n = ts.length; if (!n) return '';
+    const live = ts.filter((x) => RANK[x]).sort((a, b) => RANK[b] - RANK[a]), w = live[0] || (ts.includes('expired') ? 'expired' : null), k = ts.filter((x) => x === w).length;
+    return w === 'critical' ? `+${n} · ${k} critical` : w === 'expired' ? `+${n} · ${k} expired` : `+${n}`; };
+  plan(tail(M(45), M(65))); await nextTick(2);
+  // the strip's ROOM (its left edge to the chip's right edge, or to its own right edge while no chip shows): the viewport
+  // minus everything else on the bar — calibrated once, each width then checked by the probe itself
+  const ROOM = `(() => { const s = document.getElementById('taskbar-items'), c = document.getElementById('taskbar-overflow'), sr = s.getBoundingClientRect(), cr = c && !c.hidden ? c.getBoundingClientRect() : null;
+    return { vw: innerWidth, room: Math.round(((cr ? cr.right : sr.right) - sr.left) * 10) / 10, strip: Math.round(sr.width * 10) / 10, chipW: cr ? Math.round(cr.width * 10) / 10 : 0, box: !!c && c.classList.contains('warmth-box'),
+      hidden: ((c && !c.hidden && c._hiddenIds) || []).map((id) => app.sessions.get(id)?.sessionId || id), text: c && !c.hidden ? c.textContent : '', dot: (c && c.querySelector('.wsum-dot')?.getAttribute('data-warmth-tier')) || null, mobile: !!app.isMobile }; })()`;
+  // after the settle: a MutationObserver over 1 s on the chip — its records, its words' changes, its box's changes
+  const WATCH = `new Promise((res) => { const c = document.getElementById('taskbar-overflow'); const bw = () => (c.hidden ? 0 : Math.round(c.getBoundingClientRect().width * 10) / 10);
+    let calls = 0, flips = 0, boxes = 0, last = c.textContent, lastW = bw(); const words = [last];
+    const mo = new MutationObserver(() => { calls++; const now = c.textContent, w = bw(); if (now !== last) { flips++; last = now; if (words.length < 4 && !words.includes(now)) words.push(now); } if (Math.abs(w - lastW) > 0.5) { boxes++; lastW = w; } });
+    mo.observe(c, { childList: true, subtree: true, characterData: true, attributes: true }); setTimeout(() => { mo.disconnect(); res({ calls, flips, boxes, words }); }, 1000); })`;
+  await device(1600, 700); await sleep(600);
+  const cal = await evalJs(ROOM), rest = cal.vw - cal.room;
+  const ROOMS = Array.from({ length: 31 }, (_, i) => 1040 + 6 * i); // 1040 … 1220
+  const sweep = async (rest) => { const out = []; for (const room of ROOMS) { await device(Math.round(room + rest), 700); await sleep(500); const m = await evalJs(WATCH); const p = await evalJs(ROOM); out.push({ want: room, ...p, ...m }); } return out; };
+  const brief = (xs) => xs.map((x) => `${x.room}:${x.hidden.length}${x.text ? '«' + x.text + '»' : ''}/${x.chipW}px${x.flips || x.boxes ? ` ✗${x.flips}f${x.boxes}b` : ''}`).join(' ');
+  const sidAt = (i) => SIDS[ks[i]];
+  const on = await sweep(rest);
+  console.log(`    ON — the strip's room swept (the bar's rest ${Math.round(rest)} px), per width «room:hidden«words»/chip px»: ${brief(on)}`);
+  console.log(`    ON — MutationObserver calls per second at each width: ${on.map((x) => x.calls).join(' ')} (a refit by the page's own poll writes the same words and box)`);
+  check(`J1: warmth ON, ${on.length} widths of the strip's room (${on[0]?.room} → ${on[on.length - 1]?.room} px): after a 500-ms settle the chip's words and its box change ZERO times in 1 s at EVERY width (≤ 4 observer calls — the loop's own threshold; most 0)`,
+    on.length >= 20 && on[0].room <= 1046 && on[on.length - 1].room >= 1214 && on.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4), on.filter((x) => x.flips || x.boxes || x.calls > 4 || x.mobile).slice(0, 4));
+  const alone = on.filter((x) => x.hidden.length === 1 && x.hidden[0] === sidAt(11)).length, both = on.filter((x) => x.hidden.includes(sidAt(10)) && x.hidden.includes(sidAt(11))).length;
+  check(`…the loop's two hidden sets are both in the sweep: the expired tile alone (${alone} widths, «+1 · 1 expired») and the late one with it (${both} widths, «+N»)`, alone > 0 && both > 0, brief(on));
+  check(`…the shown chip's box is the CONSTANT box (OVERFLOW_CHIP_WARM_BOX_PX ${BOX} px) at every width, whatever it says`, on.filter((x) => x.text).length > 0 && on.every((x) => !x.text || (x.box && Math.abs(x.chipW - BOX) <= 0.5)), on.filter((x) => x.text).map((x) => [x.room, x.chipW, x.box]).slice(0, 6));
+  check('…and its words still name the hidden set at every width (the tail expired + late ⇒ «+N», the late dot)', on.every((x) => x.text === wordsOf(x.hidden) && (!x.text || x.hidden.length < 2 || x.dot === 'late')), on.filter((x) => x.text !== wordsOf(x.hidden)).map((x) => [x.room, x.text, wordsOf(x.hidden)]));
+  for (const room of [1072, 1100, 1132]) { await device(Math.round(room + rest), 700); await sleep(600); const fb = await evalJs(`(() => { const r = document.getElementById('taskbar').getBoundingClientRect(); return { x: 0, y: r.top - 4, width: innerWidth, height: r.height + 4 }; })()`); await shot(`A-desktop-12-plusN-room-${room}-dark`, fb); }
+  // RED: the constant box taken away (the chip's box follows its words again, as on 6550a3a51) ⇒ the flip returns
+  await evalJs(`(() => { const s = document.createElement('style'); s.id = '__j1'; s.textContent = '#taskbar-overflow.warmth-box { width: auto !important; }'; document.head.appendChild(s); return 1; })()`);
+  const red = await sweep(rest);
+  await evalJs(`document.getElementById('__j1').remove(), 1`);
+  const loops = red.filter((x) => x.flips > 4);
+  console.log(`    RED (the box follows the words): ${loops.length} of ${red.length} widths flip > 4 times a second — ${loops.map((x) => `${x.room}:${x.flips}/s «${x.words.join('» ⇄ «')}»`).join(' ')}`);
+  check(`RED: the constant box taken away ⇒ the chip and the strip flip each other (> 4 rewrites a second) at ${loops.length} of ${red.length} widths`, loops.length > 0, brief(red));
+  if (loops.length) { await device(Math.round(loops[0].room + rest), 700); await sleep(500); const m = await evalJs(WATCH); check(`…the box back: the first looping width (${loops[0].room} px) settles again (${m.flips} flips)`, m.flips === 0 && m.boxes === 0, m); }
+  // the other words, in the same box: an expired-only tail and a critical one (two widths each, the same 1-s watch)
+  const other = [];
+  for (const [t10, name] of [[M(65), 'expired'], [M(55), 'critical']]) {
+    plan(tail(t10, M(65))); await nextTick(2);
+    for (const room of [1046, 1064, 1100]) { await device(Math.round(room + rest), 700); await sleep(500); const m = await evalJs(WATCH); const p = await evalJs(ROOM); other.push({ name, want: room, ...p, ...m, says: wordsOf(p.hidden) }); }
+  }
+  console.log(`    the tail EXPIRED + EXPIRED, then CRITICAL + EXPIRED: ${other.map((x) => `${x.name} ${x.room}:«${x.text}»/${x.chipW}px ${x.flips}f${x.boxes}b`).join(' · ')}`);
+  check(`…an expired-only tail says «+N · k expired», a critical one «+N · k critical» — in the same box, no change in 1 s (${[...new Set(other.map((x) => x.text))].join(' / ')})`,
+    other.every((x) => x.text === x.says && x.flips === 0 && x.boxes === 0 && Math.abs(x.chipW - BOX) <= 0.5) && other.some((x) => / expired$/.test(x.text)) && other.some((x) => / critical$/.test(x.text)), other.map((x) => [x.name, x.room, x.text, x.says, x.chipW, x.flips]));
+  // OFF: the plain chip (its box its words' again), the same sweep
+  plan(tail(M(45), M(65)));
+  await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);
+  await device(1600, 700); await sleep(600);
+  const calOff = await evalJs(ROOM), restOff = calOff.vw - calOff.room; // no summary chip beside For-you now: the bar's rest is shorter
+  const off = await sweep(restOff);
+  console.log(`    OFF — the same rooms (the bar's rest ${Math.round(restOff)} px): ${brief(off)}; observer calls per second: ${off.map((x) => x.calls).join(' ')}`);
+  check(`J1: warmth OFF, the same ${off.length} widths (${off[0]?.room} → ${off[off.length - 1]?.room} px): ZERO changes of the words or the box in 1 s at every width; the plain «+N», no constant box`,
+    off[0].room <= 1046 && off[off.length - 1].room >= 1214 && off.some((x) => x.text) && off.every((x) => !x.mobile && x.flips === 0 && x.boxes === 0 && x.calls <= 4 && !x.box && (!x.text || x.text === '+' + x.hidden.length)), off.filter((x) => x.flips || x.boxes || x.calls > 4 || x.box).slice(0, 4));
+  await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
+  await waitFor(`!!app._warmth?.drawn && !!document.getElementById('taskbar-warmth')`, 12000);
+  await device(1280, 800); await sleep(600);
+  await evalJs(`app.wm.applyLayout('grid-2-4')`);
+});
+
 /** a tab group's strip as the page draws it: per tab its band (computed), the tab's width, its label's words */
 const TABS = `(() => { const host = [...app.wm.windows.values()].find((w) => w._tabChain && w._tabChain.tabs[0] === w.id && w._tabChain.tabs.length >= 4); if (!host) return null;
   const sid = (id) => app.sessions.get(id)?.sessionId; const hb = getComputedStyle(host.titleBar, '::before');
@@ -602,7 +686,7 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   const extra = (await evalJs(`[...app.wm.windows.keys()]`)).filter((id) => !before.includes(id));
   const FIT = `(() => { const root = document.getElementById('desktop-previews'), c = document.getElementById('taskbar-overflow'), s = document.getElementById('taskbar-items');
     const tiles = [...s.children].filter((e) => e.classList.contains('taskbar-item')), ids = (c && !c.hidden && c._hiddenIds) || [];
-    return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: c.offsetWidth } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth, mobile: !!app.isMobile }; })()`;
+    return { form: root.classList.contains('desktop-previews-compact') ? 'compact' : 'full', tiles: tiles.length, whole: tiles.length - ids.length, chip: c && !c.hidden ? { text: c.textContent, w: Math.round(c.getBoundingClientRect().width * 10) / 10, box: c.classList.contains('warmth-box') } : null, strip: Math.round(s.getBoundingClientRect().width), bar: document.getElementById('taskbar').clientWidth, mobile: !!app.isMobile }; })()`;
   const at = async (w) => { await device(w, 700); await sleep(450); return evalJs(FIT); };
   // the narrowest DESKTOP-class viewport judged 'full' (a phone-class page has no taskbar: it counts as not full here)
   const full = (f) => !f.mobile && f.bar > 0 && f.form === 'full';
@@ -610,7 +694,7 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   // the chip's longest forms: the dot + «+88 · 88 …» in en / zh / ja (the dictionaries' own words), measured as the chip draws them
   const word = (lang, key) => { if (lang === 'en') return key; const l = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8').split('\n').find((x) => x.trim().startsWith(J(key) + ':')); return l ? JSON.parse(l.trim().slice(J(key).length + 1).trim().replace(/,$/, '')) : null; };
   const LONG = ['en', 'zh', 'ja'].flatMap((lang) => ['+{n} · {k} critical', '+{n} · {k} expired'].map((key) => ({ lang, s: String(word(lang, key)).replace('{n}', '88').replace('{k}', '88') })));
-  const forms = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); const m = (html) => { const x = c.cloneNode(false); x.removeAttribute('id'); x.hidden = false; x.innerHTML = html; c.parentNode.appendChild(x); const w = x.offsetWidth; x.remove(); return w; };
+  const forms = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); const m = (html) => { const x = c.cloneNode(false); x.removeAttribute('id'); x.classList.remove('warmth-box'); x.hidden = false; x.innerHTML = html; c.parentNode.appendChild(x); const w = Math.round(x.getBoundingClientRect().width * 10) / 10; x.remove(); return w; };
     const dot = '<span class="wsum-dot" data-warmth-tier="critical" aria-hidden="true"></span>'; return { plain88: m('+88'), forms: ${J(LONG)}.map((f) => ({ ...f, w: m(dot + f.s) })) }; })()`);
   const longest = Math.max(...forms.forms.map((f) => f.w));
   const on = await boundary();
@@ -619,19 +703,17 @@ await step('⑧b the switcher\'s «+N» room at its boundary (r2 H4): whole tile
   await evalJs(`app.settings.set('desktop.cacheWarmth', true), 1`); await sleep(1300); await nextTick(1);
   await waitFor(`!!app._warmth?.drawn && !!document.getElementById('taskbar-warmth')`, 12000); // drawn again before the RED below
   console.log(`    the switcher's boundary (the narrowest viewport judged 'full', 4 desktops): ON ${J(on)} · OFF ${J(off)}`);
-  console.log(`    the «+N» chip's forms (px): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest} + the plain room's margin ${TF.OVERFLOW_CHIP_PX - forms.plain88} = ${longest + TF.OVERFLOW_CHIP_PX - forms.plain88}; OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
+  console.log(`    the «+N» chip's forms (px, the natural box): plain «+88» ${forms.plain88}; ${forms.forms.map((f) => `${f.lang} «${f.s}» ${f.w}`).join('; ')} — the longest ${longest}; the constant box OVERFLOW_CHIP_WARM_BOX_PX = ${TF.OVERFLOW_CHIP_WARM_BOX_PX}; its room OVERFLOW_CHIP_WARM_PX = ${TF.OVERFLOW_CHIP_WARM_PX}`);
   check(`H4: at the switcher's boundary the strip keeps ≥ STRIP_MIN_TILES (${TF.STRIP_MIN_TILES}) whole tiles — warmth ON (${on.w} px: ${on.whole} whole, the chip «${on.chip && on.chip.text}» ${on.chip && on.chip.w} px) and OFF (${off.w} px: ${off.whole} whole, «${off.chip && off.chip.text}»)`,
     extra.length === 1 && on.w && off.w && on.form === 'full' && off.form === 'full' && on.whole >= TF.STRIP_MIN_TILES && off.whole >= TF.STRIP_MIN_TILES && !!on.chip && !!off.chip, { on, off, extra });
-  check(`…the warm budget is the longest warm form + the plain room's own margin (${longest} + ${TF.OVERFLOW_CHIP_PX - forms.plain88} ≤ OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX} ≤ that + 8)`,
-    TF.OVERFLOW_CHIP_WARM_PX >= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 && TF.OVERFLOW_CHIP_WARM_PX <= longest + TF.OVERFLOW_CHIP_PX - forms.plain88 + 8, forms);
-  // THE WORST CASE at the ON boundary: the chip held at its longest warm form's width (what it says there depends on which
-  // tiles the strip cuts) — the floor still holds; RED: a chip planted wider than the budget ⇒ the probe counts fewer whole tiles
+  check(`…every warm form fits the constant box whole (the longest ${longest} ≤ OVERFLOW_CHIP_WARM_BOX_PX ${TF.OVERFLOW_CHIP_WARM_BOX_PX} ≤ it + 2), and the room the verdict budgets is that box + its gaps (OVERFLOW_CHIP_WARM_PX ${TF.OVERFLOW_CHIP_WARM_PX})`,
+    longest <= TF.OVERFLOW_CHIP_WARM_BOX_PX && TF.OVERFLOW_CHIP_WARM_BOX_PX <= longest + 2 && TF.OVERFLOW_CHIP_WARM_PX >= TF.OVERFLOW_CHIP_WARM_BOX_PX + 3 + (TF.STRIP_MIN_TILES - 1) * 2, forms);
+  // r3: THE WORST CASE IS THE CASE — at the ON boundary the chip's box is the constant box, whatever it says there; RED: a
+  // chip planted wider than the budget ⇒ the probe counts fewer whole tiles
   if (on.w) {
+    check(`…at the ON boundary the shown chip's box IS the constant box (${on.chip && on.chip.w} px = ${TF.OVERFLOW_CHIP_WARM_BOX_PX}) and the strip keeps ${on.whole} ≥ ${TF.STRIP_MIN_TILES} whole tiles (the strip ${on.strip} px)`,
+      !!on.chip && on.chip.box && Math.abs(on.chip.w - TF.OVERFLOW_CHIP_WARM_BOX_PX) <= 0.5 && on.whole >= TF.STRIP_MIN_TILES, on);
     await device(on.w, 700); await sleep(500);
-    await evalJs(`(() => { const s = document.createElement('style'); s.id = '__worst'; s.textContent = '#taskbar-overflow { min-width: ${longest}px !important; }'; document.head.appendChild(s); return 1; })()`);
-    await sleep(500); const wc = await evalJs(FIT);
-    await evalJs(`document.getElementById('__worst').remove(), 1`); await sleep(400);
-    check(`…the worst case: the chip held at the longest warm form's width (${longest} px) at the ON boundary still leaves ≥ ${TF.STRIP_MIN_TILES} whole tiles (${wc.whole}, the strip ${wc.strip} px)`, wc.form === 'full' && !!wc.chip && wc.whole >= TF.STRIP_MIN_TILES, wc);
     await evalJs(`(() => { const s = document.createElement('style'); s.id = '__red'; s.textContent = '#taskbar-overflow { min-width: ${TF.OVERFLOW_CHIP_WARM_PX + 120}px !important; }'; document.head.appendChild(s); return 1; })()`);
     await sleep(500); const r = await evalJs(FIT);
     await evalJs(`document.getElementById('__red').remove(), 1`);
@@ -681,8 +763,8 @@ await step('⑩ off and on, live (the hub\'s answer is the switch)', async () =>
   await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`);
   await sleep(1300); await nextTick(1);
   check('OFF (app.settings.set, no reload): zero marks — no tier, band, ring, phone band, summary chip or warmth title left', (await evalJs(MARKS)) === 0, await evalJs(`[...document.querySelectorAll('[data-warmth-tier], .tab-warmth, .warmth-ring, #taskbar-warmth, [data-warmth-tip]')].slice(0, 5).map((e) => e.className?.baseVal ?? e.className)`));
-  const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); return c ? { text: c.textContent, n: (c._hiddenIds || []).length, dot: !!c.querySelector('.wsum-dot'), shown: !c.hidden } : null; })()`);
-  check(`…the «+N» chip reads exactly «+N» («${chip && chip.text}»)`, chip && chip.text === '+' + chip.n && !chip.dot, chip);
+  const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-overflow'); return c ? { text: c.textContent, n: (c._hiddenIds || []).length, dot: !!c.querySelector('.wsum-dot'), shown: !c.hidden, box: c.classList.contains('warmth-box') } : null; })()`);
+  check(`…the «+N» chip reads exactly «+N» («${chip && chip.text}») in its own box again (no constant box)`, chip && chip.text === '+' + chip.n && !chip.dot && !chip.box, chip);
   await evalJs(`(window.__offMut.on = true, 1)`);
   await nextTick(2);
   const mut = await evalJs(`(window.__offMut.on = false, window.__offMut)`);
