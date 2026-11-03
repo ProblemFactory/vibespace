@@ -2747,6 +2747,67 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(rb && rb.status === 'failed' && /could not be read/.test(rb.error) && !JSON.parse(fs.readFileSync(path.join(broken, 'data', 'migrations.json'), 'utf8')).applied[ID], 'an UNREADABLE grants store fails the run BY NAME — not recorded, retried on the next boot (never «nothing to reshape»)', rb);
     } catch (e) { ok(false, `${ID} threw on this tree (the migration it asks for is missing): ${(e && e.message) || e}`); }
   }
+  // ── 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): a custom theme saved on .374 froze the OLD warmth
+  // derivation strings (the editor seeded each «Cache warmth» row with it); its injected rule outranks style.css's raw-hue
+  // derivation. Each of the five keys whose value byte-equals ITS .374 string is dropped; anything else is the person's ──
+  {
+    const ID = '2026-11-warmth-ramp-derived';
+    const OLD = { '--warmth-fresh': 'var(--ok-text)', '--warmth-mid': 'var(--accent)', '--warmth-late': 'var(--warn-text)', '--warmth-critical': 'var(--bad-text)', '--warmth-expired': 'var(--border)' };
+    const STORE = {
+      saved374: { css: { '--bg-window': '#101018', ...OLD, '--text': '#eeeeee' }, terminal: { background: '#000000' } },   // saved from a built-in base on .374: all five frozen
+      mine: { css: { '--warmth-fresh': '#00ff88', '--warmth-mid': 'var(--ok-text)', '--warmth-late': 'var(--warn-text) ', '--warmth-critical': 'var(--bad-text)' }, terminal: {} },   // a colour, ANOTHER key's string, a trailing space — and one equal
+      before374: { css: { '--accent': '#ff00ff' }, terminal: {} },   // saved before .374: no warmth row at all
+      broken: 'not a theme', nocss: { terminal: {} }, listcss: { css: ['--warmth-mid', 'var(--accent)'] },
+    };
+    const rootOf = (tag, store) => { const r = path.join(tmp, 'warmth-ramp-' + tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); if (store !== undefined) fs.writeFileSync(path.join(r, 'data', 'custom-themes.json'), typeof store === 'string' ? store : JSON.stringify(store, null, 2), { mode: 0o600 }); return r; };
+    const fileOf = (r) => path.join(r, 'data', 'custom-themes.json');
+    const notices = [];
+    const boot = (r) => create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: (k, t) => notices.push([k, t]) }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
+    const rowOf = (r) => create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.find((x) => x.id === ID);
+    let r1 = null, res = null, doc = null;
+    try { r1 = rootOf('main', STORE); res = boot(r1); doc = JSON.parse(fs.readFileSync(fileOf(r1), 'utf8')); } catch (e) { res = { status: 'threw', error: (e && e.message) || String(e) }; }
+    const rep = (res && res.report) || {};
+    ok(res && res.status === 'ran' && rep.store === 'rewritten' && rep.themes === 6, `${ID}: the row runs at boot over data/custom-themes.json and rewrites it (RED on 749aa7bf9: there is no such row)`, res);
+    ok(doc && Object.keys(OLD).every((k) => !(k in doc.saved374.css)) && doc.saved374.css['--bg-window'] === '#101018' && doc.saved374.css['--text'] === '#eeeeee' && doc.saved374.terminal.background === '#000000'
+      && JSON.stringify(rep.dropped && rep.dropped.saved374) === JSON.stringify(Object.keys(OLD)), 'EQUAL ⇒ DROPPED: a theme saved on .374 loses all five frozen strings (the derivation applies); its other rows and its terminal stay', doc && doc.saved374);
+    ok(doc && doc.mine.css['--warmth-fresh'] === '#00ff88' && doc.mine.css['--warmth-mid'] === 'var(--ok-text)' && doc.mine.css['--warmth-late'] === 'var(--warn-text) ' && !('--warmth-critical' in doc.mine.css) && rep.kept === 3
+      && JSON.stringify(rep.dropped && rep.dropped.mine) === '["--warmth-critical"]', 'DIFFERENT ⇒ KEPT: a colour, another key\'s .374 string and a value with a trailing space are the person\'s; only the byte-equal one goes', doc && { mine: doc.mine.css, kept: rep.kept });
+    const ran = !!(res && res.status === 'ran');   // the legs below judge a run that HAPPENED (on a tree without the row they are red, never vacuous)
+    ok(ran && doc && JSON.stringify(doc.before374) === JSON.stringify(STORE.before374) && !(rep.dropped && rep.dropped.before374), 'ABSENT ⇒ UNTOUCHED: a theme with no warmth rows is byte-for-byte what it was', doc && doc.before374);
+    ok(doc && doc.broken === 'not a theme' && JSON.stringify(doc.nocss) === '{"terminal":{}}' && JSON.stringify(doc.listcss) === JSON.stringify(STORE.listcss) && JSON.stringify(rep.skipped) === '["broken","nocss","listcss"]',
+      'NOT AN OBJECT ⇒ SKIPPED, SAID: a theme that is not an object, one with no css, one whose css is a list — each kept as it was and named in the report', rep.skipped);
+    let led = null; try { led = JSON.parse(fs.readFileSync(path.join(r1, 'data', 'migrations.json'), 'utf8')); } catch { }
+    ok(led && typeof led.applied[ID] === 'number' && led.reports && led.reports[ID] && JSON.stringify(led.reports[ID].dropped) === JSON.stringify(rep.dropped),
+      'THE LEDGER: data/migrations.json stamps the id and keeps the report (every dropped key by theme — the archive; the values are the five .374 constants)', led && led.reports && led.reports[ID]);
+    let mode = null; try { mode = fs.statSync(fileOf(r1)).mode & 0o777; } catch { }
+    ok(ran && rep.store === 'rewritten' && mode === 0o600 && fs.readFileSync(fileOf(r1), 'utf8') === JSON.stringify(doc, null, 2) && !fs.readdirSync(path.join(r1, 'data')).some((f) => f.includes('.tmp')), 'ATOMIC: written whole as the route writes it (2-space JSON), the file\'s mode kept, no tmp left behind', { mode });
+    ok(ran && notices.length === 0 && !fs.existsSync(path.join(r1, 'data', 'user-todos.json')), 'NOTHING IS SAID to the person: no notice, no For-you item (nothing they chose changed)', notices);
+    let again = null, rerun = null, before = null, after = null;
+    try { before = fs.readFileSync(fileOf(r1), 'utf8'); again = boot(r1); rerun = rowOf(r1).run(); after = fs.readFileSync(fileOf(r1), 'utf8'); } catch (e) { again = { status: 'threw', error: e.message }; }
+    ok(again && again.status === 'already' && rerun && rerun.store === 'untouched' && JSON.stringify(rerun.dropped) === '{}' && rerun.kept === 3 && before === after,
+      'IDEMPOTENT: a second boot answers `already`; the row run again by hand changes nothing (untouched, the store byte-identical)', { again, rerun });
+    // a TORN first run: the store is computed whole and written once, so a throw anywhere before the rename (after the first
+    // theme or the last) leaves the file as it was — planted here at the rename itself, the last instant it can tear
+    const r2 = rootOf('torn', STORE), text0 = fs.readFileSync(fileOf(r2), 'utf8');
+    const realRename = fs.renameSync;
+    let torn = null;
+    fs.renameSync = (a, b) => { if (String(b).endsWith('custom-themes.json')) throw new Error('ENOSPC: planted — the disk filled at the rename'); return realRename(a, b); };
+    try { torn = boot(r2); } catch (e) { torn = { status: 'threw', error: e.message }; } finally { fs.renameSync = realRename; }
+    let led2 = null; try { led2 = JSON.parse(fs.readFileSync(path.join(r2, 'data', 'migrations.json'), 'utf8')); } catch { }
+    ok(torn && torn.status === 'failed' && /planted/.test(torn.error || '') && fs.readFileSync(fileOf(r2), 'utf8') === text0 && !(led2 && led2.applied && led2.applied[ID]) && !fs.readdirSync(path.join(r2, 'data')).some((f) => f.includes('.tmp')),
+      'A TORN FIRST RUN fails loudly, records nothing and leaves the store byte-identical with no tmp behind (the runner retries next boot)', torn);
+    let retry = null; try { retry = boot(r2); } catch (e) { retry = { status: 'threw', error: e.message }; }
+    ok(retry && retry.status === 'ran' && fs.readFileSync(fileOf(r2), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'), '…and THE RETRY CONVERGES: the next boot writes exactly what an untorn run wrote', retry);
+    // torn the other way: the write landed, the process died before the runner stamped the ledger ⇒ the next boot runs it again
+    const r3 = rootOf('late', STORE);
+    let lateRes = null; try { rowOf(r3).run(); lateRes = boot(r3); } catch (e) { lateRes = { status: 'threw', error: e.message }; }
+    ok(lateRes && lateRes.status === 'ran' && lateRes.report.store === 'untouched' && fs.readFileSync(fileOf(r3), 'utf8') === fs.readFileSync(fileOf(r1), 'utf8'),
+      '…and a run whose write landed but whose ledger stamp did not: the next boot finds nothing left to drop and records it', lateRes);
+    const ra = rootOf('absent'), ru = rootOf('unparseable', '{ not json');
+    let absent = null, unp = null; try { absent = boot(ra); unp = boot(ru); } catch (e) { absent = absent || { status: 'threw', error: e.message }; }
+    ok(absent && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && unp && unp.status === 'ran' && unp.report.store === 'unparseable' && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
+      'no store ⇒ none made; an unparseable store ⇒ never rewritten (both recorded)', { absent, unp });
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

@@ -39,6 +39,10 @@
 //     chip by a PURE constant while warmth is drawn (H4, the r1 literal planted reds it); round 3 (the acceptance of
 //     6550a3a51): while warmth is drawn the chip's BOX is that constant's box — the fit reads a constant, never the chip's
 //     content (J1, the rule removed reds it).
+//   ⑩ THE RAMP'S GAUGE (r5 round 2, 主开发's ruling: a fence is a census — a gauge that cannot fall is no gauge): pure text
+//     arithmetic over style.css's six theme blocks (the derivation and the words' mix read FROM the file): every adjacent
+//     pair ≥ 30° of hue, every band ≥ 1.5:1 on its title bar, the words ≥ 4.5:1 on the list / phone row / window grounds,
+//     expired ≥ 1.5:1 on the taskbar — printed as the table; four PLANTED copies red it, each on its own floor.
 // Run: node scripts/test-cache-warmth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -370,6 +374,99 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   ok('r3 J1: while warmth is drawn the «+N» chip\'s BOX is CONSTANT — the CSS width = taskbar-fit.js OVERFLOW_CHIP_WARM_BOX_PX (the fit reads a constant, never the chip\'s content); the room the switcher budgets = that box + the bar\'s 3-px gap before it + the floor\'s three 2-px tile gaps; paintOverflowChip toggles the box with the drawing',
     !!bx && Number(bx[1]) === BOX && ROOM === BOX + 3 + 3 * 2 && gaps && /const ids = chip\._hiddenIds \|\| \[\], n = ids\.length, drawn = warmthDrawn\(app\);\s*chip\.classList\.toggle\('warmth-box', drawn\);/.test(bodyOf(wc, /\nexport function paintOverflowChip\(app, chip\) /)), { css: bx && bx[1], BOX, ROOM, gaps });
   ok('…CONTROL: the box rule taken out of the block reds the pin', !boxRule(block.replace(/\.taskbar-overflow\.warmth-box \{[^}]*\}/, '')));
+}
+
+console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four live tiers, pure arithmetic over style.css');
+{
+  // THE FLOORS (kb-bugfix-invariants: «a status ramp is built from the theme's raw hues, never its text mixes»): adjacent tiers
+  // ≥ 30° of hue — the complaint's own pair (.374 mint → teal, 25°; monokai 1°) sits BELOW it, the shipped minimum (amber →
+  // red, 38°) above; a band ≥ 1.5:1 on its title bar (the lower of idle / active); a tier's words ≥ 4.5:1 (AA at 11 px) on the
+  // list (--bg-dialog), the phone row (--bg-sidebar) and the window (--bg-window); expired ≥ 1.5:1 on the taskbar.
+  const HUE_FLOOR = 30, BAND_FLOOR = 1.5, WORDS_FLOOR = 4.5, EXPIRED_FLOOR = 1.5;
+  const TIERS = ['fresh', 'mid', 'late', 'critical'], GROUNDS = ['--bg-dialog', '--bg-sidebar', '--bg-window'];
+  const topArgs = (x) => { const out = []; let d = 0, cur = ''; for (const ch of x) { if (ch === '(') d++; if (ch === ')') d--; if (ch === ',' && d === 0) { out.push(cur.trim()); cur = ''; } else cur += ch; } out.push(cur.trim()); return out; };
+  const hexRgb = (h) => { let x = h.slice(1); if (x.length <= 4) x = [...x].map((c) => c + c).join(''); const n = (i) => parseInt(x.slice(i, i + 2), 16) / 255; return [n(0), n(2), n(4), x.length === 8 ? n(6) : 1]; };
+  const cmix = (a, p, b) => { const q = 1 - p, al = a[3] * p + b[3] * q; return al === 0 ? [0, 0, 0, 0] : [0, 1, 2].map((i) => (a[i] * a[3] * p + b[i] * b[3] * q) / al).concat(al); };   // color-mix in srgb: premultiplied
+  const over = (c, bg) => [0, 1, 2].map((i) => c[i] * c[3] + bg[i] * (1 - c[3])).concat(1);
+  const resolve = (v, T, depth = 0) => {
+    v = String(v).trim(); if (depth > 24) throw new Error('a var() loop at ' + v);
+    let m;
+    if ((m = /^var\((--[\w-]+)\s*(?:,\s*([\s\S]+))?\)$/.exec(v))) { if (m[1] in T) return resolve(T[m[1]], T, depth + 1); if (m[2] != null) return resolve(m[2], T, depth + 1); throw new Error(m[1] + ' is not defined'); }
+    if (/^#[0-9a-fA-F]{3,8}$/.test(v)) return hexRgb(v);
+    if ((m = /^rgba?\(([^)]*)\)$/.exec(v))) { const n = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); return [n[0] / 255, n[1] / 255, n[2] / 255, n.length > 3 ? n[3] : 1]; }
+    if (v === 'transparent') return [0, 0, 0, 0];
+    if ((m = /^color-mix\(in srgb,([\s\S]+)\)$/.exec(v))) {
+      const [a, b] = topArgs(m[1]), pa = /\s(\d+(?:\.\d+)?)%$/.exec(a), pb = /\s(\d+(?:\.\d+)?)%$/.exec(b);
+      const A = resolve(pa ? a.slice(0, pa.index) : a, T, depth + 1), B = resolve(pb ? b.slice(0, pb.index) : b, T, depth + 1);
+      return cmix(A, pa ? pa[1] / 100 : pb ? 1 - pb[1] / 100 : 0.5, B);
+    }
+    throw new Error('not a colour the gauge reads: ' + v);
+  };
+  const lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const hueOf = (c) => { const [r, g, b] = c, mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (d < 1e-9) return null; const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return ((h * 60) + 360) % 360; };
+  const hueGap = (a, b) => (a == null || b == null ? null : Math.min(Math.abs(a - b) % 360, 360 - (Math.abs(a - b) % 360)));
+  const hex = (c) => '#' + c.slice(0, 3).map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+  const decls = (body) => Object.fromEntries([...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((x) => [x[1], x[2].trim()]));
+  /** the gauge over one style.css text → { rows (the printed table), fails [{theme, floor, what, value}], error } */
+  const gauge = (src) => {
+    const S = src.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const head = S.slice(0, S.indexOf('html, body {'));
+    const blocks = {};
+    for (const m of head.matchAll(/(:root, \[data-theme="dark"\]|\[data-theme="([a-z]+)"\])\s*\{([^}]*)\}/g)) Object.assign((blocks[m[2] || 'dark'] = blocks[m[2] || 'dark'] || {}), decls(m[3]));
+    const at = S.indexOf('--warmth-fresh:');
+    if (at < 0) return { rows: [], fails: [], error: 'no --warmth-fresh declaration' };
+    const derived = decls(S.slice(S.lastIndexOf('{', at) + 1, S.indexOf('}', at)));   // the block every theme inherits (declared after the theme blocks)
+    const w = /\.wl-left\[data-warmth-tier\], \.sess-warmth-left\[data-warmth-tier\] \{ color: color-mix\(in srgb, var\(--warmth-c\) (\d+(?:\.\d+)?)%, var\(--text\)\); \}/.exec(S);
+    const wordsPct = w ? Number(w[1]) : null;
+    const rows = [], fails = [];
+    for (const theme of Object.keys(blocks)) {
+      const T = { ...blocks.dark, ...blocks[theme], ...derived }, c = (v) => resolve(v, T);
+      const tier = Object.fromEntries(TIERS.map((t) => [t, c(`var(--warmth-${t})`)]));
+      const tb = [c('var(--bg-titlebar)'), c('var(--bg-titlebar-active)')], task = c('var(--bg-taskbar)'), text = c('var(--text)');
+      const gaps = TIERS.slice(1).map((t, i) => [`${TIERS[i]}→${t}`, hueGap(hueOf(tier[TIERS[i]]), hueOf(tier[t]))]);
+      const bands = TIERS.map((t) => [t, Math.min(...tb.map((g) => ratio(over(tier[t], g), g)))]);
+      const words = wordsPct == null ? [] : TIERS.flatMap((t) => GROUNDS.map((k) => { const g = c(`var(${k})`); return [`${t} on ${k}`, ratio(over(cmix(tier[t], wordsPct / 100, text), g), g)]; }));
+      const expired = ratio(over(c('var(--warmth-expired)'), task), task);
+      for (const [what, v] of gaps) if (v == null || v < HUE_FLOOR) fails.push({ theme, floor: 'hue', what, value: v == null ? 'no hue' : Math.round(v) + '°' });
+      for (const [what, v] of bands) if (v < BAND_FLOOR) fails.push({ theme, floor: 'band', what, value: v.toFixed(2) });
+      if (wordsPct == null) fails.push({ theme, floor: 'words', what: 'the words\' mix rule', value: 'absent' });
+      for (const [what, v] of words) if (v < WORDS_FLOOR) fails.push({ theme, floor: 'words', what, value: v.toFixed(2) });
+      if (expired < EXPIRED_FLOOR) fails.push({ theme, floor: 'expired', what: 'expired on --bg-taskbar', value: expired.toFixed(2) });
+      const lo = (xs) => (xs.length ? Math.min(...xs.map(([, v]) => (v == null ? -1 : v))) : NaN);
+      rows.push(`${theme.padEnd(9)} ${TIERS.map((t) => `${hex(tier[t])} ${String(Math.round(hueOf(tier[t]) ?? NaN)).padStart(3)}°`).join(' · ')}  Δhue ${gaps.map(([, v]) => (v == null ? '—' : Math.round(v))).join('/')}  band ≥ ${lo(bands).toFixed(2)}  words@${wordsPct}% ≥ ${lo(words).toFixed(2)}  expired ${expired.toFixed(2)}`);
+    }
+    return { rows, fails, themes: Object.keys(blocks) };
+  };
+  const css = read('public/style.css');
+  let g = null; try { g = gauge(css); } catch (e) { g = { rows: [], fails: [], error: (e && e.message) || String(e) }; }
+  for (const r of g.rows) console.log('    ' + r);
+  const by = (floor) => g.fails.filter((f) => f.floor === floor).map((f) => `${f.theme} ${f.what} ${f.value}`).join('; ');
+  ok(`⑩ the gauge reads all six built-in theme blocks (${(g.themes || []).join(', ')}) and resolves every colour it needs`, !g.error && JSON.stringify(g.themes) === '["dark","light","dracula","nord","solarized","monokai"]', g.error);
+  ok(`⑩ every ADJACENT pair of tiers ≥ ${HUE_FLOOR}° of hue on every theme (RED on 749aa7bf9: .374's mint → teal)`, !g.error && !by('hue'), by('hue'));
+  ok(`⑩ every band ≥ ${BAND_FLOOR}:1 on its title bar (the lower of idle / active) on every theme`, !g.error && !by('band'), by('band'));
+  ok(`⑩ a tier's words (the block's own mix toward --text) ≥ ${WORDS_FLOOR}:1 on the list / phone row / window on every theme`, !g.error && !by('words'), by('words'));
+  ok(`⑩ expired ≥ ${EXPIRED_FLOOR}:1 on the taskbar on every theme (RED on 749aa7bf9: --border, 1.17:1)`, !g.error && !by('expired'), by('expired'));
+  // the PLANTED copies: each reds the gauge on its own floor (a gauge that cannot fall is no gauge)
+  const plant = (from, to) => (css.includes(from) ? gauge(css.replace(from, to)) : null);
+  const failsOf = (x, floor) => (x ? x.fails.filter((f) => f.floor === floor) : []);
+  const pm = plant('  --warmth-mid: var(--blue, #3b82f6);', '  --warmth-mid: var(--accent);');
+  ok('…CONTROL: --warmth-mid ← var(--accent) planted (the .374 «second green») ⇒ the hue floor reds — on monokai, whose accent IS its green (0° from the raw green)',
+    failsOf(pm, 'hue').some((f) => f.theme === 'monokai' && f.what === 'fresh→mid' && f.value === '0°'), JSON.stringify(pm && failsOf(pm, 'hue')));
+  const p374 = (() => { const x = '  --warmth-fresh: var(--green);'; return css.includes(x) && css.includes('  --warmth-mid: var(--blue, #3b82f6);') ? gauge(css.replace(x, '  --warmth-fresh: var(--ok-text);').replace('  --warmth-mid: var(--blue, #3b82f6);', '  --warmth-mid: var(--accent);')) : null; })();
+  const hue374 = Object.fromEntries(failsOf(p374, 'hue').filter((f) => f.what === 'fresh→mid').map((f) => [f.theme, f.value]));
+  ok(`…CONTROL: the .374 pair planted back (fresh ← --ok-text, mid ← --accent) ⇒ the hue floor reds at the complaint's own gaps — dark ${hue374.dark}, light ${hue374.light}, monokai ${hue374.monokai}`,
+    hue374.dark === '25°' && hue374.light === '22°' && hue374.monokai === '1°', JSON.stringify(p374 && failsOf(p374, 'hue')));
+  const pw = plant('var(--warmth-c) 50%, var(--text)', 'var(--warmth-c) 60%, var(--text)');
+  ok('…CONTROL: the words at 60 % planted (the brief\'s first number) ⇒ the AA floor reds — light\'s amber on the phone row',
+    failsOf(pw, 'words').some((f) => f.theme === 'light' && f.what === 'late on --bg-sidebar'), JSON.stringify(pw && failsOf(pw, 'words')));
+  const pe = plant('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);');
+  ok('…CONTROL: expired ← var(--border) planted (.374\'s invisible mark) ⇒ the expired floor reds on every theme',
+    failsOf(pe, 'expired').length === 6, JSON.stringify(pe && failsOf(pe, 'expired')));
+  const pb = plant('  --warmth-late: var(--yellow);', '  --warmth-late: var(--bg-titlebar-active);');
+  ok('…CONTROL: a band planted in its title bar\'s own colour (--warmth-late ← var(--bg-titlebar-active)) ⇒ the band floor reds on every theme',
+    failsOf(pb, 'band').filter((f) => f.what === 'late').length === 6, JSON.stringify(pb && failsOf(pb, 'band')));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
