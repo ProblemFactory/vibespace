@@ -36,6 +36,9 @@ This file is the engineers' record of every release: the lanes, the verification
   - **Deviation from the brief:** the brief asked for ONE fast suite with a chrome leg. The fast tier never launches a browser (test-fold-ux's row; no fast row does), so the chrome half is its own heavy suite — the repo's pairing, as with test-plugins-grammar + test-plugin-consent-chrome.
   - Bare Chrome runs under `ulimit -d 4194304`, applied to Chrome alone: under it the hub's worker isolates fail to start.
 
+### int377 — the .377 hotfix's own notes (lane int361; one pick on 27a0bf89e: hotfix-card-list-indent 7156bd39e)
+- **A hotfix of one commit, no seams.** The cut's src/, public/, scripts/ and data/ equal 7156bd39e byte for byte; the fast tier's sum moves 919.46 → 919.51 s (test-card-list-indent, 57 ms) and stays under the 920 s cap; the lane's block was already headed «## 2.369.377» and is assembled as the ONE .377 block.
+
 ## 2.369.376 — 2026-11-03
 
 ### cache-warmth-ramp — q-059 r5: the four warmth tiers are the theme's own raw hues (green → blue → amber → red) and expired is one quiet value; CSS, the theme editor's derived strings and one boot migration for the themes saved on .374 (no geometry)
