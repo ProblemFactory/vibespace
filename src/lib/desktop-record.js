@@ -57,6 +57,29 @@
 //     a page that cannot build it shows it as a placeholder until the person closes it; dropped as 'unbuilt' it is refused at
 //     ANY count and named in `unbuilt` (09:19:35: 个人 11 → 4 with seven 'unbuilt'). A duplicate (another entry still shows
 //     its session) still leaves; a window that is no session stays explained by 'unbuilt'.
+//     A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN (userW inc-mw1ogdno-5jny, 2.369.374 — a warn toast every 500 ms: one live
+//     conversation listed under THREE desktops' records, three window ids; the page showed it on X, settled desktop V's copy as a
+//     duplicate and dropped it as 'unbuilt'; `nextSessions` saw only V's own record, so the drop was «1 LIVE», refused, the
+//     page re-sent the same drop — 222 refusals in 130 s). The page's evidence for a copy it settled because it already shows
+//     that session under another window names that window: {id, why: 'dup', by}. The drop is explained when `by` is a window of
+//     the record written (`next`) or of ANY other desktop's stored record (`elsewhere`, the server hands every other desktop's
+//     windows) that shows the SAME server session (shownBy); a 'dup' whose `by` shows nothing of it is refused at ANY count
+//     and named in `dup` — a duplicate is never a word the page may say about a window it simply lost.
+//
+//   duplicatesOf({records, shown}) — ONE CONVERSATION, ONE WINDOW ENTRY (the same incident's writer — session-lifecycle's
+//     attachSession found an open conversation only among the windows the page had BUILT, so a sidebar click of a conversation
+//     whose window waits on a desktop not visited since the page loaded opened a SECOND window, on the desktop on show — twice
+//     over reloads made three entries): `shown` = Map(server session → the window id this page shows it in); every entry of
+//     `records` ({desk → record or window list}, or a Map) that lists one of those sessions under ANOTHER window id is a duplicate — [{desk, id, by, sid}].
+//     The page drops each from its record with evidence {id, why: 'dup', by} (the dedup is its own evidence, never a silent
+//     delete); the window the person sees is the one that stays.
+//
+//   refusalKey({desktopId, reason, unexplained, fields, windows, base}) / refusalStorm(memory, {who, desktopId, key, now}) —
+//     A REFUSAL IS SAID ONCE (the same incident): a refusal's identity is its desktop, its reason and what it refused (the drop
+//     set, the fields moved, the base). THE SERVER NEVER ANSWERS A STORM: the same key from the same client within STORM_MS
+//     (10 s) of its last one is a repeat — not answered, counted (`answer: false`); a different key, an accepted write
+//     (stormEnd) or STORM_MS of quiet (stormSweep) ENDS the storm, returned once as {who, desktopId, key, count, firstAt,
+//     lastAt} for one journal line. The page's twin (desktop-manager.js onSyncRefused) keys its breaker the same way.
 //
 //   staleVerdict({writes, who, storedAt, base}) — THE STALENESS GATE (lane layout-stale-record-sync, §6b guard 11): a
 //     record never goes backwards. Every write names `base` — the server stamp (`updatedAt`) of the newest record of that
@@ -347,13 +370,73 @@ const evidenceIds = (evidence) => new Set(listOf(evidence).map((e) => (e && type
 /** id → why ('' for a bare id) — the evidence's reasons */
 const evidenceWhy = (evidence) => { const m = new Map(); for (const e of listOf(evidence)) { const id = e && typeof e === 'object' ? idOf(e) : (e == null ? null : String(e)); if (id) m.set(id, e && typeof e === 'object' && typeof e.why === 'string' ? e.why : ''); } return m; };
 
-function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [] } = {}) {
+/** id → the window its evidence names (`by` — the window that replaced it, or the one that shows its session) */
+const evidenceBy = (evidence) => { const m = new Map(); for (const e of listOf(evidence)) { if (!e || typeof e !== 'object' || e.by == null || e.by === '') continue; const id = idOf(e); if (id) m.set(id, String(e.by)); } return m; };
+/** Does window `by` show server session `sid` — in the record written, or in any other desktop's record (a list or a record)? */
+function shownBy(sid, id, by, nextList, elsewhere) {
+  if (!sid || by == null || String(by) === id) return false;
+  for (const l of [nextList, ...listOf(elsewhere)]) {
+    for (const w of Array.isArray(l) ? l : listOf(l && l.windows)) if (idOf(w) === String(by) && sessionOf(w) === sid) return true;
+  }
+  return false;
+}
+
+function duplicatesOf({ records = {}, shown = new Map() } = {}) {
+  const out = [];
+  const pairs = records instanceof Map ? [...records] : Object.entries(records && typeof records === 'object' ? records : {});
+  const shows = shown instanceof Map ? shown : new Map();
+  for (const [desk, rec] of pairs) {
+    for (const w of Array.isArray(rec) ? rec : listOf(rec && rec.windows)) {
+      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;
+      if (id && by != null && String(by) !== id) out.push({ desk, id, by: String(by), sid });
+    }
+  }
+  return out;
+}
+
+const STORM_MS = 10000;
+const STORM_MAX_MS = 60000;
+function refusalKey({ desktopId = null, reason = '', unexplained = [], fields = [], windows = [], base = null } = {}) {
+  const set = (l) => [...new Set(listOf(l).filter((x) => x != null).map(String))].sort();
+  return JSON.stringify([String(desktopId || ''), String(reason || ''), set(unexplained), set(fields), set(windows), typeof base === 'number' && Number.isFinite(base) ? base : null]);
+}
+const stormOf = (m) => ({ who: m.who, desktopId: m.desktopId, key: m.key, count: m.count, firstAt: m.firstAt, lastAt: m.lastAt });
+function refusalStorm(memory, { who = null, desktopId = null, key = '', now = Date.now(), windowMs = STORM_MS } = {}) {
+  if (!(memory instanceof Map)) return { answer: true, ended: null };
+  const k = String(who) + '\u0000' + String(desktopId || '');
+  const m = memory.get(k);
+  // a repeat: the same key within windowMs of the last — unless the storm has run STORM_MAX_MS (a client that never stops gets
+  // one refusal and one journal line a minute, never one per send)
+  if (m && m.key === key && now - m.lastAt <= windowMs && now - m.firstAt < STORM_MAX_MS) { m.lastAt = now; m.count++; return { answer: false, ended: null }; }
+  memory.set(k, { who, desktopId, key, count: 0, firstAt: now, lastAt: now });
+  return { answer: true, ended: m && m.count ? stormOf(m) : null };
+}
+/** A write of `desktopId` by `who` was accepted: what it refused before is settled — a storm it ran ends (returned once). */
+function stormEnd(memory, { who = null, desktopId = null } = {}) {
+  if (!(memory instanceof Map)) return null;
+  const k = String(who) + '\u0000' + String(desktopId || '');
+  const m = memory.get(k);
+  if (!m) return null;
+  memory.delete(k);
+  return m.count ? stormOf(m) : null;
+}
+/** The storms quiet for longer than `windowMs` end (each returned once); a memory with no repeat is forgotten silently. */
+function stormSweep(memory, { now = Date.now(), windowMs = STORM_MS } = {}) {
+  const out = [];
+  if (!(memory instanceof Map)) return out;
+  for (const [k, m] of memory) if (now - m.lastAt > windowMs) { memory.delete(k); if (m.count) out.push(stormOf(m)); }
+  return out;
+}
+
+function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [], elsewhere = [] } = {}) {
   const prevList = Array.isArray(prev) ? prev : listOf(prev && prev.windows);
   const nextList = Array.isArray(next) ? next : listOf(next && next.windows);
   const nextIds = new Set(windowIds(nextList));
   const nextSessions = new Set(nextList.map(sessionOf).filter(Boolean)); // a session another entry of the record still shows
   const ev = evidenceIds(evidence);
   const why = evidenceWhy(evidence);
+  const byOf = evidenceBy(evidence);
+  const dup = []; // 'dup' drops whose `by` shows nothing of their session
   const live = [];
   const rec = recent instanceof Set ? recent : new Set(listOf(recent).map((x) => (x == null ? null : String(x))).filter(Boolean));
   const dropped = [];
@@ -368,6 +451,8 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
     // entry still shows that session — a duplicate the page settled at once)
     // UNBUILT IS NOT DROPPED (lane layout-stopped-window): a SESSION window whose session is stopped, unknown or nameless —
     // the page shows a placeholder for it; only the person's close removes it (a duplicate still leaves; a live one: below)
+    // A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN (userW inc-mw1ogdno-5jny): `by` shows the same session — here or on any desktop
+    if (ev.has(id) && why.get(id) === 'dup') { if (shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); continue; }
     if (ev.has(id) && why.get(id) === 'unbuilt' && isSession(w) && !(sid && (nextSessions.has(sid) || alive(sid)))) { unexplained.push(id); unbuilt.push(id); continue; }
     if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;
     if (ev.has(id)) { unexplained.push(id); live.push(id); continue; }
@@ -378,8 +463,8 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   // a base older than its arrival (lane desktop-move verify r1: the moved window, dropped by a client that had missed
   // the broadcast); one of them is enough, the ≥ `min` rule is for the rest
   const arrived = unexplained.filter((id) => rec.has(id));
-  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt };
-  return { ok: true, dropped, unexplained, arrived, live, unbuilt };
+  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length || dup.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt, dup };
+  return { ok: true, dropped, unexplained, arrived, live, unbuilt, dup };
 }
 
 /** Per desktop whose window SET differs between two layouts.json documents: [name, before, after] (a desktop only in
@@ -512,4 +597,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS };

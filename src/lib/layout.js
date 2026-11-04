@@ -1625,8 +1625,10 @@ class LayoutManager {
     // carries released (verify r5 ⑤: a save that left on a socket the server never read used to count as sent — the
     // reconnect's re-read reversed the act and nothing re-sent it). A refused record releases nothing.
     const sentAt = Date.now(), sentDesks = [];
+    dm?.normalizeDups?.(); // ONE CONVERSATION, ONE WINDOW ENTRY (userW inc-mw1ogdno-5jny): a held copy of a session this page shows leaves, as 'dup'
     for (const d of dm?.takeDirty?.() || []) {
       const st = dm.recordFor(d);
+      if (dm.holdsBack?.(d, st)) continue; // THE BREAKER (inc-mw1ogdno-5jny): the very record the server refused is never re-sent
       this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt, viewport: this._viewport(), base: dm.stampOf?.(d) });
       sentDesks.push(d);
       dm.noteSent(d, st);
@@ -1640,6 +1642,7 @@ class LayoutManager {
     // unchanged state — skip the send (and the server disk write + rebroadcast
     // + every other client's full diff pass) when nothing actually changed.
     const json = JSON.stringify({ state, desktopId });
+    if (desktopId && dm?.holdsBack?.(desktopId, state)) { this.noteLayoutSent(sentDesks, sentAt); return; } // THE BREAKER: held until the person's act or a reload changes it
     // identical to the last record sent AND that send was READ (nothing owed for this desktop): a no-op — the state is carried
     // as of now (an act that changed nothing — a drag back to its place — is not held for a minute). While the last send is
     // still owed it is NOT a no-op: the held act's re-send after a reconnect IS that very text, and the server never read it

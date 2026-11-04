@@ -19,6 +19,7 @@ const PI = require('./proc-identity'); // the ssh kill compares the meta's recor
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
 const { keepNames } = require('./lib/desktop-record.js'); // PURE (lane layout-stopped-window): a window that replaced a named one takes its name — never written nameless
+const { refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS } = require('./lib/desktop-record.js'); // PURE (userW inc-mw1ogdno-5jny): a refusal is said once — the server never answers a storm
 const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
@@ -310,6 +311,29 @@ function registerWsHandler(wss, ctx) {
     }
     return out;
   };
+  // THE SERVER NEVER ANSWERS A STORM (userW inc-mw1ogdno-5jny — 222 layout-sync-refused in 130 s, one per 515 ms, a warn toast on
+  // the page for each): a client that re-sends a record refused for the same reason with the same drop set (PURE refusalKey)
+  // within STORM_MS of its last gets NOTHING — no refusal, no journal line, no telemetry per repeat (its one refusal stands). The
+  // storm is said ONCE when it ends (a changed record judged afresh, an accepted write, STORM_MS of quiet — PURE refusalStorm /
+  // stormEnd / stormSweep): one journal line naming the client, the desktop and the count; telemetry `layout-sync-storm`.
+  const layoutStorms = new Map(); // `${client}\0${desktopId}` → the last refusal's key and its repeats
+  let layoutStormTimer = null;
+  const sayStorm = (s) => {
+    if (!s) return;
+    let name = s.desktopId;
+    try { name = (readLayouts().desktopMeta || []).find((d) => d && d.id === s.desktopId)?.name || name; } catch { }
+    console.warn(`[layout-sync] STORM: client #${s.who} re-sent a record of desktop "${name}" (${s.desktopId}) that was refused for the same reason ${s.count} more time(s) in ${((s.lastAt - s.firstAt) / 1000).toFixed(1)} s — not answered (its one refusal stands)`);
+    try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-storm', detail: String(s.count) }); } catch { }
+  };
+  const armStormSweep = () => {
+    if (layoutStormTimer || !layoutStorms.size) return;
+    layoutStormTimer = setTimeout(() => { layoutStormTimer = null; for (const s of stormSweep(layoutStorms)) sayStorm(s); armStormSweep(); }, STORM_MS + 500);
+    layoutStormTimer.unref?.();
+  };
+  /** true = this client's last refusal of `desktopId` again (the same key within STORM_MS): dropped unanswered */
+  const layoutStormed = (ws, desktopId, key) => { const v = refusalStorm(layoutStorms, { who: layoutClientOf(ws), desktopId, key }); sayStorm(v.ended); armStormSweep(); return !v.answer; };
+  /** Every OTHER desktop's stored windows — where a duplicate's `by` may show its session (A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN) */
+  const otherRecords = (layoutData, desktopId) => Object.entries(layoutData.desktops || {}).filter(([k]) => k !== desktopId && k !== '__stage__').map(([, v]) => (v && v.autoSave && Array.isArray(v.autoSave.windows) ? v.autoSave.windows : []));
   const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
     let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
     const prev = new Set(prevIds), next = new Set(nextIds), at = Date.now(), by = layoutClientOf(ws);
@@ -1594,6 +1618,7 @@ function registerWsHandler(wss, ctx) {
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && typeof data.state === 'object') {
             const stored = layoutData.desktops[desktopId].autoSave;
             const sv = staleVerdict({ writes: layoutWrites.get(desktopId), who: layoutClientOf(ws), storedAt: stored.updatedAt, base: data.base });
+            if (!sv.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: sv.reason, base: sv.base }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
             if (!sv.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               const by = data.viewport === 'phone' || data.viewport === 'desktop' ? data.viewport + ' ' : '';
@@ -1613,11 +1638,12 @@ function registerWsHandler(wss, ctx) {
           // carries a close for every window it drops. PURE rule: src/lib/desktop-record.js shrinkVerdict.
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && Array.isArray(data.state.windows)) {
             const stored = layoutData.desktops[desktopId].autoSave;
-            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });
+            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws), elsewhere: otherRecords(layoutData, desktopId) });
             // UNBUILT IS NOT DROPPED (lane layout-stopped-window): the session windows a page dropped as 'unbuilt' are NAMED — titles, never a count
             const unbuiltTitles = (v.unbuilt || []).map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); return String(w && w.title ? w.title : id).slice(0, 48); });
             const unbuiltSaid = unbuiltTitles.length ? `; ${unbuiltTitles.length} stopped / unknown session window(s) dropped as 'unbuilt' — a page shows them as placeholders: ${unbuiltTitles.join(' · ')}` : '';
             const ringUnbuilt = unbuiltTitles.length ? { unbuilt: unbuiltTitles } : {};
+            if (!v.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: v.reason, unexplained: v.unexplained }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
             if (!v.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               const arrived = (v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '') + (v.live?.length ? `; ${v.live.length} LIVE (the sender could not build them)` : '');
@@ -1637,6 +1663,7 @@ function registerWsHandler(wss, ctx) {
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && typeof data.state === 'object') {
             const stored = layoutData.desktops[desktopId].autoSave;
             const g = layerGate(data.viewport, stored, data.state);
+            if (!g.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: g.reason, fields: g.fields, windows: g.windows }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
             if (!g.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               console.warn(`[layout-sync] REFUSED a phone record of desktop "${name}" (${desktopId}): it changes ${g.fields.join(', ')}${g.windows.length ? ` (window${g.windows.length > 1 ? 's' : ''} ${g.windows.join(', ')})` : ''} — a phone writes the workspace only; the server keeps its record`);
@@ -1664,6 +1691,9 @@ function registerWsHandler(wss, ctx) {
           // of its name); one that replaced nothing named is left out of THIS write — said in the journal and the ring. PURE keepNames.
           const named = desktopId && Array.isArray(data.state?.windows) ? keepNames({ prev: layoutData.desktops?.[desktopId]?.autoSave?.windows || [], next: data.state.windows, evidence: data.evidence }) : null;
           if (named) data.state.windows = named.windows;
+          // A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN (userW inc-mw1ogdno-5jny): the copies this write lets go, said with the window that shows each
+          const dupsLeft = desktopId && Array.isArray(data.evidence) && Array.isArray(data.state?.windows) ? data.evidence.filter((e) => e && typeof e === 'object' && e.why === 'dup' && prevWins.some((w) => w && (w.winId || w.id) === e.id) && !data.state.windows.some((w) => w && (w.winId || w.id) === e.id)) : [];
+          if (dupsLeft.length) console.log(`[layout-sync] desktop ${desktopId}: ${dupsLeft.length} duplicate window(s) left — each conversation stays in the window that shows it (${dupsLeft.map((e) => `${e.id} → ${e.by}`).join(', ')})`);
           if (named && (named.carried.length || named.withheld.length)) console.log(`[layout-sync] desktop ${desktopId}: ${named.carried.length} window(s) took the name of the window they replaced${named.withheld.length ? `; ${named.withheld.length} with no name left out of this write (${named.withheld.map((w) => w.title.slice(0, 48)).join(' · ')})` : ''}`);
           if (desktopId) {
             // Per-desktop save
@@ -1677,6 +1707,7 @@ function registerWsHandler(wss, ctx) {
           }
           const stampNow = desktopId ? layoutData.desktops[desktopId].autoSave.updatedAt : layoutData.autoSave.updatedAt; // the server's stamp: rides the relay and the ack (each page's next `base`)
           if (desktopId) noteLayoutWrite(desktopId, ws, stampNow, replacedAt);
+          if (desktopId) sayStorm(stormEnd(layoutStorms, { who: layoutClientOf(ws), desktopId })); // an accepted write ends this client's storm of it (said once)
           noteToRing({ wrote: desktopId || null, viewport, windows: Array.isArray(data.state?.windows) ? data.state.windows.length : null, evidence: ringEvidence(data.evidence, prevWins, data.state?.windows), ...(named && (named.carried.length || named.withheld.length) ? { named: { carried: named.carried.length, withheld: named.withheld.map((w) => w.title.slice(0, 48)) } } : {}), base: typeof data.base === 'number' ? data.base : null });
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta

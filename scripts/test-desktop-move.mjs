@@ -65,6 +65,11 @@
 //      RED CONTROL: Fin's frame HELD 1.2 s in the page (app.ws.send wrapped) — the instant read at HR's frame sees `[]`,
 //      the runner's ✗, and the awaited read finds the 0. VS_CPU_THROTTLE=<n> slows every page's CPU n× (the runner's
 //      cores, on this box; measured: ×4 never parts the two frames here — one save sends both in one task)
+//   S  userW inc-mw1ogdno-5jny (2.369.374: a warn toast every ~500 ms): the REPLAYED TRIPLE — scripts/fixtures/layout-dup-triple.json's
+//      structure (one conversation under three desktops' records, three window ids) with a LIVE shell session as the conversation,
+//      installed through the restore path; the page boots on X (its window attaches), a real click on V's preview: over 5 s ≤ 1
+//      toast and 0 refusals (the copy leaves as {why:'dup', by}), the server lists the conversation ONCE; RED on 86add763e (a toast
+//      and a refusal every ~500 ms)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -383,7 +388,7 @@ else await (async () => {
       const want = sortIds(['win-hr-1-f', 'win-hr-2-f', 'win-hr-3-f', 'win-fin-1-f']);
       ok(await until(async () => J(await ev(SHOWN)) === J(want), 6000), 'F: the page reconciled — HR\'s 3 windows opened beside the moved one', J(await ev(SHOWN)));
       const toast = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').map((h) => h.m).find((m) => /were kept/.test(m)) || null`);
-      ok(!!toast && /3 windows on “HR” were kept/.test(toast), 'F: …and said so in a toast', J(toast));
+      ok(!!toast && /“hr-1-f”, “hr-2-f”, “hr-3-f” on “HR” were kept/.test(toast), 'F: …and said so in a toast — naming the windows kept (userW inc-mw1ogdno-5jny)', J(toast));
       await nudge();
       ok(await until(async () => J(sortIds(await serverIds('desk-hr'))) === J(want), 5000), 'F: the server ends at 4 (the corrected record went out)', J(await serverIds('desk-hr')));
       polling = false; await poll;
@@ -707,6 +712,33 @@ else await (async () => {
       ok(refusalsSince(j0).length === 0, 'I: no refusal', J(refusalsSince(j0)));
       await boot();
       ok(J(await ev(SHOWN)) === J(wantI), 'I: after a reload Fin shows all 4', J(await ev(SHOWN)));
+    }
+
+    // ── S: the replayed triple (userW inc-mw1ogdno-5jny) — the toasts over 5 s ──
+    console.log('— S: one conversation on three desktops (userW inc-mw1ogdno-5jny) — a switch to a desktop holding a copy: the toasts over 5 s');
+    if (!dtachOk) skip('S: dtach is not installed — a live shell session cannot be created here');
+    else if (want('S') && ok(await fresh('s'), 'S: fresh fixture, booted on Fin')) {
+      const sid = await ev(`(async () => { const before = new Set(app.wm.windows.keys()); app.createSession({ backend: 'shell', mode: 'terminal', cwd: ${J(ROOT)}, name: 'Atlas notes', model: null, permission: null, effort: null, extraArgs: '' }); for (let i = 0; i < 150; i++) { const id = [...app.wm.windows.keys()].find((k) => !before.has(k)); const s = id && app.sessions.get(id); if (s && s.sessionId) return s.sessionId; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+      if (ok(!!sid, 'S: a live shell session — the conversation the records list three times', J(sid))) {
+        const FIX = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/layout-dup-triple.json'), 'utf8'));
+        const S0 = 'sess-7-41000'; // the fixture's conversation
+        const live = (w) => ({ winId: w.winId + '-s', title: 'Atlas notes — ' + ROOT, type: 'terminal', isMinimized: false, isMaximized: false, gridBounds: w.gridBounds, zIndex: w.zIndex, serverSessionId: sid, openSpec: { action: 'attachSession', serverId: sid, name: 'Atlas notes', cwd: ROOT, mode: 'terminal', backend: 'shell', backendSessionId: null, hostId: null } });
+        const triple = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: FIX.desktopMeta,
+          desktops: Object.fromEntries(Object.entries(FIX.desktops).map(([d, v]) => [d, { autoSave: { windows: v.autoSave.windows.map((w) => (w.serverSessionId === S0 ? live(w) : W(w.winId + '-s', w.winId + '-s', w.gridBounds))) } }])) };
+        await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300); ok(await install(triple), 'S: the triple installed through the restore path');
+        ok(await boot() && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x' && await until(() => ev(`!!app.sessions.get('win-x-s-s')`), 8000), 'S: the page booted on Desk X — its window of the conversation attached', J(await P1.allWins()));
+        const h0 = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').length`), j0 = journal.length, f0 = P1.framesGot.length;
+        await clickPreview('desk-v'); await sleep(2500); // 5 s since the click
+        const said = await ev(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').slice(${h0}).map((h) => h.m).filter((m) => /were kept|disagree/.test(m))`);
+        const refusedFrames = P1.framesGot.slice(f0).filter((f) => f.type === 'layout-sync-refused').length;
+        ok(said.length <= 1, `S: over 5 s on the replayed shape ≤ 1 toast (2.369.374: a warn every ~500 ms) — here ${said.length}`, J(said.slice(0, 4)));
+        ok(refusedFrames === 0 && refusalsSince(j0).length === 0, `S: …0 refusals — the copy leaves as a duplicate the server can check (here ${refusedFrames} frames)`, J(refusalsSince(j0).slice(0, 3)));
+        const lay = await api('/api/layouts');
+        const listed = Object.entries(lay.desktops || {}).flatMap(([d, v]) => ((v.autoSave && v.autoSave.windows) || []).filter((w) => w.serverSessionId === sid || w.openSpec?.serverId === sid).map((w) => d + ':' + w.winId));
+        ok(J(listed) === J(['desk-x:win-x-s-s']), 'S: …and the server lists the conversation ONCE — Desk X\'s window, the one the page shows (V\'s and Y\'s copies left with evidence \'dup\')', J(listed));
+        ok(/1 duplicate window\(s\) left/.test(journal.slice(j0)), 'S: …the journal names the duplicates that left', journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)).slice(0, 4).join(' | '));
+        try { await ev(`app.ws.send({ type: 'kill', sessionId: ${J(sid)} })`); } catch { }
+      }
     }
   } finally {
     try { cdpWs.close(); } catch { }

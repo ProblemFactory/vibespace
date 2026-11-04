@@ -721,6 +721,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     this._closeSidebarOnMobile();
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
     if (this._focusExistingSession(serverId, { replay: !!(syncId || machine) })) return null;
+    // ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — the writer of the triple): the shortcut above sees only the windows
+    // this page BUILT; a conversation whose window waits in the record of a desktop not visited since the page loaded got a SECOND
+    // window here (three desktops listed one conversation). A person's open goes to that desktop instead — its switch builds it.
+    if (!(syncId || machine) && this.desktopManager?.revealHeldSession?.(serverId)) return null;
     if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame
 
     this._hideWelcome();

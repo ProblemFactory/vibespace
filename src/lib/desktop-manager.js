@@ -9,6 +9,7 @@ import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the 
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js';
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+import { duplicatesOf, refusalKey, sessionOf, namesOf } from './desktop-record.js'; // PURE (userW inc-mw1ogdno-5jny): one conversation, one window entry; a refusal is said once
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
 import { paintPreviews, warmthDrawn } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the previews' prompt-cache tiers
@@ -22,6 +23,8 @@ const BUILD_GRACE_MS = 20000;
 /** How long a window this page closed / moved / could not build stays in the evidence every layout-sync carries. */
 const DEPARTED_TTL_MS = 10 * 60 * 1000;
 const DEPARTED_CAP = 200;
+/** A refusal's toast is said once per desktop and reason in this long; a repeat inside it is counted, never shown (inc-mw1ogdno-5jny). */
+const REFUSAL_TOAST_MS = 30000;
 
 /**
  * DesktopManager — virtual desktop system.
@@ -45,11 +48,20 @@ export class DesktopManager {
     // THE BASE (lane layout-stale-record-sync, §6b guard 11): desktopId → the newest server stamp (`updatedAt`) this page has
     // seen of that desktop's record — the boot read, a relayed record, its own write's ack, a refusal's record kept
     this._stamps = new Map();
+    // A REFUSAL NEVER RE-SENDS THE RECORD IT REFUSED (userW inc-mw1ogdno-5jny — 222 refusals in 130 s): the windows the server
+    // KEPT against this page's drop (desktopId → Set of ids — never dropped again by this page until the person closes one or
+    // the page reloads); per desktop the last refusal {key, n, json, said} (the breaker: the record it refused is never sent
+    // unchanged; ≥ 2 refusals of one key are said ONCE); the record last sent per desktop; the refusal toasts said lately
+    this._kept = new Map();
+    this._refusals = new Map();
+    this._sentJson = new Map();
+    this._refusalToasts = new Map();
 
     // Listen for desktop metadata updates from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'desktop-updated') this._onRemoteDesktopUpdated(msg);
       else if (msg.type === 'layout-sync-refused') this.onSyncRefused(msg);
+      else if (msg.type === 'layout-sync-ack' && msg.desktopId) this._refusals?.delete(msg.desktopId); // a write of it was accepted: the disagreement is over
     });
 
     // Taskbar resize handle (drag top edge to resize)
@@ -238,6 +250,7 @@ export class DesktopManager {
       if (byUser && desk !== this._activeId) this._dirtyDesks.add(desk); // a desktop not on show that listed it: its record goes out now, with the close as evidence
     }
     this._buildAttempts.delete(String(winId));
+    for (const [, ids] of this._kept || []) ids.delete(String(winId)); // the person's close: a window the server kept is the person's to remove
     this._noteDeparted(winId, 'closed'); // the evidence the server's shrink belt reads (userW inc-mun7qjmw-iksh)
   }
 
@@ -331,6 +344,7 @@ export class DesktopManager {
   /** A record of `desktopId` left this page (sent to the server): it is now the view's base, and the wire's. */
   noteSent(desktopId, state) {
     if (!desktopId || desktopId === '__stage__' || !state) return;
+    (this._sentJson || (this._sentJson = new Map())).set(desktopId, this._writeJson(desktopId, state)); // what a refusal of it refused (the breaker's witness)
     this._setRecord(desktopId, state);
     this.noteWire(desktopId, state);
   }
@@ -377,12 +391,17 @@ export class DesktopManager {
       if (!a) continue;
       if (this.app.wm.windows.has(id)) { this._buildAttempts.delete(id); continue; }
       if (a.desk === desktopId && now - a.at > BUILD_GRACE_MS) {
+        if (this._isKept(desktopId, id)) { this._buildAttempts.delete(id); continue; } // the server kept it against this page's drop: carried as the record holds it (inc-mw1ogdno-5jny)
         // UNBUILT IS NOT DROPPED (lane layout-stopped-window): a SESSION window stays in the record (the restore shows it as a
         // placeholder); only a duplicate of a session this page already shows live is settled (as before)
         const entry = (held.windows || []).find((w) => String(w && (w.winId || w.id)) === id);
         const dup = entry?.openSpec?.action === 'attachSession' && entry.openSpec.serverId && [...this.app.wm.windows.values()].some((w) => w._openSpec?.serverId === entry.openSpec.serverId);
         if (isSession(entry) && !dup) { this._buildAttempts.delete(id); continue; } // kept as the record holds it: the next build of this desktop (a visit, a reload) shows it
-        out.push(id); this._noteDeparted(id, 'unbuilt');
+        // A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN (userW inc-mw1ogdno-5jny): the copy leaves with the window that shows its session
+        // (`by`) — once the server holds that window (listed on the wire for its desktop); until then it stays and waits
+        const shower = dup ? this._showerOf(entry.openSpec.serverId, id) : null;
+        if (dup && !shower) continue;
+        out.push(id); if (shower) this._noteDeparted(id, 'dup', shower); else this._noteDeparted(id, 'unbuilt');
       }
     }
     return out;
@@ -402,7 +421,17 @@ export class DesktopManager {
     const lm = this.app.layoutManager;
     const rec = msg.state && typeof msg.state === 'object' ? msg.state : { windows: [] };
     this.noteStamp(d, rec.updatedAt); // the record kept is the base of the re-send (a 'stale' refusal: the page adopts it — lane layout-stale-record-sync)
+    const dupDrops = new Set((msg.unexplained || []).map(String).filter((id) => this._departed.get(id)?.why === 'dup')); // this page's own cleanup — no person asked for it, nothing to tell them
     for (const id of msg.unexplained || []) { this._buildAttempts.delete(String(id)); this._departed.delete(String(id)); }
+    // THE RECONCILED RE-SEND CARRIES WHAT THE PAGE DID NOT BUILD (userW inc-mw1ogdno-5jny): each window the server kept against this
+    // page's drop is carried as the server's row, verbatim, and never dropped again by this page (a duplicate, an unbuilt window)
+    // until the person closes it or the page reloads — the loop cannot exist by construction
+    if (msg.reason === 'shrink-without-close') for (const id of msg.unexplained || []) this._keep(d, id);
+    // THE BREAKER: the refusal's identity (PURE refusalKey — the desktop, the reason, what it refused) and the record it refused
+    const key = refusalKey({ desktopId: d, reason: msg.reason, unexplained: msg.unexplained, fields: msg.fields, windows: msg.windows });
+    const refusals = this._refusals || (this._refusals = new Map()), was = refusals.get(d);
+    const ref = { key, n: was && was.key === key ? was.n + 1 : 1, json: this._sentJson?.get(d) || null, said: !!(was && was.key === key && was.said) };
+    refusals.set(d, ref);
     // the windows this page built there through THE ONE CAPTURE: a phone's re-send carries the kept record's arrangement,
     // never its own z (phone-arrangement-verify F2: the reconciled re-send wrote the phone's z, a desktop's reload restacked)
     this._setRecord(d, mergeDesktopRecord({ record: rec, built: this.captureBuilt(d, rec), remove: lm.heldCloseIds?.() || [] }));
@@ -410,12 +439,99 @@ export class DesktopManager {
     let opened = 0;
     if (d === this._activeId && !this.app.stage?.isActive) opened = this._replayMissing(d, this._savedStates.get(d));
     if (d !== this._activeId) this._dirtyDesks.add(d);
-    lm.rearmSave?.();
+    // the rearm only when the record this page would write NOW is not the one refused (the breaker — a refused record is never
+    // re-sent unchanged: held until the person's act or a reload changes it)
+    const same = ref.json != null && ref.json === this._writeJson(d, this.recordFor(d));
+    if (!same) lm.rearmSave?.();
     this._renderSwitcher(); this.refreshSwitcher();
     const n = (msg.unexplained || []).length;
     const name = this._desktops.find((x) => x.id === d)?.name || d;
-    try { window.__vsOp?.('layout-sync-refused', { desk: d, n, opened }); } catch { }
-    if (n) showToast(t('{n} windows on “{desktop}” were kept — this page had not opened them yet', { n, desktop: name }), { type: 'warn', duration: 8000 });
+    try { window.__vsOp?.('layout-sync-refused', { desk: d, n, opened, again: ref.n, held: same }); } catch { }
+    // ≥ 2 refusals of one key: the page and the server disagree — said ONCE, never a cadence
+    if (ref.n >= 2 && !ref.said) {
+      ref.said = true;
+      showToast(t('This page and the server disagree about desktop “{desktop}” — reload to take the server\'s record', { desktop: name }), { type: 'warn', duration: 12000, action: { label: t('Reload now'), run: () => location.reload() } });
+      return;
+    }
+    const told = (msg.unexplained || []).map(String).filter((id) => !dupDrops.has(id));
+    if (told.length) this._sayRefusal(d, msg.reason, told, rec, name);
+  }
+
+  /** ONE TOAST PER CAUSE (userW inc-mw1ogdno-5jny — a warn every 500 ms): a refusal's toast names the windows the server kept and
+   *  is said once per desktop and reason in REFUSAL_TOAST_MS; a repeat inside it is counted, and the next one says the count. */
+  _sayRefusal(desk, reason, ids, rec, name) {
+    const said = this._refusalToasts || (this._refusalToasts = new Map());
+    const k = desk + '|' + reason, now = Date.now(), s = said.get(k);
+    if (s && now - s.at < REFUSAL_TOAST_MS) { s.count++; return false; }
+    const titles = ids.map((id) => { const w = (rec?.windows || []).find((x) => String(x && (x.winId || x.id)) === id); const nm = w ? [...namesOf(w)][0] : null; return '“' + String(nm || id).slice(0, 40) + '”'; });
+    const names = titles.length > 3 ? titles.slice(0, 3).join(', ') + ' +' + (titles.length - 3) : titles.join(', ');
+    const times = s ? s.count + 1 : 1;
+    said.set(k, { at: now, count: 0 });
+    showToast(times > 1 ? t('{names} on “{desktop}” were kept — this page had not opened them yet (refused {n} times)', { names, desktop: name, n: times }) : t('{names} on “{desktop}” were kept — this page had not opened them yet', { names, desktop: name }), { type: 'warn', duration: 8000 });
+    return true;
+  }
+
+  /** The text of a write of `desktopId`: its record and its base — what the breaker compares (a re-send on a new base is a new write). */
+  _writeJson(desktopId, state) { return JSON.stringify({ state, base: this.stampOf(desktopId) ?? null }); }
+
+  /** THE BREAKER (layout.js _doAutoSave asks before each send): `state` is the very record the server refused last for `desktopId`. */
+  holdsBack(desktopId, state) {
+    const r = this._refusals?.get(desktopId);
+    return !!(r && r.json != null && r.json === this._writeJson(desktopId, state));
+  }
+
+  _keep(desktopId, id) { if (!desktopId || id == null) return; const kept = this._kept || (this._kept = new Map()); let s = kept.get(desktopId); if (!s) { s = new Set(); kept.set(desktopId, s); } s.add(String(id)); }
+  _isKept(desktopId, id) { const s = this._kept?.get(desktopId); return !!(s && s.has(String(id))); }
+
+  /** The window this page shows server session `serverId` in (built, on a desktop — never the stage) that the server holds (the wire
+   *  lists it for its desktop) — the `by` of a duplicate's evidence; null = none. */
+  _showerOf(serverId, notId = null) {
+    if (!serverId) return null;
+    for (const w of this.app.wm.windows.values()) {
+      if (String(w.id) === String(notId) || w._onStage || w._desktopId === '__stage__') continue;
+      if (w._openSpec?.action !== 'attachSession' || w._openSpec.serverId !== serverId) continue;
+      if (this.wireListed(w._desktopId || this._activeId, w.id)) return String(w.id);
+    }
+    return null;
+  }
+
+  /** ONE CONVERSATION, ONE WINDOW ENTRY (userW inc-mw1ogdno-5jny): a held record that lists a session this page SHOWS (a built window
+   *  the server holds) under another window id holds a stale copy — it leaves that record with evidence {id, why: 'dup', by} (the
+   *  dedup is its own evidence, never a silent delete) and a desktop not on show goes out with the next save (PURE duplicatesOf).
+   *  A copy the server kept against this page, or one this page has built, stays. Returns the count. */
+  normalizeDups() {
+    const shown = new Map();
+    for (const w of this.app.wm.windows.values()) {
+      const sid = w._openSpec?.action === 'attachSession' ? w._openSpec.serverId : null;
+      if (sid && !shown.has(sid)) { const by = this._showerOf(sid); if (by) shown.set(sid, by); }
+    }
+    if (!shown.size) return 0;
+    let n = 0;
+    for (const x of duplicatesOf({ records: this._savedStates, shown })) {
+      if (x.desk === '__stage__' || this._isKept(x.desk, x.id) || this.app.wm.windows.has(x.id)) continue;
+      this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id] }));
+      this._buildAttempts.delete(x.id);
+      this._noteDeparted(x.id, 'dup', x.by);
+      if (x.desk !== this._activeId) this._dirtyDesks.add(x.desk);
+      n++;
+    }
+    return n;
+  }
+
+  /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
+   *  attachSession, not a replay) whose window waits in the held record of ANOTHER desktop this page has not built goes to that
+   *  desktop — its switch builds the window — never a second window on the desktop on show. true = switched. */
+  revealHeldSession(serverId) {
+    if (!serverId || this.app.stage?.isActive) return false;
+    for (const [desk, st] of this._savedStates) {
+      if (desk === '__stage__' || desk === this._activeId || !this._desktops.some((x) => x.id === desk)) continue;
+      const e = (st?.windows || []).find((w) => w && w.openSpec && sessionOf(w) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
+      if (!e) continue;
+      try { window.__vsOp?.('desktop-reveal-held', { desk, win: String(e.winId || e.id) }); } catch { }
+      Promise.resolve(this.switchTo(desk)).catch((e) => console.warn('[desktop] the switch to the conversation\'s desktop failed', e));
+      return true;
+    }
+    return false;
   }
 
   /** Open the held windows of `desktopId` that the page does not have yet (openSpec-backed; one already being built
@@ -811,6 +927,7 @@ export class DesktopManager {
   _broadcastDesktopState(desktopId, state) {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
     if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop deleted meanwhile: its record is nobody's to write (verify r2 ④ — the switch off it wrote an orphan record on the server)
+    if (this.holdsBack(desktopId, state)) return; // THE BREAKER (inc-mw1ogdno-5jny): the very record the server refused is never re-sent
     const sentAt = Date.now();
     this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });
     this.app.layoutManager?.noteLayoutSent?.([desktopId], sentAt); // this record carries every close made on that desktop (inc-mukeyzpt-lpou) — released once the server READ it (verify r5 ⑤)

@@ -1,0 +1,298 @@
+{
+ "_shape": "userW inc-mw1ogdno-5jny (2.369.374), anonymized: ids, titles, paths and session ids invented; the STRUCTURE kept — one live conversation (server session S) listed under THREE desktops' records with three window ids; the page shows it on X; V holds five windows (the journal's «5 → 4»)",
+ "desktopMeta": [
+  {
+   "id": "desk-x",
+   "name": "Desk X"
+  },
+  {
+   "id": "desk-y",
+   "name": "Desk Y"
+  },
+  {
+   "id": "desk-v",
+   "name": "Desk V"
+  }
+ ],
+ "current": null,
+ "saved": {},
+ "customGrids": [],
+ "desktops": {
+  "desk-x": {
+   "autoSave": {
+    "windows": [
+     {
+      "winId": "win-x-s",
+      "title": "Atlas notes — /srv/u/atlas",
+      "type": "chat",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 100,
+      "openSpec": {
+       "action": "attachSession",
+       "serverId": "sess-7-41000",
+       "name": "Atlas notes",
+       "cwd": "/srv/u/atlas",
+       "mode": "chat",
+       "backend": "claude",
+       "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+       "hostId": null
+      },
+      "serverSessionId": "sess-7-41000",
+      "backend": "claude",
+      "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+      "cwd": "/srv/u/atlas"
+     },
+     {
+      "winId": "x-1",
+      "title": "x-1.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.3333333333333333,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 11,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/x-1.md"
+      },
+      "filePath": "/srv/u/x-1.md",
+      "fileName": "x-1.md"
+     },
+     {
+      "winId": "x-2",
+      "title": "x-2.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.6666666666666666,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 12,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/x-2.md"
+      },
+      "filePath": "/srv/u/x-2.md",
+      "fileName": "x-2.md"
+     }
+    ],
+    "grid": null,
+    "updatedAt": 1000
+   }
+  },
+  "desk-y": {
+   "autoSave": {
+    "windows": [
+     {
+      "winId": "y-1",
+      "title": "y-1.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 10,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/y-1.md"
+      },
+      "filePath": "/srv/u/y-1.md",
+      "fileName": "y-1.md"
+     },
+     {
+      "winId": "win-y-s",
+      "title": "Atlas notes — /srv/u/atlas",
+      "type": "chat",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.3333333333333333,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 101,
+      "openSpec": {
+       "action": "attachSession",
+       "serverId": "sess-7-41000",
+       "name": "Atlas notes",
+       "cwd": "/srv/u/atlas",
+       "mode": "chat",
+       "backend": "claude",
+       "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+       "hostId": null
+      },
+      "serverSessionId": "sess-7-41000",
+      "backend": "claude",
+      "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+      "cwd": "/srv/u/atlas"
+     },
+     {
+      "winId": "y-2",
+      "title": "y-2.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.6666666666666666,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 12,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/y-2.md"
+      },
+      "filePath": "/srv/u/y-2.md",
+      "fileName": "y-2.md"
+     }
+    ],
+    "grid": null,
+    "updatedAt": 1000
+   }
+  },
+  "desk-v": {
+   "autoSave": {
+    "windows": [
+     {
+      "winId": "v-1",
+      "title": "v-1.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 10,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/v-1.md"
+      },
+      "filePath": "/srv/u/v-1.md",
+      "fileName": "v-1.md"
+     },
+     {
+      "winId": "v-2",
+      "title": "v-2.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.3333333333333333,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 11,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/v-2.md"
+      },
+      "filePath": "/srv/u/v-2.md",
+      "fileName": "v-2.md"
+     },
+     {
+      "winId": "win-v-s",
+      "title": "Atlas notes — /srv/u/atlas",
+      "type": "chat",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.6666666666666666,
+       "top": 0,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 102,
+      "openSpec": {
+       "action": "attachSession",
+       "serverId": "sess-7-41000",
+       "name": "Atlas notes",
+       "cwd": "/srv/u/atlas",
+       "mode": "chat",
+       "backend": "claude",
+       "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+       "hostId": null
+      },
+      "serverSessionId": "sess-7-41000",
+      "backend": "claude",
+      "backendSessionId": "a71a5000-0000-4000-8000-000000000007",
+      "cwd": "/srv/u/atlas"
+     },
+     {
+      "winId": "v-3",
+      "title": "v-3.md",
+      "type": "viewer",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0,
+       "top": 0.5,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 13,
+      "openSpec": {
+       "action": "openFile",
+       "path": "/srv/u/v-3.md"
+      },
+      "filePath": "/srv/u/v-3.md",
+      "fileName": "v-3.md"
+     },
+     {
+      "winId": "win-v-t",
+      "title": "Bramble log — /srv/u/atlas",
+      "type": "chat",
+      "isMinimized": false,
+      "isMaximized": false,
+      "gridBounds": {
+       "left": 0.3333333333333333,
+       "top": 0.5,
+       "width": 0.3333333333333333,
+       "height": 0.5
+      },
+      "zIndex": 104,
+      "openSpec": {
+       "action": "attachSession",
+       "serverId": "sess-9-41000",
+       "name": "Bramble log",
+       "cwd": "/srv/u/atlas",
+       "mode": "chat",
+       "backend": "claude",
+       "backendSessionId": "b71a5000-0000-4000-8000-000000000007",
+       "hostId": null
+      },
+      "serverSessionId": "sess-9-41000",
+      "backend": "claude",
+      "backendSessionId": "b71a5000-0000-4000-8000-000000000007",
+      "cwd": "/srv/u/atlas"
+     }
+    ],
+    "grid": null,
+    "updatedAt": 1000
+   }
+  }
+ }
+}

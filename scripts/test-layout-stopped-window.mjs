@@ -333,6 +333,13 @@ await section('§2 UNBUILT IS NOT DROPPED — the 09:19:35 write on the REAL ws-
   const live = shrinkVerdict({ prev: [named(9)], next: [], evidence: ev([named(9)], 'unbuilt'), alive: (s) => s === named(9).serverSessionId });
   ok(!live.ok && J(live.live) === J(['win-old-9']) && !(live.unbuilt || []).length, '§2 …a LIVE one is refused as before (the 10-22 rule: `live`)', live);
   ok(shrinkVerdict({ prev: [named(9), named(10)], next: [], evidence: ev([named(9), named(10)], 'closed'), alive: () => false }).ok, '§2 …the person\'s CLOSE of stopped session windows passes');
+  // userW inc-mw1ogdno-5jny — the placeholder road vs A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN: a stopped conversation's copy on
+  // ANOTHER desktop leaves only with the window that still shows it there (`by`, a placeholder's entry of the same session); a 'dup'
+  // naming nothing of it is refused as a duplicate claim (`dup`), never taken as 'unbuilt' — the placeholder road keeps the window
+  const other = [{ ...named(9), winId: 'w-elsewhere' }];
+  const away = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: [{ id: 'win-old-9', why: 'dup', by: 'w-elsewhere' }], alive: () => false, elsewhere: [other] });
+  const wrongBy = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: [{ id: 'win-old-9', why: 'dup', by: 'w-nowhere' }], alive: () => false, elsewhere: [other] });
+  ok(away.ok && !wrongBy.ok && J(wrongBy.dup) === J(['win-old-9']) && !(wrongBy.unbuilt || []).length, '§2 inc-mw1ogdno-5jny: a STOPPED session\'s copy leaves as a duplicate only when `by` (another desktop\'s placeholder entry of it) shows it; a `by` naming nothing ⇒ refused, named in `dup`', { away, wrongBy });
 });
 
 await section('§2 the boot restore of that record on a hub whose sessions are stopped — placeholders, kept past the grace', async () => {
