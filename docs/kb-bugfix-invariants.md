@@ -871,7 +871,7 @@
 - (2026-11-04) BULLETS SAT ON THE CARD'S LEFT BORDER IN EVERY CARD BUT THE ASSISTANT'S (hotfix-card-list-indent, 圆点挂在左边框): the list rule was bubble-scoped; the `*` reset zeroed the rest. 不变量 = a markdown list indents by its container, never by which bubble it sits in ⇒ kb-bugfix-invariants.md
 - (2026-11-03) A CODEX CONVERSATION DIED IN SILENCE — THE HUB'S PATH HAD NO CODEX, THE OWNER'S SHELL DID (cli-shell-truth, B-fb02): spawned «as before», dead ~30 s later. 不变量 = a CLI is where the person's login shell finds it; a missing CLI is said before anything is spawned ⇒ kb-bugfix-invariants
 
-## A CODEX CONVERSATION DIED IN SILENCE — THE HUB'S PATH HAD NO CODEX, THE OWNER'S SHELL DID (the owner 2026-11-03 10:31 PT; lane cli-shell-truth, B-fb02, 2.369.375)
+## A CODEX CONVERSATION DIED IN SILENCE — THE HUB'S PATH HAD NO CODEX, THE OWNER'S SHELL DID (the owner 2026-11-03 10:31 PT; lane cli-shell-truth, B-fb02, 2.369.378)
 
 **What happened.** codex was installed with `npm -g` under nvm's node v24.12.0. The hub's systemd unit bakes a PATH with v24.22.1/bin only, so the boot `which` found nothing. Every codex spawn then logged «… re-resolving 'codex' found nothing — spawning it as before», the wrapper died ~30 s later (wrapper=unfinalized socket=gone), and the UI said nothing. `command -v codex` in the owner's zsh found it at once. The box got a symlink in ~/.local/bin as a workaround.
 
