@@ -702,7 +702,16 @@ console.log('— wiring pins');
   ok('index.html lists the opencode option hidden by default', /<option value="opencode" hidden>OpenCode<\/option>/.test(read('public/index.html')));
   const cr = read('src/lib/chat-renderers.js');
   ok('chat-renderers renders ORDERED permission options (harness-neutral) and replies with the chosen optionId', /Array\.isArray\(msg\.permission\.options\) && msg\.permission\.options\.length/.test(cr) && /optionId: o\?\.optionId \|\| null/.test(cr) && /data-option-id="\$\{escHtml\(String\(o\.optionId\)\)\}"/.test(cr));
-  ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in', /opencode: \{\n    pool: false, hotSwitch: 'unverified'[\s\S]{0,200}streamProtocol: 'acp-events'/.test(read('src/backend-caps.js')) && /require\('\.\/opencode'\)/.test(read('src/harnesses/index.js')));
+  // int377 seam (nightly376): the opencode row is pinned on the ROW OBJECT — BACKEND_CAPS.opencode as backend-caps.js' own
+  // text defines it, loaded as a fresh module (the file requires nothing; a fresh copy sees none of this run's registrations) —
+  // never a char window over the text: a {0,200} window broke when cache-warmth-tiles r1a added promptCache to the row (red
+  // since .374 in a binary-host suite the hosted runner never runs). THE CONTROL: a copy with the row removed is RED.
+  const capsText = read('src/backend-caps.js'), rowDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-row-'));
+  const opencodeRowIn = (text, name) => { const f = path.join(rowDir, `${name}.js`); fs.writeFileSync(f, text); const T = require(f).BACKEND_CAPS; return T && Object.prototype.hasOwnProperty.call(T, 'opencode') ? T.opencode : null; };
+  const rowHolds = (r) => !!(r && r.pool === false && r.streamProtocol === 'acp-events' && r.frameFile === true);
+  const ocRow = opencodeRowIn(capsText, 'backend-caps'), noRowText = capsText.replace(/\n  opencode: \{\n[\s\S]*?\n  \},\n/, '\n'), noRow = opencodeRowIn(noRowText, 'backend-caps-no-opencode');
+  fs.rmSync(rowDir, { recursive: true, force: true });
+  ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in — pinned on the ROW OBJECT, and a copy of backend-caps.js with the row removed is RED', rowHolds(ocRow) && /require\('\.\/opencode'\)/.test(read('src/harnesses/index.js')) && noRowText !== capsText && !noRowText.includes('\n  opencode: {') && !rowHolds(noRow), { row: ocRow && { pool: ocRow.pool, streamProtocol: ocRow.streamProtocol, frameFile: ocRow.frameFile }, removed: noRowText !== capsText, noRow });
   ok('mounts-plugins-wiring dispatches SessionMessages through the descriptor for non-claude/codex harnesses', /h\?\.store\?\.SessionMessages\) return new h\.store\.SessionMessages/.test(read('src/server/mounts-plugins-wiring.js')));
   ok('wrapper-files recognises the ACP wrapper in the dtach master argv (collision resolver)', /\(chat\|acp\)-wrapper\\\.js/.test(read('src/server/wrapper-files.js')));
   // 2.369.123: the OpenCode section is DERIVED from the harness's declared table (src/harness-settings.js) — the rows are
