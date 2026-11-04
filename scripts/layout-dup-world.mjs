@@ -34,7 +34,10 @@ export const mkEl = (tag = 'div') => {
   made.push(el);
   return el;
 };
-globalThis.document = { createElement: mkEl, createElementNS: (ns, t) => mkEl(t), getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], body: mkEl('body'), documentElement: { style: { getPropertyValue: () => '', setProperty() {}, removeProperty() {} }, classList: { add() {}, remove() {} } }, addEventListener() {}, removeEventListener() {}, hidden: false };
+const docListeners = []; // the document's listeners (r3): a person's key / pointer press reaches every page's (press)
+globalThis.document = { createElement: mkEl, createElementNS: (ns, t) => mkEl(t), getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], body: mkEl('body'), documentElement: { style: { getPropertyValue: () => '', setProperty() {}, removeProperty() {} }, classList: { add() {}, remove() {} } }, addEventListener: (ev, fn) => { docListeners.push([ev, fn]); }, removeEventListener() {}, hidden: false };
+/** a person's press (r3 H): `ev` dispatched to the document's listeners — every page in the process hears it (one person, one keyboard) */
+export const press = (ev = 'keydown') => { for (const [e, fn] of docListeners) if (e === ev) fn({ type: ev, isTrusted: true }); };
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {}; globalThis.dispatchEvent = () => true;
 globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
@@ -76,12 +79,15 @@ export const loadHandler = (over = {}) => {
   for (const [k, v] of Object.entries(over)) { saved[k] = DR[k]; DR[k] = v; }
   try { return require(WSH_PATH); } finally { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete DR[k]; else DR[k] = saved[k]; } delete require.cache[WSH_PATH]; }
 };
-export function hub(WSH, seed, { alive = [S, T] } = {}) {
-  let layouts = JSON.parse(J(seed)), writes = 0, peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
+/** `file` (r3): layouts.json ON DISK — a hub built later over the same file is a NEW PROCESS over the same data/ (its memory
+ *  empty, its sockets new); `seed` null = the file as it is */
+export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
+  if (file && seed != null) fs.writeFileSync(file, J(seed));
+  let layouts = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : JSON.parse(J(seed)), writes = 0, peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
   const logs = [], tele = [];
   const quietly = async (fn) => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { return await fn(); } finally { console.warn = REAL.warn; console.log = REAL.log; } };
   const sessions = new Map(alive.map((sid) => [sid, { clients: new Map() }])); // each live session's viewers, as the attach case keeps them (`session.clients`)
-  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); if (file) fs.writeFileSync(file, J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -89,11 +95,13 @@ export function hub(WSH, seed, { alive = [S, T] } = {}) {
     const h = {}, frames = [];
     const sock = { readyState: 1, send: (s) => { const f = JSON.parse(s); frames.push(f); if (reply) setTimeout(() => reply(f), 1); }, on: (ev, fn) => { h[ev] = fn; } };
     wss.clients.add(sock); console.warn = () => {}; try { on.connection(sock); } finally { console.warn = REAL.warn; }
-    return { frames, sock, send: (m) => quietly(() => h.message(J(m))) };
+    return { frames, sock, send: (m) => quietly(() => h.message(J(m))), close: () => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { h.close?.(); } finally { console.warn = REAL.warn; console.log = REAL.log; } } }; // synchronous: the caller's next line logs as itself
   };
   /** the attach case's effect (src/ws-handler.js `session.clients.set(ws, …)`): this socket now shows session `sid` */
   const attach = (S0, sid) => { const s = sessions.get(sid); if (s && S0 && S0.sock) s.clients.set(S0.sock, {}); };
-  const hangUp = (S0) => { if (!S0 || !S0.sock) return; S0.sock.readyState = 3; for (const [, s] of sessions) s.clients.delete(S0.sock); };
+  // a socket that CLOSES (r3): the real close handler runs first (it reads which sessions the socket showed), then the attach
+  // bookkeeping the real handler keeps per connection is undone here, and the ws library forgets the socket
+  const hangUp = (S0) => { if (!S0 || !S0.sock || S0.sock.readyState === 3) return; S0.sock.readyState = 3; S0.close?.(); wss.clients.delete(S0.sock); for (const [, s] of sessions) s.clients.delete(S0.sock); };
   return { connect, attach, hangUp, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
 }
 export const refusals = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-refused');
@@ -104,17 +112,18 @@ export const RealDM = (await import(pathToFileURL(path.join(LIB, 'desktop-manage
 export const RealLM = (await import(pathToFileURL(path.join(LIB, 'layout.js')).href)).LayoutManager;
 let minted = 0;
 export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H = null, refuseAll = null, extra = {} } = {}) {
-  const sent = [], handlers = [], closed = [], ops = [];
+  const sent = [], handlers = [], closed = [], ops = [], stateFns = [], queued = [];
   const wins = new Map();
   let dm = null, lm = null, seq = 0, sock = null;
   const mkWin = (id, desk, o = {}) => { if (H && sock && o._openSpec && o._openSpec.action === 'attachSession') H.attach(sock, o._openSpec.serverId); const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'viewer', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), _listenerCtl: new AbortController(), ...o }; wins.set(id, w); return w; };
   const toPage = (f) => { for (const h of handlers) h(f); };
   if (H) sock = H.connect(toPage);
   const app = {
-    ws: { onGlobal: (fn) => handlers.push(fn), onStateChange() {}, connected: true, request: () => () => {}, attachesInFlight: () => 0,
+    ws: { onGlobal: (fn) => handlers.push(fn), onStateChange: (fn) => stateFns.push(fn), connected: true, request: () => () => {}, attachesInFlight: () => 0,
       send: (m) => {
         const c = JSON.parse(J(m)); sent.push(c);
         if (c.type !== 'layout-sync') return;
+        if (sock && sock.sock.readyState !== 1) { queued.push(c); return; } // ws.js: a send while down waits in `pending` for the next socket
         if (sock) { sock.send(c); return; }
         const keep = refuseAll ? refuseAll(c) : null; // the fake server's verdict: a record to keep ⇒ refused, nothing ⇒ acked
         if (keep) { setTimeout(() => toPage({ type: 'layout-sync-refused', desktopId: c.desktopId, reason: 'shrink-without-close', unexplained: [], arrived: [], state: keep, sentAt: c.sentAt ?? null }), 2); return; }
@@ -148,7 +157,20 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
   for (const w of records[active] || []) mkWin(w.winId, active, { type: w.type, title: w.title, gridBounds: w.gridBounds, _openSpec: w.openSpec });
   lm._restoring = false; lm._userDirty = true; lm._lastUserInputAt = Date.now();
   const act = () => { lm._userDirty = true; lm._lastUserInputAt = Date.now(); lm.scheduleAutoSave(); }; // a person's input that schedules a save
-  return { app, dm, lm, wins, sent, mkWin, handlers, closed, ops, act, syncs: (d) => sent.filter((m) => m.type === 'layout-sync' && (!d || m.desktopId === d)) };
+  const state = (up) => { app.ws.connected = up; for (const fn of stateFns) fn(up); };
+  /** the page's socket drops (r3): the hub's close handler runs; the page notices (layout.js's onStateChange(false)) */
+  const hangUp = () => { if (!H || !sock) return; H.hangUp(sock); state(false); };
+  /** the page comes back on a NEW socket to `H2` (the same hub, or a new process): ws.js's order — the open, the state handlers
+   *  (layout.js re-reads /api/layouts 250 ms later), the sends queued while down; every session window it shows re-attaches */
+  const reconnect = (H2 = H) => {
+    H = H2; sock = H2.connect(toPage);
+    for (const w of wins.values()) if (w._openSpec && w._openSpec.action === 'attachSession') H2.attach(sock, w._openSpec.serverId);
+    globalThis.fetch = async () => ({ ok: true, json: async () => JSON.parse(J(H2.layouts())) });
+    if (!lm._connects) lm._connects = 1; // the page's first connect was before this world began
+    state(true);
+    for (const c of queued.splice(0)) sock.send(c);
+  };
+  return { app, dm, lm, wins, sent, mkWin, handlers, closed, ops, act, hangUp, reconnect, sock: () => sock, syncs: (d) => sent.filter((m) => m.type === 'layout-sync' && (!d || m.desktopId === d)) };
 }
 /** a switch, settled (the switch holds `_restoring` 1 s; its replay's timers 500 ms) */
 export const switchTo = async (W, d) => { await W.dm.switchTo(d); await tick(1150); };

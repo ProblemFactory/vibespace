@@ -28,6 +28,10 @@ const DEPARTED_CAP = 200;
 const REFUSAL_TOAST_MS = 30000;
 /** The entries of `record` whose recorded tab chain names `id`, each with the chain read WITHOUT it (chain-layout withoutMembers:
  *  the host promoted, a split that lost its pair decided there) — none left to group ⇒ the entry stands alone (r2). */
+/** `record` with every row's tab chain read WITHOUT `ids` (chain-layout withoutMembers; a row left alone stands alone) — r3 G. */
+function chainsWithout(record, ids) {
+  return ids.reduce((r, id) => mergeDesktopRecord({ record: r, add: chainWithout(r, id) }), record); // THE ONE writer: `add` replaces each row in place
+}
 function chainWithout(record, id) {
   const out = [];
   for (const w of (record && record.windows) || []) {
@@ -76,8 +80,11 @@ export class DesktopManager {
     app.ws.onGlobal((msg) => {
       if (msg.type === 'desktop-updated') this._onRemoteDesktopUpdated(msg);
       else if (msg.type === 'layout-sync-refused') this.onSyncRefused(msg);
-      else if (msg.type === 'layout-sync-ack' && msg.desktopId) this._refusals?.delete(msg.desktopId); // a write of it was accepted: the disagreement is over
+      else if (msg.type === 'layout-sync-ack' && msg.desktopId) { this._refusals?.delete(msg.desktopId); this._settleAsked(msg.desktopId, true, msg.sentAt); } // a write of it was accepted: the disagreement is over (and a dedup it carried stands — r3 G)
     });
+    // A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H): a press of a key or a pointer anywhere is the person's act — a reveal still
+    // waiting for its window retires (_revealWhenBuilt)
+    try { for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, () => this._noteAct(), { capture: true, passive: true }); } catch { }
 
     // Taskbar resize handle (drag top edge to resize)
     this._setupTaskbarResize();
@@ -300,7 +307,7 @@ export class DesktopManager {
       return true;
     });
     const unbuilt = this._unbuilt(desktopId, held);
-    lm.dropUnbuiltMembers?.(unbuilt); // a chain waiting for a window the page could not build is rebuilt without it
+    lm.dropUnbuiltMembers?.(unbuilt.filter((id) => !this._isAsked(desktopId, id))); // a chain waiting for a window the page could not build is rebuilt without it (a dedup's waits for the hub's verdict — r3 G)
     // a PHONE writes membership, never arrangement (§6b guard 10): the boxes, z, maximize / minimize / snap of the windows
     // it built — and every record field outside the workspace (the grid, the sidebar, the bars, the theme, the fonts:
     // PHONE_KEEPS) — are the held record's, verbatim (PURE captureForViewport; the server's layerGate refuses anything else)
@@ -315,7 +322,12 @@ export class DesktopManager {
     const nameless = windowIds((merged.windows || []).filter((w) => isNameless(w) && !(wire && wire.has(String(w.winId || w.id)))));
     for (const id of nameless) this._noteDeparted(id, 'nameless');
     if (nameless.length && desktopId !== this._activeId) this._dirtyDesks.add(desktopId);
-    const rec = nameless.length ? mergeDesktopRecord({ record: merged, remove: nameless }) : merged;
+    const named = nameless.length ? mergeDesktopRecord({ record: merged, remove: nameless }) : merged;
+    // A REFUSAL LEAVES THE RECORD EXACTLY AS IT WAS (r3 G): a dedup this page proposes reads its group without the copy IN THE
+    // RECORD it sends (every row that names it — the members' captures still carry the waiting chain); the page's own group
+    // re-forms only when the hub accepts (the ack — _settleAsked), and a refusal leaves it as it stood
+    const asked = [...(this._dupAsked?.get(desktopId)?.keys() || [])];
+    const rec = asked.length ? chainsWithout(named, asked) : named;
     const { grid, ...chrome } = lm.captureChrome();
     if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];
     Object.assign(rec, chrome);
@@ -357,9 +369,11 @@ export class DesktopManager {
   }
 
   /** A record of `desktopId` left this page (sent to the server): it is now the view's base, and the wire's. */
-  noteSent(desktopId, state) {
+  noteSent(desktopId, state, sentAt = null) {
     if (!desktopId || desktopId === '__stage__' || !state) return;
     (this._sentJson || (this._sentJson = new Map())).set(desktopId, this._writeJson(desktopId, state)); // what a refusal of it refused (the breaker's witness)
+    const asked = this._dupAsked?.get(desktopId), listed = new Set(windowIds(state));
+    if (asked) for (const [id, a] of asked) if (!listed.has(id) && a.sentAt == null) a.sentAt = sentAt ?? Date.now(); // a dedup this write proposes: its verdict is THIS write's answer (r3 G)
     this._setRecord(desktopId, state);
     this.noteWire(desktopId, state);
   }
@@ -416,7 +430,7 @@ export class DesktopManager {
         // (`by`) — once the server holds that window (listed on the wire for its desktop); until then it stays and waits
         const shower = dup ? this._showerOf(entry.openSpec.serverId, id) : null;
         if (dup && !shower) continue;
-        out.push(id); if (shower) this._noteDeparted(id, 'dup', shower); else this._noteDeparted(id, 'unbuilt');
+        out.push(id); if (shower) { this._noteDeparted(id, 'dup', shower); this._ask(desktopId, id); } else this._noteDeparted(id, 'unbuilt');
       }
     }
     return out;
@@ -438,6 +452,7 @@ export class DesktopManager {
     this.noteStamp(d, rec.updatedAt); // the record kept is the base of the re-send (a 'stale' refusal: the page adopts it — lane layout-stale-record-sync)
     const dupDrops = new Set((msg.unexplained || []).map(String).filter((id) => this._departed.get(id)?.why === 'dup')); // this page's own cleanup — no person asked for it, nothing to tell them
     for (const id of msg.unexplained || []) { this._buildAttempts.delete(String(id)); this._departed.delete(String(id)); }
+    this._settleAsked(d, false); // A REFUSAL LEAVES THE RECORD EXACTLY AS IT WAS (r3 G): a dedup it refused shrank no group here — the record below is the server's + the page's untouched captures
     // THE RECONCILED RE-SEND CARRIES WHAT THE PAGE DID NOT BUILD (userW inc-mw1ogdno-5jny): each window the server kept against this
     // page's drop is carried as the server's row, verbatim, and never dropped again by this page (a duplicate, an unbuilt window)
     // until the person closes it or the page reloads — the loop cannot exist by construction
@@ -495,6 +510,21 @@ export class DesktopManager {
     return !!(r && r.json != null && r.json === this._writeJson(desktopId, state));
   }
 
+  /** A DEDUP ASKED OF THE HUB (r3 G): desktopId → Map(id → {sentAt}) — the `sentAt` of the first write that left it out (noteSent). */
+  _ask(desktopId, id) { if (!desktopId || id == null) return; const m = this._dupAsked || (this._dupAsked = new Map()); let s = m.get(desktopId); if (!s) { s = new Map(); m.set(desktopId, s); } if (!s.has(String(id))) s.set(String(id), { sentAt: null }); }
+  _isAsked(desktopId, id) { return !!this._dupAsked?.get(desktopId)?.has(String(id)); }
+  /** The hub's answer to a write of `desktopId` (its `sentAt`): the ack of the write that carried a dedup (or of a later one) ⇒ it
+   *  stands — the page's own waiting group re-forms without the copy (layout.js dropUnbuiltMembers); an ack of an earlier write
+   *  settles nothing; a refusal ⇒ nothing of it was done here — forgotten (the copy is the server's again). */
+  _settleAsked(desktopId, accepted, sentAt = null) {
+    const s = this._dupAsked?.get(desktopId);
+    if (!s) return;
+    const done = [...s].filter(([, a]) => !accepted || (a.sentAt != null && (sentAt == null || sentAt >= a.sentAt))).map(([id]) => id);
+    for (const id of done) s.delete(id);
+    if (!s.size) this._dupAsked.delete(desktopId);
+    if (accepted && done.length) this.app.layoutManager?.dropUnbuiltMembers?.(done);
+  }
+
   _keep(desktopId, id) { if (!desktopId || id == null) return; const kept = this._kept || (this._kept = new Map()); let s = kept.get(desktopId); if (!s) { s = new Set(); kept.set(desktopId, s); } s.add(String(id)); }
   _isKept(desktopId, id) { const s = this._kept?.get(desktopId); return !!(s && s.has(String(id))); }
 
@@ -524,10 +554,10 @@ export class DesktopManager {
     let n = 0;
     for (const x of duplicatesOf({ records: this._savedStates, shown })) {
       if (x.desk === '__stage__' || this._isKept(x.desk, x.id) || this.app.wm.windows.has(x.id)) continue;
-      // A DEDUPED COPY LEAVES ITS TAB GROUP TOO (r2): the members' recorded chain is read without it, and a chain still waiting
-      // for it is told — the road an unbuilt departure takes (dropUnbuiltMembers); else the group waits for it for ever
+      // A DEDUPED COPY LEAVES ITS TAB GROUP TOO (r2): the members' recorded chain is read without it, and — once the hub accepts
+      // (r3 G) — a chain still waiting for it is told: the road an unbuilt departure takes (dropUnbuiltMembers)
       this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id], add: chainWithout(this._savedStates.get(x.desk), x.id) }));
-      this.app.layoutManager?.dropUnbuiltMembers?.([x.id]);
+      this._ask(x.desk, x.id); // …and the page's own group waits for the hub's verdict (r3 G: a refusal leaves every group as it was)
       this._buildAttempts.delete(x.id);
       this._noteDeparted(x.id, 'dup', x.by);
       if (x.desk !== this._activeId) this._dirtyDesks.add(x.desk);
@@ -536,13 +566,20 @@ export class DesktopManager {
     return n;
   }
 
-  /** Reveal `id` (a person named it — never the replay's raise) once the window exists and its group, if any, has re-formed;
-   *  given up after ~5 s (a window the page cannot build is the placeholder road's). */
-  _revealWhenBuilt(id, tries = 50) {
+  /** A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H — the r2 acceptance: a reveal that waited ~5 s for a slow group pulled the
+   *  person back to the conversation's desktop at 4.0 s / 5.7 s): every act of the person (a key or pointer press, an open, a
+   *  desktop switch) starts a new generation; a deferred reveal acts only in the generation it was asked in. */
+  _noteAct() { this._revealGen = (this._revealGen || 0) + 1; }
+
+  /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists and its group, if any, has
+   *  re-formed — only while nothing has happened since the open that named it (`gen` is still the generation, `desk` still on
+   *  show); a wait that runs out (~5 s — a window the page cannot build is the placeholder road's) reveals NOTHING. */
+  _revealWhenBuilt(id, desk, gen, tries = 50) {
+    if ((this._revealGen || 0) !== gen || this._activeId !== desk) return; // the person moved on: the reveal retires
     const wm = this.app.wm;
     const waiting = !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id);
-    if (waiting && tries > 0) { setTimeout(() => this._revealWhenBuilt(id, tries - 1), 100); return; }
-    if (wm.windows.has(id)) wm.revealWindow?.(id);
+    if (waiting) { if (tries > 0) setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }
+    wm.revealWindow?.(id);
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
@@ -559,7 +596,10 @@ export class DesktopManager {
       // A PERSON'S OPEN REVEALS THE CONVERSATION (r2; inc-muiq348r-jwb5's rule — the USER named it ⇒ wm.revealWindow, its own tab
       // even when it is a guest of a group that shows another): the switch builds the desktop (its groups with the record's active
       // tab), then the window is revealed once it stands and no group is still re-forming around it
-      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id)).catch((err) => console.warn('[desktop] the switch to the conversation\'s desktop failed', err));
+      // A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H): the open is an act (a reveal still waiting from an earlier one retires);
+      // this one belongs to the generation after its own switch
+      this._noteAct();
+      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id, desk, this._revealGen || 0)).catch((err) => console.warn('[desktop] the switch to the conversation\'s desktop failed', err));
       return true;
     }
     return false;
@@ -637,6 +677,21 @@ export class DesktopManager {
     this._wireIds.set(desktopId, new Set(state.windows.map((w) => String(w.winId || w.id))));
   }
 
+  /** WHO IS LOOKING IS A FACT ABOUT THE PAGE, NOT A STATE OF ITS SOCKET (r3 F, userW inc-mw1ogdno-5jny — the r2 acceptance: a page
+   *  whose socket was down when another page's dedup was accepted closed, at its reconnect's re-read, the window it was showing):
+   *  `win` is a session window this page has BUILT (it shows that conversation) and the record of `desk` dropped it as a duplicate
+   *  the hub let go (`dupsLeft` — the hub's trace, relayed with the write and read back by every re-read). Then no record closes
+   *  it: kept, its desktop owed (the next save lists it again — the hub learns it). true = kept. Nothing is said (law C). */
+  keepsShown(win, desk, dupsLeft) {
+    if (!win || !Array.isArray(dupsLeft) || win._onStage || win._desktopId === '__stage__') return false;
+    if (win._openSpec?.action !== 'attachSession' || !win._openSpec.serverId) return false;
+    if (!dupsLeft.some((e) => e && String(e.id) === String(win.id))) return false;
+    const d = desk || win._desktopId || this._activeId;
+    if (d !== this._activeId) this._dirtyDesks.add(d);
+    try { window.__vsOp?.('layout-dup-kept', { desk: d, win: String(win.id) }); } catch { }
+    return true;
+  }
+
   /** Did the last record of `desktopId` on the wire list `winId`? (A reconnect's re-read may close only these.) */
   wireListed(desktopId, winId) {
     const base = this._wireIds.get(desktopId);
@@ -650,13 +705,17 @@ export class DesktopManager {
    *  this client's next save wrote it back to every other client. A window the wire never listed for that desktop
    *  (moved or opened here, not yet sent) is this client's own change and stays; a window on show (the stage) is
    *  never touched. The closes are not this user's (no held close, no save: `_restoring` around them). */
-  cacheRemoteState(desktopId, state, { receivedAt = Date.now() } = {}) {
+  cacheRemoteState(desktopId, state, { receivedAt = Date.now(), dupsLeft = null } = {}) {
     const base = this._wireIds.get(desktopId);
     const now = new Set(((state && state.windows) || []).map((w) => String(w.winId || w.id)));
     // …unless another desktop's record lists it now: it MOVED there (a remote move — lane desktop-move verify r1);
     // a window this page moved here AFTER the record arrived, or whose move no save has carried yet, is the user's own
     // act the record cannot know (verify r2; THE UNSAVED ACT, verify r4 ①: layout.js actHeld)
     const gone = base ? [...this.app.wm.windows.values()].filter((w) => w._desktopId === desktopId && w._hiddenByDesktop && !w._onStage && w._openSpec && base.has(String(w.id)) && !now.has(String(w.id)) && !this.app.layoutManager?.actHeld?.(w._movedAt, receivedAt, w)).filter((w) => !this.adoptRemoteMove(w, desktopId)) : [];
+    // WHO IS LOOKING IS A FACT ABOUT THE PAGE (r3 F): a window this page shows (hidden here) that another page's dedup wrote away —
+    // the hub's trace names it — stays, and this desktop's next save lists it again
+    const kept = gone.filter((w) => this.keepsShown(w, desktopId, dupsLeft));
+    if (kept.length) { gone.splice(0, gone.length, ...gone.filter((w) => !kept.includes(w))); setTimeout(() => this.app.layoutManager?.resendKeptShown?.(), 1000); } // after the re-read's own apply gate (its dirty clear), as layout.js's held re-sends
     if (gone.length) {
       const lm = this.app.layoutManager, was = lm._restoring;
       lm._restoring = true; lm._applying = true; // these closes are the record's, not the user's (verify r3 ③)
@@ -717,6 +776,7 @@ export class DesktopManager {
     }
     if (this.app.stage?.isActive) return this.app.stage.leave(desktopId);
     if (desktopId === this._activeId) { this._pendingSwitch = null; return; }
+    this._noteAct(); // a switch, whoever asked it, retires a reveal still waiting (r3 H — the reveal's own switch is before it starts)
     // Rapid switching: a switch requested mid-flight is QUEUED (latest wins),
     // not dropped — dropping left the user's actual position out of sync with
     // _activeId, so a later capture/save could persist the WRONG desktop's
@@ -962,7 +1022,7 @@ export class DesktopManager {
     const sentAt = Date.now();
     this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });
     this.app.layoutManager?.noteLayoutSent?.([desktopId], sentAt); // this record carries every close made on that desktop (inc-mukeyzpt-lpou) — released once the server READ it (verify r5 ⑤)
-    this.noteSent(desktopId, state);
+    this.noteSent(desktopId, state, sentAt);
   }
 
   // ── UI: Ubuntu-style desktop previews in taskbar ──

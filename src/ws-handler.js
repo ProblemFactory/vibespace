@@ -20,6 +20,7 @@ const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
 const { keepNames } = require('./lib/desktop-record.js'); // PURE (lane layout-stopped-window): a window that replaced a named one takes its name — never written nameless
 const { refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS } = require('./lib/desktop-record.js'); // PURE (userW inc-mw1ogdno-5jny): a refusal is said once — the server never answers a storm
+const { noteDupsLeft, chainsAgree } = require('./lib/desktop-record.js'); // PURE (r3, inc-mw1ogdno-5jny): the dedup trace (who is looking outlives the socket); a write never makes a record's chains disagree
 const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
@@ -1661,6 +1662,23 @@ function registerWsHandler(wss, ctx) {
               break;
             }
           }
+          // A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE (r3 G, inc-mw1ogdno-5jny — the r2 acceptance: a refused dedup's re-send
+          // paired a shrunk host chain with the copy's restored guest row; accepted, every page ungrouped the copy's window): a row
+          // whose chain names a member the record holds whose own row's chain differs is not a consistent record — REFUSED for that
+          // desktop, the rows named, the record kept (a disagreement already stored is carried). PURE: desktop-record.js chainsAgree.
+          if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && Array.isArray(data.state?.windows)) {
+            const stored = layoutData.desktops[desktopId].autoSave;
+            const c = chainsAgree(data.state.windows, stored.windows);
+            if (!c.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: c.reason, windows: c.rows }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
+            if (!c.ok) {
+              const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
+              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): its rows disagree about a tab group (${c.rows.join(', ')}: a member's own row names other members) — the server keeps its record`);
+              try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${c.reason} ${c.rows.length}` }); } catch { }
+              noteToRing({ refused: c.reason, desktopId, viewport: data.viewport || null, n: c.rows.length });
+              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: c.reason, windows: c.rows, state: stored, sentAt: data.sentAt ?? null })); } catch { }
+              break;
+            }
+          }
           // THE LAYER GATE (design q-039 P1, §6b item 10 — the layer law's server half): a PHONE-stamped record may change
           // the workspace only. One that moves a held window's z / box / maximize / minimize / snap, the grid, the sidebar,
           // the bars, the theme or the fonts of the record held is REFUSED for that desktop, whichever bundle sent it (an old
@@ -1708,6 +1726,9 @@ function registerWsHandler(wss, ctx) {
             if (!layoutData.desktops[desktopId]) layoutData.desktops[desktopId] = {};
             if (Array.isArray(data.state?.windows)) noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws); // what this write ADDS is remembered against every OTHER socket
             layoutData.desktops[desktopId].autoSave = { ...data.state, updatedAt: Date.now() };
+            // THE DEDUP TRACE (r3 F): the copies this write let go, kept beside the record (persisted; relayed; every re-read reads it) —
+            // a page that SHOWS one never closes it for this record; an id a write lists again leaves the trace (PURE noteDupsLeft)
+            if (Array.isArray(data.state?.windows)) { const trace = noteDupsLeft(layoutData.desktops[desktopId].dupsLeft, { left: dupsLeft, listed: data.state.windows }); if (trace.length) layoutData.desktops[desktopId].dupsLeft = trace; else delete layoutData.desktops[desktopId].dupsLeft; }
           } else {
             // Legacy single-desktop save
             layoutData.autoSave = { ...data.state, updatedAt: Date.now() };
@@ -1718,7 +1739,7 @@ function registerWsHandler(wss, ctx) {
           noteToRing({ wrote: desktopId || null, viewport, windows: Array.isArray(data.state?.windows) ? data.state.windows.length : null, evidence: ringEvidence(data.evidence, prevWins, data.state?.windows), ...(named && (named.carried.length || named.withheld.length) ? { named: { carried: named.carried.length, withheld: named.withheld.map((w) => w.title.slice(0, 48)) } } : {}), base: typeof data.base === 'number' ? data.base : null });
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta
-          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, updatedAt: stampNow, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}) });
+          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, updatedAt: stampNow, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}), ...(desktopId && layoutData.desktops[desktopId].dupsLeft ? { dupsLeft: layoutData.desktops[desktopId].dupsLeft } : {}) }); // r3 F: the dedup trace rides the relay
           wss.clients.forEach(client => {
             if (client !== ws && client.readyState === WS_OPEN) { try { client.send(syncMsg); } catch {} }
           });

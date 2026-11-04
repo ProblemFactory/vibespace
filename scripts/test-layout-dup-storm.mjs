@@ -19,11 +19,16 @@
 //   §4 D — ONE TOAST PER CAUSE (the real DesktopManager.onSyncRefused): refusals of one desktop and reason within 30 s ⇒ one
 //      toast naming the windows by name; the count on the next one after 30 s
 //   §6 MUTANTS (scripts/mutant-copy.mjs): A's by-check dropped, C's storm guard removed, D's dedup removed — each RED
+//   ROUND 3 (the r2 acceptance of ab1226ff2): §1 noteDupsLeft (the hub's dedup trace) and chainsAgree (a write never makes a
+//      record's rows disagree about a group — 'chain-disagrees'); §2 on the real handler: an accepted dedup is TRACED beside the
+//      record (on disk) and relayed, and forgotten when a write lists the window again; a write introducing a chain disagreement
+//      is refused; §6 the trace, the chain gate, the PURE verdict removed — each RED
 import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
+const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
@@ -82,6 +87,22 @@ function pureLegs(DR, { quiet = false } = {}) {
   leg(ended && ended.count === 1 && !m3.size && swept.length === 1 && swept[0].count === 1 && !m4.size, '§1 stormEnd (an accepted write) and stormSweep (10 s of quiet) end a storm once; a refusal never repeated ends silently', { ended, swept });
   const m5 = new Map(); let n5 = 0; for (let t = 0; t <= 125000; t += 500) if (RS(m5, { who: 1, desktopId: 'd', key: 'k', now: t }).answer) n5++;
   leg(n5 === 3, '§1 …a client that never stops gets one answer a MINUTE (STORM_MAX_MS), never one per send (125 s of 2 Hz ⇒ 3)', n5);
+  // r3 F — THE DEDUP TRACE (noteDupsLeft): the copies a write let go, noted; an id a write lists again, forgotten; bounded
+  const ND = DR.noteDupsLeft || (() => null);
+  const tr1 = ND([{ id: 'a', by: 'b', at: 1 }, { id: 'c', by: 'd', at: 2 }], { left: [{ id: 'e', why: 'dup', by: 'f' }], listed: [{ winId: 'a' }, 'x'], at: 9 });
+  leg(J(tr1) === J([{ id: 'c', by: 'd', at: 2 }, { id: 'e', by: 'f', at: 9 }]), '§1 r3 F noteDupsLeft: a copy the write let go is traced {id, by, at}; an id the write LISTS again leaves the trace (the hub learned it is shown)', tr1);
+  const tr2 = ND(Array.from({ length: 60 }, (_, i) => ({ id: 'w' + i, by: 'b', at: i })), { left: [], listed: [] });
+  leg(Array.isArray(tr2) && tr2.length === (DR.DUP_TRACE_CAP || 50) && tr2[0].id === 'w10', '§1 r3 F …bounded: the newest DUP_TRACE_CAP (50) entries', tr2 && tr2.length);
+  // r3 G — A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE (chainsAgree)
+  const CA = DR.chainsAgree || (() => ({ ok: true, rows: [] }));
+  const G = ['h', 's', 'g'], ch = (tabs) => ({ tabs, active: 0, layout: 'tabs', order: tabs });
+  const rowsOf = (host, guest) => [{ winId: 'h', tabChain: ch(host) }, { winId: 's', tabChain: ch(guest), isTabGuest: true }, { winId: 'g', tabChain: ch(host), isTabGuest: true }];
+  const bad = CA(rowsOf(['h', 'g'], G), rowsOf(G, G));
+  leg(!bad.ok && bad.reason === 'chain-disagrees' && J(bad.rows) === J(['s']), '§1 r3 G chainsAgree: the r2 re-send — host [h, g] beside the copy\'s guest row [h, s, g] — DISAGREES (reason \'chain-disagrees\', the row named)', bad);
+  const lone = CA([{ winId: 'h', tabChain: ch(G) }, { winId: 'g' }], []);
+  leg(!lone.ok && J(lone.rows) === J(['h']), '§1 r3 G …a row naming a member whose own row carries NO chain disagrees too', lone);
+  leg(CA(rowsOf(G, G), []).ok && CA([{ winId: 'h', tabChain: ch(G) }, { winId: 'g', tabChain: ch(G), isTabGuest: true }], []).ok, '§1 r3 G …rows that agree pass, and so does a member the record does not hold (a chain still waiting for it — never a disagreement)');
+  leg(CA(rowsOf(['h', 'g'], G), rowsOf(['h', 'g'], G)).ok, '§1 r3 G …a disagreement ALREADY STORED is the record\'s — carried (a write never fixes what its page did not build): only a disagreement the write introduces is one');
   return failed;
 }
 await section('§1 PURE (src/lib/desktop-record.js)', async () => { pureLegs(require(MODEL)); });
@@ -109,9 +130,35 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 700));
     leg(refusals(P).length === 1 && J(refusals(P)[0].unexplained) === J(['win-v-s']) && H.writes() === 0 && H.logs.some((l) => /1 offered as a duplicate while another page shows its conversation — kept/.test(l)), '§2 r2: V\'s valid duplicate is REFUSED while ANOTHER client has its session attached — nothing written (that page may be showing win-v-s), the journal says why', { frames: P.frames.map((f) => f.type), log: H.logs.filter((l) => /REFUSED/.test(l)) });
     const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect(), Q2 = H2.connect();
-    H2.attach(P2, S); H2.attach(Q2, S); H2.hangUp(Q2); // the other page went away
+    H2.attach(P2, S); H2.attach(Q2, S); H2.hangUp(Q2); // the other page's socket closed (its close handler ran) — the hub hears no page there
     await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 701));
-    leg(acks(P2).length === 1 && !ids(H2.layouts().desktops['desk-v'].autoSave.windows).includes('win-v-s'), '§2 r2: …the proposer\'s OWN attach never counts, and once no other page shows S the copy leaves (accepted)', P2.frames.map((f) => f.type));
+    leg(acks(P2).length === 1 && !ids(H2.layouts().desktops['desk-v'].autoSave.windows).includes('win-v-s'), '§2 r2: …the proposer\'s OWN attach never counts, and once no other page shows S the copy leaves (accepted — r3: TRACED, below; the page that comes back keeps what it shows)', P2.frames.map((f) => f.type));
+  }
+  // r3 F — THE DEDUP TRACE: an accepted copy is traced beside its record (layouts.json — persisted), relayed, forgotten when listed again
+  {
+    const H = hub(WSH, DOC(TRIPLE())), P = H.connect(), R = H.connect();
+    await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 801));
+    const tr = H.layouts().desktops['desk-v'].dupsLeft || [];
+    const relay = R.frames.find((f) => f.type === 'layout-sync' && f.desktopId === 'desk-v');
+    leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].by === 'win-x-s' && relay && J(relay.dupsLeft) === J(tr), '§2 r3 F THE DEDUP TRACE: the accepted copy is traced beside V\'s record ({id, by, at} in layouts.json — on disk) and the relay to every other page carries it', { tr, relay: relay && relay.dupsLeft });
+    await P.send({ ...vWrite([], 802), state: { windows: TRIPLE()['desk-v'], grid: null } }); // a page that shows win-v-s lists it again
+    leg(acks(P).length === 2 && !('dupsLeft' in H.layouts().desktops['desk-v']), '§2 r3 F …a write that lists the id again takes it out of the trace (the hub learned it is shown)', Object.keys(H.layouts().desktops['desk-v']));
+  }
+  // r3 G — A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE, on the real handler
+  {
+    const G = ['v-h', 'win-v-s', 'v-g'];
+    const rows = (host, guest) => [member(files('v-h', 0), host), member(chat('win-v-s', S, 1), guest), member(files('v-g', 2), host)];
+    const w = (sentAt, r) => ({ type: 'layout-sync', desktopId: 'desk-v', state: { windows: r, grid: null }, evidence: [], base: 1000, sentAt, viewport: 'desktop' });
+    const H = hub(WSH, DOC({ ...TRIPLE(), 'desk-v': rows(G, G) })), P = H.connect();
+    await P.send(w(901, rows(['v-h', 'v-g'], G)));
+    const f = refusals(P)[0];
+    leg(f && f.reason === 'chain-disagrees' && J(f.windows) === J(['win-v-s']) && H.writes() === 0 && J(Object.keys(f).sort()) === J(['desktopId', 'reason', 'sentAt', 'state', 'type', 'windows']), '§2 r3 G: the r2 re-send (host [v-h, v-g] beside the copy\'s guest row [v-h, win-v-s, v-g]) is REFUSED \'chain-disagrees\' — nothing written, the rows named, the record kept (ab1226ff2: accepted; every page ungrouped the copy)', P.frames);
+    leg(H.logs.some((l) => /REFUSED a record of desktop "Desk V" \(desk-v\): its rows disagree about a tab group \(win-v-s/.test(l)), '§2 r3 G …the journal names the rows', H.logs.filter((l) => /REFUSED/.test(l)));
+    await P.send(w(902, rows(['v-h', 'v-g'], G)));
+    leg(refusals(P).length === 1, '§2 r3 G …a repeat within 10 s is never answered (law C)', refusals(P).length);
+    const H2 = hub(WSH, DOC({ ...TRIPLE(), 'desk-v': rows(['v-h', 'v-g'], G) })), P2 = H2.connect();
+    await P2.send(w(903, rows(['v-h', 'v-g'], G)));
+    leg(acks(P2).length === 1, '§2 r3 G …a disagreement already STORED is carried by a write that does not add one (a page never fixes what it did not build)', P2.frames.map((x) => x.type));
   }
   // C — THE SERVER NEVER ANSWERS A STORM
   {
@@ -185,6 +232,18 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(find, ''), 'd-no-dedup', { esm: true })).href)).DesktopManager;
     const f = await toastLegs({ DM: DMx, quiet: true });
     ok(f.some((n) => /ONE TOAST PER CAUSE: three refusals/.test(n)), `mutant D-no-dedup: a warn per refusal — RED (${f.length})`);
+  }
+  // r3: F's trace never written, G's chain gate removed (the handler), G's verdict blind (PURE)
+  {
+    const tr = await hubLegs(loadHandler({ noteDupsLeft: () => [] }), { quiet: true });
+    ok(tr.some((n) => /THE DEDUP TRACE/.test(n)), `mutant r3-F-no-trace: no trace on disk, none on the relay — RED (${tr.length})`);
+    const cg = await hubLegs(loadHandler({ chainsAgree: () => ({ ok: true, rows: [] }) }), { quiet: true });
+    ok(cg.some((n) => /is REFUSED 'chain-disagrees'/.test(n)), `mutant r3-G-no-chain-gate (ab1226ff2's handler): the inconsistent re-send is written — RED (${cg.length})`);
+    const find = "    if (w.tabChain.tabs.some((m) => String(m) !== id && rows.has(String(m)) && members(rows.get(String(m))) !== mine)) out.push(id);";
+    ok(PSRC.includes(find), 'mutant r3-G-blind-verdict: the patched line exists in desktop-record.js');
+    const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(find, ''), 'r3-g-blind');
+    const p = pureLegs(Mx, { quiet: true });
+    ok(p.some((n) => /chainsAgree: the r2 re-send/.test(n)) && p.some((n) => /NO chain disagrees too/.test(n)), `mutant r3-G-blind-verdict: chainsAgree sees no disagreement — RED (${p.length})`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });

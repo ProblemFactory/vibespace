@@ -69,6 +69,22 @@
 //     conversation away and the relay closed it in front of B's person): the VERDICT is the hub's — it sees every client.
 //     `showing(sid)` = ANOTHER connected client has that session attached (it shows it in some window — which one the hub cannot
 //     tell, so the rule is the safe superset); then no copy of it leaves as 'dup' — refused, named in `dup` and in `shown`.
+//     WHO IS LOOKING IS A FACT ABOUT THE PAGE, NOT A STATE OF ITS SOCKET (the r2 acceptance: a page whose socket was down — a
+//     backgrounded phone, a sleeping laptop, every page during a hub restart — was not counted; another page's dedup was
+//     accepted and the first page's reconnect re-read closed the window it was showing): the hub cannot know a page it cannot
+//     hear, so the page's own knowledge answers — every dedup the hub accepts is TRACED beside the desktop's record
+//     (noteDupsLeft → `desktops[id].dupsLeft`, persisted, relayed with every write of that desktop and read back by every
+//     re-read): a page that SHOWS a window the trace names never closes it for that record — it keeps it and lists it again
+//     in its next save (the hub learns it; the trace forgets an id a write lists again). No clock: a timed grace on a closed
+//     socket was measured and dropped (r3) — the page's own earlier socket (a reload) blocked its own cleanup for the grace.
+//   noteDupsLeft(trace, {left, listed, at, cap}) → the trace after a write: the copies it let go ([{id, by}]) noted
+//     [{id, by, at}], every id it lists forgotten, newest last, ≤ cap (DUP_TRACE_CAP).
+//   chainsAgree(next, prev) → {ok, reason: 'chain-disagrees', rows} — A WRITE NEVER MAKES A RECORD'S ROWS DISAGREE ABOUT A
+//     CHAIN (the r2 acceptance: a refused dedup's re-send paired the proposer's shrunk host chain [h, g] with the copy's
+//     restored guest row [h, s, g] — accepted, and every page ungrouped the copy's window): a row whose chain names a member
+//     the record holds, whose own row's chain has other members (or none), disagrees. `rows` = the rows of `next` that
+//     disagree and did not in `prev` (a disagreement already stored is the record's, carried — a write never fixes what its
+//     page did not build); a member the record does not hold is a chain waiting for it (layout.js pendingChainOf), not one.
 //
 //   duplicatesOf({records, shown}) — ONE CONVERSATION, ONE WINDOW ENTRY (the same incident's writer — session-lifecycle's
 //     attachSession found an open conversation only among the windows the page had BUILT, so a sidebar click of a conversation
@@ -398,6 +414,34 @@ function duplicatesOf({ records = {}, shown = new Map() } = {}) {
   return out;
 }
 
+const DUP_TRACE_CAP = 50;
+function noteDupsLeft(trace, { left = [], listed = [], at = Date.now(), cap = DUP_TRACE_CAP } = {}) {
+  const relisted = new Set(listOf(listed).map((x) => (x && typeof x === 'object' ? idOf(x) : (x == null ? null : String(x)))).filter(Boolean));
+  const gone = new Map();
+  for (const e of listOf(left)) { const id = idOf(e); if (id && !relisted.has(id)) gone.set(id, e.by == null ? null : String(e.by)); }
+  const out = listOf(trace).filter((e) => { const id = idOf(e); return id && !relisted.has(id) && !gone.has(id); }).map((e) => ({ id: idOf(e), by: e.by == null ? null : String(e.by), at: Number(e.at) || 0 }));
+  for (const [id, by] of gone) out.push({ id, by, at });
+  return out.slice(-Math.max(0, cap));
+}
+
+/** The rows of `windows` whose chain names a member the list holds whose own row's chain has other members (or none). */
+const chainDisagreements = (windows) => {
+  const list = listOf(windows), rows = new Map(), out = [];
+  for (const w of list) { const id = idOf(w); if (id) rows.set(id, w); }
+  const members = (w) => (w && w.tabChain && Array.isArray(w.tabChain.tabs) ? [...new Set(w.tabChain.tabs.map(String))].sort().join('\u0000') : null);
+  for (const w of list) {
+    const id = idOf(w), mine = members(w);
+    if (!id || mine == null) continue;
+    if (w.tabChain.tabs.some((m) => String(m) !== id && rows.has(String(m)) && members(rows.get(String(m))) !== mine)) out.push(id);
+  }
+  return out;
+};
+function chainsAgree(next, prev = []) {
+  const was = new Set(chainDisagreements(Array.isArray(prev) ? prev : listOf(prev && prev.windows)));
+  const rows = chainDisagreements(Array.isArray(next) ? next : listOf(next && next.windows)).filter((id) => !was.has(id));
+  return rows.length ? { ok: false, reason: 'chain-disagrees', rows } : { ok: true, rows };
+}
+
 const STORM_MS = 10000;
 const STORM_MAX_MS = 60000;
 function refusalKey({ desktopId = null, reason = '', unexplained = [], fields = [], windows = [], base = null } = {}) {
@@ -602,4 +646,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree, DUP_TRACE_CAP };

@@ -320,7 +320,7 @@ class LayoutManager {
     const order = Object.entries(desktops).sort(([a], [b]) => (a === active) - (b === active));
     for (const [id, d] of order) {
       if (id === '__stage__' || !d?.autoSave || !Array.isArray(d.autoSave.windows)) continue;
-      take({ type: 'layout-sync', desktopId: id, state: d.autoSave, resync: true, receivedAt, desktopMeta: id === active ? meta : undefined }); n++;
+      take({ type: 'layout-sync', desktopId: id, state: d.autoSave, resync: true, receivedAt, desktopMeta: id === active ? meta : undefined, ...(Array.isArray(d.dupsLeft) ? { dupsLeft: d.dupsLeft } : {}) }); n++; // r3 F: the hub's dedup trace
     }
     if (!dm && Array.isArray(data.autoSave?.windows)) { take({ type: 'layout-sync', state: data.autoSave, resync: true, receivedAt }); n++; }
     try { window.__vsOp?.('layout-resync', { desktops: n }); } catch { }
@@ -375,7 +375,7 @@ class LayoutManager {
         // Cache state for non-active desktop — through the desktop manager: a window this client still holds
         // (hidden) that the record's sender REMOVED is closed here now, never shown again by the next switch
         // (inc-mukeyzpt-lpou, the parked second client)
-        dm.cacheRemoteState(msg.desktopId, msg.state, { receivedAt });
+        dm.cacheRemoteState(msg.desktopId, msg.state, { receivedAt, dupsLeft: msg.dupsLeft });
         dm._renderSwitcher(); // update window counts
         return;
       }
@@ -388,7 +388,7 @@ class LayoutManager {
     // newer acts are kept by the held-act witnesses (phone-arrangement-verify F1: the re-read dropped another desktop's
     // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop). The layer law's table
     // says it (desktop-record.js applyForViewport): a desktop takes a live phone record's MEMBERSHIP only.
-    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg) }); // THE ONE writer predicate — the deferred slot's too (layout-model.js)
+    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg), dupsLeft: msg.dupsLeft }); // THE ONE writer predicate — the deferred slot's too (layout-model.js)
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
       // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
@@ -399,7 +399,7 @@ class LayoutManager {
   }
 
   // Apply remote state: diff against local windows, update only what changed
-  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), writer = null } = {}) {
+  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), writer = null, dupsLeft = null } = {}) {
     if (!state) return;
     // THE LAYER LAW's read half (§6b item 10): this page's subsets of the record — a phone takes the membership and a
     // desktop's minimize (guard 5), never its sidebar, bars, grid or boxes (inc-mv8l2frb-xkqm); a desktop takes no live
@@ -410,6 +410,7 @@ class LayoutManager {
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
     let heldClosed = false; // a window THIS client closed, still listed by the record (inc-mukeyzpt-lpou) — the close is re-sent once below
     let heldMoved = false; // a window THIS page moved AFTER the record arrived (verify r2) — kept where the user put it, the move re-sent once below
+    let keptShown = false; // a window THIS page shows that the record let go as a duplicate (r3 F, the hub's trace) — kept, listed again below
     const heldIds = (state.windows || []).map((rw) => rw.winId || rw.id).filter((id) => this._closeHeld(id));
     // THE HELD CHAIN ACT (stage-blank verify r5): a tab this user tore off / merged / moved in its strip here that no record
     // has AGREED with yet — the record's chains and that window's entry are older than the act (_heldChainIds)
@@ -560,6 +561,9 @@ class LayoutManager {
             // a reconnect's re-read closes only what the WIRE listed: a window the wire never listed for this
             // desktop is this client's own change, not sent yet (its save left the queue an instant ago)
             if (closeOnlyWired && !this.app.desktopManager?.wireListed?.(activeDesk, id)) continue;
+            // WHO IS LOOKING IS A FACT ABOUT THE PAGE (r3 F, inc-mw1ogdno-5jny): a window this page SHOWS that another page's dedup
+            // wrote away (the hub's trace names it) is never closed by the record — kept, and the next save lists it again
+            if (this.app.desktopManager?.keepsShown?.(win, activeDesk, dupsLeft)) { keptShown = true; continue; }
             this.app.wm.closeWindow(id);
           }
         }
@@ -684,6 +688,17 @@ class LayoutManager {
     const owed = this.app.desktopManager?._dirtyDesks;
     if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;
     if (heldMoved) setTimeout(() => this._resendHeldMove(), 1000); // …and a move the record could not know (verify r2)
+    if (keptShown) setTimeout(() => this.resendKeptShown(), 1000); // …and a shown window a dedup wrote away (r3 F: the hub learns it)
+  }
+
+  /** WHO IS LOOKING IS A FACT ABOUT THE PAGE (r3 F): a record dropped a window this page shows as another page's duplicate and
+   *  the page kept it (desktop-manager keepsShown) — its desktop's next record lists it again: sent once, through the ordinary
+   *  autosave, after the apply's gate (the hub learns it; its trace forgets the id). */
+  resendKeptShown(tries = 0) {
+    if (this._restoring) { if (tries < 25) setTimeout(() => this.resendKeptShown(tries + 1), 200); return; }
+    this._userDirty = true;
+    this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, Date.now());
+    this.scheduleAutoSave();
   }
 
   /** THE CLOCK WATCH (verify r5 ①): called by the 5 s tick and at every wake path (a save, a record, the reconnect, the
@@ -1631,7 +1646,7 @@ class LayoutManager {
       if (dm.holdsBack?.(d, st)) continue; // THE BREAKER (inc-mw1ogdno-5jny): the very record the server refused is never re-sent
       this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt, viewport: this._viewport(), base: dm.stampOf?.(d) });
       sentDesks.push(d);
-      dm.noteSent(d, st);
+      dm.noteSent(d, st, sentAt);
     }
     this._savedAt = Date.now(); // a deferred save's witness (verify r3 ③): an act older than this left with this save
     const desktopId = dm?.activeDesktopId;
@@ -1657,7 +1672,7 @@ class LayoutManager {
     this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt, viewport: this._viewport(), base: desktopId ? dm?.stampOf?.(desktopId) : undefined });
     sentDesks.push(desktopId || '');
     this.noteLayoutSent(sentDesks, sentAt);
-    if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state); else dm?.noteWire?.(desktopId, state); }
+    if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state, sentAt); else dm?.noteWire?.(desktopId, state); }
   }
 
   /** The ids of the closes this page holds (made here, not carried by a save yet) — a record read off the wire
