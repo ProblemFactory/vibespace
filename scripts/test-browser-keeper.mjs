@@ -373,7 +373,13 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     } finally { AT.attachArgv = orig; }
     const iSaid = jl.findIndex((l) => l === `[browser] ${pP.id} "Engine planted": NOT started on the attach road [bad_argv] (--disable-sync) — the attach argv failed its census (missing -; forbidden --disable-sync)`);
     const iStop = jl.findIndex((l) => l.startsWith(`[browser] ${pP.id}: its display session `) && l.endsWith('stopped — its launch was refused'));
-    ok(rP.e && rP.e.code === 'bad_argv' && chromeLog().length === nP && iSaid >= 0 && iStop > iSaid && jl.filter((l) => l.includes('NOT started on the attach road')).length === 1, 'PLANTED CONTROL through the keeper: a forbidden switch in the HUB\'s own argv is still refused bad_argv — and the refusal is journaled ONCE, with its code and the item, BEFORE its display session is stopped; nothing spawned', { code: rP.e && rP.e.code, jl });
+    // int378 seam 4 (B-52dd): the count reads ITS OWN profile's lines — the «Mute» start above (:269) is not awaited until the end and
+    // fails by design at its 5 s port wait, so its refusal line can land inside this window (red on ci/int378 ×2 at load ≈ 4)
+    const mine = (l) => l.startsWith(`[browser] ${pP.id} `) || l.startsWith(`[browser] ${pP.id}:`);
+    const notStarted = (lines, own) => lines.filter((l) => (!own || mine(l)) && l.includes('NOT started on the attach road')).length;
+    const planted = iSaid >= 0 ? [...jl.slice(0, iSaid), '[browser] bp-00000000 "Mute": NOT started on the attach road [cdp_port_missing] — planted', ...jl.slice(iSaid)] : jl;
+    ok(notStarted(planted, false) === notStarted(jl, false) + 1 && notStarted(planted, true) === notStarted(jl, true), 'the planted control counts ITS OWN profile\'s refusals: another profile\'s line in its window (the unawaited «Mute» start\'s 5 s refusal) — the old every-profile count moves by one, the own-profile count does not', { all: notStarted(jl, false), own: notStarted(jl, true) });
+    ok(rP.e && rP.e.code === 'bad_argv' && chromeLog().length === nP && iSaid >= 0 && iStop > iSaid && notStarted(jl, true) === 1, 'PLANTED CONTROL through the keeper: a forbidden switch in the HUB\'s own argv is still refused bad_argv — and the refusal is journaled ONCE, with its code and the item, BEFORE its display session is stopped; nothing spawned', { code: rP.e && rP.e.code, jl });
     await kP.stop(pP.id, { why: 'user' }).catch(() => { });
   }
   // (2) a sibling on the road (the switch-only wall — the wrapper's wall stubbed away, as L1b r5 below): journaled by name too
