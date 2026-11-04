@@ -81,13 +81,15 @@ export const loadHandler = (over = {}) => {
 };
 /** `file` (r3): layouts.json ON DISK — a hub built later over the same file is a NEW PROCESS over the same data/ (its memory
  *  empty, its sockets new); `seed` null = the file as it is */
+let killDir = null; // the kill case's buffer dir (r5 N: the real end seam runs whole — its file sweeps find nothing here)
+const KILL_DIR = () => killDir || (killDir = fs.mkdtempSync(path.join(scratchDir('ldup-kill'), 'b-')));
 export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
   if (file && seed != null) fs.writeFileSync(file, J(seed));
   let layouts = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : JSON.parse(J(seed)), writes = 0, peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
   const logs = [], tele = [];
   const quietly = async (fn) => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { return await fn(); } finally { console.warn = REAL.warn; console.log = REAL.log; } };
   const sessions = new Map(alive.map((sid) => [sid, { clients: new Map() }])); // each live session's viewers, as the attach case keeps them (`session.clients`)
-  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); if (file) fs.writeFileSync(file, J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, BUFFERS_DIR: KILL_DIR(), broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, deleteSessionMeta: () => {}, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); if (file) fs.writeFileSync(file, J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -102,9 +104,14 @@ export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
   // a socket that CLOSES (r3): the real close handler runs first (it reads which sessions the socket showed), then the attach
   // bookkeeping the real handler keeps per connection is undone here, and the ws library forgets the socket
   const hangUp = (S0) => { if (!S0 || !S0.sock || S0.sock.readyState === 3) return; S0.sock.readyState = 3; S0.close?.(); wss.clients.delete(S0.sock); for (const [, s] of sessions) s.clients.delete(S0.sock); };
-  /** a conversation ENDS (r4 M — killed / exited: it leaves the hub's live-session set, as ws-handler's endSession does) */
-  const end = (sid) => sessions.delete(sid);
-  return { connect, attach, hangUp, end, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
+  /** a conversation leaves the hub's live-session set (r5 N — a STOP: its CLI exited, session-stdout's exit path; every page keeps
+   *  its window as read-only history — the r4 acceptance's q4 drives exactly this as `end`) */
+  const end = (sid) => sessions.delete(sid), stop = end;
+  /** a conversation is KILLED (r5 N — THE end seam: the real 'kill' case, endSessionBody, on a socket of its own) */
+  const kill = async (sid) => { if (!sessions.has(sid)) sessions.set(sid, { clients: new Map() }); const k = connect(); await k.send({ type: 'kill', sessionId: sid }); await new Promise((r) => setTimeout(r, 20)); hangUp(k); return k.frames.find((f) => f.type === 'killed') || null; };
+  /** a hub that ADOPTS late (r5 N — after a restart, R6 pipe sessions / readopted keepers join the live-session set seconds later) */
+  const adopt = (sid) => { if (!sessions.has(sid)) sessions.set(sid, { clients: new Map() }); };
+  return { connect, attach, hangUp, end, stop, kill, adopt, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
 }
 export const refusals = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-refused');
 export const acks = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-ack');

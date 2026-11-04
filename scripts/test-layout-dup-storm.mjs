@@ -134,6 +134,39 @@ await section('§1 r4 PURE (src/lib/chain-layout.js withMembersBack)', async () 
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+/** r5 N on the real handler (its own function: the r5-N-live-set mutant runs these alone). → failed names. */
+async function hubNLegs(WSH, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const vWrite = (evidence, sentAt, o = {}) => ({ type: 'layout-sync', desktopId: 'desk-v', state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, ...(o.state || {}) }, evidence, base: 1000, sentAt, viewport: 'desktop' });
+  // r5 N — ALIVE FOR THE TRACE MEANS «A WINDOW CAN STILL SHOW IT» (the r4 acceptance's q4: the trace forgot every conversation
+  // missing from the live-session set): a conversation that STOPPED (its CLI exited — every page keeps its window as read-only
+  // history) stays traced through every write; only its END (the real kill case — the hub's end seam) takes it out, at once; a
+  // hub that has not adopted it yet (a restart) sheds nothing
+  const traced = (Hx) => ((Hx.layouts().desktops['desk-v'] || {}).dupsLeft || []).some((e) => e.id === 'win-v-s' && e.sid === S);
+  const later = (Hx, sentAt) => ({ ...vWrite([], sentAt), base: Hx.layouts().desktops['desk-v'].autoSave.updatedAt, state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, theme: 'light' } });
+  const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect();
+  await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1201));
+  H2.stop(S); // its CLI exited: the live-session set lost it (session-stdout's exit path)
+  await P2.send(later(H2, 1202));
+  leg(acks(P2).length === 2 && traced(H2), '§2 r5 N: a STOPPED conversation stays traced through the next write of its desktop — its window is read-only history a page still shows (4ad07d751: dropped at that write, and the page that showed it closed it)', H2.layouts().desktops['desk-v'].dupsLeft);
+  const H3 = hub(WSH, DOC(TRIPLE())), P3 = H3.connect();
+  await P3.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1301));
+  const w3 = H3.writes(), k = await H3.kill(S);
+  leg(k && k.ok === true && traced(H3) === false && !('dupsLeft' in H3.layouts().desktops['desk-v']) && H3.writes() === w3 + 1, '§2 r5 N: …its END — the real kill case, the hub\'s end seam — takes it out of every desktop\'s trace at once (one write; no write of the desktop needed)', { k, writes: H3.writes() - w3, tr: H3.layouts().desktops['desk-v'].dupsLeft });
+  await P3.send({ ...vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1302), base: H3.layouts().desktops['desk-v'].autoSave.updatedAt, state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, theme: 'dark' } });
+  leg(!traced(H3), '§2 r5 N: …and a later write that lets a copy of the ENDED conversation go never traces it (nothing can show it any more)', H3.layouts().desktops['desk-v'].dupsLeft);
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldup-n-')), file = path.join(dd, 'layouts.json');
+  const H4 = hub(WSH, DOC(TRIPLE()), { file }), P4 = H4.connect();
+  await P4.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1401));
+  const H5 = hub(WSH, null, { file, alive: [] }), P5 = H5.connect(); // a NEW process over the same data/: nothing adopted yet (R6 pipe sessions, readopted keepers)
+  await P5.send(later(H5, 1402));
+  const before = traced(H5);
+  H5.adopt(S);
+  leg(acks(P5).length === 1 && before && traced(H5), '§2 r5 N: …and a hub that has not ADOPTED the conversation yet (after a restart) sheds nothing at a write — an absence the hub has not confirmed never shrinks the trace', H5.layouts().desktops['desk-v'].dupsLeft);
+  fs.rmSync(dd, { recursive: true, force: true });
+  return failed;
+}
 async function hubLegs(WSH, { quiet = false } = {}) {
   const failed = [];
   const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
@@ -180,11 +213,6 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].sid === S, '§2 r4 M: the traced copy names its conversation ({id, by, sid, at} — the hub judges an entry by its conversation, never by count)', tr);
     await P.send({ ...vWrite([{ id: 'win-v-s', why: 'closed' }], 1102), base: base() });
     leg(acks(P).length === 2 && !('dupsLeft' in H.layouts().desktops['desk-v']), '§2 r4 K: a write whose evidence says a PERSON CLOSED the traced window (a page that kept it) takes it out of the trace in that same write — no other page\'s keep undoes the close (36bd0c866: the trace kept it)', H.layouts().desktops['desk-v'].dupsLeft);
-    const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect();
-    await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1201));
-    H2.end(S); // the conversation is killed: it leaves the hub's live-session set
-    await P2.send({ ...vWrite([], 1202), base: H2.layouts().desktops['desk-v'].autoSave.updatedAt, state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, theme: 'light' } });
-    leg(acks(P2).length === 2 && !('dupsLeft' in H2.layouts().desktops['desk-v']), '§2 r4 M: …and an entry whose conversation ENDED leaves the trace at the next write of its desktop', H2.layouts().desktops['desk-v'].dupsLeft);
   }
   // r3 G — A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE, on the real handler
   {
@@ -224,7 +252,7 @@ async function hubLegs(WSH, { quiet = false } = {}) {
   }
   return failed;
 }
-await section('§2 THE REAL ws-handler — A (the duplicate explained across desktops) and C (the storm never answered)', async () => { await hubLegs(loadHandler()); });
+await section('§2 THE REAL ws-handler — A (the duplicate explained across desktops) and C (the storm never answered)', async () => { await hubLegs(loadHandler()); await hubNLegs(loadHandler()); });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 /** r4 K — THE TRACE IS A FACT ABOUT THE RECORD, on the real src/routes/persistence.js (a temp data dir): writeLayouts is THE CHOKE
@@ -268,7 +296,7 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   const body = (t, name) => { const i = t.indexOf('function ' + name + '('); return i < 0 ? '' : t.slice(i, t.indexOf('\n  }\n', i)); };
   ok(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts')) && /tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts')), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
   ok((PS.match(/writeJsonAtomic\(LAYOUTS_FILE/g) || []).length === 1 && /writeJsonAtomic\(LAYOUTS_FILE, _layoutsCache\)/.test(body(PS, 'flushLayouts')) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache — and the cache is set only by its declaration, readLayouts (the disk, ×2) and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));
-  const ROWS = { 'src/routes/persistence.js': [9, 'the presets, the active preset, the custom grids, the autosave slot, the two restores, the import — each through writeLayouts'], 'src/ws-handler.js': [5, 'layout-sync (noteDupsLeft: listed / gone / alive) + desktop-create (an empty record) / -delete (the trace goes with it) / -rename / -reorder (no record changes) — each through writeLayouts (ctx)'] };
+  const ROWS = { 'src/routes/persistence.js': [9, 'the presets, the active preset, the custom grids, the autosave slot, the two restores, the import — each through writeLayouts'], 'src/ws-handler.js': [6, 'layout-sync (noteDupsLeft: listed / gone / ended) + desktop-create (an empty record) / -delete (the trace goes with it) / -rename / -reorder (no record changes) + the end seam (endTraces — r5 N: a killed conversation leaves every trace) — each through writeLayouts (ctx)'] };
   const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
   ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
   const strays = ['src/server/incident-wiring.js', 'src/server/migrations.js', 'src/server/boot-restore.js'].filter((f) => fs.existsSync(path.join(REPO, f)) && /layouts\.json/.test(src(f)) && /writeFileSync|writeJsonAtomic|renameSync/.test(src(f).split('\n').filter((l) => /layouts/.test(l)).join('\n')));
@@ -350,7 +378,15 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const f = pureLegs({ ...require(MODEL), noteDupsLeft: (t, o = {}) => ND(t, o).slice(-50) }, { quiet: true });
     ok(f.some((n) => /NEVER cut by count/.test(n)), `mutant r4-M-fifo-50 (36bd0c866's DUP_TRACE_CAP): the oldest copies leave the trace by count — RED (${f.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  // r5: N the live-session set alone (4ad07d751's `alive`: a stopped conversation, or one not adopted yet, leaves the trace)
+  {
+    const WSRC = read('src/ws-handler.js'), find = 'gone, alive: (sid) => !endedConvs.has(sid) });';
+    ok(WSRC.includes(find), 'mutant r5-N-live-set: the patched line exists in ws-handler.js');
+    const Wx = M.load('src/ws-handler.js', WSRC.replace(find, 'gone, alive: (sid) => activeSessions.has(sid) });'), 'r5-n-live');
+    const n = await hubNLegs(Wx, { quiet: true });
+    ok(n.some((x) => /a STOPPED conversation stays traced/.test(x)) && n.some((x) => /not ADOPTED the conversation yet/.test(x)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a stopped conversation and one not adopted yet leave the trace — RED (${n.length}: ${n.filter((x) => /r5 N/.test(x)).map((x) => x.slice(0, 60)).join(' | ')})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 

@@ -678,9 +678,9 @@ export function installSessionLifecycle(App, ctx = {}) {
   _focusExistingSession(serverId, { replay = false } = {}) {
     for (const [winId, term] of this.sessions) {
       if (term.sessionId === serverId) {
-        // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L): the person named it while its group is still re-forming (a double-click
-        // on a desktop the first click is building) — the reveal waits for the group; a repeated open renews it (desktop-manager)
-        if (!replay && this.desktopManager?.revealWhenFormed?.(winId)) return true;
+        // A REVEAL WAITS ONLY FOR WHAT IS NOT YET STANDING (r5 O): the person named a window that stands — revealed now; a group
+        // still forming around it forms with it in front (desktop-manager keepInFront)
+        if (!replay) this.desktopManager?.keepInFront?.(winId);
         this.wm.revealWindow(winId, { replay });
         if (replay && this.wm.windows.get(winId)?.isMinimized) this.wm.restore(winId);
         term.focus();
@@ -697,7 +697,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const w = this._attachWins && this._attachWins.get(serverId);
     const sent = this.ws && this.ws._attachInFlight && this.ws._attachInFlight.get(serverId);
     if (!w || !sent || Date.now() - sent >= 15000 || !this.wm.windows.has(w.id)) { if (w) this._attachWins.delete(serverId); return false; }
-    if (this.desktopManager?.revealWhenFormed?.(w.id)) return true; // its group still re-forming: the reveal waits for it (r4 L)
+    this.desktopManager?.keepInFront?.(w.id); // it stands: revealed now, in front of a group still forming around it (r5 O)
     this.wm.revealWindow(w.id);
     return true;
   },

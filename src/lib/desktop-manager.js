@@ -353,7 +353,7 @@ export class DesktopManager {
     const built = this.captureBuilt(desktopId, held);
     // A PAGE'S VIEW OF A DESKTOP IS THE RECORD (r4 I): a row this page carries and does not build (a kept copy) rides the group
     // its members form here — every row of that group written with it (rideKept); the page's rows never disagree about a group
-    const ghosts = this.ghostsOf(desktopId);
+    const ghosts = this.ghostsOf(desktopId).filter((id) => !unbuilt.includes(id)); // …a copy this write lets go (a dedup it proposes) rides nothing
     const rode = ghosts.length ? rideKept(held, built, ghosts) : null;
     const onto = mergeDesktopRecord({ record: held, built: rode ? rode.built : built, remove: [...unbuilt, ...elsewhere] });
     const merged = rode && rode.rows.length ? mergeDesktopRecord({ record: onto, add: rode.rows }) : onto;
@@ -407,6 +407,7 @@ export class DesktopManager {
   cacheShownState(desktopId, state) {
     if (!desktopId || desktopId !== this._activeId || !state || typeof state !== 'object') return;
     state = this.keptRecord(desktopId, state, this._takeKept(desktopId)); // a window the apply kept: in its place and its group (r4 J)
+    this._relisted(desktopId, state);
     const held = this.app.layoutManager?.heldCloseIds?.() || [];
     this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);
     this._noteAttempts(desktopId, windowIds(state).filter((id) => !this._buildAttempts.has(id)));
@@ -506,7 +507,7 @@ export class DesktopManager {
     // a kept copy is a member of it in what the page writes (rideKept), never one the group waits for (layout.js _reconcileChain)
     if ((msg.unexplained || []).length) lm._settlePendingChains?.();
     // …and a write whose rows disagree about a group is never the page's for its life: repaired here (_chainsDisagreed)
-    const repaired = msg.reason === 'chain-disagrees' && this._chainsDisagreed(d, rec, (msg.windows || []).map(String));
+    const repaired = msg.reason === 'chain-disagrees' && this._chainsDisagreed(d, rec, (msg.windows || []).map(String), msg.sentAt) === 'taken';
     // THE BREAKER: the refusal's identity (PURE refusalKey — the desktop, the reason, what it refused) and the record it refused
     const key = refusalKey({ desktopId: d, reason: msg.reason, unexplained: msg.unexplained, fields: msg.fields, windows: msg.windows });
     const refusals = this._refusals || (this._refusals = new Map()), was = refusals.get(d);
@@ -574,6 +575,17 @@ export class DesktopManager {
     for (const id of done) s.delete(id);
     if (!s.size) this._dupAsked.delete(desktopId);
     if (accepted && done.length) this.app.layoutManager?.dropUnbuiltMembers?.(done);
+    if (accepted) { const g = this._letGo || (this._letGo = new Map()); if (!g.has(desktopId)) g.set(desktopId, new Set()); for (const id of done) g.get(desktopId).add(id); } // read back by _relisted
+  }
+
+  /** A COPY THE HUB LET GO IS ASKED FOR ONCE (r5 O — the r4 acceptance's q1: B's keep re-send listed the copy again, and this page,
+   *  which had let it go, would ask again at its next save — refused while B shows it, or accepted and re-sent by B at its next
+   *  return): a record of `desk` that lists a copy this page's dedup let go is another page's keep (r3 F) — this page carries it as
+   *  a ghost for its life, never asks again (a reload asks once more — the hub's verdict stands, as for any dedup). */
+  _relisted(desk, state) {
+    const g = this._letGo?.get(desk);
+    if (!g || !g.size || !state || !Array.isArray(state.windows)) return;
+    for (const w of state.windows) { const id = rowId(w); if (g.has(id)) { g.delete(id); this._keep(desk, id); } }
   }
 
   _keep(desktopId, id) { if (!desktopId || id == null) return; const kept = this._kept || (this._kept = new Map()); let s = kept.get(desktopId); if (!s) { s = new Set(); kept.set(desktopId, s); } s.add(String(id)); }
@@ -582,13 +594,37 @@ export class DesktopManager {
 
   /** The rows of `desk`'s record this page CARRIES and does not build (r4 I): a copy the server kept against its drop, a session
    *  window it could not build and keeps as the record holds it — not built here, no build of it under way. Each is a member of
-   *  its group in what the page writes (rideKept), never one the page's group waits for (layout.js _reconcileChain). */
-  ghostsOf(desk) {
-    const out = [], now = Date.now();
+   *  its group in what the page writes (rideKept), never one the page's group waits for (layout.js _reconcileChain).
+   *  A COPY THIS PAGE CANNOT BUILD IS A GHOST FROM THE MOMENT THE RECORD NAMES IT (r5 O — the r4 acceptance: a copy that came by a
+   *  relay or a first visit was a build attempt until a save ran _unbuilt, and the group waited on it — the proposer's group taken
+   *  apart by a keep re-send, a person's merge refused and undone, an open that revealed nothing): a row of `desk`'s record (`rec`
+   *  — a record being applied — or the held one) whose conversation this page already shows in ANOTHER built window is a ghost
+   *  at once, whatever the road that brought it, and stays one while that window shows it (copiesOf). */
+  ghostsOf(desk, rec = null) {
+    const out = [], now = Date.now(), wm = this.app.wm;
     for (const m of [this._kept, this._carried]) {
       for (const id of m?.get(desk) || []) {
         const a = this._buildAttempts.get(id);
-        if (this.app.wm.windows.has(id) || out.includes(id) || (a && a.desk === desk && now - a.at <= BUILD_GRACE_MS)) continue;
+        if (wm.windows.has(id) || out.includes(id) || (a && a.desk === desk && now - a.at <= BUILD_GRACE_MS)) continue;
+        out.push(id);
+      }
+    }
+    for (const id of this.copiesOf(desk, rec)) if (!out.includes(id)) out.push(id);
+    return out;
+  }
+
+  /** The rows of `desk`'s record (`rec` — a record being applied — or the held one) this page CANNOT build: their conversation is
+   *  shown here in another built window, and attachSession never builds a second window of a conversation (_focusExistingSession
+   *  raises the first). Never built by an apply (layout.js), never waited for, ghosts from the moment the record names them (r5 O). */
+  copiesOf(desk, rec = null) {
+    const out = [], wm = this.app.wm;
+    const shows = new Map(); // conversation → a built window that shows it
+    for (const w of wm.windows.values()) { const sid = w._openSpec?.action === 'attachSession' ? w._openSpec.serverId : null; if (sid && !shows.has(String(sid))) shows.set(String(sid), String(w.id)); }
+    if (!shows.size) return out;
+    for (const st of [rec, this._savedStates.get(desk)]) {
+      for (const w of (st && st.windows) || []) {
+        const id = rowId(w), sid = sessionOf(w);
+        if (!sid || wm.windows.has(id) || out.includes(id) || !shows.has(sid) || shows.get(sid) === id) continue;
         out.push(id);
       }
     }
@@ -597,10 +633,17 @@ export class DesktopManager {
 
   /** A DESKTOP IS NEVER UNWRITABLE FROM A PAGE (r4 I): the hub refused this page's write of `d` because its rows disagree about a
    *  group ('chain-disagrees', `rows`). A member of those groups still being built (its grace runs) ⇒ nothing is said: the write
-   *  goes again once the grace is over (the member stood, or was dropped as unbuilt — either way the rows agree). Else the page
-   *  TAKES THE HUB'S GROUPS for those windows (layout.js takeChains — the person's group act there is undone, and said once by the
-   *  caller) and the next write carries them. true = repaired. */
-  _chainsDisagreed(d, rec, rows) {
+   *  goes again once the grace is over (the member stood, or was dropped as unbuilt — either way the rows agree).
+   *  THE PAGE NEVER UNDOES A PERSON'S ACT (r5 P — the r4 acceptance's q3: a person's merge beside a group still waiting on a copy
+   *  was refused, and this repair took the hub's groups and said so — the merge lost on the page and on the hub): every group the
+   *  page SHOWS holds together (each member of it holds that very group) ⇒ the disagreement is between what it shows and a row it
+   *  carries or a group still forming — what it shows stands: a forming group an act superseded is let go (layout.js
+   *  _reconcileChain's act-wins rule), every carried row of them rides what the page shows (a ghost — rideKept) and the write goes
+   *  again; nothing is taken, nothing said ('kept'). Only a page whose own groups do not hold together (a state the real tab-group
+   *  never makes — an injected one, the loop's on-purpose leg) TAKES THE HUB'S GROUPS for those windows (layout.js takeChains;
+   *  said once by the caller — 'taken') — and even then every group act the person made after the refused write left (`sentAt`; the
+   *  same millisecond counts as after — the page cannot tell, and an act is never undone on a tie) stays as they made it. false = nothing done (the grace). */
+  _chainsDisagreed(d, rec, rows, sentAt = null) {
     const wm = this.app.wm, lm = this.app.layoutManager, now = Date.now();
     const recRows = new Map(((rec && rec.windows) || []).map((w) => [rowId(w), w]));
     const touch = new Set(rows);
@@ -609,12 +652,22 @@ export class DesktopManager {
     const building = [...touch].filter((id) => !wm.windows.has(id)).map((id) => this._buildAttempts.get(id)).filter((a) => a && a.desk === d && now - a.at <= BUILD_GRACE_MS);
     if (building.length) { setTimeout(() => lm?.rearmSave?.(), Math.max(0, Math.max(...building.map((a) => a.at)) + BUILD_GRACE_MS - now) + 600); return false; }
     if (!lm?.takeChains) return false;
-    lm.takeChains(d, rec, [...touch]);
+    const holds = (id) => { const c = wm.windows.get(id)?._tabChain; return !c || c.tabs.every((m) => { const o = wm.windows.get(String(m)); return !o || o._tabChain === c; }); };
+    if ([...touch].every(holds)) {
+      lm._settlePendingChains?.();
+      for (const id of touch) if (!wm.windows.has(id) && recRows.has(id)) this._carry(d, id);
+      try { window.__vsOp?.('layout-chains-kept', { desk: d, n: touch.size }); } catch { }
+      return 'kept';
+    }
+    const since = Number(sentAt) || 0, keep = new Set();
+    if (since) for (const id of touch) { const w = wm.windows.get(id); if (w && (w._chainAt || 0) >= since) { keep.add(id); for (const m of w._tabChain?.tabs || []) keep.add(String(m)); } }
+    const take = [...touch].filter((id) => !keep.has(id));
+    lm.takeChains(d, rec, take, { keep });
     // a window the hub's record holds ALONE goes back to the record's box (the detach dropped it on its old host's frame, as a tear-off
     // does); a phone's record moves no box here and a phone takes none (§6b guard 10)
-    if (!this.app.isMobile) for (const id of touch) { const r = recRows.get(id), w = wm.windows.get(id); if (r && !r.tabChain && r.gridBounds && w && !w._onStage) { w.gridBounds = { ...r.gridBounds }; wm._applyGridBounds(w); } }
-    try { window.__vsOp?.('layout-chains-taken', { desk: d, n: touch.size }); } catch { }
-    return true;
+    if (!this.app.isMobile) for (const id of take) { const r = recRows.get(id), w = wm.windows.get(id); if (r && !r.tabChain && r.gridBounds && w && !w._onStage) { w.gridBounds = { ...r.gridBounds }; wm._applyGridBounds(w); } }
+    try { window.__vsOp?.('layout-chains-taken', { desk: d, n: take.length, kept: keep.size }); } catch { }
+    return 'taken';
   }
 
   /** The window this page shows server session `serverId` in (built, on a desktop — never the stage) that the server holds (the wire
@@ -660,9 +713,11 @@ export class DesktopManager {
    *  desktop switch) starts a new generation; a deferred reveal acts only in the generation it was asked in. */
   _noteAct() { this._revealGen = (this._revealGen || 0) + 1; this._revealAsk = null; }
 
-  /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists and its group, if any, has
-   *  re-formed — only while nothing has happened since the open that named it (`gen` is still the generation, `desk` still on
-   *  show); a wait that runs out (~5 s — a window the page cannot build is the placeholder road's) reveals NOTHING. */
+  /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists — only while nothing has happened
+   *  since the open that named it (`gen` is still the generation, `desk` still on show); a wait that runs out (~5 s — a window the
+   *  page cannot build is the placeholder road's) reveals NOTHING. A REVEAL WAITS ONLY FOR WHAT IS NOT YET STANDING (r5 O — the r4
+   *  acceptance's qR: a reveal that waited for the window's group to re-form revealed nothing when a member took > 5 s): its
+   *  switch, its build — never a group; a group still forming around it forms with it in front (layout.js showWhenFormed). */
   _revealWhenBuilt(id, desk, gen, tries = 50) {
     if ((this._revealGen || 0) !== gen) return; // the person moved on: the reveal retires
     // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L — the r3 acceptance: an open while another switch still held its 1 s gate
@@ -671,26 +726,23 @@ export class DesktopManager {
     const coming = this._pendingSwitch === desk || (this._restoring && this._activeId !== desk);
     if (this._activeId !== desk && !coming) return;
     const wm = this.app.wm;
-    const waiting = this._activeId !== desk || !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id);
+    const waiting = this._activeId !== desk || !wm.windows.has(id);
     if (waiting) { if (tries > 0) setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }
     this._revealAsk = null;
+    this.app.layoutManager?.showWhenFormed?.(id);
     wm.revealWindow?.(id);
   }
 
-  /** A person's open of a conversation whose window stands on the desktop on show while its group is still RE-FORMING (a member
-   *  still opening — the switch that built it is moments old): its reveal waits for the group (r4 L — a double-click on a sidebar
-   *  row: the second press retired the first open's deferred reveal and the second open's immediate one landed before the group
-   *  re-formed, the host's tab back in front). A repeated open RENEWS the ask. true = deferred (the caller reveals nothing now). */
-  revealWhenFormed(id) {
+  /** A person's open of a conversation whose window STANDS on the desktop on show (session-lifecycle _focusExistingSession /
+   *  _focusPendingAttach): the caller reveals it NOW (r5 O — the r4 acceptance's qR / qR2: r4 deferred that reveal while the
+   *  window's group was still forming, and a group waiting on a copy or a slow member revealed nothing, focused nothing, said
+   *  nothing). The open is an act (an earlier deferred reveal retires); a group still forming around the window forms with it
+   *  in front (layout.js showWhenFormed) — a double-click's second open lands on the same tab the first one asked for. */
+  keepInFront(id) {
     const w = this.app.wm.windows.get(String(id));
-    if (!w || w._onStage || !this.app.layoutManager?.pendingChainOf?.(String(id))) return false;
-    const desk = w._desktopId || this._activeId;
-    if (desk !== this._activeId) return false;
+    if (!w || w._onStage) return;
     this._noteAct();
-    const gen = this._revealGen || 0;
-    this._revealAsk = { id: String(id), desk, gen };
-    this._revealWhenBuilt(String(id), desk, gen);
-    return true;
+    this.app.layoutManager?.showWhenFormed?.(String(id));
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
@@ -872,6 +924,7 @@ export class DesktopManager {
     }
     // the server's record, as it is — minus a window THIS page closed that no save has carried yet (the held close:
     // the record is older than the close; the next switch would replay it, and a save of this desktop re-send it)
+    this._relisted(desktopId, state);
     const held = this.app.layoutManager?.heldCloseIds?.() || [];
     this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);
     this.noteWire(desktopId, wire);

@@ -82,8 +82,9 @@
 //     one desktop or all, an import); only a 'dup' drop ever enters it, and a window that leaves by a person's act (evidence
 //     'closed' / 'moved' / 'replaced' — a kill closes its window) leaves it in that same write: a person's close is never
 //     undone by another page's keep. It is NEVER cut by count: an entry leaves when its id is listed again, by a person's
-//     act, or when its conversation ends (`alive(sid)` false — the hub's live-session set, the shrink belt's own) — so the
-//     trace is never longer than the live conversations' copies a desktop let go (r3's newest-50 cap closed the 51st copy).
+//     act, or when its conversation ENDS (`alive(sid)` false — r5 N: the hub's end seam, a kill; a STOPPED conversation's
+//     window is read-only history a page still shows, and one the hub has not adopted yet after a restart is not known gone —
+//     both stay) — never cut by count (r3's newest-50 cap closed the 51st copy).
 //   noteDupsLeft(trace, {left, listed, gone, alive, at}) → the trace after a write: the copies it let go ([{id, by, sid}])
 //     noted [{id, by, sid, at}] (newest last), every id it lists or `gone` names forgotten, every entry whose `sid` is no
 //     longer alive forgotten (an entry with no sid — an r3 trace — is judged by the first two alone).

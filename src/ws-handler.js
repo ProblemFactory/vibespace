@@ -340,6 +340,29 @@ function registerWsHandler(wss, ctx) {
   //  creating socket may never be listed in its connection's attachedSessions
   const viewersElsewhere = (ws, sid) => { const s = activeSessions.get(sid); let n = 0; if (!s || !(s.clients instanceof Map)) return n; for (const c of s.clients.keys()) if (c !== ws && c && c.readyState === WS_OPEN && wss.clients.has(c)) n++; return n; };
   const showingElsewhere = (ws, sid) => viewersElsewhere(ws, sid) > 0;
+  // ALIVE FOR THE TRACE MEANS «A WINDOW CAN STILL SHOW IT» (r5 N, inc-mw1ogdno-5jny — the r4 acceptance's q4: the trace forgot every
+  // conversation missing from activeSessions, so a STOPPED one — its CLI exited, every page keeps its window as read-only history —
+  // lost its entry, and the page that showed it closed it; a session the hub had not adopted yet after a restart would have lost its
+  // entry too): only the conversation's END takes it out of the dedup trace — this hub's end seam (endSessionBody: the ws kill, the
+  // routes, an automation key), at once, on every desktop. An absence the hub has not confirmed never shrinks the trace.
+  const endedConvs = new Map(); // sid → at, this hub's life (capped: a forgotten end only lets a later dedup of its copy be traced)
+  const endTraces = (sid) => {
+    if (!sid) return;
+    endedConvs.delete(String(sid)); endedConvs.set(String(sid), Date.now());
+    while (endedConvs.size > 4096) endedConvs.delete(endedConvs.keys().next().value);
+    try {
+      const layoutData = readLayouts();
+      let n = 0;
+      for (const v of Object.values((layoutData && layoutData.desktops) || {})) {
+        if (!v || !Array.isArray(v.dupsLeft)) continue;
+        const t = noteDupsLeft(v.dupsLeft, { alive: (x) => !endedConvs.has(x) });
+        if (t.length === v.dupsLeft.length) continue;
+        n += v.dupsLeft.length - t.length;
+        if (t.length) v.dupsLeft = t; else delete v.dupsLeft;
+      }
+      if (n) { writeLayouts(layoutData); console.log(`[layout-sync] conversation ${sid} ended: ${n} dedup trace entr${n === 1 ? 'y' : 'ies'} dropped`); }
+    } catch (e) { console.warn('[layout-sync] an ended conversation\'s trace entries were not dropped:', e.message); }
+  };
   const otherRecords = (layoutData, desktopId) => Object.entries(layoutData.desktops || {}).filter(([k]) => k !== desktopId && k !== '__stage__').map(([, v]) => (v && v.autoSave && Array.isArray(v.autoSave.windows) ? v.autoSave.windows : []));
   const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
     let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
@@ -387,6 +410,7 @@ function registerWsHandler(wss, ctx) {
       console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
       global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
       session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
+      endTraces(data.sessionId); // r5 N: the conversation's end — its copies leave every desktop's dedup trace
       // Cancel any pending delayed-SIGINT from a recent interrupt — after
       // kill, the childPid may be reused by an unrelated process
       if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
@@ -1730,11 +1754,11 @@ function registerWsHandler(wss, ctx) {
             // a page that SHOWS one never closes it for this record; an id a write lists again leaves the trace (PURE noteDupsLeft).
             // r4 K/M: only a 'dup' drop enters it, each with its conversation; a window this write says left by a person's act (a
             // close — a kill closes its window —, a move, a replace) leaves it here — a person's close is never undone by a keep —
-            // and an entry whose conversation ended (the live-session set, the shrink belt's own) leaves it; never cut by count
+            // and an entry whose conversation ENDED leaves it (r5 N: a kill — endTraces; a stopped conversation stays); never cut by count
             if (Array.isArray(data.state?.windows)) {
               const left = dupsLeft.map((e) => ({ id: e.id, by: e.by, sid: sessionOf(prevWins.find((w) => w && (w.winId || w.id) === e.id)) }));
               const gone = (Array.isArray(data.evidence) ? data.evidence : []).filter((e) => e && typeof e === 'object' && (e.why === 'closed' || e.why === 'moved' || e.why === 'replaced')).map((e) => e.id);
-              const trace = noteDupsLeft(layoutData.desktops[desktopId].dupsLeft, { left, listed: data.state.windows, gone, alive: (sid) => activeSessions.has(sid) });
+              const trace = noteDupsLeft(layoutData.desktops[desktopId].dupsLeft, { left, listed: data.state.windows, gone, alive: (sid) => !endedConvs.has(sid) });
               if (trace.length) layoutData.desktops[desktopId].dupsLeft = trace; else delete layoutData.desktops[desktopId].dupsLeft;
             }
           } else {

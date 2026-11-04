@@ -314,17 +314,19 @@ async function r3Legs({ over = {}, DM = RealDM, LM = RealLM, install = null, qui
     leg(toasts(t0).length === 0, `§8 r3 G: …nothing said (here ${toasts(t0).length})`, toasts(t0).map(toastText));
   }
   if (install && ['H1', 'H2', 'H3', 'H4'].some(want)) {
-    // A LATE REVEAL NEVER TAKES THE PERSON BACK (the acceptance's probe 2): V = the group [v-h, win-v-s(S), v-slow], v-slow's
-    // opener answers after `slowMs` (a file on a slow machine) or never; the page is on X and the person opens S
+    // A LATE REVEAL NEVER TAKES THE PERSON BACK (the acceptance's probe 2): V = the group [v-h, win-v-s(S), v-slow]; the page is on X
+    // and the person opens S. r5 O: a reveal waits only for what is not yet standing (its switch, its build) — never for a group —
+    // so the slow one here is the conversation's OWN window (`slow` = 'win-v-s': its build answers after `slowMs`, or never); H3
+    // keeps the slow group member (v-slow) and the window stands at once
     const HG = ['v-h', 'win-v-s', 'v-slow'];
     const recs = () => ({ 'desk-x': [files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), HG), member(chat('win-v-s', S, 1), HG), member(files('v-slow', 2), HG)] });
-    const page = (slowMs) => {
+    const page = (slowMs, slow = 'win-v-s') => {
       const H = hub(handler(), DOC(recs()));
       const P = pageOn(H, install, 'desk-x', { DM, LM });
       const orig = P.app.replayOpenSpec;
       P.app.replayOpenSpec = (spec, winId) => {
-        if (winId !== 'v-slow') return orig(spec, winId);
-        if (slowMs != null) setTimeout(() => { const w = P.mkWin('v-slow', 'desk-v', { type: 'viewer', _openSpec: spec }); P.lm.onWindowCreated(w); }, slowMs);
+        if (winId !== slow) return orig(spec, winId);
+        if (slowMs != null) setTimeout(() => { const w = P.mkWin(slow, 'desk-v', slow === 'win-v-s' ? { type: 'chat', _openSpec: spec } : { type: 'viewer', _openSpec: spec }); P.lm.onWindowCreated(w); }, slowMs);
         return null;
       };
       return P;
@@ -337,27 +339,27 @@ async function r3Legs({ over = {}, DM = RealDM, LM = RealLM, install = null, qui
       await P.dm.switchTo('desk-y'); // the person moves on (the switcher, a key)
       await tick(3000); at.push(P.dm.activeDesktopId);
       await tick(3000); at.push(P.dm.activeDesktopId);
-      leg(J(at) === J(['desk-y', 'desk-y']) && reveals(P).length === 0 && toasts(t0).length === 0, `§8 r3 H1: A LATE REVEAL NEVER TAKES THE PERSON BACK — open, switch away at 1 s, the group re-forms at 3 s: nothing moves at 4 s or 7 s (ab1226ff2: back on desk-v at 4.0 s) — active ${J(at)}, reveals ${J(reveals(P))}`);
+      leg(J(at) === J(['desk-y', 'desk-y']) && reveals(P).length === 0 && toasts(t0).length === 0, `§8 r3 H1: A LATE REVEAL NEVER TAKES THE PERSON BACK — open, switch away at 1 s, the conversation's window stands at 3 s: nothing moves at 4 s or 7 s (ab1226ff2: back on desk-v at 4.0 s) — active ${J(at)}, reveals ${J(reveals(P))}`);
     }
     if (want('H2')) {
-      const P = page(null), t0 = made.length;
+      const P = page(6500), t0 = made.length;
       open(P); await tick(400);
       const first = P.dm.activeDesktopId;
-      await tick(6200);
-      leg(first === 'desk-v' && P.dm.activeDesktopId === 'desk-v' && reveals(P).length === 0 && toasts(t0).length === 0, `§8 r3 H2: …a group that never re-forms: the wait runs out and reveals NOTHING (no switch, no focus — ab1226ff2 revealed at 5 s) — active ${P.dm.activeDesktopId}, reveals ${J(reveals(P))}`);
+      await tick(6800);
+      leg(first === 'desk-v' && P.dm.activeDesktopId === 'desk-v' && P.wins.has('win-v-s') && reveals(P).length === 0 && P.app.wm.activeWindowId !== 'win-v-s' && toasts(t0).length === 0, `§8 r3 H2: …a window that stands only after the wait ran out (~5 s; here 6.5 s): the wait reveals NOTHING — no focus taken at 6.5 s (ab1226ff2 revealed at 5 s) — active ${P.dm.activeDesktopId}, reveals ${J(reveals(P))}, window ${P.app.wm.activeWindowId}`);
     }
     if (want('H3')) {
-      const P = page(2000), t0 = made.length;
+      const P = page(2000, 'v-slow'), t0 = made.length;
       open(P); await tick(3500);
       const w = P.wins.get('win-v-s'), c = w && w._tabChain;
-      leg(J(reveals(P)) === J([['reveal', 'win-v-s', false]]) && P.app.wm.activeWindowId === 'win-v-s' && !!c && c.tabs[c.active] === 'win-v-s' && P.dm.activeDesktopId === 'desk-v' && toasts(t0).length === 0, `§8 r3 H3: …nothing done since the open and the group re-forms at 2 s: revealed ONCE — its own tab, in front, silent (law C) — reveals ${J(reveals(P))}, chain ${J(c && { tabs: c.tabs, active: c.active })}`);
+      leg(J(reveals(P)) === J([['reveal', 'win-v-s', false]]) && P.app.wm.activeWindowId === 'win-v-s' && !!c && c.tabs[c.active] === 'win-v-s' && P.dm.activeDesktopId === 'desk-v' && toasts(t0).length === 0, `§8 r3 H3: …nothing done since the open, the window stands at once and a member of its group at 2 s: revealed ONCE — its own tab, in front once the group forms (r5 O: never waiting for it), silent (law C) — reveals ${J(reveals(P))}, chain ${J(c && { tabs: c.tabs, active: c.active })}`);
     }
     if (want('H4')) {
       const P = page(2000);
       open(P); await tick(1000);
       press('keydown'); // the person types (in the window in front, a shortcut) — an act since the open
       await tick(2500);
-      leg(reveals(P).length === 0 && P.dm.activeDesktopId === 'desk-v', `§8 r3 H4: …a key the person pressed after the open retires it too — the group re-forms at 2 s and nothing is revealed — reveals ${J(reveals(P))}`);
+      leg(reveals(P).length === 0 && P.dm.activeDesktopId === 'desk-v', `§8 r3 H4: …a key the person pressed after the open retires it too — the window stands at 2 s and nothing is revealed — reveals ${J(reveals(P))}`);
     }
   }
   return failed;
@@ -486,7 +488,8 @@ async function r4Legs({ over = {}, DM = RealDM, LM = RealLM, install = null, qui
     const open = () => { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); };
     open(); await tick(200); open(); await tick(4000);
     const c = P.wins.get('win-v-s')?._tabChain;
-    leg(J(P.ops.filter((o) => o[0] === 'reveal')) === J([['reveal', 'win-v-s', false]]) && c && c.tabs[c.active] === 'win-v-s' && P.app.wm.activeWindowId === 'win-v-s', `§9 r4 L: …a DOUBLE-CLICK renews the ask rather than retiring it — revealed ONCE when the group stands, its own tab in front (36bd0c866: the host's tab) — reveals ${J(P.ops.filter((o) => o[0] === 'reveal'))}, chain ${J(c && { tabs: c.tabs, active: c.active })}`);
+    const rv = P.ops.filter((o) => o[0] === 'reveal');
+    leg(rv.length >= 1 && rv.length <= 2 && rv.every((o) => o[1] === 'win-v-s') && c && c.tabs[c.active] === 'win-v-s' && P.app.wm.activeWindowId === 'win-v-s', `§9 r4 L: …a DOUBLE-CLICK lands on the tab it asked for — each open reveals win-v-s once it stands (r5 O: never waiting for the group), and the group forming at 2 s keeps its own tab in front (36bd0c866: the host's tab) — reveals ${J(rv)}, chain ${J(c && { tabs: c.tabs, active: c.active })}`);
   }
   if (want('M')) {
     // p1's shape: B shows 60 copies on V (60 conversations, each shown by A on X) and saves; its socket drops; A's write of V lets
@@ -510,6 +513,186 @@ async function r4Legs({ over = {}, DM = RealDM, LM = RealLM, install = null, qui
 }
 await section('§9 ROUND 4 — a page\'s view of a desktop is the record (I); a kept window keeps its group (J); a close is never undone by a keep (K); a reveal waits for its switch (L); the trace is never cut by count (M)', async () => {
   await r4Legs({ install: install0 });
+});
+
+/** ROUND 5 (the r4 acceptance of 4ad07d751): O — a copy this page cannot build is a ghost from the moment the record names it (the
+ *  acceptance's q1 / q1c / q3 / qR / qR2: the proposer's group taken apart by a keep re-send, a person's merge refused and undone,
+ *  an open that revealed nothing); N — alive for the trace means «a window can still show it» (q4 / q4b: a STOPPED conversation's
+ *  window closed); P — the page never undoes a person's act (q3's repair; an act made after the refused write left). → failed names. */
+async function r5Legs({ over = {}, WSH = null, DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  const handler = (o = {}) => WSH || loadHandler({ ...over, ...o });
+  // the real applyChainRecord's in-place apply (`active` stays this client's) — a membership change still rebuilds
+  const inPlace = (P) => Object.assign(P.app.wm, { _ungroupLast(ch) { for (const id of ch.tabs) { const w = P.wins.get(id); if (w) w._tabChain = null; } P.ops.push(['ungroup', ch.tabs.join(',')]); }, applyChainRecord(ch, rc) { ch.tabs.splice(0, ch.tabs.length, ...rc.tabs.map(String)); ch.order = [...(rc.order || rc.tabs)].map(String); ch.layout = rc.layout || 'tabs'; P.ops.push(['apply', ch.tabs.join(',')]); return false; }, setSplitRatio() {} });
+  const chainOps = (P, from) => P.ops.slice(from).filter((o) => o[0] === 'ungroup' || o[0] === 'chain');
+  // tab-group _mergeDrop's own branch: the target in a group ⇒ addToTabChain (end of the strip, shown; witnessChain stamps every
+  // member), else createTabChain — the acceptance's skeptic wrote the same (its "faithful merge")
+  const merge = (P, target, guest) => {
+    const host = P.wins.get(target), g = P.wins.get(guest), at = Date.now();
+    let ch = host._tabChain;
+    if (ch) { ch.tabs.push(guest); if (Array.isArray(ch.order)) ch.order.push(guest); ch.active = ch.tabs.length - 1; g._tabChain = ch; } else { ch = { tabs: [target, guest], active: 1, layout: 'tabs' }; host._tabChain = ch; g._tabChain = ch; }
+    for (const id of ch.tabs) { const w = P.wins.get(id); if (w) w._chainAt = at; }
+    P.act();
+  };
+  const stamps = (P, H) => { const st = H.layouts().desktops; for (const d of Object.keys(st)) P.dm.noteStamp(d, st[d].autoSave.updatedAt); };
+  for (const [k, change] of [['O1', false], ['O2', true]]) {
+    if (!want(k)) continue;
+    // q1c / q1 (J's own shape): B shows V's group [v-h, win-v-s(S), v-g], saves, drops; A dedups (accepted, traced) and shows V —
+    // [v-h, v-g] grouped; O2: A's person reorders the group and a third member joins it first; B comes back: its keep re-send
+    // lists the copy in its group again
+    const recs = () => ({ ...chainRecs(), 'desk-v': [member(files('v-h', 0), G3, 1), member(chat('win-v-s', S, 1), G3, 1), member(files('v-g', 2), G3, 1), files('v-n', 3)] });
+    const H = hub(handler(), DOC(recs()));
+    const A = world({ records: recs(), active: 'desk-x', DM, LM, H }), B = world({ records: recs(), active: 'desk-v', DM, LM, H });
+    for (const P of [A, B]) inPlace(P);
+    B.app.wm.restoreTabChain(G3, 1);
+    B.act(); await tick(2600);
+    B.lm._userDirty = false; B.lm._lastUserInputAt = 0;
+    B.hangUp();
+    A.act(); await tick(3000);
+    await switchTo(A, 'desk-v'); await tick(1500);
+    if (change) { merge(A, 'v-h', 'v-n'); await tick(2500); }
+    const want0 = change ? 'v-h,v-g,v-n' : 'v-h,v-g', grp = (id) => (A.wins.get(id)?._tabChain?.tabs || []).join(',');
+    const aOps = A.ops.length, aS = A.syncs('desk-v').length, rA = () => refusals(A.sock()).filter((f) => f.desktopId === 'desk-v'), r0 = rA().length, t0 = made.length;
+    const stood = grp('v-h') === want0;
+    B.reconnect();
+    const seen = [];
+    for (let i = 0; i < 5; i++) { await tick(1000); seen.push(grp('v-h')); }
+    const hubV = J(hubRows(H).filter(([id]) => id !== 'v-n' || change).map(([, c]) => c));
+    const riding = change ? J(['v-h,win-v-s,v-g,v-n', 'v-h,win-v-s,v-g,v-n', 'v-h,win-v-s,v-g,v-n', 'v-h,win-v-s,v-g,v-n']) : J(['v-h,win-v-s,v-g', 'v-h,win-v-s,v-g', 'v-h,win-v-s,v-g']);
+    leg(stood && seen.every((x) => x === want0) && !chainOps(A, aOps).length && !A.lm.pendingChainOf('v-h') && hubV === riding && toasts(t0).length === 0, `§10 r5 ${k}: A COPY THIS PAGE CANNOT BUILD IS A GHOST — B's keep re-send lists win-v-s in its group again; A (it shows S on X) keeps its own group [${want0}] standing for 5 s, no ungroup / rebuild, nothing pending; the hub holds it with the copy riding${change ? ' (A\'s change kept)' : ''} (4ad07d751: A ungrouped v-h, both loose until its next act) — A v-h ${J(seen)}, A ops ${J(chainOps(A, aOps))}, hub ${hubV}`);
+    const kn = acks(A.sock()).filter((f) => f.desktopId === 'desk-v').length;
+    A.wins.get('v-g').gridBounds = { left: 0.6, top: 0.1, width: 0.3, height: 0.3 }; A.wins.get('v-g')._boundsAt = Date.now(); A.act(); await tick(2500);
+    leg(rA().length === r0 && acks(A.sock()).filter((f) => f.desktopId === 'desk-v').length > kn && grp('v-h') === want0 && A.syncs('desk-v').length > aS, `§10 r5 ${k}: …A's next act lands at once — acked, NO refusal (a copy the hub let go is asked for once: the re-list is B's keep, carried — 4ad07d751: one silent 'shrink-without-close' first) — new refusals ${J(rA().slice(r0).map((f) => f.reason))}`);
+  }
+  if (want('O3') || want('O3a')) {
+    // q3 (the incident shape, nobody else shows S) with tab-group's own merge: A on X shows S; V = [v-h, win-v-s(S), v-g] + v-z; A
+    // visits V and the person drags v-z onto v-h at once / 1150 ms later (the skeptic's timings)
+    for (const gap of want('O3') ? [0, 1150] : [0]) {
+      const recs = () => ({ ...chainRecs(), 'desk-v': [...chainRecs()['desk-v'], files('v-z', 3)] });
+      const H = hub(handler(), DOC(recs()));
+      const A = world({ records: recs(), active: 'desk-x', DM, LM, H }); inPlace(A);
+      const t0 = made.length;
+      await switchTo(A, 'desk-v'); if (gap) await tick(gap);
+      const formed = (A.wins.get('v-h')?._tabChain?.tabs || []).join(',');
+      merge(A, 'v-h', 'v-z'); await tick(4000);
+      const rows = J(hubRows(H).map(([, c]) => c));
+      leg(formed === 'v-h,v-g' && refusals(A.sock()).length === 0 && toasts(t0).length === 0 && rows === J(['v-h,v-g,v-z', 'v-h,v-g,v-z', 'v-h,v-g,v-z']) && (A.wins.get('v-z')?._tabChain?.tabs || []).join(',') === 'v-h,v-g,v-z', `§10 r5 O3 (merge at ${gap} ms): …the group stands the moment the page arrives (v-h + v-g, the copy a ghost) and the person's merge onto it LANDS — 0 refusals, 0 toasts, the hub's V = the merge (A's dedup of the copy accepted with it: nobody else shows S) (4ad07d751: 'chain-disagrees', then the repair undid the merge and said so) — formed ${formed}, refusals ${J(refusals(A.sock()).map((f) => f.reason))}, hub ${rows}, toasts ${J(toasts(t0).map(toastText))}`);
+    }
+  }
+  if (want('O4')) {
+    // q3 with B showing S on V (connected — its attach): A's dedup is refused (r2), the copy KEPT — the person's merge must ride it
+    const recs = () => ({ ...chainRecs(), 'desk-v': [...chainRecs()['desk-v'], files('v-z', 3)] });
+    const H = hub(handler(), DOC(recs()));
+    const B = world({ records: recs(), active: 'desk-y', DM, LM, H }); inPlace(B);
+    await switchTo(B, 'desk-v'); await tick(1500); B.lm._userDirty = false; B.lm._lastUserInputAt = 0;
+    const A = world({ records: recs(), active: 'desk-x', DM, LM, H }); inPlace(A); stamps(A, H);
+    const t0 = made.length;
+    await switchTo(A, 'desk-v'); await tick(2500);
+    merge(A, 'v-h', 'v-z'); await tick(4000);
+    const rows = J(hubRows(H).map(([id, c]) => id + ':' + c)), r = refusals(A.sock()).map((f) => f.reason + ':' + J(f.unexplained || f.windows || []));
+    leg(J(r) === J(['shrink-without-close:["win-v-s"]']) && rows === J(['v-h:v-h,win-v-s,v-g,v-z', 'win-v-s:v-h,win-v-s,v-g,v-z', 'v-g:v-h,win-v-s,v-g,v-z', 'v-z:v-h,win-v-s,v-g,v-z']) && (B.wins.get('win-v-s')?._tabChain?.tabs || []).join(',') === 'v-h,win-v-s,v-g,v-z' && !B.closed.length && toasts(t0).length === 0, `§10 r5 O4: …and with the copy KEPT (B shows S — the dedup's one refusal is the hub's r2 verdict, silent) the merge lands WITH THE GHOST RIDING it: every row of the hub's group names win-v-s, B keeps its window inside the merged group — refusals ${J(r)}, hub ${rows}, B ${(B.wins.get('win-v-s')?._tabChain?.tabs || []).join(',')}, toasts ${toasts(t0).length}`);
+  }
+  if (install && want('O5')) {
+    // qR2 (the incident shape): V's group [v-h, win-v-s(S copy), v-t(T)]; the page shows S on X, arrives on V; the person opens T
+    const G = ['v-h', 'win-v-s', 'v-t'];
+    const recs = () => ({ 'desk-x': [chat('win-x-s', S, 0), files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), G), member(chat('win-v-s', S, 1), G), member(chat('v-t', T, 2), G)] });
+    const P = pageOn(hub(handler(), DOC(recs())), install, 'desk-x', { DM, LM });
+    await P.dm.switchTo('desk-v'); await tick(1500);
+    const t0 = made.length;
+    press('pointerdown'); P.app.attachSession(T, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: 'b' + CID.slice(1) });
+    await tick(300);
+    const rv = P.ops.filter((o) => o[0] === 'reveal'), c = P.wins.get('v-t')?._tabChain;
+    leg(J(rv) === J([['reveal', 'v-t', false]]) && P.app.wm.activeWindowId === 'v-t' && c && c.tabs[c.active] === 'v-t' && toasts(t0).length === 0, `§10 r5 O5: AN OPEN OF A WINDOW THAT STANDS REVEALS IT NOW — the group beside a copy stands at once ([v-h, v-t], the copy a ghost) and the person's open of T reveals v-t within 300 ms, its own tab in front (4ad07d751: 7 s later reveals [], active window null) — reveals ${J(rv)}, active ${P.app.wm.activeWindowId}, chain ${J(c && { tabs: c.tabs, active: c.active })}`);
+  }
+  if (install && want('O6')) {
+    // qR (its member at 4.5 s here — the acceptance's 8 s reads the same): a member of the group opens late; the conversation's window
+    // stands — the open focuses it now, and the group forms around it when the member stands, its tab in front
+    const HG = ['v-h', 'win-v-s', 'v-slow'];
+    const recs = () => ({ 'desk-x': [files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), HG), member(chat('win-v-s', S, 1), HG), member(files('v-slow', 2), HG)] });
+    const P = pageOn(hub(handler(), DOC(recs())), install, 'desk-x', { DM, LM });
+    const orig = P.app.replayOpenSpec;
+    P.app.replayOpenSpec = (spec, winId) => { if (winId !== 'v-slow') return orig(spec, winId); setTimeout(() => { const w = P.mkWin('v-slow', 'desk-v', { type: 'viewer', _openSpec: spec }); P.lm.onWindowCreated(w); }, 4500); return null; };
+    await P.dm.switchTo('desk-v'); await tick(1500);
+    press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID });
+    await tick(300);
+    const now = J(P.ops.filter((o) => o[0] === 'reveal')), win0 = P.app.wm.activeWindowId;
+    await tick(3500);
+    const c = P.wins.get('win-v-s')?._tabChain;
+    leg(now === J([['reveal', 'win-v-s', false]]) && win0 === 'win-v-s' && c && J(c.tabs) === J(HG) && c.tabs[c.active] === 'win-v-s' && P.app.wm.activeWindowId === 'win-v-s', `§10 r5 O6: …a reveal never waits for a group — its member opening only at 4.5 s: the open focuses win-v-s within 300 ms, and the group forms around it then with its tab in front (4ad07d751: reveals [] — qR) — reveals at 300 ms ${now}, group at 5.3 s ${J(c && { tabs: c.tabs, active: c.active })}, active ${P.app.wm.activeWindowId}`);
+  }
+  for (const k of ['N1', 'N2', 'N3']) {
+    if (!want(k)) continue;
+    // q4 (N1) / q4b (N2): B shows win-v-s(S) on V; S STOPS (its CLI exited — not killed: it leaves the live-session set, B keeps its
+    // window as read-only history). N1: B's socket drops, A's dedup is traced, S stops, C makes an unrelated move on V, B comes back;
+    // N2: S stops first, B stays connected, A dedups. N3: N1 with S KILLED (the real kill case) instead of stopped
+    const TWO = () => ({ 'desk-x': [chat('win-x-s', S, 0), files('x-1', 1), files('x-2', 2)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 2)] });
+    const H = hub(handler(), DOC(TWO()));
+    const A = world({ records: TWO(), active: 'desk-x', DM, LM, H }), B = world({ records: TWO(), active: 'desk-v', DM, LM, H });
+    const t0 = made.length;
+    B.act(); await tick(1800);
+    if (k === 'N2') H.stop(S); else B.hangUp();
+    A.act(); await tick(2500);
+    const traced = traceOf(H).some((e) => e.id === 'win-v-s' && e.sid === S);
+    if (k === 'N2') {
+      await tick(1500);
+      leg(traced && !B.closed.length && B.wins.has('win-v-s') && toasts(t0).length === 0, `§10 r5 N2: ALIVE FOR THE TRACE MEANS «A WINDOW CAN STILL SHOW IT» — S STOPPED first (B, connected, keeps its window as read-only history), then A's dedup is accepted: it is TRACED with its conversation and B closes nothing (4ad07d751: trace [], B closed win-v-s live) — traced ${traced}, B closed ${J(B.closed)}`);
+      continue;
+    }
+    let killed = null;
+    if (k === 'N3') killed = await H.kill(S); else H.stop(S);
+    const now = () => Object.fromEntries(Object.entries(H.layouts().desktops).map(([d, v]) => [d, JSON.parse(J(v.autoSave.windows))]));
+    const C = world({ records: now(), active: 'desk-v', DM, LM, H });
+    { const st = H.layouts().desktops; for (const d of Object.keys(st)) C.dm.noteStamp(d, st[d].autoSave.updatedAt); }
+    await tick(300);
+    const w1 = C.wins.get('v-1'); w1.gridBounds = { left: 0.5, top: 0.5, width: 0.2, height: 0.2 }; w1._movedAt = Date.now();
+    C.act(); await tick(3000);
+    const afterC = traceOf(H).some((e) => e.id === 'win-v-s');
+    B.reconnect(); await tick(3000);
+    const hubV = ids(H.layouts().desktops['desk-v'].autoSave.windows);
+    if (k === 'N1') leg(traced && afterC && !B.closed.length && B.wins.has('win-v-s') && hubV.includes('win-v-s') && toasts(t0).length === 0, `§10 r5 N1: ALIVE FOR THE TRACE MEANS «A WINDOW CAN STILL SHOW IT» — A's dedup traced while B was away, S STOPPED, C wrote V: the trace still names the copy, and B's return closes nothing and lists it again (4ad07d751: trace [] after C's write, B closed win-v-s) — trace after C ${afterC}, B closed ${J(B.closed)}, hub V ${J(hubV)}`);
+    else leg(traced && killed && killed.ok && !afterC && B.closed.includes('win-v-s') && !hubV.includes('win-v-s') && ids(H.layouts().desktops['desk-x'].autoSave.windows).includes('win-x-s'), `§10 r5 N3: …only the conversation's END (the real kill — the hub's end seam) takes it out of the trace, at once: B's return closes the copy, its other window stays on X — killed ${J(killed && killed.ok)}, trace after C ${afterC}, B closed ${J(B.closed)}, hub V ${J(hubV)}`);
+  }
+  if (want('P1')) {
+    // THE PAGE NEVER UNDOES A PERSON'S ACT, the belt: an injected disagreement (p2b's hand-made state — v-h and v-z on a new group
+    // object, v-g left on the old one); right after that write leaves, the person drags v-q onto v-z (a real merge, `_chainAt` after
+    // the write) — the refusal's repair takes the hub's groups for what the person did not touch since, and keeps the act
+    const recs = () => ({ ...chainRecs(), 'desk-v': [...chainRecs()['desk-v'], files('v-z', 3), files('v-q', 4)] });
+    const H = hub(handler(), DOC(recs()));
+    const A = world({ records: recs(), active: 'desk-x', DM, LM, H }); stubChains(A);
+    await switchTo(A, 'desk-v'); await tick(2500);
+    const t0 = made.length, rA = () => refusals(A.sock()).filter((f) => f.desktopId === 'desk-v'), kA = () => acks(A.sock()).filter((f) => f.desktopId === 'desk-v'), r0 = rA().length;
+    const bad = { tabs: ['v-h', 'v-z'], active: 0, layout: 'tabs', order: ['v-h', 'v-z'] };
+    for (const id of bad.tabs) { const w = A.wins.get(id); w._tabChain = bad; w._chainAt = Date.now(); }
+    const send = A.app.ws.send; let armed = true;
+    A.app.ws.send = (m) => { send(m); if (armed && m && m.type === 'layout-sync' && m.desktopId === 'desk-v') { armed = false; setTimeout(() => {}, 0); merge(A, 'v-z', 'v-q'); } };
+    A.act(); await tick(3500);
+    A.app.ws.send = send;
+    const told = toasts(t0).map(toastText), vh = (A.wins.get('v-h')?._tabChain?.tabs || []).join(','), a1 = kA().length;
+    A.wins.get('v-q').gridBounds = { left: 0.1, top: 0.6, width: 0.2, height: 0.2 }; A.wins.get('v-q')._boundsAt = Date.now(); A.act(); await tick(2500);
+    const hv = (H.layouts().desktops['desk-v'].autoSave.windows.find((w) => w.winId === 'v-q') || {}).tabChain;
+    leg(rA().slice(r0).some((f) => f.reason === 'chain-disagrees') && vh === 'v-h,v-z,v-q' && !A.wins.get('v-g')._tabChain && told.length === 1 && kA().length > a1 && hv && hv.tabs.includes('v-q') && hv.tabs.includes('v-z') && hv.tabs.includes('v-h'), `§10 r5 P1: AN ACT MADE AFTER THE REFUSED WRITE LEFT SURVIVES THE REPAIR — the injected write is refused 'chain-disagrees' and repaired ONCE (v-g off the stale group), while the person's merge of v-q made since stands on the page and lands on the hub at the next write (4ad07d751's repair: every touched group taken — v-h + v-g again, v-z and v-q loose) — v-h ${vh}, v-g ${(A.wins.get('v-g')?._tabChain?.tabs || []).join(',') || 'alone'}, toasts ${J(told)}, hub v-q ${J(hv && hv.tabs)}`);
+  }
+  if (want('P2')) {
+    // …and a 'chain-disagrees' that crossed the person's act (an older hub's verdict; the page's groups hold together — each member
+    // holds its group): never the hub's groups — the act stays, nothing is said, the write goes again and is acked
+    const recs = () => ({ ...chainRecs(), 'desk-v': [...chainRecs()['desk-v'], files('v-z', 3)] });
+    const H = hub(handler(), DOC(recs()));
+    const A = world({ records: recs(), active: 'desk-x', DM, LM, H }); stubChains(A);
+    await switchTo(A, 'desk-v'); await tick(2500);
+    const t0 = made.length, kA = () => acks(A.sock()).filter((f) => f.desktopId === 'desk-v'), a0 = kA().length;
+    merge(A, 'v-h', 'v-z');
+    const rec = JSON.parse(J(H.layouts().desktops['desk-v'].autoSave));
+    A.dm.onSyncRefused({ type: 'layout-sync-refused', desktopId: 'desk-v', reason: 'chain-disagrees', windows: ['v-g'], state: rec, sentAt: Date.now() - 1 });
+    await tick(3000);
+    const g = (A.wins.get('v-h')?._tabChain?.tabs || []).join(','), hv = (H.layouts().desktops['desk-v'].autoSave.windows.find((w) => w.winId === 'v-z') || {}).tabChain;
+    leg(g === 'v-h,v-g,v-z' && toasts(t0).length === 0 && kA().length > a0 && hv && J(hv.tabs) === J(['v-h', 'v-g', 'v-z']), `§10 r5 P2: …a 'chain-disagrees' refusal of a write whose groups the page shows hold together (an older hub's, one crossing the act) never takes the hub's groups — the merge stays, nothing said, the write goes again and lands (4ad07d751: the merge undone, the warn said) — A ${g}, toasts ${J(toasts(t0).map(toastText))}, hub v-z ${J(hv && hv.tabs)}`);
+  }
+  return failed;
+}
+await section('§10 ROUND 5 — a copy this page cannot build is a ghost from the moment the record names it (O); alive for the trace means a window can still show it (N); the page never undoes a person\'s act (P)', async () => {
+  await r5Legs({ install: install0 });
 });
 
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
@@ -595,9 +778,9 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     ok(fH.some((n) => /a key the person pressed after the open retires it/.test(n)), `mutant r3-H-no-token: a key press retires nothing — RED (${fH.length}; H1's switch away is held twice since r4: the reveal also waits for ITS desktop on show)`);
     const findW = "    if (waiting) { if (tries > 0) setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }";
     ok(DSRC.includes(findW), 'mutant r3-H-giveup-reveals: the patched line exists in desktop-manager.js');
-    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findW, "    if (waiting && tries > 0) { setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }\n    if (!wm.windows.has(id)) return;"), 'r3-h-giveup', { esm: true })).href)).DesktopManager;
+    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findW, "    if (waiting) { setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }"), 'r3-h-giveup', { esm: true })).href)).DesktopManager;
     const fW = await r3Legs({ DM: DMw, install: install0, quiet: true, legs: ['H2'] });
-    ok(fW.some((n) => /the wait runs out and reveals NOTHING/.test(n)), `mutant r3-H-giveup-reveals (ab1226ff2's give-up): a group that never re-forms is revealed anyway at 5 s — RED (${fW.length})`);
+    ok(fW.some((n) => /the wait reveals NOTHING/.test(n)), `mutant r3-H-never-gives-up (r5: the wait is for the window itself — a reveal that never retires takes the focus when the window stands at 6.5 s): RED (${fW.length})`);
   }
   // r4: I the group waits for the kept copy (36bd0c866's forget-without-rebuild) / no repair of a 'chain-disagrees'; J the chain sync
   // rebuilds from the shrunk chain (on show) / the hidden road appends the kept row; K a keep on a close (the trace ignores the
@@ -607,8 +790,8 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const findI = "    const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), ghosts.length ? [...entry.gone, ...ghosts] : entry.gone);";
     ok(LSRC4.includes(findI), 'mutant r4-I-wait-for-kept: the patched line exists in layout.js');
     const LMi = (await import(pathToFileURL(M.write('src/lib/layout.js', LSRC4.replace(findI, "    const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), entry.gone);"), 'r4-i-wait', { esm: true })).href)).LayoutManager;
-    const fI = await r4Legs({ LM: LMi, quiet: true, legs: ['I'] });
-    ok(fI.some((n) => /A SHOWS the record's group around the members it builds/.test(n)), `mutant r4-I-wait-for-kept (36bd0c866: the group waits for a copy the page never builds): A shows v-h and v-g loose — RED (${fI.length})`);
+    const fI = await r4Legs({ LM: LMi, quiet: true, legs: ['I'] }), fI5 = await r5Legs({ LM: LMi, quiet: true, legs: ['O3a'] });
+    ok(fI.some((n) => /an injected disagreement is REPAIRED on the page/.test(n)) && fI5.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)), `mutant r4-I-wait-for-kept (36bd0c866: the group waits for a copy the page never builds — since r5 the relayed record's groups are read without the ghost too, so the first visit and the repair carry it): the group pending on the copy at the first visit (q3) and after the repair — RED (${fI.length + fI5.length}: ${[...fI, ...fI5].map((n) => n.slice(0, 30)).join(' | ')})`);
     const findR = "    if (!lm?.takeChains) return false;";
     ok(DSRC.includes(findR), 'mutant r4-I-no-repair: the patched line exists in desktop-manager.js');
     const DMr = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findR, '    return false;'), 'r4-i-no-repair', { esm: true })).href)).DesktopManager;
@@ -635,7 +818,41 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const fM = await r4Legs({ over: { noteDupsLeft: (t, o = {}) => ND(t, o).slice(-50) }, quiet: true, legs: ['M'] });
     ok(fM.some((n) => /THE TRACE IS NEVER CUT BY COUNT/.test(n)), `mutant r4-M-fifo-50 (36bd0c866's DUP_TRACE_CAP): B closes the ten oldest copies it shows — RED (${fM.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 12, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  // r5: O the copy a build attempt until a save (4ad07d751's ghostsOf), O the reveal waiting for a group (4ad07d751's revealWhenFormed),
+  // O a re-listed copy asked for again, P the repair discarding the act made since, P the hub's groups taken over a group the page
+  // shows whole, N the live-session set alone (4ad07d751's `alive`)
+  {
+    const DSRC5 = read('src/lib/desktop-manager.js'), LSRC5 = read('src/lib/session-lifecycle.js'), WSRC5 = read('src/ws-handler.js');
+    const dm5 = (find, repl, tag) => { ok(DSRC5.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC5.split(find).join(repl), tag, { esm: true })).href).then((m) => m.DesktopManager); };
+    const DMo = await dm5('    if (!shows.size) return out;', '    return out;', 'r5-o-attempt');
+    const fO = await r5Legs({ DM: DMo, install: install0, quiet: true, legs: ['O1', 'O3a', 'O5'] });
+    ok(fO.some((n) => /r5 O1: A COPY THIS PAGE CANNOT BUILD IS A GHOST/.test(n)) && fO.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)) && fO.some((n) => /r5 O5: AN OPEN OF A WINDOW THAT STANDS/.test(n)), `mutant r5-O-build-attempt-until-save (4ad07d751's ghostsOf: only _kept / _carried): A's group taken apart by B's re-send (q1), the merge refused (q3), v-t's group still pending at the open (qR2) — RED (${fO.length}: ${fO.map((n) => n.slice(0, 22)).join(' | ')})`);
+    const kif = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage) return;\n    this._noteAct();\n    this.app.layoutManager?.showWhenFormed?.(String(id));\n  }";
+    const r4k = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage || !this.app.layoutManager?.pendingChainOf?.(String(id))) return false;\n    const desk = w._desktopId || this._activeId;\n    if (desk !== this._activeId) return false;\n    this._noteAct();\n    const gen = this._revealGen || 0;\n    this._revealAsk = { id: String(id), desk, gen };\n    this._revealWhenBuilt(String(id), desk, gen);\n    return true;\n  }";
+    const wl = '    const waiting = this._activeId !== desk || !wm.windows.has(id);';
+    ok(DSRC5.includes(kif) && DSRC5.includes(wl), 'mutant r5-O-reveal-waits-for-group: the patched lines exist in desktop-manager.js');
+    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC5.replace(kif, r4k).replace(wl, '    const waiting = this._activeId !== desk || !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id);'), 'r5-o-waits', { esm: true })).href)).DesktopManager;
+    const lf = '        if (!replay) this.desktopManager?.keepInFront?.(winId);';
+    ok(LSRC5.includes(lf), 'mutant r5-O-reveal-waits-for-group: the patched line exists in session-lifecycle.js');
+    const installW = await loadLifecycle(LSRC5.replace(lf, '        if (!replay && this.desktopManager?.keepInFront?.(winId)) return true;'));
+    const fW5 = await r5Legs({ DM: DMw, install: installW, quiet: true, legs: ['O6'] });
+    ok(fW5.some((n) => /r5 O6: …a reveal never waits for a group/.test(n)), `mutant r5-O-reveal-waits-for-group (4ad07d751's revealWhenFormed for a window that stands): the open of win-v-s reveals nothing while its group waits 8 s for a member (qR) — RED (${fW5.length})`);
+    const DMa = await dm5('    this._relisted(desktopId, state);\n', '', 'r5-o-ask-again');
+    const fA5 = await r5Legs({ DM: DMa, quiet: true, legs: ['O1'] });
+    ok(fA5.some((n) => /r5 O1: …A's next act lands at once — acked, NO refusal/.test(n)), `mutant r5-O-ask-again (a copy the hub let go asked for again at the next save): A's next act is refused 'shrink-without-close' first — RED (${fA5.length})`);
+    const DMp = await dm5('    lm.takeChains(d, rec, take, { keep });', '    lm.takeChains(d, rec, [...touch]);', 'r5-p-discard');
+    const fP = await r5Legs({ DM: DMp, quiet: true, legs: ['P1'] });
+    ok(fP.some((n) => /r5 P1: AN ACT MADE AFTER THE REFUSED WRITE LEFT SURVIVES THE REPAIR/.test(n)), `mutant r5-P-repair-discards-the-act (4ad07d751's repair: every touched group taken): the person's merge made after the refused write is undone — RED (${fP.length})`);
+    const DMt = await dm5('    if ([...touch].every(holds)) {', '    if (false) {', 'r5-p-take');
+    const fT5 = await r5Legs({ DM: DMt, quiet: true, legs: ['P2'] });
+    ok(fT5.some((n) => /r5 P2: …a 'chain-disagrees' refusal of a write whose groups the page shows hold together/.test(n)), `mutant r5-P-take-over-the-act (4ad07d751's: any disagreement with no member building takes the hub's groups): the person's merge undone and said — RED (${fT5.length})`);
+    const fn = 'gone, alive: (sid) => !endedConvs.has(sid) });';
+    ok(WSRC5.includes(fn), 'mutant r5-N-live-set: the patched line exists in ws-handler.js');
+    const Wn = M.load('src/ws-handler.js', WSRC5.replace(fn, 'gone, alive: (sid) => activeSessions.has(sid) });'), 'r5-n-live');
+    const fN = await r5Legs({ WSH: Wn, quiet: true, legs: ['N1', 'N2'] });
+    ok(fN.some((n) => /r5 N1: ALIVE FOR THE TRACE/.test(n)) && fN.some((n) => /r5 N2: ALIVE FOR THE TRACE/.test(n)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a STOPPED conversation's copy leaves the trace and B closes the window it shows — RED (${fN.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 18, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 

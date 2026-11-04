@@ -440,11 +440,15 @@ class LayoutManager {
       // Windows: update existing, create missing, close removed
       if (state.windows) {
         const remoteIds = new Set();
+        // A COPY THIS PAGE CANNOT BUILD IS A GHOST FROM THE MOMENT THE RECORD NAMES IT (r5 O): a row whose conversation this page
+        // already shows in another window is never built here (its open would raise that other window) — nor waited for
+        const ghostRows = new Set(this.app.desktopManager?.copiesOf?.(this.app.desktopManager?.activeDesktopId, state) || []);
         for (const rw of layers.membership.windows) { // the entries' workspace fields — their arrangement is `a`
           const winId = rw.winId || rw.id;
           remoteIds.add(winId);
           const win = this.app.wm.windows.get(winId);
           const a = arrangementFor(layers, rw); // this page's arrangement of the entry (null: none — a live phone record on a desktop)
+          if (!win && ghostRows.has(String(winId))) continue; // a copy this page cannot build (r5 O — desktop-manager copiesOf): never built here
           // a window whose chain act is held: the record's entry for it (its box = its OLD frame's) is older than the act —
           // skipped whole, the act re-sent below (stage-blank verify r5)
           if (win && heldChain.has(String(winId))) { heldClosed = true; continue; }
@@ -574,7 +578,7 @@ class LayoutManager {
         if (keptIds.length) state = this.app.desktopManager?.keptRecord?.(activeDesk, state, keptIds) || state;
         // A PAGE'S VIEW OF A DESKTOP IS THE RECORD (r4 I): a row this page carries and does not build (a kept copy) is a member of
         // the record's groups in what it writes, never one it shows — the record's groups read without it
-        const ghosts = this.app.desktopManager?.ghostsOf?.(activeDesk) || [];
+        const ghosts = this.app.desktopManager?.ghostsOf?.(activeDesk, state) || [];
         if (ghosts.length) state = { ...state, windows: state.windows.map((rw) => (rw && rw.tabChain && Array.isArray(rw.tabChain.tabs) && rw.tabChain.tabs.some((m) => ghosts.includes(String(m))) ? { ...rw, tabChain: withoutMembers(rw.tabChain, ghosts) || undefined } : rw)) };
 
         // Sync tab chains from remote state. THE KEY CARRIES THE LAYOUT
@@ -968,7 +972,7 @@ class LayoutManager {
     const dm = this.app.desktopManager, ghosts = (dm?.ghostsOf?.(entry.desk || dm.activeDesktopId) || []).filter((id) => entry.tc.tabs.includes(id));
     const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), ghosts.length ? [...entry.gone, ...ghosts] : entry.gone);
     if (v.act !== 'restore') return v.act === 'drop';
-    const tc = v.chain;
+    const tc = entry.shown && v.chain.tabs.includes(entry.shown) ? { ...v.chain, active: v.chain.tabs.indexOf(entry.shown) } : v.chain; // the member a person revealed meanwhile stays in front (r5 O: showWhenFormed)
     // a member still grouped locally (a chain the record does not name) leaves it first — never two chains claiming one window
     for (const id of tc.tabs) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); }
     wm.restoreTabChain(tc.tabs, tc.active, { layout: tc.layout, split: tc.split, order: tc.order });
@@ -983,6 +987,14 @@ class LayoutManager {
   }
 
   _settlePendingChains() { this._pendingChains = (this._pendingChains || []).filter((e) => !this._reconcileChain(e)); }
+
+  /** A PERSON REVEALED `id` while a group naming it is still forming (a member still opening — r5 O: the reveal never waits for a
+   *  group): that group forms with `id` the tab in front. true = a group was waiting. */
+  showWhenFormed(id) {
+    let hit = false;
+    for (const e of this._pendingChains || []) if (e.tc.tabs.includes(String(id))) { e.shown = String(id); hit = true; }
+    return hit;
+  }
 
   /** The record's chain a pending (not yet whole) chain holds for window `id` — what its capture writes, never a flat member. */
   pendingChainOf(id) {
@@ -1002,11 +1014,20 @@ class LayoutManager {
    *  about a group ('chain-disagrees'). The page takes the hub's: its own groups of them are taken apart the way the remote apply
    *  breaks a group (the caller puts a window the record holds alone back in its box), any chain still waiting for one is let go, and the record's
    *  groups of them are queued as a remote record's are (_queueChain: a carried copy rides, a late member is waited for). Their
-   *  held chain acts are spent — refused, and said once by the caller (desktop-manager onSyncRefused). */
-  takeChains(desk, rec, ids) {
-    const wm = this.app.wm, want = new Set((ids || []).map(String)), rows = ((rec && rec.windows) || []).filter((w) => w && want.has(String(w.winId || w.id)));
+   *  held chain acts are spent — refused, and said once by the caller (desktop-manager onSyncRefused). `keep` (r5 P): the windows of
+   *  a group act the person made after the refused write left — never taken, and no hub group naming one of them is queued (the act
+   *  wins); a stale group object of a taken window that names one of them lets it go first (a page state only an injection makes). */
+  takeChains(desk, rec, ids, { keep = null } = {}) {
+    const kept = new Set([...(keep || [])].map(String));
+    const wm = this.app.wm, want = new Set((ids || []).map(String).filter((id) => !kept.has(id))), rows = ((rec && rec.windows) || []).filter((w) => w && want.has(String(w.winId || w.id)) && !(w.tabChain && Array.isArray(w.tabChain.tabs) && w.tabChain.tabs.some((m) => kept.has(String(m)))));
     const hosts = new Set();
-    for (const id of want) { const w = wm.windows.get(id); if (!w) continue; w._chainAt = 0; if (w._tabChain) hosts.add(w._tabChain.tabs[0]); }
+    for (const id of want) {
+      const w = wm.windows.get(id); if (!w) continue; w._chainAt = 0;
+      const c = w._tabChain; if (!c) continue;
+      const off = c.tabs.filter((m) => kept.has(String(m)) && wm.windows.get(String(m))?._tabChain !== c); // they hold a group of their own
+      if (off.length) { c.tabs = c.tabs.filter((m) => !off.includes(m)); if (!(c.active < c.tabs.length)) c.active = 0; }
+      if (c.tabs.length && !c.tabs.some((m) => kept.has(String(m)))) hosts.add(c.tabs[0]);
+    }
     for (const h of hosts) {
       const w = wm.windows.get(h);
       while (w && w._tabChain && w._tabChain.tabs.length > 1) wm._detachFromChain(w._tabChain, w._tabChain.tabs[w._tabChain.tabs.length - 1]);
