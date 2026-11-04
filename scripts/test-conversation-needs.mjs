@@ -48,7 +48,7 @@ const PRODUCERS = {
   'src/server/spend-guard.js': { origin: 'spend', scope: 'group', types: [] },
   'src/server/login-expiry-watch.js': { origin: 'login', scope: 'group', types: [] },
   'src/migration-runner.js': { origin: 'server', scope: 'group', types: [], why: 'int365 seam F (.365): a boot migration that failed files ONE notice per migration id in the hub\'s «Migrations» group (lane job-secrets-retire r3/r4 sayFailed) — it only informs (the retry is automatic at the next start), no action type' },
-  'src/server/migrations.js': { origin: 'vault', scope: 'group', types: [], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — its words name a MANUAL owner step (put each secret into the vault, delete the file; with two files, move one out and restart), but it files no action type and draws no button' },
+  'src/server/migrations.js': { origin: ['vault', 'browser'], scope: 'group', types: [], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — its words name a MANUAL owner step (put each secret into the vault, delete the file; with two files, move one out and restart), but it files no action type and draws no button; int376 (.376): + the CloakBrowser-to-plugin notice (2026-11-cloak-to-plugin, lane engine-spi-egress L3) in the Agent browser group — origin \'browser\', its own notice, no action type — so this file files from TWO origins' },
   'src/server/device-upgrade-watch.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/device-alerts.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/hub-act-ask.js': { origin: 'machines', scope: 'group', types: ['hub-act-ask', 'hub-act-standing'], why: 'the asker is named only in the act\'s `by` — OPEN: no `about` yet; lane ledger-dedup-law F3: + a background subject\'s ONE standing notice (no conversation asks it)' },
@@ -135,7 +135,10 @@ const census = (rows, byType, fl = files, sites = SITES) => {
   for (const x of sites) {
     const row = rows[x.rel];
     if (!row) { problems.push(`${x.rel}:${x.line} files a For-you item — a producer missing from the census (add its row: origin, scope, types)`); continue; }
-    if (row.origin !== x.origin) problems.push(`${x.rel}:${x.line} declares '${x.origin}', its census row says '${row.origin}'`);
+    // int376: a row may name SEVERAL origins (src/server/migrations.js files the Vault group's job-secrets notice AND the Agent
+    // browser group's CloakBrowser notice) — a site of an origin its row does not name is still red by name
+    const origins = [].concat(row.origin);
+    if (!origins.includes(x.origin)) problems.push(`${x.rel}:${x.line} declares '${x.origin}', its census row says '${origins.join("' / '")}'`);
     if (x.about && row.scope !== 'about' && row.scope !== 'mixed') problems.push(`${x.rel}:${x.line} stamps \`about\` — its row must say scope 'about'`);
   }
   for (const [rel, row] of Object.entries(rows)) {
@@ -160,6 +163,9 @@ console.log('   RED COPIES (the census must be able to go red)');
 { const r = { ...PRODUCERS }; delete r['src/server/channels-access.js']; ok(census(r, CN.BY_TYPE).some((p) => /channels-access\.js:\d+ files a For-you item — a producer missing from the census/.test(p)), 'RED: the channels access producer dropped from the census is named'); }
 { const b = { ...CN.BY_TYPE }; delete b['channel-watch-request']; const p = census(PRODUCERS, b); ok(p.some((x) => /channels-access\.js files action type 'channel-watch-request' — no row in src\/foryou-actions\.js/.test(x)) && p.some((x) => /action type 'channel-watch-request' is spelled by a producer — no row/.test(x)), 'RED: the watch request\'s type dropped from the registry is named (twice — the producer row and the spelling)'); }
 { ok(census(PRODUCERS, { ...CN.BY_TYPE, 'ghost-ask': { kind: 'approval', card: true } }).some((p) => /BY_TYPE row 'ghost-ask' is no producer row's type/.test(p)), 'RED: a BY_TYPE row no producer files is a dead row'); }
+{ // int376 CONTROL: a row naming two origins does not admit a third — a planted agent-origin site under migrations.js' row is red by name
+  const fl = { ...files, 'src/server/migrations.js': files['src/server/migrations.js'] + "\nstore.add('x', { origin: 'agent', text: 'planted' });\n" };
+  ok(census(PRODUCERS, CN.BY_TYPE, fl, sitesOf(fl)).some((p) => /migrations\.js:\d+ declares 'agent', its census row says 'vault' \/ 'browser'/.test(p)), 'CONTROL (int376): a two-origin row (vault / browser) still refuses a third origin by name'); }
 { const fl = { ...files, 'src/server/new-producer.js': "x.add(key, { origin: 'agent', text: 'hi' });\n" }; ok(census(PRODUCERS, CN.BY_TYPE, fl, sitesOf(fl)).some((p) => /new-producer\.js:1 files a For-you item — a producer missing/.test(p)), 'RED: a NEW producer file is named until its row is written'); }
 { const fl = { ...files, 'src/server/new-producer.js': "x.add('channels', { origin: 'channels', text: 'hi', action: { type: 'chan-new-ask', id } });\n" }; const p = census({ ...PRODUCERS, 'src/server/new-producer.js': { origin: 'channels', scope: 'group', types: [] } }, CN.BY_TYPE, fl, sitesOf(fl)); ok(p.some((x) => /'chan-new-ask' is spelled by a producer/.test(x)), 'RED: a NEW action type a producer spells is named until BY_TYPE has its row'); }
 
