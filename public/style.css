@@ -1291,6 +1291,8 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
   box-shadow: var(--shadow-window);
 }
 .desktop-preview-dragging { opacity: 0.45; }
+/* the waiting blink: the cadence is this rule's alone; yellow = a square with NO state colour (a tiered square blinks its
+   own tier — the warmth block's `.desktop-preview-win[data-warmth-tier]` rule, lane desktop-blink-colour) */
 .desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }
 .desktop-preview-waiting { border-color: var(--yellow, #e5c07b); }
 .desktop-preview-find-flash { animation: blink-fade 0.3s ease-in-out infinite reverse; background: var(--accent); }
@@ -2356,6 +2358,9 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 @keyframes bell-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* Waiting for input — blink title bar and taskbar item.
+   Yellow here by the strip's blink law (lane desktop-blink-colour): none of these four is a state-coloured element — the
+   warmth tier rides a title bar / tab as a 3-px band and a tile / chooser row as a ring, never as their fill — so their
+   blink stays yellow; a tier-filled element (a desktop-preview square) blinks its own colour.
    The color fill is an ::after overlay animating only opacity (composited);
    the old inset box-shadow hack forced a full repaint every frame, forever,
    on every blinking titlebar/taskbar item at once. */
@@ -6230,9 +6235,11 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
    width and the 90-px floor keeps its readable word (a chooser row keeps it inline, before its icon) */
 .taskbar-icon:has(> .warmth-ring) { position: relative; }
 .taskbar-icon > .warmth-ring, .taskbar-icon-stack > .warmth-ring { position: absolute; right: -5px; bottom: -5px; z-index: 1; border-radius: 50%; background: var(--bg-taskbar); }
-/* desktop previews: a square takes its tier colour (the waiting blink and the find flash keep theirs); a desktop's ring =
-   its worst live tier, just inside the border so neighbours never merge */
-.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash) { background: var(--warmth-c); }
+/* desktop previews: a square takes its tier colour — ALSO while it waits: the waiting blink pulses the square's OWN colour
+   (lane desktop-blink-colour, userW inc-mw2oamb4-vain + the owner: «闪烁和颜色互不干扰» — the blink is the action, the
+   colour the window's: green blinks green, red blinks red; only a square with no tier blinks yellow); the find flash keeps
+   its own (a different signal). A desktop's ring = its worst live tier, just inside the border so neighbours never merge */
+.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash) { background: var(--warmth-c); }
 .desktop-preview[data-warmth-tier] { outline: 2px solid var(--warmth-c); outline-offset: -3.5px; }
 /* the «+N» chip's dot and the summary chip beside For-you («Going cold a · Late b · Expired c / n»; a stable width) */
 .wsum-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--warmth-c); pointer-events: none; }

@@ -16,9 +16,14 @@
 //      survive a switch; a strip rebuild brings the bands back with no tick; the group tile = critical, then expired; the
 //      chooser's rows each carry a ring; a split
 //   ⑤ desktops: the squares' tiers (r5: expired = the ONE quiet --warmth-expired, on every expired ring, square and dot;
-//      waiting = still yellow), three adjacent preview rings (none for an
+//      waiting = its OWN tier — lane desktop-blink-colour), three adjacent preview rings (none for an
 //      all-fresh desktop), the switcher form and «+N» with warmth on at 1100 / 1280, 8 desktops ⇒ the folded button's ring;
 //      a reload: the held windows and which rung of the ladder resolved each
+//   ⑤b (lane desktop-blink-colour — userW inc-mw2oamb4-vain, the owner: «闪烁和颜色互不干扰») the strip's waiting blink in the
+//      window's OWN colour: a red, a green and a no-state square wait; each blink paused at mid-animation, its centre pixel
+//      read from a ×4 shot — red's hue = --warmth-critical's, green's = --warmth-fresh's, the no-state one yellow (dark and
+//      light); the cadence (computed animation, effect timing, opacity at 8 instants, a live rAF period of ~700 ms) the same
+//      for all three and before / after; RED: the base's rule planted back through the CSSOM ⇒ red and green blink yellow
 //   ⑥ «+N»: «+N · k critical» with the critical dot, stable across two ticks and a focus click, at 951 / 1024 / 1100 / 1280;
 //      r2 (H3): at the 90-px floor a tile shows the SAME title characters with warmth on and off (the ring rides the icon;
 //      RED: the r1 DOM re-planted — the ring a flex child before the icon — counts fewer)
@@ -333,6 +338,105 @@ await step('③ the blink over a critical band (the blink is untouched)', async 
   await evalJs(`${winOf(3)}.element.classList.remove('window-waiting'), 1`);
 });
 
+// ⑤b (lane desktop-blink-colour — userW inc-mw2oamb4-vain: «a window that turned red blinks yellow»; the owner's ruling
+// «闪烁和颜色互不干扰»): the strip's waiting blink in the window's OWN colour. A red (critical) square, a green (fresh) one and
+// one with no state colour (an unknown) wait at once; each blink is PAUSED at mid-animation (0.35 s into the reversed 0.7 s =
+// keyframe 50 %, opacity 1) and its centre pixel read from a ×4 shot of the strip: its hue = its own tier's (± 20°), the
+// unknown's = yellow's. The cadence read back — the computed animation, the effect's timing, the opacity at eight instants,
+// a live rAF trace's period — equal for all three and equal under the base's rule. BEFORE = the base's rule planted back
+// through the CSSOM (`:not(.desktop-preview-win-waiting)`): red and green blink yellow there (the RED control, by name).
+// Shots: A-desktop-15-blink-{after,before}-{dark,light}.png.
+const PNG_PX = (buf) => {
+  let o = 8, w = 0, h = 0, bd = 0, ct = 0; const idat = [];
+  while (o + 8 <= buf.length) { const n = buf.readUInt32BE(o), ty = buf.toString('latin1', o + 4, o + 8), d = buf.subarray(o + 8, o + 8 + n); if (ty === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); bd = d[8]; ct = d[9]; } else if (ty === 'IDAT') idat.push(d); else if (ty === 'IEND') break; o += 12 + n; }
+  const bpp = ct === 6 ? 4 : ct === 2 ? 3 : 0; if (bd !== 8 || !bpp) return null;
+  const raw = require('node:zlib').inflateSync(Buffer.concat(idat)), stride = w * bpp, px = Buffer.alloc(h * stride); let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), cur = px.subarray(y * stride, (y + 1) * stride);
+    for (let x = 0; x < stride; x++) { const a = x >= bpp ? cur[x - bpp] : 0, b = prev[x], c = x >= bpp ? prev[x - bpp] : 0; let v = line[x];
+      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1; else if (f === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      cur[x] = v & 255; }
+    prev = cur;
+  }
+  return { w, h, at: (x, y) => { let r = 0, g = 0, b = 0, n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = Math.round(x) + dx, Y = Math.round(y) + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const i = (Y * w + X) * bpp; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; } return n ? [r / n, g / n, b / n] : null; } };
+};
+const hueOf = (c) => { if (!c) return null; const [r, g, b] = c.map((v) => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (d < 0.08) return null; const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return ((h * 60) + 360) % 360; };
+const hueGap = (a, b) => (a == null || b == null ? 999 : Math.min(Math.abs(a - b) % 360, 360 - (Math.abs(a - b) % 360)));
+const FIX_SEL = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash)';
+const BASE_SEL = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash)';
+/** the tier rule's selector swapped in the page's own sheet (the BEFORE state = the base's rule) → the count swapped */
+const swapRule = (from, to) => evalJs(`(() => { let n = 0; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } for (const r of rs) if (r.selectorText === ${J(from)}) { r.selectorText = ${J(to)}; n++; } } return n; })()`);
+const TIMES = [0, 87.5, 175, 262.5, 350, 437.5, 525, 612.5];
+/** each square: its classes, tier, fill and computed animation; the blink's effect timing; the opacity at TIMES; left PAUSED at 350 ms */
+const BLINKS = (ids) => `(() => { const out = {}; for (const id of ${J(ids)}) {
+  const q = document.querySelector('#desktop-previews .desktop-preview-win[data-win-id="' + id + '"]'); if (!q) { out[id] = null; continue; }
+  const cs = getComputedStyle(q), an = q.getAnimations().find((a) => a.animationName === 'blink-fade') || null, t = an && an.effect.getTiming();
+  const op = []; if (an) { an.pause(); for (const at of ${J(TIMES)}) { an.currentTime = at; op.push(Math.round(parseFloat(getComputedStyle(q).opacity) * 1000) / 1000); } an.currentTime = 350; }
+  const r = q.getBoundingClientRect();
+  out[id] = { cls: q.className, tier: q.getAttribute('data-warmth-tier'), bg: cs.backgroundColor, anim: [cs.animationName, cs.animationDuration, cs.animationTimingFunction, cs.animationIterationCount, cs.animationDirection].join(' '),
+    timing: t ? [t.duration, String(t.iterations), t.direction].join(' ') : null, op, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; } return out; })()`;
+/** a live trace (the blinks running, rAF for ms): each square's opacity minima → the period between them */
+const TRACE = (ids, ms) => `new Promise((res) => { const qs = ${J(ids)}.map((id) => document.querySelector('#desktop-previews .desktop-preview-win[data-win-id="' + id + '"]'));
+  for (const q of qs) for (const a of (q ? q.getAnimations() : [])) a.play();
+  const rec = qs.map(() => []), t0 = performance.now();
+  (function f() { const t = performance.now() - t0; qs.forEach((q, i) => q && rec[i].push([t, parseFloat(getComputedStyle(q).opacity)])); if (t < ${ms}) requestAnimationFrame(f); else res(rec.map((r) => {
+    const lows = []; for (let i = 1; i < r.length - 1; i++) if (r[i][1] <= r[i - 1][1] && r[i][1] < r[i + 1][1] && r[i][1] < 0.15) lows.push(Math.round(r[i][0]));
+    const gaps = lows.slice(1).map((x, i) => x - lows[i]); return { frames: r.length, lows, gaps }; })); })(); })`;
+const INKS = `(() => { const pr = document.createElement('div'); document.body.appendChild(pr); const ink = (v) => { pr.style.background = v; return getComputedStyle(pr).backgroundColor; };
+  const v = { red: ink('var(--warmth-critical)'), green: ink('var(--warmth-fresh)'), yellow: ink('var(--yellow)') }; pr.remove(); return v; })()`;
+
+await step('⑤b the strip\'s waiting blink in the window\'s OWN colour — red blinks red, green blinks green, no state colour yellow; the blink unchanged', async () => {
+  const ids = { red: await WID(3), green: await WID(0), none: await WID(7) };
+  const all = [ids.red, ids.green, ids.none];
+  await evalJs(`(() => { for (const w of [${winOf(3)}, ${winOf(0)}, ${winOf(7)}]) w.element.classList.add('window-waiting'); app.desktopManager._renderSwitcher(); return 1; })()`);
+  await sleep(400);
+  const clip = await evalJs(`(() => { const r = document.getElementById('desktop-previews').getBoundingClientRect(); return { x: Math.max(0, Math.floor(r.left) - 4), y: Math.max(0, Math.floor(r.top) - 4), width: Math.ceil(r.width) + 8, height: Math.ceil(r.height) + 8 }; })()`);
+  const SCALE = 4;
+  const shotPx = async (name) => { const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: SCALE } }); const buf = Buffer.from(data, 'base64'); const f = path.join(SHOTS, `${name}.png`); fs.writeFileSync(f, buf); SHOT_LIST.push(f); console.log(`  (shot: ${f})`); return PNG_PX(buf); };
+  const read = async (label) => {
+    const b = await evalJs(BLINKS(all)); await sleep(80);
+    const img = await shotPx(label), inks = await evalJs(INKS);
+    const px = Object.fromEntries(Object.entries(ids).map(([k, id]) => { const s = b[id]; const c = s && img ? img.at((s.x - clip.x) * SCALE, (s.y - clip.y) * SCALE) : null; return [k, { tier: s && s.tier, waiting: !!s && /desktop-preview-win-waiting/.test(s.cls), bg: s && s.bg, rgb: c && c.map(Math.round), hue: hueOf(c) }]; }));
+    const hues = { red: hueOf(inkOf(inks.red)), green: hueOf(inkOf(inks.green)), yellow: hueOf(inkOf(inks.yellow)) };
+    return { b, px, hues, inks };
+  };
+  const at = {};
+  for (const th of ['dark', 'light']) {
+    await theme(th); await sleep(200);
+    at[th] = await read(`A-desktop-15-blink-after-${th}`);
+    const { px, hues } = at[th];
+    console.log(`    after (${th}): ` + J({ px, hues }));
+    check(`THE LAW (${th}): the waiting RED square's blink, read at mid-animation from the shot, is red (hue within 20° of --warmth-critical's) — not yellow`,
+      px.red.waiting && px.red.tier === 'critical' && hueGap(px.red.hue, hues.red) <= 20 && hueGap(px.red.hue, hues.yellow) > 20, { red: px.red, hues });
+    check(`…the waiting GREEN square blinks green (${th})`, px.green.waiting && px.green.tier === 'fresh' && hueGap(px.green.hue, hues.green) <= 20, { green: px.green, hues });
+    check(`…a waiting square with NO state colour (an unknown) still blinks yellow (${th})`, px.none.waiting && !px.none.tier && hueGap(px.none.hue, hues.yellow) <= 20, { none: px.none, hues });
+  }
+  await theme('dark'); await sleep(150);
+  const A = at.dark.b;
+  const CAD = 'blink-fade 0.7s ease-in-out infinite reverse', TIM = '700 Infinity reverse'; // (a CSS animation's ease lives on its keyframes — the computed timing function is in CAD)
+  check(`THE BLINK UNCHANGED: all three squares compute «${CAD}», their effect «${TIM}», and the SAME opacity at ${TIMES.length} instants (keyframe 50 % = 1 at 350 ms)`,
+    all.every((id) => A[id] && A[id].anim === CAD && A[id].timing === TIM && J(A[id].op) === J(A[ids.none].op)) && A[ids.none].op[4] === 1 && A[ids.none].op[0] === 0,
+    all.map((id) => A[id] && [A[id].tier, A[id].anim, A[id].timing, A[id].op]));
+  const live = await evalJs(TRACE(all, 2300));
+  console.log('    live trace (rAF, 2.3 s): ' + J(live.map((x) => ({ frames: x.frames, lows: x.lows, gaps: x.gaps }))));
+  check('…and live: each square\'s opacity bottoms out every ~700 ms (rAF trace over 2.3 s, every gap 700 ± 60 ms)', live.every((x) => x.gaps.length >= 1 && x.gaps.every((g) => Math.abs(g - 700) <= 60)), live);
+  // BEFORE: the base's rule planted back — the shot pair and the RED control
+  const swapped = await swapRule(FIX_SEL, BASE_SEL);
+  await sleep(150);
+  const before = await read('A-desktop-15-blink-before-dark');
+  console.log('    before (the base\'s rule, dark): ' + J({ px: before.px, hues: before.hues }));
+  check('RED (the base\'s rule planted back through the CSSOM): the red AND the green square blink YELLOW there — the hue test that passes above fails on them',
+    swapped >= 1 && hueGap(before.px.red.hue, before.hues.red) > 20 && hueGap(before.px.red.hue, before.hues.yellow) <= 20 && hueGap(before.px.green.hue, before.hues.green) > 20 && hueGap(before.px.green.hue, before.hues.yellow) <= 20, { swapped, px: before.px, hues: before.hues });
+  const B = before.b;
+  check('…the cadence is the SAME before and after (the computed animation, the effect, the opacity at every instant): only the colour moved',
+    all.every((id) => B[id] && A[id] && B[id].anim === A[id].anim && B[id].timing === A[id].timing && J(B[id].op) === J(A[id].op)), all.map((id) => B[id] && [B[id].anim, B[id].op]));
+  const back = await swapRule(BASE_SEL, FIX_SEL); await sleep(150);
+  const again = await evalJs(BLINKS([ids.red]));
+  check('…the rule restored: the red square computes its tier colour again', back === swapped && sameInk(again[ids.red]?.bg, at.dark.inks.red), { back, bg: again[ids.red]?.bg, red: at.dark.inks.red });
+  await evalJs(`(() => { for (const w of [${winOf(3)}, ${winOf(0)}, ${winOf(7)}]) w.element.classList.remove('window-waiting'); app.desktopManager._renderSwitcher(); return 1; })()`);
+  await sleep(300);
+});
+
 await step('⑥ the «+N» chip: the worst tier it hides, in words, stable across ticks and a focus click', async () => {
   await attach([8, 9]);
   plan({ ...MATRIX, 8: { agoMs: M(56) }, 9: { agoMs: M(57) } });
@@ -575,7 +679,9 @@ await step('⑤ desktops: the squares, three adjacent preview rings, the folded 
     squares: [...document.querySelectorAll('.desktop-preview-win[data-warmth-tier="expired"]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash)')].map((q) => getComputedStyle(q).backgroundColor) }))()`);
   check(`r5: ONE expired value — every expired ring (${one.rings.length}), summary / «+N» dot (${one.dots.length}) and square (${one.squares.length}) on the page computes it (the special cases are gone)`,
     one.dots.length >= 1 && one.squares.length >= 1 && [...one.rings, ...one.dots, ...one.squares].every((c) => sameInk(c, ink5.exp)), { one, exp: ink5.exp });
-  check('a WAITING square still computes the yellow (the blink wins over the tier)', sq(2)?.waiting && sq(2)?.bg === p.yellow, { sq: sq(2), yellow: p.yellow });
+  const twin = sq(2) && (p.previews || []).flatMap((x) => x.squares).find((s) => s.tier === sq(2).tier && !s.waiting);
+  check('a WAITING square computes its OWN tier colour — a group member waits in the group\'s worst, the same fill as its group\'s resting squares (lane desktop-blink-colour; never the yellow)',
+    sq(2)?.waiting && ['critical', 'fresh', 'mid', 'expired'].includes(sq(2)?.tier) && !!twin && sameInk(sq(2)?.bg, twin.bg) && !sameInk(sq(2)?.bg, p.yellow), { sq: sq(2), twin, yellow: p.yellow });
   for (const [w, h] of [[1280, 800], [1100, 700]]) { await device(w, h); await sleep(700); await nextTick(1); const q = await evalJs(PREVIEWS); FORMS[`on-${w}`] = { form: q.form, chip: q.chip, summary: q.summary }; }
   // the same state with warmth OFF (the live flip): does the summary chip fold the previews / cut a tile?
   await evalJs(`app.settings.set('desktop.cacheWarmth', false), 1`); await sleep(1300); await nextTick(1);

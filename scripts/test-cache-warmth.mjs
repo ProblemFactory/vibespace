@@ -39,7 +39,7 @@
 //   ⑨ WIRING + THE LAWS (r1b, comment-stripped code): the poll's ONE call from the SAME answer; warmth-chrome.js computes
 //     once (one warmthOf call site) and owns no timer / rAF / settings listener / _notify / setTitleMeta / colour write;
 //     every builder re-applies from the map; app.js seats the chip beside the lock chip; the CSS block's selectors (the
-//     frame guard, the blink kept; r5: no expired special case, a tier's words mixed toward --text — a PLANTED r1b line reds
+//     frame guard, a waiting square keeps its tier — ⑫; r5: no expired special case, a tier's words mixed toward --text — a PLANTED r1b line reds
 //     it) and no literal colour in it (a PLANTED control proves the check fires);
 //     round 2 (the acceptance of ca2670be0): a list row's label shrinks (H1), an «Other desktops» row takes its group's tabs —
 //     built or held (H2, a PLANTED r1 line reds it), a tile's ring rides its icon (H3), the switcher budgets the warm «+N»
@@ -50,6 +50,13 @@
 //     arithmetic over style.css's six theme blocks (the derivation and the words' mix read FROM the file): every adjacent
 //     pair ≥ 30° of hue, every band ≥ 1.5:1 on its title bar, the words ≥ 4.5:1 on the list / phone row / window grounds,
 //     expired ≥ 1.5:1 on the taskbar — printed as the table; four PLANTED copies red it, each on its own floor.
+//   ⑫ THE STRIP'S BLINK LAW (lane desktop-blink-colour — userW inc-mw2oamb4-vain, the owner: «闪烁和颜色互不干扰»): a small
+//     cascade over style.css (selectors with :not / attributes / ancestors, specificity, order, inherited custom properties,
+//     read down to the theme's raw hue) — a waiting square blinks its OWN tier colour (green green, red red, …, the same fill
+//     as at rest), a square with no state colour yellow (also inside a critical desktop ring), the find flash its own; the
+//     cadence unchanged (blink-fade 0.7 s ease-in-out infinite reverse, the keyframes); THE CENSUS of every «waiting» blink
+//     selector → state-coloured ⇒ own colour / not ⇒ yellow; PLANTED: the yellow-always rule (RED on b7c910c3c by name), a
+//     cadence changed, the unguarded var road, a new unjudged blink.
 // Run: node scripts/test-cache-warmth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -414,7 +421,8 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   const block = a >= 0 && z > a ? stripAll(css.slice(a, z)) : '';
   ok('the CSS block: the frame band rides ::before on a bar that is not seamless and hosts no tab strip (a group frame draws none)',
     /\.window:not\(\.seamless\) > \.window-titlebar\[data-warmth-tier\]:not\(:has\(> \.tab-bar-tabs\)\)::before \{/.test(block));
-  ok('…a square keeps the waiting blink and the find flash (the tier rule steps aside for both)', /\.desktop-preview-win\[data-warmth-tier\]:not\(\.desktop-preview-win-waiting\):not\(\.desktop-preview-find-flash\) \{ background: var\(--warmth-c\); \}/.test(block));
+  ok('…a square keeps its tier WHILE IT WAITS (lane desktop-blink-colour: the blink pulses the square\'s own colour) and the find flash keeps its own (the tier rule steps aside for the flash alone)',
+    /\.desktop-preview-win\[data-warmth-tier\]:not\(\.desktop-preview-find-flash\) \{ background: var\(--warmth-c\); \}/.test(block) && !/desktop-preview-win\[data-warmth-tier\][^{]*:not\(\.desktop-preview-win-waiting\)/.test(block));
   ok('r5: NO expired special case — the one mapping line stands and nothing re-points an expired mark (the ring, the square, the preview ring and the dots all read --warmth-expired, one quiet value)',
     (block.match(/\[data-warmth-tier="expired"\]/g) || []).length === 1 && /\[data-warmth-tier="expired"\]  \{ --warmth-c: var\(--warmth-expired\); \}/.test(block) && !/--warmth-c: var\(--text-dim\)/.test(block));
   const R1B_LEFT = 'font-variant-numeric: tabular-nums; color: var(--text-dim); }';
@@ -554,6 +562,215 @@ console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four li
   const pe7 = css7 && css7.includes('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);') ? gauge(css7.replace('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);')) : null;
   ok('…a SEVENTH theme block planted (its blue under 2° from its green) ⇒ the gauge walks seven, reds the hue floor on that block ALONE; the expired control over the same copy counts seven and still reds every one',
     !!g7 && !g7.error && g7.themes.length === 7 && g7.fails.length > 0 && g7.fails.every((f) => f.theme === 'seventh' && f.floor === 'hue') && every(pe7, 'expired'), JSON.stringify(g7 && { themes: g7.themes, fails: g7.fails }));
+}
+
+console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiting square blinks its OWN colour, the cadence unchanged');
+{
+  // userW (inc-mw2oamb4-vain, 2.369.378): «the desktop strip's preview blink is always yellow — a window that turned red blinks
+  // yellow». The owner's ruling: «闪烁和颜色互不干扰» — the BLINK (cadence, pattern, which elements blink) stays; the COLOUR is
+  // the element's own state colour; only an element with no state colour blinks yellow. A small CASCADE over style.css's
+  // top-level rules (selector matching with :not / attributes / ancestors, specificity, order, !important, custom properties
+  // inherited down the strip's chain), read symbolically down to the theme's raw hue — no browser; the chrome half is
+  // test-cache-warmth-chrome ⑤b (a mid-animation pixel's hue).
+  const css = read('public/style.css');
+  const splitTop = (x, sep) => { const out = []; let d = 0, q = '', cur = ''; for (const ch of x) { if (q) { if (ch === q) q = ''; cur += ch; continue; } if (ch === '"' || ch === "'") q = ch; else if (ch === '(' || ch === '[') d++; else if (ch === ')' || ch === ']') d--; if (ch === sep && !d) { out.push(cur.trim()); cur = ''; } else cur += ch; } if (cur.trim()) out.push(cur.trim()); return out; };
+  const declsOf = (body) => splitTop(body, ';').map((d) => { const k = d.indexOf(':'); if (k < 0) return null; let v = d.slice(k + 1).trim(); const imp = /!\s*important\s*$/i.test(v); if (imp) v = v.replace(/!\s*important\s*$/i, '').trim(); return { prop: d.slice(0, k).trim().toLowerCase(), value: v, imp }; }).filter(Boolean);
+  const TOKEN = /([.#])([\w-]+)|\[([\w-]+)(?:([~^$*|]?=)\s*["']?([^"'\]]*)["']?)?\]|(::?)([\w-]+)(\((?:[^()]|\([^()]*\))*\))?|(\*)|([a-zA-Z][\w-]*)/y;
+  /** one compound → tokens, or null when it holds what this cascade does not read (then the selector matches nothing) */
+  const compound = (c) => { const out = []; TOKEN.lastIndex = 0; while (TOKEN.lastIndex < c.length) { const at = TOKEN.lastIndex, m = TOKEN.exec(c); if (!m || m.index !== at) return null; out.push(m); } return out; };
+  const selOf = (sel) => { const parts = []; let cur = '', d = 0; for (const ch of sel) { if (ch === '(' || ch === '[') d++; if (ch === ')' || ch === ']') d--; if (!d && /[\s>+~]/.test(ch)) { if (cur) parts.push(cur); cur = ''; if (ch === '+' || ch === '~') parts.push('+'); } else cur += ch; } if (cur) parts.push(cur); if (parts.includes('+')) return null; const cs = parts.map(compound); return cs.every(Boolean) ? cs : null; };
+  // ONE scan of style.css into its top-level rules (an @media / @supports block skipped whole — the strip's rules live at the
+  // top level; @keyframes kept by name). A PLANTED copy is that list with ONE rule's text swapped (or one rule appended) —
+  // the same sheet the planted text would scan to, without a second 450 KB scan. Kept for the cascade: a rule whose
+  // selector names one of the chains' classes / attributes / ids / tags, holds a compound led by `:` or `*` (it names
+  // nothing), or whose body runs blink-fade (THE CENSUS) — any other rule names something no node here carries.
+  const NAMES = /(?<![\w-])(desktop-preview(?:-win(?:-waiting)?|-find-flash|-wrapper|s)?|active|body|html|div|data-(?:win-id|warmth-tier|desktop-id|theme)|window(?:-titlebar|-waiting)?|taskbar-items?|waiting|tab-item|overlap-switcher(?:-item)?)(?![\w-])|(?:^|[\s>+~,(])[:*]/;
+  const rawOf = (src) => {
+    const S = src.replace(/\/\*[\s\S]*?\*\//g, ' '), raw = [], frames = {};
+    const BR = /[{}]/g; let d = 0, start = 0, open = -1, m;
+    while ((m = BR.exec(S))) {
+      if (m[0] === '{') { if (d++ === 0) open = m.index; continue; }
+      if (--d !== 0) { if (d < 0) d = 0; continue; }
+      let sel = S.slice(start, open); sel = sel.slice(sel.lastIndexOf(';') + 1).trim(); const body = S.slice(open + 1, m.index); start = m.index + 1;
+      if (/^@keyframes\s/.test(sel)) frames[sel.slice(10).trim()] = body.replace(/\s+/g, ' ').trim();
+      else if (!sel.startsWith('@') && (NAMES.test(sel) || body.includes('blink-fade'))) raw.push([sel, body]);
+    }
+    return { raw, frames };
+  };
+  const PARSED = new Map();
+  const ruleOf = (sel, body) => {
+    const k = sel + '{' + body; let r = PARSED.get(k); if (r) return r;
+    const sels = splitTop(sel, ',').map((text) => { const cs = selOf(text); if (!cs) return null; const last = cs[cs.length - 1], m = last.find((t) => t[1] || t[3] || t[10]); return { text, cs, key: !m ? '*' : m[1] ? m[1] + m[2] : m[3] ? '[' + m[3] : m[10].toLowerCase() }; }).filter(Boolean);
+    const decls = declsOf(body);
+    PARSED.set(k, (r = { texts: splitTop(sel, ','), sels, decls, vars: decls.some((d) => d.prop.startsWith('--')) })); return r;
+  };
+  const sheetOf = ({ raw, frames }) => {
+    const rules = [], index = new Map();
+    for (const [sel, body] of raw) {
+      const r = { ...ruleOf(sel, body), order: rules.length }; rules.push(r);
+      for (const s of r.sels) { const l = index.get(s.key); if (l) l.push([r, s]); else index.set(s.key, [[r, s]]); }
+    }
+    return { rules, frames, index, memo: new Map() };
+  };
+  const flat = (x) => x.replace(/\s+/g, ' ').trim();
+  /** the scanned list with the rule whose text is `from` swapped for `to` (null when no rule reads `from`), or `extra` appended */
+  const plantRule = (base, from, to) => { const f = flat(from); const i = base.raw.findIndex(([sel, body]) => flat(sel + ' { ' + body + ' }') === f); if (i < 0) return null; const raw = base.raw.slice(); raw.splice(i, 1, ...rawOf(to).raw); return { raw, frames: base.frames }; };
+  /** does a compound match a node (`up`: as an ancestor — never its pseudo-element)? → its specificity [ids, classes, types], or null */
+  const NOT = new Map(); // a :not( … ) argument → its compounds + its specificity, parsed once
+  const hit = (toks, n, up = false) => {
+    const sp = [0, 0, 0], pseudo = up ? null : n.pseudo;
+    for (const m of toks) {
+      if (m[1] === '.') { if (!n.cls.has(m[2])) return null; sp[1]++; }
+      else if (m[1] === '#') { if (n.id !== m[2]) return null; sp[0]++; }
+      else if (m[3]) { const v = n.attrs[m[3]]; if (v == null) return null; const w = m[5]; if (m[4] === '=' && v !== w) return null; if (m[4] === '^=' && !v.startsWith(w)) return null; if (m[4] === '*=' && !v.includes(w)) return null; if (m[4] === '$=' && !v.endsWith(w)) return null; if (m[4] === '~=' && !v.split(/\s+/).includes(w)) return null; sp[1]++; }
+      else if (m[6] === '::' || (m[6] === ':' && /^(before|after)$/.test(m[7]))) { if (pseudo !== m[7]) return null; sp[2]++; }
+      else if (m[6] === ':') {
+        if (m[7] === 'root') { if (!n.root) return null; sp[1]++; continue; }
+        if (m[7] !== 'not' || !m[8]) return null; // :hover / :has / … — a resting square in a resting strip: never
+        let nt = NOT.get(m[8]);
+        if (!nt) { const args = splitTop(m[8].slice(1, -1), ',').map(compound); let best = null; if (args.every(Boolean)) for (const a of args) { const w = specOf(a); if (!best || cmp(w, best) > 0) best = w; } NOT.set(m[8], (nt = { args: best ? args : null, best })); }
+        if (!nt.args) return null;
+        for (const a of nt.args) if (hit(a, n, true)) return null;
+        sp[0] += nt.best[0]; sp[1] += nt.best[1]; sp[2] += nt.best[2];
+      }
+      else if (m[9]) { /* * */ }
+      else if (m[10]) { if (n.tag !== m[10].toLowerCase()) return null; sp[2]++; }
+    }
+    if (pseudo && !toks.some((m) => m[6] === '::' || (m[6] === ':' && /^(before|after)$/.test(m[7])))) return null; // a rule without the pseudo-element styles the host
+    return sp;
+  };
+  const specOf = (toks) => { const sp = [0, 0, 0]; for (const m of toks) { if (m[1] === '#') sp[0]++; else if (m[1] === '.' || m[3]) sp[1]++; else if (m[6] === '::' || m[10]) sp[2]++; else if (m[6] === ':') sp[1]++; } return sp; };
+  const cmp = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0); } return 0; };
+  /** a parsed selector against a chain [element, parent, …, root] (descendant and child both read as «an ancestor») */
+  const matchSel = (cs, chain) => {
+    const last = hit(cs[cs.length - 1], chain[0]); if (!last) return null;
+    const sp = [...last]; let pos = 1;
+    for (let k = cs.length - 2; k >= 0; k--) { let found = null; while (pos < chain.length && !(found = hit(cs[k], chain[pos], true))) pos++; if (!found) return null; pos++; sp[0] += found[0]; sp[1] += found[1]; sp[2] += found[2]; }
+    return sp;
+  };
+  /** the declarations that win on chain[0] — candidates from the index by its classes / attributes / id / tag + `*` */
+  const cascade = (sheet, chain, varsOnly = false) => {
+    const n = chain[0], keys = ['*', n.tag, ...[...n.cls].map((c) => '.' + c), ...Object.keys(n.attrs).map((a) => '[' + a), ...(n.id ? ['#' + n.id] : [])];
+    const best = new Map(), won = {};
+    for (const k of keys) for (const [r, s] of sheet.index.get(k) || []) { if (varsOnly && !r.vars) continue; const sp = matchSel(s.cs, chain); if (sp && (!best.has(r) || cmp(sp, best.get(r)) > 0)) best.set(r, sp); }
+    for (const [r, sp] of best) for (const d of r.decls) { if (varsOnly && !d.prop.startsWith('--')) continue; const key = [d.imp ? 1 : 0, ...sp, r.order]; if (!won[d.prop] || cmp(key, won[d.prop].key) >= 0) won[d.prop] = { value: d.value, key }; }
+    return won;
+  };
+  /** custom properties down the chain (inherited), then the winning background / animation of chain[0], read to the raw hue */
+  const RAW = new Set(['--green', '--red', '--yellow', '--blue', '--accent', '--text-dim']);
+  const sig = (n) => n.tag + '#' + (n.id || '') + '.' + [...n.cls].join('.') + JSON.stringify(n.attrs) + (n.pseudo || '') + (n.root ? '!' : '');
+  /** the custom properties chain[0] holds — its own over its parent's (inherited), memoized per sheet by the chain */
+  const varsOf = (sheet, chain) => {
+    if (!chain.length) return {};
+    const k = chain.map(sig).join('<'); let v = sheet.memo.get(k); if (v) return v;
+    v = { ...varsOf(sheet, chain.slice(1)) }; for (const [p, w] of Object.entries(cascade(sheet, chain, true))) v[p] = w.value;
+    sheet.memo.set(k, v); return v;
+  };
+  const styleOf = (sheet, chain) => {
+    const mk = 'style:' + chain.map(sig).join('<'); const hit0 = sheet.memo.get(mk); if (hit0) return hit0;
+    const top = cascade(sheet, chain), vars = varsOf(sheet, chain);
+    const pick = (props) => props.map((p) => top[p] && { p, ...top[p] }).filter(Boolean).sort((a, b) => cmp(b.key, a.key))[0] || null;
+    const bg = pick(['background', 'background-color']);
+    const toRaw = (v, path = []) => { const m = /^var\((--[\w-]+)\s*(?:,\s*([\s\S]+))?\)$/.exec(String(v).trim()); if (!m) return { raw: String(v).trim(), path }; const p = [...path, m[1]]; if (RAW.has(m[1])) return { raw: m[1], path: p }; if (m[1] in vars) return toRaw(vars[m[1]], p); if (m[2] != null) return toRaw(m[2], p); return { raw: null, path: p }; };
+    const anim = top.animation || null;
+    const longhands = Object.keys(top).filter((p) => /^animation-/.test(p) && (!anim || cmp(top[p].key, anim.key) > 0));
+    const out = { bg: bg ? toRaw(bg.value) : { raw: null, path: [] }, animation: anim ? anim.value.replace(/\s+/g, ' ') : null, longhands };
+    sheet.memo.set(mk, out); return out;
+  };
+  const node = (tag, cls, attrs = {}, extra = {}) => ({ tag, id: extra.id || null, cls: new Set(cls), attrs, pseudo: extra.pseudo || null, root: !!extra.root });
+  const html = (theme) => node('html', [], { 'data-theme': theme }, { root: true });
+  /** a square in the full strip: [square, its desktop's preview (its ring's tier on it), the wrapper, #desktop-previews, body, html] */
+  const sqChain = ({ tier = null, waiting = false, flash = false, deskTier = null, theme = 'dark' } = {}) => [
+    node('div', ['desktop-preview-win', ...(waiting ? ['desktop-preview-win-waiting'] : []), ...(flash ? ['desktop-preview-find-flash'] : [])], { 'data-win-id': 'w1', ...(tier ? { 'data-warmth-tier': tier } : {}) }),
+    node('div', ['desktop-preview', 'active'], { 'data-desktop-id': 'd1', ...(deskTier ? { 'data-warmth-tier': deskTier } : {}) }),
+    node('div', ['desktop-preview-wrapper']), node('div', [], {}, { id: 'desktop-previews' }), node('body', []), html(theme)];
+  const CADENCE = 'blink-fade 0.7s ease-in-out infinite reverse', FLASH = 'blink-fade 0.3s ease-in-out infinite reverse';
+  const FRAMES = '0%,100% { opacity: 0; } 50% { opacity: 1; }';
+  // THE CENSUS: every «waiting» blink selector, with its element's state colour — a NEW waiting blink must enter this table
+  const WAIT_CENSUS = [
+    ['.desktop-preview-win-waiting', 'a desktop-preview square — FILLED by its tier (warmth-chrome paintPreviews)', 'own colour'],
+    ['.window-waiting .window-titlebar::after', 'the title bar — the tier rides it as a 3-px ::before band, never its fill', 'yellow'],
+    ['.taskbar-item.waiting::after', 'a taskbar tile — the tier is a ring on its icon', 'yellow'],
+    ['.tab-item.waiting::after', 'a tab — the tier is a child band', 'yellow'],
+    ['.overlap-switcher-item.waiting::after', 'a chooser row — the tier is a ring', 'yellow'],
+  ];
+  /** an ::after blink's chain: [the pseudo-element (its host's classes, to match `.host::after`), the host, …, html] */
+  const hostChain = (sel, tier, theme = 'dark') => {
+    const t = tier ? { 'data-warmth-tier': tier } : {};
+    const up = {
+      '.window-waiting .window-titlebar::after': [node('div', ['window-titlebar'], t), node('div', ['window', 'window-waiting'])],
+      '.taskbar-item.waiting::after': [node('div', ['taskbar-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', [], {}, { id: 'taskbar-items' })],
+      '.tab-item.waiting::after': [node('div', ['tab-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', ['window-titlebar'], t), node('div', ['window'])],
+      '.overlap-switcher-item.waiting::after': [node('div', ['overlap-switcher-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', ['overlap-switcher'])],
+    }[sel];
+    return [{ ...up[0], pseudo: 'after' }, ...up, node('body', []), html(theme)];
+  };
+  const TIERS = [['fresh', '--green', 'green blinks green'], ['critical', '--red', 'red blinks red'], ['mid', '--blue', 'blue blinks blue'], ['late', '--yellow', 'amber blinks amber'], ['expired', null, 'grey blinks grey']];
+  /** THE LAW over one scanned sheet → a row by id ({ pass, detail }), each computed when first asked (a planted copy asks
+   *  only the rows it is about) */
+  const law = (scanned) => {
+    const sh = sheetOf(scanned), done = new Map(), sty = (chain) => styleOf(sh, chain);
+    const ROWS = {};
+    for (const theme of ['dark', 'light']) {
+      for (const [tier, hue, words] of TIERS) ROWS[`tint:${tier}:${theme}`] = () => {
+        const w = sty(sqChain({ tier, waiting: true, theme })), rest = sty(sqChain({ tier, theme }));
+        const own = rest.bg.path.includes('--warmth-' + tier) && (hue ? rest.bg.raw === hue : /var\(--text-dim\)/.test(rest.bg.raw || ''));
+        return [own && w.bg.raw === rest.bg.raw && JSON.stringify(w.bg.path) === JSON.stringify(rest.bg.path), `${words} (${theme}): waiting ${w.bg.path.join(' → ') || '—'} = ${w.bg.raw} · resting ${rest.bg.path.join(' → ')} = ${rest.bg.raw}`];
+      };
+      ROWS[`tint:none:${theme}`] = () => { const n = sty(sqChain({ waiting: true, theme })); return [n.bg.raw === '--yellow' && n.bg.path.join() === '--yellow', `no state colour ⇒ yellow (${theme}): ${n.bg.path.join(' → ')} = ${n.bg.raw}`]; };
+      ROWS[`tint:none-in-ring:${theme}`] = () => { const n = sty(sqChain({ waiting: true, deskTier: 'critical', theme })); return [n.bg.raw === '--yellow' && !n.bg.path.includes('--warmth-c'), `no state colour on a desktop whose RING is critical ⇒ still yellow — the ring's --warmth-c is inherited, never the square's (${theme}): ${n.bg.path.join(' → ')} = ${n.bg.raw}`]; };
+      ROWS[`flash:${theme}`] = () => { const a = sty(sqChain({ tier: 'critical', waiting: true, flash: true, theme })), b = sty(sqChain({ tier: 'fresh', flash: true, theme })); return [a.bg.raw === '--accent' && b.bg.raw === '--accent' && a.animation === FLASH && b.animation === FLASH && !a.longhands.length, `the find flash keeps its own (${theme}): ${a.bg.raw} ${a.animation} · ${b.bg.raw} ${b.animation}`]; };
+    }
+    const variants = [{}, ...TIERS.map(([tier]) => ({ tier })), { deskTier: 'critical' }];
+    ROWS.cadence = () => { const c = variants.map((v) => ({ v, s: sty(sqChain({ ...v, waiting: true })) })); return [c.every(({ s }) => s.animation === CADENCE && !s.longhands.length), c.map(({ v, s }) => `${v.tier || (v.deskTier ? 'none in ring' : 'none')}: ${s.animation}${s.longhands.length ? ' + ' + s.longhands.join(',') : ''}`).join(' · ')]; };
+    ROWS['cadence:resting'] = () => { const st = variants.map((v) => sty(sqChain(v))); return [st.every((x) => x.animation == null), 'a square that does not wait does not animate: ' + st.map((x) => x.animation || 'none').join(' · ')]; };
+    ROWS.keyframes = () => [sh.frames['blink-fade'] === FRAMES, 'blink-fade = ' + sh.frames['blink-fade']];
+    // the census: every selector whose rule runs blink-fade, minus the find flash's — exactly the table's five, each judged
+    ROWS['census:set'] = () => {
+      const blinking = sh.rules.filter((r) => r.decls.some((d) => /^animation(-name)?$/.test(d.prop) && /\bblink-fade\b/.test(d.value))).flatMap((r) => r.texts).filter((x) => !/find-flash/.test(x));
+      const listed = WAIT_CENSUS.map(([x]) => x);
+      return [blinking.length === listed.length && blinking.every((x) => listed.includes(x)), 'the waiting blinks in style.css: ' + blinking.join(' | ')];
+    };
+    for (const [sel, what, verdict] of WAIT_CENSUS.slice(1)) ROWS['census:' + sel] = () => {
+      const t = sty(hostChain(sel, 'critical')), u = sty(hostChain(sel, null)), host = sty(hostChain(sel, 'critical').slice(1));
+      return [!host.bg.path.includes('--warmth-c') && t.bg.raw === u.bg.raw && t.animation === u.animation && /^blink-fade 0\.7s /.test(t.animation || ''), `${what} ⇒ ${verdict}: blink ${t.bg.raw} ${t.animation} (tier or none alike) · host fill ${host.bg.raw}`];
+    };
+    return (id) => { if (!done.has(id)) { const f = ROWS[id]; const [pass, detail] = f ? f() : [false, 'no row ' + id]; done.set(id, { pass: !!pass, detail }); } return done.get(id); };
+  };
+  const scanned = rawOf(css), real = law(scanned);
+  const by = (row, id) => row(id);
+  console.log('    the census (every «waiting» blink selector → its element\'s state colour → its blink):');
+  for (const [s, what, verdict] of WAIT_CENSUS) console.log(`      ${s.padEnd(42)} ${verdict.padEnd(10)} ${what}`);
+  for (const theme of ['dark', 'light']) {
+    ok(`THE LAW (${theme}): a waiting square blinks its OWN tier colour — green blinks green, red blinks red, blue blue, amber amber, the quiet grey grey — the same fill it has at rest`,
+      TIERS.every(([tier]) => by(real, `tint:${tier}:${theme}`).pass), TIERS.map(([tier]) => by(real, `tint:${tier}:${theme}`).detail).join(' | '));
+    ok(`…a waiting square with NO state colour blinks yellow, as before (${theme})`, by(real, `tint:none:${theme}`).pass, by(real, `tint:none:${theme}`).detail);
+    ok(`…and stays yellow inside a desktop whose ring is critical (the ring's inherited --warmth-c never tints it) (${theme})`, by(real, `tint:none-in-ring:${theme}`).pass, by(real, `tint:none-in-ring:${theme}`).detail);
+    ok(`…the find flash keeps its own colour and its 0.3 s, waiting or not (${theme})`, by(real, `flash:${theme}`).pass, by(real, `flash:${theme}`).detail);
+  }
+  ok(`THE BLINK UNCHANGED: every waiting square (each tier, none, none in a critical ring) runs «${CADENCE}» — no longhand overrides it`, by(real, 'cadence').pass, by(real, 'cadence').detail);
+  ok('…a square that does not wait does not animate', by(real, 'cadence:resting').pass, by(real, 'cadence:resting').detail);
+  ok(`…the keyframes: blink-fade = «${FRAMES}»`, by(real, 'keyframes').pass, by(real, 'keyframes').detail);
+  ok('THE CENSUS: the waiting blinks in style.css are exactly the table\'s five (a new one must be judged here)', by(real, 'census:set').pass, by(real, 'census:set').detail);
+  ok('…the four ::after blinks ride hosts that are NOT state-coloured ⇒ yellow, the same with a tier or none (their 0.7 s kept)',
+    WAIT_CENSUS.slice(1).every(([s]) => by(real, 'census:' + s).pass), WAIT_CENSUS.slice(1).map(([s]) => by(real, 'census:' + s).detail).join(' | '));
+  // PLANTED copies — each reds its own row(s), and the rest stand
+  const TIER_RULE = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash) { background: var(--warmth-c); }';
+  const WAIT_RULE = '.desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }';
+  const planted = (...pairs) => { let x = scanned; for (const [from, to] of pairs) { x = x && plantRule(x, from, to); } return x && law(x); };
+  const BASE_TIER_RULE = '.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-win-waiting):not(.desktop-preview-find-flash) { background: var(--warmth-c); }';
+  const yellowAlways = planted([TIER_RULE, BASE_TIER_RULE]);
+  ok('CONTROL: the yellow-always rule planted back (the base\'s `:not(.desktop-preview-win-waiting)`) reds the law — red and green blink yellow — and nothing else',
+    !!yellowAlways && !by(yellowAlways, 'tint:critical:dark').pass && !by(yellowAlways, 'tint:fresh:light').pass && by(yellowAlways, 'tint:none:dark').pass && by(yellowAlways, 'cadence').pass, yellowAlways && by(yellowAlways, 'tint:critical:dark').detail);
+  const slower = planted([WAIT_RULE, WAIT_RULE.replace('0.7s', '0.5s')]);
+  const longhand = planted([TIER_RULE, TIER_RULE.replace('{ background: var(--warmth-c); }', '{ background: var(--warmth-c); animation-duration: 1.4s; }')]);
+  ok('CONTROL: a cadence changed — the blink at 0.5 s, or a tier rule adding its own animation-duration — reds THE BLINK UNCHANGED, the colours still hold',
+    !!slower && !by(slower, 'cadence').pass && by(slower, 'tint:critical:dark').pass && !!longhand && !by(longhand, 'cadence').pass, [slower && by(slower, 'cadence').detail, longhand && by(longhand, 'cadence').detail].join(' | '));
+  const unguarded = planted([TIER_RULE, BASE_TIER_RULE], [WAIT_RULE, WAIT_RULE.replace('var(--yellow, #e5c07b)', 'var(--warmth-c, var(--yellow, #e5c07b))')]);
+  ok('CONTROL: the unguarded var road (the blink reads var(--warmth-c, yellow) by inheritance) colours the tiered squares but tints a NO-state square with its desktop ring\'s red ⇒ that row reds',
+    !!unguarded && by(unguarded, 'tint:critical:dark').pass && !by(unguarded, 'tint:none-in-ring:dark').pass, unguarded && by(unguarded, 'tint:none-in-ring:dark').detail);
+  const newBlink = law({ raw: scanned.raw.concat(rawOf('.mobile-win-row.waiting::after { animation: blink-fade 0.7s ease-in-out infinite; }').raw), frames: scanned.frames });
+  ok('CONTROL: a NEW waiting blink planted (a phone row\'s ::after) reds THE CENSUS until it is judged in the table', !by(newBlink, 'census:set').pass, by(newBlink, 'census:set').detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

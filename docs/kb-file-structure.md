@@ -7,6 +7,8 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+public/style.css `.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash)` (lane desktop-blink-colour) — THE STRIP'S BLINK LAW: a waiting square keeps its tier fill and pulses its OWN colour; yellow = no state colour; the ::after blinks stay yellow ⇒ kb-file-structure.md
+scripts/test-cache-warmth.mjs ⑫ + test-cache-warmth-chrome.mjs ⑤b (lane desktop-blink-colour) — a cascade over style.css + the census of every waiting blink + planted controls · mid-blink pixel hue, the cadence, RED = the base's rule ⇒ kb-file-structure.md
 src/server/cli-cmd.js — THE SHELL RUNG (lane cli-shell-truth): runShell (one spawn / kill site), askShell (WHERE — the spawn is always a program), the registry: path ⇒ direct, a wrapper NAMED, a dangling target by its cause; current() = THE accessor, remoteName ⇒ kb-design-lessons §24
 src/login-shell.js — PURE (CJS) the ladder spelled ONCE (S0_SH = dial.js's), the program-only spelling (escaped builtins), shellLine, parseShellAnswer, wrapperOf, aliasTarget (the ONE narrow rule: a one-word absolute alias), judgeAnswer (path / none / unanswered) ⇒ kb-file-structure
 src/server/cli-env.js — registers every CLI with cliCmds (claude, codex, the ACP / exe harnesses); the boot `which` is the PROVISIONAL answer (hub-path) — the login shell is asked lazily by cli-cmd.js, never at boot (lane cli-shell-truth)
@@ -1521,6 +1523,10 @@ src/lib/setup-flows.js _showLayoutHistory `busy` + app.js `_layoutRestoring` (la
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### public/style.css (the warmth block's square rule + `.desktop-preview-win-waiting` + the shared ::after waiting blink) — THE STRIP'S BLINK LAW (lane desktop-blink-colour, 2026-11-04)
+
+userW (inc-mw2oamb4-vain, 2.369.378): a window that turned red blinked yellow in the desktop strip. The owner: «闪烁和颜色互不干扰» — the blink is the action, the colour the element's own. **The rule:** `.desktop-preview-win[data-warmth-tier]:not(.desktop-preview-find-flash) { background: var(--warmth-c); }` — it steps aside for the find flash ONLY (never again for `.desktop-preview-win-waiting`), so a tiered waiting square keeps its fill and `.desktop-preview-win-waiting` supplies only the animation; its `var(--yellow, …)` is the fill of a square with NO tier. **Do not:** colour the blink through `var(--warmth-c, …)` on the waiting rule — `--warmth-c` inherits from the desktop's ring (`.desktop-preview[data-warmth-tier]`) and would tint a no-state square; add a second state → colour table (the tier attribute paintPreviews writes is the one source); change blink-fade / 0.7 s / reverse / which selectors blink with a colour change. **The census** (test-cache-warmth ⑫ — a new «waiting» blink reds it until judged): the square = tier-filled ⇒ own colour; `.window-waiting .window-titlebar::after`, `.taskbar-item.waiting::after`, `.tab-item.waiting::after`, `.overlap-switcher-item.waiting::after` = not state-coloured (band / ring) ⇒ yellow (the pre-existing rgba literal, untouched); the static `.desktop-preview-waiting` / `.desktop-switch-waiting` frames do not blink ⇒ yellow. Gates: test-cache-warmth ⑫ (fast, cascade + census + planted), test-cache-warmth-chrome ⑤b (heavy, the pixel hue at mid-animation, RED = the base's selector via the CSSOM).
 
 ### src/lib/user-todos-row.js runFactsHtml `strip` + public/chat.css (the attention dock's run card) + src/lib/chat-needs-card.js _dockPass + src/foryou-actions.js runCardOf `window.short` / `window.lines` / `output` (lane foryou-dock-layout, .373)
 
