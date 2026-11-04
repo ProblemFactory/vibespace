@@ -23,11 +23,19 @@ const BOOT_DELAY_MS = 20e3;
 
 function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = (...a) => console.log(...a), recheckMs = RECHECK_MS, bootDelayMs = BOOT_DELAY_MS } = {}) {
   if (!accounts || typeof accounts.noteCliVersion !== 'function' || !machineProbes || typeof machineProbes.cliVersion !== 'function') return { stop() { }, tick: async () => null };
-  let timer = null, stopped = false, said = undefined;
-  async function tick() {
+  let timer = null, stopped = false, said = undefined, running = null, again = false;
+  // ONE CLI, ONE BINARY (lane cli-shell-truth r2): `claudeCmd` may be THE accessor (cliCmds.current('claude')) — the binary
+  // the sessions spawn is the one measured; an adoption calls tick() at once, ONE tick at a time (a second ask re-runs it)
+  function tick() {
+    if (running) { again = true; return running; }
+    running = tickOnce().finally(() => { running = null; if (again && !stopped) { again = false; tick(); } });
+    return running;
+  }
+  async function tickOnce() {
     let caps = null;
     try {
-      const v = await machineProbes.cliVersion(claudeCmd || 'claude');
+      const bin = typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd;
+      const v = await machineProbes.cliVersion(bin || 'claude');
       // a probe that FAILED (a timeout on a loaded box, the binary mid-upgrade) is not an unmeasured CLI: the
       // last known version stands — taking credential files back from running sessions on a hiccup is the bug
       if (!v) { caps = { ...accounts.oatFileCaps(), changed: false }; if (said !== 'probe-failed') { said = 'probe-failed'; log(`[oat-file] claude --version gave no answer — keeping CLI ${caps.cli || '(unknown)'}`); } await accounts.syncOatFiles(); return caps; }

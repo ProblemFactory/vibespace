@@ -81,7 +81,7 @@ function spawnPanelProbe(bin, { root, env: identityEnv }, done) {
 /** The probe's working directory: an empty dir INSIDE the isolated config dir
  *  (no config dir = the machine login's own probe, in the shared tmpdir). */
 function probeCwdOf(probeConfigDir) { return probeConfigDir ? path.join(probeConfigDir, 'cwd') : os.tmpdir(); }
-function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
+function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -676,7 +676,7 @@ async function refreshViaCliPanel(key) {
       // token is the identity, and the CLI must read THIS account's
       // oauthAccount for it — never the machine-wide file
       if (credsDir) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;
-      const bin = CLAUDE_CMD || 'claude';
+      const bin = (cliCmds && typeof cliCmds.current === 'function' && cliCmds.current('claude')) || CLAUDE_CMD || 'claude'; // THE accessor (lane cli-shell-truth r2)
       probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
       spawnPanelProbe(bin, { root: probeConfigDir, env }, (err, stdout, stderr) => {

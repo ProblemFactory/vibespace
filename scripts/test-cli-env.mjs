@@ -34,7 +34,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -73,6 +73,8 @@ const ENVSH = mkShell('env-shell', [`env > '${F('env.txt')}'`, ...BANNER, RUN_C(
 const SLEEPY = mkShell('sleepy-shell', `echo $$ > '${F('sleepy.pid')}'; sleep 60 & echo $! > '${F('sleepy-child.pid')}'; wait`);
 const EXIT3 = mkShell('exit3-shell', 'echo "an rc that gives up"; exit 3');
 const FN = mkShell('fn-shell', RUN_C('vsfn_cli() { :; }; '));
+// a login shell with no POSIX `command` builtin (tcsh / csh / xonsh): `command` answers an error on stderr, nothing on stdout
+const NOCMD = mkShell('nocmd-shell', RUN_C("command() { echo 'command: Command not found.' >&2; return 127; }; "));
 const ZSH = ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p)) || null;
 const ZALIAS = ZSH ? mkShell('zalias-shell', `while [ $# -gt 0 ]; do case "$1" in -c) shift; exec ${ZSH} -f -c "alias vs-al-cli=ls; $1";; *) shift;; esac; done`) : null;
 const asks = () => { try { return fs.readFileSync(F('asks.log'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
@@ -120,8 +122,8 @@ async function helperLegs(mod) {
     const r2 = await c.check('antigravity');
     leg('the binary appears; a read still inside the bound answers the bound (null, no lookup)', r2 === null && calls.lookups === 1, `r=${r2} lookups=${calls.lookups}`);
     clock.t += 1000;
-    const r3 = await c.check('antigravity', { force: true });
-    leg('a PERSON\'S read (force: Install / Re-check) looks now and says INSTALLED at the scratch path', r3 === EXE && calls.lookups === 2, `r=${r3} lookups=${calls.lookups}`);
+    const r3 = await c.check('antigravity', { reask: true });
+    leg('a PERSON\'S read (reask: Install / Re-check) looks now and says INSTALLED at the scratch path', r3 === EXE && calls.lookups === 2, `r=${r3} lookups=${calls.lookups}`);
     leg('…the path is ADOPTED: handed to the adapter once, the registry answers it, ONE log line names it', calls.applied.join() === EXE && c.current('antigravity') === EXE && calls.logs.length === 1 && calls.logs[0].includes(EXE), JSON.stringify(calls.logs));
     clock.t += 1000;
     const r4 = await c.check('antigravity');
@@ -138,7 +140,7 @@ async function helperLegs(mod) {
     install();
     const r7 = await c.check('antigravity');
     leg('back at the same path: a read inside the bound keeps the shell\'s last answer (not installed, no ask) — the shell is the truth', r7 === null && calls.lookups === looked, `r=${r7}`);
-    const r8 = await c.check('antigravity', { force: true });
+    const r8 = await c.check('antigravity', { reask: true });
     leg('…and a person\'s Re-check asks the shell again and says installed', r8 === EXE && calls.lookups === looked + 1, `r=${r8}`);
   }
   uninstall();
@@ -159,8 +161,8 @@ async function helperLegs(mod) {
   }
   {
     const { c, calls } = rig(mod);
-    const rs = await Promise.all([1, 2, 3].map(() => c.check('antigravity', { force: true })));
-    leg('three forced reads in flight share ONE lookup (single-flight with forSpawn\'s)', rs.every((r) => r === null) && calls.lookups === 1, `lookups=${calls.lookups}`);
+    const rs = await Promise.all([1, 2, 3].map(() => c.check('antigravity', { reask: true })));
+    leg('three person\'s reads in flight share ONE lookup (single-flight with forSpawn\'s)', rs.every((r) => r === null) && calls.lookups === 1, `lookups=${calls.lookups}`);
     leg('an unregistered backend answers null and looks nothing up', (await c.check('nope')) === null && calls.lookups === 1);
   }
   uninstall();
@@ -211,8 +213,69 @@ async function routeLegs(routeMod, cliMod) {
   return out;
 }
 
-console.log('① cliCmds.check over the real resolver and a scratch PATH dir');
 const CLI = require(path.join(REPO, 'src/server/cli-cmd.js'));
+// ⑧'s real shells (round 2) start HERE — independent of every other leg, so their wall time hides behind ①–⑦
+const REAL8 = await (async () => {
+  // planted homes (never the owner's rc): .zshenv skip_global_compinit=1 (a person's own switch — the real road, -l -i,
+  // without Ubuntu's global compinit), the shape in .zshrc / .bash_profile
+  const RN = `vsreal${process.pid}`, RB = path.join(DIR, 'realbin');
+  fs.mkdirSync(RB, { recursive: true });
+  const PROG = path.join(RB, RN); fs.writeFileSync(PROG, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const home = (shape, rc, { local = false } = {}) => {
+    const h = path.join(DIR, 'homes', shape); fs.mkdirSync(h, { recursive: true });
+    fs.writeFileSync(path.join(h, '.zshenv'), 'skip_global_compinit=1\n');
+    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), rc + '\n');
+    if (local) { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); fs.writeFileSync(path.join(h, '.local-cli', RN), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); }
+    return h;
+  };
+  const SHAPES = [
+    ['wrapper alias over a PATH program (alias x=\'x --yolo\')', home('wrapalias', `alias ${RN}='${RN} --yolo'`), true, (a) => a.kind === 'path' && a.path === PROG && a.via === 'program' && a.wrapper?.kind === 'alias'],
+    ['the installer alias, ~ spelling (alias x="~/.local-cli/x"), no program on PATH', home('inst-tilde', `alias ${RN}="~/.local-cli/${RN}"`, { local: true }), false, (a, h) => a.kind === 'path' && a.path === path.join(h, '.local-cli', RN) && a.via === 'alias'],
+    ['the installer alias, $HOME spelling (alias x="$HOME/.local-cli/x"), no program on PATH', home('inst-home', `alias ${RN}="$HOME/.local-cli/${RN}"`, { local: true }), false, (a, h) => a.kind === 'path' && a.path === path.join(h, '.local-cli', RN) && a.via === 'alias'],
+    ['an nvm-style lazy-load FUNCTION with the program on PATH', home('lazyfn', `${RN}() { unset -f ${RN}; command ${RN} "$@"; }`), true, (a) => a.kind === 'path' && a.path === PROG && a.wrapper?.kind === 'function'],
+    ['a FUNCTION with nothing on PATH', home('fnonly', `${RN}() { echo hi; }`), false, (a) => a.kind === 'none' && a.wrapper?.kind === 'function'],
+    ['the plain program', home('plain', ''), true, (a) => a.kind === 'path' && a.path === PROG && !a.wrapper],
+  ];
+  const SHELLS = [['zsh', ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p))], ['bash', ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p))]].filter(([, p]) => p);
+  const envOf = (h, onPath) => ({ HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' });
+  const runs = Promise.all(SHAPES.flatMap(([label, h, onPath, want]) => SHELLS.map(async ([sn, sp]) => {
+    const a = typeof CLI.askShell === 'function' ? await CLI.askShell(RN, { shell: sp, env: envOf(h, onPath) }) : { kind: 'no-askShell' };
+    return { label, sn, a, pass: want(a, h) };
+  })));
+  const [wsn, wsp] = SHELLS.find(([n]) => n === 'bash') || SHELLS[0] || [];
+  const wrapReg = wsp ? (async () => {
+    const cw = CLI.createCliCmds({ ask: (n) => CLI.askShell(n, { shell: wsp, env: envOf(SHAPES[0][1], true) }), log: () => {} });
+    cw.register('claude', { name: RN, current: RN });
+    const rw = await cw.forSpawn('claude', RN).catch((e) => e);
+    return { sn: wsn, rw, cs: cw.census?.('claude') };
+  })() : null;
+  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs, wrapReg };
+})();
+
+// ⑨'s version-gate leg (round 2) starts with the early batch too
+const GATE9 = (async () => {
+  const VB = path.join(DIR, 'versions'), HUBV = path.join(VB, 'hub'), SHV = path.join(VB, 'shell');
+  for (const d of [HUBV, SHV]) fs.mkdirSync(d, { recursive: true });
+  const fake = (d, v) => { const p = path.join(d, 'claude'); fs.writeFileSync(p, `#!/bin/sh\n[ "$1" = --version ] && echo "${v} (Claude Code)"\nexit 0\n`, { mode: 0o755 }); return p; };
+  const HUBC = fake(HUBV, '2.1.281'), SHC = fake(SHV, '2.1.300');
+  const reg = CLI.createCliCmds({ ask: async () => ({ kind: 'path', path: SHC, via: 'program', wrapper: null, shell: REGSH, shellPath: `${SHV}:/usr/bin:/bin` }), log: () => {} });
+  reg.register('claude', { name: 'claude', current: HUBC });
+  const gate = [], told = [];
+  const accounts = { noteCliVersion: (v) => { gate.push(v); return { cli: v, ok: true, changed: false }; }, oatFileCaps: () => ({ cli: null, ok: false }), syncOatFiles: async () => { }, oatFileSettled: async () => { } };
+  const OFS = require(path.join(REPO, 'src/server/oat-file-sync.js'));
+  const MP = require(path.join(REPO, 'src/machine-probes.js'));
+  const sync = OFS.start({ accounts, machineProbes: MP, claudeCmd: () => reg.current('claude'), onCliVersion: (v) => told.push(v), log: () => { }, bootDelayMs: 1e9, recheckMs: 1e9 });
+  let adoptTick = null;
+  if (typeof reg.onAdopt === 'function') reg.onAdopt((b) => { if (b === 'claude') adoptTick = sync.tick(); });
+  await sync.tick();
+  const before = gate[gate.length - 1];
+  const spawned = await reg.forSpawn('claude', HUBC).catch(() => null);
+  if (adoptTick) await adoptTick;
+  sync.stop();
+  return { spawned, before, gate, told, SHC };
+})();
+
+console.log('① cliCmds.check over the real resolver and a scratch PATH dir');
 for (const r of await helperLegs(CLI)) ok(r.name, r.pass, r.detail);
 
 console.log('② the real /api/backend-status handler');
@@ -222,9 +285,9 @@ for (const r of await routeLegs(ROUTE, CLI)) ok(r.name, r.pass, r.detail);
 console.log('③ wiring');
 {
   const cc = read('src/server/cli-cmd.js'), rt = read('src/server/backend-status-route.js'), ce = read('src/server/cli-env.js'), ma = read('src/lib/manage-agents.js');
-  ok('the route checks EVERY registered CLI at each read, forced only by `?recheck=1`', /const force = String\(req\.query\?\.recheck \|\| ''\) === '1';/.test(rt) && /cliCmds\.ids\(\)\.map\(async \(id\) => \{ live\[id\] = await cliCmds\.check\(id, \{ force \}\); \}\)/.test(rt));
+  ok('the route checks EVERY registered CLI at each read, forced only by `?recheck=1`', /const force = String\(req\.query\?\.recheck \|\| ''\) === '1';/.test(rt) && /cliCmds\.ids\(\)\.map\(async \(id\) => \{ live\[id\] = await cliCmds\.check\(id, \{ reask: force \}\); \}\)/.test(rt));
   ok('…and hands a descriptor\'s machineStatus the CHECKED path (never the boot answer)', /machineStatus\(\{ cmd: cmdOf\(h\.id\) \}\)/.test(rt) && !/machineStatus\(\{ cmd: cliCmds\?\.current/.test(rt));
-  ok('forSpawn and check share ONE single-flight lookup (`lookup`: one shell ask, one hub walk)', (cc.match(/await lookup\(backend, e\)|return lookup\(backend, e\)/g) || []).length === 2 && (cc.match(/await askOf\(e\.name\)/g) || []).length === 1 && (cc.match(/await resolve\(e\.name\)/g) || []).length === 1);
+  ok('forSpawn and check share ONE single-flight lookup (`lookup`: one shell ask, one hub walk)', (cc.match(/await lookup\(backend, e\)/g) || []).length === 1 && (cc.match(/return lookup\(backend, e\)/g) || []).length >= 1 && (cc.match(/await askOf\(e\.name\)/g) || []).length === 1 && (cc.match(/await resolve\(e\.name\)/g) || []).length === 1);
   ok('nothing checks on a timer (no setInterval; the ONE setTimeout is the shell ask\'s bound — it ENDS an ask, never starts one; the route is the only caller of check)', !/setInterval/.test(cc) && (cc.match(/setTimeout\(/g) || []).length === 1 && /timer = setTimeout\(\(\) => done\(\{ kind: 'unanswered', why: 'timeout' \}\), timeoutMs\);/.test(cc) && (rt.match(/cliCmds\.check\(/g) || []).length === 1);
   ok('cli-env still registers claude, codex and every ACP / exe harness (the CLIs a read checks)', /cliCmds\.register\('claude'/.test(ce) && /cliCmds\.register\('codex'/.test(ce) && /for \(const id of Object\.keys\(ACP_COMMANDS\)\)[\s\S]{0,40}cliCmds\.register\(id/.test(ce));
   ok('Manage agents: Install and Re-check mark the next local status read as a person\'s (`?recheck=1`), once', /instBtn\.onclick = \(\) => \{ if \(!selectedHost\) this\._cliRecheckDue = true; run\(b\.installCmd\); \};/.test(ma) && /reBtn\.onclick = \(\) => \{ this\._cliRecheckDue = true; refresh\(\); \};/.test(ma) && /if \(recheck\) this\._cliRecheckDue = false;/.test(ma) && /`\/api\/backend-status\$\{recheck \? '\?recheck=1' : ''\}`/.test(ma));
@@ -246,13 +309,13 @@ console.log('④ negative controls (patched copies outside the tree)');
 const M = mutantCopies('cli-env', REPO); // ONE copy set for ④ and ⑦ — its tree-litter census (a `git status`) runs once, at ⑦'s end
 {
   const ccSrc = read('src/server/cli-cmd.js'), rtSrc = read('src/server/backend-status-route.js');
-  const BOUND = '        if (now() - e.lookedAt < recheckMs) return null;\n';
+  const BOUND = '        if (!force && now() - e.lookedAt < recheckMs) return null;\n';
   ok('control unbounded: the bound line exists in cli-cmd.js', ccSrc.includes(BOUND));
   const unbounded = M.load('src/server/cli-cmd.js', ccSrc.replace(BOUND, ''), 'unbounded');
   const redU = (await helperLegs(unbounded)).filter((r) => !r.pass).map((r) => r.name);
   ok(`control unbounded (a lookup on EVERY read): THE BOUND leg is RED by call count (${redU.length} red)`, redU.some((n) => /^THE BOUND/.test(n)), redU.join(' | ').slice(0, 300));
   const PRE = [
-    ["      try { await Promise.all(cliCmds.ids().map(async (id) => { live[id] = await cliCmds.check(id, { force }); })); } catch { }\n", ''],
+    ["      try { await Promise.all(cliCmds.ids().map(async (id) => { live[id] = await cliCmds.check(id, { reask: force }); })); } catch { } // ?recheck=1 = a PERSON's press: the shell asked now\n", ''],
     ['machineStatus({ cmd: cmdOf(h.id) })', 'machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null })'],
   ];
   ok('control pre-fix: the patched lines exist in the route', PRE.every(([a]) => rtSrc.includes(a)));
@@ -277,17 +340,19 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
       leg('a scratch login shell with a noisy rc (a 3-line banner + a DECOY sentinel triple first) answers kind:path at the real executable — the LAST pair wins', a.kind === 'path' && a.path === EXE, JSON.stringify(a));
       leg('…its exported PATH rides the answer (shellPath, printenv\'s colon form)', typeof a.shellPath === 'string' && a.shellPath.split(':').includes(BIN), String(a.shellPath).slice(0, 120));
       let argv = []; try { argv = fs.readFileSync(F('argv.log'), 'utf8').split('|'); } catch { }
-      leg('…asked as `-l -i -c <line>` (the three flags spelled apart) with the line the law names', argv[0] === '-l' && argv[1] === '-i' && argv[2] === '-c' && argv[3] === S.shellLine(NAME), argv.slice(0, 3).join(' '));
+      leg('…asked as `-l -i -c <line>` (the three flags spelled apart) with the line the law names', argv[0] === '-l' && argv[1] === '-i' && argv[2] === '-c' && argv[3] === S.shellLine(NAME, NOISY), argv.slice(0, 3).join(' '));
       uninstall();
       const b = await mod.askShell(NAME, { shell: NOISY });
       leg('the CLI absent: kind:none (the shell answered, nothing between the sentinels — the decoy path did not count)', b.kind === 'none', JSON.stringify(b));
     },
     async kinds(leg) {
-      const [a, z, e3, en, e0] = await Promise.all([
+      const [a, z, e3, en, e0, nc] = await Promise.all([
         mod.askShell('vsfn_cli', { shell: FN }), ZALIAS ? mod.askShell('vs-al-cli', { shell: ZALIAS }) : null,
-        mod.askShell(NAME, { shell: EXIT3 }), mod.askShell(NAME, { shell: path.join(SHD, 'no-such-shell') }), mod.askShell(NAME, { shell: '' })]);
-      leg('a shell FUNCTION: kind:alias (command -v printed its bare name — VibeSpace runs programs)', a.kind === 'alias' && a.text === 'vsfn_cli', JSON.stringify(a));
-      if (z) leg('a zsh ALIAS: kind:alias with what the shell printed', z.kind === 'alias' && /alias/.test(z.text || ''), JSON.stringify(z));
+        mod.askShell(NAME, { shell: EXIT3 }), mod.askShell(NAME, { shell: path.join(SHD, 'no-such-shell') }), mod.askShell(NAME, { shell: '' }),
+        mod.askShell(NAME, { shell: NOCMD })]);
+      leg('a shell FUNCTION with NO program behind it: kind:none, the wrapper named (function) — never «a program refused»', a.kind === 'none' && a.wrapper && a.wrapper.kind === 'function' && a.wrapper.text === 'vsfn_cli', JSON.stringify(a));
+      if (z) leg('a zsh ALIAS whose body is no program path (alias x=ls): kind:none, the wrapper named (alias, its text)', z.kind === 'none' && z.wrapper && z.wrapper.kind === 'alias' && /alias/.test(z.wrapper.text || ''), JSON.stringify(z));
+      leg('D: a shell WITHOUT the `command` builtin (both sentinel pairs, nothing between, the control word unnamed) ⇒ unanswered:no-command-builtin — never «none»', nc.kind === 'unanswered' && nc.why === 'no-command-builtin', JSON.stringify(nc));
       leg('the shell could not be asked: an rc that exits 3 ⇒ unanswered exit:3; a missing shell ⇒ spawn:ENOENT; none ⇒ no-shell', e3.kind === 'unanswered' && e3.why === 'exit:3' && en.kind === 'unanswered' && en.why === 'spawn:ENOENT' && e0.kind === 'unanswered' && e0.why === 'no-shell', JSON.stringify([e3.why, en.why, e0.why]));
     },
     async env(leg) {
@@ -304,8 +369,8 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
     },
     async sleepy(leg) {
       let r = null;
-      // 80 ms, then 320 ms on a box too loaded for the shell to have written its pids inside the first bound
-      for (const bound of [80, 320]) {
+      // 40 ms, then 320 ms on a box too loaded for the shell to have written its pids inside the first bound
+      for (const bound of [40, 320]) {
         fs.rmSync(F('sleepy.pid'), { force: true }); fs.rmSync(F('sleepy-child.pid'), { force: true });
         let ticks = 0; const tick = setInterval(() => { ticks++; }, 5);
         const guard = new Promise((res) => setTimeout(() => res({ kind: 'GUARD', why: `no answer by the guard` }), boundGuardMs || bound * 3));
@@ -341,7 +406,7 @@ async function registryLegs(mod, { slow = true } = {}) {
   const unanswered = slow ? (async () => {
     const r = [];
     const ulogs = [];
-    const cu = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: SLEEPY, timeoutMs: 80 }), log: (l) => ulogs.push(l) });
+    const cu = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: SLEEPY, timeoutMs: 40 }), log: (l) => ulogs.push(l) });
     cu.register('codex', { name: N2, current: HUBX });
     const ru = await cu.forSpawn('codex', HUBX);
     const cs = cu.census?.('codex');
@@ -365,7 +430,7 @@ async function registryLegs(mod, { slow = true } = {}) {
     leg('a plain status read: no ask either', (await c.check('codex')) === SHX1 && asks() === n0 + 1);
     const SHX2 = put(SH2); fs.writeFileSync(F('prefix'), `${SH2}:${SH1}`);
     leg('a newer install under another node version: a plain read keeps the cached path (no ask)', (await c.check('codex')) === SHX1 && asks() === n0 + 1);
-    const r3 = await c.check('codex', { force: true });
+    const r3 = await c.check('codex', { reask: true });
     leg('…a person\'s Re-check (force) asks the shell again and ADOPTS it', r3 === SHX2 && c.current('codex') === SHX2 && asks() === n0 + 2 && applied[applied.length - 1] === SHX2, `r=${r3}`);
     fs.rmSync(SHX2);
     const r4 = await c.forSpawn('codex', SHX2);
@@ -379,19 +444,27 @@ async function registryLegs(mod, { slow = true } = {}) {
     try { ran = await c.forSpawn('codex', SHX1); } catch (e) { thrown = e; }
     finally { process.env.PATH = savedPath; fs.rmSync(F('restrict'), { force: true }); }
     leg('FAIL CLOSED: the shell found NOTHING ⇒ forSpawn REFUSES (a thrown CliMissing, code cli-missing) — never «spawning it as before»', !ran && thrown && thrown.code === 'cli-missing' && thrown.answer === 'none' && thrown.cli === N2 && thrown.shell === 'reg-shell', thrown ? thrown.message : `ran ${ran}`);
-    leg('…it names what was asked and where it looked, and the hub\'s path as a HINT', !!thrown && Array.isArray(thrown.looked) && thrown.looked.includes(HUBD) && thrown.hubPath === HUBX && /add that directory to your shell's PATH/.test(thrown.hint || '') && /not found by your reg-shell \(login shell\)/.test(thrown.message), thrown && JSON.stringify({ looked: thrown.looked.length, hubPath: thrown.hubPath, hint: thrown.hint }));
+    leg('…it names what was asked and where it looked, and the hub\'s path as a HINT', !!thrown && Array.isArray(thrown.looked) && thrown.looked.includes(HUBD) && thrown.hubPath === HUBX && /add that directory to your shell's PATH/.test(thrown.hint || '') && /not found as a program by your reg-shell \(login shell\)/.test(thrown.message), thrown && JSON.stringify({ looked: thrown.looked.length, hubPath: thrown.hubPath, hint: thrown.hint }));
     leg('…ONE journal line says the create is refused (cli-missing)', logs.filter((l) => /refused \(cli-missing\)/.test(l)).length === 1, logs.slice(-2).join(' | '));
-    leg('…and a read says missing too (null; census missing)', (await c.check('codex', { force: true })) === null && c.census?.('codex')?.missing === true && c.census?.('codex')?.answer === 'none');
+    leg('…and a read says missing too (null; census missing)', (await c.check('codex', { reask: true })) === null && c.census?.('codex')?.missing === true && c.census?.('codex')?.answer === 'none');
     // an alias / a function is refused BY THAT WORD; unanswered with the hub's PATH empty too is refused, saying both
     const ca = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: FN }), log: () => {} });
     ca.register('opencode', { name: 'vsfn_cli', current: 'vsfn_cli' });
     const cn = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: EXIT3 }), log: () => {} });
     cn.register('codex', { name: `${N2}-nowhere`, current: `${N2}-nowhere` });
     const [ta, tn] = await Promise.all([ca.forSpawn('opencode', 'vsfn_cli').then(() => null, (e) => e), cn.forSpawn('codex', `${N2}-nowhere`).then(() => null, (e) => e)]);
-    leg('a shell function / alias is REFUSED by that word, with the door «make it a program on your PATH»', !!ta && ta.code === 'cli-missing' && ta.answer === 'alias' && /make it a program on your PATH/.test(ta.message), ta && ta.message);
+    leg('a shell function with NO program behind it is refused as none, in honest words — the wrapper named, the doors «put the program on your PATH, or set OPENCODE_CMD»', !!ta && ta.code === 'cli-missing' && ta.answer === 'none' && ta.wrapper && ta.wrapper.kind === 'function' && ta.envName === 'OPENCODE_CMD' && /shell function there/.test(ta.message) && /set OPENCODE_CMD/.test(ta.message), ta && ta.message);
     leg('unanswered AND the hub\'s PATH has none ⇒ refused too, saying both', !!tn && tn.code === 'cli-missing' && tn.answer === 'unanswered' && tn.why === 'exit:3' && /could not be asked \(exit:3\)/.test(tn.message), tn && tn.message);
   } finally { fs.rmSync(F('prefix'), { force: true }); fs.rmSync(F('restrict'), { force: true }); }
   if (unanswered) { for (const [n, p, d] of await unanswered) leg(n, p, d); reapSleepy(); }
+  {
+    const dl = [];
+    const cd = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: NOCMD }), log: (l) => dl.push(l) });
+    cd.register('codex', { name: N2, current: HUBX });
+    const rd = await cd.forSpawn('codex', HUBX).catch((e) => e);
+    const c0 = cd.census?.('codex');
+    leg('D: a shell without `command` ⇒ the provisional path is KEPT (the spawn proceeds) and NAMED — census unanswered:no-command-builtin, the shell said', rd === HUBX && !!c0 && c0.unanswered === 'no-command-builtin' && c0.shell === 'nocmd-shell' && dl.some((l) => /nocmd-shell could not be asked .*no-command-builtin/.test(l)), JSON.stringify({ rd: String(rd && rd.message || rd), c0, dl }));
+  }
   return out;
 }
 
@@ -401,38 +474,127 @@ let LSmod = null; try { LSmod = require(path.join(REPO, 'src/login-shell.js')); 
 if (LSmod && typeof CLI.loginShellOf === 'function') {
   const LS = LSmod;
   const userShell = (() => { try { return os.userInfo().shell || ''; } catch { return ''; } })();
-  let getent = ''; try { getent = execFileSync('getent', ['passwd', os.userInfo().username], { encoding: 'utf8' }).trim().split(':').pop(); } catch { }
-  ok('the account rung reads the passwd record (os.userInfo().shell = `getent passwd`\'s, the record the dial road reads)', !getent || userShell === getent, `${userShell} vs ${getent}`);
+  const run = (cmd, args, o = {}) => new Promise((res) => execFile(cmd, args, { encoding: 'utf8', ...o }, (err, out) => res(err ? 'ERR ' + err.message : String(out))));
+  const getentP = run('getent', ['passwd', os.userInfo().username]);
   const isX = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return p.startsWith('/'); } catch { return false; } };
   const onPath = (n) => { for (const d of String(process.env.PATH).split(':')) { if (d && isX(path.join(d, n))) return path.join(d, n); } return null; };
   const norm = (x) => (x === 'sh' ? '/bin/sh' : x);
   const rows = (await Promise.all([['SHELL set', NOISY], ['SHELL empty', ''], ['SHELL not executable', path.join(SHD, 'no-such-shell')]].map(async ([label, envShell]) => {
     const env = { PATH: process.env.PATH, HOME: process.env.HOME || '/tmp' };
     if (envShell) env.SHELL = envShell;
-    let s0 = ''; try { s0 = execFileSync('/bin/sh', ['-c', LS.S0_SH + 'printf %s "$S0"'], { env, encoding: 'utf8' }); } catch (e) { s0 = 'ERR ' + e.message; }
+    const s0 = await run('/bin/sh', ['-c', LS.S0_SH + 'printf %s "$S0"'], { env });
     const js = LS.pickLoginShell({ envShell, accountShell: userShell, executable: isX, onPath }).shell;
     const real = await CLI.loginShellOf({ env, userInfo: () => ({ shell: userShell }) });
     return [[label, norm(s0), js], [label + ' (loginShellOf)', norm(s0), real.shell]];
   }))).flat();
+  const ge = await getentP; const getent = ge.startsWith('ERR') ? '' : ge.trim().split(':').pop();
+  ok('the account rung reads the passwd record (os.userInfo().shell = `getent passwd`\'s, the record the dial road reads)', !getent || userShell === getent, `${userShell} vs ${getent}`);
   ok(`THE LADDER: the dial road's S0 (sh) and the local road (pickLoginShell / loginShellOf) agree on the same inputs (${rows.map((r) => `${r[0]}: ${r[1]}`).join('; ')})`, rows.every((r) => r[1] === r[2]), JSON.stringify(rows));
 }
 
 console.log('⑥ the registry on the real default road (SHELL = a scratch shell)');
 for (const r of await registryLegs(CLI)) ok(r.name, r.pass, r.detail);
 
-console.log('⑦ mutants of the shell rung (patched copies outside the tree, judged side by side)');
-{
+// ⑦'s mutants START here and run beside ⑧–⑩ (disjoint scratch state); their rows print after ⑩
+const SEVEN = (() => {
   const cc = read('src/server/cli-cmd.js');
   const MUT = [
     ['fail-closed removed (found nothing ⇒ spawn the old path)', '      if (p) return p;\n      const r = refusal(backend, e);', '      if (p || true) return p || cmd;\n      const r = refusal(backend, e);', (m) => registryLegs(m, { slow: false }), /FAIL CLOSED|REFUSED by that word|refused too/],
     ['sentinel parse removed (the first printed line is the answer)', '      const p = LS.parseShellAnswer(out);', "      const p = { complete: true, pathDone: true, cv: out.split('\\n').map((l) => l.trim()).filter(Boolean)[0] || '', path: null };", (m) => rungLegs(m, { groups: ['noisy'] }), /LAST pair wins|kind:none/],
     ['env unsanitized (the hub\'s process.env handed to the shell)', "env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } })", "env: { ...env, SHELL: shell }", (m) => rungLegs(m, { groups: ['env'] }), /SANITIZED ENV/],
-    ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 100 }), /unanswered:timeout/],
+    ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 }), /unanswered:timeout/],
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
     ? legs(M.load('src/server/cli-cmd.js', cc.replace(from, to), label.split(' ')[0].replace(/[^a-z]/g, ''))).then((rs) => rs.filter((r) => !r.pass).map((r) => r.name))
     : Promise.resolve(null));
-  const reds = await Promise.all(runs);
+  return { MUT, reds: Promise.all(runs) };
+})();
+
+console.log('⑧ round 2 — THE ASK IS FOR A PROGRAM: the five measured shapes in REAL zsh + REAL bash under planted homes');
+{
+  const { RN, PROG, SHAPES, SHELLS, envOf } = REAL8;
+  const runs = await REAL8.runs;
+  ok(`${SHELLS.length} real shells measured (${SHELLS.map(([n, p]) => `${n} ${p}`).join(', ')})`, SHELLS.length === 2, 'zsh and bash are both required here');
+  for (const [label] of SHAPES) {
+    const rs = runs.filter((r) => r.label === label);
+    ok(`A: ${label} ⇒ ${rs.map((r) => `${r.sn} ${r.a.kind}${r.a.via === 'alias' ? ' (through its alias)' : ''}${r.a.wrapper ? ' +' + r.a.wrapper.kind : ''}`).join(' · ')}`, rs.length === SHELLS.length && rs.every((r) => r.pass), JSON.stringify(rs.map((r) => ({ sh: r.sn, ...r.a, shellPath: undefined }))));
+  }
+  // …and the REGISTRY: a wrapper is provenance — never a refusal; its census names it
+  if (REAL8.wrapReg) {
+    const { sn, rw, cs } = await REAL8.wrapReg;
+    ok(`A: a create whose CLI the person's ${sn} wraps in an alias SPAWNS the program (never cli-missing); the census names the wrapper as provenance`, rw === PROG && !!cs && cs.missing === false && cs.wrapper?.kind === 'alias' && cs.answer === 'path', JSON.stringify({ rw: String(rw && rw.message || rw), cs }));
+  }
+}
+
+console.log('⑨ round 2 — ONE CLI, ONE BINARY: every measurement reads the binary the sessions spawn');
+{
+  const { spawned, before, gate, told, SHC } = await GATE9;
+  ok(`B: the hub's 2.1.281 vs the shell's 2.1.300 — sessions spawn the shell's (${spawned === SHC ? '2.1.300' : spawned}); the version GATE measures it (boot ${before} → ${gate[gate.length - 1]}) and the REGISTRATION is told it (${told[told.length - 1]})`, spawned === SHC && /^2\.1\.281\b/.test(before || '') && /^2\.1\.300\b/.test(gate[gate.length - 1] || '') && /^2\.1\.300\b/.test(told[told.length - 1] || ''), JSON.stringify({ gate, told }));
+  // THE READERS CENSUS: CLAUDE_CMD / CODEX_CMD outside the boot registration (src/server/cli-env.js) — each one named
+  const ALLOWED = [
+    ['server.js', 'CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,', 'the boot registration\'s exports (the destructure)'],
+    ['server.js', 'app, rootDir: __dirname, HOST, CLAUDE_CMD, cliCmds, NODE_CMD,', 'account-usage-routes gets the accessor beside the boot constant (its fallback before the registry exists)'],
+    ['server.js', "claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD, cliCmds });", 'backend-status-route reads the checked path / cliCmds.current first — these are its last fallback'],
+    ['server.js', 'onMemberReadingFresh, CLAUDE_CMD, cliCmds });', 'usage-routes gets the accessor beside the boot constant'],
+    ['server.js', 'NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,', 'the ws ctx hands both (ws-create reads cliCmds first)'],
+    ['server.js', 'claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}', 'the boot log line (what boot resolved)'],
+    ['src/ws-handler.js', "'NODE_CMD', 'DTACH_CMD', 'CLAUDE_CMD',", 'WS_CTX_CONTRACT names the ctx key'],
+    ['src/ws-handler.js', 'NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,', 'the ctx destructure'],
+    ['src/ws-create.js', 'NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,', 'the ctx destructure'],
+    ['src/usage-routes.js', 'probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {', 'the setup parameter'],
+    ['src/server/account-usage-routes.js', 'function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,', 'the create parameter'],
+  ];
+  const FALLBACK = /current\??\.?\('(claude|codex)'\)\)? \|\| (CLAUDE_CMD|CODEX_CMD)\b/; // THE accessor first, the boot constant its fallback
+  // the tracked tree's lines that name either constant (`git grep -w`: the census reads no file that does not)
+  let hits = '';
+  try { hits = execFileSync('git', ['-C', REPO, 'grep', '-n', '-w', '-E', 'CLAUDE_CMD|CODEX_CMD', '--', 'server.js', 'src'], { encoding: 'utf8' }); } catch (e) { hits = String(e.stdout || ''); }
+  const byFile = new Map();
+  for (const h of hits.split('\n').filter(Boolean)) { const m = /^([^:]+):(\d+):([\s\S]*)$/.exec(h); if (!m || m[1] === 'src/server/cli-env.js' || !/\.js$/.test(m[1])) continue; if (!byFile.has(m[1])) byFile.set(m[1], []); byFile.get(m[1]).push([Number(m[2]), m[3]]); }
+  ok('B: the census scope is the tracked server tree (git grep found the known readers — non-vacuous)', byFile.has('server.js') && byFile.has('src/ws-create.js') && byFile.has('src/server/account-usage-routes.js'), [...byFile.keys()].join(', '));
+  const stray = [], used = new Set();
+  for (const [f, rows] of byFile) {
+    rows.forEach(([ln, l]) => { const i = ln - 1;
+      if (!/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(l) || /^\s*(\/\/|\*|\/\*)/.test(l)) return;
+      const code = l.replace(/\/\/.*$/, '').replace(/process\.env\.(CLAUDE_CMD|CODEX_CMD)\b/g, 'process.env.$1_RAWNAME'); // the env override NAME is not a reader of the binary
+      if (!/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(code)) return;
+      const row = ALLOWED.find(([af, sub]) => af === f && code.includes(sub));
+      if (row) { used.add(row); return; }
+      const bare = code.replace(new RegExp(FALLBACK.source, 'g'), '');
+      if (FALLBACK.test(code) && !/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(bare)) return;
+      stray.push(`${f}:${i + 1} ${code.trim().slice(0, 120)}`);
+    });
+  }
+  ok(`B: THE READERS CENSUS — every CLAUDE_CMD / CODEX_CMD read outside the boot registration is a named row (${ALLOWED.length}) or THE accessor's fallback (\`cliCmds.current(…) || CLAUDE_CMD\`)`, stray.length === 0, stray.join(' | '));
+  ok('B: …and every named row still names a live line (a dead row would hide a new reader)', used.size === ALLOWED.length, ALLOWED.filter((r) => !used.has(r)).map((r) => r[0] + ': ' + r[1]).join(' | '));
+}
+
+console.log('⑩ round 2 — THE SHELL RUNS FOR A PERSON\'S PRESS ONLY: the usage door\'s wall read spawns no shell');
+{
+  const AGX = path.join(DIR, 'agy-door'); fs.writeFileSync(AGX, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  let asks = 0;
+  const reg = CLI.createCliCmds({ ask: async () => { asks++; return { kind: 'path', path: AGX, via: 'program', wrapper: null, shell: REGSH, shellPath: null }; }, log: () => { } });
+  reg.register('antigravity', { name: 'agy-door', current: AGX });
+  const DOOR = require(path.join(REPO, 'src/server/cli-usage-door.js'));
+  const door = DOOR.createCliUsageDoor({
+    accounts: { get: (id) => ({ id, backend: 'antigravity' }), resolveForSpawn: () => { throw new Error('stub: no login in this leg'); } },
+    harnessOf: () => ({ label: 'Antigravity', quota: { onDemand: { judge: () => ({ verdict: 'reading' }), argv: ['-p', '/usage'], onWallSignal: true, cwdOf: () => DIR } } }),
+    cliCmds: reg, cacheDir: DIR, setting: () => 'manual', log: () => { }, paceMs: 0,
+  });
+  const w0 = await door.read('acct-wall', { wall: true });
+  ok(`C: a wall read on a never-asked CLI with a usable path: ${asks} shell runs (the door read on, ${w0 && w0.code})`, asks === 0 && w0 && w0.code === 'login-needed', JSON.stringify(w0));
+  await reg.forSpawn('antigravity', AGX);
+  const n1 = asks;
+  const w1 = await door.read('acct-wall-2', { wall: true });
+  const p1 = await door.read('acct-press', { person: true });
+  ok(`C: after the session's spawn asked once (${n1}), a wall read and a person's usage press run NO shell (${asks - n1}) — only Re-check / Install (reask) does`, n1 === 1 && asks === 1 && w1.code === 'login-needed' && p1.code === 'login-needed', JSON.stringify({ n1, asks, w1: w1.code, p1: p1.code }));
+  await reg.check('antigravity', { reask: true });
+  ok('C: …and a person\'s Re-check (reask) asks the shell now', asks === 2, `asks=${asks}`);
+}
+
+console.log('⑦ mutants of the shell rung (patched copies outside the tree, judged side by side)');
+{
+  const { MUT } = SEVEN;
+  const reds = await SEVEN.reds;
   reapSleepy();
   MUT.forEach(([label, , , , want], i) => {
     if (!ok(`mutant «${label}»: its line exists in cli-cmd.js`, reds[i] !== null)) return;

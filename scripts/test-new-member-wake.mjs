@@ -551,7 +551,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
   ok('…and the HOST branch takes none of them (a remote machine\'s pool is not ours to decide for)',
     /LOCAL ONLY, DELIBERATELY/.test(usageSrc));
   ok('…the edge reaches the routes as an injected dep, not a require (tier: usage-routes stays ORCH wiring)',
-    /probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD \}\) \{/.test(usageSrc) && /onMemberReadingFresh, CLAUDE_CMD \}\);/.test(read('server.js')));
+    /probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null \}\) \{/.test(usageSrc) && /onMemberReadingFresh, CLAUDE_CMD, cliCmds \}\);/.test(read('server.js')));
 
   const srv = read('src/server/auto-cli-loop.js');
   ok('the auto-cli loop — the THIRD producer, whose successful read at 02:31:43 changed nothing — takes the same edge, and only on success',

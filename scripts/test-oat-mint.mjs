@@ -538,7 +538,7 @@ setInterval(() => { }, 1000);
   const withHook = await runChild(true);
   ok(withHook && !withHook.dirLeft && !withHook.alive, 'exitHook: SIGTERM mid-mint ⇒ stopAll ran — the CLI is gone and its scratch dir removed', withHook);
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ok(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring) && /probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(CLAUDE_CMD, o, done\)/.test(wiring),
+  ok(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring) && /probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), o, done\)/.test(wiring), // claudeBin = THE accessor (lane cli-shell-truth r2: the binary the sessions spawn)
     'the server wires exitHook: true and the probe through usage-routes spawnPanelProbe (the one allowlisted /usage spawn)');
 }
 // §8 (lane pool-oat-materialize, q-035 invariants 1 + 2): THE MATERIALIZED FILE IS THE TOKEN'S ONE

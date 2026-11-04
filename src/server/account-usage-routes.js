@@ -17,7 +17,7 @@ const { mk } = require('./lazy.js');
 // The only=pivots answer (B-f95d ②): the asked crosses + the words that qualify them (as of / partial).
 const pivotsOnly = (a) => ({ pivots: a.pivots || {}, ...(a.asOf ? { asOf: a.asOf } : {}), ...(a.partial ? { partial: a.partial } : {}) });
 
-function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
+function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts, getModels = () => ({}), refreshModels = () => { }, getIntegrations = () => null,
@@ -689,8 +689,11 @@ app.post('/api/accounts/:id/oat/identity', (req, res) => {
 // auto-cli spawn, its window against the anchors; else the person picks.
 // Outcomes journal into the probe log; stopAll rides the exit (F3).
 const usageRoutesMod = require('../usage-routes.js');
-const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: CLAUDE_CMD, broadcastAll, exitHook: true,
-  probePanel: require('./oat-mint.js').panelProbeVia((o, done) => usageRoutesMod.spawnPanelProbe(CLAUDE_CMD, o, done), usageRoutesMod.parseCliUsageText),
+// ONE CLI, ONE BINARY (lane cli-shell-truth r2): the login helpers, the token mint and the panel probe run the binary the
+// sessions spawn — THE accessor, the boot constant only before the registry exists
+const claudeBin = () => (cliCmds && typeof cliCmds.current === 'function' && cliCmds.current('claude')) || CLAUDE_CMD;
+const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: claudeBin, broadcastAll, exitHook: true,
+  probePanel: require('./oat-mint.js').panelProbeVia((o, done) => usageRoutesMod.spawnPanelProbe(claudeBin(), o, done), usageRoutesMod.parseCliUsageText),
   windows: () => (typeof engine.establishedWindows === 'function' ? engine.establishedWindows() : {}),
   journal: (rec) => { try { require('./usage-probe-log.js').appendProbeLog(accounts.dataDir, { rung: 'oat-mint', ...rec }); } catch { } } });
 require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer });
@@ -700,7 +703,7 @@ require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer 
 // terminal, theme picker, method menu or trust prompt. This ORCH only drives the login screen;
 // the client card calls the EXISTING /subscription/:id/finalize | /:id/relogin-finalize routes
 // (above) once the sign-in lands, so the identity merge / login-expiry sweep / pool wake are unchanged.
-const claudeSignin = require('./claude-signin.js').create({ accounts, claudeCmd: CLAUDE_CMD, nodeCmd: NODE_CMD,
+const claudeSignin = require('./claude-signin.js').create({ accounts, claudeCmd: claudeBin, nodeCmd: NODE_CMD,
   helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER, broadcastAll, exitHook: true, hub: true }); // hub: the WS layer's page holds (lane door-signin-fixes)
 require('./claude-signin.js').registerSigninRoutes(app, { signin: claudeSignin, isAgentBearer });
 // the token's identity post-check (lane oat-identity-postcheck) is told when a save / a removal / a move replaces a
@@ -724,7 +727,7 @@ app.post('/api/accounts/subscription', (req, res) => {
     const loginCmd = buildClaudeSubscriptionLoginCommand({
       nodeCmd: NODE_CMD,
       helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER,
-      claudeCmd: CLAUDE_CMD,
+      claudeCmd: claudeBin(),
       configDir: dir,
     });
     res.json({ success: true, id, dir, loginCmd });
@@ -749,7 +752,7 @@ app.post('/api/accounts/:id/relogin', (req, res) => {
     const loginCmd = buildClaudeSubscriptionLoginCommand({
       nodeCmd: NODE_CMD,
       helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER,
-      claudeCmd: CLAUDE_CMD,
+      claudeCmd: claudeBin(),
       configDir: dir,
     });
     let baselineAttempt = null;

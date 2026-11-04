@@ -877,7 +877,9 @@
 
 **The fix.** The person's LOGIN SHELL is the truth for where an agent CLI is (src/server/cli-cmd.js askShell: `-l -i -c`, a sanitized env, its own session, sentinels, a 10 s bound; asked lazily, once per CLI). Its path replaces the hub's provisional one and its PATH rides the spawn. Found nothing (or an alias) ⇒ the create is REFUSED by name, `cli-missing`, before anything is spawned. The client draws a dialog with what was asked, where it looked and two doors. Manage agents shows where each CLI was found. A registry, pinned versions and a managed prefix were refused by the owner twice (kb-design-lessons §24).
 
-不变量: a CLI is where the person's login shell finds it, however it was installed; a missing CLI is said before anything is spawned, never «spawning it as before»; a shell that cannot be asked is a named degradation, not a refusal.
+Round 2 (the acceptance's blocker): the ask is for the PROGRAM — the shell's own program-only spelling — so a person's alias or function wearing the CLI's name (`alias claude='claude --flag'`, an nvm lazy-load, the installer's `alias claude="~/.claude/local/claude"`) is provenance, never a refusal; and every measurement of the CLI (the long-lived-token version gate) reads the binary the sessions spawn (ONE accessor).
+
+不变量: a CLI is where the person's login shell finds it, however it was installed; a wrapper is provenance, never a refusal; the binary measured is the binary spawned; a missing CLI is said before anything is spawned, never «spawning it as before»; a shell that cannot be asked is a named degradation, not a refusal.
 
 Gates: test-cli-env (fast, scratch shells + four mutants), test-cli-cmd-refresh (heavy: gone everywhere ⇒ cli-missing, no dtach), test-cli-missing-chrome (heavy: the dialog en/zh/ja, the census lines).
 

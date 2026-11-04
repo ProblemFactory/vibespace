@@ -207,7 +207,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     const m = { id, accountId, phase: 'starting', url: null, localUrl: null, error: null, startedAt: now(), endedAt: null, mintedAt: null, pty: null, dir: dir, parse: initialMintParse(), lastLine: '', screen: initialRawScreen(), outputAt: 0, rawTimer: null, stalled: false, rawHint: null };
     mints.set(id, m);
     try {
-      m.pty = spawn(claudeCmd, ['setup-token'], { name: 'xterm-256color', cols: 400, rows: 50, cwd: dir, env: e });
+      m.pty = spawn(typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd, ['setup-token'], /* THE accessor (lane cli-shell-truth r2) */ { name: 'xterm-256color', cols: 400, rows: 50, cwd: dir, env: e });
     } catch (err) {
       end(m, 'failed', 'could not run `claude setup-token`: ' + String((err && err.message) || err));
       return { ok: true, mint: publicMint(m) };

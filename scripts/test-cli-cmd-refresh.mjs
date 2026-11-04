@@ -106,7 +106,7 @@ if (mod) {
     const e = await refusedBy(c.forSpawn('claude', '/old/claude'));
     ok(!!e && e.code === 'cli-missing' && e.cli === 'claude' && e.shell === 'zsh' && e.answer === 'none', `found NOTHING ⇒ the create is REFUSED by name (CliMissing ${e && e.code}) — never «spawning it as before» (lane cli-shell-truth: this leg CHANGED MEANING)`);
     ok(!calls.applied.length, 'nothing is handed to the adapter');
-    ok(calls.logs.length === 1 && /refused \(cli-missing\)/.test(calls.logs[0]) && /not found by your zsh/.test(calls.logs[0]), `and ONE line says so (${calls.logs[0]})`);
+    ok(calls.logs.length === 1 && /refused \(cli-missing\)/.test(calls.logs[0]) && /not found as a program by your zsh/.test(calls.logs[0]), `and ONE line says so (${calls.logs[0]})`);
   }
   {
     const { c, calls } = mk(new Set(['/old/claude']), async () => { throw new Error('boom'); });
@@ -268,7 +268,7 @@ else {
   ok(Array.isArray(r5?.looked) && r5.looked.includes(A) && r5.looked.includes(B), `…naming where the hub looked too (${(r5?.looked || []).length} dirs)`);
   ok(marks().length === before && dNew.length === 0, `…and NOTHING was spawned: no CLI ran, no new dtach master (${dNew.length})`);
   const l3 = cliLines()[2] || '';
-  ok(cliLines().length === 3 && /refused \(cli-missing\)/.test(l3) && /not found by your login-shell/.test(l3), `ONE journal line says the create is refused (${l3.trim().slice(0, 200)})`);
+  ok(cliLines().length === 3 && /refused \(cli-missing\)/.test(l3) && /not found as a program by your login-shell/.test(l3), `ONE journal line says the create is refused (${l3.trim().slice(0, 200)})`);
   // ④ (lane antigravity-card-fixes, the owner's 「Antigravity CLI 未安装」 for an agy installed after the hub booted):
   // THE STATUS READ re-checks the CLI paths (src/server/cli-cmd.js `check`) — on THIS server, after its spawn legs (a
   // status read runs `claude --version`, which would add a mark; here the fake claude is already gone)

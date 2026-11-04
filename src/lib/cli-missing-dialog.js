@@ -19,6 +19,7 @@ export function whyWords(why) {
   const w = String(why || '');
   if (w === 'timeout') return t('timed out after {s} s', { s: 10 });
   if (w === 'no-shell') return t('no login shell was found');
+  if (w === 'no-command-builtin') return t('it has no «command» builtin');
   if (w.startsWith('spawn:')) return t('it could not be started ({err})', { err: w.slice(6) });
   return t('it exited ({code})', { code: w.replace(/^exit:/, '') || '?' });
 }
@@ -29,13 +30,21 @@ export function cliWhereWords(info) {
   const shell = info.shell || 'sh';
   const p = tildeHome(info.cmdPath || '');
   if (info.answer === 'configured') return info.installed ? { tone: 'dim', text: t('configured path {path}', { path: p }) } : null;
-  if (info.answer === 'path' && info.cmdPath) return { tone: 'dim', text: t('found by your {shell} at {path}', { shell, path: p }) };
+  if (info.answer === 'path' && info.cmdPath) {
+    // the person's own wrapper (an alias, a function wearing the name) is PROVENANCE — the program it runs is named
+    const w = info.wrapper && info.wrapper.kind;
+    if (info.via === 'alias') return { tone: 'dim', text: t('found by your {shell} through its alias at {path}', { shell, path: p }) };
+    if (w === 'alias') return { tone: 'dim', text: t('your {shell} wraps it in an alias · VibeSpace runs the program at {path}', { shell, path: p }) };
+    if (w === 'function') return { tone: 'dim', text: t('your {shell} wraps it in a function · VibeSpace runs the program at {path}', { shell, path: p }) };
+    return { tone: 'dim', text: t('found by your {shell} at {path}', { shell, path: p }) };
+  }
   if (info.answer === 'unanswered') {
     return { tone: 'warn', text: info.installed
       ? t('your {shell} could not be asked ({why}) · using the hub’s PATH', { shell, why: whyWords(info.unanswered) })
       : t('your {shell} could not be asked ({why}) · the hub’s PATH has none', { shell, why: whyWords(info.unanswered) }) };
   }
-  if (info.answer === 'alias') return { tone: 'warn', text: t('your {shell} has it as an alias or a function, not a program · make it a program on your PATH', { shell }) };
+  if (info.answer === 'none' && info.wrapper && info.wrapper.kind === 'function') return { tone: 'warn', text: t('your {shell} has it only as a shell function · put the program on your PATH or set {env}', { shell, env: info.envName || 'CLI_CMD' }) };
+  if (info.answer === 'none' && info.wrapper && info.wrapper.kind === 'alias') return { tone: 'warn', text: t('your {shell}’s alias for it is not a program path · put the program on your PATH or set {env}', { shell, env: info.envName || 'CLI_CMD' }) };
   if (info.answer === 'none') {
     return { tone: 'warn', text: info.hubPath
       ? t('not found by your {shell} · the hub’s PATH has {path}', { shell, path: tildeHome(info.hubPath) })
@@ -52,10 +61,11 @@ export function cliMissingWords(msg) {
   const asked = msg.answer === 'configured' ? t('Asked: the configured path') : t('Asked: your {shell}, as a login shell', { shell });
   let what;
   if (msg.answer === 'configured') what = t('Nothing was started. The configured path {path} is not an executable file.', { path: tildeHome(cli) });
-  else if (msg.answer === 'alias') what = t('Nothing was started. Your {shell} has {cli} as an alias or a function, not a program: «{text}». VibeSpace runs programs — make it a program on your PATH.', { shell, cli, text: String(msg.aliasText || '').slice(0, 200) });
+  else if (msg.wrapper && msg.wrapper.kind === 'function') what = t('Nothing was started. Your {shell} has {cli} only as a shell function, and VibeSpace cannot read what a function runs. Put the program on your PATH, or set {env}.', { shell, cli, env: msg.envName || 'CLI_CMD' });
+  else if (msg.wrapper && msg.wrapper.kind === 'alias') what = t('Nothing was started. Your {shell}’s alias for {cli} («{text}») is not a program’s path. Put the program on your PATH, or set {env}.', { shell, cli, text: String(msg.wrapper.text || '').slice(0, 200), env: msg.envName || 'CLI_CMD' });
   else if (msg.answer === 'unanswered') what = t('Nothing was started. Your {shell} could not be asked where {cli} is ({why}), and the hub’s own PATH has none: {dirs}.', { shell, cli, why: whyWords(msg.why), dirs });
-  else if (msg.hubPath) what = t('Nothing was started. Your {shell} has no {cli} on its PATH (VibeSpace asked it «command -v {cli}»).', { shell, cli });
-  else what = t('Nothing was started. Your {shell} has no {cli} on its PATH (VibeSpace asked it «command -v {cli}»), and neither has the hub’s own PATH: {dirs}.', { shell, cli, dirs });
+  else if (msg.hubPath) what = t('Nothing was started. Your {shell} has no {cli} program on its PATH.', { shell, cli });
+  else what = t('Nothing was started. Your {shell} has no {cli} program on its PATH, and neither has the hub’s own PATH: {dirs}.', { shell, cli, dirs });
   const hint = msg.hubPath ? t('The hub’s PATH has {path} — add that directory to your shell’s PATH, then try again.', { path: tildeHome(msg.hubPath) }) : null;
   return { cli, asked, what, hint };
 }

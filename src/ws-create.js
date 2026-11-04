@@ -1099,7 +1099,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // pty-wrapper machinery stays (buffer/restore all work unchanged) but
           // the wrapped command becomes ssh -t … dtach -A on the REMOTE — a
           // network drop doesn't kill the agent; reattach = re-ssh.
-          let spawnCmd = sessionSpec.cmd || CLAUDE_CMD;
+          let spawnCmd = sessionSpec.cmd || cliCmds?.current?.('claude') || CLAUDE_CMD; // ONE CLI, ONE BINARY (lane cli-shell-truth r2)
           let spawnArgs = sessionSpec.args || [];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           // B-0f13: REMOTE claude terminal sessions get the SAME passive
@@ -1348,7 +1348,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             try { spawnCmd = await cliCmds.forSpawn(backend, spawnCmd); } catch (e) {
               if (!e || e.code !== 'cli-missing') throw e;
               global.__vsEvent?.('spawn-cli-missing', `${backend}/${e.answer || 'none'}`);
-              ws.send(JSON.stringify({ type: 'error', code: 'cli-missing', reqId: data.reqId, backend, cli: e.cli, shell: e.shell || null, answer: e.answer || null, why: e.why || null, aliasText: e.aliasText || null, looked: e.looked || [], hubPath: e.hubPath || null, hint: e.hint || null, message: e.message }));
+              ws.send(JSON.stringify({ type: 'error', code: 'cli-missing', reqId: data.reqId, backend, cli: e.cli, shell: e.shell || null, answer: e.answer || null, why: e.why || null, wrapper: e.wrapper || null, envName: e.envName || null, looked: e.looked || [], hubPath: e.hubPath || null, hint: e.hint || null, message: e.message }));
               return;
             }
             cliShellPath = cliCmds.spawnPath?.(backend) || null; // the shell found it ⇒ its PATH is the spawn's base

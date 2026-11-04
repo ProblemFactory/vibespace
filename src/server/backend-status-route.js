@@ -31,7 +31,7 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
     const force = String(req.query?.recheck || '') === '1';
     const live = {};
     if (cliCmds && typeof cliCmds.check === 'function') {
-      try { await Promise.all(cliCmds.ids().map(async (id) => { live[id] = await cliCmds.check(id, { force }); })); } catch { }
+      try { await Promise.all(cliCmds.ids().map(async (id) => { live[id] = await cliCmds.check(id, { reask: force }); })); } catch { } // ?recheck=1 = a PERSON's press: the shell asked now
     }
     const cmdOf = (id) => (id in live ? live[id] : (cliCmds?.current?.(id) ?? null));
     let out;

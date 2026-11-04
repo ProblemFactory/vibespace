@@ -157,7 +157,7 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     runs.set(accountId, m);
     if (!helperPath) { end(m, 'failed', 'the sign-in helper is not configured'); return { ok: true, signin: publicSignin(m) }; }
     try {
-      m.pty = spawn(nodeCmd, [helperPath, '--config-dir', dir, '--claude', claudeCmd], { name: 'xterm-256color', cols: 400, rows: 50, cwd: scratch, env: e });
+      m.pty = spawn(nodeCmd, [helperPath, '--config-dir', dir, '--claude', typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd /* THE accessor (lane cli-shell-truth r2) */], { name: 'xterm-256color', cols: 400, rows: 50, cwd: scratch, env: e });
     } catch (err) {
       end(m, 'failed', 'could not start the Claude sign-in: ' + String((err && err.message) || err));
       return { ok: true, signin: publicSignin(m) };
