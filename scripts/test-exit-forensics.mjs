@@ -1299,6 +1299,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/pty-duck.js': [1, "attach: a device handle's pty duck"],
     'src/server/boot-restore.js': [1, 'unregistered: a duplicate husk retired at boot before adoption'],
     'src/agentd/agentd.js': [6, "device: the daemon's own pipe / pty sessions + the posixShells probe's 3 s stop of a shell that never answered (windows-device-fs r2)"],
+    'src/server/cli-cmd.js': [2, "the CLI location ask (lane cli-shell-truth, B-fb02; declared by int378): runShell's OWN probe shell — the child by its pid, then its own session's group (detached ⇒ setsid ⇒ pgid = its pid), at the answer or the 10 s bound; never a session, its exit never judged"],
     'src/agentd/attach-cli.js': [1, 'device: an attach client'],
     'src/agentd/client.js': [1, 'device: an attach client'],
     'src/dial-session-bridge.js': [4, 'device: dial bridge handles'],
