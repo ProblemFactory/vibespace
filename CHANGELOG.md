@@ -6,6 +6,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - The cache-warmth colours are four distinct hues (green, blue, amber, red), and expired marks turn a quiet grey.
+- CloakBrowser is no longer built in: it installs as a plugin (⚙ → Plugins → Install plugin…), and your CloakBrowser profiles, seeds and site list move to it.
+- A CloakBrowser that was running when you updated is closed; its logins stay in its profile, and it starts again once its plugin is installed.
+- One For-you notice tells you, once, what moved and where the plugin installs.
+
+### Removed
+- The CloakBrowser install buttons (Manage agents, New profile…, the browser-switch dialog); a site's refusal card says why no switch is offered.
 
 ## 2.369.375 — 2026-11-03
 
