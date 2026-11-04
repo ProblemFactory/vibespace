@@ -14,6 +14,7 @@ const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
 const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
+const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
 const router = express.Router();
@@ -539,6 +540,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   function writeCustomThemes(data) {
     ensureDir(dataDir);
+    // q-059 r5 (lane cache-warmth-ramp r3): the ONE writer of the store — the POST save, the delete, the config import — drops a
+    // value the warmth derivation SUPERSEDED (a bundle exported on .374, an old tab's save) with the same PURE rule the one-shot
+    // boot migration ran over what was already on disk
+    data = normalizeCustomThemes(data).doc;
     _customThemesCache = data;
     writeJsonAtomic(CUSTOM_THEMES_FILE, data);
     broadcast({ type: 'custom-themes-updated', themes: data });

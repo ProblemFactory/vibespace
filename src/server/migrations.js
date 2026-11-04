@@ -31,11 +31,9 @@ const JOB_SECRETS_WORDS = Object.freeze({
   recipe: i18nKey('VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).'),
   both: i18nKey('Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.'),
 });
-// 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): the five «Cache warmth» rows' .374 `derived` strings —
-// the ONLY ones ever shipped (d4352c86f, 2.369.374). The theme editor seeded each row with its derivation and a SAVE froze it
-// into the custom theme, whose injected `[data-theme="custom-…"]` rule outranks style.css's derivation: a theme saved on .374
-// kept the «two greens» ramp after the derivation moved to the raw hues.
-const WARMTH_374_DERIVED = Object.freeze({ '--warmth-fresh': 'var(--ok-text)', '--warmth-mid': 'var(--accent)', '--warmth-late': 'var(--warn-text)', '--warmth-critical': 'var(--bad-text)', '--warmth-expired': 'var(--border)' });
+// 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): a custom theme saved on .374 froze the five «Cache warmth»
+// rows' derived strings; the ONE rule that drops them (r3) is PURE and shared with the store's one writer (persistence.js)
+const { normalizeCustomThemes } = require('../custom-theme-normalize.js');
 
 // `homeDir` is a PARAMETER, not an ambient fact: a migration that reads the
 // transcript tree (the origin backfill) must be drivable against a scratch
@@ -1015,8 +1013,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
 
   /** 2026-11-warmth-ramp-derived: data/custom-themes.json is ROWS — `{ <name>: { css: { '--key': 'value' }, terminal } }`
    *  (src/routes/persistence.js, the /api/custom-themes store), not CSS text. Per theme, a --warmth-* value byte-equal to ITS
-   *  .374 string (WARMTH_374_DERIVED) is dropped; any other value stays — another key's string, a colour, a space; a theme (or
-   *  its css) that is not an object is skipped and named in the report. The store is computed WHOLE and written ONCE (tmp +
+   *  .374 string is dropped; any other value stays — another key's string, a colour, a space; a theme (or its css) that is not
+   *  an object is skipped and named in the report: src/custom-theme-normalize.js, the ONE rule (r3 — the store's writer runs
+   *  it too, so a .374 bundle imported later is dropped at the door; its by-name maps are prototype-less). The store is
+   *  computed WHOLE and written ONCE (tmp +
    *  rename, 2-space JSON as the route writes it, the file's mode kept) and only when something dropped — an untouched store
    *  stays byte-identical, and a throw anywhere before the rename (after the first theme or the last) leaves the file as it
    *  was, so the runner's retry converges. The route fills its in-memory copy at a request's first read; the registry runs in
@@ -1029,26 +1029,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     let doc;
     try { doc = JSON.parse(text); } catch { return none('unparseable'); }   // never rewrite what we cannot read
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return none('not-an-object');
-    const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-    const out = {}, dropped = {}, skipped = [];
-    let themes = 0, kept = 0;
-    for (const [name, theme] of Object.entries(doc)) {
-      themes++;
-      const css = theme && typeof theme === 'object' && !Array.isArray(theme) ? theme.css : null;
-      if (!css || typeof css !== 'object' || Array.isArray(css)) { skipped.push(name); out[name] = theme; continue; }
-      const next = {};
-      for (const [k, v] of Object.entries(css)) {
-        if (own(WARMTH_374_DERIVED, k) && v === WARMTH_374_DERIVED[k]) { (dropped[name] = dropped[name] || []).push(k); continue; }
-        if (own(WARMTH_374_DERIVED, k)) kept++;
-        next[k] = v;
-      }
-      out[name] = dropped[name] ? { ...theme, css: next } : theme;
-    }
-    const rep = { store: 'untouched', themes, dropped, kept, skipped };
-    if (!Object.keys(dropped).length) return rep;
+    const n = normalizeCustomThemes(doc);
+    const rep = { store: 'untouched', themes: n.themes, dropped: n.dropped, kept: n.kept, skipped: n.skipped };
+    if (!n.changed) return rep;   // nothing dropped ⇒ never written (test-migrations pins it by inode + mtime)
     let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(out, null, 2), { mode });
+    fs.writeFileSync(tmp, JSON.stringify(n.doc, null, 2), { mode });
     try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
     rep.store = 'rewritten';
     return rep;
@@ -1228,4 +1214,4 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
-module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, WARMTH_374_DERIVED };
+module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS };

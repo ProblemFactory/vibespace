@@ -2807,6 +2807,70 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     let absent = null, unp = null; try { absent = boot(ra); unp = boot(ru); } catch (e) { absent = absent || { status: 'threw', error: e.message }; }
     ok(absent && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && unp && unp.status === 'ran' && unp.report.store === 'unparseable' && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
       'no store ⇒ none made; an unparseable store ⇒ never rewritten (both recorded)', { absent, unp });
+
+    // r3 (the acceptance of 3ba074455): ① a by-name map is PROTOTYPE-LESS — themes named `constructor`, `__proto__` and
+    // `toString` beside an ordinary one are rewritten like any other (an Object accumulator threw on `constructor` before the
+    // write, and `out.__proto__ = theme` set a prototype instead of keeping the theme)
+    {
+      const row = (n) => `{"css": {"--bg-window": "#0${n}0${n}0${n}", "--warmth-fresh": "var(--ok-text)", "--warmth-mid": "var(--accent)", "--warmth-late": "var(--warn-text)", "--warmth-critical": "var(--bad-text)", "--warmth-expired": "var(--border)"}, "terminal": {}}`;
+      const NAMES = ['constructor', '__proto__', 'toString', 'ordinary'];
+      const rp = rootOf('proto', `{${NAMES.map((n, i) => `"${n}": ${row(i + 1)}`).join(', ')}}`);
+      let rpr = null, back = null;
+      try { rpr = boot(rp); back = JSON.parse(fs.readFileSync(fileOf(rp), 'utf8')); } catch (e) { rpr = rpr || { status: 'threw', error: (e && e.message) || String(e) }; }
+      const ownOf = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+      const fixed = (n, i) => ownOf(back, n) && ownOf(back[n], 'css') && Object.keys(back[n].css).join(',') === '--bg-window' && back[n].css['--bg-window'] === `#0${i + 1}0${i + 1}0${i + 1}`;
+      ok(rpr && rpr.status === 'ran' && rpr.report && rpr.report.store === 'rewritten' && NAMES.every(fixed) && Object.keys(rpr.report.dropped).sort().join(',') === [...NAMES].sort().join(','),
+        'r3 PROTOTYPE NAMES: themes named constructor / __proto__ / toString beside an ordinary one — all four rewritten (the five strings gone, their own row kept), none thrown (RED on 3ba074455: `dropped[name].push` threw on constructor)', rpr && (rpr.error || rpr.report));
+      let nz = {};   // a tree without the ONE rule (3ba074455) reds the leg by name, never the suite
+      try { nz = require('../src/custom-theme-normalize.js').normalizeCustomThemes(JSON.parse(`{"__proto__": ${row(9)}}`)); } catch (e) { nz = { error: (e && e.message) || String(e) }; }
+      ok(!nz.error && Object.getPrototypeOf(nz.dropped) === null && Object.getPrototypeOf(nz.doc) === null && Object.keys(nz.doc).join(',') === '__proto__' && Object.keys(nz.doc.__proto__.css).join(',') === '--bg-window',
+        '…the ONE rule (src/custom-theme-normalize.js) builds every by-name map prototype-less: a `__proto__` theme stays a theme, never a prototype', nz.error || Object.keys(nz.doc || {}));
+    }
+    // ③ «WRITE ONLY WHEN SOMETHING DROPPED», pinned by the FILE, not the report's label: zero themes / no css / none of the five
+    // keys ⇒ the same inode and the same mtime (the mtime set in the past first, so a rewrite in the same instant still shows)
+    {
+      const PAST = new Date('2020-01-02T03:04:05Z');
+      const statOf = (f) => { const st = fs.statSync(f); return { ino: st.ino, mtimeMs: st.mtimeMs }; };
+      const same = (a, b) => a.ino === b.ino && a.mtimeMs === b.mtimeMs;
+      const shapes = { zero: {}, nocss: { a: { terminal: {} }, b: 'not a theme' }, nofive: { a: { css: { '--accent': '#ff00ff', '--warmth-fresh': '#00ff88' }, terminal: {} } } };
+      const seen = {};
+      for (const [tag, store] of Object.entries(shapes)) {
+        const r = rootOf('pin-' + tag, store); fs.utimesSync(fileOf(r), PAST, PAST);
+        const a = statOf(fileOf(r)); let res = null; try { res = boot(r); } catch (e) { res = { status: 'threw', error: e.message }; }
+        seen[tag] = { status: res && res.status, store: res && res.report && res.report.store, same: same(a, statOf(fileOf(r))) };
+      }
+      ok(Object.values(seen).every((x) => x.status === 'ran' && x.store === 'untouched' && x.same),
+        'r3 WRITE PIN: zero themes / no css / none of the five keys ⇒ the run is recorded and the store keeps its inode AND its mtime (never rewritten)', seen);
+      const rc = rootOf('pin-control', { a: { css: { '--accent': '#ff00ff' }, terminal: {} } }); fs.utimesSync(fileOf(rc), PAST, PAST);
+      const c0 = statOf(fileOf(rc)), tmpc = fileOf(rc) + '.ctl'; fs.writeFileSync(tmpc, fs.readFileSync(fileOf(rc))); fs.renameSync(tmpc, fileOf(rc));
+      ok(!same(c0, statOf(fileOf(rc))), '…CONTROL: the same bytes rewritten the migration\'s way (tmp + rename) change the inode — the pin sees a rewrite that changes no byte');
+    }
+    // ② THE OTHER WRITER: the store's ONE writer (persistence.js writeCustomThemes — the config import and the POST save) drops a
+    // superseded value with the same rule — an import of a bundle exported on .374 after the one-shot is stamped is dropped AT THE DOOR
+    {
+      const express = require('express'), http = (await import('node:http')).default;
+      delete require.cache[require.resolve('../src/routes/persistence.js')];   // a FRESH router: an earlier leg set the shared one up on its own data dir
+      const PR = require('../src/routes/persistence.js');
+      const rw = rootOf('writer'), D = path.join(rw, 'data');
+      PR.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} });
+      const app = express(); app.use(express.json({ limit: '2mb' })); app.use(PR.router);
+      const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+      const req = (method, p, body) => new Promise((r) => { const q = http.request({ host: '127.0.0.1', port: srv.address().port, method, path: p, headers: { 'Content-Type': 'application/json' } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => r({ status: res.statusCode, body: b })); }); q.on('error', (e) => r({ status: 0, body: e.message })); q.end(JSON.stringify(body)); });
+      const stored = () => { try { return JSON.parse(fs.readFileSync(fileOf(rw), 'utf8')); } catch { return null; } };
+      try {
+        const bundle = { exported374: { css: { '--bg-window': '#101018', ...OLD, '--text': '#eeeeee' }, terminal: { background: '#000000' } }, theirs: { css: { '--warmth-mid': '#3366ff', '--accent': '#ff00ff' }, terminal: {} } };
+        const im = await req('POST', '/api/config/import', { file: { app: 'vibespace-config', sections: { customThemes: bundle } }, sections: ['customThemes'] });
+        const s1 = stored();
+        ok(im.status === 200 && s1 && Object.keys(OLD).every((k) => !(k in s1.exported374.css)) && JSON.stringify(s1.exported374.css) === '{"--bg-window":"#101018","--text":"#eeeeee"}' && JSON.stringify(s1.exported374.terminal) === '{"background":"#000000"}'
+          && JSON.stringify(s1.theirs) === JSON.stringify(bundle.theirs),
+          'r3 THE IMPORT DOOR: a bundle exported on .374 (the five strings) imported AFTER the one-shot ⇒ dropped at the store\'s one writer; its other rows and the other theme byte-identical (RED on 3ba074455: written back frozen)', { status: im.status, body: im.body.slice(0, 200), files: fs.readdirSync(D), s1 });
+        const sv = await req('POST', '/api/custom-themes', { name: 'Saved', css: { '--bg-window': '#202020', '--warmth-fresh': 'var(--ok-text)', '--warmth-expired': 'var(--border)', '--warmth-late': '#ffaa00' }, terminal: {} });
+        const s2 = stored(), got = await req('GET', '/api/custom-themes');
+        let served = null; try { served = JSON.parse(got.body); } catch { }
+        ok(sv.status === 200 && s2 && JSON.stringify(s2.Saved.css) === '{"--bg-window":"#202020","--warmth-late":"#ffaa00"}' && served && JSON.stringify(served.Saved.css) === JSON.stringify(s2.Saved.css) && JSON.stringify(s2.theirs) === JSON.stringify(bundle.theirs),
+          'r3 THE SAVE ROAD: a POST save carrying .374 strings (an old tab) ⇒ dropped at the same writer — on disk AND in what GET serves; the person\'s #ffaa00 and the other themes untouched (RED on 3ba074455)', { status: sv.status, saved: s2 && s2.Saved, served: served && served.Saved });
+      } finally { await new Promise((r) => srv.close(r)); }
+    }
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -443,7 +443,8 @@ console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four li
   let g = null; try { g = gauge(css); } catch (e) { g = { rows: [], fails: [], error: (e && e.message) || String(e) }; }
   for (const r of g.rows) console.log('    ' + r);
   const by = (floor) => g.fails.filter((f) => f.floor === floor).map((f) => `${f.theme} ${f.what} ${f.value}`).join('; ');
-  ok(`⑩ the gauge reads all six built-in theme blocks (${(g.themes || []).join(', ')}) and resolves every colour it needs`, !g.error && JSON.stringify(g.themes) === '["dark","light","dracula","nord","solarized","monokai"]', g.error);
+  const SIX = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];   // the built-in blocks today; the gauge walks whatever blocks it FINDS (r3)
+  ok(`⑩ the gauge walks every theme block it finds (${(g.themes || []).length}: ${(g.themes || []).join(', ')}) — the six built-in ones among them — and resolves every colour it needs`, !g.error && SIX.every((t) => (g.themes || []).includes(t)), g.error);
   ok(`⑩ every ADJACENT pair of tiers ≥ ${HUE_FLOOR}° of hue on every theme (RED on 749aa7bf9: .374's mint → teal)`, !g.error && !by('hue'), by('hue'));
   ok(`⑩ every band ≥ ${BAND_FLOOR}:1 on its title bar (the lower of idle / active) on every theme`, !g.error && !by('band'), by('band'));
   ok(`⑩ a tier's words (the block's own mix toward --text) ≥ ${WORDS_FLOOR}:1 on the list / phone row / window on every theme`, !g.error && !by('words'), by('words'));
@@ -462,11 +463,19 @@ console.log('— ⑩ the ramp\'s gauge (r5 round 2): six theme blocks × four li
   ok('…CONTROL: the words at 60 % planted (the brief\'s first number) ⇒ the AA floor reds — light\'s amber on the phone row',
     failsOf(pw, 'words').some((f) => f.theme === 'light' && f.what === 'late on --bg-sidebar'), JSON.stringify(pw && failsOf(pw, 'words')));
   const pe = plant('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);');
-  ok('…CONTROL: expired ← var(--border) planted (.374\'s invisible mark) ⇒ the expired floor reds on every theme',
-    failsOf(pe, 'expired').length === 6, JSON.stringify(pe && failsOf(pe, 'expired')));
+  const every = (x, floor, pick = () => true) => !!x && x.themes.length >= SIX.length && failsOf(x, floor).filter(pick).length === x.themes.length;   // r3: counted over the blocks the walk FOUND
+  ok('…CONTROL: expired ← var(--border) planted (.374\'s invisible mark) ⇒ the expired floor reds on every theme block found',
+    every(pe, 'expired'), JSON.stringify(pe && failsOf(pe, 'expired')));
   const pb = plant('  --warmth-late: var(--yellow);', '  --warmth-late: var(--bg-titlebar-active);');
-  ok('…CONTROL: a band planted in its title bar\'s own colour (--warmth-late ← var(--bg-titlebar-active)) ⇒ the band floor reds on every theme',
-    failsOf(pb, 'band').filter((f) => f.what === 'late').length === 6, JSON.stringify(pb && failsOf(pb, 'band')));
+  ok('…CONTROL: a band planted in its title bar\'s own colour (--warmth-late ← var(--bg-titlebar-active)) ⇒ the band floor reds on every theme block found',
+    every(pb, 'band', (f) => f.what === 'late'), JSON.stringify(pb && failsOf(pb, 'band')));
+  // r3 (the acceptance of 3ba074455): a SEVENTH theme block reds only the floor it breaks — never a control that counted six
+  const SEVENTH = '[data-theme="seventh"] {\n  --green: #22c55e; --blue: #2fc56a;\n}\n';
+  const css7 = css.includes('\nhtml, body {') ? css.replace('\nhtml, body {', '\n' + SEVENTH + '\nhtml, body {') : null;
+  let g7 = null; try { g7 = css7 && gauge(css7); } catch (e) { g7 = { rows: [], fails: [], themes: [], error: e.message }; }
+  const pe7 = css7 && css7.includes('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);') ? gauge(css7.replace('  --warmth-expired: color-mix(in srgb, var(--text-dim) 45%, transparent);', '  --warmth-expired: var(--border);')) : null;
+  ok('…a SEVENTH theme block planted (its blue under 2° from its green) ⇒ the gauge walks seven, reds the hue floor on that block ALONE; the expired control over the same copy counts seven and still reds every one',
+    !!g7 && !g7.error && g7.themes.length === 7 && g7.fails.length > 0 && g7.fails.every((f) => f.theme === 'seventh' && f.floor === 'hue') && every(pe7, 'expired'), JSON.stringify(g7 && { themes: g7.themes, fails: g7.fails }));
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
