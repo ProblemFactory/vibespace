@@ -26,7 +26,7 @@ export const mkEl = (tag = 'div') => {
     classList: { add(c) { el.className += ' ' + c; }, remove() {}, toggle() {}, contains: () => false },
     append(...c) { for (const x of c) { if (x && typeof x === 'object') x.parent = el; el.children.push(x); } }, appendChild(c) { el.append(c); return c; }, prepend(...c) { el.append(...c); },
     remove() { if (el.parent) el.parent.children = el.parent.children.filter((x) => x !== el); el.removed = true; },
-    setAttribute() {}, getAttribute: () => null, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [], contains: () => false, insertBefore(c) { el.append(c); return c; },
+    setAttribute() {}, getAttribute: () => null, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [], contains: (x) => { for (let n = x; n; n = n.parent) if (n === el) return true; return false; }, insertBefore(c) { el.append(c); return c; },
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 }) };
   Object.defineProperty(el, 'textContent', { get: () => el._text + el.children.map((c) => (c && c.textContent) || '').join(''), set: (v) => { el._text = String(v); el.children = []; } });
   Object.defineProperty(el, 'innerHTML', { get: () => '', set: () => { el.children = []; } });
@@ -37,7 +37,7 @@ export const mkEl = (tag = 'div') => {
 const docListeners = []; // the document's listeners (r3): a person's key / pointer press reaches every page's (press)
 globalThis.document = { createElement: mkEl, createElementNS: (ns, t) => mkEl(t), getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], body: mkEl('body'), documentElement: { style: { getPropertyValue: () => '', setProperty() {}, removeProperty() {} }, classList: { add() {}, remove() {} } }, addEventListener: (ev, fn) => { docListeners.push([ev, fn]); }, removeEventListener() {}, hidden: false };
 /** a person's press (r3 H): `ev` dispatched to the document's listeners — every page in the process hears it (one person, one keyboard) */
-export const press = (ev = 'keydown') => { for (const [e, fn] of docListeners) if (e === ev) fn({ type: ev, isTrusted: true }); };
+export const press = (ev = 'keydown', target = null) => { for (const [e, fn] of docListeners) if (e === ev) fn({ type: ev, isTrusted: true, target }); }; // `target`: where (r6 Q — an act inside a window keeps its front mark)
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {}; globalThis.dispatchEvent = () => true;
 globalThis.CustomEvent = class { constructor(type) { this.type = type; } };

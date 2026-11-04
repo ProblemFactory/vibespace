@@ -6519,6 +6519,8 @@ export default {
   "{names} on “{desktop}” were kept — this page had not opened them yet (refused {n} times)": "“{desktop}”上的 {names} 已保留——本页面还没有打开过它们（已拒绝 {n} 次）",
   "This page and the server disagree about desktop “{desktop}” — reload to take the server's record": "本页面与服务器对桌面“{desktop}”的记录不一致——刷新以采用服务器的记录",
   "The tab groups on “{desktop}” did not match the server's — this page now shows the server's": "“{desktop}”上的标签组与服务器的不一致——本页面已改为显示服务器的标签组",
+  "Could not open “{name}”: {why}": "无法打开“{name}”：{why}",
+  "its window did not appear": "它的窗口没有出现",
   "“{window}” is on “{desktop}”": "“{window}”在“{desktop}”上",
   "Then: {changes}": "之后的改动：{changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "重新连接后无法重新读取布局——本页面的窗口改动将暂存，直到能读取为止",

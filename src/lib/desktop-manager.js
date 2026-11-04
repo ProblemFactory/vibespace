@@ -122,7 +122,7 @@ export class DesktopManager {
     });
     // A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H): a press of a key or a pointer anywhere is the person's act — a reveal still
     // waiting for its window retires (_revealWhenBuilt)
-    try { for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, () => this._noteAct(), { capture: true, passive: true }); } catch { }
+    try { for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, (e) => this._noteAct(e && e.target), { capture: true, passive: true }); } catch { }
 
     // Taskbar resize handle (drag top edge to resize)
     this._setupTaskbarResize();
@@ -711,26 +711,62 @@ export class DesktopManager {
   /** A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H — the r2 acceptance: a reveal that waited ~5 s for a slow group pulled the
    *  person back to the conversation's desktop at 4.0 s / 5.7 s): every act of the person (a key or pointer press, an open, a
    *  desktop switch) starts a new generation; a deferred reveal acts only in the generation it was asked in. */
-  _noteAct() { this._revealGen = (this._revealGen || 0) + 1; this._revealAsk = null; }
+  _noteAct(target = null) { this._revealGen = (this._revealGen || 0) + 1; this._revealAsk = null; this.app.layoutManager?.dropFront?.(target); } // …and a front mark stays only for an act inside its window (r6 Q)
 
   /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists — only while nothing has happened
-   *  since the open that named it (`gen` is still the generation, `desk` still on show); a wait that runs out (~5 s — a window the
-   *  page cannot build is the placeholder road's) reveals NOTHING. A REVEAL WAITS ONLY FOR WHAT IS NOT YET STANDING (r5 O — the r4
-   *  acceptance's qR: a reveal that waited for the window's group to re-form revealed nothing when a member took > 5 s): its
-   *  switch, its build — never a group; a group still forming around it forms with it in front (layout.js showWhenFormed). */
-  _revealWhenBuilt(id, desk, gen, tries = 50) {
+   *  since the open that named it (`gen` is still the generation, `desk` still on show). A REVEAL WAITS ONLY FOR WHAT IS NOT YET
+   *  STANDING (r5 O — the r4 acceptance's qR: a reveal that waited for the window's group to re-form revealed nothing when a member
+   *  took > 5 s): its switch, its build — never a group; a group still forming around it forms with it in front (layout.js
+   *  showWhenFormed). A REVEAL IS NEVER GIVEN UP IN SILENCE (r6 R — the r5 acceptance: a window that stood after 50 × 100 ms was
+   *  left unrevealed, `_revealAsk` set, nothing said): it waits for as long as the window is still coming (_buildState — no clock
+   *  of its own); it retires by the person's own act (the generation) or by the open's failure, which is SAID (the opener's error
+   *  word; a build that gave no sign of life within the page's own grace for it, BUILD_GRACE_MS: «its window did not appear») —
+   *  once, `_revealAsk` clear. */
+  _revealWhenBuilt(id, desk, gen) {
     if ((this._revealGen || 0) !== gen) return; // the person moved on: the reveal retires
     // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L — the r3 acceptance: an open while another switch still held its 1 s gate
     // queued its own switch, and the reveal retired at once because its desktop was not on show yet): that switch is still to
-    // land (queued, or in flight) ⇒ it waits for it; its desktop not on show and no switch to it coming ⇒ retires
+    // land (queued, or in flight) ⇒ it waits for it; its desktop not on show and no switch to it coming ⇒ the open failed (said)
     const coming = this._pendingSwitch === desk || (this._restoring && this._activeId !== desk);
-    if (this._activeId !== desk && !coming) return;
+    if (this._activeId !== desk && !coming) return this._revealFailed(id, null);
     const wm = this.app.wm;
-    const waiting = this._activeId !== desk || !wm.windows.has(id);
-    if (waiting) { if (tries > 0) setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }
+    if (this._activeId !== desk || !wm.windows.has(id)) {
+      const b = this._activeId !== desk ? { s: 'coming' } : this._buildState(id, desk);
+      if (b.s === 'coming') { setTimeout(() => this._revealWhenBuilt(id, desk, gen), 100); return; }
+      return this._revealFailed(id, b.why || null);
+    }
     this._revealAsk = null;
-    this.app.layoutManager?.showWhenFormed?.(id);
+    this.app.layoutManager?.showWhenFormed?.(id, desk);
     wm.revealWindow?.(id);
+  }
+
+  /** A reveal waiting for window `id` of `desk` (r6 R): 'coming' while its build is alive — its opener still answering (an async
+   *  opener's promise, a restore's reads: _opening) or the page's attempt within its grace — else 'failed' with the opener's error
+   *  word (`why`), or 'failed' with none (no build of it is alive: it gave no sign of life). */
+  _buildState(id, desk) {
+    const o = this._openers?.get(String(id));
+    if (o && o.desk === desk) { if (o.why == null) return { s: 'coming' }; this._openers.delete(String(id)); return { s: 'failed', why: o.why }; }
+    const a = this._buildAttempts.get(String(id));
+    if (a && a.desk === desk && Date.now() - a.at <= BUILD_GRACE_MS) return { s: 'coming' };
+    return { s: 'failed' };
+  }
+
+  /** An opener of window `id` of `desk` still answering (a promise: an async opener, the restore's session reads) — a sign of life for
+   *  a reveal waiting on it; a rejection's error word is kept for that reveal to say (_buildState). */
+  _opening(id, desk, p) {
+    const o = this._openers || (this._openers = new Map()), me = { desk, why: null };
+    o.set(String(id), me);
+    while (o.size > 64) o.delete(o.keys().next().value);
+    Promise.resolve(p).then(() => { if (o.get(String(id)) === me) o.delete(String(id)); }, (err) => { if (o.get(String(id)) === me) me.why = String((err && err.message) || err || ''); });
+  }
+
+  /** The reveal of `id` ends without it (r6 R): said ONCE, naming the conversation — the opener's error word, or «its window did not
+   *  appear» — and `_revealAsk` left clear. */
+  _revealFailed(id, why) {
+    const ask = this._revealAsk;
+    this._revealAsk = null;
+    const name = (ask && ask.id === String(id) && ask.name) || String(id);
+    showToast(t('Could not open “{name}”: {why}', { name, why: why || t('its window did not appear') }), { type: 'error', duration: 8000 });
   }
 
   /** A person's open of a conversation whose window STANDS on the desktop on show (session-lifecycle _focusExistingSession /
@@ -742,7 +778,7 @@ export class DesktopManager {
     const w = this.app.wm.windows.get(String(id));
     if (!w || w._onStage) return;
     this._noteAct();
-    this.app.layoutManager?.showWhenFormed?.(String(id));
+    this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
@@ -764,8 +800,11 @@ export class DesktopManager {
       // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L): the ask names its desktop — that switch, queued or not, keeps its generation
       this._noteAct();
       const gen = this._revealGen || 0;
-      this._revealAsk = { id, desk, gen };
-      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id, desk, gen)).catch((err) => console.warn('[desktop] the switch to the conversation\'s desktop failed', err));
+      this._revealAsk = { id, desk, gen, name: e.openSpec.name || e.title || null }; // the conversation's name, for a failure said (r6 R)
+      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id, desk, gen)).catch((err) => {
+        console.warn('[desktop] the switch to the conversation\'s desktop failed', err);
+        if ((this._revealGen || 0) === gen) this._revealFailed(id, String((err && err.message) || err || '')); // the open's failure, said (r6 R)
+      });
       return true;
     }
     return false;
@@ -800,7 +839,8 @@ export class DesktopManager {
       if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }
       const a = this._buildAttempts.get(String(winId));
       if (a && a.desk === desktopId && now - a.at <= BUILD_GRACE_MS) continue; // already being built
-      this.app.replayOpenSpec(ws.openSpec, winId);
+      const opened = this.app.replayOpenSpec(ws.openSpec, winId);
+      if (opened && typeof opened.then === 'function') this._opening(winId, desktopId, opened); // still answering: a sign of life (r6 R)
       this._noteAttempts(desktopId, [winId], { at: now });
       building.push(String(winId));
       n++;
@@ -823,7 +863,9 @@ export class DesktopManager {
       building.push(...sids); n += sids.length;
       // the restore's session door (layout.js restoreState: alive ⇒ attached, stopped ⇒ read-only, else a placeholder); its
       // windows are this desktop's whatever is on show when its reads answer
-      Promise.resolve(this.app.layoutManager?.restoreState?.({ windows: bySession })).then(() => {
+      const restoring = Promise.resolve(this.app.layoutManager?.restoreState?.({ windows: bySession }));
+      for (const id of sids) this._opening(id, desktopId, restoring); // its reads still out: a sign of life (r6 R)
+      restoring.then(() => {
         for (const id of sids) { const w = this.app.wm.windows.get(id); if (w && w._desktopId !== desktopId) { w._desktopId = desktopId; if (desktopId !== this._activeId) this._hideWin(w); } }
       }).catch(() => {});
     }

@@ -972,10 +972,14 @@ class LayoutManager {
     const dm = this.app.desktopManager, ghosts = (dm?.ghostsOf?.(entry.desk || dm.activeDesktopId) || []).filter((id) => entry.tc.tabs.includes(id));
     const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), ghosts.length ? [...entry.gone, ...ghosts] : entry.gone);
     if (v.act !== 'restore') return v.act === 'drop';
-    const tc = entry.shown && v.chain.tabs.includes(entry.shown) ? { ...v.chain, active: v.chain.tabs.indexOf(entry.shown) } : v.chain; // the member a person revealed meanwhile stays in front (r5 O: showWhenFormed)
+    // THE PERSON'S FRONT TAB BELONGS TO THE DESKTOP (r6 Q): the member a person put in front meanwhile (showWhenFormed) is the group's
+    // tab in front — read off the desktop, never off this entry (a relay of the desktop re-queues its entries without it)
+    const fd = entry.desk || dm?.activeDesktopId || null, front = this._fronts?.get(fd);
+    const tc = front && v.chain.tabs.includes(front) ? { ...v.chain, active: v.chain.tabs.indexOf(front) } : v.chain;
     // a member still grouped locally (a chain the record does not name) leaves it first — never two chains claiming one window
     for (const id of tc.tabs) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); }
     wm.restoreTabChain(tc.tabs, tc.active, { layout: tc.layout, split: tc.split, order: tc.order });
+    if (front && tc.tabs.includes(front)) this._fronts.delete(fd); // consumed: the group that names it formed with it in front
     return true;
   }
 
@@ -989,11 +993,24 @@ class LayoutManager {
   _settlePendingChains() { this._pendingChains = (this._pendingChains || []).filter((e) => !this._reconcileChain(e)); }
 
   /** A PERSON REVEALED `id` while a group naming it is still forming (a member still opening — r5 O: the reveal never waits for a
-   *  group): that group forms with `id` the tab in front. true = a group was waiting. */
-  showWhenFormed(id) {
-    let hit = false;
-    for (const e of this._pendingChains || []) if (e.tc.tabs.includes(String(id))) { e.shown = String(id); hit = true; }
+   *  group): that group forms with `id` the tab in front. true = a group was waiting. THE PERSON'S FRONT TAB BELONGS TO THE DESKTOP
+   *  (r6 Q — the r5 acceptance: the mark lived on the pending entry, and a relay of the desktop on show from another page — a keep
+   *  re-send, a box move, a theme change — dropped every entry and queued fresh ones without it: the group formed with the record's
+   *  tab in front, the conversation just opened a hidden tab, nothing said): the mark is `desk` → `id` (`_fronts`), outside every
+   *  entry — it survives any relay / re-queue / re-reconcile of that desktop, is consumed when a group naming `id` forms here
+   *  (_reconcileChain), and is dropped by the person's next act elsewhere (dropFront). */
+  showWhenFormed(id, desk = null) {
+    const sid = String(id), d = desk || this.app.desktopManager?.activeDesktopId || null;
+    const hit = (this._pendingChains || []).some((e) => e.tc.tabs.includes(sid));
+    if (hit) (this._fronts || (this._fronts = new Map())).set(d, sid);
     return hit;
+  }
+
+  /** The person acted (a key or pointer press, an open, a switch — desktop-manager _noteAct): a front mark stays only while the act
+   *  is inside its own window (typing in the conversation just opened); an act anywhere else, or one naming no place, drops it. */
+  dropFront(target = null) {
+    if (!this._fronts || !this._fronts.size) return;
+    for (const [d, id] of [...this._fronts]) { const el = target && this.app.wm.windows.get(id)?.element; if (!(el && typeof el.contains === 'function' && el.contains(target))) this._fronts.delete(d); }
   }
 
   /** The record's chain a pending (not yet whole) chain holds for window `id` — what its capture writes, never a flat member. */

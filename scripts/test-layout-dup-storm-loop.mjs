@@ -17,8 +17,11 @@
 //   §8 ROUND 3: F — a page whose socket is down (F1 on show, F2 hidden) and a NEW hub process over the same data/ (F3, F4) never
 //      loses the window it shows: closed [] on both pages, both entries on the hub (the hub's trace + the page's keep); G — a refused dedup
 //      beside a tab group leaves the hub's record JSON-equal and every page's group as it was; H — a late reveal retires on any act
-//      (H1 a switch, H4 a key), reveals nothing when its wait runs out (H2), fires once and silently when nothing happened (H3); mutants
-//      (the page's keep, the trace, the partial restore ± the hub's chain gate, the token, the give-up) each RED
+//      (H1 a switch, H4 a key), waits while its window is still coming (H2, r6 R), fires once and silently when nothing happened (H3);
+//      mutants (the page's keep, the trace, the partial restore ± the hub's chain gate, the token) each RED
+//   §9 ROUND 4 (I J K L M) · §10 ROUND 5 (O N P) · §11 ROUND 6: Q — the person's front tab belongs to the desktop (a relay of V while a
+//      member is still opening never moves it: a theme change, a box move, the deferred reveal, a double-click; an act elsewhere drops
+//      it); R — a reveal is never given up in silence (the open's error said once, a build with no sign of life said once, the ask clear)
 import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratchDir } from './scratch.mjs';
@@ -346,7 +349,8 @@ async function r3Legs({ over = {}, DM = RealDM, LM = RealLM, install = null, qui
       open(P); await tick(400);
       const first = P.dm.activeDesktopId;
       await tick(6800);
-      leg(first === 'desk-v' && P.dm.activeDesktopId === 'desk-v' && P.wins.has('win-v-s') && reveals(P).length === 0 && P.app.wm.activeWindowId !== 'win-v-s' && toasts(t0).length === 0, `§8 r3 H2: …a window that stands only after the wait ran out (~5 s; here 6.5 s): the wait reveals NOTHING — no focus taken at 6.5 s (ab1226ff2 revealed at 5 s) — active ${P.dm.activeDesktopId}, reveals ${J(reveals(P))}, window ${P.app.wm.activeWindowId}`);
+      const c = P.wins.get('win-v-s')?._tabChain;
+      leg(first === 'desk-v' && P.dm.activeDesktopId === 'desk-v' && J(reveals(P)) === J([['reveal', 'win-v-s', false]]) && P.app.wm.activeWindowId === 'win-v-s' && !!c && c.tabs[c.active] === 'win-v-s' && P.dm._revealAsk === null && toasts(t0).length === 0, `§8 r3 H2 (r6 R): …A REVEAL IS NEVER GIVEN UP WHILE THE WINDOW IS STILL COMING — nothing done since the open, the window stands only at 6.5 s: revealed then, its own tab in front, nothing said (a3fb7b40e: gave up at 5 s in silence — reveals [], _revealAsk left set) — reveals ${J(reveals(P))}, window ${P.app.wm.activeWindowId}, chain ${J(c && { tabs: c.tabs, active: c.active })}, ask ${J(P.dm._revealAsk)}`);
     }
     if (want('H3')) {
       const P = page(2000, 'v-slow'), t0 = made.length;
@@ -695,6 +699,123 @@ await section('§10 ROUND 5 — a copy this page cannot build is a ghost from th
   await r5Legs({ install: install0 });
 });
 
+/** ROUND 6 (the r5 acceptance of a3fb7b40e): Q — the person's «this tab in front» belongs to the desktop, never to a pending entry (a
+ *  relay of the desktop on show while a member was still opening — a theme change, a box move — re-queued the group without the mark:
+ *  the conversation just opened formed as a hidden tab, the host in front, nothing said); R — a reveal is never given up in silence
+ *  (the open's failure is said with its error word; a build with no sign of life within its grace is said once; `_revealAsk` clear).
+ *  → failed names. */
+async function r6Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (!install) return failed;
+  // O6's shape: V = the group [v-h, win-v-s(S), v-slow]; v-slow opens `slowAt` ms after its replay (the slow member); `build(spec)`
+  // replaces the replay of win-v-s (R: an opener that fails, or never answers)
+  const HG = ['v-h', 'win-v-s', 'v-slow'];
+  const recs = () => ({ 'desk-x': [files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), HG), member(chat('win-v-s', S, 1), HG), member(files('v-slow', 2), HG)] });
+  const page = (H, active, { slowAt = 4500, build = null } = {}) => {
+    const P = pageOn(H, install, active, { DM, LM });
+    const orig = P.app.replayOpenSpec;
+    P.app.replayOpenSpec = (spec, winId) => {
+      if (winId === 'win-v-s' && build) return build(spec);
+      if (winId !== 'v-slow') return orig(spec, winId);
+      setTimeout(() => { const w = P.mkWin('v-slow', 'desk-v', { type: 'viewer', _openSpec: spec }); P.lm.onWindowCreated(w); }, slowAt); return null;
+    };
+    return P;
+  };
+  const open = (P) => { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); press('pointerup'); }; // a click (its release: no page's save waits on a held pointer)
+  const front = (P) => { const c = P.wins.get('win-v-s')?._tabChain; return J(c ? { tabs: c.tabs.join(','), front: c.tabs[c.active], focus: P.app.wm.activeWindowId } : { focus: P.app.wm.activeWindowId }); };
+  const IN_FRONT = J({ tabs: HG.join(','), front: 'win-v-s', focus: 'win-v-s' });
+  // another page's write of V carrying only a change of its own (the theme) — the hub acks and relays it to A
+  const relay = async (H) => { const R = H.connect(); const rec = JSON.parse(J(H.layouts().desktops['desk-v'].autoSave)); await R.send({ type: 'layout-sync', desktopId: 'desk-v', state: { ...rec, theme: 'light' }, sentAt: Date.now(), viewport: 'desktop' }); await tick(30); return R.frames.map((f) => f.type).filter((t) => /layout-sync/.test(t)); };
+  const waiting = (P) => (P.lm._pendingChains || []).some((e) => e.tc.tabs.includes('win-v-s')); // the group still forming (the relay landed before the member)
+  if (want('Q1')) {
+    // A on V opens S (its window stands; v-slow opens at 4.5 s); the person types in S's window at +0.5 s (an act INSIDE it keeps the
+    // mark); another page writes V (a theme change) at +1 s — before the member stands
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    await P.dm.switchTo('desk-v'); await tick(1500);
+    const t0 = made.length;
+    open(P); await tick(500);
+    press('keydown', P.wins.get('win-v-s').element.content || P.wins.get('win-v-s').element); await tick(500);
+    const rf = await relay(H), mid = waiting(P);
+    await tick(4000);
+    leg(front(P) === IN_FRONT && J(rf) === J(['layout-sync-ack']) && mid && toasts(t0).length === 0, `§11 r6 Q1: THE PERSON'S FRONT TAB BELONGS TO THE DESKTOP — A opens S while a member of its group is still opening, types in it, and another page writes V (a theme change) before the member stands: the group forms with S's tab in front and focused (a3fb7b40e: the relay re-queued the group without the mark — v-h in front, S a hidden tab, nothing said) — A ${front(P)}, the writer got ${J(rf)}`);
+  }
+  if (want('Q2')) {
+    // …B, a real page on V, MOVES a window of V 1 s after A's open (B's write relayed to A before the member stands); B unchanged
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x', { slowAt: 6500 });
+    const B = world({ records: recs(), active: 'desk-y', DM, LM, H });
+    await switchTo(B, 'desk-v'); await P.dm.switchTo('desk-v'); await tick(1500);
+    const bGroup = () => { const w = B.wins.get('win-v-s'); return w && w._tabChain ? w._tabChain.tabs.join(',') + '@' + w._tabChain.active : null; };
+    const b0 = bGroup(), bc = B.closed.length, t0 = made.length;
+    open(P); await tick(300);
+    const w = B.wins.get('v-h'); w.gridBounds = { left: 0.5, top: 0.5, width: 0.2, height: 0.2 }; w._movedAt = Date.now(); B.act();
+    await tick(3700);
+    const mid = waiting(P) && P.wins.get('v-h').gridBounds?.left === 0.5; // B's move applied on A while the group still waits (at +4 s; the member at +5 s)
+    await tick(2000);
+    const hv = (H.layouts().desktops['desk-v'].autoSave.windows.find((x) => x.winId === 'v-h') || {}).gridBounds;
+    leg(front(P) === IN_FRONT && mid && bGroup() === b0 && B.closed.length === bc && hv && hv.left === 0.5 && toasts(t0).length === 0, `§11 r6 Q2: …the same when another page MOVES a window of V meanwhile (B's box move lands on the hub and is relayed to A before the member stands): S's tab in front and focused on A, B's group as it was (a3fb7b40e: v-h in front on A) — A ${front(P)}, relayed while waiting ${mid}, B ${bGroup()} (was ${b0}), hub v-h ${J(hv)}`);
+  }
+  if (want('Q3')) {
+    // the DEFERRED reveal: A on X opens S — the switch to V builds it (_revealWhenBuilt) — and another page writes V at +1.8 s
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    const t0 = made.length;
+    open(P); await tick(1800);
+    const rf = await relay(H), mid = waiting(P);
+    await tick(3700);
+    leg(P.dm.activeDesktopId === 'desk-v' && front(P) === IN_FRONT && J(rf) === J(['layout-sync-ack']) && mid && toasts(t0).length === 0, `§11 r6 Q3: …and through the DEFERRED reveal after a switch (A on X opens S, its desktop's switch builds it, a relay of V at +1.8 s): S's tab in front and focused once the group forms (a3fb7b40e: v-h) — active ${P.dm.activeDesktopId}, A ${front(P)}`);
+  }
+  if (want('Q4')) {
+    // a DOUBLE-CLICK (the r4 L shape: A on X, two opens 200 ms apart) and a relay of V at +1.8 s
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    const t0 = made.length;
+    open(P); await tick(200); open(P); await tick(1600);
+    const rf = await relay(H), mid = waiting(P);
+    await tick(3700);
+    const rv = P.ops.filter((o) => o[0] === 'reveal');
+    leg(front(P) === IN_FRONT && rv.length >= 1 && rv.every((o) => o[1] === 'win-v-s') && J(rf) === J(['layout-sync-ack']) && mid && toasts(t0).length === 0, `§11 r6 Q4: …and through a DOUBLE-CLICK (the CHANGELOG's «lands on its own tab»): two opens 200 ms apart, a relay of V at +1.8 s — S's tab in front and focused when the group forms (a3fb7b40e: v-h) — A ${front(P)}, reveals ${J(rv)}`);
+  }
+  if (want('Q5')) {
+    // …until the person's own next act ELSEWHERE: A opens S, then presses in v-h's window (the host) before the member stands — the
+    // mark is dropped, the group forms as its record has it
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    await P.dm.switchTo('desk-v'); await tick(1500);
+    open(P); await tick(800);
+    press('pointerdown', P.wins.get('v-h').element);
+    await tick(4200);
+    const c = P.wins.get('win-v-s')?._tabChain;
+    leg(!!c && c.tabs[c.active] === 'v-h' && !(P.lm._fronts && P.lm._fronts.size), `§11 r6 Q5: …the mark lasts until the person's own next act elsewhere — a press in another window of V (v-h) before the member stands drops it: the group forms as its record has it (v-h in front) — group ${J(c && { tabs: c.tabs, active: c.active })}`);
+  }
+  if (want('R2')) {
+    // A on X opens S; the switch to V replays its window and the opener FAILS at +1 s (its error word)
+    const H = hub(loadHandler(), DOC(recs()));
+    const P = page(H, 'desk-x', { slowAt: 0, build: () => { const p = new Promise((_, no) => setTimeout(() => no(new Error('the conversation could not be attached')), 1000)); p.catch(() => {}); return p; } });
+    const t0 = made.length;
+    open(P); await tick(1500);
+    const ask = P.dm._revealAsk, said = toasts(t0).map(toastText);
+    await tick(800);
+    leg(said.length === 1 && /Atlas notes/.test(said[0]) && /could not be attached/.test(said[0]) && ask === null && toasts(t0).length === 1 && !P.ops.some((o) => o[0] === 'reveal'), `§11 r6 R2: A REVEAL IS NEVER GIVEN UP IN SILENCE — the open's own failure (its opener answers an error at +1 s) reaches the person as that failure, ONCE, naming the conversation, and _revealAsk is clear (a3fb7b40e: nothing said, _revealAsk left set) — toasts ${J(said)}, ask ${J(ask)}`);
+  }
+  if (want('R3')) {
+    // …and a build with no sign of life (its opener answered nothing and the window never comes): said once when the page's own grace
+    // for that build runs out (BUILD_GRACE_MS — moved here by shifting the attempt's start back), _revealAsk clear
+    const H = hub(loadHandler(), DOC(recs()));
+    const P = page(H, 'desk-x', { slowAt: 0, build: () => null });
+    const t0 = made.length;
+    open(P); await tick(1500);
+    const before = toasts(t0).length, a = P.dm._buildAttempts.get('win-v-s');
+    if (a) a.at -= 20000;
+    await tick(400);
+    const said = toasts(t0).map(toastText), ask = P.dm._revealAsk;
+    await tick(800);
+    leg(before === 0 && !!a && said.length === 1 && /Atlas notes/.test(said[0]) && /did not appear/.test(said[0]) && ask === null && toasts(t0).length === 1, `§11 r6 R3: …a build with no sign of life is said ONCE when its grace runs out — «Could not open “Atlas notes”: its window did not appear» — and _revealAsk is clear; nothing said while it was still within its grace (a3fb7b40e: silent) — before ${before}, toasts ${J(said)}, ask ${J(ask)}`);
+  }
+  return failed;
+}
+await section('§11 ROUND 6 — the person\'s front tab belongs to the desktop (Q); a reveal is never given up in silence (R)', async () => {
+  await r6Legs({ install: install0 });
+});
+
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
   const M = mutantCopies('ldupl', REPO);
   const DSRC = read('src/lib/desktop-manager.js'), LSRC = read('src/lib/session-lifecycle.js');
@@ -776,11 +897,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const DMh = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findH, ''), 'r3-h-no-token', { esm: true })).href)).DesktopManager;
     const fH = await r3Legs({ DM: DMh, install: install0, quiet: true, legs: ['H1', 'H4'] });
     ok(fH.some((n) => /a key the person pressed after the open retires it/.test(n)), `mutant r3-H-no-token: a key press retires nothing — RED (${fH.length}; H1's switch away is held twice since r4: the reveal also waits for ITS desktop on show)`);
-    const findW = "    if (waiting) { if (tries > 0) setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }";
-    ok(DSRC.includes(findW), 'mutant r3-H-giveup-reveals: the patched line exists in desktop-manager.js');
-    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findW, "    if (waiting) { setTimeout(() => this._revealWhenBuilt(id, desk, gen, tries - 1), 100); return; }"), 'r3-h-giveup', { esm: true })).href)).DesktopManager;
-    const fW = await r3Legs({ DM: DMw, install: install0, quiet: true, legs: ['H2'] });
-    ok(fW.some((n) => /the wait reveals NOTHING/.test(n)), `mutant r3-H-never-gives-up (r5: the wait is for the window itself — a reveal that never retires takes the focus when the window stands at 6.5 s): RED (${fW.length})`);
+    // (r3-H-never-gives-up retired in r6: a reveal that waits while its window is still coming is LAW R — §6's r6 R mutants)
   }
   // r4: I the group waits for the kept copy (36bd0c866's forget-without-rebuild) / no repair of a 'chain-disagrees'; J the chain sync
   // rebuilds from the shrunk chain (on show) / the hidden road appends the kept row; K a keep on a close (the trace ignores the
@@ -810,7 +927,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const ND = require(MODEL).noteDupsLeft;
     const fK = await r4Legs({ over: { noteDupsLeft: (t, o = {}) => ND(t, { ...o, gone: [] }) }, quiet: true, legs: ['K'] });
     ok(fK.some((n) => /A PERSON'S CLOSE IS NEVER UNDONE BY A KEEP/.test(n)), `mutant r4-K-keep-on-close (the trace blind to a person's act — 36bd0c866's): B keeps the window C's person closed and re-lists it — RED (${fK.length})`);
-    const findL = "    if (this._activeId !== desk && !coming) return;";
+    const findL = "    if (this._activeId !== desk && !coming) return this._revealFailed(id, null);"; // (r6 R: that end is said)
     ok(DSRC.includes(findL), 'mutant r4-L-retire-first-call: the patched line exists in desktop-manager.js');
     const DMl = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findL, '    if (this._activeId !== desk) return;'), 'r4-l-first-call', { esm: true })).href)).DesktopManager;
     const fL = await r4Legs({ DM: DMl, install: install0, quiet: true, legs: ['L'] });
@@ -827,11 +944,11 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const DMo = await dm5('    if (!shows.size) return out;', '    return out;', 'r5-o-attempt');
     const fO = await r5Legs({ DM: DMo, install: install0, quiet: true, legs: ['O1', 'O3a', 'O5'] });
     ok(fO.some((n) => /r5 O1: A COPY THIS PAGE CANNOT BUILD IS A GHOST/.test(n)) && fO.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)) && fO.some((n) => /r5 O5: AN OPEN OF A WINDOW THAT STANDS/.test(n)), `mutant r5-O-build-attempt-until-save (4ad07d751's ghostsOf: only _kept / _carried): A's group taken apart by B's re-send (q1), the merge refused (q3), v-t's group still pending at the open (qR2) — RED (${fO.length}: ${fO.map((n) => n.slice(0, 22)).join(' | ')})`);
-    const kif = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage) return;\n    this._noteAct();\n    this.app.layoutManager?.showWhenFormed?.(String(id));\n  }";
+    const kif = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage) return;\n    this._noteAct();\n    this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);\n  }";
     const r4k = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage || !this.app.layoutManager?.pendingChainOf?.(String(id))) return false;\n    const desk = w._desktopId || this._activeId;\n    if (desk !== this._activeId) return false;\n    this._noteAct();\n    const gen = this._revealGen || 0;\n    this._revealAsk = { id: String(id), desk, gen };\n    this._revealWhenBuilt(String(id), desk, gen);\n    return true;\n  }";
-    const wl = '    const waiting = this._activeId !== desk || !wm.windows.has(id);';
-    ok(DSRC5.includes(kif) && DSRC5.includes(wl), 'mutant r5-O-reveal-waits-for-group: the patched lines exist in desktop-manager.js');
-    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC5.replace(kif, r4k).replace(wl, '    const waiting = this._activeId !== desk || !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id);'), 'r5-o-waits', { esm: true })).href)).DesktopManager;
+    const wl = '    if (this._activeId !== desk || !wm.windows.has(id)) {', wb = "      const b = this._activeId !== desk ? { s: 'coming' } : this._buildState(id, desk);";
+    ok(DSRC5.includes(kif) && DSRC5.includes(wl) && DSRC5.includes(wb), 'mutant r5-O-reveal-waits-for-group: the patched lines exist in desktop-manager.js');
+    const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC5.replace(kif, r4k).replace(wl, '    if (this._activeId !== desk || !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id)) {').replace(wb, "      const b = this._activeId !== desk || wm.windows.has(id) ? { s: 'coming' } : this._buildState(id, desk);"), 'r5-o-waits', { esm: true })).href)).DesktopManager;
     const lf = '        if (!replay) this.desktopManager?.keepInFront?.(winId);';
     ok(LSRC5.includes(lf), 'mutant r5-O-reveal-waits-for-group: the patched line exists in session-lifecycle.js');
     const installW = await loadLifecycle(LSRC5.replace(lf, '        if (!replay && this.desktopManager?.keepInFront?.(winId)) return true;'));
@@ -852,7 +969,30 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const fN = await r5Legs({ WSH: Wn, quiet: true, legs: ['N1', 'N2'] });
     ok(fN.some((n) => /r5 N1: ALIVE FOR THE TRACE/.test(n)) && fN.some((n) => /r5 N2: ALIVE FOR THE TRACE/.test(n)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a STOPPED conversation's copy leaves the trace and B closes the window it shows — RED (${fN.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 18, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  // r6: Q the front mark on the pending entry only (a3fb7b40e's `e.shown`); R the reveal that gives up while its window is still
+  // coming (a bound that says so), R the silent 50 × 100 ms cap (a3fb7b40e's)
+  {
+    const DSRC6 = read('src/lib/desktop-manager.js'), LSRC6 = read('src/lib/layout.js');
+    const sw = "    const hit = (this._pendingChains || []).some((e) => e.tc.tabs.includes(sid));\n    if (hit) (this._fronts || (this._fronts = new Map())).set(d, sid);\n    return hit;";
+    const rf = '    const fd = entry.desk || dm?.activeDesktopId || null, front = this._fronts?.get(fd);', rc = '    if (front && tc.tabs.includes(front)) this._fronts.delete(fd); // consumed: the group that names it formed with it in front\n';
+    ok(LSRC6.includes(sw) && LSRC6.includes(rf) && LSRC6.includes(rc), 'mutant r6-Q-mark-on-the-entry: the patched lines exist in layout.js');
+    const LMq = (await import(pathToFileURL(M.write('src/lib/layout.js', LSRC6.replace(sw, "    let hit = false;\n    for (const e of this._pendingChains || []) if (e.tc.tabs.includes(sid)) { e.shown = sid; hit = true; }\n    return hit;").replace(rf, '    const front = entry.shown;').replace(rc, ''), 'r6-q-entry', { esm: true })).href)).LayoutManager;
+    const fQ = await r6Legs({ LM: LMq, install: install0, quiet: true, legs: ['Q1', 'Q2', 'Q3', 'Q4'] });
+    ok(['Q1', 'Q2', 'Q3', 'Q4'].every((k) => fQ.some((n) => n.startsWith(`§11 r6 ${k}:`))), `mutant r6-Q-mark-on-the-entry (a3fb7b40e: the person's front tab kept as \`shown\` on the pending entry — a relay of V re-queues the group without it): v-h in front on all four roads — RED (${fQ.length}: ${fQ.map((n) => n.slice(0, 13)).join(' | ')})`);
+    const sig = '  _revealWhenBuilt(id, desk, gen) {', cw = "      if (b.s === 'coming') { setTimeout(() => this._revealWhenBuilt(id, desk, gen), 100); return; }";
+    const rr = '      return this._revealFailed(id, b.why || null);', rn = '    if (this._activeId !== desk && !coming) return this._revealFailed(id, null);';
+    ok(DSRC6.includes(sig) && DSRC6.includes(cw) && DSRC6.includes(rr) && DSRC6.includes(rn), 'mutant r6-R: the patched lines exist in desktop-manager.js');
+    // the bound is 5 s of wall clock from the reveal's first call (a3fb7b40e counted 50 × 100 ms tries — under load the timers stretch
+    // past the 6.5 s the H2 window takes, and a tries-count mutant reveals it after all: no verdict)
+    const capped = DSRC6.replace(sig, '  _revealWhenBuilt(id, desk, gen, t0 = Date.now()) {').replace(cw, "      if (b.s === 'coming' && Date.now() - t0 < 5000) { setTimeout(() => this._revealWhenBuilt(id, desk, gen, t0), 100); return; }");
+    const DMg = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', capped, 'r6-r-gives-up', { esm: true })).href)).DesktopManager;
+    const fG6 = await r3Legs({ DM: DMg, install: install0, quiet: true, legs: ['H2'] });
+    ok(fG6.some((n) => /r3 H2 \(r6 R\): …A REVEAL IS NEVER GIVEN UP WHILE THE WINDOW IS STILL COMING/.test(n)), `mutant r6-R-gives-up-while-coming (a 5 s bound that even says so): the window standing at 6.5 s is not revealed — RED (${fG6.length})`);
+    const DMs = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', capped.replace(rr, '      return;').replace(rn, '    if (this._activeId !== desk && !coming) return;').replace("      const b = this._activeId !== desk ? { s: 'coming' } : this._buildState(id, desk);", "      const b = { s: 'coming' };"), 'r6-r-silent', { esm: true })).href)).DesktopManager;
+    const fS6 = [...await r3Legs({ DM: DMs, install: install0, quiet: true, legs: ['H2'] }), ...await r6Legs({ DM: DMs, install: install0, quiet: true, legs: ['R2', 'R3'] })];
+    ok(fS6.some((n) => /r3 H2 \(r6 R\)/.test(n)) && fS6.some((n) => n.startsWith('§11 r6 R2:')) && fS6.some((n) => n.startsWith('§11 r6 R3:')), `mutant r6-R-silent-cap (a3fb7b40e's ~5 s cap, nothing said): H2 unrevealed, the open's failure unsaid, the build with no sign of life unsaid, _revealAsk left set — RED (${fS6.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 24, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 
