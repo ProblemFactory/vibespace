@@ -47,6 +47,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **ramp × compact.** The two cache-warmth suites merged line by line (test-cache-warmth 122 ✓ on the merged tree; ramp's ⑩ beside compact's ⑪). The chrome suite keeps compact's 600-s ceiling (its ⑬ adds two reloads), and docs/kb-features.md keeps both lanes' lines.
 - **L3's deletions verified by occurrence counts.** All 3741 of its deleted lines are gone from the train, except the two census rows the merge rewrote. The i18n tables drop its 72 keys; none comes back and no lane's addition is missing.
 - **No seams.** The fast tier's sum is 919.46 s under the 920 s cap: L3's restated rows net −0.38 s, ramp's and compact's +0.
+- **The user changelog reads as one release.** Its bullets are grouped by what the person sees — the cache warmth (the colours, then the cache facts and the compaction reset), then CloakBrowser as a plugin — not by lane (work/assemble376.py: a unit's rank orders the user files; this record keeps pick order).
 
 ## 2.369.375 — 2026-11-03
 
