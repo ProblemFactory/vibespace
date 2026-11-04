@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - CloakBrowser is no longer built in: it installs as a plugin (⚙ → Plugins → Install plugin…), and your CloakBrowser profiles, seeds and site list move to it.
 - A CloakBrowser that was running when you updated is closed; its logins stay in its profile, and it starts again once its plugin is installed.
 - One For-you notice tells you, once, what moved and where the plugin installs.
+- Cache warmth now reads each response's own cache facts and says what it projects; after you compact a conversation it resets until the next request.
 
 ### Removed
 - The CloakBrowser install buttons (Manage agents, New profile…, the browser-switch dialog); a site's refusal card says why no switch is offered.
