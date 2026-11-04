@@ -2933,6 +2933,16 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const boot = (w, opts = {}) => create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
     const notes = (store) => store.forSession('browser').filter((i) => i.itemKey === ID);
+    const MIGM = require('../src/server/migrations.js');
+    /** round 3: a boot whose row may run STEPPED (its proof streams the download's hash): waits for the gate the keeper's boot waits
+     *  for, then answers what the ledger recorded (`stepped: true`) — a synchronous row answers as boot() does */
+    const bootA = async (w, opts = {}, mod = MIGM) => {
+      const r = mod.create({ rootDir: w.root, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
+      if (!r || r.status !== 'started') return r;
+      await (mod.beforeBrowserBoot ? mod.beforeBrowserBoot() : Promise.resolve());
+      const l = w.ledger();
+      return { id: ID, status: (l.applied || {})[ID] ? 'ran' : 'failed', report: (l.reports || {})[ID], stepped: true };
+    };
     ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID), `the registry carries ${ID} (append-only, dated)`);
     // M1 THE WORLD — two CloakBrowser profiles (seeds 17 / 99), a running one with the old proxy shape, the program path + the site list,
     // a chromium profile CloakBrowser was made the default of, an open proposal with its For-you Approve, a stored licence key — through
@@ -2987,7 +2997,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const w2 = seedC('download', { reg: world(), settings: { 'browser.cloak.egressAllowlist': '' }, download: true });
     const t2 = new UserTodoManager({ dataDir: w2.dataDir, expirySweepMs: 0 });
     const seam2 = (() => { const sha = crypto.createHash('sha256').update(fs.readFileSync(w2.dl)).digest('hex'); fs.writeFileSync(path.join(w2.dataDir, 'browser-tools', 'cloak-installed.json'), JSON.stringify({ chromium: '146.0.7680.177.5', sha256: sha, path: 'cloak-cache/chromium-146.0.7680.177.5/chrome', at: 1 })); return { cloakMeasured: { chromium: '146.0.7680.177.5', sha256: sha } }; })(); // its install proof (round 2: law A)
-    const r2 = boot(w2, { userTodos: t2, ...seam2 });
+    const r2 = await bootA(w2, { userTodos: t2, ...seam2 });
     const st2 = w2.J('settings.json') || {}, d2 = String((notes(t2)[0] || {}).detail || '');
     ok(r2?.status === 'ran' && r2?.report?.via === 'file' && st2[EXE] === w2.dl && fs.existsSync(w2.dl) && !(SITES in st2) && !('browser.cloak.egressAllowlist' in st2) && /earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/.test(d2),
       'M2 no path set ⇒ the earlier download — its install stamp naming the file — becomes the plugin\'s program row (the file stays where it is); an EMPTY old site list is stripped, never carried; said', { st2, d2 });
@@ -3077,7 +3087,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const w = seedC('proof-' + kind, { reg: world() });
       const seam = proofOf(w, kind);
       const t = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });
-      const r = boot(w, { userTodos: t, ...seam });
+      const r = await bootA(w, { userTodos: t, ...seam });
       const st = w.J('settings.json') || {}, d = String((notes(t)[0] || {}).detail || '');
       const name = { match: 'STAMPED + MATCHING ⇒ the earlier download IS the plugin\'s program row (the file stays where it is), said', mismatch: 'stamped but the file is not the one the stamp names (its SHA-256 differs) ⇒ NOT carried: the row left for the plugin\'s own download, the notice says it was left out as unverified',
         marker: 'an unpack the update cut (its marker, no install stamp) ⇒ NOT carried — the sentence says so', 'other-build': 'a stamp that names a build the measured one never was (another SHA-256) ⇒ NOT carried' }[kind];
@@ -3088,13 +3098,55 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     try { // A — MUTANT: the proof dropped (an executable file is enough again) ⇒ the cut unpack is carried — A's legs go red
       const MA = mutantCopies('migrations-cloak-proof', REPO_ROOT);
       const srcA = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
-      const gate = "      const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));";
+      const gate = "    const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));";
       ok(srcA.split(gate).length === 2, 'A CONTROL scope: the proof is read where the patched copy drops it');
-      const noProof = MA.load('src/server/migrations.js', srcA.replace(gate, "      return { present: true, proven: true, why: 'executable' };\n" + gate), 'no-proof');
+      const noProof = MA.load('src/server/migrations.js', srcA.replace(gate, "    return { present: true, proven: true, why: 'executable' };\n" + gate), 'no-proof');
       const wm = seedC('proof-mut', { reg: world() }); const seamM = proofOf(wm, 'marker');
       noProof.create({ rootDir: wm.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } }, ...seamM }).runLocalMigrations({ only: [ID] });
       ok((wm.J('settings.json') || {})[EXE] === wm.dl, 'A NEGATIVE CONTROL: a copy that takes an executable file as proof carries the CUT unpack into the plugin\'s program row — A\'s «marker» leg goes red');
     } catch (e) { ok(false, `A: the negative control could not run on this tree (${(e && e.message) || e})`); }
+    // A′ (round 3) — THE PROOF NEVER HOLDS THE BOOT (server.js runs this registry inside hub.listen's callback; §19's 250 ms clause)
+    {
+      const srcP = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+      const rowSrc = srcP.slice(srcP.indexOf('  function cloakDownloadFacts()'), srcP.indexOf('  /** 2026-10-settings-rows-retired, the settings half:'));
+      ok(/const sha256Of = \(file\) => new Promise\(.*fs\.createReadStream\(file/.test(srcP) && /sha256Of\(f\.file\)/.test(rowSrc) && !/update\(fs\.readFileSync/.test(rowSrc) && rowSrc.length > 1000,
+        'A′ STRUCTURE: the proof streams through the named sha256Of (fs.createReadStream) — no readFileSync feeds a hash anywhere in the row');
+      const wiring = fs.readFileSync(path.join(REPO_ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+      const bk = wiring.slice(wiring.indexOf('  function bootBrowserKeeper('), wiring.indexOf('  function bootBrowserKeeper(') + 1200);
+      ok(/gate = require\('\.\/migrations\.js'\)\.beforeBrowserBoot\(\)/.test(bk) && /Promise\.resolve\(gate\)\.catch\(\(\) => null\)\.then\(\(\) => browserKeeper\.boot\(\)\)/.test(bk) && /browserBootGate = run\.then\(/.test(srcP),
+        'A′ THE ORDER LAW: the keeper\'s boot (mounts-plugins-wiring bootBrowserKeeper) waits on the migration\'s gate before boot() — a STEPPED row is still judged before any record is adopted');
+      const lagRun = async (mod, tag) => {
+        const w = seedC('proof-big-' + tag, { reg: world() });
+        fs.mkdirSync(path.dirname(w.dl), { recursive: true });
+        const big = Buffer.alloc(64 * 1024 * 1024, 0x61); fs.writeFileSync(w.dl, big, { mode: 0o755 });
+        const sha = sha256C(big);
+        fs.writeFileSync(path.join(w.dataDir, 'browser-tools', 'cloak-installed.json'), JSON.stringify({ chromium: MEAS, sha256: sha, path: 'cloak-cache/x/chrome', at: 1 }));
+        // the loop-lag sampler: one setImmediate per loop turn, the longest gap between two turns = the longest hold (running
+        // BEFORE the row starts, so a hold in the row's own first tick is seen too)
+        let maxGap = 0, last = process.hrtime.bigint(), on = true;
+        const tick = () => { const n = process.hrtime.bigint(); const g = Number(n - last) / 1e6; if (g > maxGap) maxGap = g; last = n; if (on) setImmediate(tick); };
+        await new Promise((res) => setImmediate(() => { last = process.hrtime.bigint(); setImmediate(tick); res(); }));
+        const t0 = Date.now();
+        const r = await bootA(w, { userTodos: { add: () => ({ id: 'x' }), flush() { } }, cloakMeasured: { chromium: MEAS, sha256: sha } }, mod);
+        await new Promise((res) => setTimeout(res, 10)); // the turn after the end is sampled too
+        on = false; const ms = Date.now() - t0;
+        return { stepped: !!(r && r.stepped), status: r && r.status, ms, maxLag: Math.round(maxGap), carried: (w.J('settings.json') || {})[EXE] === w.dl };
+      };
+      // the 250 ms boot clause (§19) is test-boot-loop-hold's (a real boot, its literal law); a fast suite judges a hold against a
+      // CONTROL MEASURED IN THE RUN (test-ci-gate's wall-clock law): the same row with the sync spelling planted back
+      let lgS = null;
+      try {
+        const MS = mutantCopies('migrations-cloak-sync-hash', REPO_ROOT);
+        const streamCall = '    const run = sha256Of(f.file).then(';
+        ok(srcP.split(streamCall).length === 2, 'A′ CONTROL scope: the streamed hash is where the patched copy puts the sync spelling back');
+        const syncHash = MS.load('src/server/migrations.js', srcP.replace(streamCall, "    const run = Promise.resolve(require('crypto').createHash('sha256').update(fs.readFileSync(f.file)).digest('hex')).then("), 'sync-hash');
+        lgS = await lagRun(syncHash, 'sync');
+      } catch (e) { ok(false, `A′: the negative control could not run on this tree (${(e && e.message) || e})`); }
+      const lg = await lagRun(MIGM, 'stream');
+      ok(lg.stepped && lg.status === 'ran' && lg.carried && !!lgS && lg.maxLag * 3 < lg.ms && lg.maxLag * 2 < lgS.maxLag,
+        `A′ a 64 MB stand-in, its stamp naming it: the row runs STEPPED (the keeper's boot waits on its gate), carries the file, and the loop's longest hold is ${lg.maxLag} ms of a ${lg.ms} ms run — under a third of the run and under half the sync spelling's ${lgS ? lgS.maxLag : '?'} ms one-tick hold`, { lg, lgS });
+      ok(!!lgS && lgS.carried && !(lgS.maxLag * 3 < lgS.ms), `A′ NEGATIVE CONTROL: the sync spelling (readFileSync → createHash) holds the loop ${lgS ? lgS.maxLag : '?'} ms of its ${lgS ? lgS.ms : '?'} ms run in one tick — the leg above goes red with it planted back`, lgS);
+    }
     // B — ARCHIVE BEFORE STRIP: a crash after EACH write (an env-gated throw the suite plants — never a patched copy), then the retry:
     // it converges to the uncrashed run's end state with ONE notice whose words are the first run's truth; the archive holds the old
     // values in every torn shape (the plugin's own rows set before the update, or not)
@@ -3124,6 +3176,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
           && r2?.status === 'ran' && same && end.n === 1 && end.detail === ref.detail && a2.includes('/opt/old/chrome') && a2.includes('old.example') && !a2.includes('"pending": true'),
           `B a crash right after the ${step} write (the plugin's rows ${kept ? 'set' : 'unset'}): the archive already held the old values; the retry converges to the uncrashed end state, ONE notice, the first run's words`,
           { r1: r1 && { status: r1.status, error: r1.error }, r2: r2 && r2.status, same, end: same ? null : end, ref: same ? null : ref, detail: end.detail, refDetail: ref.detail });
+        if (step === 'registry') {
+          const runsV = (() => { try { return JSON.parse(a2).runs || []; } catch { return []; } })();
+          const viaArch = (runsV[runsV.length - 1] || {}).via, viaLedger = ((w.ledger().reports || {})[ID] || {}).via;
+          ok(viaArch === 'file' && viaLedger === 'file' && r2?.report?.via === 'file', `B′ the run resumed after the registry write (the plugin's rows ${kept ? 'set' : 'unset'}) says the FIRST run's via — the archive and the ledger «file», never «none»`, { viaArch, viaLedger, rep: r2?.report?.via });
+        }
       }
       // the verdict's ARCHFAIL shape (a real failure, no planted code): data/archive is a FILE ⇒ the run fails before ANY write; once it
       // is gone, the next boot moves everything and tells the person — never a stamped run that told nobody

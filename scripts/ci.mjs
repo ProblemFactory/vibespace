@@ -321,7 +321,7 @@ export const SUITES = [
   { name: 'test-mount-path-class', tier: 'fast', why: 'PURE · 30 ms' }, // lane hub-fuse-sync-guard: WHERE A PATH LIVES — the roots from the incident's mountinfo (redacted), the kinds, the instance's own subtree exempt, resolve-not-realpath; src/storage-path.js
   { name: 'test-sync-fs-census', tier: 'fast', why: 'PURE grep (acorn over ~580 files) + one in-process TaskGroupManager over a one-worker SafeFs · 3 s' }, // lane hub-fuse-sync-guard: every main-thread fs.<x>Sync( site with a non-constant path is a row (local-only / via-safefs / guarded, exact counts, RED controls) + the conversions run
   { name: 'test-fs-canary', tier: 'fast', why: 'in-process · 6.7 s' }, // design 011 lane 1: a blocked loop never reads as a slow mount (the canary's stat timed in its own SafeFs worker; a main-clock control)
-  { name: 'test-migrations', tier: 'fast', why: 'in-process · 2.1 s (restated 2026-11-03 L3 round 2, ×3 vs c5c6c6599: was 2.0 s; ×3 vs 749aa7bf9: was 1.9 s) (restated 2026-10-20, was 1.3 s)' },
+  { name: 'test-migrations', tier: 'fast', why: 'in-process · 2.4 s (restated 2026-11-03 L3 round 3, ×3 vs 57d9a991b: was 2.1 s — the 64 MB lag leg + its control; round 2, ×3 vs c5c6c6599: was 2.0 s; ×3 vs 749aa7bf9: was 1.9 s) (restated 2026-10-20, was 1.3 s)' },
   { name: 'test-auto-cli-refresh', tier: 'fast', why: 'in-process · 246 ms' },
   { name: 'test-auto-cli-tick-reads', tier: 'fast', why: 'in-process · 4.0 s (two real engines + fix-reverted copies; the 150 µs-per-fs-call loop leg)' },
   { name: 'test-task-wakeup-card', tier: 'fast', why: 'PURE · 38 ms' }, // background-task lifecycle closure incl. the real record order (tool_result BEFORE the completion notification); also joined the gate late (same class)

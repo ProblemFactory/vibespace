@@ -1388,7 +1388,10 @@ function createSessionMessages(session, sessionId) {
   function bootBrowserKeeper(after = null) {
     if (!browserKeeper) return;
     try {
-      browserKeeper.boot()
+      // lane engine-spi-egress L3 round 3: a boot migration that marks records for THIS boot (the one that moves the removed anti-bot
+      // backend's records — STEPPED when its proof's hash streams) is waited for first: the order law — nothing is adopted before it judged
+      let gate = null; try { gate = require('./migrations.js').beforeBrowserBoot(); } catch { gate = null; }
+      Promise.resolve(gate).catch(() => null).then(() => browserKeeper.boot())
         .then((r) => { if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
         .catch((e) => console.warn('[browser] boot reconciliation failed:', e && e.message))
         // owner ruling A: a live session pinned BEFORE the ruling still has its indirection naming the profile's directory —

@@ -39,6 +39,10 @@ const { normalizeCustomThemes } = require('../custom-theme-normalize.js');
 // that names the plugin its records move to (scripts/test-architecture.mjs §105 ENGINE_ID_ROWS) and the old CloakBrowser facts it
 // reads (§106): the provider id, the two retired settings rows, the licence row, where VibeSpace's own download unpacked.
 const CLOAK_PLUGIN_ID = 'vibespace.cloak-browser';
+// round 3: the boot step the browser keeper's boot waits for — 2026-11-cloak-to-plugin when it runs STEPPED (its hash streams); null
+// = nothing to wait for. Read through beforeBrowserBoot() (src/server/mounts-plugins-wiring.js bootBrowserKeeper).
+let browserBootGate = null;
+function beforeBrowserBoot() { return browserBootGate || Promise.resolve(null); }
 const CLOAK_MIGRATION_ID = '2026-11-cloak-to-plugin'; // also the For-you item's key (one item, re-worded, never a second)
 const CLOAK_OLD = Object.freeze({
   provider: 'cloak', exeKey: 'browser.cloak.executablePath', sitesKey: 'browser.cloak.egressAllowlist', integration: 'cloak',
@@ -957,7 +961,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     },
     {
       id: CLOAK_MIGRATION_ID,
-      note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. Everything is READ first (data/browser-profiles.json, data/settings.json, the plugin's seeds.json): a torn or unreadable one FAILS by name before any write (retried at the next boot). Then, each step idempotent: (1) every profile's fingerprint seed into the plugin's seeds.json (merged — a profile the plugin already seeded keeps its own; atomic, 0600); (2) the two path facts into the plugin's program row — browser.cloak.executablePath verbatim, else VibeSpace's earlier download (that file, where it is: no rename, no receipt), else empty — and the site list into its site-list row, a plugin row that already holds a value never overwritten; both old keys stripped; (3) THROUGH the live keeper: every profile on CloakBrowser → chromium + the plugin as its build (its seed stripped once it is in seeds.json), a defaultBackend of CloakBrowser cleared on EVERY profile (nothing reads that field today; no record names a provider this version does not have), a running CloakBrowser marked `endAtBoot` (the keeper ends it by identity at its first boot, before adoption and before any proxy is re-bound), the old proxy shape, seat and Chromium-major readings dropped, and an open proposal to switch to CloakBrowser re-judged unavailable (its For-you Approve closed); (4) the report archived (data/archive/2026-11-cloak-to-plugin.json — never a secret: a stored licence key is named as present, never copied) BEFORE (5) ONE For-you notice naming the door, filed only when something was moved. A run whose notice failed is retried and files it from the archive. The profile directories, data/browser-tools and the integration store are left as they are.",
+      note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3 + its acceptance rounds 2 and 3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. READ first — its own archive, data/browser-profiles.json, data/settings.json, the plugin's seeds.json: a torn or unreadable one FAILS by name before any write (retried at the next boot). VibeSpace's earlier download is carried ONLY when its install proof says so (data/browser-tools/cloak-installed.json names the measured build and the file hashes to it — the hash STREAMED, the row then STEPPED and the keeper's boot waiting for it; never on a retry that already has its verdict); otherwise it is left out, said as unverified. ARCHIVE BEFORE STRIP: the archive is the FIRST write (pending until the notice is out) and holds everything the run displaces; a retry resumes that judgement — the same end state, one notice in the first run's words, its `via` too. Then, each step idempotent: the seeds merged into seeds.json (never over the plugin's own); the program path + the site list into the plugin's rows (never over a value they hold), both old keys stripped; THROUGH the live keeper: every CloakBrowser profile → chromium + the plugin as its build, a defaultBackend of CloakBrowser cleared everywhere, a running one marked endAtBoot (ended by identity before adoption — and a record a failed run leaves is ended by the keeper's unreadable-record rule), the old proxy / seat / major readings dropped, an open proposal re-judged unavailable, a site hint naming it kept as tier 2 (the plugin has a program row) or dropped and archived; ONE For-you notice — only when something moved.",
       run() { return migrateCloakToPlugin(); },
     },
   ];
@@ -1084,11 +1088,40 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
 
   /** 2026-11-cloak-to-plugin (the row's note says the rule): READ everything, then write — seeds, settings, the keeper's
    *  registry, the archive, the ONE notice. → the report (what moved; the ledger keeps it). */
+  // round 3 (主开发's law A′): THE PROOF NEVER HOLDS THE BOOT. The download's SHA-256 is STREAMED (the base install's own sha256Of
+  // shape, 1 MiB at a time) — the row is then a STEPPED one (its run() returns a promise the runner records when it ends) and the
+  // keeper's boot waits for it (`beforeBrowserBoot()` — the order law: nothing is adopted before this migration has judged it);
+  // the WHOLE body runs after the hash (nothing it reads can change under it). The hash runs ONCE: a retry whose pending archive
+  // already holds the verdict never hashes again. No hash needed (no download, no stamp, a stamp for another build) ⇒ the row
+  // stays synchronous, as it always was.
+  const sha256Of = (file) => new Promise((resolve, reject) => { const h = require('crypto').createHash('sha256'); fs.createReadStream(file, { highWaterMark: 1 << 20 }).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('hex'))); });
+  /** What the earlier download's install proof says WITHOUT hashing it: a final verdict, or `{needHash, file, stamp}`. */
+  function cloakDownloadFacts() {
+    const dl = path.join(dataDir, CLOAK_OLD.download);
+    let exec = false; try { fs.accessSync(dl, fs.constants.X_OK); exec = fs.statSync(dl).isFile(); } catch { exec = false; }
+    if (!exec) return { present: false, proven: false, why: 'absent' };
+    const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));
+    let st = null; try { st = JSON.parse(fs.readFileSync(path.join(dataDir, CLOAK_OLD.stamp), 'utf-8')); } catch { st = null; }
+    if (!st || typeof st !== 'object') return { present: true, proven: false, why: mark ? 'an unpack the update cut (its marker, no install stamp)' : 'no install stamp' };
+    if (st.chromium !== cloakMeasured.chromium || st.sha256 !== cloakMeasured.sha256) return { present: true, proven: false, why: `the install stamp names Chromium ${String(st.chromium).slice(0, 40)}, not the measured build` };
+    return { needHash: true, file: dl, stamp: st };
+  }
   function migrateCloakToPlugin() {
+    let held = null; // a pending run's verdict (the hash ran once already)
+    try { const a = JSON.parse(fs.readFileSync(path.join(archiveDir, `${CLOAK_MIGRATION_ID}.json`), 'utf-8')); const p = a && Array.isArray(a.runs) ? a.runs.find((x) => x && x.pending === true) : null; held = p && p.rep && p.rep.download ? p.rep.download : null; } catch { held = null; }
+    if (held) return cloakMigrateNow({ present: true, proven: !!held.proven, why: String(held.why || '') });
+    const f = cloakDownloadFacts();
+    if (!f.needHash) return cloakMigrateNow(f);
+    const run = sha256Of(f.file).then(
+      (got) => cloakMigrateNow(got === f.stamp.sha256 ? { present: true, proven: true, why: 'the install stamp and the file\'s SHA-256 agree' } : { present: true, proven: false, why: 'the file is not the one its install stamp names (its SHA-256 differs)' }),
+      (e) => cloakMigrateNow({ present: true, proven: false, why: `the file could not be read to its end (${(e && e.code) || 'error'})` }));
+    browserBootGate = run.then(() => null, () => null);
+    return run;
+  }
+  function cloakMigrateNow(download) {
     const B = require('../browser-profiles.js');
     const ENG = require('../browser-engines.js'); // PURE: the plugin's reserved rows (`plugin.<id>.executablePath` / `.egressAllowlist`)
     const SW = require('../browser-switch.js');   // PURE: a re-judged proposal's digest
-    const crypto = require('crypto');
     const ID = CLOAK_MIGRATION_ID, P = CLOAK_OLD.provider;
     const own = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
     const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -1135,17 +1168,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     // applied before it ever ran the file) AND the file's SHA-256 is the stamp's. Unstamped (an unpack the update cut — its marker),
     // stamped for another build, or changed since: left out, said as unverified; the row is left for the plugin's own download
     const dl = path.join(dataDir, CLOAK_OLD.download), dlShown = 'data/' + CLOAK_OLD.download.split(path.sep).join('/');
-    const download = (() => {
-      let exec = false; try { fs.accessSync(dl, fs.constants.X_OK); exec = fs.statSync(dl).isFile(); } catch { exec = false; }
-      if (!exec) return { present: false, proven: false, why: 'absent' };
-      const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));
-      let st = null; try { st = JSON.parse(fs.readFileSync(path.join(dataDir, CLOAK_OLD.stamp), 'utf-8')); } catch { st = null; }
-      if (!st || typeof st !== 'object') return { present: true, proven: false, why: mark ? 'an unpack the update cut (its marker, no install stamp)' : 'no install stamp' };
-      if (st.chromium !== cloakMeasured.chromium || st.sha256 !== cloakMeasured.sha256) return { present: true, proven: false, why: `the install stamp names Chromium ${String(st.chromium).slice(0, 40)}, not the measured build` };
-      let got = null; try { got = crypto.createHash('sha256').update(fs.readFileSync(dl)).digest('hex'); } catch { got = null; }
-      if (got !== st.sha256) return { present: true, proven: false, why: 'the file is not the one its install stamp names (its SHA-256 differs)' };
-      return { present: true, proven: true, why: 'the install stamp and the file\'s SHA-256 agree' };
-    })();
+    // `download` = the proof's verdict, judged before this body ran (migrateCloakToPlugin: streamed, never on the boot's tick)
     const judge = () => {
       const rep = { profiles: [], defaults: [], seeds: { added: [], kept: [] }, settings: { program: 'none', sites: 'none', old: {}, kept: {} }, download: { proven: download.proven, why: download.why },
         ended: [], proposals: [], egress: 0, seats: false, hints: { tier: [], dropped: [] }, install: null, licence: false, left: [] };
@@ -1267,6 +1290,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper;
       if (k && typeof k.reshapeStore === 'function') { k.reshapeStore((doc) => reshape(doc, regCol())); via = 'keeper'; }
       else { reshape(R.doc, regCol()); writeAtomic(regFile, JSON.stringify(R.doc, null, 2), modeOf(regFile, 0o600)); via = 'file'; }
+      thisRun.via = via; writeAtomic(archFile, JSON.stringify({ id: ID, runs: [...doneRuns, thisRun] }, null, 2), 0o600); // round 3 (law B′): the first run's `via`, kept for a resumed one
       faultAfter('registry');
     }
     thisRun.via = via;
@@ -1493,4 +1517,4 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
-module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };
+module.exports = { create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };
