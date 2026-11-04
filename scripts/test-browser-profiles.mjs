@@ -1798,14 +1798,16 @@ console.log('\n㉒ lane H: the holder rows (a live managed ephemeral browser is 
 console.log('\n㉑ the patched copies never touch the tree');
 console.log('— lane dc-browser-providers: every provider row carries THE launch shape; the cloakserve rung is gone');
 {
-  const cells = ['buildChoice', 'automationFlag', 'launchArgs', 'seeded', 'launchFlags', 'executable', 'exeSetting', 'egressProxy', 'integrationId'];
+  // lane engine-spi-egress L3: the cells only the anti-bot row filled (seeded / executable / exeSetting / egressProxy) left with it
+  const cells = ['buildChoice', 'automationFlag', 'launchArgs', 'launchFlags', 'integrationId'];
+  const gone = ['seeded', 'executable', 'exeSetting', 'egressProxy'];
   const missing = B.providerIds().flatMap((id) => cells.filter((c) => !(c in B.providerRow(id))).map((c) => id + '.' + c));
-  ok(!missing.length, `every row (${B.providerIds().length}, cloud rows included) declares the ${cells.length} launch cells${missing.length ? ' — missing ' + missing.join(', ') : ''}`);
+  const stale = B.providerIds().flatMap((id) => gone.filter((c) => c in B.providerRow(id)).map((c) => id + '.' + c));
+  ok(!missing.length && !stale.length, `every row (${B.providerIds().length}, cloud rows included) declares the ${cells.length} launch cells, and none the 4 the removed row filled${missing.length ? ' — missing ' + missing.join(', ') : ''}${stale.length ? ' — stale ' + stale.join(', ') : ''}`);
   const with_ = (c) => B.providerIds().filter((id) => B.providerRow(id)[c]).join();
-  ok(with_('buildChoice') === 'chromium' && with_('automationFlag') === 'chromium' && with_('seeded') === 'cloak' && with_('egressProxy') === 'cloak' && B.providerRow('cloak').executable === 'installed' && B.providerRow('cloud:kernel').integrationId === 'cloud:kernel' && B.DEFAULT_PROVIDER === 'chromium' && B.providerRow('') === B.providerRow(B.DEFAULT_PROVIDER), 'the shipped values: a build choice + the automation flag are chromium\'s, the seed + the installed executable + the egress proxy cloak\'s, a cloud row\'s key row is its own id');
+  ok(with_('buildChoice') === 'chromium' && with_('automationFlag') === 'chromium' && B.providerRow('cloak') === null && B.providerRow('cloud:kernel').integrationId === 'cloud:kernel' && B.DEFAULT_PROVIDER === 'chromium' && B.providerRow('') === B.providerRow(B.DEFAULT_PROVIDER), 'the shipped values: a build choice + the automation flag are chromium\'s, a cloud row\'s key row is its own id; the anti-bot row is gone (providerRow answers null)');
   const schema = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
-  const exeRow = schema.slice(schema.indexOf(`'${B.providerRow('cloak').exeSetting}': {`), schema.indexOf('},', schema.indexOf(`'${B.providerRow('cloak').exeSetting}': {`)));
-  ok(!('cloakservePlan' in B) && !('CLOAKSERVE_IMAGE' in B) && !schema.includes("'browser.cloak.enabled'") && exeRow.length > 0 && !/\bwhen:/.test(exeRow), 'the cloakserve CONTAINER rung is deleted (its plan, image, setting) and the live program-file setting no longer hides behind it');
+  ok(!('cloakservePlan' in B) && !('CLOAKSERVE_IMAGE' in B) && !schema.includes("'browser.cloak.enabled'") && !schema.includes("'browser.cloak.executablePath'"), 'the cloakserve CONTAINER rung is deleted (its plan, image, setting), and the program-file row left with the anti-bot row (retired: src/retired-settings.js)');
 }
 for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(r.pass, '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 

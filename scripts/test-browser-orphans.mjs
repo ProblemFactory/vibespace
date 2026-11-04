@@ -326,6 +326,56 @@ async function endLeg(Kmod, tag, waitMs = 6000) {
   const c2 = late ? await endLeg(late, 'late', 300) : null;
   ok(c2 && c2.a.state === 'stopped' && c2.port, '⑧ CONTROL: a keeper that ends it only AFTER the re-bind leaves its proxy holding the port — the "not re-bound" leg can go red', c2 && { a: c2.a, port: c2.port });
 }
+// round 2 (主开发's law C): a record THIS version cannot read — what a FAILED migration leaves on a running CloakBrowser (its profile on
+// provider 'cloak', its egress the old {port, cloak: true}, NO mark) — is ended by identity like a marked one, said, its proxy never
+// re-bound; never adopted behind an engine row that refuses every site
+async function unreadLeg(Kmod, tag, waitMs = 6000) {
+  const base = path.join(ROOT, 'unread-' + tag), dataDir = path.join(base, 'data'); fs.mkdirSync(path.join(dataDir, 'browser-env'), { recursive: true });
+  const dirA = path.join(base, 'prof-a'), dirB = path.join(base, 'prof-b'); for (const d of [dirA, dirB]) fs.mkdirSync(d, { recursive: true });
+  const dA = spawn('/bin/sleep', ['300'], { argv0: 'agent-browser-linux-x64', env: { AGENT_BROWSER_DAEMON: '1' }, stdio: 'ignore' });
+  const cA = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '--', `--user-data-dir=${dirA}`], { stdio: 'ignore' });
+  const dB = spawn('/bin/sleep', ['300'], { argv0: 'agent-browser-linux-x64', env: { AGENT_BROWSER_DAEMON: '1' }, stdio: 'ignore' });
+  for (const c of [dA, cA, dB]) kids8.add(c.pid);
+  const cmd8 = (pid) => String(F.procCmdline(pid) || '');
+  await until8(() => cmd8(dA.pid).includes('agent-browser-linux-x64') && cmd8(cA.pid).includes('--user-data-dir') && cmd8(dB.pid).includes('agent-browser-linux-x64'), 3000);
+  const [PA, PB] = await deadPorts(2);
+  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    profiles: [{ id: 'bp-000000d8', label: 'Cloaked', dir: dirA, provider: 'cloak', fingerprintSeed: 4242, createdAt: NOW - H }, { id: 'bp-000000e8', label: 'Old proxy', dir: dirB, provider: 'chromium', createdAt: NOW - H }],
+    leases: [{ profileId: 'bp-000000d8', browserKey: 'bk-000000d8', at: NOW - H }],
+    browsers: {
+      'bp-000000d8': { profileId: 'bp-000000d8', ns: 'vs-bp-000000d8', pid: dA.pid, starttime: F.procStart(dA.pid), state: 'ready', hostId: null, external: false, cdpUrl: `ws://127.0.0.1:${PA}/devtools/browser/dddddddd-8888-dddd`,
+        browser: { pid: cA.pid, starttime: F.procStart(cA.pid), dir: dirA }, egress: { port: PA, cloak: true } },
+      'bp-000000e8': { profileId: 'bp-000000e8', ns: 'vs-bp-000000e8', pid: dB.pid, starttime: F.procStart(dB.pid), state: 'ready', hostId: null, external: false, egress: { port: PB, cloak: true } } } }));
+  const rt0 = F.createBrowserRuntime({ env: { PATH: path.join(ROOT, 'nobin') } });
+  const runtime = Object.assign(Object.create(rt0), { info: async (ns) => (ns === 'vs-bp-000000d8' || ns === 'vs-bp-000000e8' ? { ok: true, active: true, pid: ns === 'vs-bp-000000d8' ? dA.pid : dB.pid, raw: { code: 0 } } : { ok: false, active: false, pid: null, raw: { code: 1, error: 'timeout' } }) });
+  const lines = [];
+  const log = { log: (l) => lines.push(l), warn: (l) => lines.push(l), error: (l) => lines.push(l) };
+  const kk = Kmod.create({ dataDir, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(['bk-000000d8']), install: false, log, now: () => NOW, tickMs: 3600e3, runtime,
+    serverSetting: (k) => (k === 'browser.cloak.egressAllowlist' ? 'bank.example' : undefined), // the user's old list, still stored (a failed migration stripped nothing)
+    pageAsk: async () => ({ list: true, pages: [{ targetId: 'T000000D', url: 'https://bank.example/', answered: true, reached: true }] }),
+    daemonTable: async () => [], endIdentity: async () => 'ended' });
+  await kk.boot();
+  await until8(() => !F.pidAlive(dA.pid) && !F.pidAlive(cA.pid) && !F.pidAlive(dB.pid), waitMs);
+  const v = (id) => kk.browserOf(id) || {};
+  const r = { a: { state: v('bp-000000d8').state, lastError: v('bp-000000d8').lastError }, b: { state: v('bp-000000e8').state, lastError: v('bp-000000e8').lastError },
+    daemon: F.pidAlive(dA.pid), chrome: F.pidAlive(cA.pid), daemonB: F.pidAlive(dB.pid), port: await listening8(PA), portB: await listening8(PB),
+    lines: lines.filter((l) => /ended at the update/.test(l)), adopted: lines.filter((l) => /adopted bp-000000[de]8/.test(l)) };
+  kk.shutdown();
+  for (const c of [dA, cA, dB]) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
+  return r;
+}
+{
+  const u = await unreadLeg(K, 'fixed');
+  ok(u.a.state === 'stopped' && !u.daemon && !u.chrome && /its profile names a browser backend this version does not have \(«cloak»\) — ended at the update \(ended\)$/.test(u.a.lastError || '') && !u.adopted.length,
+    '⑧b a live record a FAILED migration left (provider cloak, the old proxy shape, no mark) is ENDED by identity — its daemon and its Chrome gone — never adopted', u);
+  ok(u.b.state === 'stopped' && !u.daemonB && /its site-list proxy is a shape this version does not read/.test(u.b.lastError || ''), '⑧b …a record whose egress is the old {port, cloak: true} on a profile this version reads is ended the same way (no engine names its proxy)', u.b);
+  ok(!u.port && !u.portB, '⑧b neither proxy is re-bound (nothing listens on the ports the records named — never an engine row that refuses every site)', { port: u.port, portB: u.portB });
+  ok(u.lines.length === 2 && u.lines.some((l) => /"Cloaked" ended at the update: its profile names a browser backend this version does not have .*marked by this version\)/.test(l)), '⑧b ONE journal line per record: why, the result, by whom', u.lines);
+  const UNREAD = '      const unread = unreadableRecordWhy(rec, p);';
+  const blind = keeperCopy('unread-adopted', [[UNREAD, '      const unread = null;']]);
+  const c9 = blind ? await unreadLeg(blind, 'blind', 300) : null;
+  ok(c9 && c9.a.state === 'ready' && c9.daemon && c9.port, '⑧b CONTROL: a keeper that does not judge what it can read ADOPTS the CloakBrowser record — ready on its daemon, its proxy listening again with nothing admitted — the legs above can go red', c9 && { a: c9.a, port: c9.port, daemon: c9.daemon });
+}
 {
   // the install slot: a marker of a kind this version no longer installs (its installer removed — a CloakBrowser install at the update)
   const BI = require('../src/server/browser-installs.js');

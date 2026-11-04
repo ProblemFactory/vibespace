@@ -11574,7 +11574,11 @@ export default {
   "A CloakBrowser install that was running at the update was stopped; what it downloaded stays under data/browser-tools.": "更新时正在进行的 CloakBrowser 安装已被停止；它已下载的内容仍留在 data/browser-tools 下。",
   "A CloakBrowser install was running at the update; its process could not be proven to be the one VibeSpace started, so it was left alone.": "更新时有一个 CloakBrowser 安装正在进行；无法证明它的进程就是 VibeSpace 启动的那个，所以没有动它。",
   "{n} open proposal(s) to switch an agent's browser to CloakBrowser were closed — this version cannot switch a browser for the agent.": "{n} 个把 agent 的浏览器切换到 CloakBrowser 的待处理提议已关闭——这个版本无法替 agent 切换浏览器。",
+  "Done.": "已完成。",
   "Your CloakBrowser licence key is no longer used; it stays stored in data/integrations.json.": "你的 CloakBrowser 许可证密钥不再使用；它仍保存在 data/integrations.json 里。",
+  "VibeSpace's earlier download at {path} was left out as unverified — no install record proves it is the build VibeSpace checked; the row is left for the plugin's own download.": "VibeSpace 之前下载的 {path} 因无法验证而未被采用——没有安装记录能证明它就是 VibeSpace 校验过的版本；这一行留给插件自己下载的程序。",
+  "{n} per-site note(s) that named CloakBrowser now say the site needs an anti-bot browser (tier 2).": "{n} 条指名 CloakBrowser 的站点备注现在改为：该站点需要反机器人浏览器（第 2 级）。",
+  "{n} per-site note(s) that named CloakBrowser were removed (no plugin program is set); they are in {archive}.": "{n} 条指名 CloakBrowser 的站点备注已移除（未设置插件程序）；它们保存在 {archive}。",
   "closed at the update: it ran CloakBrowser, which is now a plugin": "在更新时关闭：它运行的是 CloakBrowser，而 CloakBrowser 现在是一个插件",
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "会话已停止 — 点击恢复",

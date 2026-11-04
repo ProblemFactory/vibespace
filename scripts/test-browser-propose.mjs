@@ -284,6 +284,19 @@ console.log('— ⑩b the card draws no character that is not drawn: the URL par
   ok(SW.proposalUrlOf('accounts.google.com/x') === 'https://accounts.google.com/x' && SW.proposalUrlOf('http://[') === '' && odd.url === 'https://odd.example/' && odd.state === 'unavailable', 'proposalUrlOf: a bare host gets https://; a URL that does not parse reopens the site\'s root (never an empty page)', odd);
 }
 
+// ═══ ⑩d round 2 (主开发's law E): every word the card says has a zh AND a ja entry ═══════════════════════
+console.log('— ⑩d every key the proposal card says (proposalStateText\'s state lines included) is an entry in BOTH dictionaries');
+{
+  const { dictHasEntry } = await import('./i18n-check.mjs');
+  const card = fs.readFileSync(path.join(REPO, 'src/lib/browser-proposal-card.js'), 'utf8');
+  const keys = [...new Set([...card.matchAll(/i18nKey\('((?:[^'\\]|\\.)*)'\)/g)].map((m) => m[1].replace(/\\'/g, "'")))];
+  const dicts = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO, `src/lib/i18n-${l}.js`), 'utf8'));
+  const has = (d, k) => dictHasEntry(d, k) || d.includes(`  ${JSON.stringify(k)}:`); // a key with a double quote sits escaped (dictHasEntry matches raw)
+  const missing = keys.filter((k) => !dicts.every((d) => has(d, k)));
+  const state = card.slice(card.indexOf('export function proposalStateText'), card.indexOf('/** lane site-reset: a site-reset proposal'));
+  ok(keys.length >= 10 && keys.includes('Done.') && /tt\(i18nKey\('Done\.'\)\)/.test(state) && missing.length === 0, `the card's ${keys.length} keys — every state line proposalStateText answers among them («Done.» too) — are entries in zh AND ja`, missing);
+}
+
 // ═══ ⑪ controls ═════════════════════════════════════════════════════════════════
 console.log('— ⑪ six patched-copy controls, each judged by a row above');
 const M = mutantCopies('bprop-propose', REPO);

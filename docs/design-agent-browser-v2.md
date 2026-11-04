@@ -2579,6 +2579,8 @@ Two cautions I would not ship without resolving:
 
 #### 7.2.1 The control for "does it phone home", written down as a precondition
 
+> **Superseded 2026-11-03 (L3, lane engine-spi-egress «cloak-core-removal»): CloakBrowser is a plugin.** The core no longer ships the anti-bot backend this section designs — its provider row, its §7.2.1 record and its install left the core; a browser of another build is a browser ENGINE plugin (`vibespace.cloak-browser`) a profile chooses with Change build…, and a refused site is ONE proposal that offers nothing (docs/kb-features.md, «the anti-bot backend left the core»). Kept as the history of 2.369.197–.374.
+
 Round 1 put this in an aside and named `test-vendor-whitelist` as the place it "gets caught".
 That suite cannot catch it (§9), so the control is stated here as a **P4 precondition with a
 recorded result**, in the shape this repository already uses for exactly this question.
@@ -2676,6 +2678,8 @@ Encryption is listed in §12 as unverified.)
 ---
 
 ### 7.4 Switching a live profile to another backend
+
+> **Superseded 2026-11-03 (L3, lane engine-spi-egress «cloak-core-removal»): CloakBrowser is a plugin.** The core no longer ships the anti-bot backend this section designs — its provider row, its §7.2.1 record and its install left the core; a browser of another build is a browser ENGINE plugin (`vibespace.cloak-browser`) a profile chooses with Change build…, and a refused site is ONE proposal that offers nothing (docs/kb-features.md, «the anti-bot backend left the core»). Kept as the history of 2.369.197–.374.
 
 (Owner question Q2.) The user or the agent hits a page the default Chromium cannot open and must
 switch backend **immediately**, without losing cookies, localStorage or logins. This section is the
@@ -2800,7 +2804,7 @@ protocol.** We have no reliable way to see "this is an anti-bot block" from a pa
 deterministically is HTTP 403/429 and the signatures of known challenge pages. So the server
 **never** claims to have detected a block; it records an attributed claim, the UI says "the agent
 says this page is blocked", and the one-click button is the **user's** act. Conversely, when a
-navigation really does return 403/429, `vibespace-browser`'s error carries `hint: 'may-need-cloak'`
+navigation really does return 403/429, `vibespace-browser`'s error carries `hint: 'may-need-anti-bot'`
 — a **hint**, worded so it cannot be mistaken for a detection (the same family as §4.3.1's "a
 producer we ship must be named": a claim must carry its source).
 
@@ -3243,7 +3247,7 @@ Five rules fall straight out of that table:
 5. **The escalation ladder must say why it escalated.** `vibespace-browser blocked`'s **claim**
    (§7.4) now carries a suggested tier, and the UI still says "the agent says this page is blocked
    and suggests tier N", **never** "we detected a block"; the 403/429 `hint` likewise goes from
-   `hint:'may-need-cloak'` to `hint:{tier:2|3, why}`, still worded so it cannot be mistaken for a
+   `hint:'may-need-anti-bot'` to `hint:{tier:2|3, why}`, still worded so it cannot be mistaken for a
    detection (the same family as §4.3.1's "a producer we ship must be named").
 
 ### E2 — the agent-launched desktop-app browser rung (the backend ladder's lowest rung; B-830d; design desk 2026-10-09)

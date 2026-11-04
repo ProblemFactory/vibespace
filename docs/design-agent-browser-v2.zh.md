@@ -2233,6 +2233,8 @@ test-browser-live ⑧（heavy：聊天里的卡、toast、只提醒一次）。
 
 #### 7.2.1 "它会不会回传"这件事的控制，写成一个前置条件
 
+> **2026-11-03 起已被取代（L3，lane engine-spi-egress «cloak-core-removal»）：CloakBrowser 改为插件。** 本节设计的反机器人 backend 已不在核心里——它的 provider 行、§7.2.1 的记录和它的安装都已移出；另一种构建的浏览器是一个浏览器引擎插件（`vibespace.cloak-browser`），在 profile 的「更改构建…」里选择；被拒绝的网站是一条什么也提供不了的提案（docs/kb-features.md，«the anti-bot backend left the core»）。保留作为 2.369.197–.374 的历史。
+
 第一轮把这件事放在一个旁注里，并且点名 `test-vendor-whitelist` 作为它"会被抓住"的地方。那个套件抓不到
 它（§9），所以这个控制在这里被陈述为一个**带记录结果的 P4 前置条件**，用的是这个仓库本来就为这个
 问题准备好的形状。
@@ -2315,6 +2317,8 @@ test-browser-live ⑧（heavy：聊天里的卡、toast、只提醒一次）。
 ---
 
 ### 7.4 把一个活着的 profile 切到另一个 backend
+
+> **2026-11-03 起已被取代（L3，lane engine-spi-egress «cloak-core-removal»）：CloakBrowser 改为插件。** 本节设计的反机器人 backend 已不在核心里——它的 provider 行、§7.2.1 的记录和它的安装都已移出；另一种构建的浏览器是一个浏览器引擎插件（`vibespace.cloak-browser`），在 profile 的「更改构建…」里选择；被拒绝的网站是一条什么也提供不了的提案（docs/kb-features.md，«the anti-bot backend left the core»）。保留作为 2.369.197–.374 的历史。
 
 （Owner 问题 Q2。）用户或 agent 撞上一个默认 Chromium 打不开的页面，需要**立刻**换一个 backend，
 而且**不丢 cookie / localStorage / 登录**。这一节说机制、UX、agent 工具、花钱的门，和失败形态。
@@ -2414,7 +2418,7 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>]
 看出"这是反爬拦截"：能确定性拿到的只有 HTTP 403/429 和已知挑战页的签名。所以服务端**永不**自己
 声称检测到了拦截；它记录一条带署名的主张，UI 显示"agent 说这个页面被挡住了"，而那个一键按钮是
 **用户**的动作。反过来，当一次导航确实拿到 403/429 时，`vibespace-browser` 的错误里带上
-`hint: 'may-need-cloak'` —— 这是一条**提示**，措辞上必须和一次检测能区分开（和 §4.3.1 那条"我们
+`hint: 'may-need-anti-bot'` —— 这是一条**提示**，措辞上必须和一次检测能区分开（和 §4.3.1 那条"我们
 自己发的生产者必须有名字"同族：一条主张必须带上它的来源）。
 
 **切换是一个提议，要过 owner / 租约那一关。** 一个 profile 可能有好几个会话 attach 着（§3.4），
@@ -2769,7 +2773,7 @@ key，根本没有重定向** —— 本 track 上表里的每一行都是纯 ke
    原因，而不是 P4 里的一个勾选框。
 5. **升级阶梯必须说出它为什么升。** `vibespace-browser blocked` 那条**主张**（§7.4）现在带一个
    建议的 tier，而 UI 显示的仍然是"agent 说这个页面被挡住了，它建议 tier N"，**永远不是**"我们
-   检测到了拦截"；403/429 那条 `hint` 同理，`hint:'may-need-cloak'` 变成 `hint:{tier:2|3, why}`，
+   检测到了拦截"；403/429 那条 `hint` 同理，`hint:'may-need-anti-bot'` 变成 `hint:{tier:2|3, why}`，
    措辞上仍然必须和一次检测区分得开（与 §4.3.1 那条"我们自己发的生产者必须有名字"同族）。
 
 ### E2 — agent 自己启动的「桌面应用浏览器」档（后端阶梯的最底层；B-830d；设计台 2026-10-09）

@@ -6996,6 +6996,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (daemonGone(rec)) reapOrphan(rec, 'boot'); // its browser follows, proven by its directory (boot awaits every reap)
     if (rec.launch === 'attach') endDisplay(rec, 'a browser closed at the update');
   }
+  /** round 2 (law C): why THIS version cannot read a live record (null = it can): a provider its table has no row for, or an egress
+   *  record whose shape names no engine (the removed anti-bot backend's old shape — every engine egress names its engine). */
+  function unreadableRecordWhy(rec, p) {
+    const prov = p && p.provider ? String(p.provider) : '';
+    if (prov && !rowOf(prov)) return `its profile names a browser backend this version does not have («${prov.replace(/[^\w:.-]/g, '').slice(0, 40)}»)`;
+    const e = rec && rec.egress;
+    if (e && typeof e === 'object' && !(typeof e.engine === 'string' && e.engine)) return 'its site-list proxy is a shape this version does not read (no engine names it)';
+    return null;
+  }
   async function adoptAll() {
     ensureLoaded();
     for (const rec of Object.values(reg.browsers)) {
@@ -7003,6 +7012,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const p = profile(rec.profileId);
       // lane engine-spi-egress L3: a marked record is never adopted, never re-bound (a paired machine's is never signalled from here)
       if (rec.endAtBoot) { if (isLocalRec(rec)) { await endMarked(rec, p); continue; } log.warn?.(`[browser] ${rec.profileId}: a mark to end it at the update is dropped — its browser runs on a paired machine, which is never signalled from here`); delete rec.endAtBoot; dirty = true; }
+      // round 2 (主开发's law C): a live record THIS version cannot read — its profile names a provider the table has no row for, or
+      // its egress is a shape with no engine (what a FAILED migration leaves on a running browser of the removed anti-bot backend:
+      // its provider id, its old proxy shape) — is ended like a marked one (by identity, or let go), said; never adopted behind an
+      // engine row that refuses every site. A paired machine's is never signalled from here: it is stopped on the record, said
+      const unread = unreadableRecordWhy(rec, p);
+      if (unread) {
+        if (isLocalRec(rec)) { rec.endAtBoot = { why: unread, by: 'this version' }; await endMarked(rec, p); continue; }
+        rec.state = 'stopped'; rec.endedAt = now(); rec.lastError = `${unread} — not adopted (its browser runs on a paired machine, which is never signalled from here)`; dirty = true;
+        log.warn?.(`[browser] ${rec.profileId}: ${rec.lastError}`); continue;
+      }
       if (!isLocalRec(rec)) { await adoptRemote(rec, p); continue; }
       const verdict = pidVerdictOf(rec);
       let active = false, own = null;

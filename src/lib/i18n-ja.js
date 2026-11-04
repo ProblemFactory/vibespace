@@ -11573,7 +11573,11 @@ export default {
   "A CloakBrowser install that was running at the update was stopped; what it downloaded stays under data/browser-tools.": "更新時に実行中だった CloakBrowser のインストールを停止しました。ダウンロード済みのものは data/browser-tools に残っています。",
   "A CloakBrowser install was running at the update; its process could not be proven to be the one VibeSpace started, so it was left alone.": "更新時に CloakBrowser のインストールが実行中でしたが、そのプロセスが VibeSpace の起動したものだと確認できなかったため、そのままにしました。",
   "{n} open proposal(s) to switch an agent's browser to CloakBrowser were closed — this version cannot switch a browser for the agent.": "エージェントのブラウザを CloakBrowser に切り替える未処理の提案 {n} 件を閉じました — このバージョンではエージェントのためにブラウザを切り替えられません。",
+  "Done.": "完了しました。",
   "Your CloakBrowser licence key is no longer used; it stays stored in data/integrations.json.": "CloakBrowser のライセンスキーは使われなくなりました。data/integrations.json に保存されたままです。",
+  "VibeSpace's earlier download at {path} was left out as unverified — no install record proves it is the build VibeSpace checked; the row is left for the plugin's own download.": "VibeSpace が以前ダウンロードした {path} は、検証できないため使われませんでした — VibeSpace が確認したビルドであることを示すインストール記録がありません。この行はプラグイン自身のダウンロードのために空けてあります。",
+  "{n} per-site note(s) that named CloakBrowser now say the site needs an anti-bot browser (tier 2).": "CloakBrowser を指定していた {n} 件のサイト別メモは、そのサイトにボット対策ブラウザ(ティア 2)が必要という内容になりました。",
+  "{n} per-site note(s) that named CloakBrowser were removed (no plugin program is set); they are in {archive}.": "CloakBrowser を指定していた {n} 件のサイト別メモは削除されました(プラグインのプログラムが未設定のため)。{archive} に保存されています。",
   "closed at the update: it ran CloakBrowser, which is now a plugin": "更新時に閉じました：CloakBrowser で動いていましたが、CloakBrowser は今はプラグインです",
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "セッションは停止しています — クリックで再開",

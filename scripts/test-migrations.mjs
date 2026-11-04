@@ -2986,10 +2986,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // M2 no program path set; VibeSpace's earlier download is there ⇒ THAT FILE, where it is (no rename, no receipt)
     const w2 = seedC('download', { reg: world(), settings: { 'browser.cloak.egressAllowlist': '' }, download: true });
     const t2 = new UserTodoManager({ dataDir: w2.dataDir, expirySweepMs: 0 });
-    const r2 = boot(w2, { userTodos: t2 });
+    const seam2 = (() => { const sha = crypto.createHash('sha256').update(fs.readFileSync(w2.dl)).digest('hex'); fs.writeFileSync(path.join(w2.dataDir, 'browser-tools', 'cloak-installed.json'), JSON.stringify({ chromium: '146.0.7680.177.5', sha256: sha, path: 'cloak-cache/chromium-146.0.7680.177.5/chrome', at: 1 })); return { cloakMeasured: { chromium: '146.0.7680.177.5', sha256: sha } }; })(); // its install proof (round 2: law A)
+    const r2 = boot(w2, { userTodos: t2, ...seam2 });
     const st2 = w2.J('settings.json') || {}, d2 = String((notes(t2)[0] || {}).detail || '');
     ok(r2?.status === 'ran' && r2?.report?.via === 'file' && st2[EXE] === w2.dl && fs.existsSync(w2.dl) && !(SITES in st2) && !('browser.cloak.egressAllowlist' in st2) && /earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/.test(d2),
-      'M2 no path set ⇒ the earlier download becomes the plugin\'s program row (the file stays where it is); an EMPTY old site list is stripped, never carried; said', { st2, d2 });
+      'M2 no path set ⇒ the earlier download — its install stamp naming the file — becomes the plugin\'s program row (the file stays where it is); an EMPTY old site list is stripped, never carried; said', { st2, d2 });
     t2.stop();
     // M3 neither ⇒ the row stays empty and the notice says the plugin needs CloakBrowser installed by the user
     const w3 = seedC('neither', { reg: world() });
@@ -3052,22 +3053,128 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const t12 = new UserTodoManager({ dataDir: w12.dataDir, expirySweepMs: 0 });
     const r12b = boot(w12, { userTodos: t12 });
     const d12 = String((notes(t12)[0] || {}).detail || '');
-    ok(r12 && r12.status === 'failed' && fs.existsSync(w12.archive) && r12b?.status === 'ran' && r12b?.report?.earlierRuns === 1 && notes(t12).length === 1 && /^2 browser profile\(s\) ran CloakBrowser: Bank, Shop/m.test(d12) && /program path was carried/.test(d12),
-      'M12 a run whose notice failed is NOT stamped; the next boot finds nothing left to move and files the notice from the archive — once, with the first run\'s lines', { r12: r12 && r12.status, r12b: r12b && r12b.report, d12 });
+    ok(r12 && r12.status === 'failed' && fs.existsSync(w12.archive) && r12b?.status === 'ran' && r12b?.report?.resumed === true && r12b?.report?.earlierRuns === 0 && notes(t12).length === 1 && /^2 browser profile\(s\) ran CloakBrowser: Bank, Shop/m.test(d12) && /program path was carried/.test(d12),
+      'M12 a run whose notice failed is NOT stamped; the next boot RESUMES the run its archive holds (nothing left to move) and files the notice — once, with the first run\'s lines', { r12: r12 && r12.status, r12b: r12b && r12b.report, d12 });
     t12.stop();
+    // ── round 2 (主开发's laws A, B, D on c5c6c6599) ──
+    const sha256C = (b) => crypto.createHash('sha256').update(b).digest('hex');
+    const MEAS = '146.0.7680.177.5';
+    /** plant VibeSpace's earlier download with its install proof: `match` (the stamp names the file's own hash), `mismatch` (the
+     *  stamp names another file's), `marker` (an unpack the update cut: its marker, no stamp), `other-build` (a stamp the measured
+     *  build never wrote) — and the measured facts the run is handed (the seam: a suite cannot ship the 200 MB Chromium) */
+    const proofOf = (w, kind) => {
+      const body = Buffer.from('#!/bin/sh\n# a fake CloakBrowser chrome\n');
+      fs.mkdirSync(path.dirname(w.dl), { recursive: true }); fs.writeFileSync(w.dl, body, { mode: 0o755 });
+      const tools = path.join(w.dataDir, 'browser-tools');
+      const stamp = (sha, chromium = MEAS) => fs.writeFileSync(path.join(tools, 'cloak-installed.json'), JSON.stringify({ chromium, version: '0.5.10', sha256: sha, path: path.relative(tools, w.dl), at: 1 }));
+      if (kind === 'match') stamp(sha256C(body));
+      if (kind === 'mismatch') stamp(sha256C(Buffer.from('another file')));
+      if (kind === 'marker') fs.writeFileSync(path.join(tools, 'cloak-unpacking.json'), JSON.stringify({ dir: path.dirname(w.dl), at: 1 }));
+      if (kind === 'other-build') stamp(sha256C(body));
+      return { cloakMeasured: { chromium: MEAS, sha256: kind === 'mismatch' ? sha256C(Buffer.from('another file')) : kind === 'other-build' ? 'f'.repeat(64) : sha256C(body) } };
+    };
+    for (const [kind, carried, words] of [['match', true, /earlier download at data\/browser-tools\/cloak-cache\/chromium-146\.0\.7680\.177\.5\/chrome is now the program/], ['mismatch', false, /was left out as unverified/], ['marker', false, /was left out as unverified/], ['other-build', false, /was left out as unverified/]]) {
+      const w = seedC('proof-' + kind, { reg: world() });
+      const seam = proofOf(w, kind);
+      const t = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });
+      const r = boot(w, { userTodos: t, ...seam });
+      const st = w.J('settings.json') || {}, d = String((notes(t)[0] || {}).detail || '');
+      const name = { match: 'STAMPED + MATCHING ⇒ the earlier download IS the plugin\'s program row (the file stays where it is), said', mismatch: 'stamped but the file is not the one the stamp names (its SHA-256 differs) ⇒ NOT carried: the row left for the plugin\'s own download, the notice says it was left out as unverified',
+        marker: 'an unpack the update cut (its marker, no install stamp) ⇒ NOT carried — the sentence says so', 'other-build': 'a stamp that names a build the measured one never was (another SHA-256) ⇒ NOT carried' }[kind];
+      ok(r?.status === 'ran' && (carried ? st[EXE] === w.dl : !(EXE in st)) && r?.report?.settings?.program === (carried ? 'download' : 'unverified') && words.test(d) && (carried || !/is now the program/.test(d)) && (kind !== 'marker' || /unpack the update cut/.test(r?.report?.download?.why || '')),
+        `A ${name}`, { st, program: r?.report?.settings?.program, download: r?.report?.download, d });
+      t.stop();
+    }
+    try { // A — MUTANT: the proof dropped (an executable file is enough again) ⇒ the cut unpack is carried — A's legs go red
+      const MA = mutantCopies('migrations-cloak-proof', REPO_ROOT);
+      const srcA = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+      const gate = "      const mark = fs.existsSync(path.join(dataDir, CLOAK_OLD.unpackMark));";
+      ok(srcA.split(gate).length === 2, 'A CONTROL scope: the proof is read where the patched copy drops it');
+      const noProof = MA.load('src/server/migrations.js', srcA.replace(gate, "      return { present: true, proven: true, why: 'executable' };\n" + gate), 'no-proof');
+      const wm = seedC('proof-mut', { reg: world() }); const seamM = proofOf(wm, 'marker');
+      noProof.create({ rootDir: wm.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } }, ...seamM }).runLocalMigrations({ only: [ID] });
+      ok((wm.J('settings.json') || {})[EXE] === wm.dl, 'A NEGATIVE CONTROL: a copy that takes an executable file as proof carries the CUT unpack into the plugin\'s program row — A\'s «marker» leg goes red');
+    } catch (e) { ok(false, `A: the negative control could not run on this tree (${(e && e.message) || e})`); }
+    // B — ARCHIVE BEFORE STRIP: a crash after EACH write (an env-gated throw the suite plants — never a patched copy), then the retry:
+    // it converges to the uncrashed run's end state with ONE notice whose words are the first run's truth; the archive holds the old
+    // values in every torn shape (the plugin's own rows set before the update, or not)
+    const FAULT = 'VIBESPACE_TEST_MIGRATION_FAULT';
+    const settingsB = (kept) => ({ 'browser.cloak.executablePath': '/opt/old/chrome', 'browser.cloak.egressAllowlist': 'old.example', 'browser.headed': true, ...(kept ? { [EXE]: '/home/u/cloak/chrome', [SITES]: 'mine.example' } : {}) });
+    const endOf = (w, t) => ({ settings: w.J('settings.json'), seeds: w.seeds(), profiles: ((w.J('browser-profiles.json') || {}).profiles || []).map((p) => [p.id, p.provider, p.browser || null, p.fingerprintSeed, p.defaultBackend]),
+      marks: Object.entries((w.J('browser-profiles.json') || {}).browsers || {}).map(([id, r]) => [id, !!r.endAtBoot, 'egress' in r]), detail: String((notes(t)[0] || {}).detail || ''), n: notes(t).length });
+    for (const kept of [false, true]) {
+      const wr = seedC(`fault-ref-${kept}`, { reg: world(), settings: settingsB(kept) });
+      const tr = new UserTodoManager({ dataDir: wr.dataDir, expirySweepMs: 0 });
+      const rr = boot(wr, { userTodos: tr });
+      const ref = endOf(wr, tr); tr.stop();
+      ok(rr?.status === 'ran' && ref.n === 1, `B the uncrashed reference run (the plugin's rows ${kept ? 'set' : 'unset'} before the update)`, rr);
+      for (const step of ['archive', 'seeds', 'settings', 'registry', 'notice']) {
+        const w = seedC(`fault-${step}-${kept}`, { reg: world(), settings: settingsB(kept) });
+        const t1 = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });
+        process.env[FAULT] = `${ID}:${step}`;
+        let r1; try { r1 = boot(w, { userTodos: t1 }); } finally { delete process.env[FAULT]; }
+        t1.flush?.(); t1.stop();
+        const a1 = (() => { try { return fs.readFileSync(w.archive, 'utf8'); } catch { return ''; } })();
+        const t2 = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });
+        const r2 = boot(w, { userTodos: t2 });
+        const end = endOf(w, t2); t2.stop();
+        const a2 = (() => { try { return fs.readFileSync(w.archive, 'utf8'); } catch { return ''; } })();
+        const same = JSON.stringify({ ...end, detail: null }) === JSON.stringify({ ...ref, detail: null });
+        ok(r1?.status === 'failed' && new RegExp(`planted fault after the ${step} write`).test(String(r1?.error || '')) && a1.includes('/opt/old/chrome') && a1.includes('old.example')
+          && r2?.status === 'ran' && same && end.n === 1 && end.detail === ref.detail && a2.includes('/opt/old/chrome') && a2.includes('old.example') && !a2.includes('"pending": true'),
+          `B a crash right after the ${step} write (the plugin's rows ${kept ? 'set' : 'unset'}): the archive already held the old values; the retry converges to the uncrashed end state, ONE notice, the first run's words`,
+          { r1: r1 && { status: r1.status, error: r1.error }, r2: r2 && r2.status, same, end: same ? null : end, ref: same ? null : ref, detail: end.detail, refDetail: ref.detail });
+      }
+      // the verdict's ARCHFAIL shape (a real failure, no planted code): data/archive is a FILE ⇒ the run fails before ANY write; once it
+      // is gone, the next boot moves everything and tells the person — never a stamped run that told nobody
+      const wa = seedC(`archfail-${kept}`, { reg: world(), settings: settingsB(kept) });
+      fs.writeFileSync(path.join(wa.dataDir, 'archive'), 'not a directory');
+      const [sa, ga] = [wa.B('settings.json'), wa.B('browser-profiles.json')];
+      const ra1 = boot(wa);
+      const untouched = wa.B('settings.json') === sa && wa.B('browser-profiles.json') === ga && !fs.existsSync(wa.seedsFile);
+      fs.rmSync(path.join(wa.dataDir, 'archive'));
+      const ta = new UserTodoManager({ dataDir: wa.dataDir, expirySweepMs: 0 });
+      const ra2 = boot(wa, { userTodos: ta });
+      const enda = endOf(wa, ta); ta.stop();
+      const aa = (() => { try { return fs.readFileSync(wa.archive, 'utf8'); } catch { return ''; } })();
+      ok(ra1?.status === 'failed' && /archive.*could not be read/.test(String(ra1?.error || '')) && untouched && ra2?.status === 'ran' && enda.n === 1 && enda.detail === ref.detail && aa.includes('/opt/old/chrome') && aa.includes('old.example'),
+        `B the archive cannot be written (data/archive is a file; the plugin's rows ${kept ? 'set' : 'unset'}): FAILED before any write — boot 2 moves everything, tells the person once, archives the old values`, { ra1: ra1 && { status: ra1.status, error: ra1.error }, untouched, ra2: ra2 && ra2.status, n: enda.n, d: enda.detail });
+    }
+    // D — a per-site hint naming CloakBrowser: a hint names a provider or a tier (never an engine) — kept as tier 2 (the tier the
+    // removed row declared: an anti-bot browser) when the plugin has a program row, else dropped and archived; never left naming it
+    const hintsW = () => ({ ...world(), siteHints: [{ host: 'bank.example', backend: 'cloak', tier: null, by: 'user', at: 1, why: 'blocks chromium' }, { host: 'shop.example', backend: 'cdp', tier: null, by: 'user', at: 1, why: '' }] });
+    for (const program of [true, false]) {
+      const w = seedC(`hints-${program}`, { reg: hintsW(), settings: program ? { 'browser.cloak.executablePath': '/opt/cloak/chrome' } : undefined });
+      const t = new UserTodoManager({ dataDir: w.dataDir, expirySweepMs: 0 });
+      const r = boot(w, { userTodos: t });
+      const hs = (w.J('browser-profiles.json') || {}).siteHints || [], d = String((notes(t)[0] || {}).detail || '');
+      const bank = hs.find((h) => h.host === 'bank.example'), shop = hs.find((h) => h.host === 'shop.example');
+      const arch = (() => { try { return fs.readFileSync(w.archive, 'utf8'); } catch { return ''; } })();
+      const Kd = Kmod.create({ dataDir: w.dataDir, homeDir: scratchHomeDir, install: false, log: quiet });
+      const served = Kd.siteHints(); Kd.shutdown();
+      const cliLine = fs.readFileSync(path.join(REPO_ROOT, 'data/bin/vibespace-browser'), 'utf8').includes("console.log(`site hint already on file: ${r.hint.host} → ${r.hint.backend || 'tier ' + r.hint.tier} (by ${r.hint.by})`)");
+      const printed = bank ? `${bank.host} → ${bank.backend || 'tier ' + bank.tier}` : null;
+      ok(r?.status === 'ran' && shop && shop.backend === 'cdp' && !hs.some((h) => h.backend === 'cloak') && !served.some((h) => h.backend === 'cloak') && (program
+        ? bank && bank.backend === null && bank.tier === 2 && bank.by === 'user' && printed === 'bank.example → tier 2' && cliLine && /^1 per-site note\(s\) that named CloakBrowser now say the site needs an anti-bot browser \(tier 2\)\./m.test(d)
+        : !bank && arch.includes('"host": "bank.example"') && /^1 per-site note\(s\) that named CloakBrowser were removed \(no plugin program is set\); they are in data\/archive\/2026-11-cloak-to-plugin\.json\./m.test(d)),
+        program ? 'D a site hint naming CloakBrowser becomes tier 2 (the plugin has a program row): the keeper serves no hint naming it, the CLI\'s «site hint already on file» prints «bank.example → tier 2», the notice says so; another hint untouched'
+          : 'D …with no plugin program row the hint is DROPPED and archived, the notice says where; another hint untouched', { hs, served, printed, d });
+      t.stop();
+    }
     // the words: every key is an entry in zh AND ja
     const { dictHasEntry } = await import('./i18n-check.mjs');
     const dictsC = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
     const WC = Object.values(MW);
-    ok(WC.length === 14 && WC.every((k) => dictsC.every((dt) => dictHasEntry(dt, k))), `the notice's ${WC.length} keys are entries in BOTH dicts (zh, ja)`, WC.filter((k) => !dictsC.every((dt) => dictHasEntry(dt, k))));
+    ok(WC.length === 17 && WC.every((k) => dictsC.every((dt) => dictHasEntry(dt, k))), `the notice's ${WC.length} keys are entries in BOTH dicts (zh, ja)`, WC.filter((k) => !dictsC.every((dt) => dictHasEntry(dt, k))));
     // NEGATIVE CONTROLS — patched copies of src/server/migrations.js: the legs above can go red
     try {
       const MC = mutantCopies('migrations-cloak', REPO_ROOT);
       const srcC = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
-      const keepRow = "    if (str(sdoc[exeRow]).trim()) { if (oldExe.trim() || dlOk) { rep.settings.program = 'kept'; rep.settings.kept[exeRow] = sdoc[exeRow]; } }\n    else if (oldExe.trim())";
+      const keepRow = "      if (str(sdoc[exeRow]).trim()) { if (oldExe.trim() || download.proven) { rep.settings.program = 'kept'; rep.settings.kept[exeRow] = sdoc[exeRow]; } }\n      else if (oldExe.trim())";
+      const applyRow = '      for (const [row, v] of Object.entries(plan.set)) if (!str(next[row]).trim() || next[row] === v) next[row] = v;';
       const readSeeds = "      const T = readJson(seedsFile, `data/plugins-state/${CLOAK_PLUGIN_ID}/seeds.json`);";
-      ok(srcC.split(keepRow).length === 2 && srcC.split(readSeeds).length === 2, 'CONTROL scope: the lines the patched copies change are present once each');
-      const over = MC.load('src/server/migrations.js', srcC.replace(keepRow, '    if (oldExe.trim())'), 'overwrite');
+      ok(srcC.split(keepRow).length === 2 && srcC.split(applyRow).length === 2 && srcC.split(readSeeds).length === 2, 'CONTROL scope: the lines the patched copies change are present once each');
+      const over = MC.load('src/server/migrations.js', srcC.replace(keepRow, '      if (oldExe.trim())').replace(applyRow, '      for (const [row, v] of Object.entries(plan.set)) next[row] = v;'), 'overwrite');
       const wc = seedC('mut-over', { reg: world(), settings: { 'browser.cloak.executablePath': '/opt/old/chrome', [EXE]: '/home/u/cloak/chrome' } });
       over.create({ rootDir: wc.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: { add: () => ({ id: 'x' }), flush() { } } }).runLocalMigrations({ only: [ID] });
       ok((wc.J('settings.json') || {})[EXE] === '/opt/old/chrome', 'NEGATIVE CONTROL: a copy without the never-overwrite rule writes over the plugin\'s own program row — M4 goes red');
