@@ -9,20 +9,20 @@
 // spelling over handed-in facts; `S0_SH` is the sh spelling a device runs. test-cli-env runs S0_SH under a real sh and
 // asks pickLoginShell on the same inputs: they must agree.
 //
-// THE ASK IS FOR A PROGRAM, NOT FOR WHAT THE WORD MEANS (round 2, the acceptance's blocker): `alias claude='claude
-// --dangerously-skip-permissions'`, an nvm lazy-load function, the installer's own `alias claude="~/.claude/local/claude"`
-// — the person's own wrapper is never a refusal. The line asks, in this order, between sentinels:
-//   CV  the PROGRAM the shell's PATH holds, the alias / function layer bypassed — the shell's own program-only
-//       spelling (bash `type -P`, zsh / ksh `whence -p`, fish `command -v` — fish's command searches programs only —
-//       anything else a subshell that drops the alias and the function first) — MEASURED per shell, test-cli-env;
-//   AL  what the WORD means to the shell (`command -v`: an alias definition, a function's bare name, or a path) — read
-//       as provenance («your zsh wraps claude in an alias»), and as the answer ONLY for an alias whose body is ONE word
-//       naming an executable after ~ / $HOME expansion (the installer's shape) when no program stands on PATH;
-//   CTL a CONTROL word that must exist (`printenv`) through the same program-only spelling — a shell whose printout
-//       does not name it (no `command` builtin: tcsh / csh / xonsh) could not be ASKED: never a «none»;
+// THE PERSON'S SHELL RUNS ITS OWN WRAPPER (round 4 — the law restated after three rounds of reading alias bodies: an
+// alias body is the person's shell's grammar — assignments, launchers (npx, bunx, node), wrappers (sudo, nice, env),
+// redirects, quoting — and reading it is the hand-kept recipe set the owner refused). VibeSpace NEVER interprets an alias
+// or a function. The line asks, between sentinels:
+//   CV  the PROGRAM the shell's PATH holds — the shell's own program-only spelling through ESCAPED builtins (bash
+//       `\builtin type -P`, zsh `\builtin whence -p`, ksh `\whence -p`, fish `command -v`, else a subshell that drops
+//       the alias and the function first) — so a person's `alias type='type -a'` never reaches it;
+//   AL  whether the WORD is an alias or a function in that shell (`\command -v`: its text, never read further);
+//   CTL a CONTROL word (`printenv`) through the same spelling — not named ⇒ the shell could not be asked;
 //   PATH the exported PATH (`printenv PATH`, never "$PATH": fish keeps PATH as a list).
-// An rc prints anything before the line runs (banners, a motd, a decoy), so each answer is read ONLY between its
-// sentinels and the LAST whole sequence wins.
+// Two cases only (judgeAnswer): the word is NOT a wrapper and the shell names a program ⇒ that program, spawned
+// directly; the word IS an alias / a function ⇒ the CLI's recipe is THE SHELL ITSELF (`shimScript`: `<shell> -l -i -c
+// '<cli> "$@"'`), proven once by a bounded `<cli> --version` through the same road (`versionLine` / `parseVersion`).
+// The LAST whole sentinel sequence wins (an rc's banner or decoy echo never does).
 
 const BEGIN = '__VS_CV_BEGIN__', END = '__VS_CV_END__', AL_BEGIN = '__VS_AL_BEGIN__', AL_END = '__VS_AL_END__';
 const CTL_BEGIN = '__VS_CTL_BEGIN__', CTL_END = '__VS_CTL_END__', PATH_END = '__VS_PATH_END__';
@@ -59,14 +59,11 @@ function programLookup(name, shell) {
   if (sh === 'fish') return `command -v ${name}`;
   return `(\\unalias ${name}; \\unset -f ${name}; \\command -v ${name}) 2>/dev/null`;
 }
-/** What the WORD means to the shell (an alias first, then a function, then a program — its own resolution order). */
-function wordLookup(name, shell) { return shellName(shell) === 'fish' ? `functions -q ${name}; and echo ${name}; or command -v ${name}` : `\\command -v ${name}`; } // fish: an «alias» is a function (unmeasured here: no fish on this box)
-
 /** The one line asked of `shell` for `name` (sh, bash, zsh, ksh and fish read it). */
 function shellLine(name, shell) {
   if (!NAME_OK.test(String(name || ''))) throw new TypeError(`login-shell: not a plain command name: ${String(name).slice(0, 60)}`);
   const pr = (a) => `printf '\\n${a}\\n'`;
-  return [pr(BEGIN), programLookup(name, shell), pr(END), pr(AL_BEGIN), wordLookup(name, shell), pr(AL_END),
+  return [pr(BEGIN), programLookup(name, shell), pr(END), pr(AL_BEGIN), shellName(shell) === 'fish' ? `functions -q ${name}; and echo ${name}; or command -v ${name}` : `\\command -v ${name}`, pr(AL_END),
     pr(CTL_BEGIN), programLookup(CONTROL_WORD, shell), pr(CTL_END), 'printenv PATH', pr(PATH_END)].join('; ');
 }
 
@@ -88,79 +85,63 @@ function parseShellAnswer(out) {
 }
 
 const isOnePath = (s) => !!s && !s.includes('\n') && s.startsWith('/');
-const SAFE_PATH = /^\/[^\s'"`$;|&<>()*?\\]*$/;
 
-/** What `command -v <name>` said the WORD is: { kind: 'alias', text, body } | { kind: 'function', text } | null. */
+/** Is the WORD an alias or a function in the person's shell? `command -v` printed an alias definition (bash / dash
+ *  «alias x='…'», zsh «alias x=…») or a function's bare name ⇒ { kind, text } — the TEXT only, never read further. */
 function wrapperOf(al, name) {
   const s = String(al || '').trim();
   if (!s || isOnePath(s)) return null;
-  const m = /^alias\s+([^=\s]+)=([\s\S]*)$/.exec(s) || /^([^:\s]+): aliased to ([\s\S]*)$/.exec(s);
-  if (m) {
-    let body = m[2].trim();
-    if (body.length >= 2 && body[0] === "'" && body.endsWith("'")) body = body.slice(1, -1).replace(/'\\''/g, "'");
-    else if (body.length >= 2 && body[0] === '"' && body.endsWith('"')) body = body.slice(1, -1);
-    return { kind: 'alias', text: s.slice(0, 300), body };
-  }
+  if (/^alias\s/.test(s) || /: aliased to /.test(s)) return { kind: 'alias', text: s.slice(0, 300) };
   return { kind: 'function', text: s === name ? name : s.slice(0, 300) };
 }
 
-const WRAP_CMDS = new Set(['env', 'nice', 'nohup', 'exec', 'command', 'builtin', 'noglob', 'time', 'sudo', 'caffeinate']);
-const UNREADABLE = /`|\$\(|;|\||&|<|>|\$\{(?!HOME\})|\$(?!HOME\b|\{HOME\})/;
-
-/** ~ / $HOME / ${HOME} expanded at the front of a word, or null when it needs a HOME we do not have. */
-function expandHome(word, home) {
-  const h = typeof home === 'string' && home.startsWith('/') ? home.replace(/\/+$/, '') : null;
-  if (/^~(\/|$)/.test(word)) return h ? h + word.slice(1) : null;
-  if (/^\$HOME(\/|$)/.test(word)) return h ? h + word.slice(5) : null;
-  if (/^\$\{HOME\}(\/|$)/.test(word)) return h ? h + word.slice(7) : null;
-  return word;
-}
-
-/** An alias body as the shell would run it: its words (simple quotes honoured), the CLI word — the first word that names
- *  the CLI (its basename = `name`), else the first command word past assignments (X=1) and wrappers (env, nice, …) — and
- *  every OTHER word (the options the alias adds, a wrapper command): what VibeSpace does NOT apply. */
-function aliasPlan(body, { name, home } = {}) {
-  const src = String(body || '').trim();
-  if (!src) return null;
-  const words = [];
-  const re = /'([^']*)'|"([^"]*)"|(\S+)/g;
-  let m;
-  while ((m = re.exec(src))) words.push(m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3]);
-  const isAssign = (w) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
-  let at = words.findIndex((w) => { const x = expandHome(w, home); return !!x && x.split('/').pop() === name; });
-  if (at < 0) at = words.findIndex((w) => !isAssign(w) && !WRAP_CMDS.has(w) && !w.startsWith('-'));
-  if (at < 0) return { unreadable: true, words };
-  const word = words[at];
-  const dropped = words.filter((_, i) => i !== at).join(' ');
-  const unreadable = UNREADABLE.test(src.replace(/^(\$HOME|\$\{HOME\})/, ''));
-  const expanded = expandHome(word, home);
-  if (expanded && expanded.startsWith('/')) return { target: SAFE_PATH.test(expanded) ? expanded : null, word, dropped, unreadable };
-  return { word, dropped, unreadable, bare: true };
-}
-
-/** THE VERDICT over a parsed printout (complete) — WHAT THE PERSON'S SHELL RUNS FOR THE WORD, in its own resolution order
- *  (round 3: an alias shadows PATH; a function shadows PATH but its body is unreadable). Exactly one of:
- *   { kind: 'path', path, via: 'program' | 'alias', wrapper, dropped } — the program VibeSpace spawns (`dropped` = the
- *        alias's other words, which VibeSpace does not apply — said, never silently)
- *   { kind: 'follow', word, wrapper, dropped } — the alias runs ANOTHER program by its bare name: the caller asks the shell
- *        for that word's program (one hop)
- *   { kind: 'none', wrapper }                  — the shell resolves names and runs no program for the word
+/** THE VERDICT over a parsed printout (complete). Exactly one of:
+ *   { kind: 'path', path }            — the word is no wrapper and the shell names a program: spawn it directly
+ *   { kind: 'wrapper', wrapper, path } — the word IS an alias / a function (whatever its body, a program on PATH or not —
+ *        the shell would run the wrapper, so VibeSpace runs the wrapper): the recipe is the shell itself, proven by a probe
+ *   { kind: 'none' }                  — the shell resolves names (the control word answered) and holds nothing
  *   { kind: 'unanswered', why: 'no-command-builtin' } — the control word was not named: it could not be asked */
-function judgeAnswer({ cv, al, ctl }, { name, home } = {}) {
+function judgeAnswer({ cv, al, ctl }, { name } = {}) {
   const wrapper = wrapperOf(al, name);
   const prog = isOnePath(String(cv || '').trim()) ? String(cv).trim() : isOnePath(String(al || '').trim()) ? String(al).trim() : null;
-  const asked = isOnePath(String(ctl || '').trim()) || !!prog;
-  if (wrapper && wrapper.kind === 'alias') {
-    const plan = aliasPlan(wrapper.body, { name, home });
-    if (plan && plan.target && !plan.unreadable) return { kind: 'path', path: plan.target, via: 'alias', wrapper, dropped: plan.dropped || '' };
-    if (plan && plan.bare && plan.word === name) return prog ? { kind: 'path', path: prog, via: 'program', wrapper, dropped: plan.dropped || '' } : asked ? { kind: 'none', wrapper } : { kind: 'unanswered', why: 'no-command-builtin' };
-    if (plan && plan.bare && !plan.unreadable && NAME_OK.test(plan.word)) return { kind: 'follow', word: plan.word, wrapper, dropped: plan.dropped || '' };
-    return asked ? { kind: 'none', wrapper } : { kind: 'unanswered', why: 'no-command-builtin' };
-  }
-  if (prog) return { kind: 'path', path: prog, via: 'program', wrapper: wrapper && wrapper.kind === 'function' ? wrapper : null, dropped: '' };
+  const asked = isOnePath(String(ctl || '').trim()) || !!prog || !!wrapper;
+  if (wrapper) return { kind: 'wrapper', wrapper, path: prog };
+  if (prog) return { kind: 'path', path: prog };
   if (!asked) return { kind: 'unanswered', why: 'no-command-builtin' };
-  return { kind: 'none', wrapper };
+  return { kind: 'none' };
 }
 
-module.exports = { S0_SH, pickLoginShell, shellLine, programLookup, wordLookup, parseShellAnswer, wrapperOf, aliasPlan, expandHome, judgeAnswer, shellName, NAME_OK, CONTROL_WORD,
+const VB = '__VS_VER_BEGIN__', VE = '__VS_VER_END__';
+/** THE PROBE's line: `<cli> --version` run BY THE SHELL (its alias expanded, its function run — exactly as the person's
+ *  terminal does), between sentinels; the shell's stderr is what a refusal quotes. */
+function versionLine(name, shell) {
+  if (!NAME_OK.test(String(name || ''))) throw new TypeError(`login-shell: not a plain command name: ${String(name).slice(0, 60)}`);
+  const rc = shellName(shell) === 'fish' ? '$status' : '$?';
+  return `printf '\\n${VB}\\n'; ${name} --version; printf '\\n${VE} %s\\n' ${rc}`;
+}
+/** → { complete, version, code }: the LAST non-empty versioned line between the LAST pair, and the CLI's own exit code
+ *  (the end sentinel carries it). */
+function parseVersion(out) {
+  const lines = String(out || '').split(/\r?\n/);
+  let e = -1; for (let i = lines.length - 1; i >= 0; i--) if (lines[i] === VE || lines[i].startsWith(VE + ' ')) { e = i; break; }
+  let b = -1; for (let i = e - 1; i >= 0; i--) if (lines[i] === VB) { b = i; break; }
+  if (e < 0 || b < 0) return { complete: false, version: '', code: null };
+  const body = lines.slice(b + 1, e).map((l) => l.trim()).filter(Boolean);
+  const v = body.filter((l) => /\d+\.\d+/.test(l)).pop() || '';
+  const code = Number.parseInt(lines[e].slice(VE.length).trim(), 10);
+  return { complete: true, version: v.slice(0, 200), code: Number.isInteger(code) ? code : null };
+}
+
+/** THE RECIPE: a CLI the person's shell runs through its wrapper is spawned BY THAT SHELL — `<shell> -l -i -c '<cli> "$@"'`,
+ *  the session's argv as "$@". The rc's own stdout / stderr (a banner, bash's «no job control» lines) go to /dev/null
+ *  while it starts; the CLI gets the session's stdout / stderr back (fd 3 / 4) — stream-json stays clean (measured). For
+ *  an alias both shells EXEC the expansion, so the CLI's pid is the shim's (measured); a function keeps the shell as its
+ *  parent. Single-quoted shell path; a NAME_OK name. */
+function shimScript(shell, name) {
+  if (!NAME_OK.test(String(name || ''))) throw new TypeError(`login-shell: not a plain command name: ${String(name).slice(0, 60)}`);
+  const q = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
+  return `#!/bin/sh\n# VibeSpace: ${name} runs through the person's login shell (its alias / function) — lane cli-shell-truth\nexec 3>&1 4>&2 >/dev/null 2>&1\nexec ${q(shell)} -l -i -c 'exec 1>&3 2>&4 3>&- 4>&-; ${name} "$@"' ${name} "$@"\n`;
+}
+
+module.exports = { S0_SH, pickLoginShell, shellLine, programLookup, parseShellAnswer, wrapperOf, judgeAnswer, versionLine, parseVersion, shimScript, shellName, NAME_OK, CONTROL_WORD,
   BEGIN, END, AL_BEGIN, AL_END, CTL_BEGIN, CTL_END, PATH_END };

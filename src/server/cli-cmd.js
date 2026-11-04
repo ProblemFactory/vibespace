@@ -98,8 +98,6 @@ const executable = async (p) => {
   if (typeof p !== 'string' || !p.startsWith('/')) return false;
   try { await fs.promises.access(p, fs.constants.X_OK); return true; } catch { return false; }
 };
-/** a named path that is not executable: is it there at all? (the words say which — round 3) */
-const present = async (p) => { if (typeof p !== 'string' || !p.startsWith('/')) return false; try { await fs.promises.access(p, fs.constants.F_OK); return true; } catch { return false; } };
 
 /** The bound on a READ's lookup of an unresolved (or gone) CLI: one `which` per
  *  CLI per this many ms; a person's Install / Re-check (`reask`) and a non-person fresh read (`force`) skip it. */
@@ -133,36 +131,17 @@ async function loginShellOf({ env = process.env, userInfo = () => os.userInfo(),
 }
 
 /**
- * THE SHELL ASK: `<shell> -l -i -c '<line>'` (the three flags spelled apart — fish takes them too), stdin /dev/null,
- * TERM=dumb, the sanitized env (serviceEnv), its OWN session (`detached`: an rc's `kill 0` or a job-control grab never reaches the
- * hub's process group), bounded by `timeoutMs` (the child is killed by its pid, then whatever is left in the probe's own
- * session — an rc's leftover background job that would hold the pipe). It asks for the PROGRAM (src/login-shell.js:
- * the shell's own program-only spelling; what the word means — an alias, a function — rides as provenance). The answer
- * is EXACTLY one of:
- *   { kind:'path', path, via, wrapper, shellPath } — ONE absolute path: the program on the shell's PATH (`via` 'program'),
- *        or the target of the installer-shape alias (`via` 'alias'); `wrapper` = the person's alias / function, or null
- *   { kind:'none', wrapper }   — the shell resolves names (the control word answered) and holds no program
- *   { kind:'unanswered', why } — 'timeout' | 'exit:<n>' | 'spawn:<err>' | 'no-shell' | 'bad-name' | 'no-command-builtin'
- * each with `shell` (the path asked) and `ms`.
+ * ONE LOGIN-SHELL RUN (the ask and the probe share it — one spawn site, one kill site): `<shell> -l -i -c '<line>'` (the
+ * three flags spelled apart — fish takes them too), stdin /dev/null, TERM=dumb, the sanitized env (serviceEnv), its OWN
+ * session (`detached`: an rc's `kill 0` or a job-control grab never reaches the hub's process group), bounded by
+ * `timeoutMs` (the child is killed by its pid, then whatever is left in the probe's own session — an rc's leftover
+ * background job that would hold the pipe). `complete(out)` = the whole answer is in; `judge(out, err, exitWhy)` = the
+ * answer. Resolves the judged answer + `shell` + `ms`, or { kind: 'unanswered', why } (timeout / spawn).
  */
-async function askShell(name, opts = {}) {
-  const now = opts.now || Date.now, t0 = now();
-  const a = await askOnce(name, opts);
-  if (a.kind !== 'follow') return a;
-  // the person's alias runs ANOTHER program by its bare name (alias claude='claude-beta --x'): ONE hop — that word's
-  // program through the same program-only lookup, the alias named, its other words said as not applied
-  const left = Math.max(1, (opts.timeoutMs || SHELL_ASK_MS) - (now() - t0));
-  const b = await askOnce(a.word, { ...opts, timeoutMs: left });
-  const ms = now() - t0;
-  if (b.kind === 'path') return { ...b, via: 'alias', wrapper: a.wrapper, dropped: a.dropped, followed: a.word, ms };
-  if (b.kind === 'unanswered') return { ...b, ms };
-  return { kind: 'none', wrapper: a.wrapper, followed: a.word, shell: a.shell, ms };
-}
-
-function askOnce(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
+function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now, complete, judge }) {
   return new Promise((resolve) => {
     const t0 = now();
-    let settled = false, child = null, timer = null, out = '';
+    let settled = false, child = null, timer = null, out = '', err = '';
     // the probe's own session (detached ⇒ setsid ⇒ pgid = its pid): nothing but this ask's shell and what its rc started
     const killGroup = () => { if (child && Number.isInteger(child.pid) && child.pid > 1) { try { process.kill(-child.pid, 'SIGKILL'); } catch { } } };
     const reap = () => {
@@ -180,15 +159,6 @@ function askOnce(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now
       resolve({ ...a, shell: shell || null, ms: now() - t0 });
     };
     const home = typeof env.HOME === 'string' && env.HOME.startsWith('/') ? env.HOME : undefined;
-    const judge = (exitWhy) => {
-      const p = LS.parseShellAnswer(out);
-      if (!p.complete) return done({ kind: 'unanswered', why: exitWhy });
-      const v = LS.judgeAnswer(p, { name, home });
-      return done(v.kind === 'path' ? { ...v, shellPath: p.path } : v);
-    };
-    if (!LS.NAME_OK.test(String(name || ''))) return done({ kind: 'unanswered', why: 'bad-name' });
-    if (!shell) return done({ kind: 'unanswered', why: 'no-shell' });
-    const line = LS.shellLine(name, shell);
     try {
       // THE ENV IT IS ASKED IN — an ALLOWLIST (serviceEnv): HOME LANG LC_* TMPDIR XDG_RUNTIME_DIR + USER LOGNAME, the
       // hub's PATH as the baseline its rc builds on, SHELL = itself, TERM=dumb. NEVER a VIBESPACE_* name, a token or npm_*:
@@ -198,19 +168,78 @@ function askOnce(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now
     child.on('error', (e) => done({ kind: 'unanswered', why: `spawn:${(e && e.code) || 'error'}` }));
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (d) => { out += d; if (out.length > OUT_CAP) out = out.slice(-OUT_CAP); });
-    child.stderr.on('data', () => { }); // an interactive shell with no tty complains («no job control»): drained, never read
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (d) => { err += d; if (err.length > 8192) err = err.slice(-8192); }); // the tail a refusal quotes
     let exitWhy = null;
     child.on('exit', (code, sig) => {
       exitWhy = sig ? `exit:${sig}` : `exit:${code}`;
       // the shell is gone: whatever its rc left in the probe's session goes too, so the pipe closes and 'close' comes
       killGroup();
-      if (LS.parseShellAnswer(out).pathDone) judge(exitWhy); // the whole answer is in (the LAST triple: an rc's decoy printed before the line never ends it)
+      if (complete(out)) done(judge(out, err, exitWhy)); // the whole answer is in (the LAST sequence: an rc's decoy printed before the line never ends it)
     });
-    child.on('close', (code, sig) => judge(exitWhy || (sig ? `exit:${sig}` : `exit:${code}`)));
+    child.on('close', (code, sig) => done(judge(out, err, exitWhy || (sig ? `exit:${sig}` : `exit:${code}`))));
     // THE BOUND (the ONE timer in this file: it ENDS an ask, it never starts one — nothing here checks on a timer)
     timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
   });
+}
+
+/**
+ * THE SHELL ASK — where is the CLI, and is its word a WRAPPER? (src/login-shell.js shellLine: the shell's own
+ * program-only spelling through escaped builtins, the word's meaning, a control word, the PATH.) EXACTLY one of:
+ *   { kind:'path', path, shellPath }            — the word is no wrapper and the shell names a program: spawn it directly
+ *   { kind:'wrapper', wrapper, path, shellPath } — the word IS an alias / a function in the person's shell: the shell runs
+ *        it (registry: proven by probeVersion, spawned through the shim)
+ *   { kind:'none' }                             — the shell resolves names and holds nothing for the word
+ *   { kind:'unanswered', why }                  — 'timeout' | 'exit:<n>' | 'spawn:<err>' | 'no-shell' | 'bad-name' | 'no-command-builtin'
+ * each with `shell` (the path asked) and `ms`. Never an alias body read.
+ */
+function askShell(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
+  if (!LS.NAME_OK.test(String(name || ''))) return Promise.resolve({ kind: 'unanswered', why: 'bad-name', shell: shell || null, ms: 0 });
+  if (!shell) return Promise.resolve({ kind: 'unanswered', why: 'no-shell', shell: null, ms: 0 });
+  return runShell({ shell, line: LS.shellLine(name, shell), env, timeoutMs, now,
+    complete: (o) => LS.parseShellAnswer(o).pathDone,
+    judge: (out, err, exitWhy) => {
+      const p = LS.parseShellAnswer(out);
+      if (!p.complete) return { kind: 'unanswered', why: exitWhy };
+      const v = LS.judgeAnswer(p, { name });
+      return v.kind === 'path' || v.kind === 'wrapper' ? { ...v, shellPath: p.path } : v;
+    } });
+}
+
+/** the shell's own words, its job-control noise dropped (bash with no tty: «cannot set terminal process group», «no job
+ *  control in this shell»; zsh «can't set tty pgrp») — the tail a refusal quotes, never our diagnosis */
+const shellSaid = (err) => String(err || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/cannot set terminal process group|no job control in this shell|can't set tty pgrp/.test(l)).slice(-3).join(' · ').slice(-300);
+
+/** THE PROOF of a wrapper: `<cli> --version` run BY THE PERSON'S SHELL (its alias expanded, its function run), bounded,
+ *  the sanitized env. { kind: 'proven', version } | { kind: 'refused', said, code } (no version line, or a non-zero exit:
+ *  the shell's OWN stderr is the reason) | { kind: 'unanswered', why } (timeout / spawn). The version line IS the
+ *  measurement of that CLI (ONE CLI, ONE ROAD). */
+function probeVersion(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
+  if (!LS.NAME_OK.test(String(name || ''))) return Promise.resolve({ kind: 'unanswered', why: 'bad-name', shell: shell || null, ms: 0 });
+  if (!shell) return Promise.resolve({ kind: 'unanswered', why: 'no-shell', shell: null, ms: 0 });
+  return runShell({ shell, line: LS.versionLine(name, shell), env, timeoutMs, now,
+    complete: () => false, // judged at 'close' only: the shell's stderr (a refusal's words) may trail its stdout
+
+    judge: (out, err, exitWhy) => {
+      const v = LS.parseVersion(out);
+      if (!v.complete) return { kind: 'unanswered', why: exitWhy };
+      if (v.version && v.code === 0) return { kind: 'proven', version: v.version };
+      return { kind: 'refused', said: shellSaid(err), code: v.code };
+    } });
+}
+
+/** Write the CLI's SHIM (src/login-shell.js shimScript) — async, atomic (tmp + rename), 0755 in a 0700 dir. Its path is the
+ *  CLI's binary from now on: every reader that runs current() runs the person's shell. null = could not be written. */
+async function writeShim(dir, backend, shell, name) {
+  try {
+    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+    const file = path.join(dir, `${String(backend).replace(/[^\w.-]/g, '_')}.sh`);
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fs.promises.writeFile(tmp, LS.shimScript(shell, name), { mode: 0o755 });
+    await fs.promises.rename(tmp, file);
+    return file;
+  } catch { return null; }
 }
 
 /** A refusal BY NAME: the create that would spawn a CLI nobody can find (ws-create answers it as `cli-missing`). */
@@ -230,9 +259,12 @@ class CliMissing extends Error {
  *  @param {(line:string)=>void} [o.log]
  *  @param {number} [o.recheckMs] the read-time lookup bound (RECHECK_MS)
  *  @param {()=>number} [o.now] the clock the bound reads */
-function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = null, looked = () => [...new Set(candidateDirs())],
+function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = null, probe = null, shimDir = null, looked = () => [...new Set(candidateDirs())],
   log = (l) => console.log(l), recheckMs = RECHECK_MS, now = Date.now } = {}) {
   const askOf = ask || (async (name) => { const { shell } = await loginShellOf({ usable }); return askShell(name, { shell }); });
+  // a WRAPPER's proof runs in the same shell the ask named (round 4: the person's shell runs its own wrapper)
+  const probeOf = probe || ((name, shell) => probeVersion(name, { shell }));
+  const SHIMS = shimDir || path.join(os.tmpdir(), `vibespace-cli-shims-${typeof process.getuid === 'function' ? process.getuid() : 'u'}`);
   const entries = new Map(); // backend → { name, current, apply, pending, lookedAt, provenance, answer, shellPath, hubSaw }
   // ONE CLI, ONE BINARY (round 2): whoever MEASURES the CLI (the long-lived-token version gate, the record registration)
   // reads `current(backend)` and hears an adoption at once — the binary the sessions spawn is the binary measured
@@ -250,14 +282,28 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
         let a;
         try { a = await askOf(e.name); } catch (err) { a = { kind: 'unanswered', why: `spawn:${(err && err.code) || 'error'}` }; }
         if (!a || typeof a.kind !== 'string') a = { kind: 'unanswered', why: 'exit:?' };
-        if (a.kind === 'path' && !await usable(a.path)) a = { ...a, kind: 'none', notExecutable: a.path, dangling: await present(a.path) ? 'not-executable' : 'missing' };
+        if (a.kind === 'wrapper') {
+          // THE PERSON'S SHELL RUNS ITS OWN WRAPPER (round 4): never read; proven ONCE by `<cli> --version` through the
+          // shell, then spawned BY the shell (the shim). A refusal quotes the shell's own words; a timeout keeps the
+          // provisional path, named.
+          let v;
+          try { v = await probeOf(e.name, a.shell); } catch (err) { v = { kind: 'unanswered', why: `spawn:${(err && err.code) || 'error'}` }; }
+          if (v && v.kind === 'proven') {
+            const shim = await writeShim(SHIMS, backend, a.shell, e.name);
+            a = shim ? { ...a, kind: 'path', path: shim, via: 'wrapper', version: v.version } : { ...a, kind: 'unanswered', why: 'shim-unwritable' };
+          } else if (v && v.kind === 'refused') a = { ...a, kind: 'refused', said: v.said || '', code: v.code };
+          else a = { ...a, kind: 'unanswered', why: (v && v.why) || 'exit:?' };
+        }
+        if (a.kind === 'path' && !await usable(a.path)) a = { ...a, kind: 'none', notExecutable: a.path };
         e.answer = { ...a, at: now() };
         const was = e.current;
         if (a.kind === 'path') {
           e.current = a.path; e.provenance = 'shell'; e.shellPath = a.shellPath || null; e.hubSaw = null;
           if (a.path !== was) {
             try { e.apply(a.path); } catch (err) { log(`[cli-cmd] ${backend}: could not hand '${a.path}' to the adapter — ${err && err.message}`); }
-            log(`[cli-cmd] ${backend}: ${said(a)} (login shell) found '${e.name}' at '${a.path}'${a.via === 'alias' ? ' through its alias' : a.wrapper ? ` (it wraps the name in ${a.wrapper.kind === 'alias' ? 'an alias' : 'a function'})` : ''}${a.dropped ? ` — the alias's other words «${a.dropped}» are not applied` : ''} — adopted (it was '${was}', no restart needed)`);
+            log(a.via === 'wrapper'
+              ? `[cli-cmd] ${backend}: ${said(a)} (login shell) runs '${e.name}' through ${a.wrapper && a.wrapper.kind === 'function' ? 'a function' : 'an alias'} — proven (${a.version}); spawned through the shell ('${a.path}', it was '${was}', no restart needed)`
+              : `[cli-cmd] ${backend}: ${said(a)} (login shell) found '${e.name}' at '${a.path}' — adopted (it was '${was}', no restart needed)`);
             adopted(backend, a.path);
           }
           return a.path;
@@ -279,9 +325,9 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
           log(`[cli-cmd] ${backend}: ${said(a)} could not be asked where '${e.name}' is (${a.why}) — ${keep ? `using the hub's PATH ('${keep}')` : 'and the hub\'s PATH has none'}`);
           return keep || null;
         }
-        // none (no PROGRAM — a wrapper with nothing behind it included): MISSING for every purpose — the hub's walk is a hint,
-        // never a spawn
-        e.hubSaw = hub;
+        // none / refused (no program for the word; a wrapper whose run said no): MISSING for every purpose — the hub's walk
+        // is a hint, never a spawn (and never offered for a refused wrapper: that refusal is the shell's own)
+        e.hubSaw = a.kind === 'refused' ? null : hub;
         e.provenance = 'hub-path';
         return null;
       })().finally(() => { e.pending = null; });
@@ -298,19 +344,16 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
     const dirs = looked();
     const envName = envNameOf(backend);
     const hint = e.hubSaw ? `the hub's PATH has ${e.hubSaw} — add that directory to your shell's PATH` : null;
-    const wrapped = a.kind === 'none' && a.notExecutable
-      ? ` — ${a.via === 'alias' || (a.wrapper && a.wrapper.kind === 'alias') ? 'its alias names' : 'it named'} ${a.notExecutable}, which is ${a.dangling === 'missing' ? 'missing' : 'not executable'}`
-      : a.kind === 'none' && a.wrapper
-      ? (a.wrapper.kind === 'function'
-        ? ` — it is a shell function there, and VibeSpace cannot read what a function runs: put the program on your PATH, or set ${envName}`
-        : ` — its alias «${a.wrapper.text}» is not a program's path: put the program on your PATH, or set ${envName}`)
-      : '';
+    const wkind = a.wrapper && a.wrapper.kind === 'function' ? 'function' : 'alias';
+    const wrapped = a.kind === 'none' && a.notExecutable ? ` — it named ${a.notExecutable}, which is not executable` : '';
     const message = isAbs(e.name)
       ? `${e.name} was not found — the configured path is not an executable file`
+      : a.kind === 'refused'
+        ? `${e.name} did not run in ${who} (login shell): it runs ${e.name} through ${wkind === 'function' ? 'a function' : 'an alias'} (${a.wrapper ? a.wrapper.text : e.name}), and \`${e.name} --version\` there said: «${a.said || 'nothing'}»${Number.isInteger(a.code) && a.code !== 0 ? ` (exit ${a.code})` : ''} — fix the ${wkind}, or set ${envName}`
       : a.kind === 'unanswered'
         ? `${e.name} was not found — ${who} (login shell) could not be asked (${a.why}) and the hub's PATH (${dirs.join(', ')}) has none`
         : `${e.name} was not found as a program by ${who} (login shell)${wrapped}${hint ? ` — ${hint}` : wrapped ? '' : ` — and the hub's PATH (${dirs.join(', ')}) has none either`}`;
-    return new CliMissing({ backend, cli: e.name, shell: sh, answer: isAbs(e.name) ? 'configured' : a.kind, why: a.why || null, wrapper: wrapperWords(a.wrapper), envName, notExecutable: a.notExecutable || null, dangling: a.dangling || null, looked: dirs, hubPath: e.hubSaw || null, hint, message });
+    return new CliMissing({ backend, cli: e.name, shell: sh, answer: isAbs(e.name) ? 'configured' : a.kind, why: a.why || null, wrapper: wrapperWords(a.wrapper), envName, said: a.kind === 'refused' ? a.said || '' : null, notExecutable: a.notExecutable || null, looked: dirs, hubPath: e.hubSaw || null, hint, message });
   };
   return {
     /** `name` = what the lookup asks for (the raw command, env override
@@ -380,16 +423,17 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
       const e = entries.get(backend);
       if (!e) return null;
       const a = e.answer;
-      const missing = !isAbs(e.name) && !!a && a.kind === 'none';
+      const missing = !isAbs(e.name) && !!a && (a.kind === 'none' || a.kind === 'refused');
       return {
         provenance: e.provenance,
         shell: a && a.shell ? LS.shellName(a.shell) : null,
         askedAt: a ? a.at : null,
         answer: isAbs(e.name) ? 'configured' : (a ? a.kind : null),
-        via: a && a.kind === 'path' ? a.via || 'program' : null,
-        wrapper: a ? wrapperWords(a.wrapper) : null, // the person's alias / function wearing the name — provenance, never a refusal
-        dropped: a && a.kind === 'path' && a.dropped ? a.dropped : null, // the alias's other words VibeSpace does not apply (said)
-        notExecutable: a && a.notExecutable ? a.notExecutable : null, dangling: a && a.dangling ? a.dangling : null, // a dangling target, by its cause
+        via: a && a.kind === 'path' ? a.via || 'program' : null, // 'wrapper' = spawned THROUGH the person's shell (its alias / function)
+        wrapper: a ? wrapperWords(a.wrapper) : null, // the person's alias / function wearing the name — run by their shell, never read
+        version: a && a.kind === 'path' && a.version ? a.version : null, // the wrapper's proof: its --version line through the shell
+        said: a && a.kind === 'refused' ? a.said || '' : null, // a refused wrapper: the shell's OWN words
+        notExecutable: a && a.notExecutable ? a.notExecutable : null,
         envName: envNameOf(backend),
         unanswered: a && a.kind === 'unanswered' ? a.why : null,
         hubPath: missing ? e.hubSaw : null,
@@ -400,4 +444,4 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
   };
 }
 
-module.exports = { resolveCmd, resolveCmdAsync, createCliCmds, candidateDirs, RECHECK_MS, SHELL_ASK_MS, askShell, loginShellOf, CliMissing };
+module.exports = { resolveCmd, resolveCmdAsync, createCliCmds, candidateDirs, RECHECK_MS, SHELL_ASK_MS, askShell, probeVersion, loginShellOf, CliMissing };

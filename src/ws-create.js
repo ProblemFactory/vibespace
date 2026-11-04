@@ -1349,7 +1349,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             try { spawnCmd = await cliCmds.forSpawn(backend, spawnCmd); } catch (e) {
               if (!e || e.code !== 'cli-missing') throw e;
               global.__vsEvent?.('spawn-cli-missing', `${backend}/${e.answer || 'none'}`);
-              ws.send(JSON.stringify({ type: 'error', code: 'cli-missing', reqId: data.reqId, backend, cli: e.cli, shell: e.shell || null, answer: e.answer || null, why: e.why || null, wrapper: e.wrapper || null, envName: e.envName || null, notExecutable: e.notExecutable || null, dangling: e.dangling || null, looked: e.looked || [], hubPath: e.hubPath || null, hint: e.hint || null, message: e.message }));
+              ws.send(JSON.stringify({ type: 'error', code: 'cli-missing', reqId: data.reqId, backend, cli: e.cli, shell: e.shell || null, answer: e.answer || null, why: e.why || null, wrapper: e.wrapper || null, envName: e.envName || null, said: e.said || null, notExecutable: e.notExecutable || null, looked: e.looked || [], hubPath: e.hubPath || null, hint: e.hint || null, message: e.message }));
               return;
             }
             cliShellPath = cliCmds.spawnPath?.(backend) || null; // the shell found it ⇒ its PATH is the spawn's base

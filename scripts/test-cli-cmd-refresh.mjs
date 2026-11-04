@@ -191,7 +191,7 @@ else {
   fakeHome = scratchHome('cli-cmd-home', fs);
   // A fake CLI: records the path it was run AS, then holds the pty briefly.
   const PATHMARK = path.join(ROOT, 'ran-path.txt');
-  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\necho "$0" >> '${MARK}'\necho "$PATH" > '${PATHMARK}'\nexec sleep 15\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho "$0" >> '${MARK}'\necho "$PATH" > '${PATHMARK}'\nexec sleep 15\n`, { mode: 0o755 });
   // THE PERSON'S LOGIN SHELL (lane cli-shell-truth): a scratch sh script named by the server's SHELL — the REAL road is
   // driven (never this machine's own zsh under a suite). Its "rc" prints a banner and puts a marker dir first on PATH.
   const LOGIN_SH = path.join(ROOT, 'login-shell'), SHMARK = path.join(ROOT, 'shell-path-mark');
@@ -286,6 +286,24 @@ else {
     fs.rmSync(path.join(B, 'agy'));
     const s2 = await agyStatus();
     ok(s2.installed === false && s2.cmdPath === null, `agy removed: the next plain read says not installed (${JSON.stringify(s2)})`);
+  }
+  // ⑤ (lane cli-shell-truth round 4) THE PERSON'S SHELL RUNS ITS OWN WRAPPER — on the real spawn road: the login shell's
+  // rc now makes `claude` a FUNCTION; a person's Re-check re-asks, the shell's `claude --version` proves it, and the next
+  // create spawns THROUGH the shell (the shim) — dtach, the pty wrapper, the person's function, the program it runs
+  console.log('\n⑤ the same server: a FUNCTION wearing the name — the create runs through the person\'s shell');
+  {
+    try { fs.renameSync(path.join(A, 'claude.gone'), path.join(A, 'claude')); } catch { }
+    const RCFN = path.join(ROOT, 'rc-function.sh');
+    fs.writeFileSync(RCFN, `claude() { '${path.join(A, 'claude')}' "$@"; }\n`);
+    fs.writeFileSync(LOGIN_SH, `#!/bin/sh\necho "scratch rc banner"\nPATH="${SHMARK}:$PATH"; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; L="$1"; shift; exec /bin/sh -c ". '${RCFN}'; $L" "$@";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
+    try { await fetch(`http://127.0.0.1:${PORT}/api/backend-status?recheck=1`); } catch { }
+    const st = await (async () => { try { return (await (await fetch(`http://127.0.0.1:${PORT}/api/backend-status`)).json())?.claude || {}; } catch (e) { return { error: e.message }; } })();
+    ok(st.via === 'wrapper' && st.wrapper && st.wrapper.kind === 'function' && /^2\.1\.300/.test(st.version || ''), `a person's Re-check: the shell runs claude through a FUNCTION — proven by its --version (${st.version}), the census names the road (via ${st.via})`);
+    const before = marks().length;
+    const r6 = await create();
+    const ran = await until(() => marks().length > before, 10000);
+    ok(r6?.type === 'created' && ran && marks()[marks().length - 1] === path.join(A, 'claude'), `the create spawns THROUGH the person's shell: dtach ⇒ the pty wrapper ⇒ the shim ⇒ the function ⇒ ${path.join(A, 'claude')} ran (${r6?.type}; ran=${ran})`);
+    ok(journal.split('\n').some((l) => /\[cli-cmd\] claude: .*runs 'claude' through a function — proven/.test(l)), 'ONE journal line says the shell runs it through a function, proven');
   }
   try { ws.close(); } catch { }
   done();

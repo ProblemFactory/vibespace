@@ -125,7 +125,7 @@ export const ROWS = [
   ['src/server/channel-api-cards.js', 'own-tree', 2, null, DATA],
   ['src/server/channel-api.js', 'own-tree', 3, null, DATA],
   ['src/server/channels-wiring.js', 'own-tree', 3, null, DATA],
-  ['src/server/cli-cmd.js', 'own-tree', 4, null, CLI], // + `present` (lane cli-shell-truth r3: a dangling alias target — missing, or there but not executable)
+  ['src/server/cli-cmd.js', 'own-tree', 3, null, CLI],
   ['src/server/cli-env.js', 'own-tree', 4, null, PROC],
   ['src/server/cluster-presets.js', 'own-tree', 7, null, DATA],
   ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
