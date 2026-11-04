@@ -264,6 +264,8 @@ console.log('— ⑦ the stamp outlives a restart');
   ok('…so a 30-minute-old stamp is WARM, 30 min ago, after the restart (the hold and the colour read it — test-pool-auto)', w.warm === true && w.agoSec === 1800, JSON.stringify(w));
   ok('…and a meta with none restores none (the engine then calls the conversation UNKNOWN: no colour, no hold — never the attach preamble)', sB && sB._lastRequestAt === undefined, String(sB && sB._lastRequestAt));
   const sR = active.get(idReset);
+  ok('⑪ (round 2, C) a conversation the REAL boot-restore brings back is never born here (`_bornHere` unset on every restored session) — so a stamp-less one reads `unseen`, never «no request yet» (the engine leg: test-pool-auto CW6)',
+    [sS, sB, active.get(idReset)].every((x) => x && x._bornHere !== true), JSON.stringify([sS, sB, active.get(idReset)].map((x) => x && x._bornHere)));
   ok('⑪ THE PIN (lane cache-warmth-compact): what the last record SAID (its TTL, read / created / cold) and a compaction\'s reset still standing are read back — the ONE spelling (sessionFromMeta); a meta with neither restores neither (RED on 749aa7bf9)',
     sR && JSON.stringify(sR._cacheFact) === JSON.stringify(factW) && sR._compactedAt === T0 - 2 * 60e3 && sS && sS._cacheFact === null && sS._compactedAt === null, JSON.stringify(sR && [sR._cacheFact, sR._compactedAt, sS && sS._cacheFact, sS && sS._compactedAt]));
   ok('G3 (e) THE PIN (round 3): the member that served the last request is read back with it — a restart does not forget where the cache lives (a moved link reads lost: test-pool-auto)', sS && sS._lastRequestMember === 'sub-member-a' && sB && sB._lastRequestMember === null, JSON.stringify([sS && sS._lastRequestMember, sB && sB._lastRequestMember]));
@@ -315,12 +317,16 @@ if (HAVE) {
     say(wInf) === 'Cache: about 50 min left · last request 18:16' && say(warmthOf({ ...rec, lastRequestAt: S - 2 * 3600e3 }, clk)) === 'Cache expired · last request 18:16', say(wInf));
   ok('⑪ THE PIN (en): the reasons say themselves — «Cache reset — the conversation was compacted», «Cache: unknown — no request yet»; an unknown without one still says nothing',
     say(wReset) === 'Cache reset — the conversation was compacted' && say(wNone) === 'Cache: unknown — no request yet' && say(warmthOf(null, clk)) === '', [say(wReset), say(wNone)].join(' | '));
+  const wUnseen = warmthOf({ lastRequestAt: null, cacheTtlSec: 3600, unknown: 'unseen' }, clk);
+  ok('⑪ THE PIN (round 2, C — words that are true): a restored / resumed conversation with no stamp is `unseen` — «Cache: unknown — the time of its last request is not known», never «no request yet»; zh «缓存：未知 — 不知道上次请求的时间», ja «キャッシュ: 不明 — 前回のリクエストの時刻が分かりません» (RED on a03e496e6)',
+    wUnseen.tier === 'unknown' && wUnseen.unknown === 'unseen' && say(wUnseen) === 'Cache: unknown — the time of its last request is not known' && say(wUnseen, tr(zh)) === '缓存：未知 — 不知道上次请求的时间' && say(wUnseen, tr(ja)) === 'キャッシュ: 不明 — 前回のリクエストの時刻が分かりません',
+    [say(wUnseen), say(wUnseen, tr(zh)), say(wUnseen, tr(ja))].join(' | '));
   ok('⑪ zh: «缓存还剩约 50 分钟 — 按上次请求的1 小时缓存推算（18:16 读取 42k tokens）», «缓存已重置 — 对话已压缩»',
     say(wRead, tr(zh)) === '缓存还剩约 50 分钟 — 按上次请求的1 小时缓存推算（18:16 读取 42k tokens）' && say(wReset, tr(zh)) === '缓存已重置 — 对话已压缩', [say(wRead, tr(zh)), say(wReset, tr(zh))].join(' | '));
   ok('⑪ ja: «キャッシュ残り約 50 分 — 前回リクエストの1 時間キャッシュから推定（18:16 に 42k トークン読み込み）», «キャッシュ: 不明 — まだリクエストなし»',
     say(wRead, tr(ja)) === 'キャッシュ残り約 50 分 — 前回リクエストの1 時間キャッシュから推定（18:16 に 42k トークン読み込み）' && say(wNone, tr(ja)) === 'キャッシュ: 不明 — まだリクエストなし', [say(wRead, tr(ja)), say(wNone, tr(ja))].join(' | '));
   const keysA1 = ['Cache: about {n} min left — projected from the {cache} of the last request (read {k} tokens at {time})', 'Cache: about {n} min left — projected from the {cache} of the last request (wrote {k} tokens at {time})',
-    'Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})', '1-hour cache', '5-minute cache', 'Cache reset — the conversation was compacted', 'Cache: unknown — no request yet'];
+    'Cache: about {n} min left — projected from the {cache} of the last request (the earlier cache was not reused · wrote {k} tokens at {time})', '1-hour cache', '5-minute cache', 'Cache reset — the conversation was compacted', 'Cache: unknown — no request yet', 'Cache: unknown — the time of its last request is not known'];
   const sameP = (k, v) => JSON.stringify((k.match(/\{\w+\}/g) || []).sort()) === JSON.stringify((String(v).match(/\{\w+\}/g) || []).sort());
   const badA1 = keysA1.filter((k) => ![zh, ja].every((d) => typeof d[k] === 'string' && sameP(k, d[k])));
   const unusedA1 = keysA1.filter((k) => !code('src/cache-warmth.js').includes(`t('${k}'`));
@@ -328,18 +334,20 @@ if (HAVE) {
   ok('⑪ tokensText: 950 · 42k · 1.2M', CW.tokensText && CW.tokensText(950) === '950' && CW.tokensText(42123) === '42k' && CW.tokensText(1_234_000) === '1.2M');
   // the session list
   const R = require(path.join(REPO, 'src/routes/sessions.js'));
-  const live = new Map([['c-rec', {}], ['c-reset', {}], ['c-none', {}], ['c-codex', {}]]);
+  const live = new Map([['c-rec', {}], ['c-reset', {}], ['c-none', {}], ['c-codex', {}], ['c-unseen', {}]]);
   const byS = new Map([...live].map(([k, v]) => [v, k]));
   const dA = R.warmthDiff(live, (s) => ({
     'c-rec': { lastRequestAt: 900, cacheTtlSec: 300, ttlSource: 'record', lost: false, inFlight: false, turnStartedAt: null, cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 9000, unknownWhy: null },
     'c-reset': { lastRequestAt: null, cacheTtlSec: 3600, ttlSource: 'inferred', lost: false, inFlight: false, turnStartedAt: null, cacheObserved: null, unknownWhy: 'compacted' },
     'c-none': { lastRequestAt: null, cacheTtlSec: null, ttlSource: null, lost: false, inFlight: false, turnStartedAt: null, unknownWhy: 'no-request' },
-    'c-codex': { lastRequestAt: 950, cacheTtlSec: null, lost: false, unknownWhy: null } }[byS.get(s)]), 1000);
+    'c-codex': { lastRequestAt: 950, cacheTtlSec: null, lost: false, unknownWhy: null },
+    'c-unseen': { lastRequestAt: null, cacheTtlSec: 3600, ttlSource: 'inferred', lost: false, inFlight: false, turnStartedAt: null, unknownWhy: 'unseen' } }[byS.get(s)]), 1000);
   ok('⑪ THE PIN — warmthDiff carries the provenance (ttlSource + cacheObserved + its tokens) beside the five facts (RED on 749aa7bf9: dropped)',
     JSON.stringify(dA.warmth['c-rec']) === JSON.stringify({ lastRequestAt: 900, cacheTtlSec: 300, lost: false, inFlight: false, turnStartedAt: null, ttlSource: 'record', cacheObserved: 'cold', cacheReadTokens: 0, cacheCreatedTokens: 9000 }), JSON.stringify(dA.warmth['c-rec']));
   ok('⑪ THE PIN — a REASONED unknown is sent with no instant (a compaction\'s reset; no request yet) — the client still draws nothing; an unknown without a reason (codex: no TTL) is left out as before (RED on 749aa7bf9)',
     JSON.stringify(dA.warmth['c-reset']) === JSON.stringify({ lastRequestAt: null, cacheTtlSec: 3600, lost: false, inFlight: false, turnStartedAt: null, unknown: 'compacted', ttlSource: 'inferred' })
-    && dA.warmth['c-none'] && dA.warmth['c-none'].unknown === 'no-request' && dA.warmth['c-none'].lastRequestAt === null && !('c-codex' in dA.warmth) && warmthOf(dA.warmth['c-reset'], { serverNow: 1000, receivedAt: 0, now: 0 }).tier === 'unknown', JSON.stringify(dA.warmth));
+    && dA.warmth['c-none'] && dA.warmth['c-none'].unknown === 'no-request' && dA.warmth['c-none'].lastRequestAt === null && !('c-codex' in dA.warmth)
+    && dA.warmth['c-unseen'] && dA.warmth['c-unseen'].unknown === 'unseen' && dA.warmth['c-unseen'].lastRequestAt === null && warmthOf(dA.warmth['c-reset'], { serverNow: 1000, receivedAt: 0, now: 0 }).tier === 'unknown', JSON.stringify(dA.warmth));
   // the chrome: the reasoned words live only where words already live
   const wcA1 = code('src/lib/warmth-chrome.js');
   ok('⑪ the chrome: the reasoned unknown\'s words go through wordsOf alone — the bar\'s and a tab label\'s hover — while every ring, square, count and list row still asks isKnown (nothing drawn)',

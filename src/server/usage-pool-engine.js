@@ -4026,10 +4026,12 @@ function resetCreditsLeft(session, key) {
  *  THE CLI'S OWN RECORD IS NO REQUEST (round 2): a `<synthetic>`-model record (an API error, a limit or credit refusal,
  *  «Not logged in» — scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl) or one whose usage counts nothing
  *  describes no API request — message-manager.js syntheticUsage's rule, gated HERE (the ONE writer), never at a feed.
- *  THE COMPACTION'S OWN SUMMARY REQUEST IS NO REQUEST OF THE CONVERSATION (lane cache-warmth-compact): while the parse
- *  holds the compaction in flight (`_streamingKind === 'compacting'`, §2.11) a usage record describes the summary ask —
- *  the OLD prefix + the summary prompt, never the next turn's prefix — so it never stamps (the real captures stream none:
- *  the summary request's only trace on our wire is a rate_limit_event; the gate is the rule, said once, HERE).
+ *  NO GATE ON AN INTENT (lane cache-warmth-compact round 2, the acceptance's B): a record is excluded only by a mark ON
+ *  the record (the model, the usage, the thread, its lateness) — never by a client-side flag. `_streamingKind ===
+ *  'compacting'` is set at the SEND of a /compact (user-input), mid-turn too, and held to that turn's end: round 1 gated
+ *  on it and froze the stamp through 26 real cache-reading requests. The compaction's own summary request streams no
+ *  record (the real captures: its only trace on our wire is a rate_limit_event); if a CLI ever streams one, the boundary
+ *  that follows it resets the fact anyway (noteCompacted).
  *  THE RECORD'S CACHE FACTS (amendment 1 — observe the cache, don't infer it): a MAIN-THREAD record also stamps what it
  *  says about the prompt cache (`_cacheFact`: the TTL it wrote, read / created / cold, the tokens — account-pool-auto
  *  recordCacheFact); a sub-agent's request has its own prefix and says nothing about the conversation's. That record
@@ -4039,7 +4041,6 @@ function noteModelRequest(session, rec, now = Date.now()) {
   if (rec.message.model === '<synthetic>') return;
   const u = rec.message.usage;
   if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
-  if (session._streamingKind === 'compacting') return; // the compaction's own summary request (§2.11) — its cache is the old prefix
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
   session._lastRequestMember = linkMemberOf(session); // WHERE the cache now lives — the member that served it (round 4)
@@ -4050,11 +4051,15 @@ function noteModelRequest(session, rec, now = Date.now()) {
 /** THE COMPACTION'S END (lane cache-warmth-compact, 2026-11-03 — userW inc-mw1aanqt-994q, B-9769) — the ONE writer of
  *  `_compactedAt`, called by BOTH feeds for every record (the parse beside noteModelRequest, the device stream's
  *  claudeSideEffects), gated HERE on the record that ends a compaction: `system/compact_boundary` — the CLI writes it once
- *  the summary has REPLACED the conversation (a failed or blocked compaction writes none and replaces nothing). From
- *  then until the new context's first request the conversation's prompt cache is UNKNOWN (cacheFactsOf): no band, no
- *  warm hold, no first-stop defer — a free move window, so the pool is asked at once. The EARLY signal of amendment 1,
- *  corrected by the next record (noteModelRequest clears it and states what that request observed). Persisted with the
- *  stamp at once (one write per compaction), so a restart keeps «reset». A backlog's boundary proves nothing about now. */
+ *  the summary has REPLACED the conversation (a failed or blocked compaction writes none and replaces nothing). It resets
+ *  the FACT of the old context, never a request: from the boundary until the NEXT REQUEST-OUT (the summary's user record,
+ *  an auto-compaction's continuation — turn-state noteRequestSent, like any request-out) the prompt cache is UNKNOWN
+ *  (cacheFactsOf): no band, no warm hold, no first-stop defer — the free move WINDOW, and the pool is asked at once (a
+ *  throttled ask leaves the window open for the next pass). Once a request has gone out after the boundary the
+ *  conversation is IN FLIGHT on the member that serves it and held like any request in flight (round 2, the acceptance's
+ *  A: round 1 hid that request — the pool moved a conversation mid-write and its reply credited the wrong member); its
+ *  reply ends the reset and states what it observed. Persisted with the stamp at once (one write per compaction), so a
+ *  restart keeps «reset». A backlog's boundary proves nothing about now. */
 function noteCompacted(session, rec, now = Date.now()) {
   if (!session || !rec || rec.type !== 'system' || rec.subtype !== 'compact_boundary' || rec.parent_tool_use_id || rec.isSidechain) return;
   if (recordIsLate(session, rec)) return;
@@ -4134,10 +4139,15 @@ function flushRequestStamps() {
  *    conversation that had a cache wrote it anew: the previous prefix was not reused) + its read / created tokens. Warm
  *    in between is a PROJECTION from that record and says so (the hover). `lost` stays the EARLY signal (a move is known
  *    before the next request); the next record corrects it (it re-stamps where the cache now lives and says read/cold).
- *  · A COMPACTION'S END (`_compactedAt`, noteCompacted — the other early signal) ⇒ UNKNOWN until the new context's
- *    first request: no stamp, not lost, nothing in flight (the flight instant is the old context's), `unknownWhy:
- *    'compacted'`. A chat conversation whose stream named no request yet is `unknownWhy: 'no-request'`. A terminal-mode
- *    session is unchanged: no stream, no record, no compaction it could tell — the pty stamp and the inferred TTL. */
+ *  · A COMPACTION'S END (`_compactedAt`, noteCompacted — the other early signal) ⇒ UNKNOWN (`unknownWhy:
+ *    'compacted'`: no stamp, not lost) for the WINDOW until the next request-out — a flight instant older than the
+ *    boundary is the old context's and counts for nothing; one AT OR AFTER it is the new context's first request: in
+ *    flight, warm by the turn law, held (round 2). The new context's first record ends the reset.
+ *  · THE REASON IS TRUE (round 2, the acceptance's C): a streamed chat conversation with no stamp is `'no-request'`
+ *    only when this hub STARTED it (`_bornHere`: no resume, fork or keeper — nothing before its first record);
+ *    restored, resumed or forked with no stamp it is `'unseen'` (the time of its last request is not known). A
+ *    terminal-mode session is unchanged: no stream, no record, no compaction it could tell — the pty stamp and the
+ *    inferred TTL. */
 function cacheFactsOf(session, now = Date.now()) {
   const s = session || {};
   const harness = s.backend || 'claude';
@@ -4149,7 +4159,14 @@ function cacheFactsOf(session, now = Date.now()) {
   const recordTtl = fact && Number(fact.ttlSec) > 0 ? Number(fact.ttlSec) : null;
   const cacheTtlSec = recordTtl || inferredTtl;
   const ttlSource = recordTtl ? 'record' : inferredTtl ? 'inferred' : null;
-  if (Number(s._compactedAt) > 0) return { lastRequestAt: null, cacheTtlSec, ttlSource, lost: false, inFlight: false, turnStartedAt: null, cacheObserved: null, cacheReadTokens: null, cacheCreatedTokens: null, unknownWhy: 'compacted' };
+  // a request OUT (never a turn paused on the owner) and the instant it went out — warm for one TTL from it
+  const inFlight = requestInFlight({ isStreaming: s._isStreaming, turnState: s._turnState });
+  const turnStartedAt = inFlight ? (Number(s._turnStartedAt) || null) : null;
+  const compactedAt = Number(s._compactedAt) || 0;
+  // the compaction's window: nothing has gone out since the boundary (round 2 — a request sent after it is in flight)
+  if (compactedAt && !(turnStartedAt >= compactedAt)) return { lastRequestAt: null, cacheTtlSec, ttlSource, lost: false, inFlight: false, turnStartedAt: null, cacheObserved: null, cacheReadTokens: null, cacheCreatedTokens: null, unknownWhy: 'compacted' };
+  // …and the new context's first request is OUT: in flight on the member that serves it (no stamp of the new context yet)
+  if (compactedAt) return { lastRequestAt: null, cacheTtlSec, ttlSource, lost: false, inFlight: true, turnStartedAt, cacheObserved: null, cacheReadTokens: null, cacheCreatedTokens: null, unknownWhy: null };
   // a chat session of a harness that states a TTL names each request in its stream (noteModelRequest): no stamp there ⇒
   // UNKNOWN (no colour, no hold) — a pty byte (the attach preamble after a restart) is never a request. The pty stamp
   // stands in only where no stream names one (a terminal-mode session).
@@ -4159,13 +4176,10 @@ function cacheFactsOf(session, now = Date.now()) {
   const servedBy = (Number(s._lastRequestAt) && s._lastRequestMember) || null;
   const linkNow = servedBy ? linkMemberOf(s) : null;
   const lost = !!(servedBy && linkNow && linkNow !== servedBy);
-  // a request OUT (never a turn paused on the owner) and the instant it went out — warm for one TTL from it
-  const inFlight = requestInFlight({ isStreaming: s._isStreaming, turnState: s._turnState });
-  const turnStartedAt = inFlight ? (Number(s._turnStartedAt) || null) : null;
   const tokens = (n) => (Number.isFinite(Number(n)) && Number(n) >= 0 ? Number(n) : null);
   return { lastRequestAt, cacheTtlSec, ttlSource, lost, inFlight, turnStartedAt,
     cacheObserved: (fact && fact.observed) || null, cacheReadTokens: fact ? tokens(fact.read) : null, cacheCreatedTokens: fact ? tokens(fact.created) : null,
-    unknownWhy: streamed && !lastRequestAt && !(inFlight && turnStartedAt) ? 'no-request' : null };
+    unknownWhy: streamed && !lastRequestAt && !(inFlight && turnStartedAt) ? (s._bornHere === true ? 'no-request' : 'unseen') : null };
 }
 /** Warm = a request is in flight OR its prompt cache has not gone cold (warmCache over
  *  cacheFactsOf — the SAME facts the pool's warm-cache hold reads); `inTurn` beside it. */

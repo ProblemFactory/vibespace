@@ -39,7 +39,8 @@
 //   ⑩ off and on, live: off ⇒ zero marks, «+N» exactly «+N», ZERO warmth mutations over two ticks, a failed poll draws
 //      nothing; the window list as before; on ⇒ the marks return with no reload
 //   ⑬ (lane cache-warmth-compact, amendment 1) the REAL road: a stub /compact (the real capture's order) ⇒ the hub sends a
-//      REASONED unknown (`compacted`), a never-asked conversation `no-request`, a '#cache' response its provenance — nothing
+//      REASONED unknown (`compacted`), a never-asked conversation `no-request`, a resumed one `unseen` (r2: never «no request
+//      yet» on a conversation with history), a '#cache' response its provenance — nothing
 //      drawn for the reasoned unknowns (no band, tier, ring or count), the bar's hover says why, en / zh / ja; the provenance
 //      sentence for the stated cache; the next request after the compaction brings the band back
 //   ⑪ scale and cost: passMs over 3 ticks in the heaviest state (+ the ×150 extrapolation, said as one); NO timer / rAF
@@ -851,10 +852,12 @@ await step('⑬ the reasoned unknown and the provenance, through the REAL road (
   // three conversations of their own (never in SIDS: the earlier legs' geometry and the phone's census stay as they were)
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const frames = [];
   await new Promise((r) => ws.on('open', r)); ws.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch { } });
-  const mk = async (tag, name) => { ws.send(J({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: tag, sessionName: name })); for (let i = 0; i < 100; i++) { const f = frames.find((m) => m?.type === 'created' && m.reqId === tag); if (f) return f.sessionId; await sleep(100); } return null; };
+  const mk = async (tag, name, extra = {}) => { ws.send(J({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: tag, sessionName: name, ...extra })); for (let i = 0; i < 100; i++) { const f = frames.find((m) => m?.type === 'created' && m.reqId === tag); if (f) return f.sessionId; await sleep(100); } return null; };
   const say = async (sid, text) => { ws.send(J({ type: 'chat-input', sessionId: sid, text })); await sleep(700); };
   const X = await mk('cw-x', 'compacted 15'), Y = await mk('cw-y', 'no request 16'), Z = await mk('cw-z', 'cache facts 17');
-  check('⑬ setup: three more stub conversations over the hub\'s ws', !!(X && Y && Z), [X, Y, Z]);
+  // round 2 (C): a RESUMED conversation (history before this hub saw it) that runs no turn here
+  const R = await mk('cw-r', 'resumed 18', { resume: true, resumeId: 'cwarm-history-18', ignoreNoConvo: true });
+  check('⑬ setup: four more stub conversations over the hub\'s ws (one of them a resume)', !!(X && Y && Z && R), [X, Y, Z, R]);
   await sleep(300);
   await say(X, 'Pull this week\'s numbers together'); await say(Z, 'Pull this week\'s numbers together #cache');
   await say(X, '/compact'); // the stub answers with the real capture's compaction (status compacting → success → compact_boundary → the summary's user record → «Compacted» → result)
@@ -862,27 +865,29 @@ await step('⑬ the reasoned unknown and the provenance, through the REAL road (
   const barS = (sid) => `(() => { const w = ${winS(sid)}; if (!w) return null; const bar = w.titleBar, cs = getComputedStyle(bar, '::before'); const width = cs.content === 'none' || cs.display === 'none' ? 0 : (parseFloat(cs.width) || 0);
     const ring = document.querySelector('#taskbar-items .taskbar-item[data-win-id="' + w.id + '"] .warmth-ring');
     return { tier: bar.getAttribute('data-warmth-tier'), band: width > 0.5, title: bar.getAttribute('title'), tip: bar.hasAttribute('data-warmth-tip'), ring: !!ring }; })()`;
-  const attachS = async () => { for (const [sid, name] of [[X, 'compacted 15'], [Y, 'no request 16'], [Z, 'cache facts 17']]) if (!(await evalJs(`!!${winS(sid)}`))) await evalJs(`(app.attachSession(${J(sid)}, ${J(name)}, ${J(CWD)}, { mode: 'chat', backend: 'claude' }), 1)`);
-    await waitFor(`${J([X, Y, Z])}.every((s) => !![...app.wm.windows.values()].find((w) => app.sessions.get(w.id)?.sessionId === s))`, 20000); await sleep(300); };
+  const attachS = async () => { for (const [sid, name] of [[X, 'compacted 15'], [Y, 'no request 16'], [Z, 'cache facts 17'], [R, 'resumed 18']]) if (!(await evalJs(`!!${winS(sid)}`))) await evalJs(`(app.attachSession(${J(sid)}, ${J(name)}, ${J(CWD)}, { mode: 'chat', backend: 'claude' }), 1)`);
+    await waitFor(`${J([X, Y, Z, R])}.every((s) => !![...app.wm.windows.values()].find((w) => app.sessions.get(w.id)?.sessionId === s))`, 20000); await sleep(300); };
   await attachS(); await nextTick(2);
   const raw = RW.lastRaw && RW.lastRaw.warmth;
   check('⑬ THE ROAD: the hub\'s own answer sends the compacted conversation as a REASONED unknown (`unknown: compacted`, no instant), the never-asked one as `no-request`, and the cache-stating one with its provenance (`ttlSource: record`, created 17000) — RED on 749aa7bf9',
     !!raw && raw[X] && raw[X].unknown === 'compacted' && raw[X].lastRequestAt === null && raw[Y] && raw[Y].unknown === 'no-request' && raw[Z] && raw[Z].ttlSource === 'record' && raw[Z].cacheObserved === 'created' && raw[Z].cacheCreatedTokens === 17000,
     raw && { X: raw[X], Y: raw[Y], Z: raw[Z] });
-  const e = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)) };
+  const e = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)), R: await evalJs(barS(R)) };
   check('⑬ THE PIN (en): the reasoned unknowns draw NOTHING — no band, no tier, no ring — and the bar\'s hover says why: «Cache reset — the conversation was compacted», «Cache: unknown — no request yet»',
     e.X && !e.X.band && !e.X.tier && !e.X.ring && e.X.title === 'Cache reset — the conversation was compacted' && e.X.tip && e.Y && !e.Y.band && !e.Y.tier && !e.Y.ring && e.Y.title === 'Cache: unknown — no request yet', e);
   check('⑬ THE PIN (en): a response that stated its cache is a projection that says so — «Cache: about 60 min left — projected from the 1-hour cache of the last request (wrote 17k tokens at HH:MM)», the band drawn',
     e.Z && e.Z.band && e.Z.tier === 'fresh' && /^Cache: about (59|60) min left — projected from the 1-hour cache of the last request \(wrote 17k tokens at \d\d:\d\d\)$/.test(e.Z.title || ''), e.Z);
+  check('⑬ THE PIN (round 2, C — words that are true): a RESUMED conversation that ran no turn here is sent `unseen` and says «Cache: unknown — the time of its last request is not known» — never «no request yet» (only the conversation this hub started says that); nothing drawn',
+    !!raw && raw[R] && raw[R].unknown === 'unseen' && e.R && !e.R.band && !e.R.tier && !e.R.ring && e.R.title === 'Cache: unknown — the time of its last request is not known' && e.Y && e.Y.title === 'Cache: unknown — no request yet', { raw: raw && raw[R], R: e.R });
   const chip = await evalJs(`(() => { const c = document.getElementById('taskbar-warmth'); return c ? c.textContent.trim() : null; })()`);
   const rowsS = await evalJs(`(() => { const ids = ${J([X, Y])}.map((s) => { const w = ${'[...app.wm.windows.values()]'}.find((x) => app.sessions.get(x.id)?.sessionId === s); return w && w.id; }); return ids.filter(Boolean); })()`);
   await shot('A-desktop-13-reasoned-unknown-dark');
-  for (const [lang, wantX, wantY, reZ] of [['zh', '缓存已重置 — 对话已压缩', '缓存：未知 — 还没有请求', /^缓存还剩约 (59|60) 分钟 — 按上次请求的1 小时缓存推算（\d\d:\d\d 写入 17k tokens）$/],
-    ['ja', 'キャッシュはリセット — 会話が圧縮されました', 'キャッシュ: 不明 — まだリクエストなし', /^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/]]) {
+  for (const [lang, wantX, wantY, reZ, wantR] of [['zh', '缓存已重置 — 对话已压缩', '缓存：未知 — 还没有请求', /^缓存还剩约 (59|60) 分钟 — 按上次请求的1 小时缓存推算（\d\d:\d\d 写入 17k tokens）$/, '缓存：未知 — 不知道上次请求的时间'],
+    ['ja', 'キャッシュはリセット — 会話が圧縮されました', 'キャッシュ: 不明 — まだリクエストなし', /^キャッシュ残り約 (59|60) 分 — 前回リクエストの1 時間キャッシュから推定（\d\d:\d\d に 17k トークン書き込み）$/, 'キャッシュ: 不明 — 前回のリクエストの時刻が分かりません']]) {
     const { identifier } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` });
     await load(1280, 800); await attachS(); await nextTick(1);
-    const b = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)) };
-    check(`⑬ (${lang}, after a reload): «${wantX}», «${wantY}» — nothing drawn; the provenance sentence translated`, b.X && !b.X.band && b.X.title === wantX && b.Y && !b.Y.band && b.Y.title === wantY && b.Z && b.Z.band && reZ.test(b.Z.title || ''), b);
+    const b = { X: await evalJs(barS(X)), Y: await evalJs(barS(Y)), Z: await evalJs(barS(Z)), R: await evalJs(barS(R)) };
+    check(`⑬ (${lang}, after a reload): «${wantX}», «${wantY}», the resumed one «${wantR}» — nothing drawn; the provenance sentence translated`, b.X && !b.X.band && b.X.title === wantX && b.Y && !b.Y.band && b.Y.title === wantY && b.Z && b.Z.band && reZ.test(b.Z.title || '') && b.R && !b.R.band && b.R.title === wantR, b);
     if (lang === 'ja') {
       // the new context's first request ends the reset — through the same real road
       await say(X, 'Go on from the summary #cache'); await nextTick(2);

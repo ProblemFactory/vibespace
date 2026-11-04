@@ -11766,6 +11766,7 @@ export default {
   "5-minute cache": "5 分キャッシュ",
   "Cache reset — the conversation was compacted": "キャッシュはリセット — 会話が圧縮されました",
   "Cache: unknown — no request yet": "キャッシュ: 不明 — まだリクエストなし",
+  "Cache: unknown \u2014 the time of its last request is not known": "キャッシュ: 不明 — 前回のリクエストの時刻が分かりません",
   // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
   "Going cold {n}": "まもなく冷める {n}",
   "Late {n}": "後半 {n}",

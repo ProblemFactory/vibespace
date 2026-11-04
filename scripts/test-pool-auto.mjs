@@ -1089,8 +1089,8 @@ await (async () => {
     {
       const metasM = new Map();
       const metaM = { readSessionMeta: (k) => metasM.get(k) || {}, writeSessionMeta: (k, m) => { metasM.set(k, m); } };
-      const shapeM = (kind, extra) => {
-        const x = world(engMod, { burnA: 0, extra, metaStore: metaM });
+      const shapeM = (kind, extra, mod = engMod) => {
+        const x = world(mod, { burnA: 0, extra, metaStore: metaM });
         if (!x) return null;
         const nowS = Math.floor(Date.now() / 1000);
         const cf = (id) => path.join(x.am.dataDir, 'usage-cache', id + '.json');
@@ -1161,14 +1161,15 @@ await (async () => {
         const g = (sid) => wC.sessions.get(sid);
         for (const sid of ['m2-compact', 'm2-control']) { idle(g(sid)); note(wC, g(sid), recM('w-' + sid, { read: 250000, h1: 1200 }), Date.now() - 2 * 60e3); }
         const sC = g('m2-compact'), key = sC.sockName, stamp0 = sC._lastRequestAt;
-        // the compaction: in flight (the parse's §2.11 state), its own summary request's record (the OLD prefix), then its end
+        // the compaction: the client's /compact intent marked (`_streamingKind`), a usage record meanwhile (round 2, B: it STAMPS — the
+        // writer never gates on an intent flag), then the end
         sC._streamingKind = 'compacting'; sC._isStreaming = true; sC._turnState = 'running'; sC._turnStartedAt = Date.now() - 80e3;
         note(wC, sC, recM('summary', { read: 268000, h1: 2500 }), Date.now());
         const afterSummary = sC._lastRequestAt;
         sC._streamingKind = null;
         quietM(() => compactEnd(wC, sC, boundary(1), Date.now()));
         const fC = factsOf(wC.eng, sC, Date.now()), wcC = warmCache({ ...fC, nowMs: Date.now() });
-        ck('CW2 THE PIN — the compaction\'s own summary record (usage, while compacting) never stamps: the stamp stays the last real request\'s', afterSummary === stamp0, String(afterSummary - stamp0));
+        ck('CW2 (round 2, B) a usage record while the client\'s /compact intent is marked STAMPS like any record (no gate on an intent flag — RED on a03e496e6: frozen); the boundary after it still resets', afterSummary > stamp0, String(afterSummary - stamp0));
         ck('CW2 THE PIN — the compaction\'s END ⇒ UNKNOWN: no stamp, not lost, nothing in flight (the flight instant is the old context\'s), `unknownWhy: compacted`; warmCache answers unknown (RED on 749aa7bf9: warm, 2 min ago)',
           fC.unknownWhy === 'compacted' && fC.lastRequestAt === null && fC.lost === false && fC.inFlight === false && wcC.warm === false && wcC.unknown === true, JSON.stringify([fC, wcC]));
         ck('CW2 THE PIN — the session meta says RESET at once (compactedAt persisted with the stamp — a restart keeps it)', Number(metasM.get(key) && metasM.get(key).compactedAt) > 0, JSON.stringify(metasM.get(key)));
@@ -1194,8 +1195,10 @@ await (async () => {
         quietM(() => compactEnd(wC, sC, late, Date.now()));
         ck('CW2 a BACKLOG\'s boundary (stamped 3 h ago — a catch-up) resets nothing: still warm', !sC._compactedAt && warmCache({ ...factsOf(wC.eng, sC, Date.now()), nowMs: Date.now() }).warm === true, String(sC._compactedAt));
       }
-      // (CW3) THE SOFT BAND: a warm conversation MID-TURN (an auto-compaction inside a turn) is a free move at the compaction's end —
-      // no first-stop defer (nothing warm) — and the end ASKS the pool itself (noteCompacted kicks the pass: no tick needed)
+      // (CW3) THE SOFT BAND, THE WINDOW: a warm conversation MID-TURN whose compaction just ended and whose continuation has NOT
+      // gone out yet (its flight instant is the old context's) is a free move in the window — no first-stop defer (nothing
+      // warm) — and the end ASKS the pool itself (noteCompacted kicks the pass); once a request goes out after the boundary it
+      // is in flight and held (CW4, round 2)
       const wS = shapeM('soft', [['m3-auto', 0], ['m3-control', 0]]);
       if (wS) {
         const g = (sid) => wS.sessions.get(sid);
@@ -1205,12 +1208,155 @@ await (async () => {
           compactEnd(wS, g('m3-auto'), boundary(3), Date.now()); // the auto-compaction ends; the turn goes on
           await drain(); await drain();
         } finally { console.log = l0; console.warn = w0; }
-        ck('CW3 THE PIN — SOFT band: the compaction\'s end moves the mid-turn conversation AT ONCE (unknown: no warm-soft-defer), asked by the end itself — no pool tick ran (RED on 749aa7bf9: no writer, held to its first stop)',
+        ck('CW3 THE PIN — SOFT band, the WINDOW (the boundary, nothing sent since): the compaction\'s end moves the mid-turn conversation AT ONCE (unknown: no warm-soft-defer), asked by the end itself — no pool tick ran (RED on 749aa7bf9: no writer, held to its first stop)',
           wS.linkOf('m3-auto') === 'B' && !lS.some((l) => /defer m3-auto/.test(l)), wS.linkOf('m3-auto') + ' | ' + lS.filter((l) => /m3-|\[pool\]/.test(l)).join(' | ').slice(0, 500));
         const lS2 = []; console.log = (...a) => lS2.push(a.join(' ')); console.warn = (...a) => lS2.push(a.join(' '));
         try { wS.eng.maybePoolAutoSwitchForPool(wS.P); } finally { console.log = l0; console.warn = w0; }
         ck('CW3 control: the same warm mid-turn conversation with no compaction is deferred to its first stop (warm-soft-defer)',
           wS.linkOf('m3-control') === 'A' && lS2.concat(lS).some((l) => /^\[pool\] defer m3-control: soft-exhausted/.test(l)), wS.linkOf('m3-control') + ' | ' + lS2.filter((l) => /m3-control/.test(l)).join(' | ').slice(0, 300));
+      }
+      // ── ROUND 2 (the acceptance of a03e496e6) through the REAL parse (session-stdout) and the REAL typing path
+      // (createUserInputSender) over the real engine, on a clock moved back (the r5 L1 recipe) ──
+      const { createUserInputSender: mkSender } = require(path.resolve('src/server/user-input.js'));
+      const { createMessageManager: mkMM } = require(path.resolve('src/normalizers.js'));
+      const roadOf = (x) => {
+        const soDir = fs.mkdtempSync(path.join(scr, 'so-')), BUF = path.join(soDir, 'buffers'), META = path.join(soDir, 'meta');
+        fs.mkdirSync(BUF, { recursive: true }); fs.mkdirSync(META, { recursive: true });
+        const so = require(path.resolve('src/server/session-stdout.js')).create({
+          rootDir: soDir, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(soDir, 'nonexistent'),
+          CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), activeSessions: x.sessions, engine: x.eng,
+          checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { },
+          daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }),
+          getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor() { } }),
+        });
+        const ad = new ClaudeCodeAdapter({ buffersDir: BUF });
+        const send = mkSender({ activeSessions: x.sessions, adapterRegistry: { get: () => ad }, BUFFERS_DIR: BUF, broadcastToSession() { }, feedLive() { },
+          autoResume: null, reattachLocalPty() { }, ptyQuietSince: () => false, writeSessionInput() { }, log() { }, framesDir: path.join(soDir, 'frames') }).send;
+        const pty = (sid) => { const s = x.sessions.get(sid); delete s._lastRequestAt; delete s._cacheFact; s._turnStartedAt = null; s._isStreaming = false; s._turnState = 'idle'; s._normalizer = mkMM('claude', sid);
+          const p = { data: null, exit: null, onData(cb) { p.data = cb; }, onExit(cb) { p.exit = cb; } }; so.setupSessionPty(s, sid, p); return (r) => p.data(JSON.stringify({ parent_tool_use_id: null, session_id: 'cid-' + sid, ...r }) + '\n'); };
+        return { send, pty };
+      };
+      const realNowR = Date.now;
+      const onClock = async (fn) => { // the moved-back clock + a console capture; the kicked passes drained under it
+        const lines = [], o0 = console.log, o1 = console.warn; let skew = 0;
+        console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
+        Date.now = () => realNowR() + skew;
+        try { fn((ms) => { skew = ms; }); } finally { Date.now = realNowR; }
+        try { await drain(); await drain(); } finally { console.log = o0; console.warn = o1; }
+        return lines;
+      };
+      const st = (state, n) => ({ type: 'system', subtype: 'session_state_changed', state, uuid: 'u-st-' + state + n });
+      const ask = (text, n) => ({ type: 'user', message: { role: 'user', content: text }, uuid: 'u-q' + n });
+      const reply = (n, usage) => ({ type: 'assistant', message: { id: 'msg_cw' + n, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 40, ...usage } }, uuid: 'u-a' + n });
+      const toolUse = (n, usage) => ({ type: 'assistant', message: { id: 'msg_tu' + n, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: 'tu-' + n, name: 'Bash', input: { command: 'make check' } }], usage: { input_tokens: 3, output_tokens: 9, ...usage } }, uuid: 'u-tu' + n });
+      const toolRes = (n) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-' + n, content: 'ok' }] }, uuid: 'u-tr' + n });
+      const h1w = (k, read = 0) => ({ cache_read_input_tokens: read, cache_creation_input_tokens: k, cache_creation: { ephemeral_1h_input_tokens: k, ephemeral_5m_input_tokens: 0 } });
+      const m5w = (k, read = 0) => ({ cache_read_input_tokens: read, cache_creation_input_tokens: k, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: k } });
+      const compaction = (feed, n, trigger) => { // the real capture's order, the summary's user record last
+        feed({ type: 'system', subtype: 'status', status: 'compacting', uuid: 'u-c1' + n });
+        feed({ type: 'system', subtype: 'status', status: null, compact_result: 'success', uuid: 'u-c2' + n });
+        feed({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger, pre_tokens: 270743, post_tokens: 16740, duration_ms: 78444 }, uuid: 'u-c3' + n });
+      };
+      const summary = (n) => ask('This session is being continued from a previous conversation that ran out of context.', 'sum' + n);
+      // (CW4) A — THE NEW CONTEXT'S FIRST REQUEST IS A REQUEST: an AUTO compaction inside a turn (the acceptance's probe:
+      // a turn, its 1-hour record, a tool result, the compaction, the summary's user record, then 60 s with the continuation
+      // in flight) ⇒ in flight on A, HELD («a request in flight since 61s»), its reply stamps A, warm on A. A manual /compact
+      // at idle sends nothing after it ⇒ the window stays open and the next pass moves it.
+      const cw4 = async (mod) => {
+        const x = shapeM('edf', [['cw4-auto', 0], ['cw4-manual', 0]], mod);
+        if (!x) return null;
+        const road = roadOf(x), fA = road.pty('cw4-auto'), fM = road.pty('cw4-manual');
+        const lines = await onClock((at) => {
+          at(-5 * 60e3); road.send('cw4-auto', 'refactor the parser', { origin: 'ws' }); fA(st('running', 'a1')); fA(ask('refactor the parser', 'a1'));
+          at(-4.5 * 60e3); fA(toolUse('a1', h1w(900, 250000)));
+          at(-3 * 60e3); fA(toolRes('a1'));
+          at(-62e3); compaction(fA, 'a', 'auto');
+          at(-61e3); fA(summary('a'));                                     // the new context's first request goes out
+          at(-3 * 60e3); road.send('cw4-manual', 'check the logs', { origin: 'ws' }); fM(st('running', 'm1')); fM(ask('check the logs', 'm1'));
+          at(-2 * 60e3); fM(reply('m1', h1w(800, 120000))); fM({ type: 'result', subtype: 'success', uuid: 'u-r-m1' }); fM(st('idle', 'm1'));
+          at(-90e3); road.send('cw4-manual', '/compact', { origin: 'ws' }); fM(st('running', 'm2'));
+          at(-80e3); compaction(fM, 'm', 'manual'); fM(summary('m')); fM(ask('<local-command-stdout>Compacted </local-command-stdout>', 'm3'));
+          fM({ type: 'result', subtype: 'success', uuid: 'u-r-m2' }); fM(st('idle', 'm2'));
+        });
+        const sA = x.sessions.get('cw4-auto'), sM = x.sessions.get('cw4-manual'), t = Date.now(), cAt = Number(sA._compactedAt) || 0;
+        const fAuto = factsOf(x.eng, sA, t), fMan = factsOf(x.eng, sM, t);
+        const passLines = []; { const o0 = console.log, o1 = console.warn; console.log = (...a) => passLines.push(a.join(' ')); console.warn = (...a) => passLines.push(a.join(' ')); try { x.eng.maybePoolAutoSwitchForPool(x.P); } finally { console.log = o0; console.warn = o1; } }
+        const linkAfterPass = { auto: x.linkOf('cw4-auto'), manual: x.linkOf('cw4-manual') };
+        await onClock(() => { fA(reply('a2', h1w(17000))); });          // the continuation's reply, now
+        const fReply = factsOf(x.eng, sA, Date.now());
+        return { x, lines: lines.concat(passLines), fAuto, fMan, linkAfterPass, fReply, member: sA._lastRequestMember, compactedAfter: sA._compactedAt, cAt };
+      };
+      const r4 = await cw4(engMod);
+      if (r4) {
+        const { x } = r4;
+        ck('CW4 THE PIN (A) — an AUTO compaction inside a turn, the summary\'s user record out 61 s ago: the facts say IN FLIGHT since then (a send at or after the boundary), not «compacted» (RED on a03e496e6: unknown, inFlight false)',
+          r4.fAuto.inFlight === true && r4.fAuto.unknownWhy === null && r4.cAt > 0 && r4.fAuto.turnStartedAt >= r4.cAt && warmCache({ ...r4.fAuto, nowMs: Date.now() }).warm === true, JSON.stringify(r4.fAuto));
+        ck('CW4 THE PIN (A) — the pool HOLDS it on A while that request writes its cache there, and the hold says why: «warm cache (a request in flight since Ns)» (RED on a03e496e6: moved A → B mid-write)',
+          r4.linkAfterPass.auto === 'A' && r4.lines.some((l) => /^\[pool\] hold cw4-auto: warm cache \(a request in flight since \d+s\) — proactive move to Member B deferred$/.test(l)) && !r4.lines.some((l) => /per-session switch[^\n]*cw4-auto/.test(l)),
+          JSON.stringify({ link: r4.linkAfterPass.auto, l: r4.lines.filter((l) => /cw4-auto/.test(l)).slice(0, 4) }));
+        ck('CW4 THE PIN (A) — its reply stamps the member that served it (A): warm on A from the record, not lost, the reset over',
+          r4.member === x.A && r4.fReply.lost === false && r4.fReply.ttlSource === 'record' && warmCache({ ...r4.fReply, nowMs: Date.now() }).warm === true && !r4.compactedAfter, JSON.stringify({ memberIsA: r4.member === x.A, f: r4.fReply }));
+        ck('CW4 (A) a MANUAL /compact at idle sends nothing after the boundary: the window stays open («compacted», nothing in flight) and the pass moves it',
+          r4.fMan.unknownWhy === 'compacted' && r4.fMan.inFlight === false && r4.linkAfterPass.manual === 'B', JSON.stringify({ f: r4.fMan, link: r4.linkAfterPass.manual }));
+      }
+      {
+        // the MUTANT: the compacted branch answering before the flight check (round 1's order) ⇒ the probe moves it mid-write
+        const mA = mutEngine('cw4-order', 'if (compactedAt && !(turnStartedAt >= compactedAt)) return', 'if (compactedAt) return');
+        ck('CW4 MUTANT: the anchor (the window\'s flight check) hits once', mA.hit);
+        const rM = mA.hit ? await cw4(mA.mod) : null;
+        ck('CW4 MUTANT RED: with the compacted branch before the flight check the pool moves the auto-compacted conversation A → B while its continuation writes on A, and the reply credits B — what CW4\'s pins refuse',
+          !!rM && rM.linkAfterPass.auto === 'B' && rM.member === rM.x.Bm, rM && JSON.stringify({ link: rM.linkAfterPass.auto, memberIsB: rM.member === rM.x.Bm }));
+      }
+      // (CW5) B — NO GATE ON A CLIENT-SIDE INTENT: /compact typed MID-TURN (the acceptance's probe through the real typing
+      // path, which marks the session 'compacting' at the SEND until the turn's end): a prompt at T-30, a 5-minute record at
+      // T-29, /compact at T-28, 26 tool results + cache-reading records T-27 … T-2, the result + idle at T-1 ⇒ the stamp follows
+      // the records (2 min old), warm on the 5-minute cache, held.
+      const cw5 = async (mod) => {
+        const x = shapeM('edf', [['cw5-mid', 0]], mod);
+        if (!x) return null;
+        const road = roadOf(x), f = road.pty('cw5-mid');
+        let kindMid = null;
+        const lines = await onClock((at) => {
+          at(-30 * 60e3); road.send('cw5-mid', 'migrate the store', { origin: 'ws' }); f(st('running', 'b1')); f(ask('migrate the store', 'b1'));
+          at(-29 * 60e3); f(toolUse('b0', m5w(9000)));
+          at(-28 * 60e3); road.send('cw5-mid', '/compact', { origin: 'ws' }); kindMid = x.sessions.get('cw5-mid')._streamingKind;
+          for (let k = 0; k < 26; k++) { at(-(27 - k) * 60e3); f(toolRes(k === 0 ? 'b0' : 'b' + k)); f(toolUse('b' + (k + 1), m5w(200, 9000 + k * 300))); }
+          at(-60e3); f({ type: 'result', subtype: 'success', uuid: 'u-r-b' }); f(st('idle', 'b2'));
+        });
+        const s = x.sessions.get('cw5-mid'), t = Date.now(), fx = factsOf(x.eng, s, t);
+        const passLines = []; { const o0 = console.log, o1 = console.warn; console.log = (...a) => passLines.push(a.join(' ')); console.warn = (...a) => passLines.push(a.join(' ')); try { x.eng.maybePoolAutoSwitchForPool(x.P); } finally { console.log = o0; console.warn = o1; } }
+        return { x, kindMid, f: fx, agoS: fx.lastRequestAt ? Math.round((t - fx.lastRequestAt) / 1000) : null, link: x.linkOf('cw5-mid'), lines: lines.concat(passLines) };
+      };
+      const r5 = await cw5(engMod);
+      if (r5) {
+        ck('CW5 THE PIN (B) — /compact typed mid-turn marks the session compacting at the send (the client\'s intent), and the 26 records after it STAMP: the last request is 2 min old, the 5-minute TTL from the record, warm (RED on a03e496e6: frozen 29 min, cold)',
+          r5.kindMid === 'compacting' && r5.agoS >= 115 && r5.agoS <= 125 && r5.f.cacheTtlSec === 300 && r5.f.ttlSource === 'record' && r5.f.cacheObserved === 'read' && warmCache({ ...r5.f, nowMs: Date.now() }).warm === true,
+          JSON.stringify({ kindMid: r5.kindMid, agoS: r5.agoS, f: r5.f }));
+        ck('CW5 THE PIN (B) — the pool HOLDS it on A («warm cache (last request Ns ago < ttl 300s)» — the TTL from the record) — RED on a03e496e6: the turn-end pass moved it',
+          r5.link === 'A' && r5.lines.some((l) => /^\[pool\] hold cw5-mid: warm cache \(last request \d+s ago < ttl 300s\)/.test(l)), JSON.stringify({ link: r5.link, l: r5.lines.filter((l) => /cw5-mid/.test(l)).slice(0, 3) }));
+      }
+      {
+        const mB = mutEngine('cw5-gate', '  if (recordIsLate(session, rec)) return;\n  session._lastRequestAt = now;', "  if (session._streamingKind === 'compacting') return;\n  if (recordIsLate(session, rec)) return;\n  session._lastRequestAt = now;");
+        ck('CW5 MUTANT: the anchor (the writer\'s late-record line) hits once', mB.hit);
+        const rB = mB.hit ? await cw5(mB.mod) : null;
+        ck('CW5 MUTANT RED: the intent gate restored ⇒ the stamp freezes at the 5-minute record (29 min), cold, and the pool moves it — what CW5\'s pins refuse',
+          !!rB && rB.agoS >= 29 * 60 - 5 && rB.link === 'B', rB && JSON.stringify({ agoS: rB.agoS, link: rB.link }));
+      }
+      {
+        // (CW6) C — THE REASON IS TRUE: «no request yet» only for a conversation this hub STARTED (`_bornHere`, ws-create);
+        // restored / resumed / forked with no stamp ⇒ 'unseen' (the time of its last request is not known)
+        const wU = shapeM('edf', [['cw6-born', 0], ['cw6-restored', 0]]);
+        if (wU) {
+          const b = wU.sessions.get('cw6-born'), r = wU.sessions.get('cw6-restored');
+          for (const s of [b, r]) { idle(s); delete s._lastRequestAt; }
+          b._bornHere = true;
+          const fb = factsOf(wU.eng, b, Date.now()), fr = factsOf(wU.eng, r, Date.now());
+          ck('CW6 THE PIN (C) — a stamp-less chat conversation this hub started ⇒ `no-request`; one it did not start (restored, resumed, forked: no `_bornHere`) ⇒ `unseen`, never «no request yet» (RED on a03e496e6: both no-request)',
+            fb.unknownWhy === 'no-request' && fr.unknownWhy === 'unseen', JSON.stringify([fb.unknownWhy, fr.unknownWhy]));
+        }
+        const wsc = fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8'), brs = fs.readFileSync(path.resolve('src/server/boot-restore.js'), 'utf8');
+        ck('CW6 WIRING: ws-create\'s new session is born here only with no resume, fork or keeper (the rule `_historyLoaded` is born with); no restore path ever sets it',
+          /_bornHere: !\(data\.resume && data\.resumeId\) && !data\.fork && !data\.keeperSid,/.test(wsc) && !/_bornHere/.test(brs));
       }
       {
         // THE WRITER CENSUS (the lane's growth of K2's): `_compactedAt` and `_cacheFact` are assigned in usage-pool-engine.js alone

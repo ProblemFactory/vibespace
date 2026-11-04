@@ -1066,6 +1066,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // resume spawn marker (2.219.0): lets the parser adopt claude's
             // IMPLICIT fork (locked-conversation resume mints a new id)
             _resumeSpawn: !!SP.resumeMayFork && !!(data.resume && data.resumeId),
+            // lane cache-warmth-compact r2: a conversation this hub STARTED — nothing before its first record (the cache facts'
+            // «no request yet» is true only for it; a resume, a fork or an adopted keeper session carries history)
+            _bornHere: !(data.resume && data.resumeId) && !data.fork && !data.keeperSid,
             sockName, socketPath, buffer: '',
           };
           if (convIdField) session[convIdField] = data.resumeId || null;

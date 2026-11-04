@@ -44,14 +44,14 @@ function tierOf({ agoMs, ttlMs } = {}) {
  *  in flight and reads its stamp like idle (the band ages).
  *  THE PROVENANCE (lane cache-warmth-compact, amendment 1): a fact whose TTL the last response WROTE (`ttlSource:
  *  'record'`) carries `source` = {ttlSec, observed, read, created} — the band is a projection from that record, and the
- *  hover says so; an unknown with a reason (`unknown: 'compacted' | 'no-request'`) stays tier 'unknown' (nothing drawn)
+ *  hover says so; an unknown with a reason (`unknown: 'compacted' | 'no-request' | 'unseen'`) stays tier 'unknown' (nothing drawn)
  *  and carries the reason for the hover alone.
  *  → { tier, leftMs, frac (the time left, 1 → 0: the band's length), lastAt, lost?, inFlight?, source?, unknown? } */
 function warmthOf(fact, { serverNow, receivedAt, now } = {}) {
   const ttlMs = Number(fact && fact.cacheTtlSec) * 1000;
   const last = Number(fact && fact.lastRequestAt) || 0;
   const sNow = Number(serverNow), rAt = Number(receivedAt), cNow = Number(now);
-  const why = fact && (fact.unknown === 'compacted' || fact.unknown === 'no-request') ? fact.unknown : null;
+  const why = fact && (fact.unknown === 'compacted' || fact.unknown === 'no-request' || fact.unknown === 'unseen') ? fact.unknown : null;
   if (why) return { tier: 'unknown', leftMs: null, frac: null, lastAt: null, unknown: why };
   const none = { tier: 'unknown', leftMs: null, frac: null, lastAt: last || null };
   if (!(ttlMs > 0) || !(sNow > 0) || !Number.isFinite(rAt) || !Number.isFinite(cNow)) return none;
@@ -77,11 +77,13 @@ const tokensText = (n) => { const v = Math.max(0, Number(n) || 0); return v >= 1
  *  THE PROVENANCE (lane cache-warmth-compact, amendment 1): a live warmth whose TTL the last response wrote says what it
  *  projects from — «Cache: about N min left — projected from the 1-hour cache of the last request (read 42k
  *  tokens at 18:16)» (wrote … for a first write; «the earlier cache was not reused · wrote …» for a cold one); an unknown with a
- *  reason says it — «Cache reset — the conversation was compacted», «Cache: unknown — no request yet». */
+ *  reason says it — «Cache reset — the conversation was compacted», «Cache: unknown — no request yet» (only a conversation
+ *  this hub started), «Cache: unknown — the time of its last request is not known» (restored / resumed — round 2). */
 function warmthTitle(w, { t = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m)), timeText = (ms) => new Date(ms).toTimeString().slice(0, 5) } = {}) {
   if (w && w.inFlight) return t('Cache: warm — a turn is running');
   if (w && w.tier === 'unknown' && w.unknown === 'compacted') return t('Cache reset — the conversation was compacted');
   if (w && w.tier === 'unknown' && w.unknown === 'no-request') return t('Cache: unknown — no request yet');
+  if (w && w.tier === 'unknown' && w.unknown === 'unseen') return t('Cache: unknown — the time of its last request is not known');
   if (!w || w.tier === 'unknown' || !w.lastAt) return '';
   if (w.lost) return t('Cache expired — the conversation moved to another account · last request {time}', { time: timeText(w.lastAt) });
   if (w.tier === 'expired') return t('Cache expired · last request {time}', { time: timeText(w.lastAt) });

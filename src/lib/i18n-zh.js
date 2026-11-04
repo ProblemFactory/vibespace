@@ -11767,6 +11767,7 @@ export default {
   "5-minute cache": "5 分钟缓存",
   "Cache reset — the conversation was compacted": "缓存已重置 — 对话已压缩",
   "Cache: unknown — no request yet": "缓存：未知 — 还没有请求",
+  "Cache: unknown \u2014 the time of its last request is not known": "缓存：未知 — 不知道上次请求的时间",
   // lane cache-warmth-band (q-059 r1b): the warmth summary chip, the «+N» chip's words, the lists' sort
   "Going cold {n}": "快熄火 {n}",
   "Late {n}": "后段 {n}",
