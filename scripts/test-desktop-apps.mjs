@@ -678,7 +678,14 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     q.send(1000, () => got.push(['a', Date.now() - t0])); q.send(60000, () => got.push(['b', Date.now() - t0])); q.send(10, () => got.push(['c', Date.now() - t0]));
     setTimeout(() => {
       ok(got.map((g) => g[0]).join('') === 'abc', 'netemQueue delivers in order', got);
-      ok(got[0][1] >= 28 && got[1][1] >= got[0][1] + 55 && got[2][1] >= got[1][1], `each message waits rtt/2 (a at ${got[0][1]} ms ≥ 30) and a 60 kB message lands only after its own airtime at 8 Mbps (b at ${got[1][1]} ms ≥ a + 60; c follows b)`, got);
+      // int378 seam 5 (B-d28f): b is measured against the queue's SCHEDULE — its contract: no earlier than rtt/2 after it was queued AND no
+      // earlier than the previous one's scheduled finish + its own airtime (a due at 30, b at 30 + 60 = 90), on the 2 ms grain — never
+      // against a's ACTUAL arrival, which a late timer moves (ci/int378-r2 attempt 1, load 7.5: a at 37, b at 91 ⇒ «b ≥ a + 55» 1 ms short)
+      const onSchedule = (g) => g[0][1] >= 28 && g[1][1] >= 88 && g[2][1] >= g[1][1];
+      const fromArrival = (g) => g[0][1] >= 28 && g[1][1] >= g[0][1] + 55 && g[2][1] >= g[1][1];   // the old yardstick, kept for its control
+      ok(onSchedule(got), `each message waits rtt/2 (a at ${got[0][1]} ms ≥ 30) and a 60 kB message lands only after its own airtime at 8 Mbps on the queue's schedule (b at ${got[1][1]} ms ≥ 90; c follows b)`, got);
+      const lateTimer = [['a', 37], ['b', 91], ['c', 91]], noAirtime = [['a', 31], ['b', 33], ['c', 33]];
+      ok(!fromArrival(lateTimer) && onSchedule(lateTimer) && !onSchedule(noAirtime), 'the yardstick is the schedule: a late first timer (a 37 / b 91, the runner at load 7.5) reds the old «b ≥ a + 55» by name and holds here; a queue that skipped b\'s airtime (b at 33) reds here', { lateTimer, noAirtime });
       const q2 = S.netemQueue({ rttMs: 40 }); let fired = false; q2.send(1, () => { fired = true; }); q2.stop();
       setTimeout(() => { ok(!fired, 'stop() drops what is still queued (a closed bridge sends nothing late)'); resolve(); }, 60);
     }, 160);
