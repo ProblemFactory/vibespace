@@ -467,6 +467,7 @@
 .markdown-preview a { color: var(--accent-hover); }
 .markdown-preview table { border-collapse: collapse; margin: 8px 0; }
 .markdown-preview th, .markdown-preview td { padding: 4px 8px; border: 1px solid var(--border); }
+.markdown-preview ul, .markdown-preview ol { padding-left: 2em; } /* hotfix .377: the list indents by its container (style.css:1 zeroes it) */
 /* ── Word document viewer (src/lib/docx-viewer.js) — the pages live in a shadow
    root (.docx-host); these rules are the frame around them. The surround is the
    workspace colour like the image viewer's; the page is var(--paper). */

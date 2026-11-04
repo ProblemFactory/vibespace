@@ -868,6 +868,7 @@
 - (2026-11-03) THE CACHE-WARMTH COLOURS READ AS TWO GREENS (cache-warmth-ramp, userW): fresh / mid came from text mixes, 25° apart (1° on monokai). 不变量 = a status ramp is built from the theme's raw hues, never its text mixes; adjacent tiers ≥ 30° of hue apart ⇒ kb-bugfix-invariants
 - (2026-11-03) A MIGRATION THAT STRIPS BEFORE IT ARCHIVES LIES ON RETRY (engine-spi-egress L3): old values lost on a crash, a cut unpack carried, a failed run's browser adopted. 不变量 = archive before strip; a carried binary is proven by its stamp; an unreadable record is ended ⇒ kb-bugfix-invariants
 - (2026-11-03) A COMPACTED CONVERSATION STAYED «WARM»; THE CACHE TTL WAS INFERRED FROM BILLING (cache-warmth-compact). 不变量 = the cache fact is what the last record said; a compaction resets the old context's fact, never a request sent after it ⇒ kb-bugfix-invariants
+- (2026-11-04) BULLETS SAT ON THE CARD'S LEFT BORDER IN EVERY CARD BUT THE ASSISTANT'S (hotfix-card-list-indent, 圆点挂在左边框): the list rule was bubble-scoped; the `*` reset zeroed the rest. 不变量 = a markdown list indents by its container, never by which bubble it sits in ⇒ kb-bugfix-invariants.md
 
 ## THE PHONE'S «WAITING FOR YOU» STRIP TOOK A THIRD OF THE SCREEN (the owner 2026-11-02 ~23:20 PT on the iPhone, 2.369.373: «你那个等你操作的那个橙色的菜单，在画面最下方的 iPhone UI 上占据的显示面积过大»; lane phone-dock-restore, .374)
 - THE SYMPTOM: on the phone the amber strip above the message box drew its newest item whole — the head line, the question (wrapped), the clock, the age, ⤢ «打开» as a full-width 44 px row, the command, «发往 未知 …», the three answers and the hour's line. The transcript above it shrank to a slit.
@@ -8614,3 +8615,32 @@ Fix: `stripForbidden(extra)` (PURE, src/browser-attach.js — the census's own r
 不变量: an engine's driver-only switch is dropped and said on the attach road; a refused launch is journaled by name. A plugin's launch arguments are additive switches the hub judges — the plugin's author cannot know the hub's road rules, so a road rule is the hub's to apply to them (drop, say), not a reason to refuse the engine; a refusal names its code and the offending item where the owner reads the journal, before the evidence (the display session) goes.
 
 Gates: test-browser-keeper ①b (PURE strip + planted hub-side control + the keeper's incident launch + the journal line + the panel row through the real housekeeping route + every refusal journaled before the display stop; 12 legs red on 749aa7bf9 by name).
+
+## BULLETS SAT ON THE CARD'S LEFT BORDER IN EVERY CARD BUT THE ASSISTANT'S — 圆点挂在左边框 (hotfix-card-list-indent, 2.369.377)
+
+The owner, 2026-11-04, sent two screenshots: «先把这种卡片修一下，好几处这类卡片都有这个布局问题（点跑到左边界了）». In both the sub-agent report card «remaining_weeks_audit · FINAL_ANSWER» and the VibeSpace notice «已交接 1 条等待中的通知», the markdown bullets sat on the card's left border.
+
+Measured on 27a0bf89e in headless chrome (zh, 1000 × 760, every ::marker by its CDP box model):
+- In the report, both VibeSpace notices and the away recap, every list had padding-left 0. Its items started AT the text column, and the outside markers hung 17 px (bullets) / 21.8 px («12.») left of it — 5–12 px past the card's border.
+- In the compact view's user message and For-you reply (18 px), the bullets fit, but «10.»–«12.» stuck out 3.8 px.
+- `.markdown-preview` (file viewer, jobs panel) had no list rule.
+
+Cause: public/style.css:1 (`*, *::before, *::after { margin: 0; padding: 0 }`) takes every list's UA padding. The only rules that gave it back were `.chat-bubble-assistant .chat-text ul/ol` and `.chat-compact-content .chat-text ul/ol`. Every other `.chat-text` rendered its lists with nothing, and every renderMarkdown site writes into one:
+- 8 templates in chat-renderers.js
+- the two in subagent-card.js
+- the streaming re-render in chat-view.js
+
+This is the same class as .370's plugin consent dialog (`.plugin-caps-list`): a list in a container that has no list rule.
+
+Fix (CSS only):
+- `.chat-text ul, .chat-text ol { margin: 6px 0; padding-left: 20px }`
+- `.chat-text ol { padding-left: 2em }` — an ordered list's column holds «12.», which is 1.67 em in Liberation digits and 1.91 em in DejaVu (the runner's face), so a px value tuned on one box clips on the other.
+- `.chat-text li { margin: 3px 0 }`
+- The compact view keeps its narrower rule (margin 2 px, ul 18 px); its ol takes the 2em.
+- `.markdown-preview ul, ol { padding-left: 2em }`
+
+不变量: a markdown list indents by its container, never by which bubble it sits in. Every renderMarkdown site writes into a `.chat-text`, and `.chat-text` carries the list rule. A new markdown home either writes into a `.chat-text` or brings its own list rule (a padding that holds its widest marker). Paragraph / code / quote spacing is still bubble-scoped (`.chat-bubble-assistant .chat-text p/pre/code/blockquote`) — a follow-up, not swept here.
+
+Gates:
+- scripts/test-card-list-indent.mjs (fast, PURE): ① the census of every renderMarkdown( site, printed, with a planted-site control; ② the stylesheet rules — 5 rows RED on the base
+- scripts/test-card-list-indent-chrome.mjs (heavy): 7 card kinds plus a markdown-preview box, each item and ::marker measured — 34 rows RED on the base by name

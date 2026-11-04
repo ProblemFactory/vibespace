@@ -253,8 +253,14 @@
   border: 1px solid var(--border);
 }
 .chat-bubble-assistant .chat-text pre code { background: none; padding: 0; border: none; }
-.chat-bubble-assistant .chat-text ul, .chat-bubble-assistant .chat-text ol { margin: 6px 0; padding-left: 20px; }
-.chat-bubble-assistant .chat-text li { margin: 3px 0; }
+/* hotfix .377 (the owner: «好几处这类卡片都有这个布局问题（点跑到左边界了）»): A MARKDOWN LIST INDENTS BY ITS CONTAINER, never by the
+   bubble it sits in — style.css:1 zeroes every padding, so a list with no rule hangs its outside markers left of its text (the
+   sub-agent report, the VibeSpace notices, the recap, a For-you reply drew them on the card's border). Every renderMarkdown
+   site writes into a .chat-text (test-card-list-indent ① censuses them); an ordered list's column holds «12.» (≈ 1.7 em in
+   Liberation digits, 1.9 em in DejaVu) */
+.chat-text ul, .chat-text ol { margin: 6px 0; padding-left: 20px; }
+.chat-text ol { padding-left: 2em; }
+.chat-text li { margin: 3px 0; }
 .chat-bubble-assistant .chat-text h1, .chat-bubble-assistant .chat-text h2,
 .chat-bubble-assistant .chat-text h3, .chat-bubble-assistant .chat-text h4 {
   margin: 14px 0 6px; font-weight: 600;
@@ -1568,7 +1574,8 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
    newline 2) — test-ax-budget ④c's fence. The bubble face (.chat-bubble-user) already pre-wraps; the agent's paragraphs
    keep markdown's convention (a single newline is a space); code blocks and lists are untouched */
 .chat-msg-user .chat-text p { white-space: pre-wrap; }
-.chat-compact-content .chat-text ul, .chat-compact-content .chat-text ol { margin: 2px 0; padding-left: 18px; }
+.chat-compact-content .chat-text ul, .chat-compact-content .chat-text ol { margin: 2px 0; }
+.chat-compact-content .chat-text ul { padding-left: 18px; }
 .chat-compact-content .chat-text li { margin: 1px 0; }
 .chat-compact-content .chat-text h1, .chat-compact-content .chat-text h2,
 .chat-compact-content .chat-text h3, .chat-compact-content .chat-text h4 { margin: 6px 0 2px; }
