@@ -10,6 +10,12 @@
 // SMALL transcript (below the seek threshold → index mode, like the incident)
 // and asserts the clicked message IS on screen ~centered after everything
 // settles — across consecutive jumps.
+// §3b (lane minimap-person-rows; the owner 2026-11-04: «这个消息历史里一大堆系统消息混在里面很难检索»): the outline's
+// message list is the PERSON's conversation — a second view-only conversation of 20 user turns (6 the person's, 14
+// nobody typed, real record shapes from scripts/fixtures/message-origin) opens folded: the person's 6 rows, ONE chip
+// "×14" first, the placeholder counting 6, the filter finding only the person's words; the chip lists all 20 (the
+// folded ones dimmed) and finds their words; the choice is kept per device; the strip keeps all 20 markers.
+// MINIMAP_SHOTS=<dir> writes the folded / shown popover as PNGs (the lane's before/after pair).
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,6 +73,35 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const sz = fs.statSync(path.join(PROJ, `${SID}.jsonl`)).size;
   console.log(`  transcript: ${lines.length} records, ${(sz / 1e6).toFixed(1)}MB (index mode)`);
   if (sz > 30e6) { console.error('fixture unexpectedly huge — would flip into gap mode'); process.exit(1); }
+}
+
+// ── 1b. THE PERSON'S ROWS: 20 user turns — 6 the person's, 14 nobody typed (real record shapes) ──
+const SID2 = fixtureSid('3');
+const PR = { person: 6, other: 14 };
+{
+  const recs = fs.readFileSync(path.join(repo, 'scripts/fixtures/message-origin/claude-user-records.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    .filter((r) => !/^mo-attachment-/.test(r.uuid));   // page images make no turn
+  const like = (uuid, text, extra = {}) => { const r = JSON.parse(JSON.stringify(recs.find((x) => x.uuid.startsWith(uuid)))); r.uuid = uuid + '-b'; const c = r.message.content; if (Array.isArray(c)) c[0].text = text; else r.message.content = text; return Object.assign(r, extra); };
+  const typedIdx = recs.findIndex((r) => r.uuid === 'mo-typed-2');
+  recs.splice(typedIdx, 0,
+    like('mo-typed-1', 'MARKER_PERSON_3 please also check the signup page'),
+    like('mo-note-1', 'Stop hook feedback:\nVibeSpace bookkeeping before you stop (this note is from VibeSpace, not from the user): set your CURRENT state first.'),
+    like('mo-peer-group', recs.find((r) => r.uuid === 'mo-peer-group').message.content.replace('please take the next lane', 'the other lane is merged')),
+    like('mo-notice-1', recs.find((r) => r.uuid === 'mo-notice-1').message.content.replace('nightly-build finished (exit 0, 4 min)', 'weekly-report finished (exit 0, 1 min)')),
+    like('mo-notification-task', recs.find((r) => r.uuid === 'mo-notification-task').message.content.replace('npm test', 'npm run lint')),
+    like('mo-typed-2', 'MARKER_PERSON_4 and the footer links'));
+  const lines = [];
+  let t2 = Date.now() - 7200e3;
+  // each turn: the user record, a tool call + its result, the answer — > 50 records, so a view-only chat asks for its turn map
+  recs.forEach((r, i) => {
+    const at = () => new Date((t2 += 10e3)).toISOString();
+    lines.push(JSON.stringify({ ...r, timestamp: at() }));
+    lines.push(JSON.stringify({ type: 'assistant', message: { id: `msg_pt${i}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: `pt-${i}`, name: 'Bash', input: { command: `echo ${i}` } }], usage: { input_tokens: 5, output_tokens: 3 } }, uuid: `pt-${i}`, timestamp: at() }));
+    lines.push(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `pt-${i}`, content: `${i}\n` }] }, uuid: `pr-${i}`, timestamp: at() }));
+    lines.push(JSON.stringify({ type: 'assistant', message: { id: `msg_pa${i}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: `reply ${i}` }], usage: { input_tokens: 5, output_tokens: 3 } }, uuid: `pa-${i}`, timestamp: at() }));
+  });
+  if (recs.length !== PR.person + PR.other) { console.error(`person-rows fixture: ${recs.length} user records, not ${PR.person + PR.other}`); process.exit(1); }
+  fs.writeFileSync(path.join(PROJ, `${SID2}.jsonl`), lines.join('\n') + '\n');
 }
 
 // ── 2. throwaway server + chrome ──
@@ -167,6 +202,65 @@ for (const frac of [0.6, 0.25, 0.85]) {
 }
 
 check('the three jumps measured three DISTINCT targets', new Set(seenTargets).size === 3, JSON.stringify(seenTargets));
+
+// ── 3b. THE PERSON'S ROWS: the outline lists what the person said; the rest waits behind ONE chip ──
+{
+  const KEY = 'vibespace.minimap.showOther';
+  const opened2 = await evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try { localStorage.removeItem('${KEY}'); } catch {}
+    window.app.viewSession('${SID2}', '${CWD}', 'person rows test');
+    const userTurns = (v) => (v && v._chatMinimap && v._chatMinimap._turnMap ? v._chatMinimap._turnMap.filter((x) => x.role === 'user').length : 0);
+    for (let i = 0; i < 60 && !window.__pr; i++) {
+      window.__pr = [...(window.app.sessions?.values() || [])].find((v) => v && v !== window.__view && userTurns(v) === ${PR.person + PR.other}) || null;
+      if (!window.__pr) await sleep(300);
+    }
+    return window.__pr ? { ok: true, turns: userTurns(window.__pr) } : { ok: false, views: [...(window.app.sessions?.values() || [])].map(userTurns) };
+  })()`);
+  check(`3b: the person-rows conversation opened (${PR.person + PR.other} user turns on the minimap)`, opened2?.ok, JSON.stringify(opened2));
+  // the popover's state, read the way a person sees it (the rows' texts, the chip's words, the placeholder)
+  const READ = `const pop = document.querySelector('.chat-minimap-toc');
+    const rows = pop ? [...pop.querySelectorAll('.chat-minimap-toc-list .chat-minimap-toc-row')].filter((r) => r.querySelector('.chat-minimap-toc-text')) : [];
+    const chip = pop ? pop.querySelector('.chat-minimap-toc-fold') : null;
+    const st = { open: !!pop, rows: rows.map((r) => r.querySelector('.chat-minimap-toc-text').textContent), dimmed: rows.filter((r) => r.classList.contains('other')).length,
+      chip: chip ? chip.textContent : null, chipFirstRow: !!chip && chip.previousElementSibling?.classList.contains('chat-minimap-toc-filter') && chip.nextElementSibling?.classList.contains('chat-minimap-toc-list'),
+      pressed: chip ? chip.getAttribute('aria-pressed') : null, placeholder: pop ? pop.querySelector('.chat-minimap-toc-filter').placeholder : null, stored: localStorage.getItem('${KEY}') };`;
+  const step = (body) => evaljs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const mm = window.__pr._chatMinimap;
+    const typeIn = async (q) => { const f = document.querySelector('.chat-minimap-toc-filter'); if (!f) return; f.value = q; f.dispatchEvent(new Event('input')); await sleep(60); };
+    const open = async () => { document.querySelectorAll('.chat-minimap-toc').forEach((p) => p.remove()); mm._tocBtn.click(); await sleep(250); };
+    ${body} })()`).catch((e) => ({ err: String(e && e.message).slice(0, 300) }));   // a tree without the fold reds BY NAME below, never a crash
+  const SHOTS = process.env.MINIMAP_SHOTS || '';
+  const shot = async (name) => {
+    if (!SHOTS) return;
+    const r = await evaljs(`(() => { const p = document.querySelector('.chat-minimap-toc'); if (!p) return null; const b = p.getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height }; })()`);
+    if (!r) return;
+    const png = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 1 } });
+    fs.mkdirSync(SHOTS, { recursive: true });
+    fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(png.result.data, 'base64'));
+    console.log(`  (screenshot ${path.join(SHOTS, name + '.png')})`);
+  };
+  const folded = await step(`await open(); ${READ} return st;`);
+  await shot('list-folded');
+  const findPerson = await step(`await typeIn('signup'); ${READ} await typeIn(''); return st.rows;`);
+  const findOther = await step(`await typeIn('merged'); ${READ} await typeIn(''); return st.rows;`);
+  const shown = await step(`document.querySelector('.chat-minimap-toc-fold')?.click(); await sleep(120); ${READ} return st;`);
+  await shot('list-shown');
+  const findOtherShown = await step(`await typeIn('merged'); ${READ} await typeIn(''); return st.rows;`);
+  const kept = await step(`await open(); ${READ} return st;`);
+  const back = await step(`document.querySelector('.chat-minimap-toc-fold')?.click(); await sleep(120); ${READ} const strip = mm._minimap.querySelectorAll('.chat-minimap-marker').length; document.querySelectorAll('.chat-minimap-toc').forEach((p) => p.remove()); return { ...st, strip };`);
+  const PERSON_WORDS = ['Please fix the login page', 'B — tonight is fine', '/compact', 'MARKER_PERSON_3', 'MARKER_PERSON_4', 'Thanks — now the signup page'];
+  check(`3b: opened FOLDED — the list shows the person's ${PR.person} rows, nothing else (${folded?.rows?.length})`,
+    folded?.rows?.length === PR.person && PERSON_WORDS.every((w) => folded.rows.some((r) => r.includes(w))), JSON.stringify(folded?.rows));
+  check(`3b: ONE chip, the list's first row, counts the folded rows ("${folded?.chip}")`, !!folded?.chip && folded.chip.includes('×' + PR.other) && folded.chipFirstRow && folded.pressed === 'false', JSON.stringify(folded));
+  check(`3b: the placeholder counts what is listed ("${folded?.placeholder}")`, new RegExp('\\b' + PR.person + '\\b').test(folded?.placeholder || '') && !new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(folded?.placeholder || ''), folded?.placeholder);
+  check('3b: folded, the filter searches the person\'s rows — a word of theirs is found, a folded row\'s word is not', findPerson?.length === 2 && findOther?.length === 0, JSON.stringify({ findPerson, findOther }));
+  check(`3b: the chip lists all ${PR.person + PR.other} rows, the ${PR.other} folded ones dimmed, and says so (pressed, the placeholder counts ${PR.person + PR.other})`,
+    shown?.rows?.length === PR.person + PR.other && shown.dimmed === PR.other && shown.pressed === 'true' && new RegExp('\\b' + (PR.person + PR.other) + '\\b').test(shown.placeholder || ''), JSON.stringify(shown));
+  check('3b: with the chip on, the filter finds a folded row\'s word too (another session\'s message)', findOtherShown?.length === 1 && /merged/.test(findOtherShown[0]), JSON.stringify(findOtherShown));
+  check('3b: the choice is kept per device — reopened, the list is still all rows (localStorage)', kept?.rows?.length === PR.person + PR.other && kept.pressed === 'true' && kept.stored === '1', JSON.stringify({ rows: kept?.rows?.length, pressed: kept?.pressed, stored: kept?.stored }));
+  check('3b: …and folding again lists the person\'s rows and remembers that', back?.rows?.length === PR.person && back.stored === '0', JSON.stringify({ rows: back?.rows?.length, stored: back?.stored }));
+  check(`3b: the strip keeps a marker for every one of the ${PR.person + PR.other} turns (only the list folds)`, back?.strip === PR.person + PR.other, `markers=${back?.strip}`);
+}
 
 // ── 4. THE REAL HOME IS UNTOUCHED (see test-chat-paging.mjs §5 for the rule).
 {

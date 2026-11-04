@@ -1,7 +1,8 @@
 /**
  * ChatMinimap — semantic scrollbar showing conversation structure.
  * User message markers (blue), compact markers (red), drag-to-jump with floating label.
- * TOC button (top of the track) opens a filterable outline of all user messages.
+ * TOC button (top of the track) opens a filterable outline of the person's own messages
+ * (the rows nobody typed folded behind one chip — lane minimap-person-rows).
  */
 import { createPopover, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
@@ -12,6 +13,15 @@ import { noteSentence } from './chat-run-summary.js';
 // assistant (the Stop nudge, an injection turn — src/assistant-note.js turnPreviewOf
 // marks it `note`) says its sentence in the device's language, never its raw text.
 const turnText = (turn) => (turn.note ? t(noteSentence(turn.note)) : turn.preview || '');
+
+// THE PERSON'S CONVERSATION (lane minimap-person-rows; the owner 2026-11-04: «这个消息历史里一大堆系统消息混在里面很难
+// 检索»). The message list shows what the PERSON said: a turn nobody typed carries `other` (src/assistant-note.js
+// personRow — every turn builder stamps it through turnPreviewOf: a VibeSpace note, another session's message, a
+// background-task wake, a compaction summary …) and is folded behind ONE chip at the top of the list, listed only while
+// the chip is on. Per device, default folded. The strip's markers and the drag label keep every turn (B-40f8).
+const SHOW_OTHER_KEY = 'vibespace.minimap.showOther';
+const readShowOther = () => { try { return localStorage.getItem(SHOW_OTHER_KEY) === '1'; } catch { return false; } };
+const writeShowOther = (on) => { try { localStorage.setItem(SHOW_OTHER_KEY, on ? '1' : '0'); } catch {} };
 
 export class ChatMinimap {
   /**
@@ -213,7 +223,7 @@ export class ChatMinimap {
   appendFullTurn(turn) {
     if (!this._fullExtent || !turn?.ts) return;
     const ext = this._fullExtent;
-    const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, note: turn.note, line: turn.line };
+    const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, note: turn.note, line: turn.line, other: turn.other };
     ext.fullTurns.push(rec);
     if (turn.ts > ext.lastTs) ext.lastTs = turn.ts;
     // Incremental: ONE new marker + reposition existing ones (the span end
@@ -394,29 +404,41 @@ export class ChatMinimap {
     });
   }
 
-  // Outline popover: every user message (time + preview), filterable, click to
-  // jump. Works in both coordinate modes.
+  // Outline popover: the person's messages (time + preview), filterable, click to
+  // jump; the rows nobody typed behind the fold chip. Works in both coordinate modes.
   _showToc() {
     const turns = this._fullExtent
       ? this._fullExtent.fullTurns
       : this._turnMap.filter(t => t.role === 'user');
     if (!turns.length) return;
+    const folded = turns.filter((tt) => tt.other).length;
+    let showOther = readShowOther();
     const pop = createPopover(this._tocBtn, 'chat-minimap-toc');
     const filter = document.createElement('input');
     filter.className = 'chat-minimap-toc-filter';
-    filter.placeholder = t('Filter {n} messages…', { n: turns.length });
     pop.appendChild(filter);
+    // THE FOLD CHIP: the list's first row, outside its scroller (the list opens at the bottom — a chip inside it would
+    // start scrolled away); absent when nothing is folded
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chat-minimap-toc-fold';
+    if (folded) pop.appendChild(chip);
     const list = document.createElement('div');
     list.className = 'chat-minimap-toc-list';
     pop.appendChild(list);
     const renderRows = (f) => {
       list.innerHTML = '';
       const q = (f || '').toLowerCase();
-      for (const turn of turns) {
+      const listed = showOther ? turns : turns.filter((tt) => !tt.other);
+      filter.placeholder = t('Filter {n} messages…', { n: listed.length }); // counts what is listed
+      chip.textContent = showOther ? t('System & other sources ×{n} · Hide', { n: folded }) : t('System & other sources ×{n} · Show', { n: folded });
+      chip.setAttribute('aria-pressed', String(showOther));
+      chip.classList.toggle('on', showOther);
+      for (const turn of listed) {
         const preview = turnText(turn);
         if (q && !preview.toLowerCase().includes(q)) continue;
         const row = document.createElement('div');
-        row.className = 'chat-minimap-toc-row' + (turn.isCompact ? ' compact' : '');
+        row.className = 'chat-minimap-toc-row' + (turn.isCompact ? ' compact' : '') + (turn.other ? ' other' : '');
         const d = new Date(turn.ts);
         const time = document.createElement('span');
         time.className = 'chat-minimap-toc-time';
@@ -436,12 +458,20 @@ export class ChatMinimap {
         const empty = document.createElement('div');
         empty.className = 'chat-minimap-toc-row';
         empty.style.opacity = '0.5';
-        empty.textContent = t('No matches');
+        empty.textContent = !q && !showOther && folded ? t('Nothing you typed here — the button above lists the rest') : t('No matches'); // a conversation of deliveries only (a worker) opens on this, never on «No matches»
         list.appendChild(empty);
       }
     };
     renderRows('');
     filter.addEventListener('input', () => renderRows(filter.value));
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showOther = !showOther;
+      writeShowOther(showOther);
+      renderRows(filter.value);
+      list.scrollTop = list.scrollHeight;
+      filter.focus();
+    });
     filter.addEventListener('keydown', (e) => { if (e.key === 'Escape') { pop.remove(); } e.stopPropagation(); });
     // Start at the bottom — recent messages are what users usually remember
     requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; filter.focus(); });

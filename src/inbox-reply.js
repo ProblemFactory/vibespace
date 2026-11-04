@@ -1,6 +1,7 @@
 'use strict';
 /**
- * PURE (imports only PURE src/helper-ask.js — the ask's transition table, verify r3;
+ * PURE (imports only PURE src/helper-ask.js — the ask's transition table, verify r3; src/inbox-reply-text.js — the
+ * marker line + its parser, lane minimap-person-rows;
  * CJS so the server, the route and the browser bundle share ONE spelling) — a reply to a For-you inbox item (docs/design-user-inbox-reply.md §2).
  *
  * The owner's quoting rule: "注意回复inbox item的时候 发给agent的消息得带有对应的引用信息"
@@ -26,7 +27,7 @@
  * the codes and the sentences agree (the sentences are t() keys client-side).
  */
 
-const REPLY_MARKER_RE = /^\[For you reply #(ut-[0-9a-f]{10})\]$/;
+const { REPLY_MARKER_RE, lf, parseReply } = require('./inbox-reply-text.js'); // THE marker + parser (PURE, imports nothing — the daemon-bundled turn preview reads it)
 const DETAIL_QUOTE_CAP = 1500;   // chars of the item's detail quoted into the reply
 const REPLY_MAX = 4000;          // chars of the user's own reply
 const OPTIONS_MAX = 6;           // option chips per item
@@ -93,7 +94,6 @@ function relAgo(ms, now) {
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} d ago`;
 }
-const lf = (s) => String(s).replace(/\r\n?/g, '\n');
 const quote = (s) => toAgentLines(s).map((l) => '> ' + l);
 const chip = (s) => toAgentText(s, { kind: 'line', max: OPTION_MAX_CHARS * 4 });
 
@@ -147,28 +147,7 @@ function composeReply(item, replyText, { now = Date.now() } = {}) {
   return lines.join('\n') + '\n\n' + body;
 }
 
-/** The inverse: `{id, quote, reply}` (quote = the quoted lines without their
- *  `> ` prefix, joined by \n) or null when the text is not an inbox reply. The
- *  quote block ends at the first line that is not a quote line; the blank line
- *  after it is the separator, everything after it is the reply verbatim. */
-function parseReply(text) {
-  if (typeof text !== 'string') return null;
-  const src = lf(text);
-  const nl = src.indexOf('\n');
-  const head = nl < 0 ? src : src.slice(0, nl);
-  const m = REPLY_MARKER_RE.exec(head);
-  if (!m) return null;
-  const rest = nl < 0 ? [] : src.slice(nl + 1).split('\n');
-  const q = [];
-  let i = 0;
-  for (; i < rest.length; i++) {
-    if (rest[i].startsWith('> ')) q.push(rest[i].slice(2));
-    else if (rest[i] === '>') q.push('');
-    else break;
-  }
-  if (i < rest.length && rest[i] === '') i++;
-  return { id: m[1], quote: q.join('\n'), reply: rest.slice(i).join('\n') };
-}
+/** `parseReply` (the inverse of composeReply) lives in src/inbox-reply-text.js — re-exported below. */
 
 /** Can this item be replied to RIGHT NOW? `session` = a projection
  *  `{live, mode, remoteState}` of the item's session (null/undefined = not in

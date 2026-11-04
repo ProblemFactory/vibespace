@@ -203,7 +203,7 @@ try {
     const mdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-oauth-m-'));
     try {
       fs.mkdirSync(path.join(mdir, 'src/server'), { recursive: true });
-      for (const f of ['src/voice-model.js', 'src/assistant-note.js']) fs.copyFileSync(path.join(REPO, f), path.join(mdir, f));
+      for (const f of ['src/voice-model.js', 'src/assistant-note.js', 'src/notification-senders.js', 'src/inbox-reply-text.js']) fs.copyFileSync(path.join(REPO, f), path.join(mdir, f));
       const src = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
       const anchor = '      try { tokens.write(next); }';
       fs.writeFileSync(path.join(mdir, 'src/server/dropline-client.js'), src.replace(anchor, '      log.log?.(`[voice] refreshed ${JSON.stringify(next)}`);\n' + anchor));

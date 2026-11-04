@@ -789,6 +789,7 @@ const STORAGE = {
   'src/lib/appearance-panel.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
   'src/lib/appearance-panel.js|localStorage|key': ['pref', 'a UI pref percentage (scale / font size)'],
   'src/lib/browser-live-window.js|localStorage|\'vibespace.deviceTag\'': ['ids', 'a random device tag'],
+  'src/lib/chat-minimap.js|localStorage|SHOW_OTHER_KEY': ['pref', 'lane minimap-person-rows: the message list\'s «System & other sources» chip on this device (a "1" / "0" flag, never a record\'s words)'],
   'src/lib/settings-ui.js|localStorage|SHOW_ADVANCED_KEY': ['pref', 'lane settings-tiers (B-df40 part 2): the Settings window\'s "Show advanced settings" switch (a "1" / "0" flag, never a record\'s words)'],
   'src/lib/browser-trace-view.js|localStorage|SHOW_FITS_KEY': ['pref', 'lane trace-fits: show the live view\'s page-size changes as rows (a "1" flag, never a record\'s words)'],
   'src/lib/channel-outbox.js|localStorage|DELIVER_KEY': ['pref', 'next-turn | wake-now (the Approve button\'s remembered delivery)'],

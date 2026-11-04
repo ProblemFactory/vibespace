@@ -571,7 +571,7 @@ function scanJsonlUserTurns(fp, backend) {
 // auto-resume continue are cards, never notes) — the nudge turn is a note here too
 function _turnOf(line, ts, text, prov = {}) {
   const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });
-  return p ? { line, ts, preview: p.preview, isCompact: !!p.isCompact, ...(p.note ? { note: p.note } : {}) } : null;
+  return p ? { line, ts, preview: p.preview, isCompact: !!p.isCompact, ...(p.note ? { note: p.note } : {}), ...(p.other ? { other: p.other } : {}) } : null; // lane minimap-person-rows: `other` = nobody typed it (personRow) — the list folds it
 }
 
 function _claudeUserTurn(rec, line) {
@@ -584,7 +584,10 @@ function _claudeUserTurn(rec, line) {
     text = content.filter((b) => b.type === 'text').map((b) => b.text || '').join('');
   }
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-  const prov = rec.origin?.kind === 'peer' ? { originKind: 'peer-message' } : rec.originKind === 'auto-resume' ? { originKind: 'auto-resume' } : (rec.promptSource || rec._fromWebui) ? { typed: true } : {};
+  // lane minimap-person-rows: message-manager's ladder — a background-task wake (origin, or its text where a transport
+  // dropped the stamp) wins over the promptSource the CLI stamps on it too
+  const prov = rec.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(text) ? { originKind: 'task-notification' }
+    : rec.origin?.kind === 'peer' ? { originKind: 'peer-message' } : rec.originKind === 'auto-resume' ? { originKind: 'auto-resume' } : (rec.promptSource || rec._fromWebui) ? { typed: true } : {};
   return _turnOf(line, ts, text, prov);
 }
 

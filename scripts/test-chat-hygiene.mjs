@@ -138,8 +138,8 @@ console.log('§1 NOTES — text addressed to the assistant is a note, and only t
   ok('the fold pass: a hidden note is transparent glue (skip), a note folds like a tool card, the run label names its note', /notesHidden && el\.classList\.contains\('chat-vs-note'\)\) return 'skip'/.test(cv) && /el\.classList\.contains\('chat-msg-tool-result'\) \|\| el\.classList\.contains\('chat-vs-note'\)/.test(cv) && /byKind, mcpServers, files, nErr, running, notes,/.test(cv));
   const cr = read('src/lib/chat-renderers.js');
   const iNote = cr.indexOf('const note = assistantNoteOf(msg);');
-  const iNotif = cr.indexOf("const isNotification = msg.originKind === 'task-notification'");
-  ok('renderUserMsg asks the note classifier BEFORE the notification regexes (a `[cmd]:` nudge is never "Goal check: not met")', iNote > 0 && iNotif > iNote);
+  const iNotif = cr.indexOf("const isNotification = origin.why === 'notification'"); // lane minimap-person-rows: the notification shapes moved into src/assistant-note.js personRow (which asks the note rule first as well)
+  ok('renderUserMsg asks the note classifier BEFORE the notification verdict (a `[cmd]:` nudge is never "Goal check: not met")', iNote > 0 && iNotif > iNote);
   ok('a hook card whose payload is a VibeSpace block renders as the SAME note row', /const note = assistantNoteOf\(msg\);\s*if \(note\) return \{ el: this\._renderAssistantNote\(msg, note\), sideEffect: null \};/.test(cr));
   const body = cr.slice(cr.indexOf('  _renderAssistantNote(msg, note) {'), cr.indexOf('  _renderVibespaceNotice(msg, rawText) {'));
   ok('the note row: ONE summary line (its sentence, escaped) + the payload escaped behind the expander; chat-msg-hook kept (showHookCards still hides it), chat-vs-note its own switch, the REAL record as _rawMsg',

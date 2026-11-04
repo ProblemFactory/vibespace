@@ -207,7 +207,7 @@ console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED 
     try {
       for (const d of ['src/server', 'src/routes']) fs.mkdirSync(path.join(dir, d), { recursive: true });
       fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(dir, 'node_modules'));
-      for (const f of ['src/voice-model.js', 'src/assistant-note.js', 'src/server/dropline-client.js', 'src/routes/voice.js']) fs.copyFileSync(path.join(REPO, f), path.join(dir, f));
+      for (const f of ['src/voice-model.js', 'src/assistant-note.js', 'src/notification-senders.js', 'src/inbox-reply-text.js', 'src/server/dropline-client.js', 'src/routes/voice.js']) fs.copyFileSync(path.join(REPO, f), path.join(dir, f));
       const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
       fs.writeFileSync(path.join(dir, rel), src.replace(anchor, replacement));
       const M = await hub(path.join(dir, 'src/server/dropline-client.js'), path.join(dir, 'src/routes/voice.js'));

@@ -6486,7 +6486,7 @@ class ChatView {
       // Missed user turns also belong on the minimap
       for (let i = 0; i < msgs.length; i++) {
         const m = msgs[i];
-        if (m.role === 'user') this._chatMinimap.addTurn({ turnIndex: m.turnIndex, startIdx: missedStart + i, ts: m.ts, role: 'user' }, this._total);
+        if (m.role === 'user' && !m.imageAttachment) this._chatMinimap.addTurn({ turnIndex: m.turnIndex, startIdx: missedStart + i, ts: m.ts, role: 'user', ...turnPreviewOf(m) }, this._total); // lane minimap-person-rows: the live append's facts (preview + the person-row verdict) — it listed «(empty)», as the person's
       }
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       if (this._pinned) this._scrollToBottom();

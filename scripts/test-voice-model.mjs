@@ -25,6 +25,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// voice-model requires src/assistant-note.js (PURE → PURE), which requires two PURE siblings (lane minimap-person-rows: personRow) — a copied voice-model gets the whole closure
+const AN_CLOSURE = ['assistant-note.js', 'notification-senders.js', 'inbox-reply-text.js'];
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -104,7 +106,7 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
   ];
   let mut = src; const applied = cuts.map(([a, b]) => { const n = mut.split(a).length - 1; mut = mut.replace(a, b); return n; });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
-  fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+  for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f)); // voice-model requires it (PURE → PURE)
   try {
     fs.writeFileSync(path.join(dir, 'voice-model.js'), mut);
     const MM = require(path.join(dir, 'voice-model.js'));
@@ -132,7 +134,7 @@ const neverLeaks = (M) => { const c = M.dictationContext({ messages: NEVER, cwd:
   const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
   try {
-    fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js'));
+    for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f));
     fs.writeFileSync(path.join(dir, 'vm-sum.js'), src.replace(anchor, ''));
     ok('CONTROL: a copy without the summary skip lets the summary into all three ⇒ the check above is RED on it', src.split(anchor).length === 2 && sumLeaks(require(path.join(dir, 'vm-sum.js'))).leaked);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -192,7 +194,7 @@ console.log('④ the vendor contract');
   ok('teachContextOf never-list: no key, env value, e-mail, frame, tool row or system row', !LEAK_RE.test(c.text), c.text);
   ok('teachContextOf cuts at 6 000', VM.teachContextOf({ messages: [{ role: 'assistant', text: 'x'.repeat(9000) }, { role: 'user', text: 'y '.repeat(5000) }] }).text.length <= 6000);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-model-'));
-  fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+  for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f)); // voice-model requires it (PURE → PURE)
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
     const anchor = '  for (const re of SECRET_RES) s = s.replace(re, \'\');';
@@ -233,7 +235,7 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
   ok('census: one row per SHAPE_EXCLUSIONS entry (four: secret, placeholder, vendor-id, url-email-digits), no row without a term', VM.SHAPE_EXCLUSIONS.map(([r]) => r).join() === Object.keys(ROWS).join(), VM.SHAPE_EXCLUSIONS.map(([r]) => r));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-cands-'));
   try {
-    fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+    for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f)); // voice-model requires it (PURE → PURE)
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
     const said = (w) => w === SK ? { messages: [], groupName: w } : { messages: [user(`look at ${w} please`), agent(`yes, ${w} it is`)] }; // prose scrubs a key: only a group name reaches the row
     for (const [row, w] of Object.entries(ROWS)) {
@@ -354,7 +356,7 @@ console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal
   // THE MUTANT: a voice-model copy whose candidate rule subtracts only `known` (rule 1 dropped) ⇒ the same replay is RED
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vm-ledger-'));
   try {
-    fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+    for (const f of AN_CLOSURE) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, f)); // voice-model requires it (PURE → PURE)
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
     const needle = '  return ledger ? evidenceRule(ranked, ledger) : ranked;';
     ok('the mutant\'s needle occurs exactly once', src.split(needle).length === 2);

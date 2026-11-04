@@ -59,6 +59,7 @@ import { btn as textBtn } from './channel-chrome.js'; // the house text button (
 import { renderArtifactCard, patchArtifactCard, showInPorts } from './artifact-card.js'; // lane artifacts-model: a deliverable's ONE card (patched in place)
 import { renderProposalCard, patchProposalCard } from './browser-proposal-card.js'; // lane browser-propose: the agent's proposal, ONE Approve (patched in place)
 import { peerCore, peerCardFold, demoteHeadings, PEER_FOLD_SETTING } from './peer-card-model.js'; // lane peer-card-fold: the ONE fold verdict + preview + demoted headings
+import { personRow } from '../assistant-note.js'; // PURE (lane minimap-person-rows): THE verdict «did the person type this record?» — the minimap's list folds by the same one
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
 // An href or a link's text read back out of HTML (marked's and the sanitizer's entities, a numeric one) — escHtml'd again
@@ -717,10 +718,11 @@ class ChatRenderers {
     // feedback must not be labelled "Goal check: not met".
     const note = assistantNoteOf(msg);
     if (note) return this._renderAssistantNote(msg, note);
-    const isNotification = msg.originKind === 'task-notification' || (!msg.typed && (msg.synthetic
-      || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
-      || /^A session-scoped Stop hook is now active/.test(rawText.trim())
-      || /^Stop hook feedback:/.test(rawText.trim())));
+    // THE PERSON'S ROW (lane minimap-person-rows): who wrote this record is ONE verdict, src/assistant-note.js personRow
+    // (its notification shapes moved there from here) — the minimap's message list folds by the same one. A slash
+    // command the person ran is still drawn as the command bubble (the notification path strips its tags).
+    const origin = personRow(msg);
+    const isNotification = origin.why === 'notification' || origin.why === 'command';
     if (msg.originKind === 'auto-resume') {
       // VibeSpace's auto-resume continue prompt (server-sent after a usage-limit
       // wall): a user-role record the CLI needs, but the OWNER never typed it —
@@ -761,7 +763,7 @@ class ChatRenderers {
     // the live stream and a history rebuild draw the same card: a head naming
     // the item, the quote folded, the reply as the body. Every piece escaped /
     // markdown-sanitized like any user message.
-    const inboxReply = parseInboxReply(rawText);
+    const inboxReply = origin.why === 'tray-answer' ? parseInboxReply(rawText) : null;
     if (inboxReply) return this._renderInboxReply(msg, inboxReply);
 
     const el = document.createElement('div');
