@@ -182,6 +182,12 @@ const answersIn = (html) => [...String(html).matchAll(/data-answer="([a-z]+)"/g)
 const changeRowIn = (html) => { const m = /<div class="ut-run-changes"[^>]*>([\s\S]*?)<\/div>/.exec(String(html || '')); return m ? textOf(m[1].replace(/<\/span><span/g, '</span>\n<span')) : null; };
 const changeRowOf = (item, t = tZH) => changeRowIn(drawnHtml(item, t));
 const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// B-81c4 (int377 seam): the words clockWords prints — «HH:MM», or «M/D HH:MM» when the page's now is another day (an hour that ends
+// past midnight: red on any runner 23:00–00:00Z) — are read through ONE pattern beside clockWords (FA.clockWordsPattern); each
+// ${instant} of a clockRe / clockIs template is that instant's pattern. The Vault row's own clock (clockOf, always HH:MM) keeps hhmm.
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const clockRe = (strs, ...at) => new RegExp(strs.map((x, i) => reEsc(x) + (i < at.length ? FA.clockWordsPattern(at[i]) : '')).join(''));
+const clockIs = (strs, ...at) => new RegExp(`^${clockRe(strs, ...at).source}$`);
 // r8: a page as small as a row and a chip need (createElement / createTextNode, className, textContent, innerHTML, title, append)
 class Txt { constructor(s) { this.nodeType = 3; this.data = String(s); } get textContent() { return this.data; } }
 class El {
@@ -314,7 +320,7 @@ for (const K of ['local', 'cluster']) {
     const html = drawnHtml(drawn, tZH), v = drawn && FA.runCardOf(drawn, { t: tZH });
     ok(answersIn(html).join() === 'once,window,deny' && /允许一次/.test(textOf(html)) && /允许 1 小时/.test(textOf(html)) && /拒绝/.test(textOf(html)), 'Ⓐb the tray / chat row (中文) draws THREE answers — 允许一次 · 允许 1 小时 · 拒绝', { answers: answersIn(html), text: textOf(html).slice(0, 400) });
     const row = changeRowIn(html);
-    ok(!!(row && row.includes(`「允许 1 小时」：到 ${hhmm(f.until)} 为止，这个对话可以在任何运行中使用“TTS API key”。`) && textOf(html).includes('1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。') && v && v.window && v.window.offered === true), 'Ⓐc its OWN row above the answers says what the press writes («到 HH:MM 为止 … 在任何运行中使用“TTS API key”»), the words beside it («1 小时内 … 每次使用都会弹一条提示（不进「待你处理」）…») — and the base\'s «No «Always»: why» stays', { row, text: textOf(html).slice(0, 600) });
+    ok(!!(row && clockRe`「允许 1 小时」：到 ${f.until} 为止，这个对话可以在任何运行中使用“TTS API key”。`.test(row) && textOf(html).includes('1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。') && v && v.window && v.window.offered === true), 'Ⓐc its OWN row above the answers says what the press writes («到 HH:MM 为止 … 在任何运行中使用“TTS API key”»), the words beside it («1 小时内 … 每次使用都会弹一条提示（不进「待你处理」）…») — and the base\'s «No «Always»: why» stays', { row, text: textOf(html).slice(0, 600) });
     const lay = LAYOUT && LAYOUT.itemView ? LAYOUT.itemView(drawn, {}) : null;
     const acts = lay && Array.isArray(lay.actions) ? lay.actions : (LAYOUT && typeof LAYOUT.paneView === 'function' ? (LAYOUT.paneView(drawn, {}) || {}).actions : null);
     ok(!!(acts && acts.includes('hub-once') && acts.includes('shape-window') && acts.includes('hub-deny') && !acts.includes('shape-always')), 'Ⓐd the For-you window\'s action row: Allow once · Allow for 1 hour · Deny (its verdict, inbox-window-layout)', acts);
@@ -346,14 +352,25 @@ for (const K of ['local', 'cluster']) {
     const rec = card && recordOf(w, card.action.askId);
     const f = rec && rec.resolvedFact;
     ok(!!(rec && rec.resolvedBy === 'always' && f && f.windowFor === '1h' && f.until === T + WINDOW_MS && f.decidedBy === 'person'), 'Ⓑd the record: resolvedBy always + {windowFor: 1h, until} (the grant\'s facts, as an «always» record carries alwaysFor / until)', rec && { by: rec.resolvedBy, fact: f });
-    const want = `已允许这个对话 1 小时 · 至 ${hhmm(T + WINDOW_MS)} · 可在保险库窗口收回`;
+    const want = `已允许这个对话 1 小时 · 至 ${hhmm(T + WINDOW_MS)} · 可在保险库窗口收回`, wantIs = clockIs`已允许这个对话 1 小时 · 至 ${T + WINDOW_MS} · 可在保险库窗口收回`;
     const stamp = rec && FA.decidedStamp(rec, { t: tZH, now: T + MIN }), settled2 = rec && FA.settledWords(rec, tZH), tray = rec && ROW && ROW.resolvedByText ? ROW.resolvedByText(rec.resolvedBy, tZH, rec) : null;
-    ok(!!(stamp && stamp.text === want && `${stamp.verb} · ${stamp.time}` === want && settled2 === want && tray === want), `Ⓑe the record's tail is «${want}» — the chat card's stamp (verb · time), the tray's and the For-you window's words (resolvedByText) and the quiet line (settledWords): the SAME words`, { stamp, settled2, tray });
+    ok(!!(stamp && wantIs.test(stamp.text) && wantIs.test(`${stamp.verb} · ${stamp.time}`) && wantIs.test(settled2) && wantIs.test(tray)), `Ⓑe the record's tail is «${want}» — the chat card's stamp (verb · time), the tray's and the For-you window's words (resolvedByText) and the quiet line (settledWords): the SAME words`, { stamp, settled2, tray });
     const ended = rec && FA.decidedStamp(rec, { t: tZH, now: T + WINDOW_MS + MIN });
     const endedWant = `已允许这个对话 1 小时 · ${tZH('ended {time}', { time: hhmm(T + WINDOW_MS) })}`;
-    ok(!!(ended && ended.text === endedWant && ended.ended === 'ended'), `Ⓑf past its hour the record says it ended — «${endedWant}» (its grant's life — never «until» a time gone)`, ended);
+    const [e0, e1] = tZH('ended {time}', { time: '\u0001' }).split('\u0001'), endedIs = clockIs([`已允许这个对话 1 小时 · ${e0}`, e1], T + WINDOW_MS);
+    ok(!!(ended && endedIs.test(ended.text) && ended.ended === 'ended'), `Ⓑf past its hour the record says it ended — «${endedWant}» (its grant's life — never «until» a time gone)`, ended);
     const au = auditOf(w, 'vault-run-window');
     ok(au.length === 1 && au[0].until === T + WINDOW_MS && au[0].conv === CID && Array.isArray(au[0].grants) && /^vg-/.test(au[0].grants[0]) && !JSON.stringify(au).includes(VALUE), 'Ⓑg ONE audit line `vault-run-window` {by, conv, shapeId, until, grants, changes} — never a value', au);
+    // B-81c4 (int377 seam) THE FROZEN CLOCK: a press at 23:30 on this clock (23:30Z on a UTC runner — master CI's 23:44Z push)
+    // whose hour ends 00:30 the NEXT day. The record rightly says «至 M/D 00:30»; the old bare «至 HH:MM» reds on it by name, the
+    // shared pattern holds — and the pattern is clockWords' own two spellings (every half hour of the day, now the same day or the next)
+    const F = new Date(2026, 10, 3, 23, 30).getTime(), FU = F + WINDOW_MS, fd = new Date(FU);
+    const fz = rec && FA.decidedStamp({ ...rec, resolvedFact: { ...f, until: FU, decidedAt: F } }, { t: tZH, now: F + MIN });
+    const oldWant = `已允许这个对话 1 小时 · 至 ${hhmm(FU)} · 可在保险库窗口收回`, dated = `${fd.getMonth() + 1}/${fd.getDate()} ${hhmm(FU)}`;
+    ok(!!(fz && fz.text !== oldWant && fz.text.includes(`至 ${dated} · `) && clockIs`已允许这个对话 1 小时 · 至 ${FU} · 可在保险库窗口收回`.test(fz.text)), `Ⓑh (B-81c4) the frozen clock: pressed at 23:30, the hour ends 00:30 the next day — the record says «至 ${dated}»; the OLD bare pattern «${oldWant}» is RED on it, the shared FA.clockWordsPattern holds`, fz);
+    const off = [];
+    for (let ts = F - 23.5 * 3600e3; ts <= FU; ts += 1800e3) for (const now of [ts, ts + 86400e3]) { const w = FA.clockWords(ts, now); if (!new RegExp(`^${FA.clockWordsPattern(ts)}$`).test(w) || !new RegExp(`^${FA.clockWordsPattern()}$`).test(w) || new RegExp(`^${FA.clockWordsPattern(ts + MIN)}$`).test(w)) off.push({ ts, now, w }); }
+    ok(off.length === 0, 'Ⓑh the shared pattern IS clockWords\' spellings: an instant\'s «HH:MM» and «M/D HH:MM» match its pattern and the any-instant one; the next minute\'s pattern does not', off.slice(0, 3));
   });
 
   console.log('Ⓒ Ⓓ THE HOUR — any other run goes with NO card, files NOTHING; each use pops ONE notice (a key per use, the minutes left)');
@@ -407,7 +424,7 @@ for (const K of ['local', 'cluster']) {
     w.clock.at = T + WINDOW_MS + MIN;
     const again = await runAnswered(w, SHELL(w.e.ref, 'other.tts.example'));
     const row = again.drawn && changeRowIn(drawnHtml(again.drawn, tZH));
-    ok(!!(first.a && first.a.ok && again.card && again.drawn.action.window === true && row && row.includes(`这个对话在“TTS API key”上的 1 小时授权已于 ${hhmm(T + WINDOW_MS)} 结束`)), 'Ⓔ an hour and a minute later the next run draws its card again — «Allow for 1 hour» offered anew, its row saying the old window ended at HH:MM', { card: !!again.card, row, code: again.r && again.r.code });
+    ok(!!(first.a && first.a.ok && again.card && again.drawn.action.window === true && row && clockRe`这个对话在“TTS API key”上的 1 小时授权已于 ${T + WINDOW_MS} 结束`.test(row)), 'Ⓔ an hour and a minute later the next run draws its card again — «Allow for 1 hour» offered anew, its row saying the old window ended at HH:MM', { card: !!again.card, row, code: again.r && again.r.code });
   });
 
   console.log('Ⓕ A LATE CARD offers neither answer that writes — no `window`, no «允许 1 小时», refused by the door');
@@ -443,7 +460,7 @@ for (const K of ['local', 'cluster']) {
     const it = cB && w.userTodos.get(cB.id);
     const face1 = it && changeRowIn(drawnHtml(it, tZH));
     const still = windowsOf(memberRaw(w))[0];
-    ok(!!(aA && aA.ok && aB1 && aB1.code === 'ask_redrawn' && still && wA && still.until === wA.until && it && it.status === 'open' && face1 && /^已于 \S+ 重新绘制/.test(face1) && face1.includes(`「允许 1 小时」会替换这个对话在“TTS API key”上到 ${hhmm(wA.until)} 为止的 1 小时授权`) && face1 !== face0), 'Ⓖa card B drawn before A\'s window was written: its press writes NOTHING (ask_redrawn), the card is drawn again — marked, its row naming the window it would replace', { aA, aB1, face0, face1 });
+    ok(!!(aA && aA.ok && aB1 && aB1.code === 'ask_redrawn' && still && wA && still.until === wA.until && it && it.status === 'open' && face1 && /^已于 \S+ 重新绘制/.test(face1) && clockRe`「允许 1 小时」会替换这个对话在“TTS API key”上到 ${wA.until} 为止的 1 小时授权`.test(face1) && face1 !== face0), 'Ⓖa card B drawn before A\'s window was written: its press writes NOTHING (ask_redrawn), the card is drawn again — marked, its row naming the window it would replace', { aA, aB1, face0, face1 });
     const aB2 = cB && w.door.answer(cB.action.askId, { answer: 'window', reauthed: true, person: true });
     const now2 = windowsOf(memberRaw(w));
     ok(!!(aB2 && aB2.ok && now2.length === 1 && now2[0].until === w.now() + WINDOW_MS), 'Ⓖb the next press writes — ONE window, its end the new press + 1 h', { aB2, now2 });
@@ -461,7 +478,7 @@ for (const K of ['local', 'cluster']) {
     const next = await runAnswered(w, SHELL(w.e.ref, 'x.tts.example'));
     ok(!!(first.a && first.a.ok && rv && rv.ok && rv.removed && next.card && !memberRaw(w)), 'Ⓗa ✕ (the row\'s revoke) takes the member back, its window with it — the next run asks (its card)', { first: first.a, rv, card: !!next.card });
     const rec = first.card && recordOf(w, first.card.action.askId), st = rec && FA.decidedStamp(rec, { t: tZH, now: T + MIN });
-    ok(!!(rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && st.text === `已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销`), `Ⓗb (r8, MINOR 4) the press's record is TOLD — «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销» (never «至 HH:MM» for a window taken back)`, rec && { fact: rec.resolvedFact, stamp: st });
+    ok(!!(rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && clockIs`已允许这个对话 1 小时 · 已于 ${T} 撤销`.test(st.text)), `Ⓗb (r8, MINOR 4) the press's record is TOLD — «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销» (never «至 HH:MM» for a window taken back)`, rec && { fact: rec.resolvedFact, stamp: st });
   });
   await leg('Ⓘ locked', async () => {
     const w = await world();
@@ -616,7 +633,7 @@ for (const K of ['local', 'cluster']) {
     const py = await runAnswered(w, PY('part02.mp3'));
     ok(!!(next.card && next.drawn.action.window === true && py.r.ok && !py.card && py.r.by === 'grant' && !w.notices.length), 'Ⓟb the next shell run asks (its card — the window offered anew); the trusted script still runs by its command scope, no notice', { next: !!next.card, py: py.r && { ok: py.r.ok, by: py.r.by, code: py.r.code } });
     const rec = win.card && recordOf(w, win.card.action.askId), st = rec && FA.decidedStamp(rec, { t: tZH, now: T + MIN });
-    ok(!!(rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && st.text === `已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销`), `Ⓟc the press's record is told — «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销»`, rec && { fact: rec.resolvedFact, stamp: st });
+    ok(!!(rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && clockIs`已允许这个对话 1 小时 · 已于 ${T} 撤销`.test(st.text)), `Ⓟc the press's record is told — «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销»`, rec && { fact: rec.resolvedFact, stamp: st });
     const plan = VUR && VUR.saveScopesOf && pm0 ? VUR.saveScopesOf({ was: pm0, hosts: [], cmds: pm0.commands || [], endId: 'keep', now: w.now() }) : null;
     const save = plan && w.useGrants.setRow(w.e.id, { to: [{ kind: 'conversation', key: CID, name: 'Narrator', scopes: plan.scopes }], except: [] }, { reauthed: true });
     const staleOld = w.useGrants.setRow(w.e.id, { to: [{ kind: 'conversation', key: CID, name: 'Narrator', scopes: [...(plan ? plan.scopes.filter((s) => s.kind !== 'window') : []), { kind: 'window', until: until0 }] }], except: [] }, { reauthed: true });
@@ -765,7 +782,7 @@ for (const K of ['local', 'cluster']) {
     const save = saveVia(w, { to: [eveOf(w)], except: [] });
     const rec = win.card && recordOf(w, win.card.action.askId), st = rec && FA.decidedStamp(rec, { t: tZH, now: T + MIN });
     const route = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
-    ok(!!(k.a && k.a.ok && win.a && win.a.ok && save.ok && !memberRaw(w) && rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && st.text === `已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销` && /run\.saveRow\(String\(b\.id/.test(route)), `Ⓦa the owner's Save that leaves out the member holding a LIVE window (the Save route → the door's saveRow): the window goes and the press's record says «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销» — as both ✕ roads do`, { save, fact: rec && rec.resolvedFact, stamp: st && st.text });
+    ok(!!(k.a && k.a.ok && win.a && win.a.ok && save.ok && !memberRaw(w) && rec && rec.resolvedFact && rec.resolvedFact.endedBy === 'revoked' && rec.resolvedFact.endedAt === T && st && clockIs`已允许这个对话 1 小时 · 已于 ${T} 撤销`.test(st.text) && /run\.saveRow\(String\(b\.id/.test(route)), `Ⓦa the owner's Save that leaves out the member holding a LIVE window (the Save route → the door's saveRow): the window goes and the press's record says «已允许这个对话 1 小时 · 已于 ${hhmm(T)} 撤销» — as both ✕ roads do`, { save, fact: rec && rec.resolvedFact, stamp: st && st.text });
     const w2 = await world();
     await runAnswered(w2, CURL(w2.e.ref, 'api.tts.example'), { answer: 'always', caller: w2.caller('cid-e', 'Eve') });
     const win2 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window' });

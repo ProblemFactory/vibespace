@@ -62,6 +62,11 @@ const PY = ['/usr/bin/python3'].find((p) => fs.existsSync(p));
 if (!PY) { console.log('SKIP: no system python3'); process.exit(0); }
 const PYN = path.basename(fs.realpathSync(PY));   // the program's REAL name — what the grant pins and the row says (python3 is a link: python3.14)
 const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// B-81c4 (int377 seam): the words clockWords prints — «HH:MM», or «M/D HH:MM» when the page's now is another day (an hour that ends
+// past midnight: red on any runner 23:00–00:00Z) — are read through ONE pattern beside clockWords (FA.clockWordsPattern; no
+// instant = any instant's). The Vault row's chip keeps its own clock (clockOf, always HH:MM) and its \d\d:\d\d.
+const FA = require(path.join(repo, 'src/foryou-actions.js'));
+const clockRe = (strs, ...at) => new RegExp(strs.map((x, i) => reEsc(x) + (i < at.length ? FA.clockWordsPattern(at[i]) : '')).join(''));
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('vsr-wt'), PROFILE = process.env.VSR_CHROME_PROFILE || scratch('vsr-chrome'), fakeHome = scratch('vsr-home'), stubDir = scratch('vsr-stub');   // VSR_CHROME_PROFILE: a lane keeps the profile under its worktree
@@ -387,7 +392,7 @@ try {
   const T_W = Date.now();   // the card's 60 s: everything below is read and pressed inside it
   check('`bash -c \'curl … -H "Authorization: Bearer $T" …\'` draws its card WITHOUT a hosts «Always» and WITH «Allow for 1 hour» (action.window)', !!wc && wc.action.window === true && wc.action.always === false, wc && wc.action);
   const HOUR_ROW = () => A.evalJs(`(() => { const it = ${ITEM('/v1\\/asr/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const ch = it.querySelector('.ut-run-changes'), ans = it.querySelector('.ut-run-answer'); const r = it.getBoundingClientRect(), q = ch && ch.getBoundingClientRect(), a = ans && ans.getBoundingClientRect(); const btns = ans ? [...ans.querySelectorAll('button')] : []; return { changes: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null, above: !!(q && a && q.bottom <= a.top + 1), buttons: btns.map((b) => { const z = b.getBoundingClientRect(); return { t: b.textContent.trim(), inside: z.left >= r.left - 1 && z.right <= r.right + 1, h: Math.round(z.height) }; }), hints: ans ? [...ans.querySelectorAll('.ut-run-hint')].map((h) => h.textContent) : [], overflow: it.scrollWidth > it.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, vw: window.innerWidth }; })()`);
-  const HOUR_LINE = /^「允许 1 小时」：到 \d\d:\d\d 为止，这个对话可以在任何运行中使用“TTS API key”。$/;
+  const HOUR_LINE = new RegExp(`^「允许 1 小时」：到 ${FA.clockWordsPattern()} 为止，这个对话可以在任何运行中使用“TTS API key”。$`);
   const HOUR_HINT = '1 小时内这个对话用这把密钥不再问你；每次使用都会弹一条提示（不进「待你处理」）；到期后再问。';
   await openTray();
   const h1 = await HOUR_ROW();
@@ -424,7 +429,7 @@ try {
   const T_P = Date.now();
   check('«允许 1 小时» (验证是你) ⇒ ok · window (its end the press + 1 h), inside the card\'s 60 s; the run goes', !!wa && wa.status === 200 && wa.json.ok && wa.json.outcome === 'window' && Math.abs(Number(wa.json.until) - (T_P + 3600e3)) < 60e3 && T_P - T_W < 58000 && wr.code === 0, { wa: wa && wa.json, ms: T_P - T_W, wr: wr.out.slice(0, 200) });
   const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  const TAIL = `已允许这个对话 1 小时 · 至 ${hm(Number(wa && wa.json && wa.json.until))} · 可在保险库窗口收回`;
+  const TAIL = `已允许这个对话 1 小时 · 至 ${hm(Number(wa && wa.json && wa.json.until))} · 可在保险库窗口收回`, TAIL_RE = clockRe`已允许这个对话 1 小时 · 至 ${Number(wa && wa.json && wa.json.until)} · 可在保险库窗口收回`;
   // THE RECORD — the same words in the chat card, the tray and the For-you window
   const chatRec = await A.until(`(() => { const c = document.querySelector('.cn-card.cn-done[data-item="${wc && wc.id}"]'); if (!c) return null; const l = c.querySelector('.cn-line'); return l ? l.textContent : c.textContent; })()`, { timeout: 10000 });
   await openTray();
@@ -438,7 +443,7 @@ try {
   await A.shot('vsr-20-hour-record-foryou-window.png');
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
   const near = (x) => (typeof x === 'string' ? x.slice(Math.max(0, x.indexOf('已允许') - 30), x.indexOf('已允许') + 90) : x);
-  check(`the record says «${TAIL}» — in the chat card, the tray and the For-you window alike`, [chatRec, trayRec, winRec].every((x) => typeof x === 'string' && x.includes(TAIL)), { chatRec: near(chatRec), trayRec: near(trayRec), winRec: near(winRec) });
+  check(`the record says «${TAIL}» — in the chat card, the tray and the For-you window alike`, [chatRec, trayRec, winRec].every((x) => typeof x === 'string' && TAIL_RE.test(x)), { chatRec: near(chatRec), trayRec: near(trayRec), winRec: near(winRec) });
   // THE NEXT USE — another command: no card, nothing filed, a notice on the SECOND client
   const ch2 = await chatNow(), n2 = await countItems();
   await B.evalJs(`window.__toasts.length = 0; true`);
@@ -478,7 +483,7 @@ try {
   await openTray();
   const trayX = await A.until(`(() => { const it = ${ITEM('/v1\\/asr/')}; return it && /撤销/.test(it.textContent) ? it.textContent : null; })()`, { timeout: 8000 });
   await closeTray();
-  check('the press\'s record is told — «已允许这个对话 1 小时 · 已于 HH:MM 撤销» (the tray)', typeof trayX === 'string' && new RegExp(`已允许这个对话 1 小时 · 已于 (${hm(T_X)}|${hm(T_X - 60e3)}) 撤销`).test(trayX), typeof trayX === 'string' ? trayX.slice(Math.max(0, trayX.indexOf('已允许') - 20), trayX.indexOf('已允许') + 60) : trayX);
+  check('the press\'s record is told — «已允许这个对话 1 小时 · 已于 HH:MM 撤销» (the tray)', typeof trayX === 'string' && new RegExp(`已允许这个对话 1 小时 · 已于 (?:${FA.clockWordsPattern(T_X)}|${FA.clockWordsPattern(T_X - 60e3)}) 撤销`).test(trayX), typeof trayX === 'string' ? trayX.slice(Math.max(0, trayX.indexOf('已允许') - 20), trayX.indexOf('已允许') + 60) : trayX);
   const afterP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'sh', '-c', 'printf "%s\\n" "${T:+after the window}"'], TOKEN, { timeout: 70000 });
   let ac = null;
   for (let i = 0; i < 60 && !ac; i++) { ac = (await openOf('vault-run-ask')).find((x) => /after the window/.test(String(x.detail))) || null; if (!ac) await sleep(200); }
