@@ -4059,11 +4059,21 @@ function noteModelRequest(session, rec, now = Date.now()) {
  *  conversation is IN FLIGHT on the member that serves it and held like any request in flight (round 2, the acceptance's
  *  A: round 1 hid that request — the pool moved a conversation mid-write and its reply credited the wrong member); its
  *  reply ends the reset and states what it observed. Persisted with the stamp at once (one write per compaction), so a
- *  restart keeps «reset». A backlog's boundary proves nothing about now. */
+ *  restart keeps «reset». A backlog's boundary proves nothing about now.
+ *  ONE BOUNDARY RESETS ONCE (round 3): the parse runs every record (it registers through sbSeenFirst and ignores the
+ *  verdict) and the device feed runs what the parse has not seen yet, so a boundary can arrive TWICE — and a second
+ *  reset would re-stamp `_compactedAt` past a request already in flight and reopen 'compacted' over it. The boundary
+ *  handled is remembered by its own identity (`_compactedBy` = its uuid, kept after the reset ends); that boundary
+ *  again — or, for a boundary with no uuid, one stamped no later than the reset standing now — resets nothing and kicks
+ *  nothing (a uuid outranks a stamp: a remote host's clock may be off). */
 function noteCompacted(session, rec, now = Date.now()) {
   if (!session || !rec || rec.type !== 'system' || rec.subtype !== 'compact_boundary' || rec.parent_tool_use_id || rec.isSidechain) return;
+  if (rec.uuid && rec.uuid === session._compactedBy) return; // this boundary again (the other feed's copy): it reset once
+  const stampedAt = !rec.uuid && Date.parse(rec.timestamp || '') || 0; // no identity of its own: its stamp is the identity
+  if (stampedAt && Number(session._compactedAt) >= stampedAt) return; // stamped before the reset standing now: handled
   if (recordIsLate(session, rec)) return;
   session._compactedAt = Number(now) || Date.now();
+  session._compactedBy = rec.uuid || null;
   persistRequestStamp(session);
   kickPoolEval();
 }

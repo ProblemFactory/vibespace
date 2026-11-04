@@ -1233,7 +1233,9 @@ await (async () => {
         const send = mkSender({ activeSessions: x.sessions, adapterRegistry: { get: () => ad }, BUFFERS_DIR: BUF, broadcastToSession() { }, feedLive() { },
           autoResume: null, reattachLocalPty() { }, ptyQuietSince: () => false, writeSessionInput() { }, log() { }, framesDir: path.join(soDir, 'frames') }).send;
         const pty = (sid) => { const s = x.sessions.get(sid); delete s._lastRequestAt; delete s._cacheFact; s._turnStartedAt = null; s._isStreaming = false; s._turnState = 'idle'; s._normalizer = mkMM('claude', sid);
-          const p = { data: null, exit: null, onData(cb) { p.data = cb; }, onExit(cb) { p.exit = cb; } }; so.setupSessionPty(s, sid, p); return (r) => p.data(JSON.stringify({ parent_tool_use_id: null, session_id: 'cid-' + sid, ...r }) + '\n'); };
+          const p = { data: null, exit: null, onData(cb) { p.data = cb; }, onExit(cb) { p.exit = cb; } }; so.setupSessionPty(s, sid, p);
+          const line = (r) => JSON.stringify({ parent_tool_use_id: null, session_id: 'cid-' + sid, ...r }) + '\n';
+          const feed = (r) => p.data(line(r)); feed.chunk = (rs) => p.data(rs.map(line).join('')); return feed; }; // .chunk: several records in ONE read
         return { send, pty };
       };
       const realNowR = Date.now;
@@ -1358,15 +1360,93 @@ await (async () => {
         ck('CW6 WIRING: ws-create\'s new session is born here only with no resume, fork or keeper (the rule `_historyLoaded` is born with); no restore path ever sets it',
           /_bornHere: !\(data\.resume && data\.resumeId\) && !data\.fork && !data\.keeperSid,/.test(wsc) && !/_bornHere/.test(brs));
       }
+      // ── ROUND 3 (the acceptance of 285c7ecca) ──
+      // (CW7) A — ONE BOUNDARY RESETS ONCE ACROSS THE FEEDS: the parse runs every record and the device feed runs what the
+      // parse has not seen yet, so ONE session can meet the same boundary twice. The device feed ahead: its boundary resets
+      // and kicks; the continuation goes out (in flight); the parse's later copy of the SAME boundary resets nothing and kicks
+      // nothing — the in-flight state untouched. Kicks are counted as the kicked pass's `accounts.list()` calls.
+      const cw7 = async (mod) => {
+        const x = shapeM('edf', [['cw7-both', 0]], mod);
+        if (!x) return null;
+        const brainM = require(path.resolve('src/server/session-brain.js')).create({ engine: x.eng, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }) });
+        const road = roadOf(x), f = road.pty('cw7-both'), s = x.sessions.get('cw7-both');
+        const dev = (r) => brainM.claudeSideEffects(s, 'cw7-both', { parent_tool_use_id: null, session_id: 'cid-cw7-both', ...r });
+        let lists = 0; const list0 = x.am.list.bind(x.am); x.am.list = (...a) => { lists++; return list0(...a); };
+        const bnd = { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 270743, post_tokens: 16740, duration_ms: 78444 }, uuid: 'u-cw7-boundary' };
+        await onClock((at) => {
+          at(-5 * 60e3); road.send('cw7-both', 'refactor the parser', { origin: 'ws' }); f(st('running', 'c7')); f(ask('refactor the parser', 'c7'));
+          at(-4.5 * 60e3); f(toolUse('c7', h1w(900, 250000)));
+          at(-3 * 60e3); f(toolRes('c7'));
+        });
+        lists = 0;
+        await onClock((at) => { at(-20e3); dev(bnd); });                     // the device feed's copy first: the reset, the kick
+        const kicksFirst = lists, cAt = Number(s._compactedAt) || 0, metaFirst = (metasM.get(s.sockName) || {}).compactedAt;
+        await onClock((at) => { at(-19e3); dev(summary('c7')); });           // the continuation goes out (the device feed's copy)
+        const fOut = factsOf(x.eng, s, Date.now());
+        lists = 0;
+        await onClock((at) => { at(-1e3); f({ type: 'system', subtype: 'status', status: 'compacting', uuid: 'u-c7s1' }); f({ type: 'system', subtype: 'status', status: null, compact_result: 'success', uuid: 'u-c7s2' }); f(bnd); });
+        const kicksSecond = lists, fAfter = factsOf(x.eng, s, Date.now());
+        x.am.list = list0;
+        return { x, kicksFirst, kicksSecond, cAt, cAfter: Number(s._compactedAt) || 0, metaFirst, metaAfter: (metasM.get(s.sockName) || {}).compactedAt, fOut, fAfter };
+      };
+      const r7 = await cw7(engMod);
+      if (r7) {
+        ck('CW7 setup: the device feed\'s boundary resets (compactedAt set, persisted) and kicks the pool once; the continuation then goes out — in flight',
+          r7.cAt > 0 && r7.metaFirst === r7.cAt && r7.kicksFirst >= 1 && r7.fOut.inFlight === true && r7.fOut.unknownWhy === null, JSON.stringify({ kicks: r7.kicksFirst, cAt: r7.cAt > 0, f: r7.fOut }));
+        ck('CW7 THE PIN (A) — the parse\'s later copy of the SAME boundary resets nothing and kicks nothing: compactedAt and the meta unchanged, no pass, the request in flight untouched (RED on 285c7ecca: re-stamped, «compacted» over the request in flight, a second kick)',
+          r7.cAfter === r7.cAt && r7.metaAfter === r7.cAt && r7.kicksSecond === 0 && r7.fAfter.inFlight === true && r7.fAfter.unknownWhy === null,
+          JSON.stringify({ restamped: r7.cAfter !== r7.cAt, kicks: r7.kicksSecond, f: r7.fAfter }));
+      }
+      {
+        const mI = mutEngine('cw7-once', "  if (rec.uuid && rec.uuid === session._compactedBy) return;", '  // MUTANT: the identity guard removed');
+        ck('CW7 MUTANT: the anchor (the boundary\'s identity guard) hits once', mI.hit);
+        const rI = mI.hit ? await cw7(mI.mod) : null;
+        ck('CW7 MUTANT RED: without the identity guard the parse\'s copy re-stamps the reset past the request in flight («compacted» again) and kicks a second pass — what CW7\'s pin refuses',
+          !!rI && rI.cAfter > rI.cAt && rI.fAfter.unknownWhy === 'compacted' && rI.kicksSecond >= 1, rI && JSON.stringify({ restamped: rI.cAfter > rI.cAt, f: rI.fAfter.unknownWhy, kicks: rI.kicksSecond }));
+      }
+      // (CW8) B — THE EQUAL INSTANT: a flight instant in the SAME ms as the boundary is the new context's request (at OR after) —
+      // synthetic, and through the real parse with the boundary and the summary's user record in ONE read on a frozen clock
+      const cw8 = (mod) => {
+        const x = shapeM('edf', [['cw8-syn', 0], ['cw8-syn-1', 0], ['cw8-parse', 0]], mod);
+        if (!x) return null;
+        const T = Date.now() - 30e3;
+        const syn = (sid, sent) => { const s = x.sessions.get(sid); s._isStreaming = true; s._turnState = 'running'; s._compactedAt = T; s._turnStartedAt = sent; return factsOf(x.eng, s, Date.now()); };
+        const fEq = syn('cw8-syn', T), fBefore = syn('cw8-syn-1', T - 1);
+        const road = roadOf(x), f = road.pty('cw8-parse'), s = x.sessions.get('cw8-parse');
+        const o0 = console.log, o1 = console.warn; console.log = console.warn = () => { };
+        const FROZEN = Date.now() - 20e3; let fParse = null, eqParse = null;
+        try {
+          Date.now = () => FROZEN - 60e3; road.send('cw8-parse', 'refactor the parser', { origin: 'ws' }); f(st('running', 'c8')); f(ask('refactor the parser', 'c8')); f(toolUse('c8', h1w(900, 250000))); f(toolRes('c8'));
+          Date.now = () => FROZEN; // one read: the boundary and the summary's user record, the same ms
+          f.chunk([{ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 270743, post_tokens: 16740 }, uuid: 'u-c8-b' }, summary('c8')]);
+          eqParse = { c: s._compactedAt, t: s._turnStartedAt };
+        } finally { Date.now = realNowR; console.log = o0; console.warn = o1; }
+        fParse = factsOf(x.eng, s, Date.now());
+        return { fEq, fBefore, fParse, eqParse, FROZEN };
+      };
+      const r8 = cw8(engMod);
+      if (r8) {
+        ck('CW8 THE PIN (B) — synthetic: a flight instant in the SAME ms as the boundary ⇒ in flight (the at-or-after edge); one ms before it ⇒ «compacted» (the old context\'s)',
+          r8.fEq.inFlight === true && r8.fEq.unknownWhy === null && r8.fBefore.unknownWhy === 'compacted' && r8.fBefore.inFlight === false, JSON.stringify([r8.fEq, r8.fBefore]));
+        ck('CW8 THE PIN (B) — the real parse, the boundary and the summary\'s user record in ONE read on a frozen ms: compactedAt === turnStartedAt, and the facts say in flight',
+          r8.eqParse.c === r8.FROZEN && r8.eqParse.t === r8.FROZEN && r8.fParse.inFlight === true && r8.fParse.unknownWhy === null, JSON.stringify({ eq: r8.eqParse, f: r8.fParse }));
+      }
+      {
+        const mS = mutEngine('cw8-strict', 'if (compactedAt && !(turnStartedAt >= compactedAt)) return', 'if (compactedAt && !(turnStartedAt > compactedAt)) return');
+        ck('CW8 MUTANT: the anchor (the at-or-after comparison) hits once', mS.hit);
+        const rS = mS.hit ? cw8(mS.mod) : null;
+        ck('CW8 MUTANT RED: strictly-after ⇒ both same-ms shapes read «compacted» — what CW8\'s pins refuse',
+          !!rS && rS.fEq.unknownWhy === 'compacted' && rS.fParse.unknownWhy === 'compacted', rS && JSON.stringify([rS.fEq.unknownWhy, rS.fParse.unknownWhy]));
+      }
       {
         // THE WRITER CENSUS (the lane's growth of K2's): `_compactedAt` and `_cacheFact` are assigned in usage-pool-engine.js alone
         // (noteCompacted sets the reset, noteModelRequest ends it and stamps the fact; boot-restore's restore is a literal's key)
         const walkM = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkM(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
         const filesM = [...walkM(path.resolve('src')), path.resolve('server.js')];
         const by = (re) => { const o = {}; for (const f of filesM) { const n = (fs.readFileSync(f, 'utf8').match(re) || []).length; if (n) o[path.relative(path.resolve('.'), f)] = n; } return o; };
-        const comp = by(/\._compactedAt\s*=[^=]/g), fact = by(/\._cacheFact\s*=[^=]/g);
-        ck('CW WRITER CENSUS: `_compactedAt` is assigned only in usage-pool-engine.js — noteCompacted\'s reset and noteModelRequest\'s end of it; `_cacheFact` only by noteModelRequest (RED on 749aa7bf9: neither exists)',
-          JSON.stringify(comp) === JSON.stringify({ 'src/server/usage-pool-engine.js': 2 }) && JSON.stringify(fact) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }), JSON.stringify({ comp, fact }));
+        const comp = by(/\._compactedAt\s*=[^=]/g), fact = by(/\._cacheFact\s*=[^=]/g), compBy = by(/\._compactedBy\s*=[^=]/g);
+        ck('CW WRITER CENSUS: `_compactedAt` is assigned only in usage-pool-engine.js — noteCompacted\'s reset and noteModelRequest\'s end of it; `_cacheFact` only by noteModelRequest; `_compactedBy` only by noteCompacted (r3) (RED on 749aa7bf9: neither exists)',
+          JSON.stringify(comp) === JSON.stringify({ 'src/server/usage-pool-engine.js': 2 }) && JSON.stringify(fact) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }) && JSON.stringify(compBy) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }), JSON.stringify({ comp, fact, compBy }));
       }
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
