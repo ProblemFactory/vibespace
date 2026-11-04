@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.376 — 2026-11-03
+
+### Changed
+- The cache-warmth colours are four distinct hues (green, blue, amber, red), and expired marks turn a quiet grey.
+
 ## 2.369.375 — 2026-11-03
 
 ### Fixed
