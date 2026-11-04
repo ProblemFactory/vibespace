@@ -45,6 +45,9 @@ function pureLegs(DR, { quiet = false } = {}) {
   const none = sv([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], []);
   const gone = sv([{ id: 'win-v-s', why: 'dup', by: 'win-gone' }]);
   leg(!self.ok && !none.ok && !gone.ok, '§1 …nor a `by` naming the copy itself, a `by` no stored record holds, or no other record handed in (`elsewhere` empty)', { self: self.ok, none: none.ok, gone: gone.ok });
+  // r2 (the r1 acceptance's major): DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT — the verdict is the hub's (`showing`)
+  const seen = typeof DR.shrinkVerdict === 'function' ? DR.shrinkVerdict({ prev: R['desk-v'], next: vNext, evidence: [{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], alive, elsewhere: [R['desk-x'], R['desk-y']], showing: (sid) => sid === S }) : { ok: true };
+  leg(!seen.ok && J(seen.dup) === J(['win-v-s']) && J(seen.shown) === J(['win-v-s']), '§1 r2 DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT: the same valid duplicate while ANOTHER client shows its session (`showing`) ⇒ REFUSED, named in `dup` and `shown`', seen);
   const same = typeof DR.shrinkVerdict === 'function' ? DR.shrinkVerdict({ prev: [chat('a', S, 0), chat('b', S, 1)], next: [chat('a', S, 0)], evidence: [{ id: 'b', why: 'dup', by: 'a' }], alive }) : { ok: false };
   leg(same.ok === true, '§1 …and a `by` in the record written itself (two windows of S on one desktop) explains it too', same);
   const fileDup = typeof DR.shrinkVerdict === 'function' ? DR.shrinkVerdict({ prev: [files('f', 0), chat('a', S, 0)], next: [chat('a', S, 0)], evidence: [{ id: 'f', why: 'dup', by: 'a' }], alive }) : { ok: true };
@@ -99,6 +102,17 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     await P.send(vWrite(ev, 2));
     leg(refusals(P).length === 1 && J(refusals(P)[0].unexplained) === J(['win-v-s']) && H.writes() === 0, `§2 CONTROL: the same drop with ${label} is REFUSED (nothing written)`, P.frames.map((f) => f.type));
   }
+  // r2 — DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT, on the real handler: another socket has S attached (`session.clients`)
+  {
+    const H = hub(WSH, DOC(TRIPLE())), P = H.connect(), Q = H.connect();
+    H.attach(P, S); H.attach(Q, S); // P shows S on X, Q shows S somewhere (its attach)
+    await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 700));
+    leg(refusals(P).length === 1 && J(refusals(P)[0].unexplained) === J(['win-v-s']) && H.writes() === 0 && H.logs.some((l) => /1 offered as a duplicate while another page shows its conversation — kept/.test(l)), '§2 r2: V\'s valid duplicate is REFUSED while ANOTHER client has its session attached — nothing written (that page may be showing win-v-s), the journal says why', { frames: P.frames.map((f) => f.type), log: H.logs.filter((l) => /REFUSED/.test(l)) });
+    const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect(), Q2 = H2.connect();
+    H2.attach(P2, S); H2.attach(Q2, S); H2.hangUp(Q2); // the other page went away
+    await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 701));
+    leg(acks(P2).length === 1 && !ids(H2.layouts().desktops['desk-v'].autoSave.windows).includes('win-v-s'), '§2 r2: …the proposer\'s OWN attach never counts, and once no other page shows S the copy leaves (accepted)', P2.frames.map((f) => f.type));
+  }
   // C — THE SERVER NEVER ANSWERS A STORM
   {
     const H = hub(WSH, DOC(TRIPLE())), P = H.connect(), Q = H.connect();
@@ -148,11 +162,16 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   const PSRC = read('src/lib/desktop-record.js'), DSRC = read('src/lib/desktop-manager.js');
   // A's by-check dropped: any 'dup' is explained
   {
-    const find = "    if (ev.has(id) && why.get(id) === 'dup') { if (shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); continue; }";
+    const find = "    if (ev.has(id) && why.get(id) === 'dup') { const seen = !!(sid && showing(sid, id)); if (!seen && shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); if (seen) shown.push(id); continue; }";
     ok(PSRC.includes(find), 'mutant A-no-by-check: the patched line exists in desktop-record.js');
     const Mx = M.load('src/lib/desktop-record.js', PSRC.replace(find, "    if (ev.has(id) && why.get(id) === 'dup') continue;"), 'a-no-by-check');
     const f = pureLegs(Mx, { quiet: true }), h = await hubLegs(loadHandler({ shrinkVerdict: Mx.shrinkVerdict }), { quiet: true });
     ok(f.some((n) => /CONTROL: a 'dup' whose `by` shows nothing/.test(n)) && h.some((n) => /CONTROL: the same drop with a `by` that shows nothing of S/.test(n)), `mutant A-no-by-check: a duplicate taken on the page's word drops a window nothing shows — RED (${f.length}/${h.length})`);
+  }
+  // r2 A: the hub's `showing` dropped (the r1 verdict: a copy leaves on any page's word)
+  {
+    const h = await hubLegs(loadHandler({ shrinkVerdict: (a) => require(MODEL).shrinkVerdict({ ...a, showing: () => false }) }), { quiet: true });
+    ok(h.some((n) => /r2: V's valid duplicate is REFUSED while ANOTHER client/.test(n)), `mutant A-no-showing (b3a058eb2's verdict): the copy another page shows is written away — RED (${h.length})`);
   }
   // C's storm guard removed (every refusal answered)
   {

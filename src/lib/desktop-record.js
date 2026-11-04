@@ -65,6 +65,10 @@
 //     the record written (`next`) or of ANY other desktop's stored record (`elsewhere`, the server hands every other desktop's
 //     windows) that shows the SAME server session (shownBy); a 'dup' whose `by` shows nothing of it is refused at ANY count
 //     and named in `dup` — a duplicate is never a word the page may say about a window it simply lost.
+//     DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT (the r1 acceptance: page A's dedup wrote page B's window of the same
+//     conversation away and the relay closed it in front of B's person): the VERDICT is the hub's — it sees every client.
+//     `showing(sid)` = ANOTHER connected client has that session attached (it shows it in some window — which one the hub cannot
+//     tell, so the rule is the safe superset); then no copy of it leaves as 'dup' — refused, named in `dup` and in `shown`.
 //
 //   duplicatesOf({records, shown}) — ONE CONVERSATION, ONE WINDOW ENTRY (the same incident's writer — session-lifecycle's
 //     attachSession found an open conversation only among the windows the page had BUILT, so a sidebar click of a conversation
@@ -428,7 +432,7 @@ function stormSweep(memory, { now = Date.now(), windowMs = STORM_MS } = {}) {
   return out;
 }
 
-function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [], elsewhere = [] } = {}) {
+function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [], elsewhere = [], showing = () => false } = {}) {
   const prevList = Array.isArray(prev) ? prev : listOf(prev && prev.windows);
   const nextList = Array.isArray(next) ? next : listOf(next && next.windows);
   const nextIds = new Set(windowIds(nextList));
@@ -436,7 +440,8 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   const ev = evidenceIds(evidence);
   const why = evidenceWhy(evidence);
   const byOf = evidenceBy(evidence);
-  const dup = []; // 'dup' drops whose `by` shows nothing of their session
+  const dup = []; // 'dup' drops whose `by` shows nothing of their session — or whose session another client shows (`shown`)
+  const shown = [];
   const live = [];
   const rec = recent instanceof Set ? recent : new Set(listOf(recent).map((x) => (x == null ? null : String(x))).filter(Boolean));
   const dropped = [];
@@ -452,7 +457,7 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
     // UNBUILT IS NOT DROPPED (lane layout-stopped-window): a SESSION window whose session is stopped, unknown or nameless —
     // the page shows a placeholder for it; only the person's close removes it (a duplicate still leaves; a live one: below)
     // A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN (userW inc-mw1ogdno-5jny): `by` shows the same session — here or on any desktop
-    if (ev.has(id) && why.get(id) === 'dup') { if (shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); continue; }
+    if (ev.has(id) && why.get(id) === 'dup') { const seen = !!(sid && showing(sid, id)); if (!seen && shownBy(sid, id, byOf.get(id), nextList, elsewhere)) continue; unexplained.push(id); dup.push(id); if (seen) shown.push(id); continue; }
     if (ev.has(id) && why.get(id) === 'unbuilt' && isSession(w) && !(sid && (nextSessions.has(sid) || alive(sid)))) { unexplained.push(id); unbuilt.push(id); continue; }
     if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;
     if (ev.has(id)) { unexplained.push(id); live.push(id); continue; }
@@ -463,8 +468,8 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   // a base older than its arrival (lane desktop-move verify r1: the moved window, dropped by a client that had missed
   // the broadcast); one of them is enough, the ≥ `min` rule is for the rest
   const arrived = unexplained.filter((id) => rec.has(id));
-  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length || dup.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt, dup };
-  return { ok: true, dropped, unexplained, arrived, live, unbuilt, dup };
+  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length || dup.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt, dup, shown };
+  return { ok: true, dropped, unexplained, arrived, live, unbuilt, dup, shown };
 }
 
 /** Per desktop whose window SET differs between two layouts.json documents: [name, before, after] (a desktop only in

@@ -10,6 +10,7 @@ import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: t
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js';
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { duplicatesOf, refusalKey, sessionOf, namesOf } from './desktop-record.js'; // PURE (userW inc-mw1ogdno-5jny): one conversation, one window entry; a refusal is said once
+import { withoutMembers } from './chain-layout.js'; // r2 (inc-mw1ogdno-5jny): a copy that leaves takes its place in its tab group with it
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
 import { paintPreviews, warmthDrawn } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the previews' prompt-cache tiers
@@ -25,6 +26,20 @@ const DEPARTED_TTL_MS = 10 * 60 * 1000;
 const DEPARTED_CAP = 200;
 /** A refusal's toast is said once per desktop and reason in this long; a repeat inside it is counted, never shown (inc-mw1ogdno-5jny). */
 const REFUSAL_TOAST_MS = 30000;
+/** The entries of `record` whose recorded tab chain names `id`, each with the chain read WITHOUT it (chain-layout withoutMembers:
+ *  the host promoted, a split that lost its pair decided there) — none left to group ⇒ the entry stands alone (r2). */
+function chainWithout(record, id) {
+  const out = [];
+  for (const w of (record && record.windows) || []) {
+    const wid = String(w && (w.winId || w.id));
+    if (!w || wid === String(id) || !w.tabChain || !Array.isArray(w.tabChain.tabs) || !w.tabChain.tabs.map(String).includes(String(id))) continue;
+    const c = withoutMembers(w.tabChain, [String(id)]);
+    const e = { ...w };
+    if (c) { e.tabChain = c; e.isTabGuest = String(c.tabs[0]) !== wid; } else { delete e.tabChain; delete e.isTabGuest; }
+    out.push(e);
+  }
+  return out;
+}
 
 /**
  * DesktopManager — virtual desktop system.
@@ -509,13 +524,25 @@ export class DesktopManager {
     let n = 0;
     for (const x of duplicatesOf({ records: this._savedStates, shown })) {
       if (x.desk === '__stage__' || this._isKept(x.desk, x.id) || this.app.wm.windows.has(x.id)) continue;
-      this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id] }));
+      // A DEDUPED COPY LEAVES ITS TAB GROUP TOO (r2): the members' recorded chain is read without it, and a chain still waiting
+      // for it is told — the road an unbuilt departure takes (dropUnbuiltMembers); else the group waits for it for ever
+      this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id], add: chainWithout(this._savedStates.get(x.desk), x.id) }));
+      this.app.layoutManager?.dropUnbuiltMembers?.([x.id]);
       this._buildAttempts.delete(x.id);
       this._noteDeparted(x.id, 'dup', x.by);
       if (x.desk !== this._activeId) this._dirtyDesks.add(x.desk);
       n++;
     }
     return n;
+  }
+
+  /** Reveal `id` (a person named it — never the replay's raise) once the window exists and its group, if any, has re-formed;
+   *  given up after ~5 s (a window the page cannot build is the placeholder road's). */
+  _revealWhenBuilt(id, tries = 50) {
+    const wm = this.app.wm;
+    const waiting = !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id);
+    if (waiting && tries > 0) { setTimeout(() => this._revealWhenBuilt(id, tries - 1), 100); return; }
+    if (wm.windows.has(id)) wm.revealWindow?.(id);
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
@@ -527,8 +554,12 @@ export class DesktopManager {
       if (desk === '__stage__' || desk === this._activeId || !this._desktops.some((x) => x.id === desk)) continue;
       const e = (st?.windows || []).find((w) => w && w.openSpec && sessionOf(w) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
       if (!e) continue;
-      try { window.__vsOp?.('desktop-reveal-held', { desk, win: String(e.winId || e.id) }); } catch { }
-      Promise.resolve(this.switchTo(desk)).catch((e) => console.warn('[desktop] the switch to the conversation\'s desktop failed', e));
+      const id = String(e.winId || e.id);
+      try { window.__vsOp?.('desktop-reveal-held', { desk, win: id }); } catch { }
+      // A PERSON'S OPEN REVEALS THE CONVERSATION (r2; inc-muiq348r-jwb5's rule — the USER named it ⇒ wm.revealWindow, its own tab
+      // even when it is a guest of a group that shows another): the switch builds the desktop (its groups with the record's active
+      // tab), then the window is revealed once it stands and no group is still re-forming around it
+      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id)).catch((err) => console.warn('[desktop] the switch to the conversation\'s desktop failed', err));
       return true;
     }
     return false;

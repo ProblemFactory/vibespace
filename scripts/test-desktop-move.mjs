@@ -69,7 +69,8 @@
 //      structure (one conversation under three desktops' records, three window ids) with a LIVE shell session as the conversation,
 //      installed through the restore path; the page boots on X (its window attaches), a real click on V's preview: over 5 s ≤ 1
 //      toast and 0 refusals (the copy leaves as {why:'dup', by}), the server lists the conversation ONCE; RED on 86add763e (a toast
-//      and a refusal every ~500 ms)
+//      and a refusal every ~500 ms); r2 C: the conversation's only entry a tab GUEST on V — a person's open (attachSession) from X
+//      lands on V with ITS tab in front (b3a058eb2: the host's tab)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -718,7 +719,15 @@ else await (async () => {
     console.log('— S: one conversation on three desktops (userW inc-mw1ogdno-5jny) — a switch to a desktop holding a copy: the toasts over 5 s');
     if (!dtachOk) skip('S: dtach is not installed — a live shell session cannot be created here');
     else if (want('S') && ok(await fresh('s'), 'S: fresh fixture, booted on Fin')) {
-      const sid = await ev(`(async () => { const before = new Set(app.wm.windows.keys()); app.createSession({ backend: 'shell', mode: 'terminal', cwd: ${J(ROOT)}, name: 'Atlas notes', model: null, permission: null, effort: null, extraArgs: '' }); for (let i = 0; i < 150; i++) { const id = [...app.wm.windows.keys()].find((k) => !before.has(k)); const s = id && app.sessions.get(id); if (s && s.sessionId) return s.sessionId; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+      // the live conversation is created on a RAW socket that then closes: since r2 the hub refuses a dedup while ANOTHER live socket
+      // has the session attached — a page that created it and navigated away still counted as one (measured: «1 other page(s) attached»)
+      const raw = new WebSocket(`ws://127.0.0.1:${PORT}/ws`), rawGot = [];
+      raw.on('message', (d) => { try { rawGot.push(JSON.parse(d)); } catch { } });
+      await new Promise((r, e) => { raw.on('open', r); raw.on('error', e); });
+      raw.send(J({ type: 'create', backend: 'shell', mode: 'terminal', cwd: ROOT, sessionName: 'Atlas notes', cols: 120, rows: 30 }));
+      await until(() => rawGot.some((f) => f.type === 'created' || f.type === 'error'), 20000);
+      const sid = (rawGot.find((f) => f.type === 'created') || {}).sessionId || null;
+      raw.close(); await sleep(500);
       if (ok(!!sid, 'S: a live shell session — the conversation the records list three times', J(sid))) {
         const FIX = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/layout-dup-triple.json'), 'utf8'));
         const S0 = 'sess-7-41000'; // the fixture's conversation
@@ -737,6 +746,19 @@ else await (async () => {
         const listed = Object.entries(lay.desktops || {}).flatMap(([d, v]) => ((v.autoSave && v.autoSave.windows) || []).filter((w) => w.serverSessionId === sid || w.openSpec?.serverId === sid).map((w) => d + ':' + w.winId));
         ok(J(listed) === J(['desk-x:win-x-s-s']), 'S: …and the server lists the conversation ONCE — Desk X\'s window, the one the page shows (V\'s and Y\'s copies left with evidence \'dup\')', J(listed));
         ok(/1 duplicate window\(s\) left/.test(journal.slice(j0)), 'S: …the journal names the duplicates that left', journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)).slice(0, 4).join(' | '));
+        // r2 C — A PERSON'S OPEN REVEALS THE CONVERSATION (the r1 acceptance: the switch rebuilt the group with the record's active tab):
+        // the conversation's only entry is a tab GUEST on Desk V; the page on Desk X opens it through attachSession (the sidebar's door)
+        const guestId = 'win-vg-s', hostId = 'v-host-s', box = { left: 0.1, top: 0.1, width: 0.5, height: 0.5 };
+        const tg = { tabs: [hostId, guestId], active: 0, layout: 'tabs', order: [hostId, guestId] };
+        const guestShape = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: FIX.desktopMeta, desktops: {
+          'desk-x': { autoSave: { windows: [W('x-1-s2', 'x-1-s2', box)] } }, 'desk-y': { autoSave: { windows: [] } },
+          'desk-v': { autoSave: { windows: [{ ...W(hostId, hostId, box), tabChain: tg, isTabGuest: false }, { ...live({ winId: 'win-vg', gridBounds: box, zIndex: 20 }), tabChain: tg, isTabGuest: true }] } } } };
+        await cdp('Page.navigate', { url: 'about:blank' }); await sleep(300);
+        ok(await install(guestShape) && await boot() && await ev(`app.desktopManager.activeDesktopId`) === 'desk-x', 'S (r2 C): the conversation\'s only entry is a tab GUEST on Desk V; the page booted on Desk X');
+        await ev(`(app.attachSession(${J(sid)}, 'Atlas notes', ${J(ROOT)}, { mode: 'terminal', backend: 'shell' }), true)`);
+        const inFront = await until(async () => (await ev(`app.wm.activeWindowId`)) === guestId, 8000);
+        const st = await ev(`(() => { const w = app.wm.windows.get(${J(guestId)}); const c = w && w._tabChain; return { desk: app.desktopManager.activeDesktopId, active: app.wm.activeWindowId, chain: c ? { tabs: c.tabs, active: c.active } : null, windows: [...app.wm.windows.values()].filter((x) => x._openSpec && x._openSpec.serverId === ${J(sid)}).map((x) => x.id) }; })()`);
+        ok(inFront && st.desk === 'desk-v' && !!st.chain && st.chain.tabs[st.chain.active] === guestId && J(st.windows) === J([guestId]), `S (r2 C): a person's open goes to Desk V and shows the conversation's OWN tab in front — its one window, the group re-formed around it (b3a058eb2: the host's tab) — ${J(st)}`);
         try { await ev(`app.ws.send({ type: 'kill', sessionId: ${J(sid)} })`); } catch { }
       }
     }

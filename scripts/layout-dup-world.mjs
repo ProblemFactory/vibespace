@@ -80,7 +80,8 @@ export function hub(WSH, seed, { alive = [S, T] } = {}) {
   let layouts = JSON.parse(J(seed)), writes = 0, peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
   const logs = [], tele = [];
   const quietly = async (fn) => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { return await fn(); } finally { console.warn = REAL.warn; console.log = REAL.log; } };
-  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(alive.map((sid) => [sid, {}])), WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const sessions = new Map(alive.map((sid) => [sid, { clients: new Map() }])); // each live session's viewers, as the attach case keeps them (`session.clients`)
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -88,9 +89,12 @@ export function hub(WSH, seed, { alive = [S, T] } = {}) {
     const h = {}, frames = [];
     const sock = { readyState: 1, send: (s) => { const f = JSON.parse(s); frames.push(f); if (reply) setTimeout(() => reply(f), 1); }, on: (ev, fn) => { h[ev] = fn; } };
     wss.clients.add(sock); console.warn = () => {}; try { on.connection(sock); } finally { console.warn = REAL.warn; }
-    return { frames, send: (m) => quietly(() => h.message(J(m))) };
+    return { frames, sock, send: (m) => quietly(() => h.message(J(m))) };
   };
-  return { connect, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
+  /** the attach case's effect (src/ws-handler.js `session.clients.set(ws, …)`): this socket now shows session `sid` */
+  const attach = (S0, sid) => { const s = sessions.get(sid); if (s && S0 && S0.sock) s.clients.set(S0.sock, {}); };
+  const hangUp = (S0) => { if (!S0 || !S0.sock) return; S0.sock.readyState = 3; for (const [, s] of sessions) s.clients.delete(S0.sock); };
+  return { connect, attach, hangUp, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
 }
 export const refusals = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-refused');
 export const acks = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-ack');
@@ -103,7 +107,7 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
   const sent = [], handlers = [], closed = [], ops = [];
   const wins = new Map();
   let dm = null, lm = null, seq = 0, sock = null;
-  const mkWin = (id, desk, o = {}) => { const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'viewer', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), _listenerCtl: new AbortController(), ...o }; wins.set(id, w); return w; };
+  const mkWin = (id, desk, o = {}) => { if (H && sock && o._openSpec && o._openSpec.action === 'attachSession') H.attach(sock, o._openSpec.serverId); const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'viewer', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), _listenerCtl: new AbortController(), ...o }; wins.set(id, w); return w; };
   const toPage = (f) => { for (const h of handlers) h(f); };
   if (H) sock = H.connect(toPage);
   const app = {
@@ -112,22 +116,26 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
         const c = JSON.parse(J(m)); sent.push(c);
         if (c.type !== 'layout-sync') return;
         if (sock) { sock.send(c); return; }
-        if (refuseAll) { setTimeout(() => toPage({ type: 'layout-sync-refused', desktopId: c.desktopId, reason: 'shrink-without-close', unexplained: [], arrived: [], state: refuseAll(c), sentAt: c.sentAt ?? null }), 2); return; }
+        const keep = refuseAll ? refuseAll(c) : null; // the fake server's verdict: a record to keep ⇒ refused, nothing ⇒ acked
+        if (keep) { setTimeout(() => toPage({ type: 'layout-sync-refused', desktopId: c.desktopId, reason: 'shrink-without-close', unexplained: [], arrived: [], state: keep, sentAt: c.sentAt ?? null }), 2); return; }
         setTimeout(() => toPage({ type: 'layout-sync-ack', desktopId: c.desktopId || null, sentAt: c.sentAt ?? null, seq: ++seq, updatedAt: Date.now() }), 2);
       } },
     settings: { get: () => null, on() {} }, stage: null, isMobile: false,
     wm: { windows: wins, grid: null, zIndex: 100, _restoring: false, activeWindowId: null, setGrid() {}, _reflowWindows() {}, _applyGridBounds() {}, _captureGridBounds(w) { if (!w.gridBounds) w.gridBounds = { left: 0.3, top: 0.3, width: 0.4, height: 0.4 }; }, focusWindow() {}, setWindowHidden(w, r = {}) { if (w && 'desktop' in r) w._hiddenByDesktop = !!r.desktop; },
       toggleMaximize() {}, minimize() {}, restore() {}, _notify() {}, _scheduleOverlapUpdate() {}, syncHiddenViews() {},
-      revealWindow: (id) => { const w = wins.get(id); ops.push(['reveal', id]); if (w && w._desktopId !== dm.activeDesktopId) dm.switchTo(w._desktopId); return !!w; },
-      createWindow: ({ title, type, syncId, openSpec }) => mkWin(syncId || ('win-n' + (++minted)), dm.activeDesktopId, { type, title, _openSpec: openSpec }), // a window id is unique across pages (the real one is random)
+      revealWindow: (id, o = {}) => { const w = wins.get(id); ops.push(['reveal', id, !!o.replay]); if (w && w._desktopId !== dm.activeDesktopId) dm.switchTo(w._desktopId); if (w && !o.replay) { if (w._tabChain) w._tabChain.active = w._tabChain.tabs.indexOf(id); app.wm.activeWindowId = id; } return !!w; }, // window.js's rule: the person named it ⇒ its own tab, in front
+      createWindow: ({ title, type, syncId, openSpec }) => { const w = mkWin(syncId || ('win-n' + (++minted)), dm.activeDesktopId, { type, title, _openSpec: openSpec }); lm.onWindowCreated?.(w); return w; },
+      // tab-group's restoreTabChain (the shown tab = tabs[active]) and _detachFromChain, wide enough for the chain road
+      restoreTabChain: (tabs, active = 0, o = {}) => { const chain = { tabs: tabs.map(String), active: Number(active) || 0, layout: o.layout || 'tabs', order: (o.order || tabs).map(String) }; for (const id of chain.tabs) { const w = wins.get(id); if (w) w._tabChain = chain; } ops.push(['chain', chain.tabs.join(','), chain.active]); app.wm.activeWindowId = chain.tabs[chain.active]; return chain; },
+      _detachFromChain: (chain, id) => { const i = chain.tabs.indexOf(id); if (i >= 0) chain.tabs.splice(i, 1); const w = wins.get(id); if (w) w._tabChain = null; }, // a window id is unique across pages (the real one is random)
       closeWindow: (id) => { if (!wins.has(id)) return; wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
       setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; } },
     themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
     updateTaskbar() {}, _checkWelcome() {},
     // the real app's replay of a session window is attachSession's: a session this page already shows builds NOTHING (its shortcut)
     replayOpenSpec: (spec, winId) => {
-      if (spec && spec.action === 'attachSession') { if (app.attachSession) return app.attachSession(spec.serverId, spec.name, spec.cwd, { mode: spec.mode, syncId: winId, backend: spec.backend, backendSessionId: spec.backendSessionId }); if ([...wins.values()].some((w) => w._openSpec && w._openSpec.serverId === spec.serverId)) return null; return mkWin(winId, dm.activeDesktopId, { type: 'chat', title: spec.name, _openSpec: spec }); }
-      return mkWin(winId, dm.activeDesktopId, { type: 'viewer', _openSpec: spec });
+      if (spec && spec.action === 'attachSession') { if (app.attachSession) return app.attachSession(spec.serverId, spec.name, spec.cwd, { mode: spec.mode, syncId: winId, backend: spec.backend, backendSessionId: spec.backendSessionId }); if ([...wins.values()].some((w) => w._openSpec && w._openSpec.serverId === spec.serverId)) return null; const c = mkWin(winId, dm.activeDesktopId, { type: 'chat', title: spec.name, _openSpec: spec }); lm.onWindowCreated?.(c); return c; }
+      const v = mkWin(winId, dm.activeDesktopId, { type: 'viewer', _openSpec: spec }); lm.onWindowCreated?.(v); return v; // the real createWindow tells the layout manager (pending chains reconcile)
     },
     ...extra,
   };
@@ -161,12 +169,12 @@ export async function loadLifecycle(src = fs.readFileSync(path.join(LIB, 'sessio
   try { return (await import(pathToFileURL(f).href)).installSessionLifecycle; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 /** a page (the real classes + the REAL attachSession) over the hub's CURRENT layouts, booted on `active` */
-export function pageOn(H, install, active) {
+export function pageOn(H, install, active, { DM = RealDM, LM = RealLM } = {}) {
   class Life {} install(Life);
   const proto = Life.prototype;
   const doc = H.layouts();
   const records = Object.fromEntries(Object.entries(doc.desktops).map(([d, v]) => [d, v.autoSave.windows]));
-  const W = world({ records, active, H, extra: { _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _closeSidebarOnMobile() {} } });
+  const W = world({ records, active, H, DM, LM, extra: { _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _closeSidebarOnMobile() {} } });
   for (const k of ['attachSession', '_focusExistingSession', '_focusPendingAttach', '_windowPending']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
   return W;
 }

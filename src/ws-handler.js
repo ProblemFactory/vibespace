@@ -333,6 +333,12 @@ function registerWsHandler(wss, ctx) {
   /** true = this client's last refusal of `desktopId` again (the same key within STORM_MS): dropped unanswered */
   const layoutStormed = (ws, desktopId, key) => { const v = refusalStorm(layoutStorms, { who: layoutClientOf(ws), desktopId, key }); sayStorm(v.ended); armStormSweep(); return !v.answer; };
   /** Every OTHER desktop's stored windows — where a duplicate's `by` may show its session (A DUPLICATE IS EXPLAINED WHEREVER IT IS SHOWN) */
+  /** DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT (the r1 acceptance): ANOTHER open socket has session `sid` attached
+   *  (the attach case puts every viewer's socket in `session.clients`) — it shows that conversation, so no copy of it leaves */
+  //  — a LIVE connection only (in `wss.clients`, open): a socket that left keeps its entry until its own close handler runs, and a
+  //  creating socket may never be listed in its connection's attachedSessions
+  const viewersElsewhere = (ws, sid) => { const s = activeSessions.get(sid); let n = 0; if (!s || !(s.clients instanceof Map)) return n; for (const c of s.clients.keys()) if (c !== ws && c && c.readyState === WS_OPEN && wss.clients.has(c)) n++; return n; };
+  const showingElsewhere = (ws, sid) => viewersElsewhere(ws, sid) > 0;
   const otherRecords = (layoutData, desktopId) => Object.entries(layoutData.desktops || {}).filter(([k]) => k !== desktopId && k !== '__stage__').map(([, v]) => (v && v.autoSave && Array.isArray(v.autoSave.windows) ? v.autoSave.windows : []));
   const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
     let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
@@ -1638,16 +1644,17 @@ function registerWsHandler(wss, ctx) {
           // carries a close for every window it drops. PURE rule: src/lib/desktop-record.js shrinkVerdict.
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && Array.isArray(data.state.windows)) {
             const stored = layoutData.desktops[desktopId].autoSave;
-            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws), elsewhere: otherRecords(layoutData, desktopId) });
+            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws), elsewhere: otherRecords(layoutData, desktopId), showing: (sid) => showingElsewhere(ws, sid) });
             // UNBUILT IS NOT DROPPED (lane layout-stopped-window): the session windows a page dropped as 'unbuilt' are NAMED — titles, never a count
             const unbuiltTitles = (v.unbuilt || []).map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); return String(w && w.title ? w.title : id).slice(0, 48); });
             const unbuiltSaid = unbuiltTitles.length ? `; ${unbuiltTitles.length} stopped / unknown session window(s) dropped as 'unbuilt' — a page shows them as placeholders: ${unbuiltTitles.join(' · ')}` : '';
             const ringUnbuilt = unbuiltTitles.length ? { unbuilt: unbuiltTitles } : {};
+            const shownSaid = v.shown?.length ? `; ${v.shown.length} offered as a duplicate while another page shows its conversation — kept (${v.shown.map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); const sid = w && (w.serverSessionId || (w.openSpec && w.openSpec.serverId)); return `${viewersElsewhere(ws, sid)} other page(s) attached`; }).join(', ')})` : ''; // r2: the hub's dedup verdict, said
             if (!v.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: v.reason, unexplained: v.unexplained }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
             if (!v.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               const arrived = (v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '') + (v.live?.length ? `; ${v.live.length} LIVE (the sender could not build them)` : '');
-              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}${unbuiltSaid}; the server keeps its record`);
+              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}${unbuiltSaid}${shownSaid}; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
               noteToRing({ refused: v.reason, desktopId, viewport: data.viewport || null, n: v.unexplained.length, live: v.live?.length || 0, ...ringUnbuilt });
               try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }

@@ -140,6 +140,61 @@ async function censusLegs(install, { quiet = false } = {}) {
 const install0 = await loadLifecycle();
 await section('§5 E — THE WRITER: the door census over the shape (the REAL session-lifecycle attachSession)', async () => { await censusLegs(install0); });
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// §7 ROUND 2 (the r1 acceptance on b3a058eb2 — each leg RED there by name): A DEDUP NEVER REMOVES A WINDOW SOMEONE IS LOOKING AT
+// (the verifier's world ×2 over one hub); a refused dedup is KEPT, so the person's close beside it lands; THE BREAKER holds for a
+// desktop NOT on show too; B a deduped copy leaves its tab group; C a person's open reveals the conversation (its own tab)
+const chainOf = (tabs, active = 0) => ({ tabs: [...tabs], active, layout: 'tabs', order: [...tabs] });
+const member = (w, tabs, active = 0) => ({ ...w, tabChain: chainOf(tabs, active), isTabGuest: tabs[0] !== w.winId });
+const TWO = () => ({ 'desk-x': [chat('win-x-s', S, 0), files('x-1', 1), files('x-2', 2)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 2)] });
+async function r2Legs({ WSH = loadHandler(), DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (want('A')) {
+    const H = hub(WSH, DOC(TWO()));
+    const A = world({ records: TWO(), active: 'desk-x', DM, LM, H }), B = world({ records: TWO(), active: 'desk-v', DM, LM, H });
+    const t0 = made.length;
+    A.act(); await tick(2500); B.act(); await tick(2500);
+    leg(!B.closed.length && !A.closed.length && B.wins.has('win-v-s') && A.wins.has('win-x-s'), `§7 r2 A: two pages each SHOWING S on another desktop (A on X, B on V) — an act on either removes NOTHING on the other; no relay closes a shown window (b3a058eb2: B closed win-v-s with no act of its own) — closed A ${J(A.closed)} B ${J(B.closed)}`);
+    leg(J(sessionEntries(H.layouts()).sort()) === J(['desk-v:win-v-s', 'desk-x:win-x-s']), '§7 r2 A: …both entries stay on the hub while both are shown (the verdict is the hub\'s: another client has S attached)', sessionEntries(H.layouts()));
+    leg(toasts(t0).length === 0, `§7 r2 A: …and nothing is said on either page (here ${toasts(t0).length})`, toasts(t0).map(toastText));
+    // the refused dedup is KEPT: A visits V and the person closes v-1 — the close lands beside the kept copy (claim 1's probe d)
+    await switchTo(A, 'desk-v'); A.app.wm.closeWindow('v-1'); A.act(); await tick(1500);
+    const v = ids(H.layouts().desktops['desk-v'].autoSave.windows);
+    leg(J(v) === J(['win-v-s']), `§7 r2 A: …the refused copy is KEPT on A, so A's person's close of v-1 lands (V = [win-v-s]); nothing re-proposes it (with the kept row gone the copy is dropped again, the hub swallows the repeat and the close is lost) — V ${J(v)}`, H.logs.filter((l) => /REFUSED|STORM/.test(l)).slice(0, 3));
+  }
+  if (want('H')) {
+    // THE BREAKER for a desktop NOT on show (claim 1's probe h): V refused, then four acts on X re-send nothing of V
+    const W = world({ records: { 'desk-x': [files('x-1', 1), files('x-2', 2)], 'desk-v': [files('v-1', 0)] }, active: 'desk-x', DM, LM, refuseAll: (c) => (c.desktopId === 'desk-v' ? c.state : null) });
+    W.dm.moveWindowToDesktop('x-2', 'desk-v'); W.act(); await tick(1200);
+    for (let i = 0; i < 4; i++) { W.act(); await tick(800); }
+    leg(W.syncs('desk-v').length === 1, `§7 r2 THE BREAKER on a desktop NOT on show: its refused record is never re-sent by four acts elsewhere — V written ${W.syncs('desk-v').length}× (holdsBack off: once per act)`, W.syncs('desk-v').map((m) => ids(m.state.windows)));
+  }
+  if (want('B')) {
+    const recs = { 'desk-x': [files('x-1', 1), chat('win-x-s', S, 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), ['v-h', 'win-v-s', 'v-g']), member(chat('win-v-s', S, 1), ['v-h', 'win-v-s', 'v-g']), member(files('v-g', 2), ['v-h', 'win-v-s', 'v-g'])] };
+    const H = hub(WSH, DOC(recs));
+    const W = world({ records: recs, active: 'desk-x', DM, LM, H });
+    W.act(); await tick(1500);
+    const v = H.layouts().desktops['desk-v'].autoSave.windows;
+    const host = v.find((w) => w.winId === 'v-h') || {}, guest = v.find((w) => w.winId === 'v-g') || {};
+    leg(J(ids(v)) === J(['v-h', 'v-g']) && J(host.tabChain && host.tabChain.tabs) === J(['v-h', 'v-g']) && !host.isTabGuest && J(guest.tabChain && guest.tabChain.tabs) === J(['v-h', 'v-g']) && guest.isTabGuest === true, '§7 r2 B: A DEDUPED COPY LEAVES ITS TAB GROUP TOO — V = [v-h, v-g] and the members\' recorded chain no longer names win-v-s (b3a058eb2: the host kept [v-h, win-v-s, v-g] — a member no record lists)', v.map((w) => [w.winId, w.tabChain && w.tabChain.tabs, !!w.isTabGuest]));
+    await switchTo(W, 'desk-v');
+    leg(W.ops.some((o) => o[0] === 'chain' && o[1] === 'v-h,v-g'), '§7 r2 B: …and the group RE-FORMS without it on the next replay (b3a058eb2: the chain waits for ever)', W.ops);
+  }
+  if (want('C') && install) {
+    const recs = { 'desk-x': [files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), ['v-h', 'win-v-s']), member(chat('win-v-s', S, 1), ['v-h', 'win-v-s'])] };
+    const H = hub(WSH, DOC(recs));
+    const P = pageOn(H, install, 'desk-x', { DM, LM });
+    P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID });
+    await tick(2200);
+    const w = P.wins.get('win-v-s'), c = w && w._tabChain;
+    leg(P.dm.activeDesktopId === 'desk-v' && P.app.wm.activeWindowId === 'win-v-s' && !!c && c.tabs[c.active] === 'win-v-s' && P.ops.some((o) => o[0] === 'reveal' && o[1] === 'win-v-s' && o[2] === false), `§7 r2 C: A PERSON'S OPEN REVEALS THE CONVERSATION — its entry a tab GUEST on V: the open switches to V and shows ITS tab, in front (inc-muiq348r-jwb5's rule; b3a058eb2: the host's tab v-h) — active ${P.app.wm.activeWindowId}, chain ${J(c && { tabs: c.tabs, active: c.active })}`, P.ops);
+  }
+  return failed;
+}
+await section('§7 ROUND 2 — dedup never removes a shown window; the kept close; the breaker off-screen; the tab group; the reveal', async () => { await r2Legs({ install: install0 }); });
+
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
   const M = mutantCopies('ldupl', REPO);
   const DSRC = read('src/lib/desktop-manager.js'), LSRC = read('src/lib/session-lifecycle.js');
@@ -167,7 +222,34 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const f = await censusLegs(await loadLifecycle(LSRC.replace(find, '')), { quiet: true });
     ok(f.some((n) => /THE WRITER: a person opening S/.test(n)), `mutant E-no-door (2.369.374's attachSession): two pages make the TRIPLE — RED (${f.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+
+  // r2: A the hub's `showing` dropped; the kept row removed (probe d); holdsBack off (probe h); B the chain shrink removed; C the reveal removed
+  {
+    const fA = await r2Legs({ WSH: loadHandler({ shrinkVerdict: (a) => realDR.shrinkVerdict({ ...a, showing: () => false }) }), quiet: true, legs: ['A'] });
+    ok(fA.some((n) => /an act on either removes NOTHING on the other/.test(n)), `mutant r2-A-no-showing (b3a058eb2's verdict): page A's dedup closes the window page B shows — RED (${fA.length})`);
+    const findK = "    if (msg.reason === 'shrink-without-close') for (const id of msg.unexplained || []) this._keep(d, id);";
+    ok(DSRC.includes(findK), 'mutant r2-nothing-kept: the patched line exists in desktop-manager.js');
+    const DMk = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findK, ''), 'r2-nothing-kept', { esm: true })).href)).DesktopManager;
+    const fK = await r2Legs({ DM: DMk, quiet: true, legs: ['A'] });
+    ok(fK.some((n) => /the refused copy is KEPT on A/.test(n)), `mutant r2-nothing-kept (_keep gone — claim 1's M3): the person's close of v-1 is lost — RED (${fK.length})`);
+    const findH = '    return !!(r && r.json != null && r.json === this._writeJson(desktopId, state));';
+    ok(DSRC.includes(findH), 'mutant r2-no-holdsBack: the patched line exists in desktop-manager.js');
+    const DMh = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findH, '    return false;'), 'r2-no-holdsBack', { esm: true })).href)).DesktopManager;
+    const fH = await r2Legs({ DM: DMh, quiet: true, legs: ['H'] });
+    ok(fH.some((n) => /THE BREAKER on a desktop NOT on show/.test(n)), `mutant r2-no-holdsBack (claim 1's M4): the refused record of V is re-sent on every act on X — RED (${fH.length})`);
+    const findB = "      this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id], add: chainWithout(this._savedStates.get(x.desk), x.id) }));\n      this.app.layoutManager?.dropUnbuiltMembers?.([x.id]);\n";
+    ok(DSRC.includes(findB), 'mutant r2-chain-kept: the patched lines exist in desktop-manager.js');
+    const DMb = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findB, "      this._setRecord(x.desk, mergeDesktopRecord({ record: this._savedStates.get(x.desk), remove: [x.id] }));\n"), 'r2-chain-kept', { esm: true })).href)).DesktopManager;
+    const fB = await r2Legs({ DM: DMb, quiet: true, legs: ['B'] });
+    ok(fB.some((n) => /LEAVES ITS TAB GROUP TOO/.test(n)) && fB.some((n) => /RE-FORMS without it/.test(n)), `mutant r2-chain-kept (b3a058eb2's normalizeDups): the host keeps naming the copy, the group never re-forms — RED (${fB.length})`);
+    const findC = '      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id))';
+    ok(DSRC.includes(findC), 'mutant r2-no-reveal: the patched line exists in desktop-manager.js');
+    const DMc = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(findC, '      Promise.resolve(this.switchTo(desk)).then(() => null)'), 'r2-no-reveal', { esm: true })).href)).DesktopManager;
+    const installC = await loadLifecycle();
+    const fC = await r2Legs({ DM: DMc, install: installC, quiet: true, legs: ['C'] }).catch((e) => [String(e)]);
+    ok(fC.length >= 1, `mutant r2-no-reveal (b3a058eb2's door): the open lands on the host's tab — RED (${fC.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 7, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 
