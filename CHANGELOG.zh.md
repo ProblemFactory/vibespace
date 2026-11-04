@@ -2,6 +2,18 @@
 
 你能感受到的改动，最新的在最前。工程记录见 docs/changelog-engineering.md。
 
+## 2.369.378 — 2026-11-04
+
+### 新增
+- 「管理 agent」会显示每个 agent CLI 是在哪里、由哪个 shell 找到的。
+
+### 更改
+- VibeSpace 现在按你自己的 shell 的方式找到 agent CLI——nvm、Homebrew、bun 或任何其他安装方式。
+- 用安装器的别名安装的 Claude Code（~/.claude/local/claude）也能被找到并运行。
+
+### 修复
+- 你的 shell 找不到的 CLI 会立刻说出来，并说明在哪里找过，不会再让对话悄无声息地死掉。
+
 ## 2.369.377 — 2026-11-04
 
 ### 修复

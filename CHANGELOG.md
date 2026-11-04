@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.378 — 2026-11-04
+
+### Added
+- Manage agents shows where each of your agent CLIs was found, and by which shell.
+
+### Changed
+- VibeSpace now finds your agent CLIs the way your own shell does — nvm, Homebrew, bun or any other install.
+- A Claude Code installed with the installer’s alias (~/.claude/local/claude) is found and run.
+
+### Fixed
+- A CLI your shell cannot find is said at once, with where it looked, instead of a conversation that dies in silence.
+
 ## 2.369.377 — 2026-11-04
 
 ### Fixed
