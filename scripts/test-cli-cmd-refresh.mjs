@@ -191,7 +191,10 @@ else {
   fakeHome = scratchHome('cli-cmd-home', fs);
   // A fake CLI: records the path it was run AS, then holds the pty briefly.
   const PATHMARK = path.join(ROOT, 'ran-path.txt');
-  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho "$0" >> '${MARK}'\necho "$PATH" > '${PATHMARK}'\nexec sleep 15\n`, { mode: 0o755 });
+  const STDIN_MARK = path.join(ROOT, 'ran-stdin.txt');
+  // the fake CLI: answers --version; records what it ran AS (and its PATH); a CHAT spawn (stream flags) records every
+  // stdin line it is handed — proof that the chat wrapper's stdin reaches a directly spawned CLI
+  fs.writeFileSync(path.join(A, 'claude'), `#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho "$0" >> '${MARK}'\necho "$PATH" > '${PATHMARK}'\ncase " $* " in *" --output-format "*) while IFS= read -r l; do printf '%s\\n' "$l" >> '${STDIN_MARK}'; done; exit 0;; esac\nexec sleep 15\n`, { mode: 0o755 });
   // THE PERSON'S LOGIN SHELL (lane cli-shell-truth): a scratch sh script named by the server's SHELL — the REAL road is
   // driven (never this machine's own zsh under a suite). Its "rc" prints a banner and puts a marker dir first on PATH.
   const LOGIN_SH = path.join(ROOT, 'login-shell'), SHMARK = path.join(ROOT, 'shell-path-mark');
@@ -287,23 +290,31 @@ else {
     const s2 = await agyStatus();
     ok(s2.installed === false && s2.cmdPath === null, `agy removed: the next plain read says not installed (${JSON.stringify(s2)})`);
   }
-  // ⑤ (lane cli-shell-truth round 4) THE PERSON'S SHELL RUNS ITS OWN WRAPPER — on the real spawn road: the login shell's
-  // rc now makes `claude` a FUNCTION; a person's Re-check re-asks, the shell's `claude --version` proves it, and the next
-  // create spawns THROUGH the shell (the shim) — dtach, the pty wrapper, the person's function, the program it runs
-  console.log('\n⑤ the same server: a FUNCTION wearing the name — the create runs through the person\'s shell');
+  // ⑤ (lane cli-shell-truth round 5 — the final shape) THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A PROGRAM: the login
+  // shell's rc now makes `claude` a FUNCTION over the program on its PATH. A person's Re-check names the wrapper; the next
+  // CHAT create spawns the PROGRAM directly (never the person's interactive shell — round 4's shim made such a chat deaf:
+  // the -i shell took the pty's foreground) and a message reaches the CLI's stdin through the chat wrapper.
+  console.log('\n⑤ the same server: a FUNCTION wearing the name — the chat spawns the program, and its stdin is alive');
   {
     try { fs.renameSync(path.join(A, 'claude.gone'), path.join(A, 'claude')); } catch { }
     const RCFN = path.join(ROOT, 'rc-function.sh');
-    fs.writeFileSync(RCFN, `claude() { '${path.join(A, 'claude')}' "$@"; }\n`);
+    fs.writeFileSync(RCFN, `claude() { VSX=1 command claude "$@"; }\n`);
     fs.writeFileSync(LOGIN_SH, `#!/bin/sh\necho "scratch rc banner"\nPATH="${SHMARK}:$PATH"; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; L="$1"; shift; exec /bin/sh -c ". '${RCFN}'; $L" "$@";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
     try { await fetch(`http://127.0.0.1:${PORT}/api/backend-status?recheck=1`); } catch { }
     const st = await (async () => { try { return (await (await fetch(`http://127.0.0.1:${PORT}/api/backend-status`)).json())?.claude || {}; } catch (e) { return { error: e.message }; } })();
-    ok(st.via === 'wrapper' && st.wrapper && st.wrapper.kind === 'function' && /^2\.1\.300/.test(st.version || ''), `a person's Re-check: the shell runs claude through a FUNCTION — proven by its --version (${st.version}), the census names the road (via ${st.via})`);
+    ok(st.via === 'program' && st.wrapper && st.wrapper.kind === 'function' && st.cmdPath === path.join(A, 'claude'), `a person's Re-check: the shell wraps claude in a FUNCTION — the census NAMES it and keeps the PATH program (${st.cmdPath}, via ${st.via})`);
     const before = marks().length;
-    const r6 = await create();
+    const reqId = 'chat5';
+    ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: WORK, reqId }));
+    await until(() => msgs.some((m) => m.reqId === reqId && (m.type === 'created' || m.type === 'error')), 20000);
+    const r6 = msgs.find((m) => m.reqId === reqId && (m.type === 'created' || m.type === 'error')) || null;
     const ran = await until(() => marks().length > before, 10000);
-    ok(r6?.type === 'created' && ran && marks()[marks().length - 1] === path.join(A, 'claude'), `the create spawns THROUGH the person's shell: dtach ⇒ the pty wrapper ⇒ the shim ⇒ the function ⇒ ${path.join(A, 'claude')} ran (${r6?.type}; ran=${ran})`);
-    ok(journal.split('\n').some((l) => /\[cli-cmd\] claude: .*runs 'claude' through a function — proven/.test(l)), 'ONE journal line says the shell runs it through a function, proven');
+    ok(r6?.type === 'created' && ran && marks()[marks().length - 1] === path.join(A, 'claude'), `the CHAT create spawns the PROGRAM directly (never the shell): ${path.join(A, 'claude')} ran (${r6?.type}; ran=${ran})`);
+    const said = 'hello-through-the-chat-wrapper-' + process.pid;
+    if (r6?.sessionId) ws.send(JSON.stringify({ type: 'chat-input', sessionId: r6.sessionId, text: said }));
+    const heard = await until(() => { try { return fs.readFileSync(STDIN_MARK, 'utf8').includes(said); } catch { return false; } }, 15000, 200);
+    ok(heard, `…and the chat is NOT deaf: a message sent through the chat wrapper reached the CLI's stdin (${heard ? 'heard' : 'nothing heard'})`);
+    ok(journal.split('\n').some((l) => /\[cli-cmd\] claude: .*found 'claude' at .* it wraps the name in a function, which VibeSpace does not run/.test(l)), 'ONE journal line names the function the program runs without');
   }
   try { ws.close(); } catch { }
   done();

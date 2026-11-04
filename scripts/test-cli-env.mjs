@@ -217,57 +217,56 @@ const CLI = require(path.join(REPO, 'src/server/cli-cmd.js'));
 // ⑧'s real shells (round 2) start HERE — independent of every other leg, so their wall time hides behind ①–⑦
 const REAL8 = await (async () => {
   // planted homes (never the owner's rc): .zshenv skip_global_compinit=1 (a person's own switch — the real road, -l -i,
-  // without Ubuntu's global compinit), the shape in .zshrc / .bash_profile. ROUND 4: the person's shell runs its OWN
-  // wrapper — each shape goes through the REAL registry (ask + the --version probe), then the adopted command is SPAWNED
-  // and the fake CLI's marker says what ran, with which argv and env.
+  // without Ubuntu's global compinit), the shape in .zshrc / .bash_profile. ROUND 5 (final): the shell says WHERE the
+  // program is; the spawn is ALWAYS that program (each shape: the REAL registry's answer, then SPAWNED directly — its
+  // marker says which program ran). One narrow wrapper rule: the installer's one-word absolute alias.
   const RN = `vsreal${process.pid}`, RB = path.join(DIR, 'realbin'), MK = path.join(DIR, 'markers');
   for (const d of [RB, MK]) fs.mkdirSync(d, { recursive: true });
-  const fake = (file, tag, ver) => fs.writeFileSync(file, `#!/bin/sh\ncase " $* " in *" --version "*) echo "${ver} (fake)"; exit 0;; esac\nprintf '{"tag":"${tag}","pid":%s,"args":"%s","x":"%s"}\\n' "$$" "$*" "\${VSX:-}" >> "$VS_MARK"\nprintf '{"tag":"${tag}"}\\n'\nexit 0\n`, { mode: 0o755 });
-  const PROG = path.join(RB, RN); fake(PROG, 'path-program', '2.1.281');
-  fake(path.join(RB, 'fakenpx'), 'npx', '9.9.9');
-  const home = (shape, rc, { target = false, banner = false } = {}) => {
+  const fake = (file, tag) => fs.writeFileSync(file, `#!/bin/sh\nprintf '{"tag":"${tag}","args":"%s"}\\n' "$*" >> "$VS_MARK"\nexit 0\n`, { mode: 0o755 });
+  const PROG = path.join(RB, RN); fake(PROG, 'path-program');
+  fake(path.join(RB, 'fakenpx'), 'npx');
+  const home = (shape, rc, { target = 'none' } = {}) => {
     const h = path.join(DIR, 'homes', shape); fs.mkdirSync(h, { recursive: true });
     fs.writeFileSync(path.join(h, '.zshenv'), 'skip_global_compinit=1\n');
-    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), (banner ? 'echo "rc banner on STDOUT"\necho "rc note on STDERR" >&2\n' : '') + rc + '\n');
-    if (target) { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); fake(path.join(h, '.local-cli', RN), 'alias-target', '2.1.300'); }
+    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), rc + '\n');
+    if (target !== 'none') { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); if (target === 'exec') fake(path.join(h, '.local-cli', RN), 'alias-target'); else fs.writeFileSync(path.join(h, '.local-cli', RN), 'not a program\n', { mode: 0o644 }); }
     return h;
   };
   const SHELLS = [['zsh', ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p))], ['bash', ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p))]].filter(([, p]) => p);
   const envOf = (h, onPath) => ({ HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' });
-  // [label, home, PATH has the program dir, what the marker must say (or 'refused' / 'direct')]
+  const INST = `alias ${RN}="~/.local-cli/${RN}"`;
+  // [label, home, PATH has the program dir, the want: { target | prog | refused: 'wrapper' | 'missing' | 'not-executable' | 'none' }]
   const SHAPES = [
-    ['the installer alias (alias x="~/.local-cli/x") — run THROUGH the shell, its target runs', home('installer', `alias ${RN}="~/.local-cli/${RN}"`, { target: true }), false, { tag: 'alias-target', args: '--stream a b' }],
-    ['an npx launcher alias (alias x=\'fakenpx -y @scope/pkg@latest\') — npx runs with the package word AND the session argv', home('npx', `alias ${RN}='fakenpx -y @scope/pkg@latest'`), true, { tag: 'npx', args: '-y @scope/pkg@latest --stream a b' }],
-    ['an env-assignment alias (alias x=\'VSX=from-alias x\') — the program runs with that env set', home('envassign', `alias ${RN}='VSX=from-alias ${RN}'`), true, { tag: 'path-program', args: '--stream a b', x: 'from-alias' }],
-    ['a FUNCTION (x() { VSX=from-fn command x "$@"; }) — it runs', home('function', `${RN}() { VSX=from-fn command ${RN} "$@"; }`), true, { tag: 'path-program', args: '--stream a b', x: 'from-fn' }],
-    ['the DANGLING installer alias (its target gone) — refused with the shell\'s own words', home('dangling', `alias ${RN}="~/.local-cli/${RN}"`), false, 'refused'],
-    ['a plain program, no alias — spawned DIRECTLY (no shell in between)', home('plain', ''), true, 'direct'],
-    ['the installer alias under an rc that prints a banner on STDOUT — the CLI\'s stdout stays clean', home('banner', `alias ${RN}="~/.local-cli/${RN}"`, { target: true, banner: true }), false, { tag: 'alias-target', args: '--stream a b', clean: true }],
+    ['the installer alias (alias x="~/.local-cli/x"), no program on PATH ⇒ its target', home('inst', INST, { target: 'exec' }), false, { target: true }],
+    ['the installer alias AND a stale program on PATH ⇒ its target (the person\'s shell would run it)', home('inst-stale', INST, { target: 'exec' }), true, { target: true }],
+    ['a flags alias (alias x=\'x --yolo\') over a PATH program ⇒ the PATH program, the alias NAMED', home('flags', `alias ${RN}='${RN} --yolo'`), true, { prog: 'alias' }],
+    ['an npx alias (alias x=\'fakenpx -y @scope/pkg\') over a PATH program ⇒ the PATH program, the alias NAMED (npx is never run)', home('npx', `alias ${RN}='fakenpx -y @scope/pkg@latest'`), true, { prog: 'alias' }],
+    ['an npx alias with NO program on PATH ⇒ refused, the alias named, the two doors', home('npx-none', `alias ${RN}='fakenpx -y @scope/pkg@latest'`), false, { refused: 'wrapper', kind: 'alias' }],
+    ['a FUNCTION over a PATH program ⇒ the PATH program, the function NAMED', home('fn', `${RN}() { VSX=1 command ${RN} "$@"; }`), true, { prog: 'function' }],
+    ['a FUNCTION with NO program on PATH ⇒ refused, the function named, the two doors', home('fn-none', `${RN}() { echo hi; }`), false, { refused: 'wrapper', kind: 'function' }],
+    ['the DANGLING installer alias (its target missing) ⇒ refused by its cause', home('dangle', INST), false, { refused: 'missing' }],
+    ['the installer alias naming a file that is NOT executable ⇒ refused by its cause', home('noexec', INST, { target: 'noexec' }), false, { refused: 'not-executable' }],
+    ['r3 C: the person aliases the lookup words (alias type=\'type -a\', whence, command, unalias), no program ⇒ none — never «could not be asked»', home('builtin-alias', "alias type='type -a'\nalias whence='whence -a'\nalias command='command -p'\nalias unalias='echo'"), false, { refused: 'none' }],
+    ['a plain program, no wrapper ⇒ that program', home('plain', ''), true, { prog: null }],
   ];
-  const runCli = (cmd, env, mark) => new Promise((res) => {
-    let out = '', err = '';
-    const c = spawn(cmd, ['--stream', 'a b'], { env: { ...env, VS_MARK: mark }, stdio: ['ignore', 'pipe', 'pipe'] });
-    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
-    c.on('error', (e) => res({ pid: null, out, err: String(e.message), code: -1 }));
-    c.on('close', (code) => res({ pid: c.pid, out, err, code }));
+  const runCli = (cmd, mark) => new Promise((res) => {
+    const c = spawn(cmd, ['--stream', 'a b'], { env: { PATH: '/usr/bin:/bin', VS_MARK: mark }, stdio: 'ignore' });
+    c.on('error', (e) => res({ err: e.message })); c.on('close', (code) => res({ code }));
   });
   const runs = Promise.all(SHAPES.flatMap(([label, h, onPath, want], si) => SHELLS.map(async ([sn, sp]) => {
-    if (typeof CLI.probeVersion !== 'function') return { label, sn, want, reg: null, got: null, cs: null, ran: null, marks: [], logs: [] }; // a tree without the wrapper road: every shape RED by name
-    const logs = [];
-    const reg = CLI.createCliCmds({ ask: (n) => CLI.askShell(n, { shell: sp, env: envOf(h, onPath) }), probe: (n, shell) => CLI.probeVersion(n, { shell, env: envOf(h, onPath) }), shimDir: path.join(DIR, 'shims', `${si}-${sn}`), log: (l) => logs.push(l) });
+    const reg = CLI.createCliCmds({ ask: (n) => CLI.askShell(n, { shell: sp, env: envOf(h, onPath) }), log: () => {} });
     reg.register('claude', { name: RN, current: RN });
     const got = await reg.forSpawn('claude', RN).then((c) => ({ cmd: c }), (e) => ({ err: e }));
     const cs = reg.census?.('claude');
-    let ran = null, marks = [];
+    let marks = [];
     if (got.cmd) {
       const mark = path.join(MK, `${si}-${sn}.jsonl`);
-      ran = await runCli(got.cmd, envOf(h, onPath), mark);
+      await runCli(got.cmd, mark);
       try { marks = fs.readFileSync(mark, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { }
     }
-    return { label, sn, want, got, cs, ran, marks, logs };
+    return { label, sn, sp, h, want, got, cs, marks };
   })));
-  const [wsn, wsp] = SHELLS.find(([n]) => n === 'bash') || SHELLS[0] || [];
-  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs, wsn, wsp, home };
+  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs };
 })();
 
 // ⑨'s version-gate leg (round 2) starts with the early batch too
@@ -368,8 +367,8 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
         mod.askShell('vsfn_cli', { shell: FN }), ZALIAS ? mod.askShell('vs-al-cli', { shell: ZALIAS }) : null,
         mod.askShell(NAME, { shell: EXIT3 }), mod.askShell(NAME, { shell: path.join(SHD, 'no-such-shell') }), mod.askShell(NAME, { shell: '' }),
         mod.askShell(NAME, { shell: NOCMD })]);
-      leg('r4: a shell FUNCTION wearing the name: kind:wrapper (function) — the shell will run it; its body is never read', a.kind === 'wrapper' && a.wrapper && a.wrapper.kind === 'function' && a.wrapper.text === 'vsfn_cli', JSON.stringify(a));
-      if (z) leg('r4: a zsh ALIAS (alias x=ls): kind:wrapper (alias, its text) — the shell will run it; its body is never read', z.kind === 'wrapper' && z.wrapper && z.wrapper.kind === 'alias' && /alias/.test(z.wrapper.text || '') && !('followed' in z), JSON.stringify(z));
+      leg('a shell FUNCTION with no program behind it: kind:none, the function NAMED (never run, never read)', a.kind === 'none' && a.wrapper && a.wrapper.kind === 'function' && a.wrapper.text === 'vsfn_cli', JSON.stringify(a));
+      if (z) leg('a zsh ALIAS whose body is no absolute path (alias x=ls), no program: kind:none, the alias NAMED — never followed', z.kind === 'none' && z.wrapper && z.wrapper.kind === 'alias' && /alias/.test(z.wrapper.text || '') && !('followed' in z), JSON.stringify(z));
       leg('D: a shell WITHOUT the `command` builtin (both sentinel pairs, nothing between, the control word unnamed) ⇒ unanswered:no-command-builtin — never «none»', nc.kind === 'unanswered' && nc.why === 'no-command-builtin', JSON.stringify(nc));
       leg('the shell could not be asked: an rc that exits 3 ⇒ unanswered exit:3; a missing shell ⇒ spawn:ENOENT; none ⇒ no-shell', e3.kind === 'unanswered' && e3.why === 'exit:3' && en.kind === 'unanswered' && en.why === 'spawn:ENOENT' && e0.kind === 'unanswered' && e0.why === 'no-shell', JSON.stringify([e3.why, en.why, e0.why]));
     },
@@ -466,12 +465,12 @@ async function registryLegs(mod, { slow = true } = {}) {
     leg('…ONE journal line says the create is refused (cli-missing)', logs.filter((l) => /refused \(cli-missing\)/.test(l)).length === 1, logs.slice(-2).join(' | '));
     leg('…and a read says missing too (null; census missing)', (await c.check('codex', { reask: true })) === null && c.census?.('codex')?.missing === true && c.census?.('codex')?.answer === 'none');
     // an alias / a function is refused BY THAT WORD; unanswered with the hub's PATH empty too is refused, saying both
-    const ca = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: FN }), probe: mod.probeVersion ? (n, shell) => mod.probeVersion(n, { shell }) : undefined, shimDir: path.join(DIR, 'shims-fn'), log: () => {} });
+    const ca = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: FN }), log: () => {} });
     ca.register('opencode', { name: 'vsfn_cli', current: 'vsfn_cli' });
     const cn = mod.createCliCmds({ ask: (n) => mod.askShell(n, { shell: EXIT3 }), log: () => {} });
     cn.register('codex', { name: `${N2}-nowhere`, current: `${N2}-nowhere` });
     const [ta, tn] = await Promise.all([ca.forSpawn('opencode', 'vsfn_cli').then(() => null, (e) => e), cn.forSpawn('codex', `${N2}-nowhere`).then(() => null, (e) => e)]);
-    leg('r4: a shell function whose `--version` (run BY the shell) prints no version is REFUSED in the shell\'s own words — the wrapper named, the doors «fix the function, or set OPENCODE_CMD», no PATH hint', !!ta && ta.code === 'cli-missing' && ta.answer === 'refused' && ta.wrapper && ta.wrapper.kind === 'function' && ta.envName === 'OPENCODE_CMD' && /through a function \(vsfn_cli\)/.test(ta.message) && /fix the function, or set OPENCODE_CMD/.test(ta.message) && !ta.hint, ta && ta.message);
+    leg('a shell function with NO program behind it is refused in honest words — the function named, never run; the two doors «set OPENCODE_CMD … or put the program on your PATH»', !!ta && ta.code === 'cli-missing' && ta.answer === 'none' && ta.wrapper && ta.wrapper.kind === 'function' && ta.envName === 'OPENCODE_CMD' && /wraps the name in a function \(vsfn_cli\), which VibeSpace does not run/.test(ta.message) && /set OPENCODE_CMD to the program the function runs, or put the program on your PATH/.test(ta.message), ta && ta.message);
     leg('unanswered AND the hub\'s PATH has none ⇒ refused too, saying both', !!tn && tn.code === 'cli-missing' && tn.answer === 'unanswered' && tn.why === 'exit:3' && /could not be asked \(exit:3\)/.test(tn.message), tn && tn.message);
   } finally { fs.rmSync(F('prefix'), { force: true }); fs.rmSync(F('restrict'), { force: true }); }
   if (unanswered) { for (const [n, p, d] of await unanswered) leg(n, p, d); reapSleepy(); }
@@ -528,39 +527,33 @@ const SEVEN = (() => {
   return { MUT, reds: Promise.all(runs) };
 })();
 
-console.log('⑧ round 4 — THE PERSON\'S SHELL RUNS ITS OWN WRAPPER: the measured shapes in REAL zsh + REAL bash under planted homes');
+console.log('⑧ round 5 (final) — THE SHELL SAYS WHERE; THE SPAWN IS ALWAYS A PROGRAM: the shapes in REAL zsh + REAL bash under planted homes');
 {
   const runs = await REAL8.runs;
   ok(`${REAL8.SHELLS.length} real shells measured (${REAL8.SHELLS.map(([n, p]) => `${n} ${p}`).join(', ')})`, REAL8.SHELLS.length === 2, 'zsh and bash are both required here');
   const judge = (r) => {
-    if (!r.reg && !r.got) return false;
-    const w = r.want;
-    if (w === 'refused') return !!r.got.err && r.got.err.code === 'cli-missing' && r.got.err.answer === 'refused' && /said: «[^»]*(No such file|not found)/i.test(r.got.err.message) && r.cs && r.cs.said && !r.got.err.hint;
-    if (w === 'direct') return r.got.cmd === REAL8.PROG && r.cs && r.cs.via === 'program' && !r.cs.wrapper && r.marks.length === 1 && r.marks[0].tag === 'path-program';
-    const m = r.marks[r.marks.length - 1] || {};
-    const shimmed = !!r.got.cmd && r.got.cmd !== REAL8.PROG && r.cs && r.cs.via === 'wrapper' && !!r.cs.wrapper && !!r.cs.version;
-    const out = String(r.ran && r.ran.out || '').trim();
-    return shimmed && r.marks.length === 1 && m.tag === w.tag && m.args === w.args && (w.x === undefined || m.x === w.x) && (!w.clean || out === `{"tag":"${w.tag}"}`);
+    const w = r.want, e = r.got.err, cs = r.cs || {};
+    if (w.refused) {
+      if (!e || e.code !== 'cli-missing' || e.answer !== 'none') return false;
+      if (w.refused === 'wrapper') return !!e.wrapper && e.wrapper.kind === w.kind && /which VibeSpace does not run/.test(e.message) && /set CLAUDE_CMD to the program the (alias|function) runs, or put the program on your PATH/.test(e.message) && !e.hint;
+      if (w.refused === 'none') return !e.wrapper && !e.dangling;
+      return e.dangling === w.refused && e.via === 'alias' && new RegExp(`its alias names .*, which is ${w.refused === 'missing' ? 'missing' : 'not executable'}`).test(e.message) && cs.dangling === w.refused;
+    }
+    if (!r.got.cmd || r.got.cmd === r.sp) return false; // THE SPAWN IS NEVER A SHELL
+    const m = r.marks[0] || {};
+    if (w.target) return r.got.cmd === path.join(r.h, '.local-cli', REAL8.RN) && cs.via === 'alias' && m.tag === 'alias-target' && m.args === '--stream a b';
+    if (w.prog) return r.got.cmd === REAL8.PROG && cs.via === 'program' && cs.wrapper && cs.wrapper.kind === w.prog && m.tag === 'path-program' && m.args === '--stream a b';
+    return r.got.cmd === REAL8.PROG && !cs.wrapper && m.tag === 'path-program';
   };
   for (const [label] of REAL8.SHAPES) {
     const rs = runs.filter((r) => r.label === label);
-    ok(`A: ${label} ⇒ ${rs.map((r) => `${r.sn} ${r.got && r.got.cmd ? (r.cs && r.cs.via === 'wrapper' ? 'through the shell' : 'direct') : r.got && r.got.err ? 'refused' : '?'}`).join(' · ')}`, rs.length === REAL8.SHELLS.length && rs.every(judge),
-      JSON.stringify(rs.map((r) => ({ sh: r.sn, cmd: r.got && r.got.cmd, err: r.got && r.got.err && r.got.err.message, cs: r.cs, marks: r.marks, out: r.ran && r.ran.out, rerr: r.ran && r.ran.err && r.ran.err.slice(0, 200) }))).slice(0, 1400));
+    ok(`A: ${label} ⇒ ${rs.map((r) => `${r.sn} ${r.got.cmd ? (r.cs && r.cs.via === 'alias' ? 'its alias target' : r.cs && r.cs.wrapper ? 'the PATH program (wrapper named)' : 'the program') : 'refused'}`).join(' · ')}`, rs.length === REAL8.SHELLS.length && rs.every(judge),
+      JSON.stringify(rs.map((r) => ({ sh: r.sn, cmd: r.got.cmd, err: r.got.err && r.got.err.message, cs: r.cs, marks: r.marks }))).slice(0, 1400));
   }
-  // an ALIAS: both shells EXEC the expansion — the pid a wrapper records IS the CLI's (measured); a function keeps its shell
-  const inst = runs.filter((r) => r.label.startsWith('the installer alias (alias'));
-  ok('A: through an alias the CLI runs AT the spawned pid (both shells exec the expansion: the wrapper\'s pid record is the CLI\'s)', inst.length === REAL8.SHELLS.length && inst.every((r) => r.ran && r.marks[0] && r.marks[0].pid === r.ran.pid), JSON.stringify(inst.map((r) => ({ sh: r.sn, spawned: r.ran && r.ran.pid, cli: r.marks[0] && r.marks[0].pid }))));
-  // ONE CLI, ONE ROAD: the version GATE measures through the recipe (oat-file-sync over current() = the shim)
-  const r0 = inst.find((r) => r.sn === 'bash') || inst[0];
-  if (r0 && r0.got && r0.got.cmd) {
-    const gate = [];
-    const OFS = require(path.join(REPO, 'src/server/oat-file-sync.js'));
-    const MP = require(path.join(REPO, 'src/machine-probes.js'));
-    const sync = OFS.start({ accounts: { noteCliVersion: (v) => { gate.push(v); return { cli: v, ok: true, changed: false }; }, oatFileCaps: () => ({ cli: null, ok: false }), syncOatFiles: async () => { }, oatFileSettled: async () => { } }, machineProbes: MP, claudeCmd: () => r0.got.cmd, log: () => { }, bootDelayMs: 1e9, recheckMs: 1e9 });
-    const savedHome = process.env.HOME; process.env.HOME = REAL8.SHAPES[0][1];
-    try { await sync.tick(); } finally { process.env.HOME = savedHome; sync.stop(); }
-    ok(`A: ONE CLI, ONE ROAD — the version gate measures the wrapper's CLI THROUGH the person's shell (${gate[gate.length - 1]}), the probe's line (${r0.cs && r0.cs.version})`, /^2\.1\.300\b/.test(gate[gate.length - 1] || '') && /^2\.1\.300\b/.test(r0.cs && r0.cs.version || ''), JSON.stringify({ gate, cs: r0.cs }));
-  }
+  const spawned = runs.filter((r) => r.got.cmd);
+  ok(`A: THE SPAWN IS ALWAYS A PROGRAM — every adopted command (${spawned.length}) is a planted program file, never the shell, never a script that execs one`, spawned.length > 0 && spawned.every((r) => r.got.cmd !== r.sp && (r.got.cmd === REAL8.PROG || r.got.cmd.endsWith(`/.local-cli/${REAL8.RN}`)) && !/-l -i -c/.test(fs.readFileSync(r.got.cmd, 'utf8'))));
+  const LSsrc = read('src/login-shell.js'), CCsrc = read('src/server/cli-cmd.js');
+  ok('A: no shim road is left — login-shell.js has no shimScript / versionLine, cli-cmd.js no writeShim / probeVersion / cli-shims', !/shimScript|versionLine|parseVersion/.test(LSsrc) && !/writeShim|probeVersion|cli-shims/.test(CCsrc));
 }
 {
   // the words, in-process: the REAL src/lib/cli-missing-dialog.js bundled over stubbed utils / i18n + a lean DOM
@@ -578,19 +571,27 @@ console.log('⑧ round 4 — THE PERSON\'S SHELL RUNS ITS OWN WRAPPER: the measu
   const el = () => ({ className: '', textContent: '', title: '', children: [], appendChild(c) { this.children.push(c); }, append(...cs) { this.children.push(...cs); } });
   globalThis.document = { createElement: el };
   const runs = await REAL8.runs;
-  const d = runs.find((r) => r.label.startsWith('the DANGLING') && r.sn === 'bash') || runs.find((r) => r.label.startsWith('the DANGLING'));
-  const e = d && d.got && d.got.err;
-  let dom = '', line = '';
-  if (mod && e) {
-    mod.openCliMissingDialog({ _showAgentsDialog() { } }, { cli: e.cli, shell: e.shell, answer: e.answer, wrapper: e.wrapper, envName: e.envName, said: e.said, looked: e.looked, hubPath: e.hubPath });
-    dom = globalThis.__shell.body.children.map((c) => c.textContent).join(' | ');
-    line = (mod.cliWhereWords({ ...d.cs, installed: false }) || {}).text || '';
-  }
-  ok(`A: a refused wrapper is said in the SHELL'S OWN words — the dialog's DOM («${dom.slice(0, 110)}…») and the Manage agents line («${line.slice(0, 80)}…»); no «add a directory» hint`, !!e && /runs .* through alias .*, and running it said: «[^»]*(No such file|not found)/i.test(dom) && /ran it and said: .*(No such file|not found)/i.test(line) && !/add that directory/.test(dom), JSON.stringify({ buildErr, dom, line }));
-  const w = runs.find((r) => r.label.startsWith('the installer alias (alias') && r.sn === 'bash');
-  const wl = mod && w && w.cs ? (mod.cliWhereWords({ ...w.cs, installed: true, cmdPath: w.got.cmd }) || {}).text || '' : '';
-  ok(`A: the Manage agents line names the wrapper and the road («${wl.slice(0, 120)}»)`, /^your bash runs it through an alias \(alias .*\) · VibeSpace runs it the same way$/.test(wl), wl);
+  const pick = (start) => runs.find((r) => r.label.startsWith(start) && r.sn === 'bash') || runs.find((r) => r.label.startsWith(start));
+  const dom = (r) => { const e = r && r.got.err; if (!mod || !e) return ''; mod.openCliMissingDialog({ _showAgentsDialog() { } }, { cli: e.cli, shell: e.shell, answer: e.answer, wrapper: e.wrapper, envName: e.envName, notExecutable: e.notExecutable, dangling: e.dangling, via: e.via, looked: e.looked, hubPath: e.hubPath }); return globalThis.__shell.body.children.map((c) => c.textContent).join(' | '); };
+  const line = (r, extra = {}) => (mod && r && r.cs ? (mod.cliWhereWords({ ...r.cs, ...extra }) || {}).text || '' : '');
+  const fl = pick('a flags alias'), nn = pick('an npx alias with NO'), dg = pick('the DANGLING');
+  const flLine = line(fl, { installed: true, cmdPath: fl && fl.got.cmd });
+  ok(`A: a wrapper over a PATH program is NAMED in Manage agents («${flLine.slice(0, 150)}»)`, /^your bash wraps it in an alias — VibeSpace runs the program at .*, without the alias; to run what the alias runs, set CLAUDE_CMD to that program$/.test(flLine), JSON.stringify({ buildErr, flLine }));
+  const nnDom = dom(nn);
+  ok(`A: a wrapper with no program is refused in honest words with the two doors («${nnDom.slice(0, 160)}…»)`, /wraps vsreal\d+ in an alias \(alias .*\), which VibeSpace does not run, and has no vsreal\d+ program on its PATH\. Set CLAUDE_CMD to the program the alias runs, or put the program on your PATH\./.test(nnDom) && !/add that directory/.test(nnDom), nnDom);
+  const dgDom = dom(dg), dgLine = line(dg, { installed: false });
+  ok(`A: a dangling target is said by its CAUSE — the dialog's DOM and the Manage agents line («${dgLine.slice(0, 120)}»)`, /alias for vsreal\d+ names .*, which is missing\./.test(dgDom) && /^your bash’s alias names .*, which is missing$/.test(dgLine), JSON.stringify({ dgDom, dgLine }));
   delete globalThis.document;
+}
+{
+  // THE VERSION CHIP STAYS (round 5): the census never overwrites what cliFacts measured for a plain program
+  const reg = CLI.createCliCmds({ ask: async () => ({ kind: 'path', path: REAL8.PROG, via: 'program', wrapper: null, shell: REGSH, shellPath: null }), log: () => { } });
+  reg.register('claude', { name: REAL8.RN, current: REAL8.PROG });
+  let handler = null;
+  ROUTE.create({ app: { get: (p, h) => { if (p === '/api/backend-status') handler = h; } }, machineProbes: { cliFacts: async () => ({ claude: { installed: true, cmdPath: REAL8.PROG, version: '2.1.281 (Claude Code)' }, codex: {} }) }, accounts: { list: () => ({ accounts: [] }) }, cliCmds: reg });
+  let body = null; await handler({ query: {} }, { json: (b) => { body = b; } });
+  const c = (body && body.claude) || {};
+  ok(`A: a plain program keeps its measured version in /api/backend-status («${c.version}»), the census beside it`, c.version === '2.1.281 (Claude Code)' && c.installed === true && c.via === 'program' && c.provenance === 'shell', JSON.stringify(c));
 }
 
 console.log('⑨ round 2 — ONE CLI, ONE BINARY: every measurement reads the binary the sessions spawn');
@@ -667,16 +668,16 @@ console.log('⑨b round 3 — THE LOCAL SHELL\'S ANSWER IS LOCAL: a remote road 
   const RB2 = path.join(DIR, 'musl'); fs.mkdirSync(RB2, { recursive: true });
   const MUSL = path.join(RB2, 'codex-x86_64-unknown-linux-musl'); fs.writeFileSync(MUSL, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const remoteLegs = async (mod) => {
-    // a local alias the person's shell runs (round 4: proven, spawned through the shim) — its adopted command is a LOCAL path
-    const reg = mod.createCliCmds({ ask: async () => ({ kind: 'wrapper', wrapper: { kind: 'alias', text: "alias codex='~/bin/codex-x86_64-unknown-linux-musl'" }, path: null, shell: REGSH, shellPath: null }), probe: async () => ({ kind: 'proven', version: '0.99.0' }), shimDir: path.join(DIR, 'shims-remote'), log: () => { } });
+    // a local installer-shape alias (one absolute word) — its adopted command is a LOCAL path with another basename
+    const reg = mod.createCliCmds({ ask: async () => ({ kind: 'path', path: MUSL, via: 'alias', wrapper: { kind: 'alias', text: "alias codex='~/bin/codex-x86_64-unknown-linux-musl'" }, shell: REGSH, shellPath: null }), log: () => { } });
     reg.register('codex', { name: 'codex', current: 'codex' });
     const local = await reg.forSpawn('codex', 'codex').catch(() => null);
     const rn = typeof reg.remoteName === 'function' ? reg.remoteName('codex', local) : null;
     const ov = typeof reg.remoteName === 'function' ? reg.remoteName('codex', '/opt/custom/codex-wrap') : null;
-    return { local, rn, ov, pass: typeof local === 'string' && local.startsWith('/') && path.basename(local) !== 'codex' && rn === 'codex' && ov === 'codex-wrap' };
+    return { local, rn, ov, pass: local === MUSL && rn === 'codex' && ov === 'codex-wrap' };
   };
   const r = await remoteLegs(CLI);
-  ok(`B r3: a LOCAL adoption with another basename (${path.basename(String(r.local))}: the shim of a local alias) — the ssh / dial command still runs «${r.rn}»; a spec override keeps its own name («${r.ov}»)`, r.pass, JSON.stringify(r));
+  ok(`B r3: a LOCAL alias target with another basename (${path.basename(String(r.local))}) — the ssh / dial command still runs «${r.rn}»; a spec override keeps its own name («${r.ov}»)`, r.pass, JSON.stringify(r));
   const wc = read('src/ws-create.js'), ssh = read('src/spawn/ssh.js'), dial = read('src/spawn/dial.js');
   ok('B r3: all three remote command sites read cliCmds.remoteName(backend, spawnCmd) — ws-create\'s ssh chat, the ssh ladder, the dial ladder', /const rcmd = cliCmds\?\.remoteName \? cliCmds\.remoteName\(backend, spawnCmd\)/.test(wc) && /const rcmd = ctx\.cliCmds\?\.remoteName \? ctx\.cliCmds\.remoteName\(backend, spawnCmd\)/.test(ssh) && /const rcmd0 = SP\.loginShell \? '"\$S0"' : \(ctx\.cliCmds\?\.remoteName \? ctx\.cliCmds\.remoteName\(backend, spawnCmd\)/.test(dial));
   const cc = read('src/server/cli-cmd.js');

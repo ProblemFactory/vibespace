@@ -166,7 +166,7 @@ const adapterRegistry = createAdapterRegistry({
 // SPAWN-TIME RE-RESOLVE (B-a18e): the paths above are the BOOT answer; a spawn
 // whose path has gone (an Update restart inside an installer's window) asks
 // once more and hands the new path to the adapter ⇒ src/server/cli-cmd.js
-const cliCmds = createCliCmds({ shimDir: path.join(rootDir, 'data', 'cli-shims') }); // a wrapper's shim lives in the instance's data (lane cli-shell-truth r4)
+const cliCmds = createCliCmds();
 cliCmds.register('claude', { name: CLAUDE_CMD_RAW, current: CLAUDE_CMD, apply: (p) => { const ad = adapterRegistry.get('claude'); if (ad) ad.config.claudeCmd = p; } });
 cliCmds.register('codex', { name: CODEX_CMD_RAW, current: CODEX_CMD, apply: (p) => { const ad = adapterRegistry.get('codex'); if (ad) ad.config.codexCmd = p; require('../codex-thread-read').configure({ codexCmd: p, enabled: true }); } });
 for (const id of Object.keys(ACP_COMMANDS)) {
