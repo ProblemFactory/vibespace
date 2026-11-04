@@ -229,7 +229,9 @@ const REAL8 = await (async () => {
     return h;
   };
   const SHAPES = [
-    ['wrapper alias over a PATH program (alias x=\'x --yolo\')', home('wrapalias', `alias ${RN}='${RN} --yolo'`), true, (a) => a.kind === 'path' && a.path === PROG && a.via === 'program' && a.wrapper?.kind === 'alias'],
+    ['wrapper alias over a PATH program (alias x=\'x --yolo\') ⇒ the program, the dropped flags SAID', home('wrapalias', `alias ${RN}='${RN} --yolo'`), true, (a) => a.kind === 'path' && a.path === PROG && a.via === 'program' && a.wrapper?.kind === 'alias' && a.dropped === '--yolo'],
+    ['r3: the installer alias AND a stale program on PATH — the alias SHADOWS PATH (what the shell runs)', home('inst-stale', `alias ${RN}="~/.local-cli/${RN}"`, { local: true }), true, (a, h) => a.kind === 'path' && a.path === path.join(h, '.local-cli', RN) && a.via === 'alias'],
+    ['r3: the person aliases the lookup words (alias type=\'type -a\', whence, command, unalias) and has no program ⇒ none — never «could not be asked»', home('builtin-alias', "alias type='type -a'\nalias whence='whence -a'\nalias command='command -p'\nalias unalias='echo'"), false, (a) => a.kind === 'none'],
     ['the installer alias, ~ spelling (alias x="~/.local-cli/x"), no program on PATH', home('inst-tilde', `alias ${RN}="~/.local-cli/${RN}"`, { local: true }), false, (a, h) => a.kind === 'path' && a.path === path.join(h, '.local-cli', RN) && a.via === 'alias'],
     ['the installer alias, $HOME spelling (alias x="$HOME/.local-cli/x"), no program on PATH', home('inst-home', `alias ${RN}="$HOME/.local-cli/${RN}"`, { local: true }), false, (a, h) => a.kind === 'path' && a.path === path.join(h, '.local-cli', RN) && a.via === 'alias'],
     ['an nvm-style lazy-load FUNCTION with the program on PATH', home('lazyfn', `${RN}() { unset -f ${RN}; command ${RN} "$@"; }`), true, (a) => a.kind === 'path' && a.path === PROG && a.wrapper?.kind === 'function'],
@@ -249,7 +251,17 @@ const REAL8 = await (async () => {
     const rw = await cw.forSpawn('claude', RN).catch((e) => e);
     return { sn: wsn, rw, cs: cw.census?.('claude') };
   })() : null;
-  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs, wrapReg };
+  // D (round 3): a DANGLING installer alias — its target missing / there but not executable — is said by its cause
+  const hm = home('dangle-missing', `alias ${RN}="~/.local-cli/${RN}"`);
+  const hx = home('dangle-noexec', `alias ${RN}="~/.local-cli/${RN}"`);
+  fs.mkdirSync(path.join(hx, '.local-cli'), { recursive: true }); fs.writeFileSync(path.join(hx, '.local-cli', RN), 'not a program\n', { mode: 0o644 });
+  const dangle = wsp ? Promise.all([hm, hx].map(async (h) => {
+    const cd = CLI.createCliCmds({ ask: (n) => CLI.askShell(n, { shell: wsp, env: envOf(h, false) }), log: () => {} });
+    cd.register('claude', { name: RN, current: RN });
+    const e = await cd.forSpawn('claude', RN).then(() => null, (x) => x);
+    return { h, target: path.join(h, '.local-cli', RN), e, cs: cd.census?.('claude') };
+  })) : null;
+  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs, wrapReg, dangle };
 })();
 
 // ⑨'s version-gate leg (round 2) starts with the early batch too
@@ -351,7 +363,7 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
         mod.askShell(NAME, { shell: EXIT3 }), mod.askShell(NAME, { shell: path.join(SHD, 'no-such-shell') }), mod.askShell(NAME, { shell: '' }),
         mod.askShell(NAME, { shell: NOCMD })]);
       leg('a shell FUNCTION with NO program behind it: kind:none, the wrapper named (function) — never «a program refused»', a.kind === 'none' && a.wrapper && a.wrapper.kind === 'function' && a.wrapper.text === 'vsfn_cli', JSON.stringify(a));
-      if (z) leg('a zsh ALIAS whose body is no program path (alias x=ls): kind:none, the wrapper named (alias, its text)', z.kind === 'none' && z.wrapper && z.wrapper.kind === 'alias' && /alias/.test(z.wrapper.text || ''), JSON.stringify(z));
+      if (z) leg('r3: a zsh ALIAS naming ANOTHER program by its bare name (alias x=ls) ⇒ what the shell runs — that program, followed one hop, the alias named', z.kind === 'path' && /\/ls$/.test(z.path || '') && z.via === 'alias' && z.followed === 'ls' && z.wrapper && z.wrapper.kind === 'alias', JSON.stringify(z));
       leg('D: a shell WITHOUT the `command` builtin (both sentinel pairs, nothing between, the control word unnamed) ⇒ unanswered:no-command-builtin — never «none»', nc.kind === 'unanswered' && nc.why === 'no-command-builtin', JSON.stringify(nc));
       leg('the shell could not be asked: an rc that exits 3 ⇒ unanswered exit:3; a missing shell ⇒ spawn:ENOENT; none ⇒ no-shell', e3.kind === 'unanswered' && e3.why === 'exit:3' && en.kind === 'unanswered' && en.why === 'spawn:ENOENT' && e0.kind === 'unanswered' && e0.why === 'no-shell', JSON.stringify([e3.why, en.why, e0.why]));
     },
@@ -526,12 +538,51 @@ console.log('⑧ round 2 — THE ASK IS FOR A PROGRAM: the five measured shapes 
   }
 }
 
+{
+  // D's words, in-process: the REAL src/lib/cli-missing-dialog.js bundled over stubbed utils / i18n + a lean DOM
+  const esbuild = require('esbuild');
+  const stubs = {
+    'utils.js': "export function createModalShell(o) { const d = document.createElement('div'), b = document.createElement('div'); d.appendChild(b); globalThis.__shell = { o, dialog: d, body: b }; return { dialog: d, body: b, close() { globalThis.__closed = true; } }; }",
+    'i18n.js': "export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));",
+  };
+  let mod = null, buildErr = null;
+  try {
+    const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/cli-missing-dialog.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(utils|i18n)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: stubs[a.path], loader: 'js' })); } }] });
+    const f = path.join(DIR, 'cli-missing-dialog.cjs'); fs.writeFileSync(f, out.outputFiles[0].text); mod = require(f);
+  } catch (e) { buildErr = e.message; }
+  const el = () => ({ className: '', textContent: '', title: '', children: [], appendChild(c) { this.children.push(c); }, append(...cs) { this.children.push(...cs); } });
+  globalThis.document = { createElement: el };
+  const ds = REAL8.dangle ? await REAL8.dangle : [];
+  const { RN } = REAL8;
+  for (const [i, cause] of [[0, 'missing'], [1, 'not executable']].filter(([i]) => ds[i])) {
+    const { e, cs, target } = ds[i];
+    ok(`D: a dangling installer alias (its target ${cause}) is refused with its CAUSE — CliMissing notExecutable + dangling, the census row too`, !!e && e.code === 'cli-missing' && e.notExecutable === target && e.dangling === (cause === 'missing' ? 'missing' : 'not-executable') && cs && cs.notExecutable === target && cs.dangling === e.dangling && new RegExp(`its alias names .*, which is ${cause}`).test(e.message), JSON.stringify({ msg: e && e.message, cs }));
+    let dom = '', line = '';
+    if (mod && e) {
+      mod.openCliMissingDialog({ _showAgentsDialog() { } }, { cli: e.cli, shell: e.shell, answer: e.answer, wrapper: e.wrapper, envName: e.envName, notExecutable: e.notExecutable, dangling: e.dangling, looked: e.looked, hubPath: e.hubPath });
+      dom = globalThis.__shell.body.children.map((c) => c.textContent).join(' | ');
+      line = (mod.cliWhereWords({ ...cs, installed: false }) || {}).text || '';
+    }
+    ok(`D: …the dialog's DOM says «…alias for ${RN} names ${target}, which is ${cause}» and the Manage agents line says it too`, dom.includes(`alias for ${RN} names ${target}, which is ${cause}.`) && line === `your ${e && e.shell}’s alias names ${target}, which is ${cause}`, JSON.stringify({ buildErr, dom: dom.slice(0, 300), line }));
+  }
+  if (mod && REAL8.wrapReg) {
+    const { cs, sn } = await REAL8.wrapReg;
+    const wl = (mod.cliWhereWords({ ...cs, installed: true, cmdPath: REAL8.PROG }) || {}).text || '';
+    ok(`A r3: the wrapper's dropped flags are SAID in the Manage agents line («${wl}»)`, cs && cs.dropped === '--yolo' && wl === `your ${sn} wraps it in an alias · VibeSpace runs the program at ${REAL8.PROG}; the alias’s options are not applied`, JSON.stringify(cs));
+  }
+  delete globalThis.document;
+}
+
 console.log('⑨ round 2 — ONE CLI, ONE BINARY: every measurement reads the binary the sessions spawn');
 {
   const { spawned, before, gate, told, SHC } = await GATE9;
   ok(`B: the hub's 2.1.281 vs the shell's 2.1.300 — sessions spawn the shell's (${spawned === SHC ? '2.1.300' : spawned}); the version GATE measures it (boot ${before} → ${gate[gate.length - 1]}) and the REGISTRATION is told it (${told[told.length - 1]})`, spawned === SHC && /^2\.1\.281\b/.test(before || '') && /^2\.1\.300\b/.test(gate[gate.length - 1] || '') && /^2\.1\.300\b/.test(told[told.length - 1] || ''), JSON.stringify({ gate, told }));
-  // THE READERS CENSUS: CLAUDE_CMD / CODEX_CMD outside the boot registration (src/server/cli-env.js) — each one named
+  // THE READERS CENSUS: every CLAUDE_CMD / CODEX_CMD READ outside the boot registration (src/server/cli-env.js) — per
+  // OCCURRENCE (round 3: a forbidden read beside an allowed one on the same line reds by name), process.env reads counted
   const ALLOWED = [
+    ['server.js', "const CLAUDE_CMD_RAW = process.env.CLAUDE_CMD || 'claude';", 'the env override\'s NAME, read once at boot (the raw the registry asks for)'],
+    ['server.js', "const CODEX_CMD_RAW = process.env.CODEX_CMD || 'codex';", 'the env override\'s NAME, read once at boot'],
     ['server.js', 'CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,', 'the boot registration\'s exports (the destructure)'],
     ['server.js', 'app, rootDir: __dirname, HOST, CLAUDE_CMD, cliCmds, NODE_CMD,', 'account-usage-routes gets the accessor beside the boot constant (its fallback before the registry exists)'],
     ['server.js', "claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD, cliCmds });", 'backend-status-route reads the checked path / cliCmds.current first — these are its last fallback'],
@@ -544,28 +595,77 @@ console.log('⑨ round 2 — ONE CLI, ONE BINARY: every measurement reads the bi
     ['src/usage-routes.js', 'probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {', 'the setup parameter'],
     ['src/server/account-usage-routes.js', 'function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,', 'the create parameter'],
   ];
-  const FALLBACK = /current\??\.?\('(claude|codex)'\)\)? \|\| (CLAUDE_CMD|CODEX_CMD)\b/; // THE accessor first, the boot constant its fallback
+  const FALLBACK = /current\??\.?\('(claude|codex)'\)\)? \|\| (CLAUDE_CMD|CODEX_CMD)\b/g; // THE accessor first, the boot constant its fallback
+  const READ = /\b(CLAUDE_CMD|CODEX_CMD)\b/g;
+  /** {file → [[line no, text]]} → { stray, unused } — every OCCURRENCE must sit inside a named row's text or the fallback */
+  function readersCensus(byFile) {
+    const stray = [], used = new Set();
+    for (const [f, rows] of byFile) {
+      for (const [ln, raw] of rows) {
+        if (/^\s*(\/\/|\*|\/\*)/.test(raw)) continue;
+        const code = raw.replace(/\/\/.*$/, '');
+        const spans = [];
+        for (const row of ALLOWED) { if (row[0] !== f) continue; let i = code.indexOf(row[1]); while (i >= 0) { spans.push([i, i + row[1].length, row]); i = code.indexOf(row[1], i + 1); } }
+        for (const m of code.matchAll(FALLBACK)) spans.push([m.index, m.index + m[0].length, null]);
+        for (const m of code.matchAll(READ)) {
+          const hit = spans.find(([a, b]) => a <= m.index && m.index < b);
+          if (!hit) { stray.push(`${f}:${ln} «${code.slice(Math.max(0, m.index - 40), m.index + 30).trim()}»`); continue; }
+          if (hit[2]) used.add(hit[2]);
+        }
+      }
+    }
+    return { stray, unused: ALLOWED.filter((r) => !used.has(r)) };
+  }
   // the tracked tree's lines that name either constant (`git grep -w`: the census reads no file that does not)
   let hits = '';
   try { hits = execFileSync('git', ['-C', REPO, 'grep', '-n', '-w', '-E', 'CLAUDE_CMD|CODEX_CMD', '--', 'server.js', 'src'], { encoding: 'utf8' }); } catch (e) { hits = String(e.stdout || ''); }
   const byFile = new Map();
   for (const h of hits.split('\n').filter(Boolean)) { const m = /^([^:]+):(\d+):([\s\S]*)$/.exec(h); if (!m || m[1] === 'src/server/cli-env.js' || !/\.js$/.test(m[1])) continue; if (!byFile.has(m[1])) byFile.set(m[1], []); byFile.get(m[1]).push([Number(m[2]), m[3]]); }
   ok('B: the census scope is the tracked server tree (git grep found the known readers — non-vacuous)', byFile.has('server.js') && byFile.has('src/ws-create.js') && byFile.has('src/server/account-usage-routes.js'), [...byFile.keys()].join(', '));
-  const stray = [], used = new Set();
-  for (const [f, rows] of byFile) {
-    rows.forEach(([ln, l]) => { const i = ln - 1;
-      if (!/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(l) || /^\s*(\/\/|\*|\/\*)/.test(l)) return;
-      const code = l.replace(/\/\/.*$/, '').replace(/process\.env\.(CLAUDE_CMD|CODEX_CMD)\b/g, 'process.env.$1_RAWNAME'); // the env override NAME is not a reader of the binary
-      if (!/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(code)) return;
-      const row = ALLOWED.find(([af, sub]) => af === f && code.includes(sub));
-      if (row) { used.add(row); return; }
-      const bare = code.replace(new RegExp(FALLBACK.source, 'g'), '');
-      if (FALLBACK.test(code) && !/\b(CLAUDE_CMD|CODEX_CMD)\b/.test(bare)) return;
-      stray.push(`${f}:${i + 1} ${code.trim().slice(0, 120)}`);
-    });
+  const real = readersCensus(byFile);
+  ok(`B: THE READERS CENSUS — every CLAUDE_CMD / CODEX_CMD READ (per occurrence, process.env counted) outside the boot registration is a named row (${ALLOWED.length}) or THE accessor's fallback`, real.stray.length === 0, real.stray.join(' | '));
+  ok('B: …and every named row still names a live read (a dead row would hide a new reader)', real.unused.length === 0, real.unused.map((r) => r[0] + ': ' + r[1]).join(' | '));
+  // E MUTANTS: the gate's base spelling put back BESIDE the allowed backend-status row (same line) / a process.env read
+  const patched = (f, from, to) => new Map([...byFile].map(([k, rows]) => [k, k === f ? rows.map(([n, l]) => [n, l.includes(from) ? l.replace(from, to) : l]) : rows]));
+  const gateFrom = "claudeCmd: () => cliCmds.current('claude') || CLAUDE_CMD, onCliVersion";
+  ok('E mutant: the gate\'s accessor exists on the line beside the allowed backend-status row', (byFile.get('server.js') || []).some(([, l]) => l.includes(gateFrom) && l.includes("codexCmd: CODEX_CMD, cliCmds });")));
+  const m1 = readersCensus(patched('server.js', gateFrom, 'claudeCmd: CLAUDE_CMD, onCliVersion'));
+  ok(`E mutant «the gate reads the boot CLAUDE_CMD again, on the line an allowed row shares» ⇒ RED by name (${m1.stray.join(' | ').slice(0, 140)})`, m1.stray.some((x) => /^server\.js:\d+ .*claudeCmd: CLAUDE_CMD, onCliVersion/.test(x)), m1.stray.join(' | '));
+  const binFrom = "const bin = (cliCmds && typeof cliCmds.current === 'function' && cliCmds.current('claude')) || CLAUDE_CMD || 'claude';";
+  const usageRows = [...(byFile.get('src/usage-routes.js') || [])];
+  const m2map = new Map(byFile); m2map.set('src/usage-routes.js', [...usageRows.map(([n, l]) => [n, l.includes(binFrom) ? l.replace(binFrom, "const bin = process.env.CLAUDE_CMD || 'claude';") : l])]);
+  const m2 = readersCensus(m2map);
+  ok(`E mutant «the /usage probe reads process.env.CLAUDE_CMD» ⇒ RED by name (${m2.stray.join(' | ').slice(0, 140)})`, usageRows.some(([, l]) => l.includes(binFrom)) && m2.stray.some((x) => /^src\/usage-routes\.js:\d+ .*process\.env\.CLAUDE_CMD/.test(x)), m2.stray.join(' | '));
+  // E: the onAdopt re-tick is WIRED (deleted ⇒ the gate never re-measures an adoption) — the pin + its mutant
+  const srv = read('server.js');
+  const adoptPin = (t) => /const oatFileSync = require\('\.\/src\/server\/oat-file-sync\.js'\)\.start\(\{[^\n]*\}\); cliCmds\.onAdopt\(\(\) => oatFileSync\.tick\(\)\);/.test(t);
+  ok('E: server.js wires the version gate\'s re-tick on an adoption (cliCmds.onAdopt(() => oatFileSync.tick()))', adoptPin(srv));
+  ok('E mutant «the onAdopt re-tick deleted» ⇒ the pin is RED', srv.includes(' cliCmds.onAdopt(() => oatFileSync.tick());') && !adoptPin(srv.replace(' cliCmds.onAdopt(() => oatFileSync.tick());', '')));
+}
+
+console.log('⑨b round 3 — THE LOCAL SHELL\'S ANSWER IS LOCAL: a remote road runs the CLI\'s configured NAME');
+{
+  const RB2 = path.join(DIR, 'musl'); fs.mkdirSync(RB2, { recursive: true });
+  const MUSL = path.join(RB2, 'codex-x86_64-unknown-linux-musl'); fs.writeFileSync(MUSL, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const remoteLegs = async (mod) => {
+    const reg = mod.createCliCmds({ ask: async () => ({ kind: 'path', path: MUSL, via: 'alias', wrapper: { kind: 'alias', text: "alias codex='~/bin/codex-x86_64-unknown-linux-musl'" }, dropped: '', shell: REGSH, shellPath: null }), log: () => { } });
+    reg.register('codex', { name: 'codex', current: 'codex' });
+    const local = await reg.forSpawn('codex', 'codex').catch(() => null);
+    const rn = typeof reg.remoteName === 'function' ? reg.remoteName('codex', local) : null;
+    const ov = typeof reg.remoteName === 'function' ? reg.remoteName('codex', '/opt/custom/codex-wrap') : null;
+    return { local, rn, ov, pass: local === MUSL && rn === 'codex' && ov === 'codex-wrap' };
+  };
+  const r = await remoteLegs(CLI);
+  ok(`B r3: a LOCAL alias target with another basename (${path.basename(String(r.local))}) — the ssh / dial command still runs «${r.rn}»; a spec override keeps its own name («${r.ov}»)`, r.pass, JSON.stringify(r));
+  const wc = read('src/ws-create.js'), ssh = read('src/spawn/ssh.js'), dial = read('src/spawn/dial.js');
+  ok('B r3: all three remote command sites read cliCmds.remoteName(backend, spawnCmd) — ws-create\'s ssh chat, the ssh ladder, the dial ladder', /const rcmd = cliCmds\?\.remoteName \? cliCmds\.remoteName\(backend, spawnCmd\)/.test(wc) && /const rcmd = ctx\.cliCmds\?\.remoteName \? ctx\.cliCmds\.remoteName\(backend, spawnCmd\)/.test(ssh) && /const rcmd0 = SP\.loginShell \? '"\$S0"' : \(ctx\.cliCmds\?\.remoteName \? ctx\.cliCmds\.remoteName\(backend, spawnCmd\)/.test(dial));
+  const cc = read('src/server/cli-cmd.js');
+  const RFROM = '      return e && cmd && cmd === e.current ? base(e.name) : base(cmd);';
+  if (ok('B r3 mutant: the remoteName line exists', cc.includes(RFROM))) {
+    const mm = M.load('src/server/cli-cmd.js', cc.replace(RFROM, '      return base(cmd);'), 'remotebase');
+    const rm = await remoteLegs(mm);
+    ok(`B r3 mutant «the remote command = basename of the adopted path» ⇒ RED («${rm.rn}»)`, !rm.pass && rm.rn === 'codex-x86_64-unknown-linux-musl', JSON.stringify(rm));
   }
-  ok(`B: THE READERS CENSUS — every CLAUDE_CMD / CODEX_CMD read outside the boot registration is a named row (${ALLOWED.length}) or THE accessor's fallback (\`cliCmds.current(…) || CLAUDE_CMD\`)`, stray.length === 0, stray.join(' | '));
-  ok('B: …and every named row still names a live line (a dead row would hide a new reader)', used.size === ALLOWED.length, ALLOWED.filter((r) => !used.has(r)).map((r) => r[0] + ': ' + r[1]).join(' | '));
 }
 
 console.log('⑩ round 2 — THE SHELL RUNS FOR A PERSON\'S PRESS ONLY: the usage door\'s wall read spawns no shell');

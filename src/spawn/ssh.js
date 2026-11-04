@@ -17,7 +17,7 @@ const { REMOTE_PRELUDE, buildRemoteExec, buildRemoteShellPrelude } = require('..
 const { sweepWriters } = require('../writer-sweep');
 
 function sshLadder(c) {
-  const { ctx, execFileAsync, ws, data, id, sessionMode, session, cwd, spawnAccount, integrationOn,
+  const { ctx, execFileAsync, ws, data, id, backend, sessionMode, session, cwd, spawnAccount, integrationOn,
     spawnBrowserPre, needsClaudeLoginHelper, sweepOpts, h, shq, rcmd, rargs } = c;
   const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
@@ -218,7 +218,8 @@ function sshLadder(c) {
           };
   async function terminal() {
             // locally-resolved binary paths mean nothing on the remote
-            const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+            // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the CLI's configured NAME, never a local path's basename
+            const rcmd = ctx.cliCmds?.remoteName ? ctx.cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
             const ra = await remoteAgentSetup();
             let acctEnv = '';
             try { acctEnv = await remoteAccountEnv(h); }

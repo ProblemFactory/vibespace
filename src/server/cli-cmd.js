@@ -21,13 +21,13 @@
 // spawned CLI runs INSIDE a wrapper under dtach, so its ENOENT is never seen by
 // this process — the check before the spawn IS the retry.
 //
-// `check(backend, { force })` is THE READ-TIME twin (lane antigravity-card-fixes,
+// `check(backend, { reask, force })` is THE READ-TIME twin (lane antigravity-card-fixes,
 // the owner 2026-10-20: Manage agents said 「Antigravity CLI 未安装」 for an agy
 // installed five minutes after the hub booted — the boot answer was the only one
 // ever asked for, and a READ never spawns). A resolved path is re-validated on
 // every read (one `access`), so an uninstall shows; an unresolved or gone one is
 // looked up again at most once per RECHECK_MS per CLI (one `which`) — unless the
-// read is a person's (Install / Re-check in Manage agents: `force`). A path found
+// read is a person's (Install / Re-check in Manage agents: `reask`). A path found
 // is ADOPTED exactly like a spawn-time re-resolve (the adapter gets it, one log
 // line), and the shared lookup is single-flight with forSpawn's. Lane cli-shell-truth round 2: a person's press is
 // `reask` (the shell asked now); `force` is a non-person fresh read (never a shell run on a usable path).
@@ -42,7 +42,7 @@
 //   'shell'    — `askShell`: the person's login shell, asked ONCE per CLI, lazily (the first spawn or the first status
 //                read), bounded (SHELL_ASK_MS), in a sanitized env, read between sentinels. Its path REPLACES the
 //                provisional one even when that one works (their PATH order is their choice). Asked again when its path
-//                has gone, at a person's Re-check (`force`), and at each create while it found nothing;
+//                has gone, at a person's Re-check (`reask`), and at each create while it found nothing;
 //   'boot'     — an absolute command the operator configured (CLAUDE_CMD=/x): that path, never a lookup.
 // The shell holds NO PROGRAM (round 2: an alias / a function wearing the name is the person's own wrapper — the program
 // behind it is the answer; only a wrapper with no program behind it counts as nothing) ⇒ the CLI is MISSING for every purpose: a create is REFUSED by name
@@ -98,9 +98,11 @@ const executable = async (p) => {
   if (typeof p !== 'string' || !p.startsWith('/')) return false;
   try { await fs.promises.access(p, fs.constants.X_OK); return true; } catch { return false; }
 };
+/** a named path that is not executable: is it there at all? (the words say which — round 3) */
+const present = async (p) => { if (typeof p !== 'string' || !p.startsWith('/')) return false; try { await fs.promises.access(p, fs.constants.F_OK); return true; } catch { return false; } };
 
 /** The bound on a READ's lookup of an unresolved (or gone) CLI: one `which` per
- *  CLI per this many ms; a person's Install / Re-check skips it (`force`). */
+ *  CLI per this many ms; a person's Install / Re-check (`reask`) and a non-person fresh read (`force`) skip it. */
 const RECHECK_MS = 30000;
 
 /** THE BOUND on one shell ask. Measured on the owner's box (2026-11-03, `-l -i -c 'command -v codex'`, stdin /dev/null):
@@ -143,7 +145,21 @@ async function loginShellOf({ env = process.env, userInfo = () => os.userInfo(),
  *   { kind:'unanswered', why } — 'timeout' | 'exit:<n>' | 'spawn:<err>' | 'no-shell' | 'bad-name' | 'no-command-builtin'
  * each with `shell` (the path asked) and `ms`.
  */
-function askShell(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
+async function askShell(name, opts = {}) {
+  const now = opts.now || Date.now, t0 = now();
+  const a = await askOnce(name, opts);
+  if (a.kind !== 'follow') return a;
+  // the person's alias runs ANOTHER program by its bare name (alias claude='claude-beta --x'): ONE hop — that word's
+  // program through the same program-only lookup, the alias named, its other words said as not applied
+  const left = Math.max(1, (opts.timeoutMs || SHELL_ASK_MS) - (now() - t0));
+  const b = await askOnce(a.word, { ...opts, timeoutMs: left });
+  const ms = now() - t0;
+  if (b.kind === 'path') return { ...b, via: 'alias', wrapper: a.wrapper, dropped: a.dropped, followed: a.word, ms };
+  if (b.kind === 'unanswered') return { ...b, ms };
+  return { kind: 'none', wrapper: a.wrapper, followed: a.word, shell: a.shell, ms };
+}
+
+function askOnce(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now } = {}) {
   return new Promise((resolve) => {
     const t0 = now();
     let settled = false, child = null, timer = null, out = '';
@@ -234,14 +250,14 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
         let a;
         try { a = await askOf(e.name); } catch (err) { a = { kind: 'unanswered', why: `spawn:${(err && err.code) || 'error'}` }; }
         if (!a || typeof a.kind !== 'string') a = { kind: 'unanswered', why: 'exit:?' };
-        if (a.kind === 'path' && !await usable(a.path)) a = { ...a, kind: 'none', notExecutable: a.path };
+        if (a.kind === 'path' && !await usable(a.path)) a = { ...a, kind: 'none', notExecutable: a.path, dangling: await present(a.path) ? 'not-executable' : 'missing' };
         e.answer = { ...a, at: now() };
         const was = e.current;
         if (a.kind === 'path') {
           e.current = a.path; e.provenance = 'shell'; e.shellPath = a.shellPath || null; e.hubSaw = null;
           if (a.path !== was) {
             try { e.apply(a.path); } catch (err) { log(`[cli-cmd] ${backend}: could not hand '${a.path}' to the adapter — ${err && err.message}`); }
-            log(`[cli-cmd] ${backend}: ${said(a)} (login shell) found '${e.name}' at '${a.path}'${a.via === 'alias' ? ' through its alias' : a.wrapper ? ` (it wraps the name in ${a.wrapper.kind === 'alias' ? 'an alias' : 'a function'})` : ''} — adopted (it was '${was}', no restart needed)`);
+            log(`[cli-cmd] ${backend}: ${said(a)} (login shell) found '${e.name}' at '${a.path}'${a.via === 'alias' ? ' through its alias' : a.wrapper ? ` (it wraps the name in ${a.wrapper.kind === 'alias' ? 'an alias' : 'a function'})` : ''}${a.dropped ? ` — the alias's other words «${a.dropped}» are not applied` : ''} — adopted (it was '${was}', no restart needed)`);
             adopted(backend, a.path);
           }
           return a.path;
@@ -282,7 +298,9 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
     const dirs = looked();
     const envName = envNameOf(backend);
     const hint = e.hubSaw ? `the hub's PATH has ${e.hubSaw} — add that directory to your shell's PATH` : null;
-    const wrapped = a.kind === 'none' && a.wrapper
+    const wrapped = a.kind === 'none' && a.notExecutable
+      ? ` — ${a.via === 'alias' || (a.wrapper && a.wrapper.kind === 'alias') ? 'its alias names' : 'it named'} ${a.notExecutable}, which is ${a.dangling === 'missing' ? 'missing' : 'not executable'}`
+      : a.kind === 'none' && a.wrapper
       ? (a.wrapper.kind === 'function'
         ? ` — it is a shell function there, and VibeSpace cannot read what a function runs: put the program on your PATH, or set ${envName}`
         : ` — its alias «${a.wrapper.text}» is not a program's path: put the program on your PATH, or set ${envName}`)
@@ -291,8 +309,8 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
       ? `${e.name} was not found — the configured path is not an executable file`
       : a.kind === 'unanswered'
         ? `${e.name} was not found — ${who} (login shell) could not be asked (${a.why}) and the hub's PATH (${dirs.join(', ')}) has none`
-        : `${e.name} was not found as a program by ${who} (login shell)${a.notExecutable ? ` — it named ${a.notExecutable}, which is not executable` : ''}${wrapped}${hint ? ` — ${hint}` : wrapped ? '' : ` — and the hub's PATH (${dirs.join(', ')}) has none either`}`;
-    return new CliMissing({ backend, cli: e.name, shell: sh, answer: isAbs(e.name) ? 'configured' : a.kind, why: a.why || null, wrapper: wrapperWords(a.wrapper), envName, looked: dirs, hubPath: e.hubSaw || null, hint, message });
+        : `${e.name} was not found as a program by ${who} (login shell)${wrapped}${hint ? ` — ${hint}` : wrapped ? '' : ` — and the hub's PATH (${dirs.join(', ')}) has none either`}`;
+    return new CliMissing({ backend, cli: e.name, shell: sh, answer: isAbs(e.name) ? 'configured' : a.kind, why: a.why || null, wrapper: wrapperWords(a.wrapper), envName, notExecutable: a.notExecutable || null, dangling: a.dangling || null, looked: dirs, hubPath: e.hubSaw || null, hint, message });
   };
   return {
     /** `name` = what the lookup asks for (the raw command, env override
@@ -306,6 +324,15 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
      *  (the spawn spec, the version gate, the registration, the login helpers, the usage probe) reads this, never a
      *  boot constant (test-cli-env pins the readers of CLAUDE_CMD / CODEX_CMD). */
     current(backend) { const e = entries.get(backend); return e ? e.current : null; },
+    /** THE REMOTE COMMAND NAME (round 3): the LOCAL shell's answer is LOCAL — an ssh / dial road runs the CLI's configured
+     *  NAME (the raw command, a configured path's basename), never the basename of a locally adopted path (a local
+     *  `alias codex='~/bin/codex-x86_64-unknown-linux-musl'` must not become the remote program). A command that is not
+     *  the registered one (a spec override, a shell) keeps its own basename, as before. */
+    remoteName(backend, cmd) {
+      const base = (p) => { const s = String(p == null ? '' : p); return s.includes('/') ? path.basename(s) : s; };
+      const e = entries.get(backend);
+      return e && cmd && cmd === e.current ? base(e.name) : base(cmd);
+    },
     /** `fn(backend, path)` whenever a CLI's binary changes (an adoption) — a measurer re-measures at once (server.js: the
      *  version gate re-ticks on ANY adoption; one tick at a time, so a codex adoption costs one claude `--version`). */
     onAdopt(fn) { if (typeof fn === 'function') adoptedHooks.push(fn); },
@@ -361,6 +388,8 @@ function createCliCmds({ resolve = resolveCmdAsync, usable = executable, ask = n
         answer: isAbs(e.name) ? 'configured' : (a ? a.kind : null),
         via: a && a.kind === 'path' ? a.via || 'program' : null,
         wrapper: a ? wrapperWords(a.wrapper) : null, // the person's alias / function wearing the name — provenance, never a refusal
+        dropped: a && a.kind === 'path' && a.dropped ? a.dropped : null, // the alias's other words VibeSpace does not apply (said)
+        notExecutable: a && a.notExecutable ? a.notExecutable : null, dangling: a && a.dangling ? a.dangling : null, // a dangling target, by its cause
         envName: envNameOf(backend),
         unanswered: a && a.kind === 'unanswered' ? a.why : null,
         hubPath: missing ? e.hubSaw : null,

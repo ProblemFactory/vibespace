@@ -18,7 +18,7 @@ const { sweepWriters } = require('../writer-sweep');
 const { S0_SH } = require('../login-shell'); // the login-shell ladder, spelled once (lane cli-shell-truth)
 
 function dialLadder(c) {
-  const { ctx, execFileAsync, ws, data, id, SP, sessionMode, session, cwd, spawnAccount, integrationOn,
+  const { ctx, execFileAsync, ws, data, id, backend, SP, sessionMode, session, cwd, spawnAccount, integrationOn,
     spawnBrowserPre, needsClaudeLoginHelper, sweepOpts, h, shq, rcmd, rargs } = c;
   const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote, dialBridge } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
@@ -167,7 +167,8 @@ function dialLadder(c) {
               // be absent under launchd → fall back to the account's UserShell
               // (macOS dscl) → zsh → bash. S0 is resolved in the shellCmd
               // preamble; rcmd0 just execs it.
-              const rcmd0 = SP.loginShell ? '"$S0"' : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+              // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the CLI's configured NAME, never a local path's basename
+              const rcmd0 = SP.loginShell ? '"$S0"' : (ctx.cliCmds?.remoteName ? ctx.cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd));
               // THE LADDER is spelled ONCE (src/login-shell.js S0_SH — the hub's own CLI ask reads the same rungs; test-cli-env
               // runs this string under sh against pickLoginShell on the same inputs).
               const shellResolve = SP.loginShell ? S0_SH : '';

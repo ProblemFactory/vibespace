@@ -33,6 +33,8 @@ export function cliWhereWords(info) {
   if (info.answer === 'path' && info.cmdPath) {
     // the person's own wrapper (an alias, a function wearing the name) is PROVENANCE — the program it runs is named
     const w = info.wrapper && info.wrapper.kind;
+    // round 3: the alias's other words (its flags, a wrapper command) are NOT applied — said, never silently
+    if (w === 'alias' && info.dropped) return { tone: 'dim', text: t('your {shell} wraps it in an alias · VibeSpace runs the program at {path}; the alias’s options are not applied', { shell, path: p }) };
     if (info.via === 'alias') return { tone: 'dim', text: t('found by your {shell} through its alias at {path}', { shell, path: p }) };
     if (w === 'alias') return { tone: 'dim', text: t('your {shell} wraps it in an alias · VibeSpace runs the program at {path}', { shell, path: p }) };
     if (w === 'function') return { tone: 'dim', text: t('your {shell} wraps it in a function · VibeSpace runs the program at {path}', { shell, path: p }) };
@@ -42,6 +44,13 @@ export function cliWhereWords(info) {
     return { tone: 'warn', text: info.installed
       ? t('your {shell} could not be asked ({why}) · using the hub’s PATH', { shell, why: whyWords(info.unanswered) })
       : t('your {shell} could not be asked ({why}) · the hub’s PATH has none', { shell, why: whyWords(info.unanswered) }) };
+  }
+  if (info.answer === 'none' && info.notExecutable) {
+    // a DANGLING target is said by its cause (round 3): missing, or there but not executable
+    const np = tildeHome(info.notExecutable), al = info.wrapper && info.wrapper.kind === 'alias';
+    return { tone: 'warn', text: info.dangling === 'missing'
+      ? (al ? t('your {shell}’s alias names {path}, which is missing', { shell, path: np }) : t('your {shell} named {path}, which is missing', { shell, path: np }))
+      : (al ? t('your {shell}’s alias names {path}, which is not executable', { shell, path: np }) : t('your {shell} named {path}, which is not executable', { shell, path: np })) };
   }
   if (info.answer === 'none' && info.wrapper && info.wrapper.kind === 'function') return { tone: 'warn', text: t('your {shell} has it only as a shell function · put the program on your PATH or set {env}', { shell, env: info.envName || 'CLI_CMD' }) };
   if (info.answer === 'none' && info.wrapper && info.wrapper.kind === 'alias') return { tone: 'warn', text: t('your {shell}’s alias for it is not a program path · put the program on your PATH or set {env}', { shell, env: info.envName || 'CLI_CMD' }) };
@@ -61,6 +70,12 @@ export function cliMissingWords(msg) {
   const asked = msg.answer === 'configured' ? t('Asked: the configured path') : t('Asked: your {shell}, as a login shell', { shell });
   let what;
   if (msg.answer === 'configured') what = t('Nothing was started. The configured path {path} is not an executable file.', { path: tildeHome(cli) });
+  else if (msg.notExecutable) {
+    const np = tildeHome(msg.notExecutable), al = msg.wrapper && msg.wrapper.kind === 'alias';
+    what = msg.dangling === 'missing'
+      ? (al ? t('Nothing was started. Your {shell}’s alias for {cli} names {path}, which is missing.', { shell, cli, path: np }) : t('Nothing was started. Your {shell} named {path} for {cli}, which is missing.', { shell, cli, path: np }))
+      : (al ? t('Nothing was started. Your {shell}’s alias for {cli} names {path}, which is not executable.', { shell, cli, path: np }) : t('Nothing was started. Your {shell} named {path} for {cli}, which is not executable.', { shell, cli, path: np }));
+  }
   else if (msg.wrapper && msg.wrapper.kind === 'function') what = t('Nothing was started. Your {shell} has {cli} only as a shell function, and VibeSpace cannot read what a function runs. Put the program on your PATH, or set {env}.', { shell, cli, env: msg.envName || 'CLI_CMD' });
   else if (msg.wrapper && msg.wrapper.kind === 'alias') what = t('Nothing was started. Your {shell}’s alias for {cli} («{text}») is not a program’s path. Put the program on your PATH, or set {env}.', { shell, cli, text: String(msg.wrapper.text || '').slice(0, 200), env: msg.envName || 'CLI_CMD' });
   else if (msg.answer === 'unanswered') what = t('Nothing was started. Your {shell} could not be asked where {cli} is ({why}), and the hub’s own PATH has none: {dirs}.', { shell, cli, why: whyWords(msg.why), dirs });
