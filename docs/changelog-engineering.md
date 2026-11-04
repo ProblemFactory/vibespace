@@ -48,6 +48,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **L3's deletions verified by occurrence counts.** All 3741 of its deleted lines are gone from the train, except the two census rows the merge rewrote. The i18n tables drop its 72 keys; none comes back and no lane's addition is missing.
 - **No seams.** The fast tier's sum is 919.46 s under the 920 s cap: L3's restated rows net −0.38 s, ramp's and compact's +0.
 - **The user changelog reads as one release.** Its bullets are grouped by what the person sees — the cache warmth (the colours, then the cache facts and the compaction reset), then CloakBrowser as a plugin — not by lane (work/assemble376.py: a unit's rank orders the user files; this record keeps pick order).
+- **A file may file from two origins (seam, test-only).** L3's once-only migration files its notice in the Agent browser group from src/server/migrations.js, a file whose producer-census row in test-conversation-needs named ONE origin (the Vault group's job-secrets notice). That heavy census red on the first ci/int376 mirror and on L3's own tip; the lane's rounds ran the browser rows, not this one. A census row may now name several origins: migrations.js's row is vault + browser, every other row stays one string, and a planted control proves a third origin is still refused by name. test-conversation-needs ALL PASS (265) and test-user-todos-layout ALL PASS (526) on the seamed tree.
 
 ## 2.369.375 — 2026-11-03
 
