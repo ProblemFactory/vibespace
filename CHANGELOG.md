@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.377 — 2026-11-04
+
+### Fixed
+- Lists in sub-agent reports, VibeSpace notices, the away recap and your own messages are indented inside the card instead of sitting on its left edge.
+- Numbered lists past 9 keep their numbers inside the text, and Markdown in file previews and Background Work indents its lists too.
+
 ## 2.369.376 — 2026-11-03
 
 ### Changed

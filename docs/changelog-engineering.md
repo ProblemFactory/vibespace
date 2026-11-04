@@ -4,6 +4,38 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.377 — 2026-11-04
+
+### hotfix-card-list-indent — a markdown list indents by its container, never by the bubble it sits in (hotfix on 2.369.376 27a0bf89e; CSS only)
+- **The report (the owner, 2026-11-04, two screenshots: «先把这种卡片修一下，好几处这类卡片都有这个布局问题（点跑到左边界了）»).** The sub-agent report card «remaining_weeks_audit · FINAL_ANSWER» and the VibeSpace hand-over notice «已交接 1 条等待中的通知 … Messages that arrived while this conversation was unreachable» drew their markdown bullets on the card's left border.
+- **Measured on 27a0bf89e** (headless chrome over a copy of the tree, zh, 1000 × 760; every ::marker by its CDP box model). In the report card, both VibeSpace notices (the hand-over's fold, a job notice shown whole) and the away recap, every list had padding-left 0: items started AT the text column; bullets hung 17 px and «12.» 21.8 px left of it, which is 5–12 px PAST the card's border. In the assistant's reply, a user message and a For-you reply (the compact view, 18 px), bullets fit but «10.»–«12.» stuck out 3.8 px. `.markdown-preview` (file viewer, jobs panel) had no list rule at all.
+- **Cause.** public/style.css:1 (`*, *::before, *::after { margin: 0; padding: 0 }`) takes every list's UA padding. The only rules giving it back were `.chat-bubble-assistant .chat-text ul/ol` (chat.css:256) and `.chat-compact-content .chat-text ul/ol` (:1571). That is the .370 plugin-consent class (`.plugin-caps-list`) in another container.
+- **Fix (one rule family).** chat.css: `.chat-text ul, .chat-text ol { margin: 6px 0; padding-left: 20px }`, `.chat-text ol { padding-left: 2em }`, `.chat-text li { margin: 3px 0 }`. The compact override keeps its margin (2 px) and `ul` 18 px, and its `ol` takes the 2em. viewers.css: `.markdown-preview ul, ol { padding-left: 2em }`.
+  - **Why 2em for ol, not 22–24 px:** «12. » is 1.67 em in Liberation digits (this box: 21.75 px at 13 px) and 1.91 em in DejaVu (the Actions runner's only face), so 24 px clips under DejaVu.
+  - Bullets stay at 20 px: the assistant's look is unchanged; ordered lists move 20 → 26 px.
+- **Homes the owner's «好几处» could mean, checked:**
+  - The renderMarkdown census below covers every chat card.
+  - For-you rows, the needs-you card and the For-you window's detail are NOT markdown (foryou-honest: escaped, pre-wrap words; `.iw-detail ul` already 22 px).
+  - The inbox reply's quote is escaped text.
+  - A job's report reaches the chat as a VibeSpace notice (`_peerBodyHtml` → `.chat-text`).
+  - The jobs panel's md block is a `.markdown-preview` (fixed here).
+  - Not swept: paragraph / code / quote spacing is still scoped to the assistant bubble (`.chat-bubble-assistant .chat-text p/pre/code/blockquote`), so a report card's code block has no background. A follow-up, not this hotfix.
+- **The census (printed by the gate).**
+  - chat-renderers.js — 8 templates, each class holds `chat-text`:
+    - :771 (user text), :799 (For-you reply), :1014 (the notice's fold), :1070 (`_peerBodyHtml`)
+    - :1341 (assistant text), :1379 `chat-text chat-agent-report-body`, :1418 (SendUserMessage card), :1869 `chat-text chat-away-summary-body`
+  - chat-renderers.js — one delegate (:1485 → subagent-card.js) and the definition (:2473).
+  - subagent-card.js — :73 / :76, both `.chat-text`.
+  - chat-view.js — :4602, `querySelector('.chat-text')`.
+- **Gates.** Two NEW suites, both with ci.mjs rows:
+  - scripts/test-card-list-indent.mjs — fast, PURE, 57 ms.
+    - ① the census, with a planted-site control.
+    - ② the stylesheet: `.chat-text ul/ol` and `.markdown-preview ul/ol` carry their own padding-left (the last rule written); no bubble-scoped list rule is left.
+  - scripts/test-card-list-indent-chrome.mjs — heavy, ~10 s. 7 card kinds (assistant reply, sub-agent report, hand-over notice, job notice, away recap, For-you reply, user message) plus a `.markdown-preview` box, each with a 3-item `ul` and a 12-item `ol`. Each item ≥ 8 px inside the text column; each CDP ::marker inside the column, ≥ 8 px off the card's left border, and cut by no clipping ancestor.
+  - Fix: 11 + 70 ✓. On a `git archive` of 27a0bf89e: 5 + 34 ✗ by name. The chrome reds: report / hand-over / job / recap ×6 each, `.markdown-preview` ×4, and the «10.»–«12.» overhang in the compact assistant / reply / user legs ×2 each.
+  - **Deviation from the brief:** the brief asked for ONE fast suite with a chrome leg. The fast tier never launches a browser (test-fold-ux's row; no fast row does), so the chrome half is its own heavy suite — the repo's pairing, as with test-plugins-grammar + test-plugin-consent-chrome.
+  - Bare Chrome runs under `ulimit -d 4194304`, applied to Chrome alone: under it the hub's worker isolates fail to start.
+
 ## 2.369.376 — 2026-11-03
 
 ### cache-warmth-ramp — q-059 r5: the four warmth tiers are the theme's own raw hues (green → blue → amber → red) and expired is one quiet value; CSS, the theme editor's derived strings and one boot migration for the themes saved on .374 (no geometry)
