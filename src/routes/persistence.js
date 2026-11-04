@@ -14,6 +14,7 @@ const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
 const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
+const { noteDupsLeft } = require('../lib/desktop-record.js'); // PURE (r4 K, inc-mw1ogdno-5jny): a desktop's dedup trace never names a window its record lists
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
@@ -76,6 +77,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     catch { _layoutsCache = { current: null, autoSave: null, saved: {}, customGrids: [] }; }
     // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
     if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
+    // …and a dedup trace naming a window its desktop's record lists (r4 K — tracesTrue below)
+    if (tracesTrue(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
     return _layoutsCache;
   }
 
@@ -239,9 +242,26 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     }
   }
   const detach = (o) => { try { return structuredClone(o); } catch { try { return JSON.parse(JSON.stringify(o)); } catch { return null; } } };
+  /** THE TRACE IS A FACT ABOUT THE RECORD (r4 K, inc-mw1ogdno-5jny — the r3 acceptance: the one-desktop restore spread the current
+   *  `desktops[id]` and its dedup trace with it, so the restored record listed a copy the trace still named, and another page's
+   *  keep undid a person's close of it): every road that writes layouts.json comes through here — the layout-sync write, the
+   *  restore of one desktop or all, an import, a preset — and no desktop's `dupsLeft` leaves it naming a window that desktop's
+   *  record lists (PURE noteDupsLeft's own rule: a listed id is forgotten); the first read of the file too (what an older build
+   *  wrote). IN PLACE, like the titles above. → how many desktops' traces it changed. */
+  function tracesTrue(data) {
+    let n = 0;
+    for (const v of Object.values((data && data.desktops) || {})) {
+      if (!v || typeof v !== 'object' || v.dupsLeft === undefined) continue;
+      const t = noteDupsLeft(v.dupsLeft, { listed: (v.autoSave && Array.isArray(v.autoSave.windows)) ? v.autoSave.windows : [] });
+      if (JSON.stringify(t) !== JSON.stringify(v.dupsLeft)) n++;
+      if (t.length) v.dupsLeft = t; else delete v.dupsLeft;
+    }
+    return n;
+  }
   function writeLayouts(data) {
     // THE CHOKE POINT keeps no record's words in a window title (above) — IN PLACE: the ws layout-sync handler relays
     // the SAME window objects it hands here, so the frame other clients receive carries the generic title too
+    tracesTrue(data);
     wordlessTitles(data);
     try {
       const nextShape = layoutShape(data);

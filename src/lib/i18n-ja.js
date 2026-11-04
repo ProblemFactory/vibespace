@@ -6517,6 +6517,7 @@ export default {
   "{names} on “{desktop}” were kept — this page had not opened them yet": "「{desktop}」の {names} は保持されました — このページではまだ開いていませんでした",
   "{names} on “{desktop}” were kept — this page had not opened them yet (refused {n} times)": "「{desktop}」の {names} は保持されました — このページではまだ開いていませんでした（{n} 回拒否）",
   "This page and the server disagree about desktop “{desktop}” — reload to take the server's record": "このページとサーバーでデスクトップ「{desktop}」の記録が食い違っています — 再読み込みしてサーバーの記録を使ってください",
+  "The tab groups on “{desktop}” did not match the server's — this page now shows the server's": "「{desktop}」のタブグループがサーバーと一致しませんでした — このページはサーバーのタブグループを表示しています",
   "“{window}” is on “{desktop}”": "「{window}」は「{desktop}」にあります",
   "Then: {changes}": "その後の変更: {changes}",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "再接続後にレイアウトを再読み込みできませんでした — このページのウィンドウ変更は、読み込めるまで保留されます",

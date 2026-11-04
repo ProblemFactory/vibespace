@@ -102,7 +102,9 @@ export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
   // a socket that CLOSES (r3): the real close handler runs first (it reads which sessions the socket showed), then the attach
   // bookkeeping the real handler keeps per connection is undone here, and the ws library forgets the socket
   const hangUp = (S0) => { if (!S0 || !S0.sock || S0.sock.readyState === 3) return; S0.sock.readyState = 3; S0.close?.(); wss.clients.delete(S0.sock); for (const [, s] of sessions) s.clients.delete(S0.sock); };
-  return { connect, attach, hangUp, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
+  /** a conversation ENDS (r4 M — killed / exited: it leaves the hub's live-session set, as ws-handler's endSession does) */
+  const end = (sid) => sessions.delete(sid);
+  return { connect, attach, hangUp, end, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
 }
 export const refusals = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-refused');
 export const acks = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-ack');

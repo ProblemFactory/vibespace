@@ -20,7 +20,7 @@ const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
 const { keepNames } = require('./lib/desktop-record.js'); // PURE (lane layout-stopped-window): a window that replaced a named one takes its name — never written nameless
 const { refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS } = require('./lib/desktop-record.js'); // PURE (userW inc-mw1ogdno-5jny): a refusal is said once — the server never answers a storm
-const { noteDupsLeft, chainsAgree } = require('./lib/desktop-record.js'); // PURE (r3, inc-mw1ogdno-5jny): the dedup trace (who is looking outlives the socket); a write never makes a record's chains disagree
+const { noteDupsLeft, chainsAgree, sessionOf } = require('./lib/desktop-record.js'); // PURE (r3, inc-mw1ogdno-5jny): the dedup trace (who is looking outlives the socket); a write never makes a record's chains disagree
 const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
@@ -1727,8 +1727,16 @@ function registerWsHandler(wss, ctx) {
             if (Array.isArray(data.state?.windows)) noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws); // what this write ADDS is remembered against every OTHER socket
             layoutData.desktops[desktopId].autoSave = { ...data.state, updatedAt: Date.now() };
             // THE DEDUP TRACE (r3 F): the copies this write let go, kept beside the record (persisted; relayed; every re-read reads it) —
-            // a page that SHOWS one never closes it for this record; an id a write lists again leaves the trace (PURE noteDupsLeft)
-            if (Array.isArray(data.state?.windows)) { const trace = noteDupsLeft(layoutData.desktops[desktopId].dupsLeft, { left: dupsLeft, listed: data.state.windows }); if (trace.length) layoutData.desktops[desktopId].dupsLeft = trace; else delete layoutData.desktops[desktopId].dupsLeft; }
+            // a page that SHOWS one never closes it for this record; an id a write lists again leaves the trace (PURE noteDupsLeft).
+            // r4 K/M: only a 'dup' drop enters it, each with its conversation; a window this write says left by a person's act (a
+            // close — a kill closes its window —, a move, a replace) leaves it here — a person's close is never undone by a keep —
+            // and an entry whose conversation ended (the live-session set, the shrink belt's own) leaves it; never cut by count
+            if (Array.isArray(data.state?.windows)) {
+              const left = dupsLeft.map((e) => ({ id: e.id, by: e.by, sid: sessionOf(prevWins.find((w) => w && (w.winId || w.id) === e.id)) }));
+              const gone = (Array.isArray(data.evidence) ? data.evidence : []).filter((e) => e && typeof e === 'object' && (e.why === 'closed' || e.why === 'moved' || e.why === 'replaced')).map((e) => e.id);
+              const trace = noteDupsLeft(layoutData.desktops[desktopId].dupsLeft, { left, listed: data.state.windows, gone, alive: (sid) => activeSessions.has(sid) });
+              if (trace.length) layoutData.desktops[desktopId].dupsLeft = trace; else delete layoutData.desktops[desktopId].dupsLeft;
+            }
           } else {
             // Legacy single-desktop save
             layoutData.autoSave = { ...data.state, updatedAt: Date.now() };

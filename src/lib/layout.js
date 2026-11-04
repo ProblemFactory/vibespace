@@ -392,7 +392,8 @@ class LayoutManager {
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
       // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
-      // windows onto it; a window a held close removed never comes back through it)
+      // windows onto it; a window a held close removed never comes back through it; a window the apply kept is read back
+      // in its place and its group — r4 J, desktop-manager keptRecord)
       dm.cacheShownState?.(msg.desktopId, msg.state);
     }
     if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);
@@ -411,6 +412,7 @@ class LayoutManager {
     let heldClosed = false; // a window THIS client closed, still listed by the record (inc-mukeyzpt-lpou) — the close is re-sent once below
     let heldMoved = false; // a window THIS page moved AFTER the record arrived (verify r2) — kept where the user put it, the move re-sent once below
     let keptShown = false; // a window THIS page shows that the record let go as a duplicate (r3 F, the hub's trace) — kept, listed again below
+    const keptIds = []; // …which (r4 J: kept in its place and its group)
     const heldIds = (state.windows || []).map((rw) => rw.winId || rw.id).filter((id) => this._closeHeld(id));
     // THE HELD CHAIN ACT (stage-blank verify r5): a tab this user tore off / merged / moved in its strip here that no record
     // has AGREED with yet — the record's chains and that window's entry are older than the act (_heldChainIds)
@@ -563,10 +565,17 @@ class LayoutManager {
             if (closeOnlyWired && !this.app.desktopManager?.wireListed?.(activeDesk, id)) continue;
             // WHO IS LOOKING IS A FACT ABOUT THE PAGE (r3 F, inc-mw1ogdno-5jny): a window this page SHOWS that another page's dedup
             // wrote away (the hub's trace names it) is never closed by the record — kept, and the next save lists it again
-            if (this.app.desktopManager?.keepsShown?.(win, activeDesk, dupsLeft)) { keptShown = true; continue; }
+            if (this.app.desktopManager?.keepsShown?.(win, activeDesk, dupsLeft)) { keptShown = true; keptIds.push(String(id)); continue; }
             this.app.wm.closeWindow(id);
           }
         }
+        // A KEPT WINDOW KEEPS ITS PLACE (r4 J): the record is read as it was before the dedup — the kept window back in its row and
+        // in its group (desktop-manager keptRecord, the hidden road's own reading) — so the chain sync below breaks nothing of it
+        if (keptIds.length) state = this.app.desktopManager?.keptRecord?.(activeDesk, state, keptIds) || state;
+        // A PAGE'S VIEW OF A DESKTOP IS THE RECORD (r4 I): a row this page carries and does not build (a kept copy) is a member of
+        // the record's groups in what it writes, never one it shows — the record's groups read without it
+        const ghosts = this.app.desktopManager?.ghostsOf?.(activeDesk) || [];
+        if (ghosts.length) state = { ...state, windows: state.windows.map((rw) => (rw && rw.tabChain && Array.isArray(rw.tabChain.tabs) && rw.tabChain.tabs.some((m) => ghosts.includes(String(m))) ? { ...rw, tabChain: withoutMembers(rw.tabChain, ghosts) || undefined } : rw)) };
 
         // Sync tab chains from remote state. THE KEY CARRIES THE LAYOUT
         // (agent browser P7, §4.6's named trap): `tabs.join(',')` alone read a
@@ -954,7 +963,10 @@ class LayoutManager {
     for (const [, w] of wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id && chainSyncKey(w._tabChain) === entry.key) return true; // already here
     // a member the USER grouped another way since this chain was queued (tab-group's chain witness): the act wins
     if (entry.tc.tabs.some((id) => { const w = wm.windows.get(String(id)); return w && w._tabChain && (w._chainAt || 0) > entry.at; })) return true;
-    const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), entry.gone);
+    // A PAGE'S VIEW OF A DESKTOP IS THE RECORD (r4 I): a member this page carries and does not build (a kept copy — desktop-manager
+    // ghostsOf) is never waited for: the group forms around the members it builds, and the ghost rides it in what the page writes
+    const dm = this.app.desktopManager, ghosts = (dm?.ghostsOf?.(entry.desk || dm.activeDesktopId) || []).filter((id) => entry.tc.tabs.includes(id));
+    const v = restoreVerdict(entry.tc, (id) => wm.windows.has(id), ghosts.length ? [...entry.gone, ...ghosts] : entry.gone);
     if (v.act !== 'restore') return v.act === 'drop';
     const tc = v.chain;
     // a member still grouped locally (a chain the record does not name) leaves it first — never two chains claiming one window
@@ -984,6 +996,26 @@ class LayoutManager {
     let hit = false;
     for (const e of this._pendingChains || []) for (const id of ids || []) if (e.tc.tabs.includes(String(id)) && !e.gone.includes(String(id))) { e.gone.push(String(id)); hit = true; }
     if (hit) this._settlePendingChains();
+  }
+
+  /** A DESKTOP IS NEVER UNWRITABLE FROM A PAGE (r4 I): the hub refused this page's groups of `ids` on `desk` — rows that disagree
+   *  about a group ('chain-disagrees'). The page takes the hub's: its own groups of them are taken apart the way the remote apply
+   *  breaks a group (the caller puts a window the record holds alone back in its box), any chain still waiting for one is let go, and the record's
+   *  groups of them are queued as a remote record's are (_queueChain: a carried copy rides, a late member is waited for). Their
+   *  held chain acts are spent — refused, and said once by the caller (desktop-manager onSyncRefused). */
+  takeChains(desk, rec, ids) {
+    const wm = this.app.wm, want = new Set((ids || []).map(String)), rows = ((rec && rec.windows) || []).filter((w) => w && want.has(String(w.winId || w.id)));
+    const hosts = new Set();
+    for (const id of want) { const w = wm.windows.get(id); if (!w) continue; w._chainAt = 0; if (w._tabChain) hosts.add(w._tabChain.tabs[0]); }
+    for (const h of hosts) {
+      const w = wm.windows.get(h);
+      while (w && w._tabChain && w._tabChain.tabs.length > 1) wm._detachFromChain(w._tabChain, w._tabChain.tabs[w._tabChain.tabs.length - 1]);
+      if (w && w._tabChain) wm._ungroupLast?.(w._tabChain);
+    }
+    this._pendingChains = (this._pendingChains || []).filter((e) => !e.tc.tabs.some((m) => want.has(String(m))));
+    const seen = new Set();
+    for (const r of rows) { if (!r.tabChain || r.isTabGuest || !Array.isArray(r.tabChain.tabs)) continue; const k = chainSyncKey(r.tabChain); if (!seen.has(k)) { seen.add(k); this._queueChain(chainSyncKey(r.tabChain), r.tabChain, { desk }); } }
+    if (desk !== this.app.desktopManager?.activeDesktopId) for (const id of want) { const w = wm.windows.get(id); if (w && w._desktopId === desk && !w._hiddenByDesktop) this.app.desktopManager?._hideWin?.(w); }
   }
 
   /** A RECORD's chains (a boot restore, a desktop's first visit) — each queued; the one door for both. `naming` (a desktop's

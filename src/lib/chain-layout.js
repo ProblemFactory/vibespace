@@ -508,6 +508,49 @@ function withoutMembers(rec, ids) {
   return c.tabs.length >= 2 ? c : null;
 }
 
+/** THE INVERSE OF withoutMembers (inc-mw1ogdno-5jny r4): `chain` (a group as it reads without `ids` — a record's, or this
+ *  page's; null = no group left) with `ids` put back where `was` (the group they were members of) held them. Nothing else
+ *  changed (`chain` is exactly `was` without them — the same key — or both have no group) ⇒ `was` itself (a clone): a group
+ *  read without a member and given it back is the group it was, its `active` too unless `chain` shows another tab. Else each
+ *  id goes after its nearest earlier member of `was` that `chain` holds — in the membership, in the strip order and (a split)
+ *  on that member's side — or first; `active` stays on `chain`'s shown window. A group someone dissolved meanwhile (`chain`
+ *  null while `was` without them is still a group) is not re-made: null. Ids `was` does not name, or `chain` holds, change
+ *  nothing. Never mutates its inputs. */
+function withMembersBack(chain, was, ids) {
+  const has = chain && Array.isArray(chain.tabs);
+  if (!was || !Array.isArray(was.tabs)) return has ? normalizeChain(cloneChain(chain)) : null;
+  const w = normalizeChain(cloneChain(was));
+  const mine = has ? chain.tabs.map(String) : [];
+  const back = [...new Set((ids || []).map(String))].filter((id) => w.tabs.includes(id) && !mine.includes(id));
+  if (!back.length) return has ? normalizeChain(cloneChain(chain)) : null;
+  const rest = withoutMembers(w, back);
+  if (has ? !!rest && chainSyncKey(rest) === chainSyncKey(chain) : !rest) {
+    if (has) {
+      const shown = String(chain.tabs[chain.active] ?? ''), restShown = String(rest.tabs[rest.active] ?? '');
+      if (shown && shown !== restShown && w.tabs.includes(shown)) w.active = w.tabs.indexOf(shown);
+      if (w.layout === 'split' && chain.layout === 'split' && chain.split) w.split = { ...w.split, ratio: clampRatio(chain.split.ratio) };
+    }
+    return normalizeChain(w);
+  }
+  if (!has) return null;
+  const c = normalizeChain(cloneChain(chain));
+  const shownId = c.tabs[c.active];
+  const after = (list, ref, id) => { const at = ref.indexOf(id); for (let j = at - 1; j >= 0; j--) { const k = list.indexOf(ref[j]); if (k >= 0) return k + 1; } return 0; };
+  for (const id of back) {
+    c.tabs.splice(after(c.tabs, w.tabs, id), 0, id);
+    if (c.layout === 'split') {
+      let side = null, at = 0;
+      for (let j = w.order.indexOf(id) - 1; j >= 0 && !side; j--) for (const s of ['left', 'right']) if (!side && c.split[s].includes(w.order[j])) { side = s; at = c.split[s].indexOf(w.order[j]) + 1; }
+      if (!side) side = w.layout === 'split' && w.split.right.includes(id) ? 'right' : 'left';
+      const list = [...c.split[side]]; list.splice(at, 0, id);
+      c.split = { ...c.split, [side]: list };
+    } else c.order.splice(after(c.order, w.order, id), 0, id);
+    normalizeChain(c);
+  }
+  c.active = Math.max(0, c.tabs.indexOf(shownId));
+  return normalizeChain(c);
+}
+
 /** THE QUEUED CHAIN'S VERDICT (lane split-restore-hidden, userW inc-muundq37-cjay): a chain record waiting for its
  *  members is rebuilt WHOLE — its split and ratio exactly as recorded — the moment its last member exists (`has(id)`);
  *  until then it waits, however late the member comes (a hidden desktop's first visit, an async opener). Only a member
@@ -788,6 +831,7 @@ module.exports = {
   chainFocusOf, // B-9cd4: a rebuilt chain's focus is its frame showing its active tab (the phone's first paint)
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
   withoutMembers, // inc-mukeyzpt-lpou: a record read without the windows this client closed
+  withMembersBack, // inc-mw1ogdno-5jny r4: the inverse — a kept window given back its place in its group
   restoreVerdict, // inc-muundq37-cjay: a queued chain waits for its LAST member, then is rebuilt whole
   // MULTIVIEW (design-browser-multiview §3 (b) / D3 / D5): the partner rule, the follow verdict, the new live view's place, the fold-back
   PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,

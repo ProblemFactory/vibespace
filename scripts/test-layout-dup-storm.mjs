@@ -27,6 +27,9 @@ import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat,
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 const require = createRequire(import.meta.url);
 const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0;
@@ -91,8 +94,14 @@ function pureLegs(DR, { quiet = false } = {}) {
   const ND = DR.noteDupsLeft || (() => null);
   const tr1 = ND([{ id: 'a', by: 'b', at: 1 }, { id: 'c', by: 'd', at: 2 }], { left: [{ id: 'e', why: 'dup', by: 'f' }], listed: [{ winId: 'a' }, 'x'], at: 9 });
   leg(J(tr1) === J([{ id: 'c', by: 'd', at: 2 }, { id: 'e', by: 'f', at: 9 }]), '§1 r3 F noteDupsLeft: a copy the write let go is traced {id, by, at}; an id the write LISTS again leaves the trace (the hub learned it is shown)', tr1);
-  const tr2 = ND(Array.from({ length: 60 }, (_, i) => ({ id: 'w' + i, by: 'b', at: i })), { left: [], listed: [] });
-  leg(Array.isArray(tr2) && tr2.length === (DR.DUP_TRACE_CAP || 50) && tr2[0].id === 'w10', '§1 r3 F …bounded: the newest DUP_TRACE_CAP (50) entries', tr2 && tr2.length);
+  // r4 M — NEVER CUT BY COUNT: an entry leaves when its id is listed again, by a person's act, or when its conversation ends
+  const tr2 = ND(Array.from({ length: 60 }, (_, i) => ({ id: 'w' + i, by: 'b', sid: 's' + i, at: i })), { left: [{ id: 'w60', by: 'b', sid: 's60' }], listed: [], alive: () => true, at: 99 });
+  leg(Array.isArray(tr2) && tr2.length === 61 && tr2[0].id === 'w0' && tr2[60].id === 'w60', '§1 r4 M noteDupsLeft: the trace is NEVER cut by count — 60 entries and one more ⇒ 61, the oldest kept (36bd0c866: the newest 50)', tr2 && tr2.length);
+  const tr3 = ND([{ id: 'a', by: 'b', sid: 'dead', at: 1 }, { id: 'c', by: 'd', sid: 'live', at: 2 }, { id: 'e', by: 'f', at: 3 }], { left: [{ id: 'g', by: 'h', sid: 'dead' }], listed: [], alive: (sid) => sid === 'live', at: 9 });
+  leg(J(tr3) === J([{ id: 'c', by: 'd', sid: 'live', at: 2 }, { id: 'e', by: 'f', at: 3 }]), '§1 r4 M …an entry whose conversation ENDED leaves it (the hub\'s live-session set) — and never enters; one with no conversation named (an r3 trace) is judged by the other rules alone', tr3);
+  // r4 K — A PERSON'S ACT LEAVES THE TRACE in that same write; only a 'dup' drop enters it
+  const tr4 = ND([{ id: 'a', by: 'b', sid: 's', at: 1 }, { id: 'c', by: 'd', sid: 's', at: 2 }], { left: [{ id: 'e', by: 'f', sid: 's' }], gone: ['a', 'e'], listed: [], at: 9 });
+  leg(J(tr4) === J([{ id: 'c', by: 'd', sid: 's', at: 2 }]), '§1 r4 K noteDupsLeft: a window `gone` names (the write says a person closed / moved / replaced it) leaves the trace, and never enters it — a person\'s close is never undone by another page\'s keep', tr4);
   // r3 G — A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE (chainsAgree)
   const CA = DR.chainsAgree || (() => ({ ok: true, rows: [] }));
   const G = ['h', 's', 'g'], ch = (tabs) => ({ tabs, active: 0, layout: 'tabs', order: tabs });
@@ -106,6 +115,23 @@ function pureLegs(DR, { quiet = false } = {}) {
   return failed;
 }
 await section('§1 PURE (src/lib/desktop-record.js)', async () => { pureLegs(require(MODEL)); });
+// r4 J / I — THE INVERSE OF withoutMembers (chain-layout withMembersBack): a kept window given back its place in its group
+await section('§1 r4 PURE (src/lib/chain-layout.js withMembersBack)', async () => {
+  const CL = await import(pathToFileURL(path.join(LIB, 'chain-layout.js')).href);
+  const B = CL.withMembersBack || (() => null), W = CL.withoutMembers, K = CL.chainSyncKey; // 36bd0c866 has none: each leg RED by its name
+  const was = { tabs: ['v-h', 'win-v-s', 'v-g'], active: 1, layout: 'tabs', order: ['v-h', 'win-v-s', 'v-g'] };
+  ok(J(B(W(was, ['win-v-s']), was, ['win-v-s'])) === J(was), '§1 r4 J withMembersBack: a group read without a member and given it back is the group it WAS — its tabs, its strip order, its active tab (the kept window in front stays in front)', B(W(was, ['win-v-s']), was, ['win-v-s']));
+  const shown = B({ tabs: ['v-h', 'v-g'], active: 1, layout: 'tabs', order: ['v-h', 'v-g'] }, { ...was, active: 0 }, ['win-v-s']);
+  ok(shown && K(shown) === K(was) && shown.tabs[shown.active] === 'v-g', '§1 r4 I …the page shows another tab of the group meanwhile: the group as it was, that tab in front', shown);
+  const merged = B({ tabs: ['v-h', 'v-g', 't'], active: 0, layout: 'tabs', order: ['v-h', 'v-g', 't'] }, was, ['win-v-s']);
+  ok(merged && J(merged.tabs) === J(['v-h', 'win-v-s', 'v-g', 't']) && J(merged.order) === J(['v-h', 'win-v-s', 'v-g', 't']) && merged.tabs[merged.active] === 'v-h', '§1 r4 I …the person changed the group (merged t in): the kept member goes back after its nearest earlier member — in the membership and the strip — and the shown tab stays', merged);
+  const two = { tabs: ['v-h', 'k'], active: 0, layout: 'tabs', order: ['v-h', 'k'] };
+  ok(J(B(null, two, ['k'])) === J(two) && B(null, was, ['win-v-s']) === null, '§1 r4 I …a two-tab group read without one has no group left: given back, it is the group again; a bigger group someone took apart meanwhile is not re-made (null — the kept window stands alone)', [B(null, two, ['k']), B(null, was, ['win-v-s'])]);
+  const sp = { tabs: ['a', 'k', 'b', 'c'], active: 0, layout: 'split', order: ['a', 'k', 'b', 'c'], split: { pair: ['a', 'b'], ratio: 0.4, dir: 'row', left: ['a', 'k'], right: ['b', 'c'] } };
+  const spb = B({ ...W(sp, ['k']), split: { ...W(sp, ['k']).split, ratio: 0.6 } }, sp, ['k']);
+  ok(spb && K(spb) === K(sp) && spb.split.ratio === 0.6 && J(spb.split.left) === J(['a', 'k']), '§1 r4 J …a SPLIT given its member back: the same sides and pair (the same key), the ratio the record holds now', spb);
+  ok(J(B(was, was, ['win-v-s'])) === J(CL.normalizeChain(CL.cloneChain(was))) && J(B(W(was, ['win-v-s']), was, ['zz'])) === J(W(was, ['win-v-s'])), '§1 r4 …an id the chain already holds, or one `was` never named, changes nothing');
+});
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 async function hubLegs(WSH, { quiet = false } = {}) {
@@ -143,6 +169,22 @@ async function hubLegs(WSH, { quiet = false } = {}) {
     leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].by === 'win-x-s' && relay && J(relay.dupsLeft) === J(tr), '§2 r3 F THE DEDUP TRACE: the accepted copy is traced beside V\'s record ({id, by, at} in layouts.json — on disk) and the relay to every other page carries it', { tr, relay: relay && relay.dupsLeft });
     await P.send({ ...vWrite([], 802), state: { windows: TRIPLE()['desk-v'], grid: null } }); // a page that shows win-v-s lists it again
     leg(acks(P).length === 2 && !('dupsLeft' in H.layouts().desktops['desk-v']), '§2 r3 F …a write that lists the id again takes it out of the trace (the hub learned it is shown)', Object.keys(H.layouts().desktops['desk-v']));
+  }
+  // r4 K / M on the real handler: the entry names its conversation; a write that says a PERSON closed (moved, replaced) the traced
+  // window takes it out of the trace in that same write; an entry whose conversation ENDED leaves at the next write
+  {
+    const H = hub(WSH, DOC(TRIPLE())), P = H.connect();
+    const base = () => H.layouts().desktops['desk-v'].autoSave.updatedAt;
+    await P.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1101));
+    const tr = H.layouts().desktops['desk-v'].dupsLeft || [];
+    leg(acks(P).length === 1 && tr.length === 1 && tr[0].id === 'win-v-s' && tr[0].sid === S, '§2 r4 M: the traced copy names its conversation ({id, by, sid, at} — the hub judges an entry by its conversation, never by count)', tr);
+    await P.send({ ...vWrite([{ id: 'win-v-s', why: 'closed' }], 1102), base: base() });
+    leg(acks(P).length === 2 && !('dupsLeft' in H.layouts().desktops['desk-v']), '§2 r4 K: a write whose evidence says a PERSON CLOSED the traced window (a page that kept it) takes it out of the trace in that same write — no other page\'s keep undoes the close (36bd0c866: the trace kept it)', H.layouts().desktops['desk-v'].dupsLeft);
+    const H2 = hub(WSH, DOC(TRIPLE())), P2 = H2.connect();
+    await P2.send(vWrite([{ id: 'win-v-s', why: 'dup', by: 'win-x-s' }], 1201));
+    H2.end(S); // the conversation is killed: it leaves the hub's live-session set
+    await P2.send({ ...vWrite([], 1202), base: H2.layouts().desktops['desk-v'].autoSave.updatedAt, state: { windows: TRIPLE()['desk-v'].filter((w) => w.winId !== 'win-v-s'), grid: null, theme: 'light' } });
+    leg(acks(P2).length === 2 && !('dupsLeft' in H2.layouts().desktops['desk-v']), '§2 r4 M: …and an entry whose conversation ENDED leaves the trace at the next write of its desktop', H2.layouts().desktops['desk-v'].dupsLeft);
   }
   // r3 G — A WRITE NEVER MAKES A RECORD'S CHAINS DISAGREE, on the real handler
   {
@@ -183,6 +225,55 @@ async function hubLegs(WSH, { quiet = false } = {}) {
   return failed;
 }
 await section('§2 THE REAL ws-handler — A (the duplicate explained across desktops) and C (the storm never answered)', async () => { await hubLegs(loadHandler()); });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+/** r4 K — THE TRACE IS A FACT ABOUT THE RECORD, on the real src/routes/persistence.js (a temp data dir): writeLayouts is THE CHOKE
+ *  POINT every road to layouts.json goes through; the one-desktop restore (the acceptance's probe 5: it spread the current
+ *  desktops[id], trace included) and the whole restore leave no trace naming a window the record lists. `P` = the module (a mutant's). */
+async function persistLegs(P, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldup-k-'));
+  try {
+    P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    const R = P.router, Wl = R.writeLayouts;
+    const route = R.stack.find((l) => l.route && l.route.path === '/api/layout-history/:id/restore').route.stack[0];
+    const sink = { json: () => {}, status: () => ({ json: () => {} }) };
+    const traceV = () => R.readLayouts().desktops['desk-v'].dupsLeft || [];
+    const listsV = () => ids(R.readLayouts().desktops['desk-v'].autoSave.windows);
+    Wl(DOC(SINGLE())); await tick(5);
+    // the layout-sync handler's accepted dedup: V without its copy, the trace beside it
+    const d2 = JSON.parse(J(R.readLayouts())); d2.desktops['desk-v'].autoSave.windows = d2.desktops['desk-v'].autoSave.windows.filter((w) => w.winId !== 'win-v-s'); d2.desktops['desk-v'].dupsLeft = [{ id: 'win-v-s', by: 'win-x-s', sid: S, at: 1 }];
+    Wl(d2); await tick(5);
+    const point = R.listLayoutHistory().find((h) => { try { return JSON.parse(fs.readFileSync(path.join(dd, 'layout-history', h.id), 'utf8')).layouts.desktops['desk-v'].autoSave.windows.some((w) => w.winId === 'win-v-s'); } catch { return false; } });
+    leg(traceV().length === 1 && !listsV().includes('win-v-s') && !!point, '§2b r4 K: the trace rides a write that does not list its id (the dedup stands), and a rollback point before the dedup exists', { trace: traceV(), v: listsV(), point: point && point.id });
+    await route.handle({ params: { id: point.id }, body: { desktopId: 'desk-v' } }, sink); await tick(5);
+    leg(listsV().includes('win-v-s') && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: THE ONE-DESKTOP RESTORE to the point before the dedup lists the copy again — and the trace no longer names it (36bd0c866: `{ ...desktops[only], autoSave }` carried the trace over; another page\'s keep then undid a person\'s close)', { v: listsV(), trace: traceV() });
+    Wl(d2); await tick(5);
+    await route.handle({ params: { id: point.id } }, sink); await tick(5);
+    leg(listsV().includes('win-v-s') && !traceV().some((e) => e.id === 'win-v-s'), '§2b r4 K: …the WHOLE restore too (the point\'s own document)', { v: listsV(), trace: traceV() });
+    const d3 = JSON.parse(J(R.readLayouts())); d3.desktops['desk-v'].dupsLeft = [{ id: 'win-v-s', by: 'win-x-s', at: 1 }, { id: 'gone-1', by: 'win-x-s', at: 2 }];
+    Wl(d3); await tick(5);
+    leg(J(traceV().map((e) => e.id)) === J(['gone-1']), '§2b r4 K: …and ANY write through writeLayouts (an import, a preset, a migration\'s) — the trace keeps only ids the record does not list', traceV());
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+  return failed;
+}
+const PERSIST = path.join(REPO, 'src/routes/persistence.js');
+await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real persistence.js: THE CHOKE POINT, the restores) + the writers census', async () => {
+  delete require.cache[require.resolve(PERSIST)];
+  await persistLegs(require(PERSIST));
+  // THE WRITERS CENSUS: every road that writes a desktop record — each a row, or the reason it cannot list a traced id
+  const src = (f) => read(f);
+  const PS = src('src/routes/persistence.js'), WS = src('src/ws-handler.js'), SV = src('server.js');
+  const body = (t, name) => { const i = t.indexOf('function ' + name + '('); return i < 0 ? '' : t.slice(i, t.indexOf('\n  }\n', i)); };
+  ok(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts')) && /tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts')), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
+  ok((PS.match(/writeJsonAtomic\(LAYOUTS_FILE/g) || []).length === 1 && /writeJsonAtomic\(LAYOUTS_FILE, _layoutsCache\)/.test(body(PS, 'flushLayouts')) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache — and the cache is set only by its declaration, readLayouts (the disk, ×2) and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));
+  const ROWS = { 'src/routes/persistence.js': [9, 'the presets, the active preset, the custom grids, the autosave slot, the two restores, the import — each through writeLayouts'], 'src/ws-handler.js': [5, 'layout-sync (noteDupsLeft: listed / gone / alive) + desktop-create (an empty record) / -delete (the trace goes with it) / -rename / -reorder (no record changes) — each through writeLayouts (ctx)'] };
+  const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
+  ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
+  const strays = ['src/server/incident-wiring.js', 'src/server/migrations.js', 'src/server/boot-restore.js'].filter((f) => fs.existsSync(path.join(REPO, f)) && /layouts\.json/.test(src(f)) && /writeFileSync|writeJsonAtomic|renameSync/.test(src(f).split('\n').filter((l) => /layouts/.test(l)).join('\n')));
+  ok(!strays.length && /\/home\/\$\{old\}/.test(SV) && /path\.join\(__dirname, 'data', 'layouts\.json'\)/.test(SV), '§2b census: the one other writer of layouts.json is server.js\'s HOME RENAME (/home/<old>/ → /home/<user>/ inside string values) — it rewrites paths only, never a window id or the windows a record lists, so it cannot make a record list a traced id', strays);
+});
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 async function toastLegs({ DM = RealDM, LM = RealLM, quiet = false } = {}) {
@@ -245,7 +336,21 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const p = pureLegs(Mx, { quiet: true });
     ok(p.some((n) => /chainsAgree: the r2 re-send/.test(n)) && p.some((n) => /NO chain disagrees too/.test(n)), `mutant r3-G-blind-verdict: chainsAgree sees no disagreement — RED (${p.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  // r4: K the choke point's trace rule removed (36bd0c866: the restore spread the trace), K the person's act ignored, M the newest 50
+  {
+    const PSRC = read('src/routes/persistence.js'), find = '    tracesTrue(data);\n';
+    ok(PSRC.includes(find), 'mutant r4-K-restore-spreads: the patched line exists in persistence.js');
+    const Px = M.load('src/routes/persistence.js', PSRC.replace(find, ''), 'r4-k-spread');
+    const k = await persistLegs(Px, { quiet: true });
+    ok(k.some((n) => /THE ONE-DESKTOP RESTORE/.test(n)) && k.some((n) => /…and ANY write through writeLayouts/.test(n)), `mutant r4-K-restore-spreads (36bd0c866's writeLayouts): the restored record lists the copy the trace still names — RED (${k.length})`);
+    const ND = require(MODEL).noteDupsLeft;
+    const g = await hubLegs(loadHandler({ noteDupsLeft: (t, o = {}) => ND(t, { ...o, gone: [] }) }), { quiet: true });
+    const gp = pureLegs({ ...require(MODEL), noteDupsLeft: (t, o = {}) => ND(t, { ...o, gone: [] }) }, { quiet: true });
+    ok(g.some((n) => /a write whose evidence says a PERSON CLOSED/.test(n)) && gp.some((n) => /r4 K noteDupsLeft/.test(n)), `mutant r4-K-keep-on-close (the trace blind to a person's act): the closed window stays traced — RED (${g.length}/${gp.length})`);
+    const f = pureLegs({ ...require(MODEL), noteDupsLeft: (t, o = {}) => ND(t, o).slice(-50) }, { quiet: true });
+    ok(f.some((n) => /NEVER cut by count/.test(n)), `mutant r4-M-fifo-50 (36bd0c866's DUP_TRACE_CAP): the oldest copies leave the trace by count — RED (${f.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 

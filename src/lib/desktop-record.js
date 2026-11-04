@@ -77,8 +77,16 @@
 //     re-read): a page that SHOWS a window the trace names never closes it for that record — it keeps it and lists it again
 //     in its next save (the hub learns it; the trace forgets an id a write lists again). No clock: a timed grace on a closed
 //     socket was measured and dropped (r3) — the page's own earlier socket (a reload) blocked its own cleanup for the grace.
-//   noteDupsLeft(trace, {left, listed, at, cap}) → the trace after a write: the copies it let go ([{id, by}]) noted
-//     [{id, by, at}], every id it lists forgotten, newest last, ≤ cap (DUP_TRACE_CAP).
+//     THE TRACE IS A FACT ABOUT THE RECORD (r4 K/M): an id the record lists is never in it, whoever wrote the record (the
+//     layout-sync write here, and persistence.js writeLayouts — THE CHOKE POINT every other road goes through: the restore of
+//     one desktop or all, an import); only a 'dup' drop ever enters it, and a window that leaves by a person's act (evidence
+//     'closed' / 'moved' / 'replaced' — a kill closes its window) leaves it in that same write: a person's close is never
+//     undone by another page's keep. It is NEVER cut by count: an entry leaves when its id is listed again, by a person's
+//     act, or when its conversation ends (`alive(sid)` false — the hub's live-session set, the shrink belt's own) — so the
+//     trace is never longer than the live conversations' copies a desktop let go (r3's newest-50 cap closed the 51st copy).
+//   noteDupsLeft(trace, {left, listed, gone, alive, at}) → the trace after a write: the copies it let go ([{id, by, sid}])
+//     noted [{id, by, sid, at}] (newest last), every id it lists or `gone` names forgotten, every entry whose `sid` is no
+//     longer alive forgotten (an entry with no sid — an r3 trace — is judged by the first two alone).
 //   chainsAgree(next, prev) → {ok, reason: 'chain-disagrees', rows} — A WRITE NEVER MAKES A RECORD'S ROWS DISAGREE ABOUT A
 //     CHAIN (the r2 acceptance: a refused dedup's re-send paired the proposer's shrunk host chain [h, g] with the copy's
 //     restored guest row [h, s, g] — accepted, and every page ungrouped the copy's window): a row whose chain names a member
@@ -414,14 +422,22 @@ function duplicatesOf({ records = {}, shown = new Map() } = {}) {
   return out;
 }
 
-const DUP_TRACE_CAP = 50;
-function noteDupsLeft(trace, { left = [], listed = [], at = Date.now(), cap = DUP_TRACE_CAP } = {}) {
-  const relisted = new Set(listOf(listed).map((x) => (x && typeof x === 'object' ? idOf(x) : (x == null ? null : String(x)))).filter(Boolean));
-  const gone = new Map();
-  for (const e of listOf(left)) { const id = idOf(e); if (id && !relisted.has(id)) gone.set(id, e.by == null ? null : String(e.by)); }
-  const out = listOf(trace).filter((e) => { const id = idOf(e); return id && !relisted.has(id) && !gone.has(id); }).map((e) => ({ id: idOf(e), by: e.by == null ? null : String(e.by), at: Number(e.at) || 0 }));
-  for (const [id, by] of gone) out.push({ id, by, at });
-  return out.slice(-Math.max(0, cap));
+function noteDupsLeft(trace, { left = [], listed = [], gone = [], alive = null, at = Date.now() } = {}) {
+  const ids = (l) => new Set(listOf(l).map((x) => (x && typeof x === 'object' ? idOf(x) : (x == null ? null : String(x)))).filter(Boolean));
+  const relisted = ids(listed), acted = ids(gone);
+  const lives = (sid) => !sid || typeof alive !== 'function' || !!alive(sid);
+  const fresh = new Map();
+  for (const e of listOf(left)) { const id = idOf(e); if (id && !relisted.has(id) && !acted.has(id)) fresh.set(id, { by: e.by == null ? null : String(e.by), sid: e.sid == null ? null : String(e.sid) }); }
+  const out = [];
+  for (const e of listOf(trace)) {
+    const id = idOf(e);
+    if (!id || relisted.has(id) || acted.has(id) || fresh.has(id)) continue;
+    const sid = e.sid == null ? null : String(e.sid);
+    if (!lives(sid)) continue;
+    out.push({ id, by: e.by == null ? null : String(e.by), ...(sid ? { sid } : {}), at: Number(e.at) || 0 });
+  }
+  for (const [id, { by, sid }] of fresh) if (lives(sid)) out.push({ id, by, ...(sid ? { sid } : {}), at });
+  return out;
 }
 
 /** The rows of `windows` whose chain names a member the list holds whose own row's chain has other members (or none). */
@@ -646,4 +662,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree, DUP_TRACE_CAP };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree };
