@@ -297,13 +297,17 @@ async function legStopDrain(wrap = WRAP_SRC) {
   const W = await world(wrap === WRAP_SRC ? 'stopdrain' : 'stopdrainm', { jobs: HELD, wrap }); W.put(SENT('sd')); W.release();
   const job = W.jm.jobs.get(W.create({}).job.id);
   const wpid = job.proc && job.proc.pid;
+  // int378 seam 6 (B-7fda, diagnostic only — no behaviour change): the facts say how long the arm took and when the stop was
+  // read against the 600 ms hold (attempt 2 of ci/int378-r2: armed, got 0, ONE refused:not_started — the stop before the drain)
+  const tArm = Date.now();
   for (let i = 0; i < 100 && !sigCaught(wpid, 15); i++) await nap(10);
-  const armed = sigCaught(wpid, 15);
+  const armed = sigCaught(wpid, 15), armMs = Date.now() - tArm;
+  const tStop = Date.now();
   W.jm.stop(job);
   await W.until(() => W.uses(job.id).length > 0 && !['up', 'starting'].includes(job.state));
-  const u = W.uses(job.id);
+  const u = W.uses(job.id), stopMs = Date.now() - tStop;
   rows.okLines = u.filter((x) => x.outcome === 'ok').length;
-  row(armed && W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:stopped' && rows.okLines === 0, 'round 2 (the review): a stop that lands while the wrapper drains ⇒ the job never ran, ONE `refused:stopped`, no `ok` (the ACK only after the stop is read)', { armed, u, got: W.got().length });
+  row(armed && W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:stopped' && rows.okLines === 0, 'round 2 (the review): a stop that lands while the wrapper drains ⇒ the job never ran, ONE `refused:stopped`, no `ok` (the ACK only after the stop is read)', { armed, armMs, stopMs, holdMs: 600, u, got: W.got().length });
   W.end();
   return rows;
 }
