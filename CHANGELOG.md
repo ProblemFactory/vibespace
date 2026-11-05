@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.381 — 2026-11-05
+
+### Fixed
+- Opening a conversation right after clicking another desktop now keeps you on that conversation instead of moving you away a moment later.
+- Going to a desktop no longer sends you back a second later while a conversation listed there is still loading on another desktop.
+- A conversation you just opened is no longer kept in front of its tab group once you leave that desktop, however you leave it.
+- The window list no longer lists a conversation twice, and choosing a window there that cannot be shown now says why.
+
 ## 2.369.380 — 2026-11-04
 
 ### Changed
