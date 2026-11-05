@@ -16,14 +16,41 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require(path.join(ROOT, 'src/desktop-apps.js')), D = require(path.join(ROOT, 'src/desktop-display.js'));
 const CHROME = ['/opt/google/chrome/chrome', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, XVFB = null;   // XVFB: the suite's own X server — ended with SIGTERM so it removes its lock (B-e5d3)
 const check = (n, ok, x = '') => { if (ok) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${x ? ` — ${x}` : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-h-')), kids = [];
 const env = { PATH: process.env.PATH, HOME: path.join(tmp, 'home'), XDG_RUNTIME_DIR: path.join(tmp, 'run') };
 for (const d of [env.HOME, env.XDG_RUNTIME_DIR]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-// a display nobody holds: neither a socket nor a lock (a killed Xvfb leaves both — 188..193 were all stale on the hub)
-const DISP = `:${Array.from({ length: 24 }, (_, i) => 188 + i).find((n) => !fs.existsSync(`/tmp/.X11-unix/X${n}`) && !fs.existsSync(`/tmp/.X${n}-lock`))}`;
+// a display nobody holds: neither a socket nor a lock — OR a lock whose pid is DEAD (int382 seam, B-e5d3: every killed Xvfb leaves
+// both, and :188–:211 filled with them — 24 of 24 on the hub by 2026-11-05 — so the old picker returned none and Chrome started on
+// «:undefined»). DEAD = /proc/<pid> absent AND kill(pid, 0) fails with ESRCH (an EPERM is a live process we cannot signal); Xvfb
+// reclaims a stale lock and socket itself. None free ⇒ the suite fails BY NAME, never on «:undefined».
+const pidDead = (pid) => { if (!(pid > 0) || fs.existsSync(`/proc/${pid}`)) return false; try { process.kill(pid, 0); return false; } catch (e) { return !!e && e.code === 'ESRCH'; } };
+const lockPid = (lock) => { try { return Number(fs.readFileSync(lock, 'utf8').trim()) || 0; } catch { return 0; } };
+function pickDisplay(root = '/tmp', dead = pidDead) {
+  for (let n = 188; n < 212; n++) {
+    const sock = path.join(root, '.X11-unix', `X${n}`), lock = path.join(root, `.X${n}-lock`);
+    if (!fs.existsSync(sock) && !fs.existsSync(lock)) return n;
+    if (fs.existsSync(lock) && dead(lockPid(lock))) return n;
+  }
+  return null;
+}
+// THE CONTROL (B-e5d3): a scratch /tmp whose 24 displays all hold a lock + socket — :188's lock names THIS process (alive), :189's
+// pid 1 (EPERM: alive, not ours), :190–:211 a child that has exited (dead) ⇒ the seam's picker takes :190; the BASE's picker (no lock,
+// no socket — nothing else) finds none (red by name: the «:undefined» of nightly380)
+{
+  const fx = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-fx-')); fs.mkdirSync(path.join(fx, '.X11-unix'));
+  const deadPid = spawnSync('true').pid;
+  for (let n = 188; n < 212; n++) { fs.writeFileSync(path.join(fx, '.X11-unix', `X${n}`), ''); fs.writeFileSync(path.join(fx, `.X${n}-lock`), `${String(n === 188 ? process.pid : n === 189 ? 1 : deadPid).padStart(10)}\n`); }
+  const basePick = Array.from({ length: 24 }, (_, i) => 188 + i).find((n) => !fs.existsSync(path.join(fx, '.X11-unix', `X${n}`)) && !fs.existsSync(path.join(fx, `.X${n}-lock`)));
+  const seamPick = pickDisplay(fx);
+  check('CONTROL (B-e5d3): a window of stale locks — the base picker finds NONE («:undefined», red by name); the dead-pid picker takes :190, never :188 (this process, alive) nor :189 (pid 1, EPERM)', basePick === undefined && seamPick === 190, JSON.stringify({ basePick: basePick ?? null, seamPick, deadPid }));
+  fs.rmSync(fx, { recursive: true, force: true });
+}
+const DN = pickDisplay();
+if (DN === null) { console.log('  ✗ no X display free in :188–:211 — every one holds a lock of a LIVE process (or a socket with no lock); the suite cannot start its Xvfb'); process.exit(1); }
+const DISP = `:${DN}`;
 const pre = M.portalPlan({ dir: path.join(tmp, 'pre'), display: DISP, authFile: null, bins: D.portalBins({ env }), why: 'browser' });
 const preFacts = pre.ok ? await D.appSecretsFacts({ env, mode: 'on', dataDir: path.join(tmp, 'pre-data'), id: 'da-pre' }) : null;
 const skipWhy = !pre.ok ? `portalPlan: ${pre.why}` : /^python3 /.test((preFacts && preFacts.why) || '') ? `appSecretsFacts: ${preFacts.why}` : null;
@@ -70,7 +97,7 @@ const prefixes = (prof) => spawnSync('python3', ['-c', 'import sqlite3,sys; prin
 const visit = async (b) => { const { targetId } = (await b.send('Target.createTarget', { url: URL0 })).result; await sleep(1500); const all = (await b.send('Storage.getCookies')).result.cookies; await b.send('Target.closeTarget', { targetId }); return all; };
 try {
   if (!CHROME) throw new Error('no Chrome on this machine');
-  const X = spawn('Xvfb', [DISP, '-nolisten', 'tcp', '-screen', '0', '1280x800x24'], { stdio: 'ignore' }); kids.push(X); await sleep(600);
+  const X = spawn('Xvfb', [DISP, '-nolisten', 'tcp', '-screen', '0', '1280x800x24'], { stdio: 'ignore' }); kids.push(X); XVFB = X; await sleep(600);
   console.log(`① with the Secret Service (Chrome ${spawnSync(CHROME, ['--version'], { encoding: 'utf8' }).stdout.trim()}, ${DISP})`);
   const appOn = path.join(tmp, 'data', 'desktop-apps', 'da-chrome1'); fs.mkdirSync(appOn, { recursive: true });
   const profOn = path.join(tmp, 'prof-on');
@@ -122,7 +149,14 @@ try {
   });
   check('PNG written', fs.statSync(pngOut).size > 5000, pngOut);
 } finally {
-  srv.close(); for (const k of kids.reverse()) { try { k.kill('SIGKILL'); } catch { /* gone */ } }
+  srv.close();
+  for (const k of kids.reverse()) if (k !== XVFB) { try { k.kill('SIGKILL'); } catch { /* gone */ } }
+  // B-e5d3: OUR Xvfb ends on SIGTERM so it removes its own lock + socket (a SIGKILL left both — the window filled with them)
+  if (XVFB && XVFB.exitCode === null && XVFB.signalCode === null) {
+    const gone = new Promise((r) => XVFB.once('exit', r)); try { XVFB.kill('SIGTERM'); } catch { /* gone */ }
+    await Promise.race([gone, sleep(3000)]); if (XVFB.exitCode === null && XVFB.signalCode === null) { try { XVFB.kill('SIGKILL'); } catch { /* gone */ } }
+  }
+  if (XVFB) check(`our Xvfb ended and took its lock with it (${DISP}: /tmp/.X${DN}-lock gone)`, !fs.existsSync(`/tmp/.X${DN}-lock`));
   await sleep(300); fs.rmSync(tmp, { recursive: true, force: true });
 }
 console.log(`\n${pass} passed, ${fail} failed`);
