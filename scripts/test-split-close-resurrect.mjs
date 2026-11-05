@@ -208,8 +208,13 @@ else await (async () => {
     // ── 1c · CONTROL: the pre-fix tab ✕ ──
     console.log('— 1c · CONTROL: the pre-fix ✕ (removeFromTabChain without the retirement) on the live page');
     {
-      await P1.ev(`wm.__rftc = wm.removeFromTabChain; wm.removeFromTabChain = function (chain, winId) { const win = this.windows.get(winId); if (!win) return; win._listenerCtl?.abort(); this._detachFromChain(chain, winId); if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(winId); this._notify(); this._scheduleOverlapUpdate(); if (this.activeWindowId === winId) { this.activeWindowId = null; const next = chain.tabs[chain.active] ?? chain.tabs[0]; if (next && this.windows.has(next)) this.focusWindow(next); } }; return true;`);
+      // the scene FIRST, under the fixed ✕: its own setup closes (the previous leg's group) are not this control's — under the pre-fix
+      // ✕ they would leave the closed Alpha window's row in desktop One's record, which the page then offers as a duplicate of the
+      // Alpha it shows and the hub KEEPS while the suite's own socket (it created Alpha) is attached — a kept copy that every later
+      // record lists and leg 2's echo (captureState: the built windows) does not, so the hub refused that echo (shrink-without-close)
+      // before it reached the page: leg 2 passed without the ledger, and 2c could not see it
       await scene();
+      await P1.ev(`wm.__rftc = wm.removeFromTabChain; wm.removeFromTabChain = function (chain, winId) { const win = this.windows.get(winId); if (!win) return; win._listenerCtl?.abort(); this._detachFromChain(chain, winId); if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(winId); this._notify(); this._scheduleOverlapUpdate(); if (this.activeWindowId === winId) { this.activeWindowId = null; const next = chain.tabs[chain.active] ?? chain.tabs[0]; if (next && this.windows.has(next)) this.focusWindow(next); } }; return true;`);
       const r = await ownerCycle(P1, '1c');
       await P1.ev(`wm.removeFromTabChain = wm.__rftc; delete wm.__rftc; return true;`);
       ok(r && r.after.live && r.after.free && r.after.desk === ONE, '1c CONTROL: with the pre-fix ✕ the closed editor comes back on One as a FREE window with its old id — the incident, reproduced by this leg', S(r && r.after));
