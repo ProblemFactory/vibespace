@@ -7,6 +7,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - A conversation's chat has an Outbox chip beside Artifacts: how many proposals it drafted and how many wait for you; a click shows only those in the Outbox.
 - Each proposal in the Outbox says whether you edited it or the agent replaced it ("replaced" opens the newer one); right-click a conversation for its Outbox.
+- With the Tailscale plugin running, a browser here opens a machine on your tailnet by its name (like https://nas:8006/) — no IP address, no proxy to set.
+- Tailscale's settings have «Reach tailnet hosts from browsers» (on by default); a browser with its own proxy keeps it.
+
+### Changed
+- If a tailnet machine can't be reached, the browser says why: Tailscale off or signed out, not your device, the port refused, or an untrusted certificate.
 
 ### Fixed
 - The Outbox no longer opens blank when you open it again after closing it.
