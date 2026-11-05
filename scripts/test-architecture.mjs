@@ -217,6 +217,11 @@ const PURE = new Set(['src/login-shell.js' /* lane cli-shell-truth (B-fb02): THE
   //     folded) and the rows' runs (×n); the window and test-channel-outbox §OW ask it. Imports nothing — the API
   //     card's fate is HANDED IN.
   'src/outbox-census.js',
+  //   outbox-chip — A CONVERSATION WEARS ITS OUTBOX (lane outbox-session-chip, 2026-11-05): the ids a conversation drafts
+  //     under, outboxRowsOf (the Outbox window's «drafted by» rows, both sections, every state kept — outboxFilterOf /
+  //     apiFilterOf), outboxChipOf (the chat chip's counts = the window's census over those rows), partlySent (the ONE
+  //     predicate); the chat view, the session menu and the window ask it. Imports only outbox-census (PURE → PURE).
+  'src/outbox-chip.js',
   //   channel-census — THE SCHEDULER CARD'S CLOCK CENSUS (lane scheduler-census-index, B-7978): one row's judgement
   //     and the instant it holds until (`rowClock`), how a re-judged row moves the counters (`censusStep`). Imports
   //     nothing, reads no clock; the engine keeps the index and only drives it (test-channel-census).

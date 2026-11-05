@@ -875,6 +875,17 @@
 - (2026-11-04) THE MESSAGE LIST BURIED THE PERSON'S OWN WORDS (minimap-person-rows): every user-role record was listed. 不变量 = the list is what the person typed; ONE verdict (personRow) over THE message each normalizer makes, in every builder; the rest behind one chip ⇒ kb-bugfix-invariants
 - (2026-11-05) A REVEAL KEPT EVERY MARK, A RESTORE SENT THE PERSON BACK, THE ⧉ LIST OFFERED A COPY (r8–r10, userW inc-mw1ogdno-5jny): 不变量 = a reveal owns one switch, once; the latest act wins; restores never raise; a copy is named by what its restore names, at every door ⇒ kb-bugfix-invariants
 - (2026-11-05) A 504 ON ONE FILE'S UPLOAD LEFT A SLACK REPLY PARTLY SENT (channel-upload-retry, userW inc-mw35tppf-jrvo): the first refusal stopped the chain. 不变量 = a failed BYTES upload is retried (3 tries, a fresh URL) before any refusal is said; the completing call never ⇒ kb-bugfix-invariants
+- (2026-11-05) THE OUTBOX OPENED BLANK THE SECOND TIME (outbox-session-chip): held API records were handed to a drawer not yet built. 不变量 = a window's second open in one page life draws what the first did; held records go only to a drawer that exists ⇒ kb-bugfix-invariants
+
+## THE OUTBOX OPENED BLANK THE SECOND TIME IN A PAGE'S LIFE (found while building lane outbox-session-chip, 2026-11-05; the session menu's new door opened a blank window; pre-existing since the API section moved inside the list)
+
+**What happened.** Close the Outbox, open it again from any door (⚙ → Outbox…, the panel's button, a For-you link — and now the chat chip, a card's menu, the session menu) while the page holds any raw-API record: the window drew nothing. channel-api-card-view `onApiCards(app, fn)` calls `fn(records)` SYNCHRONOUSLY when it already holds records. The second window's `const apiSec = apiOutboxSection(app, { onRecords: (recs) => { …; draw(last); } })` therefore ran `draw` INSIDE the initializer of `apiSec` — `draw` read `apiSec` in its temporal dead zone, threw, and the window was left with its toolbar and no list. The first open never hit it (no records held yet: the read answers later), so every suite that opened the window once was green.
+
+**Fix.** The window's `draw` waits for its section: `let apiReady = false` before the mount, `apiReady = true` right after it, `draw` returns early while it is false (it still records `last`); the first read draws everything. The pinned mount and `outboxNodes` lines stay byte-identical (the base-shaped controls of test-channel-outbox §OW and test-channel-outbox-window cut them).
+
+不变量: a window's second open in one page life draws what the first did — a module that hands HELD state to a subscriber synchronously hands it only to a drawer that exists (subscribe after the drawer is built, or the drawer waits until it is). Any synchronous «you already have it» callback is a re-entrancy into the subscriber's constructor; test the SECOND mount, not only the first.
+
+Gates: scripts/test-channel-outbox.mjs §OSC «a SECOND Outbox window in the same page life draws» (two opens over held API records; RED on f68b4ca1c by name, and RED with the guard cut out).
 
 ## A 504 ON ONE FILE'S UPLOAD LEFT A SLACK REPLY PARTLY SENT (userW inc-mw35tppf-jrvo, 2026-11-05: «使用 channel 发文件会 Slack 报 504»; lane channel-upload-retry, 2.369.381)
 

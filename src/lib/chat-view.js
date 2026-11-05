@@ -24,6 +24,8 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite, capsOf } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact, commandHeadWords } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
+import { conversationKeys } from '../outbox-chip.js'; // PURE (lane outbox-session-chip): the ids this conversation drafts under — the filter's keys
+import { onOutbox, conversationOutbox } from './outbox-feed.js'; // lane outbox-session-chip: the client's Outbox rows (message proposals + API calls) and the chip's ONE verdict over them
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
@@ -428,8 +430,10 @@ class ChatView {
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
       app: this.app, // lane artifacts-list-scale: the list's ⋯ (show in Files, a helper's conversation, a service's job / Ports)
       onOpenArtifactsWindow: () => this.app.openArtifacts?.({ sessionId: this.sessionId, name: String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0] }), // lane artifacts-list-scale: the popover's ⤢ → the Artifacts window
+      onOpenOutbox: () => this.app.openChannelOutbox?.({ filter: this._outboxFilter() }), // lane outbox-session-chip: the Outbox chip → the Outbox, «drafted by <this conversation>»
     });
     this._refreshArtifacts(); // lane artifacts-e2e: the chip reads the registry when the view is BUILT (a reload / a re-opened chat) — the attach reply never reached it on that path
+    this._wireOutboxChip(); // lane outbox-session-chip: the Outbox chip follows the client's outbox state (no poll of its own)
     // The chip's facts ride the `active-sessions` payload; a window opened
     // between two broadcasts reads the sidebar's last copy at once.
     this._browserFacts = null;
@@ -1348,6 +1352,7 @@ class ChatView {
         this._lastAttachedAt = Date.now(); // clears the _reattach no-reply fallback
         this._channelTouches?.onAttached(); // §26: the witness's ring is the server's (it survived a restart) — read it again
         this._refreshArtifacts(); // lane artifacts-model: the Artifacts chip reads the server's registry (the whole conversation, not the loaded slab)
+        this._paintOutboxChip(); // lane outbox-session-chip: the session's ids are known now — the chip re-asks the held Outbox rows
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
@@ -4285,6 +4290,29 @@ class ChatView {
     if (b.kind === 'page' && b.url && (b.state === 'published' || b.presented)) { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
     if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
     this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null, ...(quiet ? { quiet: true } : {}) });
+  }
+  // ── LANE OUTBOX-SESSION-CHIP: the conversation wears its Outbox (src/outbox-chip.js verdict over lib/outbox-feed.js) ──
+  /** The ids this conversation drafts under (the agent principal's id in every form — claude › backend › webui:<id>). */
+  _outboxKeys() {
+    const ids = this._getSessionIds?.() || {};
+    return conversationKeys({ claudeId: ids.claudeId || null, backendSessionId: ids.backendSessionId || null, webuiId: this.sessionId });
+  }
+  /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted). */
+  _outboxFilter() {
+    const name = String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0];
+    return { keys: this._outboxKeys(), name: name || t('this conversation') };
+  }
+  /** Repaint the chip from the held rows (a broadcast, a read, the attach that names the session's ids) — the SAME verdict the
+   *  filtered Outbox window's head counts (its message proposals and its API calls; acceptance r1 N1). */
+  _paintOutboxChip() {
+    if (this._disposed || !this._outboxWears) return;
+    this._statusBar?.setOutbox(conversationOutbox(this._outboxKeys()));
+  }
+  /** A subagent's viewer wears none: its proposals carry its parent's id and are the parent conversation's chip. */
+  _wireOutboxChip() {
+    if (typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-')) return;
+    this._outboxWears = true;   // before onOutbox: it tells the rows it already holds at once
+    this._outboxOff = onOutbox(this.app, () => this._paintOutboxChip());
   }
   /** The Artifacts chip: the server's list for the WHOLE conversation (debounced; a burst of edits = one read). */
   _refreshArtifacts() {
@@ -7706,6 +7734,7 @@ class ChatView {
 
   dispose() {
     this._statusBar?.dispose?.();
+    try { this._outboxOff?.(); } catch { } // lane outbox-session-chip: the chip stops hearing the outbox feed
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card
     this._disposed = true;

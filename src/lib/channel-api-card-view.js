@@ -24,7 +24,7 @@ export async function answerApiProposal(id, answer, { shown = null, always = fal
       ? await fetchJson(`/api/channels/api/proposals/${pid}/resubmit`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown }) }).catch(no)
       : await fetchJson(`/api/channels/api/proposals/${pid}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown, always }) }).catch(no);
   if (!r || !r.ok) showToast(r && r.code === 'not-pending' ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
-  refreshApiCards();
+  refreshApiCards({ changed: true });   // the answer changed the records: a read already in flight is read once more
   return !!(r && r.ok);
 }
 
@@ -139,15 +139,19 @@ export function placeApiCards(box, recs, opts = {}) {
 }
 
 // ── THE SHARED RECORDS (one fetch, every mounted surface patched) ──
-let records = [], inflight = null, wired = false;
+let records = [], inflight = null, wired = false, again = false;
 const listeners = new Set();
-export function refreshApiCards() {
-  if (!inflight) inflight = fetchJson('/api/channels/api').then((r) => { records = (r && r.cards) || []; for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; });
+/** lane outbox-session-chip: a `channel-api-updated` that lands while a read is in flight (`changed`) reads ONCE more when it
+ *  ends — that read may have been answered before the change (the chat's Outbox chip and every card stayed on it until the
+ *  next change); a reader joining a read in flight shares it. */
+export function refreshApiCards({ changed = false } = {}) {
+  if (inflight) { if (changed) again = true; return inflight; }
+  inflight = fetchJson('/api/channels/api').then((r) => { records = (r && r.cards) || []; for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
   return inflight;
 }
 /** Follow the records (fn(records) now and on every change); returns the unsubscribe. */
 export function onApiCards(app, fn) {
-  if (!wired && app && app.ws && app.ws.onGlobal) { wired = true; app.ws.onGlobal((msg) => { if (msg && msg.type === 'channel-api-updated') refreshApiCards(); }); }
+  if (!wired && app && app.ws && app.ws.onGlobal) { wired = true; app.ws.onGlobal((msg) => { if (msg && msg.type === 'channel-api-updated') refreshApiCards({ changed: true }); }); }
   listeners.add(fn);
   if (records.length) fn(records);
   refreshApiCards();

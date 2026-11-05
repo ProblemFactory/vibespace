@@ -81,6 +81,9 @@
 .chat-status-autoresume { color: var(--text-secondary); }
 .chat-status-autoresume-on { color: var(--accent); font-weight: 600; }
 .chat-status-autoresume-armed { color: var(--yellow, #f59e0b); font-weight: 600; }
+/* lane outbox-session-chip: the Outbox chip beside Artifacts — the accent + «M waiting» while a proposal of this conversation awaits the owner */
+.chat-status-outbox-waiting { color: var(--accent); font-weight: 600; }
+.chat-status-outbox-wait { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 999px; padding: 0 6px; }
 .chat-status-dropdown-note { font-size: 10px; color: var(--text-dim); padding: 6px 10px 4px; border-top: 1px solid var(--border); line-height: 1.45; max-width: 260px; }
 /* Design canvas chip + popover (2.366.0) */
 .chat-status-design { color: var(--accent); font-weight: 600; }

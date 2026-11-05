@@ -1,6 +1,7 @@
 import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
+import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
@@ -76,7 +77,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -84,6 +85,7 @@ export class ChatStatusBar {
     this._artifacts = null; // lane artifacts-model: the conversation's deliverables (GET /api/artifacts — view(rows)); null = none yet
     this._onOpenArtifact = onOpenArtifact;
     this._app = app; this._onOpenArtifactsWindow = onOpenArtifactsWindow; // lane artifacts-list-scale: the list's ⋯ doors + the ⤢ window
+    this._outbox = null; this._outboxKey = ''; this._onOpenOutbox = onOpenOutbox; // lane outbox-session-chip: the conversation's proposals (outboxChipFace) + the filtered Outbox door
     this._onChannelOpen = onChannelOpen;
     // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
     // first) and its click goes there — null = the view cannot jump (no chip click)
@@ -241,6 +243,16 @@ export class ChatStatusBar {
     this._refillDesignList(); // lane pages-chip-groups: the presented pages ride this feed — an open Pages popover follows
     const open = this._artifacts && (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-artifacts-panel'); // lane artifacts-list-scale: an open list follows, patched in place
     if (open && open._afList) open._afList.update(this._artifacts);
+  }
+  /** lane outbox-session-chip: the conversation's Outbox — the PURE verdict `outboxChipOf` (src/outbox-chip.js) over the client's
+   *  Outbox rows (outbox-feed `conversationOutbox`); no proposal drafted here ⇒ no chip. Repaints only when its words change. */
+  setOutbox(v) {
+    const face = outboxChipFace(v);
+    const key = face ? JSON.stringify([face.text, face.waiting, face.cls, face.tip]) : '';
+    if (key === this._outboxKey) return;
+    this._outboxKey = key;
+    this._outbox = face;
+    this.render();
   }
   setChannelTouches(v) { this._channelTouch = v && v.latest && Array.isArray(v.rows) && v.rows.length ? v : null; this.render(); }
   /** Billing identity chip (mobile — windows have no title bar there, so the
@@ -946,6 +958,12 @@ export class ChatStatusBar {
       const v = this._artifacts;
       chip('artifacts', 'chat-status-artifacts chat-status-clickable', t('Files the agent made in this conversation — click for the list'), `${UI_ICONS.memo || ''} <span class="chat-status-artifacts-text">${escHtml(t('Artifacts · {n}', { n: v.count || 0 }))}</span>`);
     }
+    // lane outbox-session-chip: the Outbox chip (keyed) BESIDE Artifacts — «Outbox · N» = every proposal this conversation drafted (its messages and its API calls);
+    // the accent + «M waiting» while M await the owner; a click opens the Outbox filtered to this conversation
+    if (this._outbox) {
+      const o = this._outbox;
+      chip('outbox', o.cls, o.tip, `${UI_ICONS.outbox || ''} <span class="chat-status-outbox-text">${escHtml(o.text)}</span>${o.waiting ? ` <span class="chat-status-outbox-wait">${escHtml(o.waiting)}</span>` : ''}`);
+    }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down
     if (this._remoteState && this._remoteState.state === 'unprotected') {
@@ -1549,6 +1567,13 @@ export class ChatStatusBar {
       // lane artifacts-list-scale (design 021 E1): BOUNDED — the room above the chip in its container (layout px) caps the panel; it scrolls inside
       dropdown.style.setProperty('--af-room', Math.max(160, (afEl.getBoundingClientRect().top - container.getBoundingClientRect().top) / uiScale() - 8) + 'px'); // the room above the chip INSIDE its container (a chat window clips what rises past its top)
       renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove(), app: this._app, onExpand: this._onOpenArtifactsWindow ? () => this._onOpenArtifactsWindow() : null });
+      return;
+    }
+    // lane outbox-session-chip: Outbox chip -> the Outbox window, filtered to this conversation (the window's own view state)
+    const obEl = e.target.closest('.chat-status-outbox');
+    if (obEl && this._outbox) {
+      e.stopPropagation();
+      this._onOpenOutbox?.();
       return;
     }
     // Channels chip (§26) -> the turn's conversations, drafted first; ONE conversation opens at once

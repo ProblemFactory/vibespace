@@ -100,6 +100,8 @@ import { routeErrorText } from './channel-words.js';
 import { apiOutboxSection, outboxSecHead, paintSecHead } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 import { fateOf as apiFate } from '../channel-api-card.js';
 import { outboxCensus, outboxView } from '../outbox-census.js';   // lane outbox-window-scroll-filter: ONE count, ONE filter
+import { outboxRowsOf, outboxFilterOf, conversationKeys, partlySent } from '../outbox-chip.js';   // lane outbox-session-chip: «drafted by <conversation>» — the rows the chip counts
+import { noteOutbox, currentOutbox, onOutbox, conversationOutbox, wireOutboxFeed } from './outbox-feed.js';   // lane outbox-session-chip: the client's Outbox rows (the window follows them; its read feeds them) + the chip's ONE verdict
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
 
@@ -344,10 +346,52 @@ const stamp = (ms) => {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+/** lane outbox-session-chip: what a card says BY NAME beside its state — «edited by you» (the owner edited its text: `edited`)
+ *  and «replaced» (its drafter replaced it: `replacedBy`; a press shows the newer one through the ONE Outbox door). */
+function proposalMarks(app, p) {
+  const out = [];
+  if (p.edited) {
+    const m = el('span', 'chan-prop-mark chan-prop-mark-edited', t('edited by you'));
+    m.title = t('You edited this text before you approved it');
+    out.push(m);
+  }
+  if (p.state === 'withdrawn' && p.replacedBy) {
+    // a real button (its role, the Tab order, Enter / Space); on a phone / a touch screen its hit area is ≥ 36 px (style.css)
+    const b = el('button', 'chan-prop-mark chan-prop-mark-replaced', t('replaced'));
+    b.type = 'button';
+    b.dataset.replacedBy = String(p.replacedBy);
+    b.title = t('The agent replaced this draft with a newer one — click to see it');
+    b.setAttribute('aria-label', b.title);
+    b.onclick = (ev) => { if (ev && ev.stopPropagation) ev.stopPropagation(); if (app && typeof app.openChannelOutbox === 'function') app.openChannelOutbox({ show: String(p.replacedBy) }); };
+    out.push(b);
+  }
+  return out;
+}
+/** lane outbox-session-chip: the ids a session-list row drafts under (the chip's own set, so the three doors give ONE filter). */
+export const sessionKeysOf = (s) => conversationKeys({ claudeId: (s && s.claudeSessionId) || null, backendSessionId: (s && s.backendSessionId) || null, sessionId: (s && s.sessionId) || null, webuiId: (s && s.webuiId) || null });
+/** lane outbox-session-chip: THE FILTER of the conversation that drafted `p` — its keys as the session list knows them and its
+ *  name now (the drafter's recorded name when the list no longer holds it); null for the owner's own drafts. */
+export function drafterFilterOf(app, p) {
+  const d = p && p.draftedBy;
+  if (!d || d.kind !== 'agent' || d.id == null) return null;
+  const id = String(d.id);
+  const s = ((app && app.sidebar && app.sidebar._allSessions) || []).find((x) => x && sessionKeysOf(x).includes(id));
+  return { keys: s ? sessionKeysOf(s) : [id], name: (s && (s.webuiName || s.name)) || d.name || id.slice(0, 8) };
+}
+/** lane outbox-session-chip: a card's menu (right-click on its row / its head) — «Only drafts by <agent>»: the words name the
+ *  DRAFTING conversation (acceptance r1 N4 — on a channel window's card «this conversation» is the Lark / Slack chat). */
+function drafterMenu(app, p, ev) {
+  const f = drafterFilterOf(app, p);
+  if (!f || !ev || (ev.target && ev.target.closest && ev.target.closest('textarea, input'))) return;   // an editor keeps its own menu
+  if (ev.preventDefault) ev.preventDefault();
+  const m = showContextMenu(ev.clientX, ev.clientY, [{ label: t('Only drafts by {name}', { name: f.name }), action: () => app.openChannelOutbox({ filter: f }) }]);
+  if (m) m.dataset.menu = 'drafter';
+}
+
 /** The state chip's words. */
 /** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): a SENT proposal a part of which did not land is "partly sent" —
  *  never a plain "sent" (the owner learned of the dropped file from the recipient). */
-const partlySent = (p) => !!(p && p.state === 'sent' && p.result && Array.isArray(p.result.parts) && p.result.parts.some((x) => x && !x.ok));
+//  (lane outbox-session-chip: the ONE predicate is src/outbox-chip.js `partlySent` — the chat chip counts the same)
 function stateChip(p) { return el('span', `chan-prop-state chan-prop-state-${partlySent(p) ? 'partly' : p.state}`, partlySent(p) ? t('partly sent') : stateLabel(p.state)); }
 export function stateLabel(state) {
   switch (state) {
@@ -412,7 +456,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   // ── head: state pill · drafter · age ──
   const head = el('div', 'chan-prop-head');
   head.appendChild(stateChip(p));
+  for (const m of proposalMarks(app, p)) head.appendChild(m);   // lane outbox-session-chip: «edited by you» / «replaced»
   head.appendChild(el('span', 'chan-prop-who', drafterLabel(p)));
+  head.oncontextmenu = (ev) => drafterMenu(app, p, ev);
   head.appendChild(el('span', 'chan-prop-when', stamp(p.updatedAt || p.at)));
   card.appendChild(head);
   // F4 (r6 verify, 2026-09-28): the envelope is ONE FACT PER LINE — where, then To / Cc / Subject (a compose)
@@ -932,6 +978,7 @@ export function renderProposalRow(app, p, { badge = null, open = false, onToggle
   row.appendChild(line);
   const sub = el('div', 'chan-orow-sub');
   sub.appendChild(stateChip(p));
+  for (const m of proposalMarks(app, p)) sub.appendChild(m);   // lane outbox-session-chip: «edited by you» / «replaced» (a press shows the newer)
   const text = el('span', 'chan-orow-text');
   revealInto(text, rowFirstLine(p).slice(0, 300));
   sub.appendChild(text);
@@ -946,6 +993,7 @@ export function renderProposalRow(app, p, { badge = null, open = false, onToggle
   }
   row.onclick = (ev) => { if (ev && ev.target && ev.target.closest && ev.target.closest('button')) return; if (onToggle) onToggle(p.id); };
   row.onkeydown = (ev) => { if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return; ev.preventDefault(); if (onToggle) onToggle(p.id); };
+  row.oncontextmenu = (ev) => drafterMenu(app, p, ev);   // lane outbox-session-chip: «Only drafts by <agent>»
   setRowOpen(row, open);
   return row;
 }
@@ -956,7 +1004,7 @@ function setRowOpen(row, open) {
 }
 /** The signature of what a row PRINTS (its open state is patched, never rebuilt). */
 function rowSig(p, badge) {
-  return JSON.stringify([p.state, p.adapterId, p.convId || null, p.title || null, p.convKind || null, p.compose || null, p.replyEnvelope ? p.replyEnvelope.to || null : null, p.audience ? p.audience.kind : null, p.prepared ? (p.prepared.notifies || []).join() : null, p.kind || null, p.reaction || null, p.text || '', p.updatedAt || p.at || 0, badge]);
+  return JSON.stringify([p.state, p.adapterId, p.convId || null, p.title || null, p.convKind || null, p.compose || null, p.replyEnvelope ? p.replyEnvelope.to || null : null, p.audience ? p.audience.kind : null, p.prepared ? (p.prepared.notifies || []).join() : null, p.kind || null, p.reaction || null, p.text || '', p.updatedAt || p.at || 0, !!p.edited, p.replacedBy || null, badge]);
 }
 function keyedRow(app, p, prev, opts) {
   const sig = rowSig(p, opts.badge);
@@ -1235,7 +1283,7 @@ export function chatProposalCards(app, cardEl, filed, { onCount = null } = {}) {
 
 /** Open (or focus) THE Outbox window — a singleton kind. */
 export function openChannelOutbox(app, opts = {}) {
-  for (const [id, w] of app.wm.windows || []) if (w && w.type === 'channel-outbox') { app.wm.revealWindow(id, { replay: !!opts.syncId }); return w; }
+  for (const [id, w] of app.wm.windows || []) if (w && w.type === 'channel-outbox') { app.wm.revealWindow(id, { replay: !!opts.syncId }); if (w._outboxDoor) w._outboxDoor(opts); return w; }
   const winInfo = app.wm.createWindow({ title: t('Outbox'), type: 'channel-outbox', syncId: opts.syncId, openSpec: { action: 'openChannelOutbox' }, width: 560, height: 600 });
   const root = el('div', 'chanwin chan-outbox');
   winInfo.content.appendChild(root);
@@ -1258,6 +1306,37 @@ export function openChannelOutbox(app, opts = {}) {
   let view = null;
   let last = null;
   let apiCards = [];
+  // lane outbox-session-chip: THE «drafted by <conversation>» FILTER — this window's view state (never persisted, never broadcast;
+  // the openSpec stays bare). Three doors set it (a chat's Outbox chip, a card's «Only drafts by <agent>», the session menu's
+  // «Outbox of this conversation»); a removable chip at the top of the list says it; the census, the head and the API section
+  // read the filtered rows (PURE outboxRowsOf — both sections, every state kept, a replaced card too), newest first — the SAME
+  // rows the chat's chip counts (outboxChipOf over outboxRowsOf + the same outboxCensus), so the head and the chip agree.
+  const okFilter = (f) => (f && Array.isArray(f.keys) && f.keys.length ? { keys: f.keys.map(String), name: String(f.name || '') } : null);
+  let filter = okFilter(opts.filter);
+  // acceptance r2 m3: a filter shows All (every state of that conversation) — and its All DIES WITH IT: `forcedFrom` is the view
+  // the filter replaced (`undefined` = none forced); the filter's removal puts it back (the census's default, null) unless the
+  // OWNER picked a view meanwhile (a segment, a folded section's «See them in All») — that pick stays
+  let forcedFrom = filter ? view : undefined;
+  if (filter) view = 'all';
+  let pendingShow = opts.show ? String(opts.show) : null;
+  const fbar = el('div', 'chan-outbox-filter');
+  const fchip = el('span', 'chan-outbox-filter-chip');
+  fchip.appendChild(icon('filter', 11));
+  const ftext = el('span', 'chan-outbox-filter-text');
+  fchip.appendChild(ftext);
+  const fx = el('button', 'chan-outbox-filter-x');
+  fx.type = 'button';
+  fx.title = t('Show every proposal');
+  fx.setAttribute('aria-label', fx.title);
+  fx.appendChild(icon('close', 10));
+  fx.onclick = () => setFilter(null);
+  fchip.appendChild(fx);
+  fbar.appendChild(fchip);
+  const rowsShown = (whole) => outboxRowsOf({ proposals: (whole && whole.proposals) || [], apiCards }, filter);
+  // lane outbox-session-chip: the API section hands its HELD records to `onRecords` at once on a second open (channel-api-card-view
+  // onApiCards) — that draw ran before `apiSec` existed and threw, leaving the window blank (close the Outbox, open it again from
+  // any door); a draw waits for the section, the first read draws everything
+  let apiReady = false;
   /** B-f467: the proposals whose full card is open under their row (pruned as proposals leave). */
   const open = new Set();
   const onToggle = (id) => { if (open.has(id)) open.delete(id); else open.add(id); draw(last); };
@@ -1272,35 +1351,74 @@ export function openChannelOutbox(app, opts = {}) {
   /** A folded section's 「在「全部」里看」: the All view, that section's head at the top of the list. */
   const onAll = (key) => {
     view = 'all';
+    forcedFrom = undefined;
     draw(last);
     const h = [...list.querySelectorAll('.chan-outbox-sec')].find((x) => x.dataset.sec === key);
     if (h && h.scrollIntoView) h.scrollIntoView({ block: 'start' });
   };
   const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });
+  apiReady = true;
 
   // KEYED (2026-09-27): a broadcast re-renders only the rows / cards whose record
   // changed; a card the user is editing is left alone; section heads are
   // re-worded in place (B-f467: the nodes are outboxNodes' — a row per proposal)
-  function draw(ob) {
-    last = ob;
+  function draw(whole) {
+    last = whole;
+    if (!apiReady) return;
+    const shown = rowsShown(whole);
+    const ob = filter && whole ? { ...whole, proposals: shown.proposals } : whole;
+    const apiCards = shown.apiCards;
     const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });
     for (const id of [...open]) if (!r.proposals.some((p) => p.id === id)) open.delete(id);
     segAwait.classList.toggle('chan-seg-on', r.view === 'awaiting');
     segAll.classList.toggle('chan-seg-on', r.view === 'all');
     summary.textContent = r.census.total ? t('{a} awaiting your approval · {n} proposals', { a: r.census.waiting, n: r.census.total }) : t('No proposals yet');
-    const nodes = r.nodes;
+    if (filter) {
+      ftext.textContent = t('drafted by {who}', { who: filter.name || t('this conversation') });
+      if (!r.census.total && r.nodes[0]) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');
+    }
+    const nodes = filter ? [fbar, ...r.nodes] : r.nodes;
     placeArmed(list, nodes);
   }
-  segAwait.onclick = () => { view = 'awaiting'; draw(last); };
-  segAll.onclick = () => { view = 'all'; draw(last); };
+  function dropFilter() { filter = null; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }
+  function setFilter(f) {
+    const next = okFilter(f);
+    if (!next) dropFilter();
+    else { if (forcedFrom === undefined) forcedFrom = view; filter = next; view = 'all'; }
+    draw(last);
+  }
+  /** «replaced» → the newer proposal: its card opened under its row, brought into view (the All view, the filter dropped, when
+   *  they hide it); one the list no longer holds is said. */
+  function show(id) {
+    if (!last) { pendingShow = id; return; }
+    const p = (last.proposals || []).find((x) => x && x.id === id);
+    if (!p) { showToast(t('The newer proposal is not in the Outbox list any more')); return; }
+    if (filter && !outboxFilterOf([p], filter).length) dropFilter();
+    open.add(id);
+    draw(last);
+    const rowOf = () => [...list.children].find((c) => c.dataset && c.dataset.orow === id);
+    if (!rowOf()) { view = 'all'; draw(last); }
+    const row = rowOf();
+    if (row) { if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); if (row.focus) row.focus(); }
+  }
+  // a door that names no filter (⚙ Outbox…, the panel's button, a For-you link) shows EVERYTHING — never an earlier filter kept
+  // silently; «replaced» (`show`) and a layout replay (`syncId`) keep the view as it is
+  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setFilter(o.filter); else if (filter && !o.show && !o.syncId) setFilter(null); if (o.show) show(String(o.show)); };
+  segAwait.onclick = () => { view = 'awaiting'; forcedFrom = undefined; draw(last); };
+  segAll.onclick = () => { view = 'all'; forcedFrom = undefined; draw(last); };
   async function refresh() {
     const r = await fetchJson('/api/channels/outbox');
     if (!r || r.error) { summary.textContent = (r && r.error) || t('The outbox is not available.'); return; }
-    draw(r);
+    const held = noteOutbox(r);   // lane outbox-session-chip: the window's read is the client's Outbox state too (the chips follow it); an answer older than a view already held is dropped — the window draws the held one
+    if (!held || held !== last) draw(held || r);
+    if (pendingShow) { const id = pendingShow; pendingShow = null; show(id); }
   }
-  const onBroadcast = (msg) => { if (msg.type === 'channel-outbox-updated' && msg.outbox) draw(msg.outbox); };
-  app.ws.onGlobal(onBroadcast);
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} apiSec.stop(); });
+  // acceptance r2 m1 + m2: THE WINDOW FOLLOWS THE FEED — it wires the feed itself on open (idempotent, shared with every chat's
+  // chip: a page with no chat window too) and draws the view the feed HOLDS: every `channel-outbox-updated` reaches the window
+  // through the feed's ONE `at` judge (noteOutbox), so a late OLDER push the feed drops is never drawn here either, and the
+  // feed's read after a reconnect redraws the window; no socket handler of its own
+  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); });
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { offFeed(); apiSec.stop(); });
   refresh().catch(() => {});
   return winInfo;
 }
@@ -1311,6 +1429,15 @@ registerWindowType({
   replay: (app, spec, { syncId } = {}) => app.openChannelOutbox({ syncId }),
 });
 registerCommand({ id: 'channels.openOutbox', title: () => t('Outbox…'), run: (c) => c.app.openChannelOutbox() });
+/** lane outbox-session-chip: the session's right-click menu — «Outbox of this conversation» while the client's Outbox rows hold
+ *  a proposal or an API call it drafted (the chip's ONE verdict; the first right-click wires the feed); the third door to the
+ *  ONE filter. */
+registerMenuItem({
+  menu: 'session-card', group: '2_locate', order: 70, id: 'session-card/outbox',
+  label: () => t('Outbox of this conversation'),
+  when: (c) => { wireOutboxFeed(c.app); return !!(c.s && conversationOutbox(sessionKeysOf(c.s)).total); },
+  run: (c) => c.app.openChannelOutbox({ filter: { keys: sessionKeysOf(c.s), name: c.displayName || c.s.name || t('this conversation') } }),
+});
 /** The ⚙ row beside "Channels…" — registered by the owning module. */
 registerMenuItem({
   menu: 'gear', parent: 'comm', order: 20, // under Communication ▸ (gear-menu.js head 'comm'; For you 5 · Channels 10 · this 20)

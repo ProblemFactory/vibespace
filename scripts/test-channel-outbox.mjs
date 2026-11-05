@@ -2592,6 +2592,530 @@ async function chatReadLegs(ENGmod, name) {
         card.remove();
         def('fetch', fetch0);
       }
+      // ── lane outbox-session-chip (the owner, 2026-11-05: «一个 agent 可能发多个 Outbox draft，有的要改有的不改，很难 keep track 每个
+      // session 发了哪些、哪些被改过»): ① the PURE verdict over fixtures (0 / 1 / many; waiting / edited / replaced / partly / sent
+      // mixes; a helper conversation is its own) + ② its two mutants; ③ the real card and row say «edited by you» / «replaced»;
+      // ④ the chip's words and accent; ⑤ the real window's «drafted by» filter over the minimal DOM (the chip, its removal, the
+      // door again, «replaced» → the newer one, the card's menu); ⑥ the session menu's «Outbox of this conversation». Round 2
+      // (acceptance r1): N1 the chip and the filtered window are ONE verdict over the SAME rows — message proposals AND the
+      // conversation's raw-API calls (keyed by the record's conv id) — + its mutant (r1's proposals-only chip); N2 an older view
+      // never overwrites a newer one (a fresh bundle of the feed) + its mutants; N4 the card menu's words name the drafting agent.
+      // Every leg runs under its own name (a missing module is RED by name, never a crash) ──
+      {
+        const legOSC = async (name, fn) => { let r; try { r = await fn(); } catch (e) { r = [false, String((e && e.stack) || e).slice(0, 400)]; } ok(!!(r && r[0]), 'OSC ' + name, r && (typeof r[1] === 'string' ? r[1] : JSON.stringify(r[1]))); return !!(r && r[0]); };
+        const OC_PATH = path.join(REPO, 'src/outbox-chip.js');
+        let O = null;
+        try { O = require(OC_PATH); } catch {}
+        const CA = 'c0ffee00-0000-4000-8000-00000000a001', CB = 'c0ffee00-0000-4000-8000-00000000b002', CH = 'c0ffee00-0000-4000-8000-00000000c003', CE = 'c0ffee00-0000-4000-8000-00000000e004';
+        const ag = (id, name) => ({ kind: 'agent', id, name });
+        const XB = { adapterId: 'lark', adapterLabel: 'Lark / 飞书', convId: 'oc_osc', title: 'Ops room', convKind: 'group', sendAs: 'user', identity: { sentAs: 'user', marking: 'none' }, policy: { mode: 'review', reasons: ['channel-policy'] } };
+        const at = (k) => ({ at: clock0 - k * 60e3, updatedAt: clock0 - k * 60e3 });
+        const FX = [
+          { ...XB, ...at(1), id: 'p-osc-w', state: 'awaiting-approval', text: 'The second try, waiting', draftedBy: ag(CA, 'Writer'), replaces: 'p-osc-old', ttlAt: clock0 + 86400e3 },
+          { ...XB, ...at(2), id: 'p-osc-e', state: 'sent', edited: true, text: 'Edited, then sent', originalText: 'The agent wrote this', draftedBy: ag(CA, 'Writer'), result: { vendorMessageId: 'om_osc1', parts: [{ part: 'text', ok: true }] } },
+          { ...XB, ...at(3), id: 'p-osc-pt', state: 'sent', text: 'With a file that did not land', draftedBy: ag(CA, 'Writer'), result: { vendorMessageId: 'om_osc2', parts: [{ part: 'text', ok: true }, { part: 'attachment', name: 'r.pdf', ok: false }] } },
+          { ...XB, ...at(4), id: 'p-osc-old', state: 'withdrawn', replacedBy: 'p-osc-w', withdrawal: { by: ag(CA, 'Writer'), why: 'replaced by p-osc-w', at: clock0 - 60e3 }, text: 'The first try', draftedBy: ag(CA, 'Writer') },
+          { ...XB, ...at(5), id: 'p-osc-f', state: 'failed', text: 'This one failed', draftedBy: ag(CA, 'Writer') },
+          { ...XB, ...at(6), id: 'p-osc-u', state: 'unknown', text: 'Outcome unknown', draftedBy: ag(CA, 'Writer') },
+          { ...XB, ...at(7), id: 'p-osc-b1', state: 'awaiting-approval', text: 'The reviewer asks', draftedBy: ag(CB, 'Reviewer'), ttlAt: clock0 + 86400e3 },
+          { ...XB, ...at(8), id: 'p-osc-b2', state: 'rejected', text: 'Rejected', draftedBy: ag(CB, 'Reviewer') },
+          { ...XB, ...at(9), id: 'p-osc-h', state: 'awaiting-approval', text: 'A helper conversation drafted this', draftedBy: ag(CH, 'Writer helper'), ttlAt: clock0 + 86400e3 },
+          { ...XB, ...at(10), id: 'p-osc-me', state: 'sent', text: 'My own words', draftedBy: { kind: 'user', id: null, name: null } },
+          { ...XB, ...at(11), id: 'p-osc-x', state: 'sent', text: 'No drafter recorded', draftedBy: null },
+          { ...XB, ...at(12), id: 'p-osc-wb', state: 'sent', text: 'A shell conversation (no claude id)', draftedBy: ag('webui:wv-9', 'Shell') },
+        ];
+        // N1: the raw-API calls (the record shape server/channel-api.js proposalView serves: `conv` = the drafter's id, the
+        // principal beside it); one names its agent only by a display name — nobody's (a name is never a key)
+        const CQ = 'c0ffee00-0000-4000-8000-00000000f005';
+        const apiOf = (id, conv, status, k, extra = {}) => ({ id, status, cred: 'lark-1', credLabel: 'Lark · ops', host: 'open.feishu.cn', method: 'POST', path: `/open-apis/im/v1/messages/${id}`, digest: `d-${id}`, tier: 'write-ask', ...(conv ? { conv, principal: { kind: 'agent', id: conv, name: 'x' } } : { principal: { name: 'Writer' } }), ...at(k), ...extra });
+        const APIX = [
+          apiOf('api-osc-ap', CA, 'pending', 1.5),
+          apiOf('api-osc-ar', CA, 'ran', 2.5, { result: { status: 200, bytes: 36 } }),
+          apiOf('api-osc-bp', CB, 'pending', 3.5),
+          apiOf('api-osc-qp', CQ, 'pending', 4.5),
+          apiOf('api-osc-nm', null, 'pending', 5.5),
+        ];
+        let CAC = null, CEN = null;
+        try { CAC = require(path.join(REPO, 'src/channel-api-card.js')); CEN = require(path.join(REPO, 'src/outbox-census.js')); } catch {}
+        const FATE = { apiFate: CAC ? CAC.fateOf : undefined };
+        const KA = O ? O.conversationKeys({ claudeId: CA, backendSessionId: CA, webuiId: 'wv-1' }) : [CA];
+        const KB = O ? O.conversationKeys({ claudeId: CB, backendSessionId: CB, webuiId: 'wv-2' }) : [CB];
+        const J = JSON.stringify;
+        // the legs over a verdict module `M` (the real one, or a mutant) — each returns [pass, detail]
+        const chipLegs = (M) => [
+          ['① the PURE verdict src/outbox-chip.js exists (outboxChipOf / outboxFilterOf / conversationKeys)', () => [!!M && typeof M.outboxChipOf === 'function' && typeof M.outboxFilterOf === 'function' && typeof M.conversationKeys === 'function', M ? Object.keys(M) : 'no module']],
+          ['① a conversation with NO proposal: every count 0 (no chip)', () => { const v = M.outboxChipOf({ proposals: FX, apiCards: APIX }, [CE], FATE); return [J(v) === J({ total: 0, waiting: 0, edited: 0, sent: 0, partly: 0, failed: 0, replaced: 0, calls: 0 }), v]; }],
+          ['① ONE proposal awaiting the owner: total 1, waiting 1', () => { const v = M.outboxChipOf({ proposals: [FX[0]] }, KA); return [v.total === 1 && v.waiting === 1 && v.edited === 0 && v.sent === 0, v]; }],
+          ['① MANY: only the proposals THIS conversation drafted count — 6 of 12 (another conversation\'s, a helper\'s, the owner\'s own and a drafter-less one are not its own)', () => { const v = M.outboxChipOf({ proposals: FX }, KA); return [v.total === 6, v]; }],
+          ['① the mix: 1 waiting · 1 edited by you · 1 sent whole · 1 partly sent · 1 failed · 1 replaced (an UNKNOWN outcome is not a failure)', () => { const v = M.outboxChipOf({ proposals: FX }, KA); return [v.waiting === 1 && v.edited === 1 && v.sent === 1 && v.partly === 1 && v.failed === 1 && v.replaced === 1, v]; }],
+          ['① another conversation: its own 2 (1 waiting, 1 rejected) — never the first\'s', () => { const v = M.outboxChipOf({ proposals: FX }, KB); return [v.total === 2 && v.waiting === 1 && v.sent === 0, v]; }],
+          ['① children: a subagent drafts under its parent\'s id (counted as the parent\'s own, no rule); a helper conversation is its own session — on its own chip, not its parent\'s', () => { const h = M.outboxChipOf({ proposals: FX }, [CH]), a = M.outboxChipOf({ proposals: FX }, KA); return [h.total === 1 && h.waiting === 1 && a.total === 6, { helper: h, parent: a.total }]; }],
+          ['① the keys: a conversation is found by any id it drafts under (claude id, or webui:<id> when it has none); one key or the list', () => { const k = M.conversationKeys({ claudeId: CA, backendSessionId: CA, webuiId: 'wv-1' }); const w = M.conversationKeys({ webuiId: 'wv-9' }); return [J(k) === J([CA, 'webui:wv-1']) && M.outboxChipOf({ proposals: FX }, CA).total === 6 && J(w) === J(['webui:wv-9']) && M.outboxChipOf({ proposals: FX }, w).total === 1 && M.outboxChipOf({ proposals: FX }, []).total === 0, { k, w }]; }],
+          ['② the filter keeps EVERY state of its conversation — the replaced card too — in the list\'s order; no filter = the whole list', () => { const f = M.outboxFilterOf(FX, { keys: KA }).map((p) => p.id); return [J(f) === J(['p-osc-w', 'p-osc-e', 'p-osc-pt', 'p-osc-old', 'p-osc-f', 'p-osc-u']) && M.outboxFilterOf(FX, null).length === FX.length && M.outboxFilterOf(FX, { keys: [] }).length === FX.length, f]; }],
+          ['② the filter and the chip agree: the filtered list\'s length IS the chip\'s total, its waiting the chip\'s waiting', () => { const f = M.outboxFilterOf(FX, { keys: KA }), v = M.outboxChipOf({ proposals: FX }, KA); return [f.length === v.total && f.filter((p) => p.state === 'awaiting-approval').length === v.waiting, { f: f.length, v }]; }],
+          ['② the raw-API cards of the same conversation (`conv` = its drafter id) are its own too', () => { const c = M.apiFilterOf([{ id: 'api-1', conv: CA }, { id: 'api-2', conv: CB }, { id: 'api-3', principal: { id: CA } }], { keys: KA }).map((r) => r.id); return [J(c) === J(['api-1', 'api-3']), c]; }],
+          ['N1 the chip counts the SAME rows the filtered window shows — its message proposals AND its raw-API calls: 6 + 2 = 8, 1 + 1 waiting, 2 calls', () => { const v = M.outboxChipOf({ proposals: FX, apiCards: APIX }, KA, FATE); return [v.total === 8 && v.waiting === 2 && v.calls === 2 && v.sent === 1 && v.failed === 1, v]; }],
+          ['N1 the chip\'s total / waiting ARE the window\'s head census — outboxCensus over outboxRowsOf (the call the window makes), for every conversation', () => {
+            const off = [];
+            for (const K of [KA, KB, [CQ], [CE], [CH]]) {
+              const v = M.outboxChipOf({ proposals: FX, apiCards: APIX }, K, FATE);
+              const c = CEN.outboxCensus({ ...M.outboxRowsOf({ proposals: FX, apiCards: APIX }, { keys: K }), apiFate: FATE.apiFate });
+              if (v.total !== c.total || v.waiting !== c.waiting) off.push({ K: K[0].slice(-4), chip: [v.total, v.waiting], window: [c.total, c.waiting] });
+            }
+            return [typeof M.outboxRowsOf === 'function' && !off.length, off];
+          }],
+          ['N1 a conversation whose ONLY Outbox row is a pending API call: total 1, waiting 1 (it wears the chip)', () => { const v = M.outboxChipOf({ proposals: FX, apiCards: APIX }, [CQ], FATE); return [v.total === 1 && v.waiting === 1 && v.calls === 1, v]; }],
+          ['N1 an API call is its conversation\'s by the id the record carries (conv, else principal.id) — never by a display name', () => { const v = M.outboxChipOf({ apiCards: [APIX[4]] }, KA, FATE); const p = M.outboxChipOf({ apiCards: [{ ...APIX[4], principal: { kind: 'agent', id: CA, name: 'Writer' } }] }, KA, FATE); return [v.total === 0 && p.total === 1, { byName: v.total, byId: p.total }]; }],
+          ['N1 a bare array (r1\'s proposals-only call) is refused by name — never read as «no API calls»', () => { let e = null; try { M.outboxChipOf(FX, KA); } catch (x) { e = x; } return [!!e && /\{proposals, apiCards\}/.test(e.message), e ? e.message : 'no throw']; }],
+        ];
+        for (const [n, fn] of chipLegs(O)) await legOSC(n, fn);
+        // the MUTANTS — the verdict's source with one line changed, loaded from this section's scratch dir
+        const mutant = async (name, from, to) => {
+          const src = fs.readFileSync(OC_PATH, 'utf-8');
+          if (src.split(from).length !== 2) return null;
+          const f = path.join(dir, `outbox-chip-${name}.js`);
+          fs.writeFileSync(f, src.replace(from, to).replace("require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`));
+          return require(f);
+        };
+        await legOSC('MUTANT the chip counting EVERY proposal (no drafter filter) ⇒ RED by name on the «only this conversation» legs', async () => {
+          const M = await mutant('count-all', '  const mine = outboxRowsOf(rows, { keys });\n', '  const mine = outboxRowsOf(rows, null);\n');
+          if (!M) return [false, 'the drafter line is not spelled once'];
+          const red = [];
+          for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
+          return [red.some((n) => /only the proposals THIS conversation drafted count/.test(n)) && red.some((n) => /a conversation with NO proposal/.test(n)) && red.some((n) => /another conversation/.test(n)), red];
+        });
+        await legOSC('MUTANT the filter dropping «replaced» cards ⇒ RED by name on the «every state» leg', async () => {
+          const M = await mutant('drop-replaced', 'return keys.length ? list.filter((p) => draftedByAny(p, keys)) : list;', 'return keys.length ? list.filter((p) => draftedByAny(p, keys) && !p.replacedBy) : list;');
+          if (!M) return [false, 'the filter line is not spelled once'];
+          const red = [];
+          for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
+          return [red.length >= 1 && red.some((n) => /the filter keeps EVERY state/.test(n)), red];
+        });
+        await legOSC('MUTANT N1 the tip\'s proposals-only chip (the census fed no API call) ⇒ RED by name on the N1 legs', async () => {
+          const M = await mutant('proposals-only', '  const c = outboxCensus({ proposals: mine.proposals, apiCards: mine.apiCards, apiFate: fate });\n', '  const c = outboxCensus({ proposals: mine.proposals, apiCards: [], apiFate: fate });\n');
+          if (!M) return [false, 'the census line is not spelled once'];
+          const red = [];
+          for (const [n, fn] of chipLegs(M)) { let r; try { r = fn(); } catch { r = [false]; } if (!r[0]) red.push(n); }
+          return [red.some((n) => /^N1 the chip counts the SAME rows/.test(n)) && red.some((n) => /^N1 the chip's total \/ waiting ARE the window's head census/.test(n)) && red.some((n) => /^N1 a conversation whose ONLY Outbox row is a pending API call/.test(n)), red];
+        });
+        await legOSC('① ONE «partly sent» predicate: the card\'s chip reads src/outbox-chip.js partlySent (channel-outbox.js keeps no copy)', () => {
+          const s = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+          return [/import \{[^}]*\bpartlySent\b[^}]*\} from '\.\.\/outbox-chip\.js';/.test(s) && !/const partlySent = /.test(s) && O.partlySent(FX[2]) && !O.partlySent(FX[1]), 'import / local copy'];
+        });
+        // ③ THE REAL CARD + ROW (the bundle above): «edited by you» / «replaced» by name; «replaced» is a door to the newer one
+        const shown = [];
+        const appM = { ...app, openChannelOutbox: (o) => { shown.push(o); } };
+        const marks = (root) => root._all().filter((e) => e._cls.has('chan-prop-mark')).map((e) => e.textContent);
+        await legOSC('③ the real card says «edited by you» beside its state when the owner edited the text', () => { const c = CO.renderProposalCard(appM, FX[1]); const h = c.querySelector('.chan-prop-head'); return [!!h && h.querySelectorAll('.chan-prop-mark-edited').length === 1 && h.querySelector('.chan-prop-mark-edited').textContent === 'edited by you' && txt(c, 'chan-prop-state') === 'sent', h && marks(h)]; });
+        await legOSC('③ the real card says «replaced» on a draft its agent replaced; a press shows the NEWER one through the ONE Outbox door', () => {
+          const c = CO.renderProposalCard(appM, FX[3]);
+          const b = c.querySelector('.chan-prop-head .chan-prop-mark-replaced');
+          shown.length = 0;
+          if (b) b.onclick({ stopPropagation() {} });
+          return [!!b && b.tagName === 'BUTTON' && b.textContent === 'replaced' && b.dataset.replacedBy === 'p-osc-w' && txt(c, 'chan-prop-state') === 'withdrawn' && J(shown) === J([{ show: 'p-osc-w' }]), { marks: marks(c), shown }];
+        });
+        await legOSC('③ the Outbox ROW says the same by name (edited by you / replaced / partly sent / withdrawn); a plain sent one says only its state', () => {
+          const rows = Object.fromEntries(['p-osc-e', 'p-osc-old', 'p-osc-pt', 'p-osc-b2'].map((id) => [id, CO.renderProposalRow(appM, FX.find((p) => p.id === id))]));
+          const sub = (id) => [txt(rows[id], 'chan-prop-state'), ...marks(rows[id])].join(' | ');
+          const got = Object.fromEntries(Object.keys(rows).map((id) => [id, sub(id)]));
+          return [got['p-osc-e'] === 'sent | edited by you' && got['p-osc-old'] === 'withdrawn | replaced' && got['p-osc-pt'] === 'partly sent' && got['p-osc-b2'] === 'rejected', got];
+        });
+        // ④ + ⑤ + ⑥: one more bundle — the window module, the client's outbox state and the menu registry, ONE copy of each
+        let OSC = null, oscErr = null;
+        try {
+          const oOut = path.join(dir, 'osc-entry.mjs');
+          const lib = (f) => JSON.stringify(path.join(REPO, 'src/lib', f));
+          await esbuild.build({ stdin: { contents: `export * from ${lib('channel-outbox.js')};\nexport { menuItems } from ${lib('contributions.js')};\nexport * from ${lib('outbox-feed.js')};\n`, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'osc-entry.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: oOut, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+          OSC = await import(oOut);
+        } catch (e) { oscErr = e; }
+        await legOSC('④ the chip module bundles (the window, the client\'s outbox state, the menu registry)', () => [!!OSC && typeof OSC.outboxChipFace === 'function', oscErr && String(oscErr.message || oscErr).slice(0, 400)]);
+        await legOSC('④ the chip\'s words: «Outbox · 6» + «1 waiting» with the accent class while one awaits the owner; the tooltip names the mix', () => {
+          const f = OSC.outboxChipFace(O.outboxChipOf({ proposals: FX }, KA));
+          return [!!f && f.text === 'Outbox · 6' && f.waiting === '1 waiting' && /\bchat-status-outbox\b/.test(f.cls) && /\bchat-status-outbox-waiting\b/.test(f.cls) && /\bchat-status-clickable\b/.test(f.cls) && /1 edited by you/.test(f.tip) && /1 partly sent/.test(f.tip) && /1 replaced/.test(f.tip), f];
+        });
+        await legOSC('④ nothing waits ⇒ «Outbox · 2», no accent, no «waiting»; nothing drafted ⇒ NO chip (null)', () => {
+          const f = OSC.outboxChipFace({ total: 2, waiting: 0, edited: 0, sent: 1, partly: 0, failed: 0, replaced: 0 }), z = OSC.outboxChipFace(O.outboxChipOf({ proposals: FX }, [CE]));
+          return [!!f && f.text === 'Outbox · 2' && f.waiting === '' && !/chat-status-outbox-waiting/.test(f.cls) && z === null, { f, z }];
+        });
+        await legOSC('④ N1 the chip\'s words over both sections: «Outbox · 8» + «2 waiting» (6 proposals + 2 API calls, 1 + 1 waiting), the tooltip says «2 API calls»; a conversation with only a pending API call: «Outbox · 1» + «1 waiting»', () => {
+          const f = OSC.outboxChipFace(O.outboxChipOf({ proposals: FX, apiCards: APIX }, KA, FATE)), q = OSC.outboxChipFace(O.outboxChipOf({ proposals: FX, apiCards: APIX }, [CQ], FATE));
+          return [!!f && f.text === 'Outbox · 8' && f.waiting === '2 waiting' && /2 API calls/.test(f.tip) && !!q && q.text === 'Outbox · 1' && q.waiting === '1 waiting' && /chat-status-outbox-waiting/.test(q.cls), { f: f && [f.text, f.waiting, f.tip], q: q && [q.text, q.waiting] }];
+        });
+        await legOSC('④ ONE chip bar: the status bar draws the Outbox chip from this face, keyed, right AFTER the Artifacts chip (its click = the filtered Outbox door)', () => {
+          const sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf-8');
+          const ia = sb.indexOf("chip('artifacts', "), io = sb.indexOf("chip('outbox', o.cls, o.tip, "), ir = sb.indexOf("chip('remote', ");
+          return [ia > 0 && io > ia && io < ir && /const face = outboxChipFace\(v\);/.test(sb) && /const obEl = e\.target\.closest\('\.chat-status-outbox'\);/.test(sb) && /this\._onOpenOutbox\?\.\(\);/.test(sb), { ia, io, ir }];
+        });
+        // ⑤ the REAL window over the minimal DOM, opened by the chip's door (a filter)
+        const OBX = { proposals: FX, accounts: [{ id: 'lark', kind: 'lark', label: 'Lark / 飞书' }] };
+        const calls = [], created = [];
+        const content = new N('div');
+        const SESS = [{ sessionId: CA, claudeSessionId: CA, backendSessionId: CA, webuiId: 'wv-1', name: 'Writer', status: 'live' }, { sessionId: CE, claudeSessionId: CE, backendSessionId: CE, webuiId: 'wv-5', name: 'Quiet one', status: 'live' }];
+        const appW = { ...app, openChannelOutbox: (o) => { calls.push(o); }, sidebar: { _allSessions: SESS }, wm: { windows: new Map(), createWindow: (spec) => { created.push(spec); return { content, _listenerCtl: null }; }, revealWindow() {} }, ws: { onGlobal() {}, offGlobal() {} } };
+        const keepF = globalThis.fetch;
+        // a settle: the window's reads are promise steps (setImmediate runs after every queued one), a timer every 5th for good measure
+        const tick = async (n = 20) => { for (let i = 0; i < n; i++) await new Promise((r) => (i % 5 === 4 ? setTimeout(r, 0) : setImmediate(r))); };
+        let win = null;
+        globalThis.fetch = async (url) => ({ ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? OBX : /\/api\/channels\/api$/.test(String(url)) ? { cards: [] } : { ok: true }) });
+        try { if (OSC) { win = OSC.openChannelOutbox(appW, { filter: { keys: KA, name: 'Writer' } }); await tick(); } } catch (e) { oscErr = e; } finally { globalThis.fetch = keepF; }
+        const listW = () => content.children[0] && content.children[0].querySelector('.chan-outbox-list');
+        const rowIds = () => (listW() ? listW().querySelectorAll('.chan-orow').map((r) => r.dataset.orow) : []);
+        const sumW = () => (content.children[0] && content.children[0].querySelector('.jobs-summary') || { textContent: null }).textContent;
+        await legOSC('⑤ opened with the chip\'s filter: a removable «drafted by Writer» chip at the TOP of the list; only Writer\'s cards (the replaced one too), newest first; the head counts them', () => {
+          const l = listW(), first = l && l.children[0];
+          const ids = rowIds();
+          return [!!first && first._cls.has('chan-outbox-filter') && txt(first, 'chan-outbox-filter-text') === 'drafted by Writer' && !!first.querySelector('.chan-outbox-filter-x') && J(ids) === J(['p-osc-w', 'p-osc-e', 'p-osc-pt', 'p-osc-old', 'p-osc-f', 'p-osc-u']) && sumW() === '1 awaiting your approval · 6 proposals' && content.children[0].children.length === 2, { first: first && first.className, ids, sum: sumW() }];
+        });
+        await legOSC('⑤ the filter is the window\'s view state: its openSpec stays bare (never persisted, never replayed)', () => [!!win && created.length === 1 && J(created[0].openSpec) === J({ action: 'openChannelOutbox' }) && typeof win._outboxDoor === 'function', created[0] && created[0].openSpec]);
+        const segOn = () => { const r = content.children[0]; const on = r ? r.querySelectorAll('.chan-seg .jobs-btn').filter((b) => b._cls.has('chan-seg-on')) : []; return on.length === 1 ? on[0].dataset.view : on.map((b) => b.dataset.view).join('+'); };
+        await legOSC('⑤ removing the chip (its ×) shows the WHOLE Outbox again — the chip gone, the head counting every proposal, the census\'s own first view (r3 m3: the filter\'s All went with it — the 3 waiting rows)', () => {
+          const x = listW() && listW().querySelector('.chan-outbox-filter-x');
+          if (x) x.click();
+          const ids = rowIds();
+          return [!!x && !listW().querySelector('.chan-outbox-filter') && segOn() === 'awaiting' && J(ids.slice().sort()) === J(['p-osc-b1', 'p-osc-h', 'p-osc-w']) && sumW() === `3 awaiting your approval · ${FX.length} proposals`, { ids, seg: segOn(), sum: sumW() }];
+        });
+        await legOSC('⑤ the door again (another conversation): ONE filter — «drafted by Reviewer», only its 2 cards', () => {
+          win._outboxDoor({ filter: { keys: KB, name: 'Reviewer' } });
+          const l = listW();
+          return [txt(l.children[0], 'chan-outbox-filter-text') === 'drafted by Reviewer' && J(rowIds()) === J(['p-osc-b1', 'p-osc-b2']), rowIds()];
+        });
+        await legOSC('⑤ «replaced» in the filtered list → the newer proposal: its card opens under its row (the same filter keeps it)', () => {
+          win._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+          const old = listW().querySelectorAll('.chan-orow').find((r) => r.dataset.orow === 'p-osc-old');
+          const b = old && old.querySelector('.chan-prop-mark-replaced');
+          calls.length = 0;
+          if (b) b.onclick({ stopPropagation() {} });
+          const asked = J(calls);
+          win._outboxDoor(calls[0] || {});
+          const kids = listW().children;
+          const iRow = kids.findIndex((c) => c.dataset.orow === 'p-osc-w');
+          const card = kids[iRow + 1];
+          return [asked === J([{ show: 'p-osc-w' }]) && iRow > 0 && !!card && card._cls.has('chan-prop') && card.dataset.proposal === 'p-osc-w' && txt(listW().children[0], 'chan-outbox-filter-text') === 'drafted by Writer', { asked, iRow, card: card && card.className }];
+        });
+        await legOSC('⑤ a filter with none of its proposals in the list says so (never the empty Outbox\'s teaching line)', () => {
+          win._outboxDoor({ filter: { keys: [CE], name: 'Quiet one' } });
+          const hint = listW().querySelector('.empty-hint');
+          return [!!hint && hint.textContent === 'This conversation has no proposal in the Outbox list.' && rowIds().length === 0, hint && hint.textContent];
+        });
+        await legOSC('⑤ a door that names no filter (⚙ Outbox…, the panel\'s button) shows the WHOLE Outbox again — an earlier filter is never kept silently (every proposal counted; the census\'s first view)', () => {
+          win._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+          const before = rowIds().length;
+          win._outboxDoor({});
+          return [before === 6 && !listW().querySelector('.chan-outbox-filter') && segOn() === 'awaiting' && rowIds().length === 3 && sumW() === `3 awaiting your approval · ${FX.length} proposals`, { before, after: rowIds().length, seg: segOn(), sum: sumW() }];
+        });
+        await legOSC('⑤ N4 a card\'s menu: right-click a row ⇒ «Only drafts by Writer» (the words name the DRAFTING agent) ⇒ the ONE filter door with the drafter\'s keys as the session list knows them', () => {
+          win._outboxDoor({ filter: null });
+          const allBtn = content.children[0].querySelector('[data-view="all"]');
+          if (allBtn) allBtn.onclick();   // the owner picks All (the sent row is under it)
+          const row = listW().querySelectorAll('.chan-orow').find((r) => r.dataset.orow === 'p-osc-e');
+          calls.length = 0;
+          let prevented = false;
+          row.oncontextmenu({ clientX: 20, clientY: 20, preventDefault() { prevented = true; }, target: row });
+          const menu = body.querySelector('.context-menu');
+          const item = menu && menu.children.find((c) => c.textContent === 'Only drafts by Writer');
+          if (item) item.onclick({ stopPropagation() {} });
+          if (menu) menu.remove();
+          const c0 = calls[0] && calls[0].filter;
+          return [prevented && !!item && !!c0 && J(c0.keys) === J([CA, 'webui:wv-1']) && c0.name === 'Writer', { item: !!item, calls }];
+        });
+        await legOSC('⑤ the owner\'s own draft offers no «Only drafts by …» (it belongs to no conversation)', () => {
+          const row = OSC.renderProposalRow(appW, FX.find((p) => p.id === 'p-osc-me'));
+          let prevented = false;
+          row.oncontextmenu({ clientX: 20, clientY: 20, preventDefault() { prevented = true; }, target: row });
+          return [!prevented && !body.querySelector('.context-menu') && OSC.drafterFilterOf(appW, FX.find((p) => p.id === 'p-osc-me')) === null, prevented];
+        });
+        // ⑥ THE SESSION MENU's door — over the client's outbox state (one copy)
+        await legOSC('⑥ the session\'s right-click menu: «Outbox of this conversation» on a session that drafted proposals (opens the ONE filter), none on one that drafted none', () => {
+          OSC.noteOutbox(OBX);
+          const ctx = (s) => ({ app: appW, s, displayName: s.name, state: {} });
+          const itA = OSC.menuItems('session-card', ctx(SESS[0])).find((i) => i.label === 'Outbox of this conversation');
+          const itE = OSC.menuItems('session-card', ctx(SESS[1])).find((i) => i.label === 'Outbox of this conversation');
+          calls.length = 0;
+          if (itA) itA.action();
+          const f = calls[0] && calls[0].filter;
+          return [!!itA && !itE && !!f && J(f.keys) === J([CA, 'webui:wv-1']) && f.name === 'Writer' && OSC.currentOutbox() === OBX, { a: !!itA, e: !!itE, calls }];
+        });
+        await legOSC('⑤ a SECOND Outbox window in the same page life draws (its API records already held — the base threw before the section existed: a blank window from every door)', async () => {
+          const card = { id: 'api-osc1', status: 'ran', cred: 'lark-1', credLabel: 'Lark · ops', host: 'open.feishu.cn', method: 'DELETE', path: '/open-apis/im/v1/messages/om_osc9', at: clock0 - 1000, conv: CB, principal: { name: 'Reviewer' }, tier: 'write-ask', sensitive: 'delete', result: { status: 200, bytes: 36 } };
+          const route = async (url) => ({ ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? OBX : /\/api\/channels\/api$/.test(String(url)) ? { cards: [card] } : { ok: true }) });
+          const openOne = async () => {
+            const c2 = new N('div');
+            const a2 = { ...appW, wm: { windows: new Map(), createWindow: () => ({ content: c2, _listenerCtl: null }), revealWindow() {} } };
+            const keep = globalThis.fetch;
+            globalThis.fetch = route;
+            let err = null;
+            try { OSC.openChannelOutbox(a2); await tick(); } catch (e) { err = e; } finally { globalThis.fetch = keep; }
+            const l = c2.children[0] && c2.children[0].querySelector('.chan-outbox-list');
+            return { err: err && String(err.message || err), rows: l ? l.querySelectorAll('.chan-orow').length : -1, head: (c2.children[0] && c2.children[0].querySelector('.jobs-summary') || {}).textContent || null };
+          };
+          // r2: a read of the records still in flight from an earlier leg (the feed's own subscription) would be SHARED by the first
+          // open, leaving nothing held for the second — the leg would hold vacuously; it settles first, and the heads say the
+          // API card IS held (the census counts it: the proposals + 1)
+          await tick();
+          const held = `3 awaiting your approval · ${FX.length + 1} proposals`;
+          const first = await openOne(), second = await openOne();
+          return [!first.err && !second.err && first.rows > 0 && second.rows === first.rows && first.head === held && second.head === held, { first, second, held }];
+        });
+        // ── N1 (acceptance r1): THE FILTERED WINDOW'S HEAD AND THE CHAT CHIP ARE ONE VERDICT OVER THE SAME ROWS ──
+        const openWith = async (opts, outbox, cards) => {
+          const c = new N('div');
+          const a = { ...appW, wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
+          const keep = globalThis.fetch;
+          globalThis.fetch = async (url) => ({ ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? outbox : /\/api\/channels\/api$/.test(String(url)) ? { cards } : { ok: true }) });
+          let w = null;
+          try { w = OSC.openChannelOutbox(a, opts); await tick(); } finally { globalThis.fetch = keep; }
+          const root = c.children[0];
+          return { w, root, head: root && (root.querySelector('.jobs-summary') || {}).textContent, list: root && root.querySelector('.chan-outbox-list') };
+        };
+        await legOSC('N1 the filtered window (its API section fed the conversation\'s calls by their conv id) says «2 awaiting your approval · 8 proposals» and lists its 2 calls; the chip over the client\'s rows says «Outbox · 8» + «2 waiting» — the same numbers', async () => {
+          const r = await openWith({ filter: { keys: KA, name: 'Writer' } }, OBX, APIX);
+          const apiRows = r.list ? r.list.querySelectorAll('.chan-api-orow').map((x) => x.dataset.key).sort() : [];
+          const v = OSC.conversationOutbox(KA), f = OSC.outboxChipFace(v);
+          return [r.head === '2 awaiting your approval · 8 proposals' && v.total === 8 && v.waiting === 2 && !!f && f.text === 'Outbox · 8' && f.waiting === '2 waiting' && J(apiRows) === J(['api-osc-ap', 'api-osc-ar']), { head: r.head, v: [v.total, v.waiting], f: f && [f.text, f.waiting], apiRows }];
+        });
+        await legOSC('N1 a conversation whose ONLY Outbox row is a pending API call: the session menu offers «Outbox of this conversation» (the same verdict), its chip says «Outbox · 1» + «1 waiting», the door opens its ONE filter', async () => {
+          const SQ = { sessionId: CQ, claudeSessionId: CQ, backendSessionId: CQ, webuiId: 'wv-6', name: 'Caller', status: 'live' };
+          const it = OSC.menuItems('session-card', { app: appW, s: SQ, displayName: 'Caller', state: {} }).find((i) => i.label === 'Outbox of this conversation');
+          const f = OSC.outboxChipFace(OSC.conversationOutbox(OSC.sessionKeysOf(SQ)));
+          calls.length = 0;
+          if (it) it.action();
+          const c0 = calls[0] && calls[0].filter;
+          const r = c0 ? await openWith({ filter: c0 }, OBX, APIX) : null;
+          const apiRows = r && r.list ? r.list.querySelectorAll('.chan-api-orow').map((x) => x.dataset.key) : [];
+          return [!!it && !!f && f.text === 'Outbox · 1' && f.waiting === '1 waiting' && !!c0 && J(c0.keys) === J([CQ, 'webui:wv-6']) && !!r && r.head === '1 awaiting your approval · 1 proposals' && J(apiRows) === J(['api-osc-qp']), { it: !!it, f: f && [f.text, f.waiting], keys: c0 && c0.keys, head: r && r.head, apiRows }];
+        });
+        // ── N2 (acceptance r1): AN OLDER VIEW NEVER OVERWRITES A NEWER ONE ──
+        await legOSC('N2 the window\'s read answered OLDER than a push the client already holds draws the push\'s view (the newer), and the client keeps it', async () => {
+          const newer = { ...OBX, proposals: FX.slice(0, 2), at: 9e12 + 2000 }, older = { ...OBX, proposals: FX.slice(0, 1), at: 9e12 + 1000 };
+          OSC.noteOutbox(newer, { push: true });
+          const r = await openWith({}, older, []);
+          return [r.head === '1 awaiting your approval · 2 proposals' && OSC.currentOutbox() === newer, { head: r.head, held: OSC.currentOutbox() && OSC.currentOutbox().at }];
+        });
+        // the feed in a FRESH bundle per variant (module state of its own): outbox-feed.js + the API records' module; a variant
+        // swaps one file's source (the mutants), loaded from this section's scratch dir
+        const feedBundle = async (name, swaps = {}) => {
+          const out = path.join(dir, `osc-feed-${name}.mjs`);
+          const lib = (f) => JSON.stringify(path.join(REPO, 'src/lib', f));
+          const swap = { name: 'swap', setup(b) { for (const [f, src] of Object.entries(swaps)) b.onLoad({ filter: new RegExp(`/src/lib/${f.replace('.', '\\.')}$`) }, () => ({ contents: src, loader: 'js', resolveDir: path.join(REPO, 'src/lib') })); } };
+          await esbuild.build({ stdin: { contents: `export * from ${lib('outbox-feed.js')};\nexport { refreshApiCards, onApiCards } from ${lib('channel-api-card-view.js')};\n`, resolveDir: path.join(REPO, 'src/lib'), sourcefile: `osc-feed-${name}.js`, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, swap] });
+          return import(out);
+        };
+        const reply = (x) => ({ ok: true, json: async () => x });
+        const feedLegs = (F) => {
+          const WS = { hs: [], onGlobal(fn) { this.hs.push(fn); }, onStateChange() {} };
+          const emit = (m) => WS.hs.forEach((fn) => fn(m));
+          return [
+            ['N2 a read answered AFTER a newer push (the first read in flight, the push lands, then the read resolves): the push\'s view stays held and the reader never goes back to the older', async () => {
+              let release = null;
+              const keep = globalThis.fetch;
+              globalThis.fetch = (url) => (/\/api\/channels\/outbox$/.test(String(url)) ? new Promise((res) => { release = () => res(reply({ proposals: [FX[0]], at: 1000 })); }) : Promise.resolve(reply({ cards: [] })));
+              const seen = [];
+              try {
+                const off = F.onOutbox({ ws: WS }, (rows) => seen.push(rows.proposals.length));
+                emit({ type: 'channel-outbox-updated', changed: ['p-osc-e'], outbox: { proposals: [FX[0], FX[1]], at: 2000 } });
+                if (release) release();
+                await tick();
+                off();
+              } finally { globalThis.fetch = keep; }
+              const held = F.currentOutbox();
+              return [!!release && !!held && held.at === 2000 && held.proposals.length === 2 && seen[seen.length - 1] === 2 && !seen.includes(1), { seen, at: held && held.at }];
+            }],
+            ['N2 the rule: a newer read replaces; a read stamped the same instant as the held push is dropped (never re-told); a push of the same instant replaces; an unstamped view is taken', () => {
+              const seen = [];
+              const off = F.onOutbox({ ws: WS }, (rows) => seen.push(rows.proposals.length));
+              seen.length = 0;
+              F.noteOutbox({ proposals: [], at: 5000 });
+              F.noteOutbox({ proposals: [FX[0]], at: 5000 });
+              F.noteOutbox({ proposals: [FX[0], FX[1]], at: 5000 }, { push: true });
+              F.noteOutbox({ proposals: [FX[0]], at: 4000 });
+              F.noteOutbox({ proposals: [FX[2]] });
+              off();
+              return [J(seen) === J([0, 2, 1]), seen];
+            }],
+            ['N2 the raw-API rows: a channel-api-updated that lands while their read is in flight reads ONCE more when it ends — the chip follows the later answer', async () => {
+              let n = 0, release = null;
+              const keep = globalThis.fetch;
+              globalThis.fetch = (url) => {
+                if (!/\/api\/channels\/api$/.test(String(url))) return Promise.resolve(reply({ proposals: [], at: 0 }));
+                const i = n++;
+                return i === 0 ? new Promise((res) => { release = () => res(reply({ cards: [APIX[0]] })); }) : Promise.resolve(reply({ cards: [{ ...APIX[0], status: 'ran' }, APIX[1]] }));
+              };
+              try {
+                F.refreshApiCards();
+                emit({ type: 'channel-api-updated' });
+                if (release) release();
+                await tick();
+              } finally { globalThis.fetch = keep; }
+              const v = F.conversationOutbox(KA);
+              return [n === 2 && v.calls === 2 && v.waiting === 0, { reads: n, calls: v.calls, waiting: v.waiting }];
+            }],
+          ];
+        };
+        let FEED = null, feedErr = null;
+        try { FEED = await feedBundle('real'); } catch (e) { feedErr = e; }
+        await legOSC('N2 the feed bundles on its own (outbox-feed + the API records)', () => [!!FEED && typeof FEED.noteOutbox === 'function' && typeof FEED.conversationOutbox === 'function', feedErr && String(feedErr.message || feedErr).slice(0, 300)]);
+        for (const [n, fn] of feedLegs(FEED)) await legOSC(n, fn);   // no module ⇒ each leg RED by its own name
+        const srcOf = (f) => { try { return fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf-8'); } catch { return ''; } };
+        const feedSrc = srcOf('outbox-feed.js'), cardSrc = srcOf('channel-api-card-view.js');
+        const redOf = async (F) => { const red = []; for (const [n, fn] of feedLegs(F)) { let r; try { r = await fn(); } catch { r = [false]; } if (!r[0]) red.push(n); } return red; };
+        await legOSC('MUTANT N2 the feed taking every view (no `at` rule) ⇒ RED by name on the read-after-push leg', async () => {
+          const GUARD = '  if (a !== null && h !== null && (a < h || (a === h && !push))) return latest;\n';
+          if (feedSrc.split(GUARD).length !== 2) return [false, 'the `at` rule is not spelled once'];
+          const red = await redOf(await feedBundle('no-at', { 'outbox-feed.js': feedSrc.replace(GUARD, '') }));
+          return [red.some((n) => /^N2 a read answered AFTER a newer push/.test(n)) && red.some((n) => /^N2 the rule:/.test(n)), red];
+        });
+        await legOSC('MUTANT the API records dropping a change that lands mid-read (the base\'s dedupe) ⇒ RED by name on the raw-API leg', async () => {
+          const DEDUPE = '  if (inflight) { if (changed) again = true; return inflight; }\n';
+          if (cardSrc.split(DEDUPE).length !== 2) return [false, 'the in-flight line is not spelled once'];
+          const red = await redOf(await feedBundle('dedupe', { 'channel-api-card-view.js': cardSrc.replace(DEDUPE, '  if (inflight) return inflight;\n') }));
+          return [red.some((n) => /^N2 the raw-API rows:/.test(n)), red];
+        });
+        // ── N3 (acceptance r1): A FINGER'S TARGET — the rule (the heavy suite's ⑪ measures the render at 480 px) ──
+        await legOSC('N3 the touch rule: under (max-width: 480px), (pointer: coarse) the filter\'s × and «replaced» are min 36 × 36 px, like their siblings', () => {
+          const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
+          const m = /@media \(max-width: 480px\), \(pointer: coarse\) \{\n([\s\S]*?)\n\}/.exec(css);
+          const rule = (sel) => { const r = m && new RegExp(`(^|\\n)\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(m[1]); return r ? r[2] : ''; };
+          const x = rule('.chan-outbox-filter-x'), rp = rule('button.chan-prop-mark-replaced');
+          const sized = (r) => /min-width:\s*36px/.test(r) && /min-height:\s*36px/.test(r);
+          return [sized(x) && sized(rp), { x, rp }];
+        });
+        // ── N4 (acceptance r1): THE WORDS NAME THE OBJECT — the card menu names the drafting agent (one key, a placeholder) ──
+        await legOSC('N4 the words: «Only drafts by {name}» — zh «只看 {name} 起草的», ja «{name} が起草したものだけ»; «Only this conversation» is gone from the card menu and both dictionaries', () => {
+          const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8'), co = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+          const has = (src, k, v) => src.includes(`${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+          return [has(zh, 'Only drafts by {name}', '只看 {name} 起草的') && has(ja, 'Only drafts by {name}', '{name} が起草したものだけ') && /t\('Only drafts by \{name\}', \{ name: f\.name \}\)/.test(co) && ![zh, ja, co].some((x) => x.includes("'Only this conversation'") || x.includes('"Only this conversation"')), 'dictionaries / channel-outbox.js'];
+        });
+        // ── ROUND 3 (acceptance r2): THE WINDOW FOLLOWS THE FEED (m1 the `at` judge, m2 it wires the feed itself), A FILTER'S
+        //    «ALL» DIES WITH THE FILTER (m3), THE RECONNECT RE-READS BOTH HALVES (m4) — each leg over a FRESH bundle's module state
+        //    (the window + the feed + the API records + the menu registry: no chat ever wired its feed), the reviewers' PROBE-A…D ──
+        const winBundle = async (name, swaps = {}) => {
+          const out = path.join(dir, `osc-r3-${name}.mjs`);
+          const lib = (f) => JSON.stringify(path.join(REPO, 'src/lib', f));
+          // the legs read the English words: the zh / ja dictionaries (4.4 of the bundle's 5.3 MB) are left out — five bundles stay cheap
+          const swap = { name: 'swap', setup(b) { b.onLoad({ filter: /\/src\/lib\/i18n-(zh|ja)\.js$/ }, () => ({ contents: 'export default {};', loader: 'js' })); for (const [f, src] of Object.entries(swaps)) b.onLoad({ filter: new RegExp(`/src/lib/${f.replace('.', '\\.')}$`) }, () => ({ contents: src, loader: 'js', resolveDir: path.join(REPO, 'src/lib') })); } };
+          await esbuild.build({ stdin: { contents: `export * from ${lib('channel-outbox.js')};\nexport * from ${lib('outbox-feed.js')};\n`, resolveDir: path.join(REPO, 'src/lib'), sourcefile: `osc-r3-${name}.js`, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, swap] });
+          return import(out);
+        };
+        const r3Legs = (W) => {
+          const mkWS = () => ({ hs: [], ss: [], onGlobal(fn) { this.hs.push(fn); }, offGlobal(fn) { this.hs = this.hs.filter((h) => h !== fn); }, onStateChange(fn) { this.ss.push(fn); } });
+          const emit = (ws, m) => [...ws.hs].forEach((fn) => fn(m));
+          const S0 = 9.5e12;   // this bundle's own clock (each leg stamps after the one before: its module state carries over)
+          const open = (ws, opts = {}) => {
+            const c = new N('div');
+            const a = { ...appW, ws, wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
+            const w = W.openChannelOutbox(a, opts);
+            const root = () => c.children[0];
+            const head = () => (root() && root().querySelector('.jobs-summary') || {}).textContent || null;
+            const rows = () => { const l = root() && root().querySelector('.chan-outbox-list'); return l ? l.querySelectorAll('.chan-orow').map((r) => r.dataset.orow) : []; };
+            const seg = () => { const on = root() ? root().querySelectorAll('.chan-seg .jobs-btn').filter((b) => b._cls.has('chan-seg-on')) : []; return on.map((b) => b.dataset.view).join('+'); };
+            return { w, a, root, head, rows, seg };
+          };
+          const settle = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };   // the read path is promise steps, no timer
+          const withFetch = async (fake, fn) => { const keep = globalThis.fetch; globalThis.fetch = fake; try { return await fn(); } finally { globalThis.fetch = keep; } };
+          return [
+            ['R3 m2 THE WINDOW WIRES THE FEED ITSELF (PROBE-B): a page with NO chat window — a push lands while the window\'s first read is in flight; the read answers OLDER: the window keeps the push\'s view and the client holds it', async () => {
+              const ws = mkWS(), pend = [];
+              let taken = 0;
+              const T1 = { ...OBX, proposals: FX.slice(0, 1), at: S0 + 1000 }, T2 = { ...OBX, proposals: FX.slice(0, 2), at: S0 + 2000 };
+              return withFetch((url) => (/\/api\/channels\/outbox$/.test(String(url)) ? new Promise((res) => pend.push(() => res({ ok: true, json: async () => { taken++; return T1; } }))) : Promise.resolve(reply({ cards: [] }))), async () => {
+                const v = open(ws);
+                await settle();
+                emit(ws, { type: 'channel-outbox-updated', changed: ['p-osc-e'], outbox: T2 });
+                const afterPush = v.head(), reads = pend.length;
+                pend.splice(0).forEach((f) => f());
+                await settle();
+                const held = W.currentOutbox();
+                return [reads >= 1 && taken === reads && afterPush === '1 awaiting your approval · 2 proposals' && v.head() === afterPush && !!held && held.at === T2.at, { afterPush, afterRead: v.head(), held: held && held.at - S0, reads, taken }];
+              });
+            }],
+            ['R3 m1 THE WINDOW OBEYS THE FEED\'S `at` (PROBE-A): a late OLDER push (T3 after the window drew T4) is dropped by the window as by the chip — the head and the chip stay the same numbers; a NEWER push is drawn', async () => {
+              const ws = mkWS();
+              const T4 = { ...OBX, proposals: FX.slice(0, 2), at: S0 + 4000 }, T3 = { ...OBX, proposals: FX.slice(0, 1), at: S0 + 3000 }, T5 = { ...OBX, proposals: FX.slice(0, 3), at: S0 + 5000 };
+              return withFetch(async (url) => reply(/\/api\/channels\/outbox$/.test(String(url)) ? T4 : { cards: [] }), async () => {
+                const v = open(ws);
+                await settle();
+                const before = v.head(), chip0 = W.conversationOutbox(KA);
+                emit(ws, { type: 'channel-outbox-updated', changed: [], outbox: T3 });
+                const late = v.head(), chip1 = W.conversationOutbox(KA);
+                emit(ws, { type: 'channel-outbox-updated', changed: ['p-osc-pt'], outbox: T5 });
+                const newer = v.head(), chip2 = W.conversationOutbox(KA);
+                return [before === '1 awaiting your approval · 2 proposals' && late === before && chip1.total === 2 && chip0.total === 2 && newer === '1 awaiting your approval · 3 proposals' && chip2.total === 3 && W.currentOutbox() === T5, { before, late, newer, chips: [chip0, chip1, chip2].map((c) => [c.total, c.waiting]) }];
+              });
+            }],
+            ['R3 m3 A FILTER\'S «ALL» DIES WITH THE FILTER (PROBE-C): a filter door then a plain door — or its × — shows what a fresh plain open shows (Awaiting, its 3 rows); an All the OWNER picked survives the ×', async () => {
+              const ws = mkWS();
+              return withFetch(async (url) => reply(/\/api\/channels\/outbox$/.test(String(url)) ? OBX : { cards: [] }), async () => {
+                const fresh = open(mkWS());
+                await settle();
+                const want = { seg: fresh.seg(), rows: fresh.rows().length };
+                const v = open(ws, { filter: { keys: KA, name: 'Writer' } });
+                await settle();
+                const filtered = v.seg();
+                v.w._outboxDoor({});
+                const plain = { seg: v.seg(), rows: v.rows().length };
+                v.w._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+                const x = () => v.root().querySelector('.chan-outbox-filter-x');
+                if (x()) x().click();
+                const byX = { seg: v.seg(), rows: v.rows().length };
+                v.w._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+                const allBtn = v.root().querySelector('[data-view="all"]');
+                if (allBtn) allBtn.onclick();
+                if (x()) x().click();
+                const owners = { seg: v.seg(), rows: v.rows().length };
+                return [want.seg === 'awaiting' && want.rows === 3 && filtered === 'all' && J(plain) === J(want) && J(byX) === J(want) && owners.seg === 'all' && owners.rows === FX.length, { want, filtered, plain, byX, owners }];
+              });
+            }],
+            ['R3 m4 THE RECONNECT RE-READS BOTH HALVES (PROBE-D): a call approved elsewhere while the socket was down — on its return ONE read of each route, and the chip drops «1 waiting»', async () => {
+              const ws = mkWS(), reads = [];
+              let cards = [APIX[3]];
+              return withFetch(async (url) => { reads.push(String(url)); return reply(/\/api\/channels\/outbox$/.test(String(url)) ? { ...OBX, at: S0 + 6000 } : { cards }); }, async () => {
+                W.wireOutboxFeed({ ...appW, ws });
+                await settle();
+                const before = W.conversationOutbox([CQ]);
+                cards = [{ ...APIX[3], status: 'ran', result: { status: 200, bytes: 2 } }];
+                reads.length = 0;
+                ws.ss.forEach((fn) => fn(false));
+                ws.ss.forEach((fn) => fn(true));
+                await settle();
+                const after = W.conversationOutbox([CQ]);
+                const n = (re) => reads.filter((u) => re.test(u)).length;
+                return [before.total === 1 && before.waiting === 1 && after.total === 1 && after.waiting === 0 && n(/\/api\/channels\/api$/) === 1 && n(/\/api\/channels\/outbox$/) === 1 && reads.length === 2, { before: [before.total, before.waiting], after: [after.total, after.waiting], reads }];
+              });
+            }],
+          ];
+        };
+        const runR3 = async (W) => { const out = []; for (const [n, fn] of r3Legs(W)) { let r; try { r = W ? await fn() : [false, 'no bundle']; } catch (e) { r = [false, String((e && e.stack) || e).slice(0, 300)]; } out.push([n, r]); } return out; };
+        let R3 = null, r3Err = null;
+        try { R3 = await winBundle('real'); } catch (e) { r3Err = e; }
+        await legOSC('R3 the window, the feed and the menu registry bundle fresh (no chat ever wired the feed)', () => [!!R3 && typeof R3.openChannelOutbox === 'function' && typeof R3.wireOutboxFeed === 'function', r3Err && String(r3Err.message || r3Err).slice(0, 300)]);
+        for (const [n, r] of await runR3(R3)) await legOSC(n, () => r);   // no module ⇒ each leg RED by its own name
+        const coSrc = srcOf('channel-outbox.js'), feedSrc3 = srcOf('outbox-feed.js');
+        const r3Red = async (file, src, name) => { const W = await winBundle(name, { [file]: src }); return (await runR3(W)).filter(([, r]) => !r[0]).map(([n]) => n); };
+        const once = (src, line) => src.split(line).length === 2;
+        const FOLLOW = "  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); });\n";
+        await legOSC('MUTANT R3 m1 the window drawing every push as it comes (r2\'s own socket handler beside the feed) ⇒ RED by name on PROBE-A', async () => {
+          if (!once(coSrc, FOLLOW)) return [false, 'the window\'s feed line is not spelled once'];
+          const red = await r3Red('channel-outbox.js', coSrc.replace(FOLLOW, FOLLOW + "  app.ws.onGlobal((msg) => { if (msg.type === 'channel-outbox-updated' && msg.outbox) draw(msg.outbox); });\n"), 'm1');
+          return [red.some((n) => /^R3 m1 /.test(n)), red];
+        });
+        await legOSC('MUTANT R3 m2 the window following the feed without wiring it (r2: only a chat wired it) ⇒ RED by name on PROBE-B', async () => {
+          if (!once(coSrc, FOLLOW)) return [false, 'the window\'s feed line is not spelled once'];
+          const red = await r3Red('channel-outbox.js', coSrc.replace(FOLLOW, FOLLOW.replace('onOutbox(app, ', 'onOutbox(null, ')), 'm2');
+          return [red.some((n) => /^R3 m2 /.test(n)), red];
+        });
+        await legOSC('MUTANT R3 m3 the filter\'s All outliving the filter (r2: the removal cleared only the filter) ⇒ RED by name on PROBE-C', async () => {
+          const DROP = '  function dropFilter() { filter = null; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }\n';
+          if (!once(coSrc, DROP)) return [false, 'dropFilter is not spelled once'];
+          const red = await r3Red('channel-outbox.js', coSrc.replace(DROP, '  function dropFilter() { filter = null; }\n'), 'm3');
+          return [red.some((n) => /^R3 m3 /.test(n)), red];
+        });
+        await legOSC('MUTANT R3 m4 the reconnect re-reading the store\'s view only (r2) ⇒ RED by name on PROBE-D', async () => {
+          const BOTH = '{ readOutboxView(); refreshApiCards({ changed: true }); }';
+          if (!once(feedSrc3, BOTH)) return [false, 'the reconnect read is not spelled once'];
+          const red = await r3Red('outbox-feed.js', feedSrc3.replace(BOTH, 'readOutboxView();'), 'm4');
+          return [red.some((n) => /^R3 m4 /.test(n)), red];
+        });
+      }
     } finally { Date.now = realNow; }
   }
   for (const [k, d] of Object.entries(saved)) { try { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } catch {} }

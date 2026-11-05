@@ -7264,6 +7264,24 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-outbox-sec .chan-outbox-sec-all { margin: 0 0 0 auto; padding: 1px 8px; font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none; }
 .chan-outbox-sec .chan-outbox-sec-all[hidden] { display: none; }
 .chan-outbox-sec-folded { padding: 4px 0; }
+/* lane outbox-session-chip: the «drafted by <conversation>» filter — a removable chip at the top of the list (view state); a
+   card's marks «edited by you» / «replaced» beside its state (replaced = a door to the newer proposal) */
+.chan-outbox-filter { display: flex; align-items: center; padding: 2px 0; }
+.chan-outbox-filter-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 2px 4px 2px 8px; border-radius: 999px; font-size: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.chan-outbox-filter-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-outbox-filter-x { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.chan-outbox-filter-x:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.chan-prop-mark { flex-shrink: 0; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 10%, transparent); border: 0; font-family: inherit; line-height: inherit; }
+.chan-prop-mark-edited { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+button.chan-prop-mark-replaced { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.chan-prop-mark-replaced:hover { color: var(--text-primary); }
+button.chan-prop-mark-replaced:focus-visible, .chan-outbox-filter-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* a finger's target (acceptance r1 N3): on a phone / a touch screen the filter's × and the «replaced» door are ≥ 36 px, like their
+   siblings in this window (.chan-outbox-sec-all, .chan-seg .jobs-btn, .chanwin-quote-x) */
+@media (max-width: 480px), (pointer: coarse) {
+  .chan-outbox-filter-x { min-width: 36px; min-height: 36px; }
+  button.chan-prop-mark-replaced { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 0 12px; font-size: 12px; }
+}
 @media (max-width: 480px) { .chan-outbox-sec .chan-outbox-sec-all { min-height: 36px; padding: 6px 12px; } .chan-api-orow { min-height: 36px; align-items: center; } }
 
 /* the dialog family — ONE width token (a1 O3 / R4), the house form rhythm */
