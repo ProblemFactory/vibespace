@@ -291,25 +291,62 @@ async function legDeferred() {
 // wrapper's SIGTERM handler is installed — its SigCgt) ⇒ the job never ran, ONE `refused:stopped`, no `ok`
 const sigCaught = (pid, n) => { const m = /^SigCgt:\s*([0-9a-f]+)$/m.exec(procRead(pid, 'status')); return !!m && ((BigInt('0x' + m[1]) >> BigInt(n - 1)) & 1n) === 1n; };
 const HELD = (() => { try { return swap(JOBS_SRC, '    s.end(frame, zero);\n  }', '    setTimeout(() => s.end(frame, zero), 600);\n  }'); } catch { return null; } })();
+// int380 seam (B-7fda — red on two mirrors at load 7.5–8.5: armed, the job never ran, ONE refused:not_started, the stop settled 305 ms
+// after it, inside the 600 ms hold): the stop is gated on the wrapper being IN its drain — a wrapper copy writes `draining.mark` in its
+// ctl dir once drainValues has its listeners on fd 3 — never on its SIGTERM handler being installed (SigCgt), which holds BEFORE the
+// drain begins. The facts print stays (armed / armMs / inDrain / drainMs / stopMs).
+const DRAIN_AT = "    sock.on('close', () => { clearTimeout(timer); if (values) resolve({ values }); }); // the fd is closed now — nothing spawned after this inherits it\n";
+const markDrain = (src) => swap(src, DRAIN_AT, DRAIN_AT + "    try { fs.writeFileSync(path.join(process.argv[2], 'draining.mark'), String(Date.now())); } catch { } // the leg's gate: IN its drain\n");
+const LATE_DRAIN = (() => { try { return markDrain(swap(WRAP_SRC, 'if (VPLAN) drainValues().then(', 'if (VPLAN) new Promise((r) => setTimeout(r, 400)).then(() => drainValues()).then(')); } catch { return null; } })();
+const HELD_LONG = (() => { try { return swap(JOBS_SRC, '    s.end(frame, zero);\n  }', '    setTimeout(() => s.end(frame, zero), 1500);\n  }'); } catch { return null; } })();
 async function legStopDrain(wrap = WRAP_SRC) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   if (!HELD) { row(false, 'round 2: a stop while the wrapper drains — the jobs.js copy could not be built (its anchor is missing)'); return rows; }
-  const W = await world(wrap === WRAP_SRC ? 'stopdrain' : 'stopdrainm', { jobs: HELD, wrap }); W.put(SENT('sd')); W.release();
+  let marked = null; try { marked = markDrain(wrap); } catch { }
+  if (!marked) { row(false, 'round 2: a stop while the wrapper drains — the drain-marker copy could not be built (its anchor is missing)'); return rows; }
+  const W = await world(wrap === WRAP_SRC ? 'stopdrain' : 'stopdrainm', { jobs: HELD, wrap: marked }); W.put(SENT('sd')); W.release();
   const job = W.jm.jobs.get(W.create({}).job.id);
   const wpid = job.proc && job.proc.pid;
+  const ctlOf = () => { const d = path.join(W.dd, 'job-logs', job.id); try { const r = fs.readdirSync(d).sort(); return r.length ? path.join(d, r[r.length - 1]) : null; } catch { return null; } };
+  const inDrainNow = () => { const c = ctlOf(); return !!c && fs.existsSync(path.join(c, 'draining.mark')); };
   // int378 seam 6 (B-7fda, diagnostic only — no behaviour change): the facts say how long the arm took and when the stop was
   // read against the 600 ms hold (attempt 2 of ci/int378-r2: armed, got 0, ONE refused:not_started — the stop before the drain)
   const tArm = Date.now();
   for (let i = 0; i < 100 && !sigCaught(wpid, 15); i++) await nap(10);
   const armed = sigCaught(wpid, 15), armMs = Date.now() - tArm;
+  const tDrain = Date.now();
+  for (let i = 0; i < 500 && !inDrainNow(); i++) await nap(10);   // THE GATE: the wrapper IN its drain (bounded 5 s — never armed alone)
+  const inDrain = inDrainNow(), drainMs = Date.now() - tDrain;
   const tStop = Date.now();
   W.jm.stop(job);
   await W.until(() => W.uses(job.id).length > 0 && !['up', 'starting'].includes(job.state));
   const u = W.uses(job.id), stopMs = Date.now() - tStop;
   rows.okLines = u.filter((x) => x.outcome === 'ok').length;
-  row(armed && W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:stopped' && rows.okLines === 0, 'round 2 (the review): a stop that lands while the wrapper drains ⇒ the job never ran, ONE `refused:stopped`, no `ok` (the ACK only after the stop is read)', { armed, armMs, stopMs, holdMs: 600, u, got: W.got().length });
+  row(armed && inDrain && W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:stopped' && rows.okLines === 0, 'round 2 (the review): a stop that lands while the wrapper drains ⇒ the job never ran, ONE `refused:stopped`, no `ok` (the ACK only after the stop is read)', { armed, armMs, inDrain, drainMs, stopMs, holdMs: 600, u, got: W.got().length });
   W.end();
   return rows;
+}
+// int380 seam (B-7fda) — THE CONTROL: a wrapper whose drain starts 400 ms AFTER its SIGTERM handler is installed (the frame held 1.5 s):
+// the OLD precondition — the handler armed — holds while the wrapper is NOT in its drain (a stop then lands outside it: the old gate
+// is red by name); the drain marker waits those 400 ms, and the stop lands inside the drain: ONE refused:stopped, the job never ran
+async function legStopDrainLate() {
+  if (!LATE_DRAIN || !HELD_LONG) return [false, 'CONTROL (B-7fda) — the late-drain copies could not be built (an anchor is missing)'];
+  const W = await world('stopdrainlate', { jobs: HELD_LONG, wrap: LATE_DRAIN }); W.put(SENT('sl')); W.release();
+  const job = W.jm.jobs.get(W.create({}).job.id);
+  const wpid = job.proc && job.proc.pid;
+  const ctlOf = () => { const d = path.join(W.dd, 'job-logs', job.id); try { const r = fs.readdirSync(d).sort(); return r.length ? path.join(d, r[r.length - 1]) : null; } catch { return null; } };
+  const inDrainNow = () => { const c = ctlOf(); return !!c && fs.existsSync(path.join(c, 'draining.mark')); };
+  for (let i = 0; i < 100 && !sigCaught(wpid, 15); i++) await nap(10);
+  const armed = sigCaught(wpid, 15), inDrainAtArm = inDrainNow();   // what the OLD gate stopped on
+  for (let i = 0; i < 500 && !inDrainNow(); i++) await nap(10);
+  const inDrain = inDrainNow();
+  W.jm.stop(job);
+  await W.until(() => W.uses(job.id).length > 0 && !['up', 'starting'].includes(job.state));
+  const u = W.uses(job.id), ran = W.got().length;
+  W.end();
+  return [armed && !inDrainAtArm && inDrain && ran === 0 && u.length === 1 && u[0].outcome === 'refused:stopped',
+    'CONTROL (B-7fda) — a drain that starts 400 ms after the handler: the OLD precondition (armed) holds while the wrapper is NOT in its drain (red by name); the drain marker waits for it, and the stop then lands inside: ONE refused:stopped, nothing ran',
+    { armed, inDrainAtArm, inDrain, ran, u: u.map((x) => x.outcome) }];
 }
 const EARLY_ACK = (() => { try { return swap(WRAP_SRC, '      if (stopping) { for (const v of r.values) v.fill(0); stoppedBefore(); }\n', '      try { fs.writeSync(3, Buffer.from([VJ.ACK])); } catch { }\n      if (stopping) { for (const v of r.values) v.fill(0); stoppedBefore(); }\n'); } catch { return null; } })();
 const QUEUED = (() => { try { return swap(JOBS_SRC, '    s.end(frame, zero);\n  }', "    s.end(frame, zero);\n    note('ok');\n  }"); } catch { return null; } })();   // r1's line, written as the frame was queued
@@ -356,7 +393,7 @@ async function mutantLock() {
 const [handed, locked, crash, boot, bootMut, approval, noMasker, noMaskerMut, windowRows, startMut, mutLock, deferred, stopDrain, stopDrainMut, cronStopped, cronMut, ...muts] = await Promise.all([
   legHanded(), legLocked(), legCrash(), legBoot(), legBoot(swap(JOBS_SRC, 'const vj = VJ.refsOf(job).length ? this._vaultGate(job, trigger) : null;', "const vj = VJ.refsOf(job).length && trigger !== 'boot' ? this._vaultGate(job, trigger) : null;")),
   legApproval(), legNoMasker(), QUEUED ? legNoMasker(QUEUED) : { okLines: -1 }, legWindow(), mutantStart(), mutantLock(), legDeferred(), legStopDrain(), EARLY_ACK ? legStopDrain(EARLY_ACK) : { okLines: -1 }, legCronStopped(),
-  legCronStopped(swap(swap(JOBS_SRC, '    if (!job.cronParent) return true;\n', '    return true;\n'), "    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped');", '')), ...MUTANTS.map(([n, o, red]) => mutant(n, o, red)),
+  legCronStopped(swap(swap(JOBS_SRC, '    if (!job.cronParent) return true;\n', '    return true;\n'), "    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped');", '')), ...MUTANTS.map(([n, o, red]) => mutant(n, o, red)), legStopDrainLate(),
 ]);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
