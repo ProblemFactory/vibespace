@@ -708,7 +708,11 @@ export class DesktopManager {
   /** ONE CONVERSATION, ONE WINDOW ENTRY (userW inc-mw1ogdno-5jny): a held record that lists a session this page SHOWS (a built window
    *  the server holds) under another window id holds a stale copy — it leaves that record with evidence {id, why: 'dup', by} (the
    *  dedup is its own evidence, never a silent delete) and a desktop not on show goes out with the next save (PURE duplicatesOf).
-   *  A copy the server kept against this page, or one this page has built, stays. Returns the count. */
+   *  A copy the server kept against this page, or one this page has built, stays. Returns the count.
+   *  THE ONE COPY VERDICT (r10 — the r9 acceptance: this keyed on the server id alone while _isCopy read the restore's ladder, so the
+   *  first autosave dropped as S's copy a row the ⧉ list offered and the visit would build — D's window, never built): duplicatesOf
+   *  resolves each row through doorSessionOf against the census's live list, as _isCopy does; `shown` is a part of the census's
+   *  `shows` (a built window the server holds), so every row proposed is one _isCopy calls a copy, and none it calls no copy is. */
   normalizeDups() {
     const shown = new Map();
     for (const w of this.app.wm.windows.values()) {
@@ -717,7 +721,7 @@ export class DesktopManager {
     }
     if (!shown.size) return 0;
     let n = 0;
-    for (const x of duplicatesOf({ records: this._savedStates, shown })) {
+    for (const x of duplicatesOf({ records: this._savedStates, shown, live: this._shownCensus().live })) {
       if (x.desk === '__stage__' || this._isKept(x.desk, x.id) || this.app.wm.windows.has(x.id)) continue;
       // A DEDUPED COPY LEAVES ITS TAB GROUP TOO (r2): the members' recorded chain is read without it, and — once the hub accepts
       // (r3 G) — a chain still waiting for it is told: the road an unbuilt departure takes (dropUnbuiltMembers)

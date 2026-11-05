@@ -1976,14 +1976,10 @@ class LayoutManager {
           applyPosition(existing.win, ws);
           this.app.wm.focusWindow(existing.winId);
         } else {
-          // Not open — check if session exists as active (attach) or stopped (resume)
-          let activeMatch = null;
-          if (backendSessionId) {
-            activeMatch = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);
-          }
-          if (!activeMatch && ws.serverSessionId) {
-            activeMatch = activeSessions.find(s => s.id === ws.serverSessionId);
-          }
+          // Not open — check if session exists as active (attach) or stopped (resume). The live session: THE ONE resolution the
+          // restore reads (desktop-record liveSessionOf — r10: a preset row's conversation id, else its serverSessionId, else a
+          // NAMELESS row's recipe; this branch kept a second, two-rung copy of that ladder)
+          const activeMatch = liveSessionOf(ws, activeSessions);
 
           if (activeMatch) {
             // Active but no window — attach (use custom name if available)
@@ -2044,9 +2040,7 @@ class LayoutManager {
           applyPosition(existing.win, ws);
           this.app.wm.focusWindow(existing.winId);
         } else {
-          let activeMatch = null;
-          if (backendSessionId) activeMatch = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);
-          if (!activeMatch && ws.serverSessionId) activeMatch = activeSessions.find(s => s.id === ws.serverSessionId);
+          const activeMatch = liveSessionOf(ws, activeSessions); // the restore's ladder (see the terminal branch — r10)
           if (activeMatch) {
             const customName = this.app.sidebar?.getCustomName(backendSessionId);
             const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { mode: 'chat', backend: activeMatch.backend || backend, machine: true });

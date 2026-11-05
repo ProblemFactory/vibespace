@@ -95,13 +95,15 @@
 //     disagree and did not in `prev` (a disagreement already stored is the record's, carried — a write never fixes what its
 //     page did not build); a member the record does not hold is a chain waiting for it (layout.js pendingChainOf), not one.
 //
-//   duplicatesOf({records, shown}) — ONE CONVERSATION, ONE WINDOW ENTRY (the same incident's writer — session-lifecycle's
+//   duplicatesOf({records, shown, live}) — ONE CONVERSATION, ONE WINDOW ENTRY (the same incident's writer — session-lifecycle's
 //     attachSession found an open conversation only among the windows the page had BUILT, so a sidebar click of a conversation
 //     whose window waits on a desktop not visited since the page loaded opened a SECOND window, on the desktop on show — twice
 //     over reloads made three entries): `shown` = Map(server session → the window id this page shows it in); every entry of
 //     `records` ({desk → record or window list}, or a Map) that lists one of those sessions under ANOTHER window id is a duplicate — [{desk, id, by, sid}].
 //     The page drops each from its record with evidence {id, why: 'dup', by} (the dedup is its own evidence, never a silent
-//     delete); the window the person sees is the one that stays.
+//     delete); the window the person sees is the one that stays. r10: an entry is a duplicate by THE ONE COPY VERDICT — the
+//     session its own door attaches (doorSessionOf against `live`) is one `shown` names — and it leaves by the name the hub
+//     checks a 'dup' by (its sessionOf, shown too: shrinkVerdict, unchanged).
 //
 //   refusalKey({desktopId, reason, unexplained, fields, windows, base}) / refusalStorm(memory, {who, desktopId, key, now}) —
 //     A REFUSAL IS SAID ONCE (the same incident): a refusal's identity is its desktop, its reason and what it refused (the drop
@@ -438,13 +440,21 @@ function shownBy(sid, id, by, nextList, elsewhere) {
   return false;
 }
 
-function duplicatesOf({ records = {}, shown = new Map() } = {}) {
+/** A COPY IS PROPOSED BY THE ONE VERDICT (r10, userW inc-mw1ogdno-5jny — the r9 acceptance: this keyed on sessionOf alone, so the
+ *  autosave's first step dropped as S's 'dup' a row whose restore attaches ANOTHER live conversation — D's conversation id beside S's
+ *  server id, no recipe — the hub took the drop and D's window was never built, while the ⧉ list and the visit called it no copy):
+ *  an entry is a copy when the session its own door attaches (doorSessionOf against `live` — desktop-manager's census, the list
+ *  _isCopy reads; none handed in ⇒ an entry with no recipe resolves to nothing) is one `shown` names; it leaves by the name the hub
+ *  checks a 'dup' by — its sessionOf, shown too (`by` = the window that shows it: shrinkVerdict's rule, unchanged on the wire). A copy
+ *  the hub keys otherwise (no server id, a stale one, another live session's) is never proposed — the hub would refuse it: it stays
+ *  carried (r5 O), as before. */
+function duplicatesOf({ records = {}, shown = new Map(), live = [] } = {}) {
   const out = [];
   const pairs = records instanceof Map ? [...records] : Object.entries(records && typeof records === 'object' ? records : {});
   const shows = shown instanceof Map ? shown : new Map();
   for (const [desk, rec] of pairs) {
     for (const w of Array.isArray(rec) ? rec : listOf(rec && rec.windows)) {
-      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;
+      const id = idOf(w), sid = sessionOf(w), door = doorSessionOf(w, live), by = sid && door && shows.has(door) ? shows.get(sid) : null;
       if (id && by != null && String(by) !== id) out.push({ desk, id, by: String(by), sid });
     }
   }

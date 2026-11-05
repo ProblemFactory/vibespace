@@ -28,7 +28,9 @@
 //   §13 ROUND 8: the latest act wins after the gate (L4: an open on the desktop on show consumes the switch queued before it; its
 //      control — a press after the open still drains); «bysession» on the real timing (BS: a copy is never restored, a restore never
 //      raises — one switch, V on show to +12 s; BSR: a deferred reveal in flight completes, nothing said); r9 BS′: V's row names S
-//      by its conversation id alone (S attaching on X, answered at +3 s, the visit at +1 s) — a copy by the restore's own ladder
+//      by its conversation id alone (S attaching on X, answered at +3 s, the visit at +1 s) — a copy by the restore's own ladder;
+//      r10 GS: V's row names T's conversation beside S's server id, S built on X — the person's act's save (normalizeDups its first
+//      step) keeps it, the visit at +2.6 s builds T's window (one verdict, the autosave's dup proposal too)
 import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press, sessionIds } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratchDir } from './scratch.mjs';
@@ -1059,6 +1061,25 @@ async function r8Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false,
     await tick(5);
     leg(J(w.switches.map((s) => s[1])) === J(['desk-x→desk-v']) && samples.every((d) => d === 'desk-v') && J(w.restores) === '[]' && sw.length === 1 && /@desk-x$/.test(sw[0]) && att && onHub.length === 1 && J(carried) === J(['desk-v:win-v-s']) && toasts(t0).length === 0, `§13 r9 BS′: A COPY IS NAMED BY WHAT ITS RESTORE NAMES — V lists S by its conversation id alone, S's window attaching on X (answered at +3 s), the person presses V at +1 s: ONE switch, V on show across 4 samples to +5 s, the row never restored, S's window stands on X once attached — ONE window of S on the hub, V's row kept as its record holds it (a carried copy: never built while X shows S — r5 O), nothing said (65a28cd29: restored — the copy verdict read the server id alone) — switches ${J(w.switches)}, samples ${J(samples)}, restored ${J(w.restores)}, S windows ${J(sw)} attached ${att}, on the hub ${J(onHub)} + carried ${J(carried)}, toasts ${J(toasts(t0).map(toastText))}`);
   }
+  if (want('GS')) {
+    // ROUND 10 (the r9 acceptance): V's row names T's CONVERSATION beside S's server id (no recipe — §R9 (g): its restore attaches
+    // T); S's window built on X, the page has the server's live list (S, T). The person acts on X — the debounce's save at +0.5 s,
+    // normalizeDups its first step — and presses V at +2.6 s
+    const tl = { id: T, name: 'Tide log', cwd: '/srv/u/tide', backend: 'claude', backendSessionId: 'b' + CID.slice(1), mode: 'chat' };
+    const rowG = { ...bare('win-v-s'), title: 'Tide log — /srv/u/tide', cwd: '/srv/u/tide', backendSessionId: tl.backendSessionId };
+    const P = page({ 'desk-x': [files('x-1', 0), chat('win-x-s', S, 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), rowG] }, 'desk-x'), t0 = made.length;
+    const w = watch(P);
+    P.app.sidebar._webuiSessions = [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }, tl];
+    let nd = 0; const nm = P.dm.normalizeDups.bind(P.dm); P.dm.normalizeDups = () => { nd++; return nm(); };
+    P.act(); await tick(2600);
+    const onHubV = ids(P.H.layouts().desktops['desk-v'].autoSave.windows), left = P.dm._departed.has('win-v-s');
+    personSwitch(P, 'desk-v');
+    const samples = [];
+    for (let i = 0; i < 3; i++) { await tick(1000); samples.push(P.dm.activeDesktopId); }
+    const tW = [...P.wins.values()].filter((x) => x._openSpec && x._openSpec.serverId === T).map((x) => x.id + '@' + x._desktopId), sw = sWins(P);
+    await tick(5);
+    leg(nd >= 1 && J(onHubV) === J(['v-1', 'win-v-s']) && !left && J(w.switches.map((s) => s[1])) === J(['desk-x→desk-v']) && samples.every((d) => d === 'desk-v') && J(w.restores) === J(['win-v-s']) && J(tW) === J(['win-v-s@desk-v']) && sw.length === 1 && /^win-x-s@desk-x/.test(sw[0]) && toasts(t0).length === 0, `§13 r10 GS: ONE VERDICT, EVERYWHERE A COPY IS DECIDED — V's row names T's conversation beside S's server id (its restore attaches T), S built on X; the person acts on X, the save the debounce sends (normalizeDups ${nd}×) keeps the row — the hub's V record ${J(onHubV)}, departed ${left} — and the visit at +2.6 s builds T's window on V: ONE switch, V on show across 3 samples, restored ${J(w.restores)}, T windows ${J(tW)}, S windows ${J(sw)}, toasts ${toasts(t0).length} (9d11dd973: the save dropped it as S's 'dup', the visit built nothing)`);
+  }
   return failed;
 }
 await section('§13 ROUND 8 — the latest act wins after the gate; «bysession»: a copy is never restored, a restore never raises, a reveal in flight completes', async () => {
@@ -1295,6 +1316,15 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
       const DMs2 = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC8.replace(imp9, imp9.replace('doorSessionOf }', 'doorSessionOf, sessionOf }')).replace('    const sid = doorSessionOf(w, census.live);\n', '    const sid = sessionOf(w);\n'), 'r9-serverid-only-i', { esm: true })).href)).DesktopManager;
       const fS = await r8Legs({ DM: DMs2, install: install0, quiet: true, legs: ['BS', 'BS9'] });
       ok(fS.some((n) => n.startsWith('§13 r9 BS′:')) && !fS.some((n) => n.startsWith('§13 r8 BS:')), `mutant r9-serverid-only (65a28cd29's verdict: the server id alone): V's row named by its conversation id is restored — BS′ RED; BS (its server id) green (${fS.length}: ${heads(fS)})`);
+    }
+    // r10: 9d11dd973's dup proposal — the server id alone (duplicatesOf), on the real autosave
+    const PSRC10 = read('src/lib/desktop-record.js'), imp10 = "from './desktop-record.js';";
+    const dupKey10 = '      const id = idOf(w), sid = sessionOf(w), door = doorSessionOf(w, live), by = sid && door && shows.has(door) ? shows.get(sid) : null;\n';
+    if (ok(PSRC10.includes(dupKey10) && DSRC8.includes(imp10), 'mutant r10-dups-on-sessionof: the patched lines exist in desktop-record.js / desktop-manager.js')) {
+      const dr10 = M.write('src/lib/desktop-record.js', PSRC10.replace(dupKey10, '      const id = idOf(w), sid = sessionOf(w), by = sid ? shows.get(sid) : null;\n'), 'r10-dups-on-sessionof-i');
+      const DMd = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC8.split(imp10).join(`from ${J(dr10)};`), 'r10-dups-on-sessionof-dm-i', { esm: true })).href)).DesktopManager;
+      const fD = await r8Legs({ DM: DMd, install: install0, quiet: true, legs: ['GS'] });
+      ok(fD.length === 1 && fD[0].startsWith('§13 r10 GS:'), `mutant r10-dups-on-sessionof (9d11dd973's duplicatesOf: the server id alone): the person's act's save proposes T's row as S's 'dup', the hub takes it, the visit builds nothing — GS RED (${fD.length})`);
     }
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 27, label: '§6 ' })) ok(r.pass, r.name, r.detail);
