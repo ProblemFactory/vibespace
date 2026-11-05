@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.379 — 2026-11-04
+
+### Fixed
+- A desktop that listed a conversation already open on another desktop no longer floods the screen with warnings; a copy no page shows is cleaned up once.
+- A copy that another tab or device is showing keeps its place in its tab group, even while that device sleeps or is offline, or after the conversation stops.
+- Changes to a tab group that holds such a copy are saved and never undone, and closing the copy on one device closes it on every device.
+- Opening a conversation whose window is on another desktop switches there and brings its own tab to the front, even right after a switch or on a double-click.
+- Opening a conversation whose window is already on the desktop you are on brings it to the front at once, even while its tab group is still opening.
+- A conversation you open stays the tab in front until its tab group finishes opening or you click elsewhere, even if another device changes that desktop.
+- If a conversation you open cannot be shown, a message says why, instead of nothing happening.
+
 ## 2.369.378 — 2026-11-04
 
 ### Added
