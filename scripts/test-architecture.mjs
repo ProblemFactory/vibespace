@@ -4473,7 +4473,7 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
     'b78469618fb15871b9508defd1ff70014747c1f918e4185425c5f2bbea2a4e5d',
     'fb25a668cf5b61bbbdd2539d41a32706059e68b8d3547916a87c8beb627cff08',   // int360 hygiene (B-c412): a pool member's nickname — the docs and suites say userP
   ]);
-  const NAME_EXEMPT = { 'src/design-viewer-entry.js': 3 };   // the zoom-in button's variable
+  const NAME_EXEMPT = {};   // none since .382 (int382 hygiene): the one same-letters local was renamed (src/design-viewer-entry.js) — the map stays for the next such word, pinned by its count
   const nameCensus = (tree, digests, exempt) => {
     const memo = new Map(), bad = [];
     const hit = (w) => { const k = w.toLowerCase(); if (!memo.has(k)) memo.set(k, digests.has(crypto.createHash('sha256').update(k).digest('hex'))); return memo.get(k); };

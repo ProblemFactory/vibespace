@@ -87,7 +87,7 @@ export function mountDesignViewer(doc = document, { lang = (typeof navigator !==
   const fit = button('dv-fit', W.fit, W.fit);
   const out = button('dv-out', '−', W.zoomOut);
   const zoom = button('dv-zoom', '100%', '100%');
-  const zin = button('dv-in', '+', W.zoomIn);
+  const zoomInBtn = button('dv-in', '+', W.zoomIn);
   // ▶ Present: an SVG mark + the word (never an emoji glyph)
   const play = button('dv-present', W.present, W.present);
   const mark = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -101,7 +101,7 @@ export function mountDesignViewer(doc = document, { lang = (typeof navigator !==
   pages.setAttribute('aria-label', W.page);
   const by = mk(doc, 'span', 'dv-by');
   by.textContent = W.by;
-  bar.append(back, title, fit, out, zoom, zin, play, pages, by);
+  bar.append(back, title, fit, out, zoom, zoomInBtn, play, pages, by);
   root.append(bar, stage);
   const touch = typeof matchMedia === 'function' && matchMedia('(hover: none)').matches;
   const hint = mk(doc, 'div', 'dv-hint');
@@ -127,7 +127,7 @@ export function mountDesignViewer(doc = document, { lang = (typeof navigator !==
   back.onclick = () => canvas.focus(null);
   fit.onclick = () => canvas.fit();
   out.onclick = () => canvas.zoomBy(-1);
-  zin.onclick = () => canvas.zoomBy(+1);
+  zoomInBtn.onclick = () => canvas.zoomBy(+1);
   zoom.onclick = () => canvas.zoomTo(1);
   pages.onchange = () => canvas.setPage(pages.value);
   const PW = { prev: W.prev, next: W.next, exit: W.exit, bar: W.presenting };
