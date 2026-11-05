@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - In the desktop previews, a waiting window blinks in its own colour (green blinks green, red blinks red); the blink itself is unchanged.
+- The chat's message list shows only what you said; lines from VibeSpace, other conversations and Background Work fold into one row you can open.
 
 ## 2.369.379 — 2026-11-04
 
