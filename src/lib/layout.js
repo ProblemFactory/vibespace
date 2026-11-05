@@ -7,7 +7,7 @@ import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
-import { conversationOf, hostOf, sessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
+import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
@@ -48,9 +48,10 @@ const CLOCK_JUMP_MS = 20000;
 // for the ACTIVE desktop only — every other desktop's windows are LAZY
 // (_savedStates) and replay on first visit, so their interrupted sessions
 // never reached the offer. PURE (data in, list out) so the matrix is
-// testable: mirrors restoreState's aliveness logic exactly (backendSessionId
-// beats serverSessionId; remote windows can never stoppedMatch against LOCAL
-// discovery and are collected from their openSpec identity instead).
+// testable: reads restoreState's own aliveness ladder (desktop-record
+// liveSessionOf — r9: backendSessionId beats serverSessionId; remote windows
+// can never stoppedMatch against LOCAL discovery and are collected from their
+// openSpec identity instead).
 // A saved window's SESSION NAME (B-ddc0). Its TITLE is `${name} — ${cwd}` (viewSession and the
 // attach paths), and every restore branch read that title back as the NAME — a remote window
 // always (a stopped remote session never stoppedMatches LOCAL discovery) — so each reload grew the
@@ -111,9 +112,7 @@ export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomN
       const bsid0 = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId;
       const backendSessionId = bsid0 && bsid0 !== ws.serverSessionId ? bsid0 : null;
       if (!backendSessionId) continue;
-      const alive = live.find((s) => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId)
-        || (ws.serverSessionId && live.find((s) => s.id === ws.serverSessionId));
-      if (alive) continue;
+      if (liveSessionOf(ws, live)) continue; // the restore's own ladder (desktop-record — r9: one resolution, never a mirror of it)
       const customName = getCustomName?.(backendSessionId);
       // land the resumed window back on ITS desktop at its saved spot
       // …taking the place of its old record entry there (never opened by this page: nothing else removes it —
@@ -1491,14 +1490,9 @@ class LayoutManager {
       if (ws.type === 'terminal') {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
         const backendSessionId = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId;
-        let alive = null;
-        if (backendSessionId) {
-          alive = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);
-        }
-        if (!alive && ws.serverSessionId) {
-          alive = activeSessions.find(s => s.id === ws.serverSessionId);
-        }
-        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId); // a NAMELESS entry (no ids — lane layout-stale-record-sync): its openSpec still names the session
+        // the conversation id, else the serverSessionId, else a NAMELESS entry's recipe (lane layout-stale-record-sync) — THE ONE
+        // resolution every copy verdict reads too (desktop-record liveSessionOf, r9)
+        const alive = liveSessionOf(ws, activeSessions);
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
           const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { backend: alive.backend || backend, mode: alive.mode || 'terminal', machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });
@@ -1538,17 +1532,11 @@ class LayoutManager {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
         const bsid0 = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId; // see terminal branch
         const backendSessionId = bsid0 && bsid0 !== ws.serverSessionId ? bsid0 : null;
-        let alive = null;
-        if (backendSessionId) {
-          alive = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);
-        }
-        if (!alive && ws.serverSessionId) {
-          alive = activeSessions.find(s => s.id === ws.serverSessionId);
-        }
-        // A NAMELESS ENTRY (lane layout-stale-record-sync — 工作's five windows after the phone's early save): no serverSessionId,
-        // no conversation id; its openSpec still names the session it attaches to. It used to match nothing here and build
-        // nothing — 20 s later the page dropped it as 'unbuilt' and the server took 工作 5 → 0.
-        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId);
+        // the conversation id, else the serverSessionId, else — A NAMELESS ENTRY (lane layout-stale-record-sync — 工作's five windows
+        // after the phone's early save: no ids, it used to match nothing here and build nothing; 20 s later the page dropped it as
+        // 'unbuilt' and the server took 工作 5 → 0) — its recipe's session. THE ONE resolution: every copy verdict reads it too
+        // (desktop-record liveSessionOf — r9: a row whose session, so resolved, this page shows is a copy: never restored here)
+        const alive = liveSessionOf(ws, activeSessions);
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
           // the attach CARRIES the conversation id: the window's openSpec names it before the attach answers (a capture in

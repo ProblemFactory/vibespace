@@ -2086,9 +2086,12 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     ok(h.some((n) => /THE STALENESS GATE on the real handler/.test(n)) && d.some((n) => /恢复布局 HOLDS/.test(n)), `control ring-no-stale-gate (2.369.340: no base judged): the phone's old copy lands over the restore — RED (${h.length}/${d.length})`);
   }
   {
-    const find = "        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId);\n";
-    ok(LSRC0.includes(find), 'control ring-restore-ignores-spec: the patched line exists in layout.js');
-    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
+    // the restore's ladder is desktop-record liveSessionOf (r9 — ONE resolution, the copy verdict reads it too): its recipe rung
+    // patched out, and restoreState reading that copy
+    const find = "    || (spec.action === 'attachSession' && spec.serverId && find((s) => s.id === spec.serverId))\n", imp = "import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js';";
+    ok(PSRC.includes(find) && LSRC0.includes(imp), 'control ring-restore-ignores-spec: the patched lines exist in desktop-record.js (liveSessionOf) and layout.js (its import)');
+    const rec = M.write('src/lib/desktop-record.js', PSRC.replace(find, ''), 'ring-restore-ignores-spec');
+    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(imp, imp.replace("'./desktop-record.js'", JSON.stringify(rec))), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
     const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
     ok(f.some((n) => /THE BOOT RESTORE of 工作's NAMELESS five/.test(n)), `control ring-restore-ignores-spec (2.369.340's restoreState): a nameless chat matches nothing and builds nothing — RED (${f.length})`);
   }

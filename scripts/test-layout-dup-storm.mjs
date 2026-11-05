@@ -447,6 +447,70 @@ await section('§R8 ROUND 8 — the reveal\'s switch is one switch, to one deskt
   await r8Legs({ install: install8 });
 });
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ROUND 9 (the r8 acceptance's finding) — THE COPY VERDICT NAMES THE CONVERSATION THE RESTORE NAMES: V's row of S named by its
+// conversation id alone (S built on X, or still attaching), or by a stale server id beside it; the controls; the two names
+// disagreeing either way (the attaching shape on the real timing: the loop's §13 BS′)
+const D9 = 'sess-5-41000', DID9 = 'd71a5000-0000-4000-8000-000000000005', STALE9 = 'sess-3-11111';
+/** the real ⧉ window list (taskbar showWindowList) over a harness page, its «Other desktops» group opened → {main, other}
+ *  (main = the desktop on show's rows, other = the other desktops'), or null when no list opens */
+const windowList = (P, TB = TB0) => {
+  const at = made.length;
+  TB.showWindowList(P.app, mkEl('span'));
+  const pop = made.slice(at).find((e) => e.className === 'overlap-switcher');
+  if (!pop) return null;
+  const head = pop.children.find((c) => /overlap-switcher-group/.test(c.className));
+  if (head && !/ open/.test(head.className)) head.onclick({ stopPropagation() {} });
+  return { main: pop.children.filter((c) => /overlap-switcher-item/.test(c.className) && !/overlap-switcher-(other|group)/.test(c.className)), other: pop.children.filter((c) => /overlap-switcher-other/.test(c.className)) };
+};
+/** R9 (a)–(g): each shape of V's row, S's window on X (built — the record's — or (b) the person's open, still attaching) — the ⧉
+ *  list opened on X, then the person's visit to V. → failed names. */
+async function r9Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (!install) return failed;
+  // the server's live sessions: S and D (D shown on no desktop of this page) — the page knows them (the sidebar's active-sessions),
+  // the restore reads them (/api/active)
+  const live = () => [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }, { id: D9, name: 'Dune log', cwd: '/srv/u/dune', backend: 'claude', backendSessionId: DID9, mode: 'chat' }];
+  const row = (o) => ({ winId: 'win-v-s', title: 'Atlas notes — /srv/u/atlas', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(1), zIndex: 101, backend: 'claude', cwd: '/srv/u/atlas', ...o }); // NO recipe: built by its identity (lane layout-stopped-window)
+  const dune = { title: 'Dune log — /srv/u/dune', cwd: '/srv/u/dune' };
+  const SHAPES = {
+    a: { row: { backendSessionId: CID }, copy: true, says: 'V lists S by its conversation id ALONE (captureState\'s row while a resume\'s create is in flight — no serverSessionId, no recipe), S BUILT on X' },
+    b: { row: { backendSessionId: CID }, copy: true, attaching: true, says: '…the same while S\'s window is still ATTACHING on X (the person\'s open)' },
+    c: { row: { backendSessionId: CID, serverSessionId: STALE9 }, copy: true, says: 'V\'s row names S\'s conversation beside a STALE server id' },
+    d: { row: { backendSessionId: DID9, ...dune }, copy: false, says: 'CONTROL: V\'s row names D, live and shown on no desktop of this page — a real held window, restored and offered as before' },
+    e: { row: { serverSessionId: S }, copy: true, says: 'CONTROL: V\'s row names S by its server id alone (r8\'s shape) — R2/R3 unchanged' },
+    f: { row: { backendSessionId: CID, serverSessionId: D9 }, copy: true, says: 'THE TWO NAMES DISAGREE: S\'s conversation id beside D\'s server id — the restore attaches by the conversation id first: S\'s copy' },
+    g: { row: { backendSessionId: DID9, serverSessionId: S, ...dune }, copy: false, says: '…the other way: D\'s conversation id beside S\'s server id — the restore attaches D: a real held window of D' },
+  };
+  const winsOf = (P, sid) => [...P.wins.values()].filter((w) => w._openSpec && w._openSpec.serverId === sid).map((w) => w.id + '@' + w._desktopId);
+  for (const [k, sh] of Object.entries(SHAPES)) {
+    if (!want(k)) continue;
+    const recs = { 'desk-x': sh.attaching ? [files('x-1', 0)] : [files('x-1', 0), chat('win-x-s', S, 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), row(sh.row)] };
+    const P = pageOn(hub(loadHandler(), DOC(recs)), install, 'desk-x', { DM, LM, attachMs: 60000 }), t0 = made.length;
+    P.app.sidebar._webuiSessions = live();
+    P.lm._bootJson = async (u) => (u === '/api/active' ? { sessions: live() } : { sessions: [] });
+    if (sh.attaching) { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); press('pointerup'); }
+    const L = windowList(P) || { main: [], other: [] }, sRows = [...L.main, ...L.other].filter((r) => /Atlas notes/.test(r.textContent)).length;
+    const offered = L.other.some((r) => r.dataset.desktopId === 'desk-v' && r.dataset.winId === 'win-v-s');
+    const restores = [], rs = P.lm.restoreState.bind(P.lm); P.lm.restoreState = (st) => { restores.push(...ids(st && st.windows)); return rs(st); };
+    press('pointerdown'); const sw = P.dm.switchTo('desk-v'); press('pointerup'); await sw;
+    const n = { switches: 0 }, own = P.dm.switchTo; P.dm.switchTo = function (d) { n.switches++; return own.call(this, d); };
+    await tick(3);
+    const copy = P.dm.copiesOf('desk-v').includes('win-v-s'), sW = winsOf(P, S), dW = winsOf(P, D9), at = P.dm.activeDesktopId, said = toasts(t0).length;
+    await tick(3); // the hub's quiet wrapper (the switch's save) gives the console back
+    const verdict = sh.copy ? J(restores) === '[]' && copy && !offered && sW.length === 1 && /@desk-x$/.test(sW[0]) && !dW.length
+      : J(restores) === J(['win-v-s']) && !copy && offered && J(dW) === J(['win-v-s@desk-v']) && sW.length === 1;
+    leg(verdict && sRows === 1 && n.switches === 0 && at === 'desk-v' && said === 0, `§R9 (${k}): ${sh.says} — ${sh.copy ? 'a COPY: the ⧉ list on X names S once (X\'s window) and never offers V\'s row; the visit to V restores nothing of it, the person stays on V, nothing said' : 'NOT a copy: the ⧉ list offers V\'s row; the visit restores it — D\'s window built on V'} — S rows ${sRows}, V's row offered ${offered}, restored ${J(restores)}, copiesOf(V) ${copy}, S windows ${J(sW)}, D windows ${J(dW)}, switches after ${n.switches}, active ${at}, toasts ${said}`);
+  }
+  return failed;
+}
+const install9 = await loadLifecycle();
+await section('§R9 ROUND 9 — the copy verdict names the conversation the restore names (one resolution: desktop-record liveSessionOf / doorSessionOf)', async () => {
+  await r9Legs({ install: install9 });
+});
+
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
   const M = mutantCopies('ldup', REPO);
   const PSRC = read('src/lib/desktop-record.js'), DSRC = read('src/lib/desktop-manager.js');
@@ -527,7 +591,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const armed = await dm8('    if (desk === this._activeId) this._pendingSwitch = null;\n', '', 'r8-R4-armed');
     const fa = await r8Legs({ DM: armed, install: install8, quiet: true, legs: ['R4'] });
     ok(fa.some((n) => n.startsWith('§R8 R4:')), `mutant r8-R4-armed (8bde36a5c's keepInFront: no cancel): the switch queued before the open stays armed — RED (${fa.length})`);
-    const copyR = await dm8('        if (liveServerIds.has(sessionOf(ws))) { noSpec.push(winId); continue; }\n', '', 'r8-R2-restore-copy');
+    const copyR = await dm8('        if (this._isCopy(ws, census)) { noSpec.push(winId); continue; }\n', '', 'r8-R2-restore-copy');
     const fr = await r8Legs({ DM: copyR, install: install8, quiet: true, legs: ['R2visit'] });
     ok(fr.some((n) => n.startsWith('§R8 R2 (visit):')), `mutant r8-R2-restore-copy (8bde36a5c's no-openSpec door: no copies verdict): the copy is restored — RED (${fr.length})`);
     const door = "    if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)\n    this.wm.revealWindow(w.id, { replay });\n";
@@ -541,6 +605,29 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const tbs = await tb8(look, "  const dm = app.desktopManager;\n  const go = app.stage?.isActive ? app.stage.leave(r.deskId) : dm.switchTo(r.deskId);\n  let tries = 0;\n  const look = () => {\n    if (dm.activeDesktopId !== r.deskId) return;\n    if (app.wm.windows.has(r.id)) { app.wm.revealWindow(r.id); return; }\n    if (++tries < 20) setTimeout(look, 250);\n  };\n  Promise.resolve(go).then(look, look);\n", 'r8-R3-silent-look');
     const fs8 = await r8Legs({ install: install8, TB: tbs, quiet: true, legs: ['R3look'] });
     ok(fs8.some((n) => n.startsWith('§R8 R3 (look):')), `mutant r8-R3-silent-look (8bde36a5c's goOtherDesk: 20 × 250 ms, then silence): nothing said — RED by the toast count (${fs8.length})`);
+  }
+  // ROUND 9 — the copy verdict keyed on the server id alone (65a28cd29), and the verdict and the restore resolving a row two ways
+  {
+    const D9s = read('src/lib/desktop-manager.js'), L9s = read('src/lib/layout.js');
+    const heads = (f) => f.map((n) => n.slice(0, 9)).join(' | ');
+    const key = '    const sid = doorSessionOf(w, census.live);\n', imp = "import { duplicatesOf, refusalKey, namesOf, doorSessionOf } from './desktop-record.js';";
+    ok(D9s.includes(key) && D9s.includes(imp), 'mutant r9: the patched lines exist in desktop-manager.js');
+    const dm9 = async (src, tag) => (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', src, tag, { esm: true })).href)).DesktopManager;
+    const sOnly = await dm9(D9s.replace(imp, "import { duplicatesOf, refusalKey, namesOf, doorSessionOf, sessionOf } from './desktop-record.js';").replace(key, '    const sid = sessionOf(w);\n'), 'r9-serverid-only');
+    const fs9 = await r9Legs({ DM: sOnly, install: install9, quiet: true, legs: ['a', 'b', 'c'] });
+    ok(['a', 'b', 'c'].every((k) => fs9.some((n) => n.startsWith(`§R9 (${k}):`))), `mutant r9-serverid-only (65a28cd29's copy verdict: sessionOf — the server id alone): the row named by its conversation id, alone or beside a stale server id, is offered and restored — (a)(b)(c) RED (the server-id shape (e) is the base's own: green on 65a28cd29) (${fs9.length}: ${heads(fs9)})`);
+    const other = await dm9(D9s.replace(key, '    const sid = !w.openSpec && w.serverSessionId && census.live.some((s) => s.id === w.serverSessionId) ? String(w.serverSessionId) : doorSessionOf(w, census.live);\n'), 'r9-two-resolvers-verdict');
+    const fv = await r9Legs({ DM: other, install: install9, quiet: true, legs: ['f', 'g'] });
+    ok(fv.some((n) => n.startsWith('§R9 (f):')) && fv.some((n) => n.startsWith('§R9 (g):')), `mutant r9-two-resolvers (the verdict reads the server id first, the restore keeps its own ladder): where the two names disagree the verdict and the restore part — S's copy restored (its attach raised X's window), D's real window never built — (f)(g) RED (${fv.length}: ${heads(fv)})`);
+    const alive = "        // (desktop-record liveSessionOf — r9: a row whose session, so resolved, this page shows is a copy: never restored here)\n        const alive = liveSessionOf(ws, activeSessions);\n";
+    ok(L9s.includes(alive), 'mutant r9-two-resolvers (restore side): the patched lines exist in layout.js');
+    const LMr = (await import(pathToFileURL(M.write('src/lib/layout.js', L9s.replace(alive, "        const alive = (ws.serverSessionId && activeSessions.find((s) => s.id === ws.serverSessionId)) || liveSessionOf(ws, activeSessions);\n"), 'r9-two-resolvers-restore', { esm: true })).href)).LayoutManager;
+    const fr9 = await r9Legs({ LM: LMr, install: install9, quiet: true, legs: ['f', 'g'] });
+    ok(fr9.length === 1 && fr9[0].startsWith('§R9 (g):'), `mutant r9-two-resolvers (restore side: restoreState keeps its own order — the server id first): D's row passes the verdict, its restore attaches S and raises X's window — (g) RED, (f) green (the verdict settles it first) (${fr9.length}: ${heads(fr9)})`);
+    const list = "    const listed = (this.app.sidebar?._webuiSessions || []).filter((s) => s && s.id != null), named = new Set(listed.map((s) => String(s.id)));\n";
+    ok(D9s.includes(list), 'mutant r9-page-only: the patched line exists in desktop-manager.js');
+    const fp = await r9Legs({ DM: await dm9(D9s.replace(list, '    const listed = [], named = new Set();\n'), 'r9-page-only'), install: install9, quiet: true, legs: ['f', 'g'] });
+    ok(fp.length === 1 && fp[0].startsWith('§R9 (g):'), `mutant r9-page-only (the census without the server's live list — only the sessions this page shows): D's conversation id matches nothing, the row falls to S's server id — D's real window never built — (g) RED, (f) green (${fp.length}: ${heads(fp)})`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });

@@ -9,7 +9,7 @@ import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the 
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js';
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
-import { duplicatesOf, refusalKey, sessionOf, namesOf } from './desktop-record.js'; // PURE (userW inc-mw1ogdno-5jny): one conversation, one window entry; a refusal is said once
+import { duplicatesOf, refusalKey, namesOf, doorSessionOf } from './desktop-record.js'; // PURE (userW inc-mw1ogdno-5jny): one conversation, one window entry; a refusal is said once; a copy by the session its door attaches (r9)
 import { withoutMembers, withMembersBack, chainSyncKey } from './chain-layout.js'; // r2 (inc-mw1ogdno-5jny): a copy that leaves takes its place in its tab group with it; r4: a kept one keeps it
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
@@ -617,18 +617,41 @@ export class DesktopManager {
    *  shown here in another built window, and attachSession never builds a second window of a conversation (_focusExistingSession
    *  raises the first). Never built by an apply (layout.js), never waited for, ghosts from the moment the record names them (r5 O). */
   copiesOf(desk, rec = null) {
-    const out = [], wm = this.app.wm;
-    const shows = new Map(); // conversation → a built window that shows it
-    for (const w of wm.windows.values()) { const sid = w._openSpec?.action === 'attachSession' ? w._openSpec.serverId : null; if (sid && !shows.has(String(sid))) shows.set(String(sid), String(w.id)); }
-    if (!shows.size) return out;
+    const out = [], wm = this.app.wm, census = this._shownCensus();
+    if (!census.shows.size) return out;
     for (const st of [rec, this._savedStates.get(desk)]) {
       for (const w of (st && st.windows) || []) {
-        const id = rowId(w), sid = sessionOf(w);
-        if (!sid || wm.windows.has(id) || out.includes(id) || !shows.has(sid) || shows.get(sid) === id) continue;
+        const id = rowId(w);
+        if (wm.windows.has(id) || out.includes(id) || !this._isCopy(w, census)) continue;
         out.push(id);
       }
     }
     return out;
+  }
+
+  /** ONE CENSUS FOR EVERY COPY VERDICT (r9): `shows` = each session this page shows or is still attaching → the built window that
+   *  shows it; `live` = the live sessions the restore matches a row against, as this page knows them — the server's list (the
+   *  sidebar's active-sessions: what /api/active answers the restore), then each session this page shows or is still attaching
+   *  that the list does not name yet (its window's recipe: the conversation its attach was asked for). */
+  _shownCensus() {
+    const shows = new Map(), mine = [];
+    for (const w of this.app.wm.windows.values()) {
+      const spec = w._openSpec?.action === 'attachSession' ? w._openSpec : null;
+      if (!spec || !spec.serverId || shows.has(String(spec.serverId))) continue;
+      shows.set(String(spec.serverId), String(w.id));
+      mine.push({ id: String(spec.serverId), backend: spec.backend || 'claude', backendSessionId: spec.backendSessionId || null });
+    }
+    const listed = (this.app.sidebar?._webuiSessions || []).filter((s) => s && s.id != null), named = new Set(listed.map((s) => String(s.id)));
+    return { shows, live: listed.concat(mine.filter((s) => !named.has(s.id))) };
+  }
+  /** A COPY IS NAMED BY WHAT ITS RESTORE NAMES (r9 — the r8 acceptance: a row naming its conversation only by its id, or by a stale
+   *  server id beside it, was no copy here while the restore found that conversation's window by its id first — restored on a visit,
+   *  offered in the ⧉ list, its press told «did not appear» with the window on screen): `w` is a copy ⇔ the session its own door
+   *  attaches (desktop-record doorSessionOf — the restore's ladder for a row with no recipe, the recipe's session for one with) is
+   *  one this page shows in ANOTHER built window. */
+  _isCopy(w, census = this._shownCensus()) {
+    const sid = doorSessionOf(w, census.live);
+    return !!sid && census.shows.has(sid) && census.shows.get(sid) !== rowId(w);
   }
 
   /** A DESKTOP IS NEVER UNWRITABLE FROM A PAGE (r4 I): the hub refused this page's write of `d` because its rows disagree about a
@@ -822,9 +845,10 @@ export class DesktopManager {
    *  (session-lifecycle attachSession: the window shown, then the window still attaching, only then a held one). */
   revealHeldSession(serverId) {
     if (!serverId || this.app.stage?.isActive) return false;
+    const live = this._shownCensus().live; // an entry names the session its own door attaches (r9 — doorSessionOf: a recipe's session)
     for (const [desk, st] of this._savedStates) {
       if (desk === '__stage__' || desk === this._activeId || !this._desktops.some((x) => x.id === desk)) continue;
-      const e = (st?.windows || []).find((w) => w && w.openSpec && sessionOf(w) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
+      const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
       if (!e || this.copiesOf(desk).includes(String(e.winId || e.id))) continue;
       const id = String(e.winId || e.id);
       try { window.__vsOp?.('desktop-reveal-held', { desk, win: id }); } catch { }
@@ -865,7 +889,7 @@ export class DesktopManager {
     // nothing. The key is the session's `serverId`, never the conversation id (verify r2): a fork's window carries
     // its PARENT's backendSessionId in its openSpec, so the conversation id settled the parent's own never-opened
     // entry as a duplicate and dropped it from its desktop's record — attachSession would have built it.
-    const liveServerIds = new Set([...this.app.wm.windows.values()].map((w) => w._openSpec?.action === 'attachSession' ? w._openSpec.serverId : null).filter(Boolean));
+    const census = this._shownCensus(), liveServerIds = new Set(census.shows.keys()); // the copy verdicts' one census (r9)
     for (const ws of state?.windows || []) {
       const winId = ws.winId || ws.id;
       if (!winId || this.app.wm.windows.has(winId)) continue;
@@ -874,7 +898,9 @@ export class DesktopManager {
         // page was still attaching on another desktop, was restored on a visit — the restore's attach found that window and took the
         // person back to it ~1 s after their own switch, a reveal in flight retired, nothing said): the verdict of the openSpec door
         // below — a conversation this page already shows, attached or still attaching, is settled at once (a ghost of it: copiesOf)
-        if (liveServerIds.has(sessionOf(ws))) { noSpec.push(winId); continue; }
+        // …BY ANY NAME THE RESTORE READS (r9 — the r8 acceptance: a row naming it only by its conversation id, or by a stale server
+        // id beside it, was restored; its attach found the window on the other desktop): _isCopy, the restore's own ladder
+        if (this._isCopy(ws, census)) { noSpec.push(winId); continue; }
         // lane layout-stopped-window: built by its identity — attached, read-only or a placeholder, never 'unbuilt'; one already
         // being built (an earlier replay whose reads are still out — r2: two doors 50 ms apart built every window twice) is left to it
         const a = this._buildAttempts.get(String(winId));

@@ -252,6 +252,34 @@ const conversationOf = (w) => {
 };
 /** A session entry nothing can rebuild: no conversation and no server session (the restore matches by one of them). */
 const isNameless = (w) => isSession(w) && !conversationOf(w) && !sessionOf(w);
+/** THE LIVE SESSION A ROW'S RESTORE ATTACHES — layout.js restoreState's ladder, the ONE resolution (r9, userW inc-mw1ogdno-5jny —
+ *  the r8 acceptance: the copy verdict keyed on sessionOf while the restore matched the conversation id first, so a row naming its
+ *  conversation only by that id — a capture made while a resume's create was in flight — or by a stale server id beside it was
+ *  restored on a visit and offered in the ⧉ list while that conversation's window stood on another desktop): the conversation it
+ *  names (conversationOf; one equal to its serverSessionId is no name — a pre-2.105.2 spec's pollution) matched against a live
+ *  session's (`s.backendSessionId || s.claudeSessionId`, the same backend), else its serverSessionId, else its attach recipe's
+ *  serverId (a NAMELESS entry — lane layout-stale-record-sync). `live` = the sessions to match, in the server's order ({id, backend,
+ *  backendSessionId | claudeSessionId}). → that session, or null. */
+function liveSessionOf(w, live) {
+  if (!isSession(w)) return null;
+  const list = listOf(live), spec = w.openSpec && typeof w.openSpec === 'object' ? w.openSpec : {};
+  const backend = w.backend || spec.backend || 'claude', cid = conversationOf(w);
+  const find = (f) => list.find((s) => s && typeof s === 'object' && f(s)) || null;
+  return (cid && cid !== w.serverSessionId && find((s) => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === cid))
+    || (w.serverSessionId && find((s) => s.id === w.serverSessionId))
+    || (spec.action === 'attachSession' && spec.serverId && find((s) => s.id === spec.serverId))
+    || null;
+}
+/** THE SESSION A ROW'S OWN DOOR ATTACHES (r9 — every copy verdict reads it: desktop-manager copiesOf, _replayMissing,
+ *  revealHeldSession, the ⧉ list): a row with a recipe is rebuilt by its replay, which attaches the recipe's session while it lives —
+ *  sessionOf, as before (a fork's recipe carries its PARENT's conversation id until its first turn: never a key — verify r2); a row
+ *  with none by layout.js restoreState — liveSessionOf against `live`. → a server session id, or null. */
+const doorSessionOf = (w, live) => {
+  if (!isSession(w)) return null;
+  if (w.openSpec) return sessionOf(w);
+  const s = liveSessionOf(w, live);
+  return s && s.id != null ? String(s.id) : null;
+};
 /** What the person reads as the window's name: its title without the " — <cwd>" tail (layout.js savedWindowName's rule)
  *  and its openSpec's name — both (the title carries a custom name, the openSpec the first message's). */
 function namesOf(w) {
@@ -663,4 +691,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, liveSessionOf, doorSessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree };
