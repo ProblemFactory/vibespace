@@ -252,11 +252,11 @@ try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   ok(r2.outcome === 'same' && fetches().length === n1, 'a boot with the same {source, ref} as the record ⇒ no git call (compare, never re-pull)');
   fleet = { ...fleet, source: { git: URL_HTTPS, ref: shaB } };
   const r3 = await EDF.bootFleet();
-  ok(r3.outcome === 'installed' && fetches().length === n1 + 1 && fetches().at(-1).argv.at(-1) === shaB && rowF().version === '0.1.2' && rowF().trustedBy === 'fleet' && regFile().trust[EID].sha === shaB, 'the fleet moves its pin ⇒ the boot installs THAT sha, and the fleet\'s trust moves to it');
+  ok(r3.outcome === 'updated' && r3.plugin === EID && rowF().install.prevSha === shaA && fetches().length === n1 + 1 && fetches().at(-1).argv.at(-1) === shaB && rowF().version === '0.1.2' && rowF().trustedBy === 'fleet' && regFile().trust[EID].sha === shaB, 'the fleet moves its pin ⇒ the boot installs THAT sha («updated», the record keeps the sha it moved from — lane fleet-plugin-catalog), and the fleet\'s trust moves to it');
   // ④ a TAG is never the trust anchor: installed, the owner asked once
   fleet = { ...fleet, source: { git: URL_HTTPS, ref: 'v0.1.1' } };
   const r4 = await EDF.bootFleet();
-  ok(r4.outcome === 'installed' && rowF().version === '0.1.1' && !rowF().trusted && rowF().trustedBy === null && rowF().consentRequired && !rowF().enabled, 'a fleet ref that is a TAG ⇒ installed but NOT pre-trusted (a tag can move — only a sha anchors D2): disabled, the owner enables it', rowF() && { trusted: rowF().trusted, enabled: rowF().enabled });
+  ok(r4.outcome === 'unpinned' && EDF.fleetView().code === 'fleet_ref_not_sha' && rowF().version === '0.1.1' && !rowF().trusted && rowF().trustedBy === null && rowF().consentRequired && !rowF().enabled, 'a fleet ref that is a TAG ⇒ installed but NOT pre-trusted (a tag can move — only a sha anchors D2): disabled, the owner enables it; the run says it by name (outcome «unpinned», fleet_ref_not_sha — lane fleet-plugin-catalog)', rowF() && { trusted: rowF().trusted, enabled: rowF().enabled });
   fleet = { ...fleet, source: { git: URL_HTTPS, ref: shaA } };
   await EDF.bootFleet();
   ok(rowF().trustedBy === 'fleet' && rowF().enabled, '…back on a sha ⇒ trusted by the fleet again');

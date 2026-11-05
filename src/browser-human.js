@@ -414,6 +414,7 @@ function humanRefusalText(code, facts = {}, tIn) {
     case 'not_web': return t('Only web addresses');
     case 'not_your_tab': return t("That tab is a conversation's, not yours — open that conversation's live view and take over to use it.");
     case 'tabs_unreadable': return t('Your tabs could not be read just now — try again.');
+    case 'engine_kernel_landing': return t('The browser kernel is being replaced — try again in a moment.'); // lane fleet-plugin-catalog r5: the engine's new kernel is between its renames — the start is refused, never beside it
     // the .197 integration (browse-yourself × browser-stuck): the human Restart of an unresponsive page never stops HIS page either
     case 'browsing_yourself': if (f.act === 'restart') return t('You are browsing “{label}” yourself — press Close in your browsing window (or Quit the whole browser) first, then restart it.', { label });
       return f.act === 'stop' ? t('You are browsing “{label}” yourself — stop it from your browsing window (Quit the whole browser) or with Stop on its row in the Agent browser panel.', { label }) : t('You are browsing “{label}” yourself — press Close in your browsing window (or Quit the whole browser) first, then delete it.', { label });

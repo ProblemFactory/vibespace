@@ -981,6 +981,9 @@ function createSessionMessages(session, sessionId) {
     engineDistribution = require('./engine-distribution.js').create({ dataDir: path.join(rootDir, 'data'), engines: browserEngines, loader: pluginLoader, fleetFacts: () => { try { return require('./cluster-presets.js').sharedPresets().fleet(); } catch { return null; } },
       env: () => process.env, userTodos: () => userTodos, notify: () => { try { bcastAll({ type: 'browser-engines-updated' }); } catch { /* no clients */ } }, log: console,
       integrations: () => integrations }); // lane kernel-asset-credential: the Plugin Git credential for a kernel on the plugin's own repository
+    // lane fleet-plugin-catalog: THE CLUSTER'S PIN, LIVE — a presets change that moves fleet.json's browserEngine runs the fleet's
+    // job again (install / update at the new sha, its kernel), no restart
+    try { engineDistribution.follow(require('./cluster-presets.js').sharedPresets()); } catch (e) { console.warn(`[plugins] the fleet's engine plugin follows no presets change — a new pin waits for a restart (${e && e.message})`); }
     { const ids = browserBackend.registerTests(); if (ids.length) console.log(`[browser] key rows' Test runners registered: ${ids.join(', ')}`); }
     // P6 (§6.2 / §6.5 / D6): the CDP-mediating proxy — LAZY (listens on
     // nothing until the first mediated lease), owned by the keeper (its
@@ -1471,6 +1474,6 @@ function createSessionMessages(session, sessionId) {
 
   return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
-    bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { if (r && r.plugin) console.log(`[plugins] the fleet's engine plugin ${r.plugin}: ${r.outcome}${r.kernel ? ` · kernel ${r.kernel.ok === false ? `not downloaded [${r.kernel.code}]` : 'ready'}` : ''}`); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
+    bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }
 module.exports = { create };

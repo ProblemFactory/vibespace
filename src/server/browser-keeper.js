@@ -1182,7 +1182,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // L1b r2: an OWNER's program reads the record by ITS stamp — a version measured for another file is not this one's
     const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id, f.source === 'user' ? { source: 'user', stamp: f.binaryStamp || null } : {}) : null;
     if (!k) return f;
-    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, measureFailed: !!(f.installed && k.measureError), kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need, credential: k.credential || null } };
+    // lane fleet-plugin-catalog r4 (N2): the WHOLE kernel fact — every field kernelFact gains (r3's `landing`, r4's `discarded`) reaches
+    // the engines view, Change build… and New profile… (a hand-copied list dropped `landing`: the card's words never showed)
+    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, measureFailed: !!(f.installed && k.measureError), kernel: { ...k } };
   }
   /** The engine table as the USER's surfaces read it (Change build…, New profile…, Settings): each row's probe FACT, never its
    *  path (the kernel's place stays here). A paired machine's dialog has none. */
@@ -1252,7 +1254,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  MARKED on the record + ONE For-you item; VibeSpace never starts Chrome in its place), then its launch options for THIS
    *  profile (the kernel VibeSpace resolved, the profile's directory) → `{executablePath, args, env, engine:{id, version,
    *  label}}`. A timeout (browser_engine_unanswered) is refused by name and marks nothing (the next launch asks again). */
+  const placeHolds = new Map(); // lane fleet-plugin-catalog r2 (N3): profile id → its start's hold on its engine's kernel place
+  const dropPlaceHold = (pid) => { const r = placeHolds.get(pid); if (r) { placeHolds.delete(pid); try { r(); } catch { /* released */ } } };
   async function launchEngineOf(p, c) {
+    // lane fleet-plugin-catalog: a kernel that waited beside its place (downloaded while a browser ran the previous one) takes it
+    // NOW when no browser runs the previous one — this start is «the next browser start»
+    // round 2 (N3): then THIS start HOLDS the place until its spawn (released when the start settles — placeHolds) — no landing swaps the
+    // kernel between this start's in-use check and its spawn. Round 3 (N2): ONE ask (`beforeStart`) — the waiting kernel lands only
+    // when that is POSSIBLE (a browser on the kernel, another start holding it ⇒ this start goes on at once, no wait); it waits only
+    // for a landing in progress, bounded ONCE (≤ 30 s for the whole ask) and said (the journal; the engine card meanwhile)
+    { const d0 = p.host ? null : eds();
+      if (d0 && typeof d0.beforeStart === 'function') { try { dropPlaceHold(p.id); const b = await d0.beforeStart(c.id); placeHolds.set(p.id, b.release); } catch (e) {
+        // r4: a landing still in progress past the start's bound (the place may be half-landed) ⇒ the start is REFUSED by that name —
+        // never spawned beside it; any other answer: no hold — the in-use check alone; asked again at the next start
+        if (e && e.code === 'engine_kernel_landing') throw namedError(e.code, e.message, { engine: c.id }); } } }
     let engine = await engineFactOf(c.id, { host: p.host || null });
     // lane engine-distribution: the kernel's version MEASURED once before its first launch (cached per receipt — 5 s at most);
     // a kernel not there yet is downloaded on this FIRST USE (in the background — the launch is refused by name meanwhile)
@@ -1268,6 +1283,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       else { try { fetching = await d.installKernel(c.id, { by: 'first-use', answer: true }); } catch (e) { fetching = e && e.code === 'install_running' ? d.kernelFact(c.id) : null; refused = fetching ? null : e; if (refused) log.warn?.(`[browser] ${p.id} "${p.label}": its engine's kernel cannot be downloaded — ${e && e.message}`); } }
       // round 3: the previous kernel PUT BACK in its place (a landing stopped between its renames) — no download: asked again
       if (fetching && fetching.restored) { fetching = null; engine = await engineFactOf(c.id, { host: p.host || null }); }
+    } else if (d && engine && !engine.code && engine.installed && engine.source !== 'user' && typeof d.kernelDue === 'function') {
+      // lane fleet-plugin-catalog: the kernel in its place is not the one named now (the cluster's new kernel, the plugin's new
+      // kernel.json) ⇒ THIS start runs the current one and the new one downloads beside it — it serves the next start
+      try { const due = await d.kernelDue(c.id); if (due.due && d.kernelFact(c.id).state !== 'downloading') d.installKernel(c.id, { by: 'first-use' }).then((r) => { if (r && r.started) log.log?.(`[browser] ${p.id} "${p.label}": its engine's kernel ${due.version} is named — downloading beside the current one (it serves the next start)`); }, (e) => log.warn?.(`[browser] ${p.id} "${p.label}": its engine's new kernel cannot be downloaded — ${e && e.message}`)); } catch { /* the current kernel runs; asked again at the next start */ }
     }
     // round 4: the probe finds the kernel IN its place while the record holds none (dropped once) ⇒ measure — the record follows it
     const unrecorded = !!(engine && engine.kernel && engine.kernel.state !== 'installed' && engine.kernel.state !== 'downloading');
@@ -3061,7 +3080,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return browserView(rec);
     })();
     starting.set(profileId, p0);
-    return p0.finally(() => { if (starting.get(profileId) === p0) starting.delete(profileId); });
+    return p0.finally(() => { if (starting.get(profileId) === p0) starting.delete(profileId); dropPlaceHold(profileId); }); // r2 (N3): the start settled — its kernel hold ends
   }
   /**
    * takeover C3 (§5.1): THE ENTRY — a conversation's first page verb with no
@@ -4235,7 +4254,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return browserView(rec);
     })();
     starting.set(profileId, p0);
-    try { return await p0; } finally { if (starting.get(profileId) === p0) starting.delete(profileId); }
+    try { return await p0; } finally { if (starting.get(profileId) === p0) starting.delete(profileId); dropPlaceHold(profileId); } // r2 (N3): the start settled — its kernel hold ends
   }
   /** P4: does a browser answer CDP at this hub-side url? One bounded GET of
    *  /json/version (the endpoint every CDP browser serves); `{ok, browser}`

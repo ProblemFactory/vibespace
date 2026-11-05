@@ -359,7 +359,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
         capabilitySummary: m ? capabilitySummary(m) : [], capabilitiesHash: hashOf(r),
         needsConsent: needsConsent(m), trusted: isTrusted(r), consentRequired: needsConsent(m) && !isTrusted(r), trustedAt: registry.trust[r.id]?.trustedAt || null,
         trustedBy: isTrusted(r) ? (registry.trust[r.id].by === 'fleet' ? 'fleet' : 'user') : null, // lane engine-distribution (D2): «Installed and trusted by the cluster»
-        install: inst ? { source: inst.source, value: inst.value, installedAt: inst.installedAt, updatedAt: inst.updatedAt || null, ref: inst.ref || null, sha: inst.sha || null, credential: inst.credential || null, by: inst.by || 'user' } : null,
+        install: inst ? { source: inst.source, value: inst.value, installedAt: inst.installedAt, updatedAt: inst.updatedAt || null, ref: inst.ref || null, sha: inst.sha || null, credential: inst.credential || null, by: inst.by || 'user', prevSha: inst.prevSha || null } : null, // lane fleet-plugin-catalog: prevSha = the cluster's previous pin
         enabled: !!r.enabled, valid: !!m, errors: r.errors || [], warnings: r.warnings || [], notice: r.notice || null,
         state: m?.server ? r.state : (r.enabled ? 'running' : 'stopped'), lastError: r.lastError || null,
       };
@@ -415,8 +415,11 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     const sameContent = !!prevInst && !!prevInst.contentHash && prevInst.contentHash === r.contentHash;
     const reconsent = !(sameSource && sameContent) && (!!registry.enabled[r.id] || !!registry.trust[r.id]);
     if (reconsent) { registry.enabled[r.id] = false; delete registry.trust[r.id]; }
+    // lane fleet-plugin-catalog: the cluster moved its pin ⇒ the record keeps the sha it moved FROM (the row: «Updated by the
+    // cluster · <old> → <new> · <when>»); any other install drops it
+    const prevSha = by === 'fleet' && r.source === 'git' && prevInst && prevInst.source === 'git' && prevInst.sha && r.sha && prevInst.sha !== r.sha ? prevInst.sha : null;
     registry.installs[r.id] = { source: r.source, value: r.value, contentHash: r.contentHash || null, installedAt: prevInst?.installedAt || Date.now(), updatedAt: prevInst ? Date.now() : null,
-      ...(r.source === 'git' ? { ref: r.ref || null, sha: r.sha || null, credential: credential || null, by: by === 'fleet' ? 'fleet' : 'user' } : {}) };
+      ...(r.source === 'git' ? { ref: r.ref || null, sha: r.sha || null, credential: credential || null, by: by === 'fleet' ? 'fleet' : 'user', ...(prevSha ? { prevSha } : {}) } : {}) };
     // D2: the cluster's install of the id it names, at the sha it pins ⇒ trusted + enabled, the trust bound to this package
     const f = by === 'fleet' ? fleetNamed() : null;
     const fleetTrust = !!f && f.plugin === r.id && /^[0-9a-f]{40}$/.test(f.ref) && r.sha === f.ref && !!r.contentHash;

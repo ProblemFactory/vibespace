@@ -12,7 +12,9 @@
  *   sha256}` (the cluster's own artifact host) is MERGED over the package's, field by field (round 2: a fleet URL that is not
  *   https is refused by name — engine_url_not_https — never swapped for the package's; the sha256 always authenticates).
  *   THE PLAN (`kernelPlan`): every path inside the kernel's own folder — `<root>/<tag>.part`, `<root>/.unpack-<tag>/`,
- *   `<root>/<tag>/` (= dirname of the registry's kernelPath), `<root>/.removing-<tag>/`, the receipt beside `chrome`; for an
+ *   `<root>/<tag>/` (= dirname of the registry's kernelPath), `<root>/.removing-<tag>/`, `<root>/.next-<tag>/` (lane
+ *   fleet-plugin-catalog: a new kernel that landed while a browser runs the one in its place WAITS there, receipt inside, for
+ *   the next browser start — never swapped under a running browser), the receipt beside `chrome`; for an
  *   install, the Node it unpacks on (round 2: a zlib without zstd ⇒ engine_node_unsupported BEFORE any byte is fetched — for
  *   a tar.zst; a tar.gz unpacks on every Node).
  *   THE ARCHIVE (`tarParser` + `tarEntryVerdict` + `tarShapeVerdict`): a tar stream read header by header (ustar, GNU long
@@ -243,7 +245,7 @@ function archiveFormatOf(doc, tag = 'linux-x64') {
 }
 /** THE PLAN — the paths of one kernel install, all inside the kernel's root folder (`<data>/plugins-state/<id>/kernel/`):
  *  `kernelPath` = the registry's `<root>/<tag>/chrome`. → `{ok, root, tag, targetDir, exe, part, unpackDir, removingDir,
- *  receipt}` | a refusal (a path of another shape is never planned). `unpack` = the Node an INSTALL unpacks on, `{zstd, node}`
+ *  nextDir, receipt}` | a refusal (a path of another shape is never planned). `unpack` = the Node an INSTALL unpacks on, `{zstd, node}`
  *  (the ORCH hands in `typeof zlib.createZstdDecompress === 'function'` + process.versions.node): no zstd ⇒
  *  engine_node_unsupported, naming the floor and the running Node — before any byte is fetched; `format` = kernel.json's
  *  archive format (archiveFormatOf) — a 'tar.gz' needs no zstd (zlib gunzip is in every Node). */
@@ -258,7 +260,7 @@ function kernelPlan({ kernelPath = '', unpack = null, format = null } = {}) {
     const node = clip(unpack.node, 40) || null;
     return { ok: false, code: 'engine_node_unsupported', node, need: NODE_FLOOR, error: `this VibeSpace runs on Node ${node || '(unknown)'}, whose zlib has no zstd — a browser engine's kernel (a tar.zst archive) needs Node ${NODE_FLOOR} or later to unpack; nothing was downloaded` };
   }
-  return { ok: true, root, tag, targetDir, exe: k, part: `${root}/${tag}.part`, unpackDir: `${root}/.unpack-${tag}`, removingDir: `${root}/.removing-${tag}`, receipt: `${targetDir}/${RECEIPT_FILE}` };
+  return { ok: true, root, tag, targetDir, exe: k, part: `${root}/${tag}.part`, unpackDir: `${root}/.unpack-${tag}`, removingDir: `${root}/.removing-${tag}`, nextDir: `${root}/.next-${tag}`, receipt: `${targetDir}/${RECEIPT_FILE}` };
 }
 
 // ── THE TAR READER ──────────────────────────────────────────────────────────────────────────────────────────────────

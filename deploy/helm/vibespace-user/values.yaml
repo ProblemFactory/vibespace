@@ -278,9 +278,17 @@ presets:
   relayUrl: ""
 
 # THE FLEET'S CUSTOM BROWSER KERNEL (lane engine-plugin; docs/design-custom-browser-plugin.zh.md
-# §1.4): enabled ⇒ rendered into this release's override fleet.json as ONE key
-# `browserEngine` {plugin: "vibespace.custom-browser", default, source, kernel}
-# beside the relay page (no env: a fleet fact moves live, never at a restart).
+# §1.4). THE FLEET'S ROAD IS THE CLUSTER SECRET, not this block (lane
+# fleet-plugin-catalog, app ≥ 2.369.383): the same `browserEngine` object in the
+# `vibespace-cluster-presets` Secret's `fleet` key (fleet.json — the fleet admin
+# writes it; deploy/README.md «The fleet's browser kernel»). Every running pod
+# follows a new pin LIVE — the plugin updated at the new sha, its kernel
+# downloaded (a browser running the old kernel keeps it; the next start takes the
+# new one) — no helm upgrade, no restart. Leave this block `enabled: false` then.
+# This block pins ONE release: enabled ⇒ rendered into this release's override
+# fleet.json as ONE key `browserEngine` {plugin: "vibespace.custom-browser",
+# default, source, kernel} beside the relay page, which wins over the cluster's
+# as ONE field (a plugin sha and its kernel are a pair — never mixed).
 # `default: true` makes the kernel the engine of every NEW agent browser on the
 # pod (Settings → Agent browser → «Default browser engine» says «set by the
 # cluster preset»; a value the user picks there wins; existing profiles keep

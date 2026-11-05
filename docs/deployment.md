@@ -129,3 +129,7 @@ VIBESPACE_PASSWORD=yourpassword PORT=3456 node server.js
 ```
 
 Put nginx/caddy with TLS in front, point teammates at the URL, share the password.
+
+## Kubernetes fleet: the browser kernel is a plugin the cluster names
+
+On the Kubernetes chart (deploy/helm/vibespace-user, one pod per user) the fleet's custom browser kernel is the plugin `vibespace.custom-browser` plus the kernel archive its `kernel.json` names. Name it ONCE for every pod in the cluster Secret `vibespace-cluster-presets`, key `fleet` (`fleet.json` → `browserEngine {plugin, source {git, ref = a full commit sha}, kernel {url, sha256}, default, preinstall}`; the fleet admin writes it). Each running pod (app ≥ 2.369.383) follows a change within ~2 minutes with no helm upgrade and no restart: the plugin is updated to the new sha with the cluster's `plugin-git` credential and trusted at that sha only; the kernel is downloaded right away (`preinstall`) or at the next browser start; a browser already running keeps its kernel and the next start uses the new one. The chart's `customBrowser` values pin ONE release (its override wins); leave them off for the fleet. Full steps: deploy/README.md «The fleet's browser kernel — a plugin the cluster names».

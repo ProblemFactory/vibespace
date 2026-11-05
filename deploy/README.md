@@ -383,6 +383,64 @@ minute — no helm upgrade, no restart.** The server logs
   `*.ts.net` included — or an https host under its `data-allow`; it shows the
   code anywhere else.
 
+### The fleet's browser kernel — a plugin the cluster names
+
+The custom browser kernel is a **plugin** (`vibespace.custom-browser`, from
+its git repository) plus the kernel archive its `kernel.json` names. The
+fleet names it in the cluster Secret's `fleet` key — the same Secret and file
+as the relay page:
+
+```bash
+cat > fleet.json <<'JSON'
+{"relayUrl": "https://admin.<domain>/relay/",
+ "browserEngine": {"plugin": "vibespace.custom-browser", "default": true, "preinstall": true,
+   "source": {"git": "https://<git host>/<org>/<plugin repository>.git", "ref": "<a FULL 40-hex commit sha>"},
+   "kernel": {"url": "", "sha256": ""}}}
+JSON
+kubectl -n vibespace create secret generic vibespace-cluster-presets \
+  --from-file=gdriveClients=gdrive-clients.json \
+  --from-file=integrations=integrations.json \
+  --from-file=fleet=fleet.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The plugin repository's credential is the `plugin-git` entry of the same
+Secret's `integrations.json` (`{"id": "plugin-git", "key": "default", "values":
+{"host": "<git host>", "token": "<read-only token>"}}`). The fleet admin
+(vibespace-admin) writes `fleet.json`; it is the other half of this road.
+
+**A kernel bump is a Secret patch: every running pod follows — no helm
+upgrade, no restart** (app ≥ 2.369.383):
+
+- A new `ref` (the plugin's commit with its new `kernel.json`), a new
+  `kernel {url, sha256}` (the fleet's own artifact host), `default` or
+  `preinstall` flipped, the key removed: each pod sees it within ~2 min (the
+  presets watch) and logs `[presets] changed (…): browser engine changed (now
+  vibespace.custom-browser, …)`, then `[plugins] fleet plugin: cluster pins
+  <sha> — updating vibespace.custom-browser from <old sha>`.
+- The plugin is updated to the new sha with the `plugin-git` credential. The
+  cluster's trust follows the pin exactly: the package at the new full sha is
+  trusted by the cluster, the old one is not (the moment the pin moves). A tag
+  or branch is installed but never trusted (the owner enables it by hand). ⚙ →
+  Plugins reads «Installed and trusted by the cluster · <sha>», after a change
+  «Updated by the cluster · <old> → <new> · <when>».
+- The kernel: when the kernel in place is not the one the pin names now, it is
+  downloaded right away with `"preinstall": true`, else at the next browser
+  start (that start still runs the current kernel). A browser running the
+  current kernel is never touched — the new kernel waits beside it and serves
+  the next browser start (⚙ → Plugins and Settings → Agent browser say so).
+- One run at a time per pod; a change during a run queues one more; a failed
+  step (git refused, the kernel host down) is said by name (⚙ → Plugins + one
+  For-you notice) and tried again at the next change of the Secret or the next
+  restart — never in a loop.
+- `default: true` makes it the engine of every NEW agent browser (a value the
+  person picks in Settings → Agent browser wins); existing profiles keep theirs.
+- The chart's `customBrowser` block renders the same object into ONE release's
+  override (`override/fleet.json`), which wins over the cluster's as one field
+  (a plugin sha and its kernel are a pair). Use it only to pin one pod; for the
+  fleet leave it `enabled: false`. An app older than 2.369.383 reads the
+  engine only at boot: there a new pin needs a pod restart.
+
 ### Register the redirect URIs — your own Google, Lark or Slack app
 
 Running VibeSpace outside the fleet with your OWN vendor app (your own hub, your

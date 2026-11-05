@@ -53,14 +53,74 @@ export function engineNote(e, t) {
     if (k && k.state === 'failed' && k.code === 'engine_node_unsupported') return t(i18nKey('{plugin} · its kernel needs Node {need} or later to unpack — this VibeSpace runs on Node {node}; nothing was downloaded'), { plugin, need: String(k.need || '22.15'), node: String(k.node || '?') });
     if (k && k.state === 'failed' && k.code === 'engine_kernel_aside') return t(i18nKey('{plugin} · its previous kernel is set aside and could not be put back in its place — VibeSpace tries again at the next start'), { plugin });
     if (k && k.state === 'failed' && k.code) return t(i18nKey('{plugin} · its kernel could not be downloaded: {why}'), { plugin, why: kernelFailWords(k.code, t) }) + (/^(?:vault_locked|kernel_credential_unusable|kernel_asset_browser_form)$/.test(k.code) ? '' : road);
-    return t(i18nKey('{plugin} · its kernel is not installed on this computer.'), { plugin });
+    return t(i18nKey('{plugin} · its kernel is not installed on this computer.'), { plugin }) + (k && k.discarded ? ' · ' + discardedWords(k.discarded, t) : ''); // r4 (N4)
   }
   if (!e.executable) return t(i18nKey("{plugin} · its kernel can't be run."), { plugin });
-  const verified = e.integrity && e.integrity.verified === true ? ' · ' + t(i18nKey('verified')) : '';
+  // lane fleet-plugin-catalog: a new kernel downloaded while a browser ran this one — a running browser is never swapped under
+  // r3 (N2): a start waiting for the new kernel to land says so (bounded) — before that, the kernel that waits beside the running one
+  // r4 (N4): the last download DISCARDED at its landing says why (else nothing on any surface the owner sees did) — r5 (m1): BESIDE
+  // the kernel that waits (a refused staging keeps it; the card says both) — r6 (n4): ONE version, ONE sentence: a discarded download
+  // of the very kernel that waits is said as a SECOND download of it
+  const nx = k && k.next && k.next.version ? k.next : null, dk = k && k.discarded ? k.discarded : null;
+  const again = !!(nx && dk && (dk.version === nx.version || (dk.sha256 && dk.sha256 === nx.sha256)));
+  const kept = nx ? ' · ' + nextKernelWords(nx, t) : '', gone = dk ? ' · ' + discardedWords(dk, t, { again }) : '';
+  const verified = (e.integrity && e.integrity.verified === true ? ' · ' + t(i18nKey('verified')) : '') + (k && k.landing ? ' · ' + t(i18nKey('waiting for the new kernel to land (≤ {s} s)'), { s: String(k.landing.waitS) }) : kept + gone);
   if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) }) + verified;
   if (e.version) return t(i18nKey('{plugin} · version {version}'), { plugin, version: String(e.version) }) + verified;
   if (e.declaredVersion) return t(i18nKey('{plugin} · declared {version} (not measured)'), { plugin, version: String(e.declaredVersion) }) + verified;
   return t(i18nKey('{plugin} · the kernel did not say its version'), { plugin }) + verified;
+}
+/** lane fleet-plugin-catalog r4 (N4): a download DISCARDED at its landing (`kernelFact().discarded`) — why, in the owner's words.
+ *  r6 (n4): `again` — it was a second download of the kernel that waits (the card names that version once); (n3) `lost` — a waiting
+ *  kernel a stop of VibeSpace cut off between its renames, which the record no longer names. */
+export function discardedWords(d, t, { again = false } = {}) {
+  const why = d && d.why === 'untrusted' ? t(i18nKey('its package was no longer trusted when it arrived'))
+    : d && d.why === 'stale' ? (d.mover === 'cluster' ? t(i18nKey('the cluster moved its pin while it downloaded')) : t(i18nKey('its plugin named another kernel while it downloaded')))
+      : d && d.why === 'lost' ? t(i18nKey('VibeSpace stopped while setting it beside its place'))
+        : t(i18nKey('its plan changed as it landed'));
+  if (again) return t(i18nKey('a second download of it was discarded — {why}'), { why });
+  return t(i18nKey('its new kernel {version} was discarded — {why}'), { version: String((d && d.version) || ''), why });
+}
+/** lane fleet-plugin-catalog: a new kernel that WAITS beside the running one (`kernelFact().next`). r8 (s3): one that could not
+ *  be read when last asked (`next.unread` — the error) says so, never «it serves the next browser start». */
+export function nextKernelWords(next, t) {
+  if (next && next.unread) return t(i18nKey('the waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start'), { version: String(next.version || ''), code: String(next.unread) });
+  return t(i18nKey('new kernel {version} downloaded — it serves the next browser start'), { version: String((next && next.version) || '') });
+}
+const short = (sha) => String(sha || '').slice(0, 12);
+/** lane fleet-plugin-catalog: THE CLUSTER'S PLUGIN ROW (⚙ → Plugins) — `p` = a /api/plugins/manifests row, `fleet` = its `fleet`
+ *  (the engine distribution's last run, its kernel as the record holds it now), `when` = a time → words. → `{fact, line}`:
+ *  `fact` = the row's trust line («Installed and trusted by the cluster · <sha>» / «Updated by the cluster · <old> → <new> ·
+ *  <when>»; round 2: «waiting for your consent — its kernel is not fetched» for the cluster's package it does not trust — r3: with
+ *  its door «enable it in ⚙ → Plugins → <id>»; r3 (N4): the cluster's repository holding ANOTHER plugin, on its rows; else null),
+ *  `line` = the panel's fleet line above the rows (a refusal by name, the kernel that serves the next start; r3 (N5): a tag pin's
+ *  words follow trust NOW — `fleet.trusted`; null when there is nothing to say). */
+export function fleetPluginWords(p, fleet, t, when = (ms) => new Date(ms).toISOString()) {
+  const f = fleet && typeof fleet === 'object' ? fleet : null;
+  const inst = p && p.install ? p.install : null;
+  // round 2 (N1, D2 whole): the cluster's run fetched nothing for a package it does not trust — its kernel waits for the owner's consent
+  const consent = !!(f && f.kernel && f.kernel.state === 'untrusted');
+  // round 3 (N4): the cluster's repository holds ANOTHER plugin — nothing of the named one to consent to: its own words, never the consent ones
+  const other = f && f.plugin && f.outcome === 'other-id' ? t(i18nKey("The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json"), { got: String(f.got || '?'), plugin: f.plugin }) : null;
+  let fact = null;
+  if (p && p.trustedBy === 'fleet') {
+    fact = inst && inst.prevSha && inst.sha && inst.updatedAt ? `${t(i18nKey('Updated by the cluster'))} · ${short(inst.prevSha)} → ${short(inst.sha)} · ${when(inst.updatedAt)}`
+      : t(i18nKey('Installed and trusted by the cluster')) + (inst && inst.sha ? ` · ${short(inst.sha)}` : '');
+  } else if (p && other && (p.id === f.plugin || p.id === f.got)) fact = other;
+  else if (p && consent && f.plugin === p.id) fact = t(i18nKey('waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → {plugin}'), { plugin: p.id }); // r3: the door, by name
+  let line = null;
+  if (f && f.plugin) {
+    if (f.outcome === 'failed') line = t(i18nKey("The cluster's plugin {plugin} could not be installed: {error}"), { plugin: f.plugin, error: `${f.error || ''}${f.code ? ` [${f.code}]` : ''}` });
+    else if (other) line = other;
+    else if (f.outcome === 'unpinned' && f.trusted === true) line = t(i18nKey('The cluster names {plugin} at «{ref}» (not a full sha, so the cluster does not vouch for it); you enabled it yourself — its kernel follows your consent'), { plugin: f.plugin, ref: String(f.ref || '') }); // r3 (N5)
+    else if (f.outcome === 'unpinned') line = t(i18nKey('The cluster names {plugin} at «{ref}» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → {plugin}'), { plugin: f.plugin, ref: String(f.ref || '') }) + (consent ? ` · ${t(i18nKey('waiting for your consent — its kernel is not fetched'))}` : '');
+    else if (consent) line = t(i18nKey("The cluster's plugin {plugin}: waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → {plugin}"), { plugin: f.plugin });
+    else if (f.kernel && f.kernel.state === 'staged' && f.kernel.unread) line = t(i18nKey("The cluster's plugin {plugin}: its waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start"), { plugin: f.plugin, version: String(f.kernel.version || ''), code: String(f.kernel.unread) }); // r8 (s3)
+    else if (f.kernel && f.kernel.state === 'staged') line = t(i18nKey("The cluster's plugin {plugin}: new kernel {version} downloaded — a browser running the current kernel keeps it; the next browser start uses the new one"), { plugin: f.plugin, version: String(f.kernel.version || '') });
+    else if (f.kernel && f.kernel.state === 'due') line = t(i18nKey("The cluster's plugin {plugin}: new kernel {version} — downloaded at the next browser start, which still runs the current one"), { plugin: f.plugin, version: String(f.kernel.version || '') });
+    else if (f.kernel && f.kernel.state === 'failed') line = t(i18nKey("The cluster's plugin {plugin}: its new kernel could not be downloaded [{code}] — tried again at the cluster's next change, a restart or the next browser start"), { plugin: f.plugin, code: String(f.kernel.code || '') });
+  }
+  return { fact, line };
 }
 /** lane engine-spi-egress L1b: why the owner's program cannot run, by the core's `why` (never its path). */
 function userWhyWords(why, t) {
@@ -267,6 +327,7 @@ export function buildRefusalWords(r, t) {
     case 'browser_engine_protocol': return t(i18nKey('That engine speaks another version of the engine protocol — update the plugin or VibeSpace.'));
     case 'browser_engine_unanswered': return t(i18nKey("That engine's plugin did not answer — restart it in ⚙ → Plugins."));
     case 'browser_engine_env': return t(i18nKey('That engine asked to set environment variables VibeSpace does not allow.'));
+    case 'engine_kernel_landing': return t(i18nKey('The browser kernel is being replaced — try again in a moment.')); // lane fleet-plugin-catalog r5: a start refused beside a half-landed kernel
     default: return null;
   }
 }

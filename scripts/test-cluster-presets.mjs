@@ -741,6 +741,46 @@ console.log('§6 fleet.json browserEngine — the fleet\'s custom browser kernel
   rg.stop();
 }
 
+// §7 lane fleet-plugin-catalog (the owner 2026-11-05: 「内核不是插件吗？把内核那套放到 admin 里」): the fleet's engine plugin lives in
+// the CLUSTER layer (the admin's Secret) first; a release override may still pin its own. The cluster alone, the override alone,
+// both (the override's browserEngine wins as ONE field — a plugin sha and its kernel are a pair; the relay page beside it still
+// merges by itself), and a pin change seen live with the field named («browser engine changed»).
+console.log('§7 fleet.json browserEngine — the cluster layer, the override, both; a new pin is a change event');
+{
+  const EID = 'vibespace.custom-browser';
+  const pin = (ref, over = {}) => ({ plugin: EID, default: true, preinstall: false, source: { git: 'https://git.fleet.example.test/acme/engine.git', ref }, kernel: { url: '', sha256: '' }, ...over });
+  const S1 = 'a1'.repeat(20), S2 = 'b2'.repeat(20), SR = 'c3'.repeat(20);
+  const ROWS = { 'gdrive-clients.json': [g('org1', SECRET_A, 'Org')] };
+  const RELAY = 'https://admin.fleet.example.test/relay/';
+  const read = (files) => { const d = fs.mkdtempSync(path.join(ROOT, 'fpc-')); project(d, { ...ROWS, ...files }); const r = CP.create({ dir: d, log: capture().log }); const out = r.fleet(); r.stop(); return out; };
+  const onlyCluster = read({ 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S1) } });
+  const onlyRelease = read({ 'override/fleet.json': { browserEngine: pin(SR, { default: false }) } });
+  const both = read({ 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S1, { preinstall: true }) }, 'override/fleet.json': { browserEngine: pin(SR, { default: false }) } });
+  ok(onlyCluster.browserEngine.source.ref === S1 && onlyCluster.browserEngine.default === true && onlyCluster.relayUrl === RELAY, 'the CLUSTER layer alone (the admin\'s Secret) names the engine plugin at its pin — every pod reads it');
+  ok(onlyRelease.browserEngine.source.ref === SR && !('relayUrl' in onlyRelease), 'the release override alone (the chart\'s customBrowser) still pins ONE pod');
+  ok(both.browserEngine.source.ref === SR && both.browserEngine.default === false && both.browserEngine.preinstall === false && both.relayUrl === RELAY,
+    'both: the override\'s browserEngine wins as ONE field (its pin, default and preinstall — never the cluster\'s preinstall mixed into the release\'s pin); the cluster\'s relay page beside it stays', both);
+  const mB = PL.mergeFleet({ cluster: PL.parseFleet({ relayUrl: RELAY, browserEngine: pin(S1) }), release: PL.parseFleet({ browserEngine: pin(SR) }) });
+  ok(mB.layerOf.browserEngine === 'release' && mB.layerOf.relayUrl === 'cluster', 'per FIELD: browserEngine from the release, relayUrl from the cluster', mB.layerOf);
+  const dir = path.join(ROOT, 'fleet-pin');
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S1) } });
+  const cap = capture();
+  const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
+  const changes = []; r.onChange((c) => changes.push(c));
+  await r.start();
+  cap.lines.length = 0;
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S2) } });
+  await until(() => changes.length >= 1, 3000);
+  const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
+  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().browserEngine.source.ref === S2 && ln.length === 1 && ln[0].endsWith(`browser engine changed (now ${EID}, the default of new browsers)`) && !/git\.fleet|a1a1|b2b2/.test(ln[0]),
+    'the admin\'s new pin in the cluster Secret is ONE change event (kind fleet), live, the field named «browser engine changed» — never its address or sha in the journal', ln);
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY, browserEngine: pin(S2) }, 'override/fleet.json': { browserEngine: pin(S2) } });
+  await until(() => changes.length >= 2, 3000);
+  ok(changes.length === 2 && changes[1].kinds.length === 0 && changes[1].sources.includes('fleet') && !cap.lines.some((l, i) => i > 0 && /\[presets\] changed/.test(l) && l !== ln[0]),
+    'an override equal to the cluster\'s pin moves only the layer (sources: fleet, no kind) — no «changed» line, so the engine job sees no new pin', { kinds: changes[1] && changes[1].kinds, sources: changes[1] && changes[1].sources });
+  r.stop();
+}
+
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

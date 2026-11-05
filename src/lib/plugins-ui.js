@@ -9,6 +9,7 @@ import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's �
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 import { pluginGitCredOf } from '../plugin-cred-state.js'; // hotfix 2.369.368: the ONE reader of /api/integrations/plugin-git's answer shape ({ integration: view })
+import { fleetPluginWords } from './browser-build-model.js'; // lane fleet-plugin-catalog: the cluster's plugin — its row fact + the panel's fleet line
 const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON body SAYS it is JSON — fetch's default for a string body is text/plain, which express.json() skips, so the route read an EMPTY body and refused «source must be …» (the owner, installing the custom browser plugin)
 
 // lane decision-vendor-hygiene: the LLM plugin row's STOPS (decision-model rowStopOf — no call until the key or the
@@ -285,11 +286,13 @@ export function installPluginsUI(App) {
       reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); this.pluginClient?.refresh?.(); render(); };
       head.append(installBtn, reload);
       sec.appendChild(head);
-      // lane engine-distribution: the CLUSTER's plugin (fleet.json browserEngine) whose boot install failed — said here, by name
-      if (r?.fleet && r.fleet.outcome === 'failed' && r.fleet.plugin) {
+      // lane engine-distribution: the CLUSTER's plugin (fleet.json browserEngine) whose install failed — said here, by name; lane
+      // fleet-plugin-catalog: + a pin that is not a commit sha, a new kernel waiting for the next browser start
+      const fleetLine = r?.fleet ? fleetPluginWords(null, r.fleet, t).line : null;
+      if (fleetLine) {
         const fw = document.createElement('div');
-        fw.className = 'plugin-detail plugin-cfg-warn plugin-fleet-failed';
-        fw.textContent = t("The cluster's plugin {plugin} could not be installed: {error}", { plugin: r.fleet.plugin, error: `${r.fleet.error || ''}${r.fleet.code ? ` [${r.fleet.code}]` : ''}` });
+        fw.className = `plugin-detail ${r.fleet.outcome === 'failed' || r.fleet.outcome === 'other-id' || (r.fleet.outcome === 'unpinned' && r.fleet.trusted !== true) || r.fleet.kernel?.state === 'failed' || r.fleet.kernel?.state === 'untrusted' ? 'plugin-cfg-warn plugin-fleet-failed' : 'plugin-cfg-hint plugin-fleet-kernel'}`; // r3: another id warns; a tag the owner enabled is a hint
+        fw.textContent = fleetLine;
         sec.appendChild(fw);
       }
       if (!list.length) {
@@ -356,7 +359,8 @@ export function installPluginsUI(App) {
         actions.appendChild(uninstall);
         // lane engine-distribution (D2): the cluster installed AND trusted it (only the id it names, only at the sha it pins)
         let fact = null;
-        if (p.trustedBy === 'fleet') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-fleet-trusted'; fact.textContent = t('Installed and trusted by the cluster') + (p.install?.sha ? ` · ${p.install.sha.slice(0, 12)}` : ''); }
+        const fleetFact = fleetPluginWords(p, r?.fleet || null, t, (ms) => new Date(ms).toLocaleString()).fact; // lane fleet-plugin-catalog: «Updated by the cluster · <old> → <new> · <when>»; r2: «waiting for your consent — its kernel is not fetched»
+        if (fleetFact) { fact = document.createElement('div'); fact.className = p.trustedBy === 'fleet' ? 'plugin-row-fact plugin-fleet-trusted' : 'plugin-row-fact plugin-fleet-consent'; fact.textContent = fleetFact; }
         else if (!p.install || p.install.source === 'zip') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-update-how'; fact.textContent = p.install ? t('Installed from an uploaded file — upload the new .vsp through Install plugin…') : t('Placed by hand — reinstall it through Install plugin… to make it updatable'); }
         const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
         rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip,

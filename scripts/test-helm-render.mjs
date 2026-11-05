@@ -460,6 +460,14 @@ console.log('P the fleet\'s custom browser kernel (customBrowser.* → override/
   ok(/^customBrowser:\n  enabled: false\n  default: false\n  preinstall: false\n  source:\n    git: ""\n    ref: ""\n  kernel:\n    url: ""\n    sha256: ""$/m.test(vals) && /FULL\s+(?:#\s+)?commit sha/.test(vals) && /plugin-git/.test(vals), 'values.yaml documents the block, off by default — preinstall, the ref as a FULL commit sha (D2), the plugin-git credential row');
   const always = chartCopy('engine-always', (x) => x.replace('{{- if $cb.enabled }}{{- $cbs := $cb.source', '{{- if true }}{{- $cbs := $cb.source'));
   ok(fleetOf(render(always, C)) !== undefined, 'CONTROL: a chart that renders the engine whatever `enabled` says writes a fleet key on the default render — the off leg above is red on it');
+  // lane fleet-plugin-catalog: THE FLEET'S ROAD IS THE CLUSTER LAYER — off, this chart renders nothing for the engine, and the pod
+  // still reads the cluster Secret's fleet.json (the admin's pin, followed live); the values comment and the README say so
+  const cbDoc = vals.slice(vals.indexOf("# THE FLEET'S CUSTOM BROWSER KERNEL"), vals.indexOf('customBrowser:'));
+  const readme = fs.readFileSync(path.join(REPO, 'deploy/README.md'), 'utf-8');
+  ok(/name: vibespace-cluster-presets\n\s+optional: true\n\s+items:\n(?:\s+- \{ key: \w+, path: [\w.-]+ \}\n)*?\s+- \{ key: fleet, path: fleet\.json \}/.test(def) && fleetOf(def) === undefined,
+    'customBrowser off (the fleet\'s default): nothing rendered for the engine, and the pod still projects the CLUSTER Secret\'s fleet.json — the layer the admin pins the plugin in');
+  ok(/THE FLEET'S ROAD IS THE CLUSTER SECRET/.test(cbDoc) && /vibespace-cluster-presets/.test(cbDoc) && /no helm upgrade, no restart/.test(cbDoc) && /pins ONE release/.test(cbDoc) && /### The fleet's browser kernel — a plugin the cluster names/.test(readme),
+    'values.yaml names the ONE road for the fleet (the cluster Secret, followed live) and this block as one release\'s pin; deploy/README.md carries the section');
 }
 
 console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fake API answering the four discovery GETs)');

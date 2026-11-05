@@ -1973,9 +1973,13 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   // ⑨ RED CONTROL: a copy without the sha256 check installs the corrupted archive — exactly what ④'s sha leg refuses
   const EDS = read('src/server/engine-distribution.js');
   const shaAnchor = "    if (sha !== m.sha256) throw named('build_verify_failed',";
-  ok(EDS.includes(shaAnchor), 'control: the sha256 check\'s anchor is in engine-distribution.js');
+  // lane fleet-plugin-catalog r3: the landing's ONE judge compares the download with the plan's sha256 too (a second line) — the
+  // control removes it beside the sha check, so it still measures the sha check alone (r4: the judge's comparison, asked before the
+  // scan AND last inside the landing — removed at its one place, landingVerdict)
+  const judgeAnchor = "      if (!p || p.sha256 !== sha256) return { ok: false, why: 'stale', p };\n";
+  ok(EDS.includes(shaAnchor) && EDS.includes(judgeAnchor), 'control: the sha256 check\'s anchor (and the landing judge\'s) is in engine-distribution.js');
   const { mutantCopies: mutantCopies8 } = await import('./mutant-copy.mjs');
-  const EDx = mutantCopies8('builds-kernel', REPO).load('src/server/engine-distribution.js', EDS.replace(shaAnchor, "    if (false) throw named('build_verify_failed',"), 'no-sha');
+  const EDx = mutantCopies8('builds-kernel', REPO).load('src/server/engine-distribution.js', EDS.replace(shaAnchor, "    if (false) throw named('build_verify_failed',").replace(judgeAnchor, ''), 'no-sha');
   const EDxi = EDx.create({ dataDir: path.join(EROOT, 'data'), engines: ENGR, loader: LDR, resolveUrl, log: { log() {}, warn() {} } });
   writeKJ('/k.tar.zst', 'a'.repeat(64), { bytes: ARCH.length });
   const ex8 = await thrK(EDxi.installKernel(EID, { wait: true }));
@@ -2325,7 +2329,7 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   // to a tar.gz kernel.json ⇒ the record says nothing of it and the download runs
   let verN = '0.0.1';
   const kpN = path.join(ROOT, 'data-gzn-k', 'kernel', 'linux-x64', 'chrome');
-  const edN = edAt('data-gzn', { engines: { kernelPath: () => kpN }, loader: { list: () => [{ id: EID, label: 'Fixture Browser Engine', version: verN }] }, zlib: {}, nodeVersion: '20.20.2' });
+  const edN = edAt('data-gzn', { engines: { kernelPath: () => kpN }, loader: { list: () => [{ id: EID, label: 'Fixture Browser Engine', version: verN, trusted: true }] }, zlib: {}, nodeVersion: '20.20.2' }); // lane fleet-plugin-catalog r3: the landing's judge asks a definite «trusted» (a loader with no answer lands nothing)
   const kjN = path.join(ROOT, 'data-gzn', 'plugins', EID, 'kernel.json');
   fs.writeFileSync(kjN, '{ not json');
   const eBrk = await thrK(edN.installKernel(EID, { wait: true })), fBrk = edN.kernelFact(EID);
