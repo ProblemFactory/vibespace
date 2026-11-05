@@ -413,8 +413,8 @@ console.log('— ⑨ the wiring and the laws (r1b)');
   ok('EVERY BUILDER re-applies from the map (a mark set only by the tick is lost at the next rebuild — the badge-stale lesson)', missing.length === 0, missing.join(' | '));
   ok('…and the pinned lines around them stand: the switcher\'s digest guard + the compact early return, and no warmth in the taskbar structKey',
     /if \(digest \+ form === this\._switcherDigest\) return;/.test(dm) && /if \(form === 'compact'\) \{ this\._renderCompactSwitcher\(container\); return; \}/.test(dm) && !/warmth/i.test(bodyOf(tb, /\nexport function updateTaskbar\(app\) /).split('fitTaskbarStrip(app);')[0]));
-  ok('…the ⧉ list keeps its pinned lines and THE door count (taskbar.js .revealWindow( = 5; the summary\'s rows jump through goOtherDesk)',
-    (tb.match(/\.revealWindow\(/g) || []).length === 5 && /if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb)
+  ok('…the ⧉ list keeps its pinned lines and THE door count (taskbar.js .revealWindow( = 4 — a held row is the desktop\'s deferred reveal since r8 of userW inc-mw1ogdno-5jny; the summary\'s rows jump through goOtherDesk)',
+    (tb.match(/\.revealWindow\(/g) || []).length === 4 && /if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb)
     && /item\.onclick = \(\) => \{ pop\.remove\(\); goOtherDesk\(app, \{ id: r\.id, deskId: r\.deskId, built: r\.built \}\); \};/.test(tb));
   const css = read('public/style.css');
   const a = css.indexOf('/* q-059 r1b (lane cache-warmth-band)'), z = css.indexOf('/* ── end of the q-059 r1b warmth block');

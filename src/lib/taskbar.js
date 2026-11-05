@@ -16,7 +16,11 @@ let otherDesksOpen = false;
  *  default (the design's one sort), this page's for its lifetime; only drawn while warmth is. */
 let byTimeLeftOn = true;
 
-/** Every other desktop's windows — the ones this page built there and the ones a held record lists that it has not built. */
+/** Every other desktop's windows — the ones this page built there and the ones a held record lists that it has not built.
+ *  A ROW IS A WINDOW THIS PAGE CAN SHOW (r8, userW inc-mw1ogdno-5jny — the r7 acceptance: a held copy of a conversation this page
+ *  shows on another desktop was listed «… · Desk V»; its press switched to V, where a copy is never built, and nothing was said):
+ *  a conversation this page shows or is still attaching is listed once, as THAT window — a copy of it (desktop-manager copiesOf,
+ *  the doors' own verdict) is never offered. */
 function otherDeskRows(app) {
   const dm = app.desktopManager, wm = app.wm;
   if (!dm || (dm.desktops || []).length < 2) return [];
@@ -24,27 +28,25 @@ function otherDeskRows(app) {
   const built = [...wm.windows.values()].filter((w) => w._desktopId && !w._isStagePlaceholder && !(w._tabChain && w._tabChain.tabs[0] !== w.id))
     .map((w) => ({ id: w.id, title: w.title, desk: w._desktopId, z: zOf(w) }));
   const held = [];
-  for (const d of dm.desktops) for (const ws of dm._savedStates?.get(d.id)?.windows || []) {
-    const id = ws && (ws.winId || ws.id);
-    if (id && !wm.windows.has(id)) held.push({ id, title: ws.title, desk: d.id, z: Number(ws.zIndex) || 0 });
+  for (const d of dm.desktops) {
+    const copies = new Set(dm.copiesOf?.(d.id) || []);
+    for (const ws of dm._savedStates?.get(d.id)?.windows || []) {
+      const id = ws && (ws.winId || ws.id);
+      if (id && !wm.windows.has(id) && !copies.has(String(id))) held.push({ id, title: ws.title, desk: d.id, z: Number(ws.zIndex) || 0 });
+    }
   }
   return otherDesktopWindows({ desktops: dm.desktops, activeId: dm.activeDesktopId, built, held });
 }
 
 /** A row of another desktop: switch there AND raise it. A built window = THE door (wm.revealWindow switches its desktop
- *  first, test-architecture §62); one its desktop's record holds that this page has not built = the switch, then the door
- *  once the switch's replay has built it. */
+ *  first, test-architecture §62); one its desktop's record holds that this page has not built = the desktop's deferred reveal
+ *  (desktop-manager revealHeld): the switch builds it, then the door. A LOOK THAT GIVES UP SAYS SO (r8 — the r7 acceptance: the
+ *  look polled 20 × 250 ms and stopped in silence, the person left on a desktop without the window): the reveal waits for as long
+ *  as the window is still coming and says a failure ONCE (r6 R), never on a clock of its own. */
 function goOtherDesk(app, r) {
   if (r.built) { app.wm.revealWindow(r.id); return; }
-  const dm = app.desktopManager;
-  const go = app.stage?.isActive ? app.stage.leave(r.deskId) : dm.switchTo(r.deskId);
-  let tries = 0;
-  const look = () => {
-    if (dm.activeDesktopId !== r.deskId) return;
-    if (app.wm.windows.has(r.id)) { app.wm.revealWindow(r.id); return; }
-    if (++tries < 20) setTimeout(look, 250);
-  };
-  Promise.resolve(go).then(look, look);
+  const dm = app.desktopManager, row = (dm._savedStates?.get(r.deskId)?.windows || []).find((w) => w && String(w.winId || w.id) === String(r.id));
+  dm.revealHeld(r.id, r.deskId, (row && ((row.openSpec && row.openSpec.name) || row.title)) || null);
 }
 
 // Resolve the sidebar SESSION object behind a session window (chat/terminal)

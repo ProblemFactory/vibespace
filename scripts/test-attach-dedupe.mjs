@@ -96,7 +96,7 @@ const { installSessionLifecycle } = await load(SRC);
 
 console.log('— ④ CONTROL: the door without the guard');
 {
-  const guard = "    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame\n";
+  const guard = "    if (this._focusPendingAttach(serverId, { replay: !!(syncId || machine) })) return null; // B-0cc8: the attach in flight IS the answer — no second frame\n";
   ok(SRC.includes(guard), '④ control anchor: the guard line is in attachSession');
   const { installSessionLifecycle: Unguarded } = await load(SRC.replace(guard, '\n'));
   const { app, frames } = rig(Unguarded);

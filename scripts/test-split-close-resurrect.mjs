@@ -18,6 +18,9 @@
 //      50 ms after it — inside this client's autosave debounce) never resurrects the editor, and this client's
 //      close still reaches the disk and the other clients (the held close is re-sent once)
 //   2c CONTROL: the held-close ledger neutered ⇒ the same echo brings the editor back
+//   2 / 2c PRECONDITION (r8 of userW inc-mw1ogdno-5jny — r7b: leg 2 passed VACUOUSLY when the hub refused its echo before the page
+//      saw it): the hub ACKED the echo (never `layout-sync-refused`) and the page received it — One's record listing the editor —
+//      asserted before each verdict
 //   3  A SECOND PAGE parked on desktop Two while the close happens on One: the record it caches for One drops
 //      the editor the last record on the wire listed ⇒ its hidden copy is closed then; back on One (a real click)
 //      it shows no editor and its next ordinary save writes none back to the first page or the disk
@@ -233,22 +236,30 @@ else await (async () => {
       const edId = await ev('return editors()[0]?.id || null;');
       const stale = await ev(`return app.layoutManager.captureState();`);
       if (neuter) await ev(`const lm = app.layoutManager; lm.__nc = lm.noteClosed; lm.noteClosed = () => {}; return true;`);
+      // what the page hears of One while the echo is out (its own writes are never relayed back to it: only the echo's record)
+      await ev(`window.__echoIn = []; if (!window.__echoTap) { window.__echoTap = true; app.ws.onGlobal((m) => { if (window.__echoIn && m && m.type === 'layout-sync' && m.desktopId === ${S(ONE)}) window.__echoIn.push(((m.state && m.state.windows) || []).map((w) => w.winId || w.id)); }); } return true;`);
       await closeTabOf(P1, edId);
       await sleep(50);
+      const m0 = msgs.length;
       ws.send(JSON.stringify({ type: 'layout-sync', state: stale, desktopId: ONE }));
       await sleep(3500); // the apply's 1 s gate + the held close's re-send + the server's disk write
       const st = await edState(P1, edId);
       if (neuter) await ev(`const lm = app.layoutManager; lm.noteClosed = lm.__nc; delete lm.__nc; return true;`);
-      return { edId, st, disk: diskHasEditor() };
+      const answers = msgs.slice(m0).filter((m) => (m.type === 'layout-sync-ack' || m.type === 'layout-sync-refused') && m.desktopId === ONE).map((m) => (m.type === 'layout-sync-ack' ? 'ack' : 'refused ' + m.reason));
+      const heard = await ev(`const h = window.__echoIn || []; window.__echoIn = null; return h.some((ids) => ids.includes(${S(edId)}));`);
+      return { edId, st, disk: diskHasEditor(), pre: { answers, heard } };
     };
+    // the leg's PRECONDITION (r8 — r7b: leg 2 passed VACUOUSLY on b3d0ab09e, the hub refused its echo before the page saw it)
+    const echoReached = (label, r) => ok(!!r && S(r.pre.answers) === S(['ack']) && r.pre.heard, `${label} PRECONDITION: the hub ACKED the echo (no layout-sync-refused) and the page received it — One's record listing the editor`, S(r && r.pre));
     {
       const r = await echoLeg('2', false);
-      if (r) {
+      if (r && echoReached('2', r)) {
         ok(!r.st.live && r.st.editors === 0, '2 the echoed pre-close state did NOT bring the editor back', S(r.st));
         ok(r.st.layout === 'split' && S(r.st.chain) === S(['chat', 'chat']), '2 the group stays [Alpha | Bravo]', S(r.st));
         ok(r.disk === false, '2 the close still reached the disk (the held close was re-sent after the echo)', S(r.disk));
       }
       const c2 = await echoLeg('2c', true);
+      echoReached('2c', c2);
       ok(c2 && c2.st.live, '2c CONTROL: with the held-close ledger neutered the same echo re-creates the closed editor', S(c2 && c2.st));
       await ev(`for (const e of editors()) wm.closeWindow(e.id); return true;`);
     }

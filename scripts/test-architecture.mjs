@@ -2935,7 +2935,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
   // THE DOORS: [revealWindow calls, where]
   const DOORS = {
     'src/lib/mobile-nav.js': [2, 'the phone switcher\'s window row + its Minimized row (the incident)'],
-    'src/lib/taskbar.js': [5, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row, the window list\'s «Other desktops» row (a built window; a held one once the switch built it — lane desktop-switch-phone)'],
+    'src/lib/taskbar.js': [4, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row, the window list\'s «Other desktops» row (a built window — lane desktop-switch-phone; a held one is the desktop\'s deferred reveal, desktop-manager revealHeld, whose `wm.revealWindow?.(id)` reveals it once its switch built it — r8 of userW inc-mw1ogdno-5jny)'],
     'src/lib/window.js': [3, 'the overlap switcher\'s row + the door\'s own second pass after a desktop switch (inc-muv3qfo7-96tm: resolved / refused)'],
     'src/lib/app.js': [5, 'goToWinId (go-to / Switch window / inbox / live view), flashWindow here + on another desktop, moveSessionWindow, _focusOpenInChain'],
     'src/lib/session-lifecycle.js': [3, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view + _focusPendingAttach (B-0cc8: a second click while the attach is in flight raises its window)'],

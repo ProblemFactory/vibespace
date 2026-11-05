@@ -147,8 +147,8 @@ console.log('⑥ wiring pins');
   const mn = read('src/lib/mobile-nav.js');
   ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id\) => this\.switchDesktop\(id\) \}\)/.test(mn) && /const s = doorState\(/.test(mn), 'the nav\'s Desktops button opens THE sheet; its badge / label are doorState\'s');
   const tb = read('src/lib/taskbar.js');
-  ok(/return otherDesktopWindows\(\{ desktops: dm\.desktops, activeId: dm\.activeDesktopId, built, held \}\);/.test(tb) && /if \(r\.built\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb) && /if \(app\.wm\.windows\.has\(r\.id\)\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb),
-    'the ⧉ list\'s «Other desktops» rows are the model\'s and go through THE door (wm.revealWindow switches the desktop first)');
+  ok(/return otherDesktopWindows\(\{ desktops: dm\.desktops, activeId: dm\.activeDesktopId, built, held \}\);/.test(tb) && /if \(r\.built\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb) && /dm\.revealHeld\(r\.id, r\.deskId, /.test(tb) && /\n    wm\.revealWindow\?\.\(id\);\n  \}/.test(read('src/lib/desktop-manager.js')),
+    'the ⧉ list\'s «Other desktops» rows are the model\'s and go through THE door (wm.revealWindow switches the desktop first; a held row = the desktop\'s deferred reveal, desktop-manager revealHeld → _revealWhenBuilt → the door — r8 of userW inc-mw1ogdno-5jny)');
   ok(/if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb), 'the ⧉ list\'s active-desktop filter stays the default view; the group starts folded');
   const dm = read('src/lib/desktop-manager.js');
   ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && !/openDesktopSheet/.test(dm) && (dm.match(/desktop-switch-sheet/g) || []).length === 1 && /^import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/m.test(dm), 'the switcher\'s home stays the taskbar (desktop-manager.js); it only tells the door (int358: it reads the sheet\'s ROWS — sheetRows, its compact list\'s one source — and never opens the sheet)');

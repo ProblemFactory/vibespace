@@ -23,7 +23,7 @@
 //      record's rows disagree about a group — 'chain-disagrees'); §2 on the real handler: an accepted dedup is TRACED beside the
 //      record (on disk) and relayed, and forgotten when a write lists the window again; a write introducing a chain disagreement
 //      is refused; §6 the trace, the chain gate, the PURE verdict removed — each RED
-import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn } from './layout-dup-world.mjs';
+import { REPO, LIB, read, J, tick, made, mkEl, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -323,6 +323,130 @@ async function toastLegs({ DM = RealDM, LM = RealLM, quiet = false } = {}) {
 }
 await section('§4 D — ONE TOAST PER CAUSE (the real DesktopManager.onSyncRefused)', async () => { await toastLegs(); });
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ROUND 8 (the r7 acceptance's four roads) — the attached-only harness, no wait on the page's own clocks (the 1 s gate's drain, a
+// 10 s attach, «bysession» on the real timing: the loop's §13)
+const TB0 = await import(pathToFileURL(path.join(LIB, 'taskbar.js')).href), WC = await import(pathToFileURL(path.join(LIB, 'warmth-chrome.js')).href);
+/** R1 the reveal's switch is one switch, to one desktop, once; R2 a restore never raises, a copy is never restored; R3 the ⧉ list
+ *  never offers a copy, a look that gives up says so; R4 an open on the desktop on show consumes the switch queued before it.
+ *  `TB` = the taskbar module (a mutant's). → failed names. */
+async function r8Legs({ DM = RealDM, LM = RealLM, install = null, TB = TB0, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (!install) return failed;
+  const G = ['x-h', 'win-x-s', 'x-slow'];
+  const recG = () => ({ 'desk-x': [member(files('x-h', 0), G), member(chat('win-x-s', S, 1), G), member(files('x-slow', 2), G)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0)] });
+  const page = (recs, active, { attachMs = 500, never = [] } = {}) => {
+    const P = pageOn(hub(loadHandler(), DOC(recs)), install, active, { DM, LM, attachMs });
+    const orig = P.app.replayOpenSpec;
+    P.app.replayOpenSpec = (spec, winId) => (never.includes(winId) ? null : orig(spec, winId)); // a window whose build never comes
+    return P;
+  };
+  // X on show, S's window standing there in a group still forming (x-slow not built yet: the record's chain waits for it)
+  const onShow = () => { const P = page(recG(), 'desk-x'); P.wins.delete('x-slow'); P.lm.queueRecordChains('desk-x', P.dm._savedStates.get('desk-x'), { naming: ['x-slow'] }); return P; };
+  const open = (P) => { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); press('pointerup'); };
+  const personSwitch = (P, d) => { press('pointerdown'); const p = P.dm.switchTo(d); press('pointerup'); return p; };
+  const fronts = (P) => J([...(P.lm._fronts || new Map())]), MARK = J([['desk-x', 'win-x-s']]);
+  const sWins = (P) => [...P.wins.values()].filter((w) => w._openSpec && w._openSpec.serverId === S).map((w) => w.id + '@' + w._desktopId);
+  const counting = (P) => { const n = { switches: 0 }, own = P.dm.switchTo; P.dm.switchTo = function (d) { n.switches++; return own.call(this, d); }; return n; };
+  if (want('R1b')) {
+    const P = onShow(), t0 = made.length;
+    open(P);
+    const marked = fronts(P) === MARK;
+    await tick(20);
+    P.dm.switchTo('desk-y'); // NO press: a forwarded shortcut's switch, made later
+    const f = fronts(P), at = P.dm.activeDesktopId;
+    await tick(5); // the hub's quiet wrapper (the switch's save) gives the console back
+    leg(marked && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1b: THE REVEAL'S SWITCH IS ONE SWITCH, TO ONE DESKTOP — the person opens S, whose window stands on X (on show) in a group still forming; later a switch to Y that came from no press (a forwarded shortcut's) is not the reveal's: the mark goes (8bde36a5c: \`_revealing\` held the generation alone — kept, «late-nopress») — marked ${marked}, after the switch fronts ${f}, active ${at}`);
+  }
+  if (want('R1c')) {
+    const P = onShow(), t0 = made.length;
+    open(P);
+    const marked = fronts(P) === MARK;
+    P.dm._onRemoteDesktopUpdated({ desktops: DESKS.filter((d) => d.id !== 'desk-x').map((d) => ({ ...d })) }); // another page deleted X
+    const f = fronts(P), at = P.dm.activeDesktopId;
+    await tick(5);
+    leg(marked && f === '[]' && at === 'desk-y' && toasts(t0).length === 0, `§R8 R1c: …a REMOTE DELETION of the desktop on show after the reveal: its switch (to where X's windows went) is not the reveal's — the mark goes (8bde36a5c: kept) — marked ${marked}, after the deletion fronts ${f}, active ${at}`);
+  }
+  if (want('R4')) {
+    // the page on Y; the person switches to X (S's window built there by the visit, still attaching, in a group still forming), then
+    // inside that switch's 1 s gate presses Y's tile (queued), then opens S
+    const P = page(recG(), 'desk-y', { never: ['x-slow'] }), t0 = made.length;
+    await personSwitch(P, 'desk-x');
+    personSwitch(P, 'desk-y');
+    const queued = P.dm._pendingSwitch === 'desk-y';
+    open(P);
+    const pend = P.dm._pendingSwitch, at = P.dm.activeDesktopId, f = fronts(P), foc = P.app.wm.activeWindowId;
+    await tick(5);
+    leg(queued && pend == null && at === 'desk-x' && f === MARK && foc === 'win-x-s' && toasts(t0).length === 0, `§R8 R4: THE LATEST ACT WINS — the person presses Y inside the 1 s gate (queued), then opens S, whose window stands on X, the desktop on show: the open consumes the queued switch — nothing left for the drain, S marked in front and focused, nothing said (8bde36a5c: Y stayed armed — the drain took the person away from what they had just opened) — queued ${queued}, after the open pending ${pend}, active ${at}, fronts ${f}, focus ${foc}`);
+  }
+  if (want('R2door')) {
+    // S's window attaching on X (the person's open; a slow host: 60 s); the person switches to V; then a MACHINE door reaches S — a
+    // restore's attach (layout.js restoreState: `machine`), as a visit, a preset or a boot restore makes it
+    const P = page({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0)] }, 'desk-x', { attachMs: 60000 }), t0 = made.length;
+    open(P);
+    await personSwitch(P, 'desk-v');
+    const n = counting(P), gen = P.dm._revealGen, o0 = P.ops.length;
+    const r = P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID, machine: true });
+    await tick(0);
+    const rv = P.ops.slice(o0).filter((o) => o[0] === 'reveal');
+    leg(r === null && n.switches === 0 && P.dm._pendingSwitch == null && P.dm.activeDesktopId === 'desk-v' && P.dm._revealGen === gen && rv.length === 1 && rv[0][2] === true && sWins(P).length === 1 && toasts(t0).length === 0, `§R8 R2 (door): A RESTORE NEVER RAISES BEYOND THE WINDOW — S's window still attaching on X, the person on V; a machine door (a restore's attach) reaches S: it only raises that window — no switch asked, no act noted, nothing built, nothing said (8bde36a5c: keepInFront — an act nobody made — and revealWindow's switch back to X) — switches ${n.switches}, pending ${P.dm._pendingSwitch}, generation ${gen}→${P.dm._revealGen}, reveals ${J(rv)}, S windows ${J(sWins(P))}`);
+  }
+  if (want('R2visit')) {
+    const bare = { winId: 'win-v-s', title: 'Atlas notes — /srv/u/atlas', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(1), zIndex: 101, serverSessionId: S, backend: 'claude', backendSessionId: CID, cwd: '/srv/u/atlas' }; // NO openSpec: built by its identity (lane layout-stopped-window)
+    const P = page({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), bare] }, 'desk-x', { attachMs: 60000 }), t0 = made.length;
+    P.lm._bootJson = async (u) => (u === '/api/active' ? { sessions: [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }] } : { sessions: [] });
+    const restores = [], rs = P.lm.restoreState.bind(P.lm); P.lm.restoreState = (st) => { restores.push(...ids(st && st.windows)); return rs(st); };
+    open(P);
+    await personSwitch(P, 'desk-v');
+    const n = counting(P), gen = P.dm._revealGen;
+    await tick(40);
+    const ghost = P.dm.copiesOf('desk-v').includes('win-v-s');
+    leg(J(restores) === '[]' && n.switches === 0 && P.dm._pendingSwitch == null && P.dm.activeDesktopId === 'desk-v' && P.dm._revealGen === gen && ghost && sWins(P).length === 1 && toasts(t0).length === 0, `§R8 R2 (visit): A COPY IS NEVER RESTORED — S's window still attaching on X; V lists S with no openSpec; the person switches to V: that row is S's copy — a ghost at once, never restored, the person stays on V (8bde36a5c: restored — its attach found the window attaching on X and switched back, «bysession») — restored ${J(restores)}, switches after ${n.switches}, pending ${P.dm._pendingSwitch}, ghost ${ghost}, S windows ${J(sWins(P))}`);
+  }
+  // the real ⧉ window list (taskbar showWindowList) over the harness page; its «Other desktops» group opened
+  const list = (P) => {
+    const at = made.length;
+    TB.showWindowList(P.app, mkEl('span'));
+    const pop = made.slice(at).find((e) => e.className === 'overlap-switcher');
+    if (!pop) return null;
+    const head = pop.children.find((c) => /overlap-switcher-group/.test(c.className));
+    if (head && !/ open/.test(head.className)) head.onclick({ stopPropagation() {} });
+    return pop.children.filter((c) => /overlap-switcher-other/.test(c.className));
+  };
+  if (want('R3list')) {
+    const recs = { 'desk-x': [files('x-1', 0), chat('win-x-s', S, 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 1)] };
+    const P = page(recs, 'desk-y'), t0 = made.length;
+    P.mkWin('x-1', 'desk-x', { _hiddenByDesktop: true }); // X built by an earlier visit: S shown there; V's record still lists a copy
+    P.mkWin('win-x-s', 'desk-x', { type: 'chat', title: 'Atlas notes — /srv/u/atlas', _openSpec: recs['desk-x'][1].openSpec, _hiddenByDesktop: true });
+    const rows = list(P) || [], got = rows.map((r) => r.dataset.desktopId + ':' + r.dataset.winId), sr = rows.filter((r) => /Atlas notes/.test(r.textContent));
+    const n = counting(P);
+    press('pointerdown'); if (sr[0]) sr[0].onclick(); press('pointerup');
+    await tick(0);
+    // the warmth summary's «Every desktop» list (warmthRows): S once, as the built window — safe already, kept so
+    P.app._warmth = { drawn: true, byId: new Map([[S, { tier: 'fresh', frac: 0.5, leftMs: 60000 }]]), held: new Map([['win-v-s', { id: S, deskId: 'desk-v', title: 'Atlas notes — /srv/u/atlas', type: 'chat' }]]), heldChains: new Map(), last: null, passMs: 0 };
+    const wr = WC.warmthRows(P.app).filter((r) => r.key === S).map((r) => r.deskId + ':' + r.id);
+    P.app._warmth = null;
+    leg(sr.length === 1 && sr[0].dataset.winId === 'win-x-s' && !got.includes('desk-v:win-v-s') && P.dm.activeDesktopId === 'desk-x' && n.switches === 1 && J(wr) === J(['desk-x:win-x-s']) && toasts(t0).length === 0, `§R8 R3 (list): A ROW IS A WINDOW THIS PAGE CAN SHOW — S shown on X, a copy of it listed on V, the person on Y: the ⧉ list's «Other desktops» names S ONCE, as X's window, and its press goes to X; the warmth «Every desktop» list names S once too (8bde36a5c: V's copy listed «… · Desk V» — its press switched to V, where a copy is never built, nothing said) — rows ${J(got)}, S rows ${sr.length}, after the press active ${P.dm.activeDesktopId} (${n.switches} switch), warmth rows ${J(wr)}`);
+  }
+  if (want('R3look')) {
+    const P = page({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), files('v-gone', 1)] }, 'desk-y', { never: ['v-gone'] }), t0 = made.length;
+    const row = (list(P) || []).find((r) => r.dataset.winId === 'v-gone');
+    press('pointerdown'); if (row) row.onclick(); press('pointerup');
+    const a = P.dm._buildAttempts.get('v-gone'); if (a) a.at -= 25000; // its build gave no sign of life within the page's grace (BUILD_GRACE_MS)
+    await tick(120);
+    const said = toasts(t0).map(toastText);
+    await tick(150);
+    leg(!!row && P.dm.activeDesktopId === 'desk-v' && said.length === 1 && /v-gone\.md/.test(said[0]) && /did not appear/.test(said[0]) && toasts(t0).length === 1 && P.dm._revealAsk === null, `§R8 R3 (look): A LOOK THAT GIVES UP SAYS SO — the ⧉ list's row of a window V's record holds and this page has not built; pressed, the visit builds nothing of it: said ONCE «Could not open “v-gone.md”: its window did not appear» (the deferred reveal's words, r6 R), never on a clock of its own (8bde36a5c: look() polled 20 × 250 ms and stopped in silence) — row ${!!row}, active ${P.dm.activeDesktopId}, toasts ${J(said)} then ${toasts(t0).length}`);
+  }
+  return failed;
+}
+const install8 = await loadLifecycle();
+await section('§R8 ROUND 8 — the reveal\'s switch is one switch, to one desktop, once (R1); a restore never raises, a copy is never restored (R2); the ⧉ list never offers a copy, a look that gives up says so (R3); the latest act wins (R4)', async () => {
+  await r8Legs({ install: install8 });
+});
+
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
   const M = mutantCopies('ldup', REPO);
   const PSRC = read('src/lib/desktop-record.js'), DSRC = read('src/lib/desktop-manager.js');
@@ -385,6 +509,38 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const Wx = M.load('src/ws-handler.js', WSRC.replace(find, 'gone, alive: (sid) => activeSessions.has(sid) });'), 'r5-n-live');
     const n = await hubNLegs(Wx, { quiet: true });
     ok(n.some((x) => /a STOPPED conversation stays traced/.test(x)) && n.some((x) => /not ADOPTED the conversation yet/.test(x)), `mutant r5-N-live-set (4ad07d751's \`activeSessions.has\` alone): a stopped conversation and one not adopted yet leave the trace — RED (${n.length}: ${n.filter((x) => /r5 N/.test(x)).map((x) => x.slice(0, 60)).join(' | ')})`);
+  }
+  // ROUND 8 — each road's fix removed (the shapes that need the page's own clocks — the gate's drain, «bysession» — are the loop's)
+  {
+    const D8 = read('src/lib/desktop-manager.js'), L8 = read('src/lib/session-lifecycle.js'), T8 = read('src/lib/taskbar.js');
+    const dm8 = async (find, repl, tag) => { ok(D8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', D8.replace(find, repl), tag, { esm: true })).href)).DesktopManager; };
+    // a second taskbar module in one process: its top-level registerWindowMenu() would register the window menu's commands again
+    // (contributions' registry is the process's, and refuses a duplicate) — the copy leaves that one call out
+    const tb8 = async (find, repl, tag) => { ok(T8.includes(find) && T8.includes('\nregisterWindowMenu();\n'), `mutant ${tag}: the patched lines exist in taskbar.js`); return import(pathToFileURL(M.write('src/lib/taskbar.js', T8.replace(find, repl).replace('\nregisterWindowMenu();\n', '\n\n'), tag, { esm: true })).href); };
+    const heads = (f) => f.map((n) => n.slice(0, 16)).join(' | ');
+    const blind = await dm8('    return !!(ask && ask.desk === desktopId) || !!(r && r.desk === desktopId && r.gen === (this._revealGen || 0));', '    return !!(ask && ask.desk === desktopId) || !!(r && r.gen === (this._revealGen || 0));', 'r8-R1-deskblind');
+    const fb = await r8Legs({ DM: blind, install: install8, quiet: true, legs: ['R1b', 'R1c'] });
+    ok(fb.some((n) => n.startsWith('§R8 R1b:')) && fb.some((n) => n.startsWith('§R8 R1c:')), `mutant r8-R1-deskblind (a switch to ANY desktop of the reveal's generation is its own): the forwarded shortcut's switch and the remote deletion's keep the mark — RED (${fb.length}: ${heads(fb)})`);
+    const never = await dm8('    this._revealing = null; // a switch lands: a reveal\'s own switch is spent — once (r8); queued, it stays the reveal\'s until its drain lands\n', '', 'r8-R1-neverclear');
+    const fn = await r8Legs({ DM: never, install: install8, quiet: true, legs: ['R1b', 'R1c', 'R4'] });
+    ok(fn.length === 0, `mutant r8-R1-neverclear ALONE (the landed switch never spends \`_revealing\`) is EQUIVALENT — the desktop check answers first: a desktop is left only by a switch that is not the reveal's, which starts a generation, so a spent \`_revealing\` never matches again; should a desktop ever be left without one, this turns RED (${fn.length}: ${heads(fn)}) — the clear's other half, never early, is the loop's r8-R1-clear-early (Q7)`);
+    const armed = await dm8('    if (desk === this._activeId) this._pendingSwitch = null;\n', '', 'r8-R4-armed');
+    const fa = await r8Legs({ DM: armed, install: install8, quiet: true, legs: ['R4'] });
+    ok(fa.some((n) => n.startsWith('§R8 R4:')), `mutant r8-R4-armed (8bde36a5c's keepInFront: no cancel): the switch queued before the open stays armed — RED (${fa.length})`);
+    const copyR = await dm8('        if (liveServerIds.has(sessionOf(ws))) { noSpec.push(winId); continue; }\n', '', 'r8-R2-restore-copy');
+    const fr = await r8Legs({ DM: copyR, install: install8, quiet: true, legs: ['R2visit'] });
+    ok(fr.some((n) => n.startsWith('§R8 R2 (visit):')), `mutant r8-R2-restore-copy (8bde36a5c's no-openSpec door: no copies verdict): the copy is restored — RED (${fr.length})`);
+    const door = "    if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)\n    this.wm.revealWindow(w.id, { replay });\n";
+    ok(L8.includes(door), 'mutant r8-R2-machine-raises: the patched lines exist in session-lifecycle.js');
+    const fm = await r8Legs({ install: await loadLifecycle(L8.replace(door, '    this.desktopManager?.keepInFront?.(w.id);\n    this.wm.revealWindow(w.id);\n')), quiet: true, legs: ['R2door'] });
+    ok(fm.some((n) => n.startsWith('§R8 R2 (door):')), `mutant r8-R2-machine-raises (8bde36a5c's _focusPendingAttach: keepInFront + a person's reveal on every path): the machine door asks a switch back to X and notes an act — RED by the switch count (${fm.length})`);
+    const tbc = await tb8(' && !copies.has(String(id))', '', 'r8-R3-copy-row');
+    const fc = await r8Legs({ install: install8, TB: tbc, quiet: true, legs: ['R3list'] });
+    ok(fc.some((n) => n.startsWith('§R8 R3 (list):')), `mutant r8-R3-copy-row (8bde36a5c's otherDeskRows: no copies filter): V's copy offered, S listed twice — RED (${fc.length})`);
+    const look = "  const dm = app.desktopManager, row = (dm._savedStates?.get(r.deskId)?.windows || []).find((w) => w && String(w.winId || w.id) === String(r.id));\n  dm.revealHeld(r.id, r.deskId, (row && ((row.openSpec && row.openSpec.name) || row.title)) || null);\n";
+    const tbs = await tb8(look, "  const dm = app.desktopManager;\n  const go = app.stage?.isActive ? app.stage.leave(r.deskId) : dm.switchTo(r.deskId);\n  let tries = 0;\n  const look = () => {\n    if (dm.activeDesktopId !== r.deskId) return;\n    if (app.wm.windows.has(r.id)) { app.wm.revealWindow(r.id); return; }\n    if (++tries < 20) setTimeout(look, 250);\n  };\n  Promise.resolve(go).then(look, look);\n", 'r8-R3-silent-look');
+    const fs8 = await r8Legs({ install: install8, TB: tbs, quiet: true, legs: ['R3look'] });
+    ok(fs8.some((n) => n.startsWith('§R8 R3 (look):')), `mutant r8-R3-silent-look (8bde36a5c's goOtherDesk: 20 × 250 ms, then silence): nothing said — RED by the toast count (${fs8.length})`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });

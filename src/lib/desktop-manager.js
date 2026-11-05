@@ -720,10 +720,14 @@ export class DesktopManager {
    *  made while a reveal performed now is still the generation (`_revealing`: keepInFront, then the caller's revealWindow; the
    *  deferred reveal's revealWindow) — queued behind the 1 s gate or not. It is part of the act that set the mark: no new
    *  generation, the mark kept. Only the person's own act leaves that generation — a press (a switch the person makes starts with
-   *  one), which drops the mark unless it is inside the marked window; their own switch then drops it as before. */
+   *  one), which drops the mark unless it is inside the marked window; their own switch then drops it as before.
+   *  THE REVEAL'S SWITCH IS ONE SWITCH, TO ONE DESKTOP, ONCE (r8 — the r7 acceptance's «qdrain» / «late-nopress»: `_revealing` held
+   *  the generation alone and was never cleared, so ANY later switch of that generation that came from no press — the drain of a
+   *  switch queued before the open, a remote deletion's, a forwarded shortcut's 2.5 s later — kept every front mark): `_revealing`
+   *  names the desktop the revealed window stands on, only a switch TO it is the reveal's, and the one that lands spends it (switchTo). */
   _revealsSwitch(desktopId) {
-    const ask = this._revealAsk;
-    return !!(ask && ask.desk === desktopId) || (this._revealing != null && this._revealing === (this._revealGen || 0));
+    const ask = this._revealAsk, r = this._revealing;
+    return !!(ask && ask.desk === desktopId) || !!(r && r.desk === desktopId && r.gen === (this._revealGen || 0));
   }
 
   /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists — only while nothing has happened
@@ -750,7 +754,7 @@ export class DesktopManager {
     }
     this._revealAsk = null;
     this.app.layoutManager?.showWhenFormed?.(id, desk);
-    this._revealing = gen; // a switch its revealWindow makes is this reveal's own (r7 Q′)
+    this._revealing = { gen, desk: wm.windows.get(id)._desktopId || desk }; // a switch its revealWindow makes — to the window's desktop — is this reveal's own (r7 Q′, r8)
     wm.revealWindow?.(id);
   }
 
@@ -798,8 +802,14 @@ export class DesktopManager {
     const w = this.app.wm.windows.get(String(id));
     if (!w || w._onStage) return;
     this._noteAct();
-    this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);
-    this._revealing = this._revealGen || 0; // the caller's revealWindow switches to its desktop next: the reveal's own switch (r7 Q′)
+    const desk = w._desktopId || this._activeId;
+    this.app.layoutManager?.showWhenFormed?.(String(id), desk);
+    // THE LATEST ACT WINS (r8 — the r7 acceptance: the person pressed another desktop's tile inside the 1 s gate, then opened a
+    // conversation whose window stands on the desktop on show; the open made no switch, the queued one stayed armed and its drain
+    // took the person away from what they had just opened): an open that lands on the desktop on show consumes a switch queued
+    // before it, as switchTo(active) does; a press made after the open queues its own and wins (r7 u2)
+    if (desk === this._activeId) this._pendingSwitch = null;
+    this._revealing = { gen: this._revealGen || 0, desk }; // the caller's revealWindow switches to THIS desktop next: the reveal's own switch (r7 Q′, r8)
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
@@ -824,16 +834,24 @@ export class DesktopManager {
       // A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H): the open is an act (a reveal still waiting from an earlier one retires);
       // this one belongs to the generation after its own switch
       // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L): the ask names its desktop — that switch, queued or not, keeps its generation
-      this._noteAct();
-      const gen = this._revealGen || 0;
-      this._revealAsk = { id, desk, gen, name: e.openSpec.name || e.title || null }; // the conversation's name, for a failure said (r6 R)
-      Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id, desk, gen)).catch((err) => {
-        console.warn('[desktop] the switch to the conversation\'s desktop failed', err);
-        if ((this._revealGen || 0) === gen) this._revealFailed(id, String((err && err.message) || err || '')); // the open's failure, said (r6 R)
-      });
+      this.revealHeld(id, desk, e.openSpec.name || e.title || null); // the conversation's name, for a failure said (r6 R)
       return true;
     }
     return false;
+  }
+
+  /** A person named window `id`, which `desk`'s held record lists and this page has not built (revealHeldSession's open; the ⧉ window
+   *  list's «Other desktops» row — taskbar goOtherDesk, r8): the switch builds it, then it is revealed — THE deferred reveal (r4 L, r6 R:
+   *  it waits for as long as the window is still coming, retires by the person's next act, and a failure is said ONCE with `name`). */
+  revealHeld(id, desk, name = null) {
+    id = String(id);
+    this._noteAct();
+    const gen = this._revealGen || 0;
+    this._revealAsk = { id, desk, gen, name };
+    Promise.resolve(this.switchTo(desk)).then(() => this._revealWhenBuilt(id, desk, gen)).catch((err) => {
+      console.warn('[desktop] the switch to the conversation\'s desktop failed', err);
+      if ((this._revealGen || 0) === gen) this._revealFailed(id, String((err && err.message) || err || '')); // the open's failure, said (r6 R)
+    });
   }
 
   /** Open the held windows of `desktopId` that the page does not have yet (openSpec-backed; one already being built
@@ -852,6 +870,11 @@ export class DesktopManager {
       const winId = ws.winId || ws.id;
       if (!winId || this.app.wm.windows.has(winId)) continue;
       if (!ws.openSpec && isSession(ws)) {
+        // A COPY IS NEVER RESTORED (r8 — the r7 acceptance's «bysession»: a row with no openSpec, of a conversation whose window this
+        // page was still attaching on another desktop, was restored on a visit — the restore's attach found that window and took the
+        // person back to it ~1 s after their own switch, a reveal in flight retired, nothing said): the verdict of the openSpec door
+        // below — a conversation this page already shows, attached or still attaching, is settled at once (a ghost of it: copiesOf)
+        if (liveServerIds.has(sessionOf(ws))) { noSpec.push(winId); continue; }
         // lane layout-stopped-window: built by its identity — attached, read-only or a placeholder, never 'unbuilt'; one already
         // being built (an earlier replay whose reads are still out — r2: two doors 50 ms apart built every window twice) is left to it
         const a = this._buildAttempts.get(String(winId));
@@ -1055,6 +1078,7 @@ export class DesktopManager {
     // _activeId, so a later capture/save could persist the WRONG desktop's
     // window set over another's (real report: windows vanish on fast switches).
     if (this._restoring) { this._pendingSwitch = desktopId; return; }
+    this._revealing = null; // a switch lands: a reveal's own switch is spent — once (r8); queued, it stays the reveal's until its drain lands
     this._restoring = true;
 
     try {

@@ -692,13 +692,17 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   /** B-0cc8 (lane pages-chip-groups): the window an attach of `serverId` is still waiting in — this socket sent that
    *  attach < 15 s ago (ws `_attachInFlight`, cleared at its `attached` / `error`) and the window it made is still open ⇒
-   *  raise it and send NOTHING. A double-click on a sidebar row used to send two attach frames (two windows, two answers). */
-  _focusPendingAttach(serverId) {
+   *  raise it and send NOTHING. A double-click on a sidebar row used to send two attach frames (two windows, two answers).
+   *  A RESTORE NEVER RAISES BEYOND THE WINDOW (r8 — the r7 acceptance's «bysession»: a visit's restore of a conversation still
+   *  attaching here came through this door as a person's open — keepInFront, an act nobody made, and revealWindow's switch back to
+   *  that window's desktop ~1 s after the person's own switch, a reveal in flight retired, nothing said): a replay / restore
+   *  (`replay` — attachSession's `syncId` or `machine`) only raises it, as _focusExistingSession's replay does. */
+  _focusPendingAttach(serverId, { replay = false } = {}) {
     const w = this._attachWins && this._attachWins.get(serverId);
     const sent = this.ws && this.ws._attachInFlight && this.ws._attachInFlight.get(serverId);
     if (!w || !sent || Date.now() - sent >= 15000 || !this.wm.windows.has(w.id)) { if (w) this._attachWins.delete(serverId); return false; }
-    this.desktopManager?.keepInFront?.(w.id); // it stands: revealed now, in front of a group still forming around it (r5 O)
-    this.wm.revealWindow(w.id);
+    if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)
+    this.wm.revealWindow(w.id, { replay });
     return true;
   },
 
@@ -729,7 +733,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // here — not yet in this.sessions, filled at 'attached' — the open went to another desktop that listed it, nothing was built
     // there and the page said its window did not appear): the window shown (above), then the window still attaching, only then a
     // held window on another desktop — never a copy of the one this page has (desktop-manager revealHeldSession)
-    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame
+    if (this._focusPendingAttach(serverId, { replay: !!(syncId || machine) })) return null; // B-0cc8: the attach in flight IS the answer — no second frame
     // ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — the writer of the triple): the shortcut above sees only the windows
     // this page BUILT; a conversation whose window waits in the record of a desktop not visited since the page loaded got a SECOND
     // window here (three desktops listed one conversation). A person's open goes to that desktop instead — its switch builds it.
