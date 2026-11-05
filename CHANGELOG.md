@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Going to a desktop no longer sends you back a second later while a conversation listed there is still loading on another desktop.
 - A conversation you just opened is no longer kept in front of its tab group once you leave that desktop, however you leave it.
 - The window list no longer lists a conversation twice, and choosing a window there that cannot be shown now says why.
+- Files sent to Slack or Lark are retried a few times when the upload hits a brief error on their side (such as a 504), instead of ending up partly sent.
 
 ## 2.369.380 — 2026-11-04
 
