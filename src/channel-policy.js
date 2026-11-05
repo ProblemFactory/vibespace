@@ -823,7 +823,7 @@ function rekeyByFiles(result, byFile) {
 }
 function sendParts(v) {
   if (!Array.isArray(v) || !v.length) return null;
-  return v.slice(0, 12).filter((x) => x && typeof x === 'object').map((x) => ({ part: x.part === 'text' ? 'text' : 'attachment', ...(x.name ? { name: String(x.name).slice(0, 200) } : {}), ok: x.ok === true, ...(x.vendorMessageId ? { vendorMessageId: String(x.vendorMessageId).slice(0, 200) } : {}), ...(x.ok === true ? {} : { code: String(x.code || 'vendor-error').slice(0, 40), ...(x.why ? { why: String(x.why).slice(0, 300) } : {}), ...(x.lost ? { lost: true } : {}), ...(Array.isArray(x.requiredScopes) && x.requiredScopes.length ? { requiredScopes: x.requiredScopes.slice(0, 8).map(String) } : {}) }) }));
+  return v.slice(0, 12).filter((x) => x && typeof x === 'object').map((x) => ({ part: x.part === 'text' ? 'text' : 'attachment', ...(x.name ? { name: String(x.name).slice(0, 200) } : {}), ok: x.ok === true, ...(x.vendorMessageId ? { vendorMessageId: String(x.vendorMessageId).slice(0, 200) } : {}), ...(Number.isInteger(x.retried) && x.retried > 0 ? { retried: Math.min(x.retried, 9) } : {}), ...(x.ok === true ? {} : { code: String(x.code || 'vendor-error').slice(0, 40), ...(x.why ? { why: String(x.why).slice(0, 300) } : {}), ...(x.lost ? { lost: true } : {}), ...(Array.isArray(x.requiredScopes) && x.requiredScopes.length ? { requiredScopes: x.requiredScopes.slice(0, 8).map(String) } : {}) }) }));
 }
 /** verify r1 (F1): a send in parts whose answer was LOST before anything landed, settled `sent` by a reconcile — the lost
  *  part is what the reconcile found (it landed); every part after it was never sent (the chain stopped at the lost answer).
@@ -834,13 +834,16 @@ function reconciledParts(v, vendorMessageId = null) {
   const at = ps.findIndex((x) => !x.ok && x.code !== 'not-sent');
   return ps.map((x, i) => (i === at ? { part: x.part, ...(x.name ? { name: x.name } : {}), ok: true, ...(vendorMessageId ? { vendorMessageId: String(vendorMessageId).slice(0, 200) } : {}) } : x));
 }
-/** The parts in the receipt's words: "landed: the text, a.png · NOT landed: b.pdf (forbidden: … needs files:write)". */
+/** The parts in the receipt's words: "landed: the text, a.png · NOT landed: b.pdf (forbidden: … needs files:write)".
+ *  lane channel-upload-retry: a part that landed after a retried upload says so ("b.pdf (retried, landed on attempt 2)");
+ *  a part whose upload failed every attempt says it in its own `why` ("… HTTP 504 (after 3 attempts)"). */
 function partsWords(parts) {
   const ps = sendParts(parts) || [];
   const nm = (x) => (x.part === 'text' ? 'the text' : JSON.stringify(String(x.name || 'a file').slice(0, 80)));
   const ok = ps.filter((x) => x.ok), no = ps.filter((x) => !x.ok);
+  const landed = (x) => `${nm(x)}${x.retried ? ` (retried, landed on attempt ${x.retried + 1})` : ''}`;   // lane channel-upload-retry
   const said = (x) => `${nm(x)} (${x.code === 'not-sent' ? 'not sent after the refusal before it' : `${x.code}${x.lost ? ', the answer was lost — check the platform' : ''}${x.why ? `: ${x.why}` : ''}${x.requiredScopes ? ` — needs ${x.requiredScopes.join(', ')}` : ''}`})`;
-  return [ok.length ? `landed: ${ok.map(nm).join(', ')}` : null, no.length ? `NOT landed: ${no.map(said).join('; ')}` : null].filter(Boolean).join(' · ');
+  return [ok.length ? `landed: ${ok.map(landed).join(', ')}` : null, no.length ? `NOT landed: ${no.map(said).join('; ')}` : null].filter(Boolean).join(' · ');
 }
 /** The attachments a proposal STORED (each with its sha256) — a record from before the bytes (names only) has none. */
 function storedAttachments(p) {

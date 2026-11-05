@@ -142,8 +142,8 @@ const scopeOf = (m) => slack.METHOD_SCOPE[m];
 
 // the seam-less copy: slack.js with `withTeam` not called (the request as before the lane; the refusal words kept)
 const SRC = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8');
-const SEAM = 'await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok });';
-const NOSEAM = SRC.includes(SEAM) ? require(MC.write('src/channels/slack.js', SRC.replace(SEAM, 'await callSlack(fetchFn, method, params, { token: tok });'), 'noseam')) : null;
+const SEAM = 'await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok, signal: w ? AbortSignal.timeout(w) : null });';   // lane channel-upload-retry r3: the line carries a retry request's window
+const NOSEAM = SRC.includes(SEAM) ? require(MC.write('src/channels/slack.js', SRC.replace(SEAM, 'await callSlack(fetchFn, method, params, { token: tok, signal: w ? AbortSignal.timeout(w) : null });'), 'noseam')) : null;
 ok(!!NOSEAM, 'the seam is the one callSlack line in api() (the copy without it loads)');
 
 // ── ⓐ the record learns the install kind ──

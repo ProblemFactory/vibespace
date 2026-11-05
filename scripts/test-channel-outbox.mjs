@@ -2004,6 +2004,18 @@ async function chatReadLegs(ENGmod, name) {
         ok(texts(partly).includes('partly sent') && find(partly, 'chan-prop-state-partly').length === 1 && find(partly, 'chan-prop-reason').some((e) => e._cls.has('chan-warn') && /NOT landed: "report\.md"/.test(e.textContent)) && texts(line).includes('partly sent') && !texts(whole).includes('partly sent') && texts(whole).includes('sent'),
           'lark-upload-preflight: a sent proposal whose file did not land reads "partly sent" on the card and the Outbox row (the NOT-landed part in a warning line); a whole send reads "sent"', JSON.stringify(texts(line).slice(0, 4)));
       }
+      // lane channel-upload-retry (userW inc-mw35tppf-jrvo): a RETRIED upload is said on the card — the file that landed on a
+      // later attempt and the file that failed every attempt, in the outcome line (the engine's reason = partsWords; the
+      // parts kept through sendParts, `retried` included)
+      {
+        const rparts = [{ part: 'attachment', name: 'a.pdf', ok: true, retried: 1, withText: true }, { part: 'attachment', name: 'b.pdf', ok: false, code: 'transport', why: 'slack files.upload: HTTP 504 (after 3 attempts)' }, { part: 'attachment', name: 'c.pdf', ok: false, code: 'not-sent' }];
+        const kept = P.sendParts(rparts);
+        const rp = { id: 'p-cur1', adapterId: 'slack-1', adapterLabel: 'Slack', convId: 'C1', key: 'slack-1/C1', state: 'sent', text: 'three PDFs', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, attachments: [], sendAs: 'user', reason: `partly sent — ${P.partsWords(kept)}`, result: { vendorMessageId: 'F1', parts: kept } };
+        const card = CO.renderProposalCard(app, rp);
+        const line = find(card, 'chan-prop-reason').map((e) => e.textContent).join(' | ');
+        ok(kept[0].retried === 1 && !('retried' in kept[1]) && /landed: "a\.pdf" \(retried, landed on attempt 2\)/.test(line) && /NOT landed: "b\.pdf" \(transport: slack files\.upload: HTTP 504 \(after 3 attempts\)\); "c\.pdf" \(not sent/.test(line) && find(card, 'chan-prop-state-partly').length === 1,
+          'channel-upload-retry (real card): the outcome line says the file that landed on attempt 2 and the one that failed "(after 3 attempts)"; sendParts keeps `retried`', line);
+      }
       // lane outbox-attachment-preview (owner 2026-10-09 "草稿的那个界面怎么不能点开文件预览，只能下载"): a click on a draft's
       // file OPENS it — a picture in THE image overlay, a document in a viewer window by URL — and the ⤓ on every row
       // downloads; a type with no preview keeps its download. Controls: a mutant whose name downloads on click ⇒ RED.

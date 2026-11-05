@@ -207,6 +207,11 @@ const PURE = new Set(['src/login-shell.js' /* lane cli-shell-truth (B-fb02): THE
   //     async-interleaved imperative scheduler each grew an ordering bug; a pure
   //     step function is pinned by a seeded invariant walk (test-channel-drain).
   'src/channel-drain.js',
+  //   channel-upload-plan — WHEN AN ADAPTER TRIES A FILE'S UPLOAD AGAIN (lane channel-upload-retry, userW
+  //     inc-mw35tppf-jrvo): the count, the 1 s / 3 s backoff, the vendor's named wait as a floor, the send's budget (a
+  //     retry's window = what is left) and the words a stopped upload ends with — ONE law the Slack bytes POST and Lark's
+  //     im/v1 upload both ask, and the budget each outbox lane brings. Imports nothing, reads no clock.
+  'src/channel-upload-plan.js',
   //   outbox-census — THE OUTBOX'S ONE COUNT (lane outbox-window-scroll-filter, 2026-10-22): the head's and every
   //     section's waiting / total, the 「待审批」 | 「全部」 view (only what waits, first; a section with nothing waiting
   //     folded) and the rows' runs (×n); the window and test-channel-outbox §OW ask it. Imports nothing — the API
@@ -4370,7 +4375,7 @@ console.log('§79 the channels engine\'s families meet only through its one cont
 {
   const FAM_REQ = {
     'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-record.js', '../channel-search.js', '../channel-watch-spec.js', '../channels/index.js', '../foryou-actions.js', '../peer-text.js', './owner-facts.js', 'crypto'],   // ../foryou-actions.js: lane chat-needs-you-card — THE For-you action registry: the agent's ONE line after a watch / access request (PURE, not a family); ./owner-facts.js: lane agent-context-owner-facts — a refusal's time in the owner's zone (not a family); ../channel-record.js: lane gmail-draft-not-a-message — the agent's read sets a draft apart (`draftsOf`, PURE)
-    'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-revisions.js', '../channel-thread.js', '../channels/index.js', '../channels/vendor-hold.js', '../peer-text.js', '../write-origin.js'],   // lane lark-send-hold: the vendor hold's ceiling; lane channels-proposals-recall: a message the store already shows recalled; lane owner-press-attended r2: isPress (an attended receipt / send rides the door's press)
+    'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-revisions.js', '../channel-thread.js', '../channel-upload-plan.js', '../channels/index.js', '../channels/vendor-hold.js', '../peer-text.js', '../write-origin.js'],   // lane lark-send-hold: the vendor hold's ceiling; lane channels-proposals-recall: a message the store already shows recalled; lane owner-press-attended r2: isPress (an attended receipt / send rides the door's press)
     'src/server/channels-auth.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-identity.js', '../channel-outbox-files.js', '../channel-policy.js', '../channels/index.js', '../integration-registry.js', './integration-store.js', 'crypto'],
   };
   const VAR = { ChannelsAccess: 'src/server/channels-access.js', ChannelsOutbound: 'src/server/channels-outbound.js', ChannelsAuth: 'src/server/channels-auth.js' };

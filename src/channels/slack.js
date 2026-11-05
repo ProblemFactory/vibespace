@@ -140,6 +140,16 @@ function avatarUrlOf(u) {
   return raw.startsWith(AVATAR_ORIGIN) && !/[\s\\]/.test(raw) ? raw : '';
 }
 const SEND_GAP_WAIT_MS = 1100;   // one wait for Slack's per-conversation second, then the bucket decides
+/** lane channel-upload-retry (userW inc-mw35tppf-jrvo: files.slack.com answered one file's bytes HTTP 504 and the send
+ *  stopped "partly sent"): a TRANSPORT failure of a file's BYTES step is tried again before any refusal is said — by THE
+ *  plan the Lark twin shares (src/channel-upload-plan.js: the count, the 1 s / 3 s backoff, r2 the vendor's Retry-After
+ *  and the send's budget). Only the bytes step: nothing shows in Slack until `files.completeUploadExternal` names the
+ *  file (an id never completed is aborted by Slack). */
+const Plan = require('../channel-upload-plan.js');
+/** The failure of an upload the plan stopped trying: the last transport failure, its words saying why it stopped. */
+const stoppedUpload = (e, n, stop) => new ChannelError('transport', `${e.message} ${Plan.stopWords({ n, stop, retryAfterSec: e.detail && e.detail.retryAfterSec })}`, { retryable: true, detail: { ...(e.detail || {}), attempts: n, stopped: stop } });
+/** r3 m1: a retry's URL ask — callSlack's own 20 s at most, and it leaves the bytes their minimum window. */
+const ASK_WINDOW = Object.freeze({ ownMs: REQUEST_TIMEOUT_MS, leaveMs: Plan.UPLOAD_MIN_WINDOW_MS });
 const TS_RE = /^\d{9,11}\.\d{1,6}$/;
 const ID_RE = /^[A-Z0-9][A-Z0-9_]{1,40}$/;
 const tsMs = (ts) => (TS_RE.test(String(ts || '')) ? Math.round(Number(ts) * 1000) : 0);
@@ -394,6 +404,7 @@ function create(record = {}, deps = {}) {
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};
   const buckets = deps.slackBuckets || Limits.createBuckets();
   const sleep = typeof deps.sleep === 'function' ? deps.sleep : (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+  const random = typeof deps.random === 'function' ? deps.random : Math.random;   // lane channel-upload-retry: the bytes retry's jitter
   const walks = new Map();       // convId (or convId#threadTs) -> {stopAt, cursor, newest, at, count, max}
   const people = new Map();      // user id -> {name, display, real, handle, isBot, deleted, team, at}
   const bots = new Map();        // bot id -> {name, at}
@@ -523,7 +534,7 @@ function create(record = {}, deps = {}) {
   }
 
   // ── THE GATE: token → the method's bucket → the pace → the meter → the request ──
-  async function api(method, params = {}, { convId = null } = {}) {
+  async function api(method, params = {}, { convId = null, windowOf = null } = {}) {
     bearer();
     let v = buckets.take(method, now(), { convId });
     // Slack's one-message-a-second per conversation: a gap under a second is WAITED once (two approvals in one
@@ -535,11 +546,12 @@ function create(record = {}, deps = {}) {
       throw new ChannelError('rate-limited', `slack ${method}: ${why} — again in ${v.retryAfterSec || 60} s`, { retryable: true, detail: { method, why: v.why, retryAfterSec: v.retryAfterSec || 60, bucket: true } });
     }
     await pace(1);
+    const w = windowOf ? windowOf() : null;   // lane channel-upload-retry r3: a retry's request reads its window HERE, after the pace (none left: thrown, nothing metered or sent)
     meter(1);
     const tok = bearer();   // re-read after the pace (a disconnect while waiting sends nothing)
     const held = readToken().token;   // lane slack-org-team-id: the record's install kind + workspace (withTeam)
     try {
-      const r = await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok });
+      const r = await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok, signal: w ? AbortSignal.timeout(w) : null });
       if (r.scopes && r.scopes.length) probe('scopes', r.scopes);
       return r.body;
     } catch (e) {
@@ -715,8 +727,10 @@ function create(record = {}, deps = {}) {
    * (name + length) → the bytes to its `upload_url` (files.slack.com only; no token rides) → `files.completeUploadExternal`
    * (the channel, the thread, and on the first file the text as `initial_comment`). The first refusal STOPS the chain
    * (never retried); `parts` say per file what landed. A token without `files:write` is refused by name before any request.
+   * lane channel-upload-retry: a refusal here is FINAL — a transport failure of the bytes was already tried again inside
+   * `uploadFile` (a part that landed so carries `retried`); the completing call is never retried (its lost answer is `lost`).
    */
-  async function sendFiles(convId, params, files) {
+  async function sendFiles(convId, params, files, deadline = Infinity) {
     if (!has(scopesHeld(), FILES_SCOPE)) throw new ChannelError('forbidden', `slack: the pasted token has no ${FILES_SCOPE} scope — nothing was sent (add ${FILES_SCOPE} to the app's user scopes and paste the new token)`, { retryable: false, detail: { why: 'files-scope-not-granted', requiredScopes: [FILES_SCOPE] } });
     const parts = [];
     let first = null;
@@ -724,14 +738,11 @@ function create(record = {}, deps = {}) {
       const f = files[i];
       const label = { part: 'attachment', name: f.name, ...(i === 0 && params.text ? { withText: true } : {}) };
       try {
-        const u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId });
-        const url = String((u && u.upload_url) || ''), fid = String((u && u.file_id) || '');
-        if (!url.startsWith(FILES_ORIGIN) || !ID_RE.test(fid)) throw new ChannelError('vendor-error', 'slack files.getUploadURLExternal: the answer names no files.slack.com upload URL — nothing was uploaded', { retryable: false, detail: { why: 'upload-url' } });
-        await uploadBytes(url, f.data, convId);
+        const { url, fid, retried } = await uploadFile(f, convId, deadline);
         const c = { files: JSON.stringify([{ id: fid, title: f.name }]), channel_id: convId, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(i === 0 && params.text ? { initial_comment: params.text } : {}) };
         try { await api('files.completeUploadExternal', c, { convId }); }
         catch (e) { if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and Slack's answer was lost; check Slack before sending again`, { retryable: false, detail: { ...(e.detail || {}), lost: true } }); throw e; }
-        parts.push({ ...label, ok: true, vendorMessageId: fid });
+        parts.push({ ...label, ok: true, vendorMessageId: fid, ...(retried ? { retried } : {}) });
         if (!first) first = { ok: true, vendorMessageId: fid, at: now(), sentAs: 'user', observed: { senderType: 'user', senderId: null, ...(params.thread_ts ? { threadKey: params.thread_ts } : {}) } };
       } catch (e) {
         const no = { ...label, ok: false, code: (e && e.code) || 'vendor-error', why: String((e && e.message) || e).slice(0, 300), ...(e && e.detail && e.detail.lost ? { lost: true } : {}), ...(e && e.detail && e.detail.requiredScopes ? { requiredScopes: e.detail.requiredScopes } : {}) };
@@ -743,19 +754,55 @@ function create(record = {}, deps = {}) {
     }
     return { ...first, parts };
   }
-  /** The bytes to Slack's upload URL — metered as its own method; the answer judged here (a 429 is the ladder's). */
-  async function uploadBytes(url, data, convId) {
+  /** lane channel-upload-retry: ONE file's bytes, every attempt on a FRESH upload URL (`files.getUploadURLExternal`, then
+   *  the POST — Slack's docs promise nothing about posting to one URL twice). A TRANSPORT failure of the POST (a 5xx from
+   *  files.slack.com, a network error, the attempt's timeout) is tried again as THE plan says, each attempt through the
+   *  bucket + pace + meter: r2 F1 never inside the wait the vendor named (a 5xx's Retry-After), r2 F3 never past the
+   *  send's `deadline`. r3: the URL ask and the bytes each read their window right before they leave (`windowOf`, after
+   *  their bucket + pace): the ask min(its 20 s, what is left − the bytes' minimum), the bytes min(60 s, what is left);
+   *  none left ⇒ nothing sent and the upload stops on the budget (a retry's ask that fails once none is left too). The
+   *  URL ask itself (callSlack's own judgement), a 429 (the ladder's hold) and any other refusal are never retried. A
+   *  landing after a retry is said on the console; the last failure says why it stopped (the count, or the budget). */
+  async function uploadFile(f, convId, deadline = Infinity) {
+    let lastErr = null;
+    for (let n = 1; ; n++) {
+      const windowOf = (own) => { const w = Plan.windowMs(n, now(), deadline, own); if (!w) throw stoppedUpload(lastErr, n - 1, 'budget'); return w; };
+      let u;
+      try { u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId, windowOf: () => windowOf(ASK_WINDOW) }); }
+      catch (e) { if (n > 1 && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }   // r3: a retry's ask that failed once no window is left = the budget's stop
+      const url = String((u && u.upload_url) || ''), fid = String((u && u.file_id) || '');
+      if (!url.startsWith(FILES_ORIGIN) || !ID_RE.test(fid)) throw new ChannelError('vendor-error', 'slack files.getUploadURLExternal: the answer names no files.slack.com upload URL — nothing was uploaded', { retryable: false, detail: { why: 'upload-url' } });
+      try { await uploadBytes(url, f.data, convId, () => windowOf()); }
+      catch (e) {
+        if (e instanceof ChannelError && e.detail && e.detail.stopped) throw e;   // r3: the budget's stop before the bytes left
+        if (!(e instanceof ChannelError) || e.code !== 'transport') throw e;   // a 429, a 403 / 413, any other refusal: ONE request
+        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline });   // r2 F1: the vendor's wait, at least
+        if (!next.go) throw stoppedUpload(e, n, next.stop);
+        lastErr = e;
+        await sleep(next.waitMs);
+        continue;
+      }
+      if (n > 1) log.warn && log.warn(`[slack] ${adapterId}: ${lastErr.message} — retried, landed on attempt ${n}`);
+      return { url, fid, retried: n - 1 };
+    }
+  }
+  /** The bytes to Slack's upload URL — metered as its own method; the answer judged here (a 429 is the ladder's; r2 F1:
+   *  a 5xx's Retry-After rides the failure as `retryAfterSec`, the plan's floor for the next attempt). r3: `windowOf()`
+   *  is read after the bucket + the pace, right before the bytes leave (none left: it throws, nothing metered or sent). */
+  async function uploadBytes(url, data, convId, windowOf = () => Plan.UPLOAD_WINDOW_MS) {
     const v = buckets.take('files.upload', now(), { convId });
     if (!v.go) throw new ChannelError('rate-limited', `slack files.upload: again in ${v.retryAfterSec || 60} s`, { retryable: true, detail: { method: 'files.upload', retryAfterSec: v.retryAfterSec || 60, bucket: true } });
     await pace(1);
+    const w = windowOf();
     meter(1);
     let r;
-    try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data, redirect: 'error', signal: AbortSignal.timeout(60000) }); }
+    try { r = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data, redirect: 'error', signal: AbortSignal.timeout(w) }); }
     catch (e) { throw new ChannelError('transport', `slack files.upload: ${(e && e.message) || e}`, { retryable: true, detail: { method: 'files.upload' } }); }
     if (r.status === 429) { const ra = retryAfterSeconds(r.headers); if (Number(ra) > 0) buckets.hold('files.upload', ra, now()); throw new ChannelError('rate-limited', `slack files.upload: Slack answered 429 (rate limited)`, { retryable: true, detail: { method: 'files.upload', status: 429, ...(Number(ra) > 0 ? { retryAfterSec: ra } : {}) } }); }
-    if (!r.ok) throw new ChannelError(r.status === 413 ? 'too-large' : r.status === 403 ? 'forbidden' : r.status >= 500 ? 'transport' : 'vendor-error', `slack files.upload: HTTP ${r.status}`, { retryable: r.status >= 500, detail: { method: 'files.upload', status: r.status } });
+    if (!r.ok) { const ra = r.status >= 500 ? retryAfterSeconds(r.headers) : null; throw new ChannelError(r.status === 413 ? 'too-large' : r.status === 403 ? 'forbidden' : r.status >= 500 ? 'transport' : 'vendor-error', `slack files.upload: HTTP ${r.status}`, { retryable: r.status >= 500, detail: { method: 'files.upload', status: r.status, ...(Number(ra) > 0 ? { retryAfterSec: ra } : {}) } }); }
   }
-  async function sendImpl(convId, { text, replyTo = null, as = 'user', placement = null, prepared = null, replyAnchor = null, attachments = null } = {}) {
+  async function sendImpl(convId, { text, replyTo = null, as = 'user', placement = null, prepared = null, replyAnchor = null, attachments = null, budgetMs = null } = {}) {
+    const deadline = Plan.deadlineOf(budgetMs, now());   // r2 F3: the caller's remaining time bounds the bytes retry
     if (as !== 'user') throw new ChannelError('send-not-available', `slack: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     if (!SEND_SCOPES.every((s) => has(scopesHeld(), s))) throw new ChannelError('forbidden', 'slack: the pasted token has no chat:write scope — add it to the app and paste the new token (Re-authorize)', { retryable: false, detail: { why: 'send-scope-not-granted' } });
     const body = String(text == null ? '' : text);
@@ -776,7 +823,7 @@ function create(record = {}, deps = {}) {
     // verify r1 (F4): Slack's files.completeUploadExternal has no `reply_broadcast` — a file into a thread AND the channel
     // would land in the thread only while the receipt said both; refused by name before any request
     if (files.length && params.reply_broadcast) throw new ChannelError('send-not-available', 'slack: a file shared into a thread cannot also go to the channel (Slack\'s file sharing has no "also send to the channel") — nothing was sent; send it into the thread only', { retryable: false, detail: { why: 'attachment-placement' } });
-    if (files.length) return sendFiles(convId, params, files);
+    if (files.length) return sendFiles(convId, params, files, deadline);
     let d;
     try { d = await api('chat.postMessage', params, { convId }); }
     catch (e) {

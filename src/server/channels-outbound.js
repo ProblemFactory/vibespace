@@ -16,6 +16,7 @@ const { isPress } = require('../write-origin.js');   // lane owner-press-attende
 const ACL = require('../channel-acl.js');
 const Drain = require('../channel-drain.js');
 const OF = require('../channel-outbox-files.js');
+const Plan = require('../channel-upload-plan.js');   // lane channel-upload-retry r2 (F3): the budget a send brings to its adapter (PURE)
 const Thr = require('../channel-thread.js');
 const Rev = require('../channel-revisions.js');   // lane channels-proposals-recall: a message the store already shows recalled
 const { toAgentText: agentText } = require('../peer-text.js');
@@ -678,7 +679,7 @@ function create(engineCtx) {
       await markCollect(created.id, guards, decision);   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
         await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
-        await sendNow(created.id, { pressed: input && input.pressed });   // r2: the owner's own send carries its door's press
+        await sendNow(created.id, { pressed: input && input.pressed, deadline: commandDeadline(ctx, guards, decision, t) });   // r2: the owner's own send carries its door's press
         wakeRefundIfUnsent(gate, guards, convId, created.id);
       }
     } catch (err) {
@@ -704,6 +705,11 @@ function create(engineCtx) {
   async function markCollect(id, guards, decision) {
     if (collectsInline(guards, decision)) await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.receiptCollect = true; });
   }
+  // lane channel-upload-retry r2 (F3): A RETRY NEVER COSTS THE CALLER MORE THAN THE BUDGET IT BROUGHT. An agent's command
+  // that waits on its DIRECT send (a reply, a new message) sets the send's deadline at the proposal's own instant: the
+  // CLI's write budget, or the collect window when the command reads the receipt inline (Plan.commandBudgetMs). Every
+  // other send (the owner's Approve or own send, a held send's release) brings the outbox's own (sendNow's default).
+  const commandDeadline = (ctx, guards, decision, at) => (ctx && ctx.kind === 'agent' ? at + Plan.commandBudgetMs({ collectWindowMs: collectsInline(guards, decision) ? collectWindowMs() : null }) : null);
   function inlineReceiptOf(fresh, guards, decision) {
     if (!collectsInline(guards, decision)) return {};
     if (!fresh || !fresh.receipt) return { receiptText: null, receiptPending: true, collectWindowMs: collectWindowMs() };   // the CLI polls as long as the hold lasts
@@ -936,7 +942,7 @@ function create(engineCtx) {
     await markCollect(created.id, guards, decision);   // lane inline-receipts-compose-api: a NEW mail sent directly is read inline by the CLI that waits, as a reply is
     if (decision.mode === 'direct') {
       await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
-      await sendNow(created.id);
+      await sendNow(created.id, { deadline: commandDeadline(ctx, guards, decision, t) });
     } else {
       await transition(created.id, 'awaiting-approval', 'policy');
       await composePointerSync(adapterId);
@@ -1336,7 +1342,7 @@ function create(engineCtx) {
    * mid-flight — the registry marks it `detail.threw`) is `unknown`, which
    * this engine NEVER retries by itself.
    */
-  async function sendNow(id, { pressed = null } = {}) {
+  async function sendNow(id, { pressed = null, deadline = null } = {}) {
     const p = store.outbox.snapshot().proposals[id];
     if (!p || p.state !== 'sending') return { ok: false, why: p ? `state ${p.state}` : 'no such proposal' };
     if (p.kind === 'reaction') return sendReactionNow(id, p);
@@ -1378,7 +1384,8 @@ function create(engineCtx) {
       else if (fv && !fv.ok) r = { ok: false, code: 'attachment-changed', retryable: false, detail: { reason: `${fv.why} — nothing was sent` } };
       else {
         sendLeft.add(id);   // only a request that is really handed to the adapter may have LEFT (r4's refund rule)
-        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, byUser: P.userDecidedSend(p), pressed, ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
+        const budgetMs = Plan.sendBudgetMs(deadline, now());   // lane channel-upload-retry r2 (F3): what the caller has left (an upload retry stays inside it)
+        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files, budgetMs }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, byUser: P.userDecidedSend(p), pressed, budgetMs, ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
         catch (err) {
           r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
           if (err && err.message && !r.message) r.message = err.message;

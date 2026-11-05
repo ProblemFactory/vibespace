@@ -1206,6 +1206,13 @@ const LARK_FILE_MAX = 30 * 1024 * 1024;
 /** lane lark-send-hold (B-efa0): how long a send 429 that names no reset holds the account's sends. Lark's rate body
  *  (code 99991400 app-level / 99991403 user-level + msg) names none; the reset rides `x-ogw-ratelimit-reset` (seconds). */
 const SEND_HOLD_DEFAULT_SEC = 30;
+/** lane channel-upload-retry (userW inc-mw35tppf-jrvo — the Slack twin): a TRANSPORT failure of an upload (im/v1/images ·
+ *  im/v1/files) is tried again before any refusal is said — by THE plan Slack shares (src/channel-upload-plan.js: the
+ *  count, the 1 s / 3 s backoff, r2 the vendor's Retry-After / x-ogw-ratelimit-reset and the send's budget). Only the
+ *  upload: nothing shows in the chat until a message names the uploaded key. */
+const Plan = require('../channel-upload-plan.js');
+/** The failure of an upload the plan stopped trying: the last transport failure, its words saying why it stopped. */
+const stoppedUpload = (e, n, stop) => new ChannelError('transport', `${e.message} ${Plan.stopWords({ n, stop, retryAfterSec: e.detail && e.detail.retryAfterSec })}`, { retryable: true, detail: { ...(e.detail || {}), attempts: n, stopped: stop } });
 /** PURE: how ONE stored attachment goes to Lark — `{route, msgType, fields, field, keyName}`. */
 function attachmentPlan(f) {
   const mime = String((f && f.mime) || '');
@@ -1309,7 +1316,8 @@ function create(record = {}, deps = {}) {
   const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_CONSENT_SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...MINUTES_SCOPES, ...MINUTES_MEDIA_SCOPES, ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
   // lane lark-minutes-scopes: what the owner's OPTIONS keep out of a consent — never asked back through the app's own list
   const optedOut = () => [...(optionOf(record, 'reactions') === 'read' ? [] : REACTIONS_READ_SCOPES), ...(optionOf(record, 'search') !== 'off' ? [] : [P2P_READ_SCOPE, SEARCH_SCOPE])];
-  const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+  const sleep = typeof deps.sleep === 'function' ? deps.sleep : (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+  const random = typeof deps.random === 'function' ? deps.random : Math.random;   // lane channel-upload-retry: the upload retry's jitter
 
   /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
    *  handed down by the engine (`deps.credentialKey`) and read LIVE off the
@@ -1856,8 +1864,10 @@ function create(record = {}, deps = {}) {
    * uuid), then per file: ONE upload with the account's token (`attachmentPlan`) and ONE message carrying its key
    * (`uuid` = the proposal's + `:a<i>`). The first refusal STOPS the chain (no retry, no storm: a rate refusal is the
    * ladder's when nothing landed); the answer's `parts` say, per piece, what landed and what did not (the receipt's words).
+   * lane channel-upload-retry: an upload's transport failure was already tried again inside `upload` (a part that landed
+   * so carries `retried`); a message send is never retried here.
    */
-  async function sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files }) {
+  async function sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline = Infinity }) {
     const parts = [];
     const one = async (what, body, i) => {
       return sendImpl(convId, { text: '', replyTo, idemKey: i == null ? idemKey : `${idemKey}:a${i}`, replyAnchor, inThread, placement, _body: body });
@@ -1869,16 +1879,17 @@ function create(record = {}, deps = {}) {
     for (let k = 0; k < pieces.length; k++) {
       const p = pieces[k];
       const label = p.part === 'text' ? { part: 'text' } : { part: 'attachment', name: p.name };
+      const tally = { retried: 0 };
       try {
         let r;
         if (p.part === 'text') r = await one('lark send', { msg_type: 'text', content: JSON.stringify({ text: String(text) }) }, null);
         else {
           const plan = attachmentPlan(p.f);
           if (plan.msgType === 'file' && Number(p.f.data.length) > LARK_FILE_MAX) throw new ChannelError('too-large', `lark: ${JSON.stringify(String(p.name).slice(0, 80))} is over Lark's 30 MB file ceiling`, { retryable: false, detail: { why: 'attachment-too-large' } });
-          const up = await upload(plan, p.f);
+          const up = await upload(plan, p.f, tally, deadline);
           r = await one(`lark send ${plan.msgType}`, { msg_type: plan.msgType, content: JSON.stringify({ [plan.keyName]: up }) }, p.i);
         }
-        parts.push({ ...label, ok: true, vendorMessageId: r.vendorMessageId });
+        parts.push({ ...label, ok: true, vendorMessageId: r.vendorMessageId, ...(tally.retried ? { retried: tally.retried } : {}) });
         if (!first) first = r;
       } catch (e) {   // rate-ok: send-parts
         noteSendHold(e);   // lane lark-send-hold: a part's 429 (an upload's too) holds the account's later sends
@@ -1891,18 +1902,41 @@ function create(record = {}, deps = {}) {
     }
     return { ...first, parts };
   }
-  /** ONE upload with the account's user token, through the gate's pace + meter — the vendor's key, or its refusal. */
-  async function upload(plan, f) {
-    let at0 = await accessToken();
-    await pace(1);
-    meter(1);
-    if (bearerExpired()) at0 = await accessToken();
-    const d = await callForm(fetchFn, `${H.open}/open-apis${plan.route}`, { what: `lark upload ${plan.msgType}`, headers: { Authorization: `Bearer ${bearerNow(at0)}` }, fields: plan.fields, file: { field: plan.field, data: f.data, mime: f.mime, name: f.name } });   // gated-inline: upload
+  /** ONE upload with the account's user token, through the gate's pace + meter — the vendor's key, or its refusal.
+   *  lane channel-upload-retry: a TRANSPORT failure (a 5xx, a network error, the attempt's timeout) is tried again as THE
+   *  plan says — the same request, its multipart form rebuilt, each attempt paced + metered, none inside the account's
+   *  send hold, r2 F1 none inside the wait the vendor named (a 5xx's Retry-After / reset), r2 F3 none past the send's
+   *  `deadline` — r3: its window read right before it leaves, after the token + the pace (none left ⇒ not sent, no unit
+   *  metered, the budget's stop); a 429 (the hold's) and any other refusal are never retried.
+   *  `tally.retried` = the tries before it landed. */
+  async function upload(plan, f, tally = {}, deadline = Infinity) {
+    let d = null, n = 0, lastErr = null;
+    for (;;) {
+      n++;
+      let at0 = await accessToken();
+      await pace(1);
+      if (bearerExpired()) at0 = await accessToken();
+      const w = Plan.windowMs(n, now(), deadline);   // r3 m1: read HERE, after the token + the pace (r2 F3: attempt 1's own 60 s, a retry's = what is left)
+      if (!w) throw stoppedUpload(lastErr, n - 1, 'budget');   // r3 m2: none left — not sent, no unit metered
+      meter(1);
+      try { d = await callForm(fetchFn, `${H.open}/open-apis${plan.route}`, { what: `lark upload ${plan.msgType}`, headers: { Authorization: `Bearer ${bearerNow(at0)}` }, fields: plan.fields, file: { field: plan.field, data: f.data, mime: f.mime, name: f.name }, signal: AbortSignal.timeout(w) }); break; }   // gated-inline: upload
+      catch (e) {
+        if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // the account's send hold (noteSendHold) — ONE request
+        if (!(e instanceof ChannelError) || e.code !== 'transport') throw e;   // a 403 / 4xx / a refused body: ONE request
+        const next = Plan.nextTry({ n, retryAfterSec: e.detail && e.detail.retryAfterSec, random, now: now(), deadline });   // r2 F1: the vendor's wait, at least
+        if (!next.go) throw stoppedUpload(e, n, next.stop);
+        lastErr = e;
+        await sleep(next.waitMs);
+        const hold = heldRefusal(); if (hold) throw hold;   // another send's 429 while this one waited: no request inside the reset
+      }
+    }
+    if (n > 1) { tally.retried = n - 1; log.warn && log.warn(`[channels] lark ${adapterId}: ${lastErr.message} — retried, landed on attempt ${n}`); }
     const key = d && d.data && d.data[plan.keyName];
     if (typeof key !== 'string' || !key || key.length > 200) throw new ChannelError('vendor-error', `lark upload ${plan.msgType}: the answer carries no ${plan.keyName}`, { retryable: false, detail: { why: 'no-key' } });
     return key;
   }
-  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null } = {}) {
+  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null, budgetMs = null } = {}) {
+    const deadline = Plan.deadlineOf(budgetMs, now());   // r2 F3: the caller's remaining time bounds the upload retry
     if (as !== 'user') throw new ChannelError('send-not-available', `lark: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     // r6 verify F1 (the belt under the engine's gate): the reply endpoint names only the MESSAGE, never the chat —
     // a message id of chat B posted into B whatever `convId` said. So a reply is sent only with the anchor's STORED
@@ -1921,7 +1955,7 @@ function create(record = {}, deps = {}) {
     const held = heldRefusal();
     if (held) throw held;
     const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
-    if (files.length) return sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files });
+    if (files.length) return sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline });
     const uuid = uuidFor(idemKey);
     const body = { ...(_body || { msg_type: 'text', content: JSON.stringify({ text: String(text == null ? '' : text) }) }), uuid };
     // lane channel-threads (L6): a reply INTO a thread says so — `reply_in_thread` is a PROMISE the composer made
