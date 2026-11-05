@@ -578,19 +578,20 @@ else await (async () => {
         ok(pd && !pd.bareWindow && pd.win != null, '6 B a real click in its middle lands in its content (the incident: the bare div.window)', S(pd));
       }
       // C — while on the Stage, resume the stopped conversation whose window lives on Scra (the resume bar's path:
-      //     the read-only window closes, the resumed one is placed back on its home desktop — session-lifecycle's
-      //     resume placement — unless the Stage holds it)
+      //     the read-only window is its row, RE-OPENED AS ITSELF — lane phone-resume-keeps-layout: the resumed window takes
+      //     its id — placed back on its home desktop by session-lifecycle's resume placement, unless the Stage holds it)
       let resHome = null;
       {
         const before = await ev('return [...wm.windows.keys()];');
         resHome = await ev(`const w = wm.windows.get(${S(W.res)}); return w && w.gridBounds ? { ...w.gridBounds } : null;`);
         await ev(`app.resumeSession(${S(SIDS.res)}, ${S(CWD6)}, 'Resumable', { mode: 'chat', backend: 'claude', backendSessionId: ${S(SIDS.res)} }); return true;`);
         let rid = null;
-        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => !${S(before)}.includes(w.id) && w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.res)})?.id || null;`); return !!rid; }, 10000, 200);
+        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.res)} && w._openSpec.action === 'attachSession' && !(app.sessions.get(w.id) || {})._readOnly)?.id || null;`); return !!rid; }, 10000, 200); // the RESUMED window (its row's id since phone-resume-keeps-layout), never the read-only view
+        void before;
         const live = rid && await until(() => ev(`const v = app.sessions.get(${S(rid)}); return !!(v && v.sessionId && !v._readOnly && v._messageList && v._messageList.querySelectorAll('.chat-msg').length >= 8);`), 20000, 250);
         await sleep(1500);
         const p = rid ? await probe6(rid) : { missing: true }; const c = p.missing ? -1 : await colours(p.rect, '6-C-resumed-on-stage');
-        const place = await ev(`const w = wm.windows.get(${S(rid)}); const slot = st.slotBounds(); const gb = w && w.gridBounds; return { oldGone: !wm.windows.has(${S(W.res)}), desk: w && w._desktopId, onStage: !!(w && w._onStage), hero: st._heroWinId === ${S(rid)}, atSlot: !!(gb && ['left', 'top', 'width', 'height'].every((k) => Math.abs((gb[k] ?? 0) - (slot[k] ?? 0)) < 0.01)), gb, slot, ops: (window.__vsOps ? window.__vsOps().filter((o) => o.op === 'resume-place').slice(-1) : null) };`);
+        const place = await ev(`const w = wm.windows.get(${S(rid)}); const slot = st.slotBounds(); const gb = w && w.gridBounds; return { sameRow: ${S(rid)} === ${S(W.res)}, desk: w && w._desktopId, onStage: !!(w && w._onStage), hero: st._heroWinId === ${S(rid)}, atSlot: !!(gb && ['left', 'top', 'width', 'height'].every((k) => Math.abs((gb[k] ?? 0) - (slot[k] ?? 0)) < 0.01)), gb, slot, ops: (window.__vsOps ? window.__vsOps().filter((o) => o.op === 'resume-place').slice(-1) : null) };`);
         console.log('    C ' + S({ ...p, colours: c, place }));
         ok(!!rid && live, '6 C the resume created a LIVE window for the conversation (the read-only one replaced)', S({ rid, live, place }));
         ok(place.hero && place.onStage && place.desk === desks.scra, '6 C …it is the Stage\'s hero, BORROWED from its home desktop Scra (the Stage is a view, not an owner — 2.369.198: stage-born, its home lost)', S(place));
@@ -628,7 +629,8 @@ else await (async () => {
         ok(back.freshDesk === '__stage__' && back.freshHidden, '6 C3 the session born on the Stage stays the Stage\'s (parked while the Stage is off screen)', S(back));
         W.resLive = back.id || W.resLive;
       }
-      // C4 — THE HERO'S OWN RESUME (verify r1 V4): Scra-1 (read-only) is the hero; its bar's Resume replaces it. The home it
+      // C4 — THE HERO'S OWN RESUME (verify r1 V4): Scra-1 (read-only) is the hero; its bar's Resume re-opens it as itself (its id —
+      //      lane phone-resume-keeps-layout). The home it
       //      carries is its OLD box, never the slot its element sat at; leaving to Scra lands it there (c4f17e39: the slot
       //      became its home, the hand-back left it at slot size on Scra, and the other client's record of Scra took it)
       {
@@ -640,7 +642,8 @@ else await (async () => {
         const before = await ev('return [...wm.windows.keys()];');
         await ev(`app.resumeSession(${S(SIDS.scra1)}, ${S(CWD6)}, 'Scra-1', { mode: 'chat', backend: 'claude', backendSessionId: ${S(SIDS.scra1)} }); return true;`);
         let rid = null;
-        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => !${S(before)}.includes(w.id) && w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.scra1)})?.id || null;`); return !!rid; }, 10000, 200);
+        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.scra1)} && w._openSpec.action === 'attachSession' && !(app.sessions.get(w.id) || {})._readOnly)?.id || null;`); return !!rid; }, 10000, 200); // the RESUMED window (the row's id since phone-resume-keeps-layout), never the read-only view
+        void before;
         const live = rid && await until(() => ev(`const v = app.sessions.get(${S(rid)}); return !!(v && v.sessionId && !v._readOnly);`), 20000, 250);
         await sleep(1200);
         const r = await ev(`const w = wm.windows.get(${S(rid)}); return w ? { hero: st._heroWinId === w.id, desk: w._desktopId, home: w._stageHomeBounds || null, gb: w.gridBounds } : null;`);

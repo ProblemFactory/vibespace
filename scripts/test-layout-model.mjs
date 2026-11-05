@@ -218,7 +218,7 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
   ok(hrs > 0 && /if \(behindStamp\(this\._appliedStamps, msg\)\) \{[^\n]*return; \}\n\s+noteStamp\(this\._appliedStamps, msg\.desktopId, recordStamp\(msg\)\); dm\?\.noteStamp\?\.\(msg\.desktopId, recordStamp\(msg\)\);/.test(hrsBody) && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('cacheRemoteState(') && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('_applyRemoteState('), '⑩ the apply (live, drained, re-read, cached) asks behindStamp BEFORE it caches or applies a record, then notes the stamp — the base of the next write (lane layout-stale-record-sync)');
   ok(/app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'layout-sync-ack' && msg\.updatedAt\) this\.app\.desktopManager\?\.noteStamp\?\.\(msg\.desktopId, msg\.updatedAt\); \}\);/.test(L) && !/this\._appliedStamps\.clear\(\)/.test(L), '⑩ the ack notes the page\'s own write\'s stamp; the applied stamps survive a reconnect (the seq restarts, the stamp does not)');
   const sends = [...L.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g), ...D.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g)].map((m) => m[0]);
-  ok(sends.length === 3 && sends.every((x) => /, base: [^,}]*stampOf/.test(x)), '⑩ every layout-sync a page sends names its `base` (desktop-manager stampOf)', J(sends));
+  ok(sends.length === 4 && sends.every((x) => /, base: [^,}]*stampOf/.test(x)), '⑩ every layout-sync a page sends names its `base` (desktop-manager stampOf) — 4 sends: the autosave\'s two, the owed recipe\'s own save (lane phone-resume-keeps-layout r4 N1), the switch\'s', J(sends));
   ok(/import \{ noteStamp \} from '\.\/layout-model\.js';/.test(D) && /stampOf\(desktopId\) \{ return this\._stamps\.get\(desktopId \|\| ''\) \|\| undefined; \}/.test(D) && /this\.noteStamp\(id, dState\?\.autoSave\?\.updatedAt\);/.test(D) && /this\.noteStamp\(d, rec\.updatedAt\);/.test(D), '⑩ desktop-manager: the base is the boot read\'s stamp, a relayed record\'s, the ack\'s and a refusal\'s record kept (the stale refusal is adopted)');
 }
 
@@ -235,6 +235,7 @@ const PAGE = ['this', 'win', 'winInfo', 'el', 'Math'];
 const READ_SITES = [
   ['_handleRemoteSync', 'remote', 1], // the bars, before the desktop gate (2.252.2)
   ['_applyRemoteState', 'remote', 1], // a live record / the reconnect's re-read
+  ['_applyRemoteState', 'boot', 1], // the record this page HELD for the desktop on show: the box of a row a live phone record names that this page has not drawn yet (lane phone-resume-keeps-layout r4)
   ['restoreState', 'boot', 1], // the boot's restore, a desktop switch's
   ['loadAutoSave', 'boot', 1], // the boot's bar heal
   ['loadPreset', 'preset', 1], // a preset the person loads
@@ -344,7 +345,7 @@ const readGreen = (c) => !c.strays.length && !c.unknownSites.length && !c.deadSi
   const L = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
   const c = readCensus(L);
   console.log(`    ⑨ asks: ${[...c.sites].map(([k, n]) => `${k} ×${n}`).join(' | ')} — layered reads: ${c.tally.subset} off a subset, ${c.tally.page} off the page, ${c.tally.declared} declared`);
-  ok(!c.unknownSites.length && !c.deadSites.length, `⑨ every applyForViewport ask in layout.js is a READ_SITES row (${READ_SITES.length} sites: remote ×2, boot ×2, preset) — none unnamed, no dead row`, J({ unknown: c.unknownSites, dead: c.deadSites }));
+  ok(!c.unknownSites.length && !c.deadSites.length, `⑨ every applyForViewport ask in layout.js is a READ_SITES row (${READ_SITES.length} sites: remote ×2, boot ×3, preset) — none unnamed, no dead row`, J({ unknown: c.unknownSites, dead: c.deadSites }));
   ok(!c.badAsks.length, '⑨ each asks with this page\'s class — applyForViewport(this._viewport(), …) — a known source, and a remote one with the ONE writer predicate (writerClass(msg), straight or through the apply\'s `writer`)', J(c.badAsks));
   ok(!c.strays.length && c.tally.subset >= 40, `⑨ every read of a record's arrangement / chrome / preference field comes off applyForViewport's subsets (${c.tally.subset}) or the page's own objects (${c.tally.page}) — 0 off a raw record, ${c.tally.declared} declared (the resume offer's box)`, J(c.strays));
   ok(!c.badReceivers.length, '⑨ every call of a receiver (_applyToolbarState, _createRemoteWindow\'s arrangement) hands it a subset, never the record', J(c.badReceivers));

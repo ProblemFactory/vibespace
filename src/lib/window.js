@@ -1925,13 +1925,24 @@ class WindowManager {
    *  session window created locally must CONVERGE onto the winId other
    *  clients/desktop records already use for that session — same precedent as
    *  the layout-restore ID remap; all UI references read winInfo.id live).
-   *  Safe only for chain-less windows; returns false when it can't rekey. */
-  rekeyWindow(oldId, newId) {
+   *  Safe only for chain-less windows; returns false when it can't rekey. `inChain` (lane phone-resume-keeps-layout r3 C3 — a refused
+   *  page's window that joined a tab group before the save takes its kept row's id): a member keeps its seat under the new id — every
+   *  list of its chain names it, the strip is drawn again (its tabs' doors read the id they were drawn with). */
+  rekeyWindow(oldId, newId, { inChain = false } = {}) {
     const win = this.windows.get(oldId);
-    if (!win || !newId || newId === oldId || this.windows.has(newId) || win._tabChain) return false;
+    if (!win || !newId || newId === oldId || this.windows.has(newId) || (win._tabChain && !inChain)) return false;
     this.windows.delete(oldId);
     win.id = newId;
     this.windows.set(newId, win);
+    const c = win._tabChain;
+    if (c) {
+      const sw = (l) => { if (Array.isArray(l)) l.forEach((m, i) => { if (m === oldId) l[i] = newId; }); }; // in place: every member holds this chain
+      for (const k of ['tabs', 'order', 'recent']) sw(c[k]);
+      if (c.split && typeof c.split === 'object') for (const k of ['pair', 'left', 'right']) sw(c.split[k]);
+      if (c._pulseTab && c._pulseTab.id === oldId) c._pulseTab.id = newId;
+      this._renderTabBar?.(c);
+      if (c.layout === 'split') this._applyChainLayout?.(c);
+    }
     const sess = this._app?.sessions?.get(oldId);
     if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
     this._app?.updateTaskbar?.();
@@ -1947,6 +1958,7 @@ class WindowManager {
    *  ask the same question does not ask again. Returns true when the window closed. */
   requestClose(id, opts = {}) {
     const win = this.windows.get(id); if (!win) return false;
+    if (this._app?._closeFenced?.(id, 'requestClose')) return false; // THE FENCE's dynamic half (lane phone-resume-keeps-layout r4 N5): a window in a resume's turn — refused, said
     if (typeof win.onCloseRequest === 'function') {
       let go = true;
       try { go = win.onCloseRequest(opts) !== false; } catch (e) { console.warn('[window] onCloseRequest threw — closing', e); }
@@ -1967,11 +1979,13 @@ class WindowManager {
    *  the purge: the owner's closed side-by-side viewer came back as a free window after two desktop switches.
    *  `held: false` = a record-only id (nothing here to hold). */
   _retireWindow(id, { held = true } = {}) {
+    if (this._app?._closeFenced?.(id, '_retireWindow')) return; // THE FENCE's dynamic half (r4 N5)
     this._app?.stage?.onWindowClosed(id);
     this._app?.desktopManager?.purgeClosedWindow(id);
     if (held) this._app?.layoutManager?.noteClosed?.(id, this.windows.get(id)?._desktopId);
   }
   closeWindow(id) {
+    if (this._app?._closeFenced?.(id, 'closeWindow')) return; // THE FENCE's dynamic half (r4 N5): a window in a resume's turn closes only as its re-opening / a second view
     const win = this.windows.get(id);
     if (!win) { this._retireWindow(id, { held: false }); return; } // a record-only id still leaves every cached record
     win._listenerCtl?.abort(); // release document-level drag/icon listeners

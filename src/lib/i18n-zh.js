@@ -11841,4 +11841,13 @@ export default {
   "This conversation has no proposal in the Outbox list.": "这个会话在发件箱列表里没有提案。",
   "The newer proposal is not in the Outbox list any more": "更新的那条提案已不在发件箱列表里",
   "Outbox of this conversation": "这个会话的发件箱",
+  "{names} on “{desktop}” kept their places — this page had no position to give them": "“{desktop}”上的 {names} 保住了原来的位置——本页面没有它们的位置可写",
+  "{names} on “{desktop}” kept their places — this page had no position to give them (refused {n} times)": "“{desktop}”上的 {names} 保住了原来的位置——本页面没有它们的位置可写（已拒绝 {n} 次）",
+  "{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet": "“{desktop}”上的 {names} 保住了原来的位置——本页面没有它们的位置可写；{others} 也被保留了——本页面还没有打开它们",
+  "{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet (refused {n} times)": "“{desktop}”上的 {names} 保住了原来的位置——本页面没有它们的位置可写；{others} 也被保留了——本页面还没有打开它们（已拒绝 {n} 次）",
+  "1 window · not placed — opening this desktop lays it out": "1 个窗口 · 尚未摆放——打开这个桌面就会把它摆好",
+  "{n} windows · not placed — opening this desktop lays them out": "{n} 个窗口 · 尚未摆放——打开这个桌面就会把它们摆好",
+  "Resumed 1 conversation where it was": "已在原来的位置恢复 1 个会话",
+  "Resumed {n} conversations where they were": "已在原来的位置恢复 {n} 个会话",
+  "Still resuming this conversation — its window is waiting for the session to start": "这个会话还在恢复中——它的窗口正在等待会话启动",
 };

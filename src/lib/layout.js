@@ -405,6 +405,12 @@ class LayoutManager {
     // desktop's minimize (guard 5), never its sidebar, bars, grid or boxes (inc-mv8l2frb-xkqm); a desktop takes no live
     // phone record's arrangement or chrome (guard 10)
     const layers = applyForViewport(this._viewport(), state, { source: 'remote', writer });
+    // …and THE RECORD THIS PAGE HELD for the desktop on show (the apply runs before it takes the new one — cacheShownState): a live
+    // phone record gives a desktop no box, so a row it names that this page has not drawn yet is built at the row's OWN box from here
+    // (lane phone-resume-keeps-layout r4 — the r3 acceptance's tile twin: a switch whose session read was still out built the phone's
+    // resumed row at this desktop's default box and its next save wrote it over the row's); a phone's own record arranges nothing
+    const heldRec = this.app.isMobile ? null : this.app.desktopManager?._savedStates?.get?.(this.app.desktopManager.activeDesktopId);
+    const held = heldRec ? applyForViewport(this._viewport(), heldRec, { source: 'boot' }) : null;
     this._restoring = true;
     this._applying = true;
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
@@ -446,7 +452,7 @@ class LayoutManager {
           const winId = rw.winId || rw.id;
           remoteIds.add(winId);
           const win = this.app.wm.windows.get(winId);
-          const a = arrangementFor(layers, rw); // this page's arrangement of the entry (null: none — a live phone record on a desktop)
+          const a = arrangementFor(layers, rw) || (!win && held ? arrangementFor(held, rw) : null); // this page's arrangement of the entry (null: none — a live phone record on a desktop; a row not drawn yet takes the held record's, r4)
           if (!win && ghostRows.has(String(winId))) continue; // a copy this page cannot build (r5 O — desktop-manager copiesOf): never built here
           // a window whose chain act is held: the record's entry for it (its box = its OLD frame's) is older than the act —
           // skipped whole, the act re-sent below (stage-blank verify r5)
@@ -465,8 +471,28 @@ class LayoutManager {
           // shows a placeholder (a dead attach, no transcript here) — it keeps it, holding the newest entry
           if (win._placeholderOf) {
             const was = win._placeholderOf.openSpec, now = rw.openSpec;
-            if (now && (!was || was.action !== now.action || (was.serverId || null) !== (now.serverId || null) || (was.backendSessionId || null) !== (now.backendSessionId || null))) { this._dropPlaceholder(win); this._createRemoteWindow(rw, { arrangement: a }); continue; }
+            if (now && (!was || was.action !== now.action || (was.serverId || null) !== (now.serverId || null) || (was.backendSessionId || null) !== (now.backendSessionId || null))) {
+              // …in ITS place on this page (lane phone-resume-keeps-layout r3 — a phone's resume re-opens the row and its record names the
+              // live session with no box for a desktop: the live window took this desktop's DEFAULT box and the next save wrote it over
+              // the row's): the record's box for this page (`a`), else the tile's own
+              const own = !this.app.isMobile && win.gridBounds ? { ...win.gridBounds } : null;
+              this._dropPlaceholder(win); this._createRemoteWindow(rw, { arrangement: a });
+              const nw = this.app.wm.windows.get(String(rw.winId || rw.id)), box = (a && a.gridBounds) || own;
+              if (nw && box && !nw._onStage) { nw.gridBounds = { ...box }; this.app.wm._applyGridBounds(nw); }
+              continue;
+            }
             win._placeholderOf = { ...win._placeholderOf, ...JSON.parse(JSON.stringify(rw)) };
+          } else if (this._deadFor(win, rw.openSpec)) {
+            // EVERY OPEN PAGE FOLLOWS A ROW'S RE-KEY (lane phone-resume-keeps-layout r2, N2 — the r1 acceptance: a resume re-opens its row
+            // under the row's id, and a page that already showed the row as a DEAD view kept it and wrote the dead recipe back over the
+            // live one): rebuilt in place from the record — the apply's own close, as the row's re-opening (nothing owed, no evidence)
+            // …in ITS place on this page: the record's box for this page (`a`), else — a phone's record carries none for a desktop —
+            // the dead view's own (the row's, on this page); an attach builds its window at once: placed now, never first at a default box
+            const own = !this.app.isMobile && win.gridBounds ? { ...win.gridBounds } : null;
+            this.app.desktopManager?.reopenRow?.(win.id); this.app.wm.closeWindow(win.id); this._createRemoteWindow(rw, { arrangement: a });
+            const nw = this.app.wm.windows.get(String(rw.winId || rw.id)), box = (a && a.gridBounds) || own;
+            if (nw && box && !nw._onStage) { nw.gridBounds = { ...box }; this.app.wm._applyGridBounds(nw); }
+            continue;
           }
           // THE HELD MOVE (verify r2): this page moved the window AFTER the record arrived (a drop on a preview at
           // the very pointerup the record waited for) — the record cannot know it; nothing of its entry applies,
@@ -701,6 +727,46 @@ class LayoutManager {
     if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;
     if (heldMoved) setTimeout(() => this._resendHeldMove(), 1000); // …and a move the record could not know (verify r2)
     if (keptShown) setTimeout(() => this.resendKeptShown(), 1000); // …and a shown window a dedup wrote away (r3 F: the hub learns it)
+    // (an owed RECIPE is not re-armed here — r4 N1: it is no act of the person's; it rides the next save of its desktop, once — noteOwnRecipe)
+  }
+
+  /** A RECIPE THIS PAGE OWES THE HUB (lane phone-resume-keeps-layout r3 — the loop's §14c: a resume this page sent was answered, its
+   *  window — the row, under the row's id — names its LIVE session now; a record another page wrote, applied between the person's press
+   *  and that answer, had cleared the dirty bit, the re-broadcast was dropped and the row kept its DEAD recipe on the hub and on every
+   *  other page). CARRIED ONCE (r4 N1 — the r3 acceptance: the r3 recipe was cleared only by a save of its OWN desktop, re-armed after
+   *  EVERY remote record with a FABRICATED input time — a window answered on a desktop not on show stayed owed for ever and an idle page
+   *  echoed every record, the 60 s dirty expiry dead): the window marks ITS desktop for the next save (takeDirty), once; that save goes
+   *  out as the recipe's own — never the person's input (no dirty bit, no input time), only the owed desktops — and the first save
+   *  that carries the desktop settles it. A remote record re-arms nothing; an idle page writes nothing after one. */
+  noteOwnRecipe(winId) {
+    if (winId == null) return;
+    const id = String(winId), w = this.app.wm.windows.get(id);
+    this._recipeTries?.delete(id); // a NEW recipe (a resume re-opens its row under the same id) has its own two tries — per recipe, never per row for the page's life (r5)
+    (this._owedRecipes || (this._owedRecipes = new Set())).add(id);
+    this.app.desktopManager?.markDirty?.(w?._desktopId); // its desktop goes with the next save (the one on show always does)
+    this.scheduleAutoSave();
+  }
+  /** the desktops of the recipes still owed (a window gone owes nothing) */
+  _owedDesks() {
+    const out = new Set();
+    if (!this._owedRecipes?.size) return out;
+    for (const id of [...this._owedRecipes]) { const w = this.app.wm.windows.get(id); if (!w) this._owedRecipes.delete(id); else out.add(w._desktopId || this.app.desktopManager?.activeDesktopId || ''); }
+    return out;
+  }
+  /** the owed recipes a save of `desks` carried (a window gone owes nothing) → [[id, desk]] carried */
+  _recipesCarried(desks) {
+    const out = [];
+    if (!this._owedRecipes?.size || !desks?.length) return out;
+    for (const id of [...this._owedRecipes]) { const w = this.app.wm.windows.get(id), d = w ? (w._desktopId || this.app.desktopManager?.activeDesktopId || '') : null; if (!w || desks.includes(d)) { this._owedRecipes.delete(id); if (w) out.push([id, d]); } }
+    return out;
+  }
+  /** A save that carried a recipe was REFUSED for its desktop: nothing carried it — owed again, for the save after the reconcile
+   *  (at most twice per window: a desktop the hub keeps refusing is the breaker's, never a loop). */
+  _recipesRefused(s, desk) {
+    const back = (s?.recipes || []).filter(([id, d]) => d === desk && this.app.wm.windows.has(id) && ((this._recipeTries ||= new Map()).get(id) || 0) < 2);
+    if (!back.length) return;
+    for (const [id] of back) { this._recipeTries.set(id, (this._recipeTries.get(id) || 0) + 1); this._owedRecipes ||= new Set(); this._owedRecipes.add(id); this.app.desktopManager?.markDirty?.(desk); }
+    this.scheduleAutoSave();
   }
 
   /** WHO IS LOOKING IS A FACT ABOUT THE PAGE (r3 F): a record dropped a window this page shows as another page's duplicate and
@@ -765,9 +831,11 @@ class LayoutManager {
 
   /** A save LEFT (or queued, `at` null until the open): `desks` = the desktop records it sent, one answer owed each. */
   noteLayoutSent(desks, sentAt) {
+    const recipes = this._recipesCarried(desks);
     if (!desks?.length) return;
     this._unacked.push({ sentAt, desks: [...desks], pending: desks.length, refused: new Set(), at: this.app.ws?.connected !== false ? Date.now() : null });
     this._armAckWatch();
+    if (recipes.length) this._unacked[this._unacked.length - 1].recipes = recipes; // the recipes it carries — owed again if its desktop is refused (r4 N1)
   }
 
   /** The server answered a record of `desk` sent at `sentAt` (an ack, or a refusal — the refused desktop's acts stay held:
@@ -779,6 +847,7 @@ class LayoutManager {
     const s = (sentAt && this._unacked.find((x) => x.sentAt === sentAt && x.desks.includes(key))) || this._unacked.find((x) => x.desks.includes(key) && !x.refused.has(key) && x.pending > 0);
     if (!s) return;
     if (refused) s.refused.add(key);
+    if (refused) this._recipesRefused(s, key); // a recipe that save carried is owed again (r4 N1)
     s.pending--;
     if (s.pending <= 0) this._settleSave(s);
   }
@@ -847,6 +916,9 @@ class LayoutManager {
     if (!this._lastUserInputAt || now - this._lastUserInputAt > CLOSE_HOLD_MS) return;
     (this._heldCloses ||= new Map()).set(String(id), { at: now, desk: desktopId || null });
   }
+
+  /** The hub KEPT window `id` against this page's close of it (desktop-manager _takeKeptRow — an `unplaced` refusal): the close is void. */
+  forgetClose(id) { this._heldCloses?.delete(String(id)); }
 
   /** Is `id` a held close right now (fresh, not re-opened)? */
   _closeHeld(id) {
@@ -1192,16 +1264,27 @@ class LayoutManager {
     return showConfirmDialog({ title: t('Remove this window?'), message: t('“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', { name }), confirmText: t('Remove'), danger: true });
   }
 
-  /** The placeholder's press: the conversation resumes IN ITS PLACE (its box, its desktop) — the placeholder closes as the
-   *  person's act, the resumed window names the conversation from birth (session-lifecycle createSession's `_conversation`). */
+  /** The placeholder's press: the conversation resumes IN ITS PLACE (its box, its desktop) — the tile is the row, re-opened AS ITSELF
+   *  (lane phone-resume-keeps-layout r2, N4: closed here first, the row went as 'closed' and a new id was minted — on a phone with no box,
+   *  refused, then lost): resumeSession closes it as its re-opening (`fromWin`), the resumed window takes its id. */
   _resumePlaceholder(win) {
     const e = win && win._placeholderOf;
     const cid = conversationOf(e);
     if (!cid || !this.app.wm.windows.has(win.id)) return;
     const backend = e.backend || e.openSpec?.backend || 'claude';
-    const bounds = this.app._snapshotWinBounds?.(win);
-    this.app.wm.closeWindow(win.id);
-    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });
+    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, fromWin: win.id });
+  }
+
+  /** Is `win` a DEAD view (a read-only chat, an exited terminal) for which the record names ANOTHER session to attach (r2 N2)? A live
+   *  view is never rebuilt by a record (it is the newer fact), nor a view whose record names a session the hub lists as stopped. */
+  _deadFor(win, now) {
+    if (!win || !now || now.action !== 'attachSession' || !now.serverId || (win.type !== 'chat' && win.type !== 'terminal')) return false;
+    const was = win._openSpec || {};
+    if (was.action === 'attachSession' && was.serverId === now.serverId) return false;
+    if ((was.backendSessionId || null) && now.backendSessionId && was.backendSessionId !== now.backendSessionId) return false; // another conversation: not this row's re-key
+    const v = this.app.sessions?.get(win.id);
+    if (!v || !(v._readOnly || win.exited)) return false;
+    return !(this.app.sidebar?._allSessions || []).some((x) => x.webuiId === now.serverId && x.status === 'stopped');
   }
 
   /** A placeholder leaves IN PLACE for the window a newer record can build under the same id — closed INSIDE the apply (the
@@ -1645,6 +1728,7 @@ class LayoutManager {
    *  `_savedAt`): the bit is re-armed at the act's REAL time (§6b guard 2's expiry keeps its meaning), the held
    *  move's / close's / ratio's rule. */
   _deferSave() {
+    if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time
     if (!this._userDirty || this._applying || this._deferT) return;
     const at = this._lastUserInputAt || Date.now();
     this._deferT = setTimeout(() => {
@@ -1669,6 +1753,7 @@ class LayoutManager {
     // (its grid config) persists through the stage's own store instead.
     if (this.app.stage?.isActive) { this.app.stage.onStageLayoutChanged(); return; }
     if (this._restoring || this.app.desktopManager?._restoring) { this._deferSave(); return; } // a gate raised since the schedule: deferred, never dropped (verify r3 ③)
+    if (!this._userDirty && this._owedDesks().size) { this._saveOwedRecipes(); return; } // a RECIPE this page owes the hub goes as its OWN save (r4 N1 — noteOwnRecipe)
     // Anti-echo: only broadcast state the USER caused. After applying a remote
     // state, our own follow-up timers (captureGridBounds, onResize chains)
     // schedule autosaves with a state that differs only by rounding — sending
@@ -1686,7 +1771,7 @@ class LayoutManager {
     // with a stuck dirty bit would echo STALE positions after every remote
     // apply, reverting other clients' fresh drags and replaying old layouts
     // (real incident: leftover test tabs fought the user's two clients).
-    if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) { this._userDirty = false; return; }
+    if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) { this._userDirty = false; if (this._owedDesks().size) this._saveOwedRecipes(); return; } // (a recipe owed goes as its own — r4 N1)
     // THE STALE BASE (verify r3 ④): the reconnect's re-read failed for good — this page's records are older than the
     // server's; nothing is saved from them (the dirty desks stay dirty). The read is asked again; a success releases it.
     if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; }
@@ -1699,6 +1784,7 @@ class LayoutManager {
     // reconnect's re-read reversed the act and nothing re-sent it). A refused record releases nothing.
     const sentAt = Date.now(), sentDesks = [];
     dm?.normalizeDups?.(); // ONE CONVERSATION, ONE WINDOW ENTRY (userW inc-mw1ogdno-5jny): a held copy of a session this page shows leaves, as 'dup'
+    for (const d of this._owedDesks()) dm?.markDirty?.(d); // an owed recipe's desktop not on show (the person switched since its answer) goes too (r4 N1)
     for (const d of dm?.takeDirty?.() || []) {
       const st = dm.recordFor(d);
       if (dm.holdsBack?.(d, st)) continue; // THE BREAKER (inc-mw1ogdno-5jny): the very record the server refused is never re-sent
@@ -1722,6 +1808,7 @@ class LayoutManager {
     // (verify r5 ⑤ on the real page: the drag on the desktop on show was kept but never reached the server)
     if (json === this._lastSentJson && !this._unacked.some((s) => s.desks.includes(desktopId || ''))) {
       this._markCarried(desktopId || '', sentAt);
+      this._recipesCarried([desktopId || '']); // carried as of now
       this.noteLayoutSent(sentDesks, sentAt);
       return;
     }
@@ -1731,6 +1818,28 @@ class LayoutManager {
     sentDesks.push(desktopId || '');
     this.noteLayoutSent(sentDesks, sentAt);
     if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state, sentAt); else dm?.noteWire?.(desktopId, state); }
+  }
+
+  /** THE OWED RECIPE'S OWN SAVE (lane phone-resume-keeps-layout r4 N1): the person caused nothing since — only the desktops of the
+   *  recipes this page owes go (their held records, the desktop on show's too when it owes one), each once; never the person's dirty
+   *  bit, never an input time (§6b guard 2 keeps its meaning), never a desktop that owes nothing (no echo). The breaker holds what the
+   *  server refused; an identical record the server READ is carried as of now. */
+  _saveOwedRecipes() {
+    if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; } // THE STALE BASE: nothing goes from it (verify r3 ④)
+    const dm = this.app.desktopManager, owes = this._owedDesks(), at = Date.now(), desks = [];
+    if (!dm) return; // a page with no desktops (the legacy single record): the person's next save carries it
+    const active = dm.activeDesktopId || '';
+    for (const d of owes) {
+      if (!d || d === '__stage__') continue;
+      const st = dm.recordFor?.(d);
+      if (!st || dm.holdsBack?.(d, st)) continue; // THE BREAKER: the very record the server refused is never re-sent
+      const json = JSON.stringify({ state: st, desktopId: d });
+      if (d === active && json === this._lastSentJson && !this._unacked.some((s) => s.desks.includes(d))) { this._markCarried(d, at); this._recipesCarried([d]); continue; } // the record the server READ already: carried
+      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence?.() || [], sentAt: at, viewport: this._viewport(), base: dm.stampOf?.(d) });
+      desks.push(d);
+      if (dm.noteSent) dm.noteSent(d, st, at); else dm.noteWire?.(d, st);
+    }
+    this.noteLayoutSent(desks, at);
   }
 
   /** The ids of the closes this page holds (made here, not carried by a save yet) — a record read off the wire
@@ -1830,11 +1939,22 @@ class LayoutManager {
       confirmText: t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
     if (!ok) return;
+    return this._resumeAll(stopped);
+  }
+
+  /** The resume-all's resumes, staggered (400 ms) — → the number re-opened in their own rows (said once). */
+  async _resumeAll(stopped) {
+    let kept = 0;
     for (let i = 0; i < stopped.length; i++) {
       const d = stopped[i];
-      try { this.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); } catch {}
+      // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1): each conversation in its own row — its window id, box, z
+      // and group, on its own desktop, whatever this viewport can show; `stay`: a bulk resume switches nothing
+      try { const r = this.app.resumeSession(d.sessionId, d.cwd, d.name, { ...(d.opts || {}), stay: true }); if (r && r.row) kept++; } catch {}
       if (i < stopped.length - 1) await new Promise((r) => setTimeout(r, 400));
     }
+    // NOTHING SILENT (LAW 3): the conversations re-opened in their own rows are said once
+    if (kept) showToast(kept === 1 ? t('Resumed 1 conversation where it was') : t('Resumed {n} conversations where they were', { n: kept }), { type: 'info', duration: 5000 });
+    return kept;
   }
 
   // Save a named preset

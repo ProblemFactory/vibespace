@@ -278,7 +278,7 @@ await section('§1b THE DOOR — the real resumeSession → createSession over t
   const W = world({ records: { 'desk-w': [], 'desk-p': [named(5), named(6)], 'desk-r': [] }, active: 'desk-w', extra: {
     _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _getBackendSessionDefaults: () => ({}), _closeSidebarOnMobile() {},
   } });
-  for (const k of ['resumeSession', 'createSession', '_windowPending']) W.app[k] = proto[k].bind(W.app);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
   W.app.ws.request = (msg) => { requests.push(msg); return () => {}; };
   W.app.sidebar.getSessionConfig = () => ({}); W.app.sidebar._getSessionTasks = () => [];
   W.app.resumeSession(CID(6), CWD(6), NAMES[6], { backend: 'claude', backendSessionId: CID(6), winBounds: { gridBounds: GB(6), desktopId: 'desk-p', winId: 'win-old-6' } });
@@ -287,11 +287,12 @@ await section('§1b THE DOOR — the real resumeSession → createSession over t
   const cap = W.lm.captureWin(E, E.id);
   ok(cap && cap.backendSessionId === CID(6) && cap.backend === 'claude' && cap.cwd === CWD(6) && !cap.openSpec, '§1b THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH: captured before its create answers it names the conversation (2.369.363: no identity — the title alone)', cap);
   const held = W.dm._savedStates.get('desk-p').windows;
-  ok(held.length === 2 && !held.some((w) => w.winId === 'win-old-6') && held.find((w) => w.winId === E.id)?.backendSessionId === CID(6), '§1b 个人\'s held record: the new window in place of win-old-6, NAMED', held.map((w) => [w.winId, w.backendSessionId || null]));
+  // lane phone-resume-keeps-layout (LAW 1 — A RESUME RE-OPENS ITS ROW): the resumed window IS win-old-6 — the row's own id, box and name
+  ok(held.length === 2 && E.id === 'win-old-6' && held.find((w) => w.winId === 'win-old-6')?.backendSessionId === CID(6) && J(held.find((w) => w.winId === 'win-old-6')?.gridBounds) === J(GB(6)), '§1b 个人\'s held record: the resume re-opens win-old-6 AS ITSELF — its id, its box, NAMED (2.369.381: a new window in its place)', held.map((w) => [w.winId, w.backendSessionId || null]));
   await W.lm._doAutoSave();
   const out = W.syncs('desk-p').at(-1);
   ok(out && out.state.windows.every(isNamed) && out.state.windows.some((w) => w.winId === E.id && w.backendSessionId === CID(6)), '§1b the next autosave sends 个人 with every window named (the resumed one by its conversation)', out && out.state.windows.map((w) => [w.winId, w.backendSessionId || null]));
-  ok(out && out.evidence.some((e) => e.id === 'win-old-6' && e.why === 'replaced' && e.by === E.id), '§1b …and its evidence says which window replaced which (`by` — the server pairs them)', out && out.evidence);
+  ok(out && !out.evidence.some((e) => e.id === 'win-old-6' && ['replaced', 'closed', 'dup'].includes(e.why)), '§1b …and nothing in its evidence retires the row (no \'replaced\' / \'closed\' — the row stands)', out && out.evidence);
   // AT THE WRITER, NOT PER CALLER: a bare window (no birth identity — another door, an older bundle's shape) moved in place of a named entry
   const W2 = world({ records: { 'desk-w': [], 'desk-p': [named(7)], 'desk-r': [] }, active: 'desk-w' });
   const B = W2.mkWin('win-new-7', 'desk-w', { type: 'chat', title: NAMES[7] });
@@ -360,7 +361,7 @@ await section('§2 the boot restore of that record on a hub whose sessions are s
   // the press: the conversation resumes IN PLACE
   tileOf(stopped[1]).onclick();
   const call = W.resumed.at(-1);
-  ok(call && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].winBounds?.winId === 'win-new-1' && call[3].winBounds?.desktopId === 'desk-p' && W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name, box and desktop); the placeholder closes as the person\'s act', call);
+  ok(call && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].fromWin === 'win-new-1' && !W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name): the tile is the row — resumeSession re-opens it as itself (`fromWin`; lane phone-resume-keeps-layout r2 N4: the press closed it first and a new id was minted), the press closes nothing itself', call);
   ok(tileOf(gone[1]).onclick == null, '§2 the unavailable tile itself is no press (nothing names a conversation) — its doors are (§7)');
 });
 

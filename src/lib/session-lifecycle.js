@@ -61,7 +61,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin, quiet = false }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -118,51 +118,23 @@ export function installSessionLifecycle(App, ctx = {}) {
     const sessionKey = backendSessionId || resumeId ? `${backend}:${backendSessionId || resumeId}` : '';
     const winType = sessionMode === 'chat' ? 'chat' : 'terminal';
     const titleMeta = this._buildTitleMeta({ backend, agentKind, agentRole, agentNickname, sourceKind, parentThreadId });
-    const winInfo = this.wm.createWindow({ title: sessionName, type: winType, syncId, titleMeta });
+    const winInfo = this.wm.createWindow({ title: sessionName, type: winType, syncId, titleMeta, ...(quiet ? { quiet: true } : {}) }); // `quiet`: drawn, never focused (r4 — a resume nobody pressed)
     // THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH (lane layout-stopped-window — the owner's 个人, 2026-10-30 09:18:22): a create
     // that CONTINUES a conversation (a resume; never a fork, which mints its own) names it before 'created' answers — resume
     // placement captures the window into its desktop's record at once (moveWindowToDesktop `replaces`), and before this it
     // went in with no identity, in place of the named entry it replaced. layout.js captureWin reads it.
     if (resumeId && !fork && winInfo) winInfo._conversation = { backend, backendSessionId: backendSessionId || resumeId, cwd: cwd || '', hostId: hostId || null };
-    // Geometry carried over from a window this session replaces (billing
-    // switch kill+resume, resume of a terminated read-only window) — without
-    // it the conversation "moves" into a default-sized centered window.
-    if (winBounds && winInfo._onStage) {
-      // ON THE STAGE createWindow's trailing focus already materialized the window INTO THE SLOT (stage-manager
-      // _borrowHero): the geometry it carries over is its HOME geometry — the hand-back's, never the element's
-      // (inc-munl8jkl-gaih (C): a conversation resumed on the Stage landed at its old desktop box, off the slot). The
-      // Stage is a VIEW, not an owner: like any borrowed hero the window keeps its HOME desktop (the one the replaced
-      // window lived on, when it still exists), so leaving the Stage hands it back there — a move now would be the
-      // Stage's refusal (the 2.112.4 rule), and the replaced window's record is gone from that desktop, so the Stage's
-      // identity adoption cannot find it later (measured: it stayed parked on the Stage).
-      // the box carried is the HOME (PURE carriedGeometry, never the slot); slot-shaped or not it is kept (verify r3: the r1
-      // belt refused a legitimately slot-shaped home and the Stage gave it a cascade box)
-      if (winBounds.gridBounds) winInfo._stageHomeBounds = { ...winBounds.gridBounds };
-      if (winBounds.isMaximized) winInfo._stageHomeMax = true;
-      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
-      const home = winBounds.desktopId;
-      if (home && home !== '__stage__' && (this.desktopManager?._desktops || []).some((d) => d.id === home)) winInfo._desktopId = home;
-      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: winBounds.desktopId || null, stage: true, landed: winInfo._desktopId }); } catch {}
-    } else if (winBounds) {
-      if (winBounds.gridBounds) { winInfo.gridBounds = { ...winBounds.gridBounds }; this.wm._applyGridBounds(winInfo); }
-      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
-      if (winBounds.isMaximized) this.wm.toggleMaximize(winInfo.id);
-      // Keep the resumed conversation on its ORIGINAL desktop (see
-      // _snapshotWinBounds). createWindow tagged it with the active desktop;
-      // move it back when the source lived elsewhere AND that desktop still
-      // exists (a since-deleted one just leaves the window active).
-      const dm = this.desktopManager;
-      const destDesktop = winBounds.desktopId;
-      const desktopExists = !!destDesktop && destDesktop !== '__stage__'
-        && (dm?._desktops || []).some((d) => d.id === destDesktop);
-      if (desktopExists && destDesktop !== winInfo._desktopId && dm?.moveWindowToDesktop) {
-        // `replaces`: the resumed conversation takes the place of its OLD window's record entry there (resume-all of
-        // a desktop the page never opened: that window was never built, so no close removed it — userW
-        // inc-mun7qjmw-iksh; the rest of that desktop's record is left exactly as it is)
-        try { dm.moveWindowToDesktop(winInfo.id, destDesktop, { replaces: winBounds.winId || null }); } catch {}
-      }
-      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: destDesktop || null, exists: desktopExists, landed: winInfo._desktopId }); } catch {}
-    }
+    // ONE RESUME IN FLIGHT PER CONVERSATION (lane phone-resume-keeps-layout r3, N2): the window this resume's create waits in, until it
+    // is answered — a second resume of the conversation joins it (resumeSession → _pendingResumeWin), never a second create
+    // RELEASED AT EVERY END OF ITS CREATE (r4 N2 — the r3 acceptance: only a matched 'error' / 'created' released it; the watchdog, an
+    // error frame naming no request and a create a reconnect will not re-send left the entry for the window's life, and every later
+    // press «joined» a dead window and sent nothing): the matched answer, the watchdog, a reqId-less error, the reconnect that will
+    // not re-send it (below), and the window's close (_pendingResumeWin: the window under the id is no longer this one)
+    const resumeKey = resumeId && !fork && winInfo ? `${backend}:${backendSessionId || resumeId}` : null;
+    if (resumeKey) { (this._resumeWins ??= new Map()).set(resumeKey, winInfo); this._markResume(winInfo.id); }
+    let lostWatch = null;
+    const settled = () => { if (lostWatch) { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey); };
+    this._placeCarried(winInfo, winBounds); // the place the window takes from the one it replaces (box, z, maximize, desktop)
     // Correlation id: concurrent creates (e.g. group resume-all) must each
     // match their OWN 'created' reply — an untagged match binds the ChatView
     // to whichever session the server happens to answer first.
@@ -248,23 +220,37 @@ export function installSessionLifecycle(App, ctx = {}) {
     // REUSES the thread id, it never forked), which the error branch turns
     // into an attach — no double-writer. Fresh creates and forks mint NEW ids
     // with no such guard, so re-sending them risks a silent double-spawn.
-    this.ws.request(createMsg, (msg) => {
+    // …a create this socket sent that a reconnect will NOT re-send (a harness whose resume is not idempotent — `resumeResend` false):
+    // the frame left on a socket that died before its answer is never answered — the wait ends at the reconnect (r4 N2). One still
+    // QUEUED (sent while down) goes out at the open: that one is in flight on the new socket.
+    if (resumeKey && !(uiRow(backend).resumeResend && !!resumeId && !fork) && this.ws.onStateChange) {
+      let out = this.ws.connected !== false, lost = false;
+      lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled(); else out = true; };
+      this.ws.onStateChange(lostWatch);
+    }
+    const cancelReq = this.ws.request(createMsg, (msg) => {
+      // an error that names NO request (ws-create's «Failed to spawn session» / «Unknown host»): it may be this create's end — the
+      // pending resume is released (r4 N2; a press after it creates again), the request stays armed for a late answer
+      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled();
       // Server refused the create (e.g. remote subscription-shipping policy):
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
-        pending.remove();
+        pending.remove(); settled();
+        if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(false, msg); } catch { }
         // Resume guard (2.179.0): the conversation is ALREADY live — attach
         // that session instead of leaving a dead "create failed" window (a
         // second --resume would double-write the same claude id).
         if (msg.code === 'resume-already-live' && msg.existingId) {
           showToast(t('Already running — opened the live session instead'));
-          try { this.wm.closeWindow(winInfo.id); } catch { }
-          this.attachSession(msg.existingId, msg.existingName || sessionName, msg.existingCwd || cwd, {
+          // …IN THIS WINDOW'S PLACE (lane phone-resume-keeps-layout r2, N2): the window is the row's (a resume re-opened it under its
+          // id) — closed as its re-opening and the live session attached as itself; a plain close here was a REAL 'closed' of the row
+          const re = this._reopenWin(winInfo.id);
+          if (re) { re.place = winBounds ? { ...re.place, ...winBounds } : re.place; this._attachInRow(re, msg.existingId, msg.existingName || sessionName, msg.existingCwd || cwd, {
             mode: msg.existingMode || sessionMode, backend,
             backendSessionId: resumeId || undefined, hostId: hostId || undefined,
-          });
+          }); }
           return true;
         }
         if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
@@ -298,8 +284,10 @@ export function installSessionLifecycle(App, ctx = {}) {
           const retry = () => this.createSession({
             cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
             backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
-            sourceKind, parentThreadId, ignoreNoConvo: true,
+            sourceKind, parentThreadId, ignoreNoConvo: true, ...this._reopenedAs(winInfo.id), // the rescued window is the row: re-opened under its id (r2 N1)
           });
+          // …by the retry ITSELF — the bar closes nothing (r3 N1); a window re-made since (another instance under the id) is not its (r3 N2)
+          const retryHere = () => this._winIs(winInfo) && (this._markResume(winInfo.id), retry()); // its turn is the resume's (r4 N5)
           // Transcript verified to exist ⇒ the retry will usually just work
           // once the underlying cause is fixed — surface it as an UNMISSABLE
           // confirm dialog (2.237.0, real report: the 2.227.3 retry bar sat
@@ -312,20 +300,20 @@ export function installSessionLifecycle(App, ctx = {}) {
               message: t('The last resume failed because the CLI looked in the wrong folder, but this conversation\u2019s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?'),
               confirmText: t('Retry resume now'),
             }).then((ok) => {
+              if (!this._winIs(winInfo)) return; // the answer came after the window was re-made / closed (r3 N4)
               if (ok) {
-                const bounds = winBounds || this._snapshotWinBounds?.(this.wm.windows.get(winInfo.id));
-                try { this.wm.closeWindow(winInfo.id); } catch { }
+                const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
                 this.createSession({
                   cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
                   backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
-                  sourceKind, parentThreadId, winBounds: bounds, ignoreNoConvo: true,
+                  sourceKind, parentThreadId, winBounds: winBounds || re?.place, syncId: re?.id, ignoreNoConvo: true,
                 });
                 return;
               }
               rescueViewOnly();
               const view = this.sessions.get(winInfo.id);
               view?._renderers?.appendSystem(t('A transcript for this conversation exists — it is not lost. The history below is loaded from it.'));
-              view?._showRetryResumeBar?.(retry);
+              view?._showRetryResumeBar?.(retryHere);
             });
             return true;
           }
@@ -333,7 +321,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           rescueViewOnly();
           const view = this.sessions.get(winInfo.id);
           view?._renderers?.appendSystem(t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
-          view?._showRetryResumeBar?.(retry);
+          view?._showRetryResumeBar?.(retryHere);
           return true;
         }
         // Missing-cwd DANGER flow (B-7812, user-approved with the explicit
@@ -350,13 +338,13 @@ export function installSessionLifecycle(App, ctx = {}) {
             confirmText: t('Recreate empty folder & resume'),
             danger: true,
           }).then((ok) => {
+            if (!this._winIs(winInfo)) return; // the answer came after the window was re-made / closed (r3 N4)
             if (!ok) { rescueViewOnly(); return; }
-            const bounds = winBounds || this._snapshotWinBounds?.(this.wm.windows.get(winInfo.id));
-            try { this.wm.closeWindow(winInfo.id); } catch { }
+            const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
             this.createSession({
               cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
               backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
-              sourceKind, parentThreadId, winBounds: bounds, recreateCwd: true,
+              sourceKind, parentThreadId, winBounds: winBounds || re?.place, syncId: re?.id, recreateCwd: true,
             });
           });
           return true;
@@ -371,7 +359,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           // resume-account-door): the rescued window's bar says it with its doors, on fresh facts
           if (/^Account error: /.test(text) && this.resumeAccountCheck) {
             const q = { backend, backendSessionId: resumeId, hostId: hostId || undefined };
-            this.resumeAccountCheck(q).then((v) => { if (v && !v.ok) this.sessions.get(winInfo.id)?._showAccountRefusalBar?.(v, q); }).catch(() => {});
+            this.resumeAccountCheck(q).then((v) => { if (v && !v.ok && this._winIs(winInfo)) this.sessions.get(winInfo.id)?._showAccountRefusalBar?.(v, q); }).catch(() => {});
           }
           return true;
         }
@@ -391,7 +379,8 @@ export function installSessionLifecycle(App, ctx = {}) {
         return true;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
-        pending.remove();
+        pending.remove(); settled();
+        if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(true, msg); } catch { }
         // Non-fatal server warning (2.271.0 T1-2): the pre-resume writer sweep
         // couldn't verify no other process was writing this conversation on a
@@ -425,7 +414,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           cwd: msg.cwd || cwd || '',
           mode: sessionMode,
         };
-        this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec
+        if (this.layoutManager.noteOwnRecipe) this.layoutManager.noteOwnRecipe(winInfo.id); else this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec — owed until a save carries it (r3)
         // Persist a fork's chosen title as a custom name once the fork's NEW
         // backend id is adopted (after its first turn). Keyed by webui id; the
         // parent id is remembered so we don't rename the parent before divergence.
@@ -504,7 +493,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           } else if (initialMessage) {
             this._sendChatMessage(msg.sessionId, initialMessage);
           }
-          lateFocus(chatView);
+          if (!quiet || this.wm.activeWindowId === winInfo.id) lateFocus(chatView); // a QUIET window (r4 — an unattended resume) never takes the keys
         } else {
           const term = new TerminalSession(winInfo, this.ws, msg.sessionId, this.themeManager, (filePath, signalPath) => {
             this._openExternalEditor(filePath, signalPath);
@@ -520,16 +509,17 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (initialCommand) {
             setTimeout(() => this.ws.send({ type: 'input', sessionId: msg.sessionId, data: initialCommand + '\r' }), 1200);
           }
-          lateFocus(term);
+          if (!quiet || this.wm.activeWindowId === winInfo.id) lateFocus(term); // a QUIET window (r4 — an unattended resume) never takes the keys
         }
         this.wm.setTitle(winInfo.id, `${sessionName} — ${msg.cwd||cwd||'~'}`);
         return true;
       }
       return false;
     }, {
-      isAlive: () => this.wm.windows.has(winInfo.id),
+      isAlive: () => this._winIs(winInfo) || (settled(), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)
       timeoutMs: 15000,
       onTimeout: () => {
+        settled(); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window
         try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
         // A slow REMOTE create is not a broken connection — the old wording
         // invited a reload, which abandons the create (fresh creates are not
@@ -540,6 +530,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       },
       resend: uiRow(backend).resumeResend && !!resumeId && !fork,
     });
+    // THE WATCHES DIE WITH THEIR WINDOW (r5 N1 — the r4 acceptance: closed before its answer, the window's lostWatch stayed registered
+    // until the next reconnect, holding the closed window, and removed itself there mid-notify — the listener after it was skipped):
+    // the window's close releases the wait, the reconnect watch and the request's own handlers at once (a re-made window: isAlive above)
+    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled(); cancelReq?.(); }, { once: true });
   },
 
   _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false, backend = 'claude' } = {}) {
@@ -563,12 +557,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         const cwd = spec.cwd || winInfo.cwd || '';
         if (!backendSessionId) { showToast(t('Session id not known — resume it from the sidebar'), { type: 'error' }); return; }
         const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || spec.name || winInfo.name || t('Session');
-        const winId = winInfo.id;
-        const winBounds = this._snapshotWinBounds(this.wm.windows.get(winId));
-        this.wm?.closeWindow?.(winId);
-        this.resumeSession(backendSessionId, cwd, name, {
+        this.resumeSession(backendSessionId, cwd, name, { // the window pressed in is the row, re-opened (r2 N1)
           mode: 'terminal', backend, backendSessionId,
-          hostId: spec.host || spec.hostId || undefined, winBounds,
+          hostId: spec.host || spec.hostId || undefined, fromWin: winInfo.id,
         });
       };
     }
@@ -631,7 +622,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (!sess.backendSessionId) return;
     try { window.__vsOp?.('unexpected-exit-respawn', { sid: sess.backendSessionId, serverId: sess.serverId, host: sess.host || null }); } catch {}
     const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || sess.name || '';
-    this.resumeSession(sess.backendSessionId, sess.cwd || '', name, { mode: sess.mode || 'chat', backend: sess.backend || 'claude', backendSessionId: sess.backendSessionId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId || undefined });
+    this.resumeSession(sess.backendSessionId, sess.cwd || '', name, { mode: sess.mode || 'chat', backend: sess.backend || 'claude', backendSessionId: sess.backendSessionId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId || undefined, unattended: true }); // nobody pressed it (r4 N3): the record's z, the person's window keeps the keys
   },
 
   // Jump the sidebar to a conversation's entry (owner UX: with dozens of
@@ -860,7 +851,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       }
       return false;
     }, {
-      isAlive: () => this.wm.windows.has(winInfo.id),
+      isAlive: () => this._winIs(winInfo), // the window INSTANCE (r3 N2): one re-made under the same id is another window
       timeoutMs: 12000,
       onTimeout: () => {
         try { track('event', 'ws-reply-timeout:attach', serverId); } catch { }
@@ -912,7 +903,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       }
       return false;
     }, {
-      isAlive: () => this.wm.windows.has(winInfo.id),
+      isAlive: () => this._winIs(winInfo), // the window INSTANCE (r3 N2): one re-made under the same id is another window
       timeoutMs: 12000,
       onTimeout: () => {
         try { track('event', 'ws-reply-timeout:tmux-attach', tmuxTarget); } catch { }
@@ -921,9 +912,156 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, initialMessage } = {}) {
+  /** THE CARRIED PLACE (createSession's own — moved here whole, lane phone-resume-keeps-layout r2: a row re-opened as an ATTACH of
+   *  the live session lands exactly where its create would have): the box, z, maximize and desktop window `winInfo` takes from the
+   *  window it replaces. */
+  _placeCarried(winInfo, winBounds) {
+    if (!winInfo || !winBounds) return;
+    // Geometry carried over from a window this session replaces (billing
+    // switch kill+resume, resume of a terminated read-only window) — without
+    // it the conversation "moves" into a default-sized centered window.
+    if (winBounds && winInfo._onStage) {
+      // ON THE STAGE createWindow's trailing focus already materialized the window INTO THE SLOT (stage-manager
+      // _borrowHero): the geometry it carries over is its HOME geometry — the hand-back's, never the element's
+      // (inc-munl8jkl-gaih (C): a conversation resumed on the Stage landed at its old desktop box, off the slot). The
+      // Stage is a VIEW, not an owner: like any borrowed hero the window keeps its HOME desktop (the one the replaced
+      // window lived on, when it still exists), so leaving the Stage hands it back there — a move now would be the
+      // Stage's refusal (the 2.112.4 rule), and the replaced window's record is gone from that desktop, so the Stage's
+      // identity adoption cannot find it later (measured: it stayed parked on the Stage).
+      // the box carried is the HOME (PURE carriedGeometry, never the slot); slot-shaped or not it is kept (verify r3: the r1
+      // belt refused a legitimately slot-shaped home and the Stage gave it a cascade box)
+      if (winBounds.gridBounds) winInfo._stageHomeBounds = { ...winBounds.gridBounds };
+      if (winBounds.isMaximized) winInfo._stageHomeMax = true;
+      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
+      const home = winBounds.desktopId;
+      if (home && home !== '__stage__' && (this.desktopManager?._desktops || []).some((d) => d.id === home)) winInfo._desktopId = home;
+      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: winBounds.desktopId || null, stage: true, landed: winInfo._desktopId }); } catch {}
+    } else if (winBounds) {
+      if (winBounds.gridBounds) { winInfo.gridBounds = { ...winBounds.gridBounds }; this.wm._applyGridBounds(winInfo); }
+      if (winBounds.zIndex > 0 && winInfo.element) { winInfo.element.style.zIndex = winBounds.zIndex; if (winBounds.zIndex >= this.wm.zIndex) this.wm.zIndex = winBounds.zIndex + 1; } // the row's z — carried only by a resume nobody pressed (r3 N3: resumeSession)
+      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
+      if (winBounds.isMaximized) this.wm.toggleMaximize(winInfo.id);
+      // Keep the resumed conversation on its ORIGINAL desktop (see
+      // _snapshotWinBounds). createWindow tagged it with the active desktop;
+      // move it back when the source lived elsewhere AND that desktop still
+      // exists (a since-deleted one just leaves the window active).
+      const dm = this.desktopManager;
+      const destDesktop = winBounds.desktopId;
+      const desktopExists = !!destDesktop && destDesktop !== '__stage__'
+        && (dm?._desktops || []).some((d) => d.id === destDesktop);
+      if (desktopExists && destDesktop !== winInfo._desktopId && dm?.moveWindowToDesktop) {
+        // `replaces`: the resumed conversation takes the place of its OLD window's record entry there (resume-all of
+        // a desktop the page never opened: that window was never built, so no close removed it — userW
+        // inc-mun7qjmw-iksh; the rest of that desktop's record is left exactly as it is)
+        try { dm.moveWindowToDesktop(winInfo.id, destDesktop, { replaces: winBounds.winId && String(winBounds.winId) !== String(winInfo.id) ? winBounds.winId : null }); } catch {} // a row re-opened under its own id replaces nothing (LAW 1)
+      }
+      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: destDesktop || null, exists: desktopExists, landed: winInfo._desktopId }); } catch {}
+    }
+  },
+
+  /** THE ONE CLOSE IN A RESUME (lane phone-resume-keeps-layout r2 — the r1 acceptance's N1: the Resume bar resumed under the row's id and
+   *  then closed the window it had just opened; the row went as 'closed', a live CLI with no window). Every window a resume, a retry
+   *  or an attach of the live session REPLACES closes here and nowhere else: as its row's RE-OPENING (desktop-manager reopenRow — the
+   *  record keeps the row, no evidence), the new window takes its id. → { id, desk, place } (place = its carried geometry) | null. */
+  _reopenWin(winId) {
+    const win = winId != null ? this.wm.windows.get(String(winId)) : null;
+    if (!win) return null;
+    const out = { id: String(win.id), desk: win._desktopId || this.desktopManager?.activeDesktopId || null, place: this._snapshotWinBounds(win) };
+    this.desktopManager?.reopenRow?.(out.id);
+    this._fenceOpen = (this._fenceOpen || 0) + 1;
+    try { this.wm.closeWindow(out.id); } finally { this._fenceOpen--; }
+    this._markResume(out.id); // the row is in a resume now: its new window is closed by nothing else this turn (r4 N5)
+    return out;
+  },
+
+  /** A SECOND VIEW of a conversation (r3 N1 — THE FENCE: every close in src/lib is a row of an allowlist with its reason): a window
+   *  of the conversation beside the one a resume shows — its row re-opened (_reopenWin), or this page's live window of it. A REAL
+   *  close (one conversation, one window); a resume closes nothing else. */
+  _closeSecondView(winId, conv = null) {
+    const id = winId != null ? String(winId) : null, w = id ? this.wm.windows.get(id) : null;
+    if (!w) return;
+    // …of THAT conversation (r4 — the r3 acceptance: it closed any id it was handed): a window that names another conversation is no second view
+    const spec = w._openSpec || w._conversation || w._placeholderOf || null, sid = spec?.backendSessionId || spec?.openSpec?.backendSessionId || this.sessions.get(id)?.backendSessionId || null;
+    const other = conv?.cid && (sid ? String(sid) !== String(conv.cid) || (spec?.backend || 'claude') !== (conv.backend || 'claude') : w.type !== 'chat' && w.type !== 'terminal'); // no conversation named: only a session window can be one
+    if (other) { this._fenceSays(id, '_closeSecondView', sid ? `it shows another conversation (${sid}), not ${conv.cid}` : `a ${w.type || 'non-session'} window shows no conversation`); return; }
+    this._fenceOpen = (this._fenceOpen || 0) + 1;
+    try { this.wm.closeWindow(id); } finally { this._fenceOpen--; }
+  },
+
+  /** THE FENCE'S DYNAMIC HALF (r4 N5 — the r3 acceptance: the N1 bug planted back through wm.requestClose, an ALLOWED census row, stayed
+   *  green — the census pins call sites, never what runs inside a resume): a window a resume works on (the row it re-opens, the window
+   *  its create waits in, the one it was pressed in, a retry's) is MARKED for the resume's turn — the task that runs it, to its end (a
+   *  door's code after its callback, a caller's trailing close: the same script; cleared by a microtask — never a timer, which another
+   *  task, a record another page wrote, could run before). closeWindow / requestClose / _retireWindow of a marked window from any site
+   *  but _reopenWin / _closeSecondView is REFUSED and said (window.js asks `_closeFenced` first) — a no-op and a console line, never a
+   *  silent close. A person's ✕ is another task: never fenced. (A close after an `await` beside a resume is the census's: one function.) */
+  _markResume(winId) {
+    if (winId == null) return;
+    const id = String(winId), m = (this._resumeMarks ??= new Map());
+    m.set(id, (m.get(id) || 0) + 1);
+    queueMicrotask(() => { const n = (m.get(id) || 1) - 1; if (n > 0) m.set(id, n); else m.delete(id); });
+  },
+  _closeFenced(winId, how) {
+    if ((this._fenceOpen || 0) > 0 || winId == null || !this._resumeMarks?.has(String(winId))) return false;
+    this._fenceSays(String(winId), how, 'the window is in a resume\u2019s turn — only its re-opening (_reopenWin) or a second view\u2019s close (_closeSecondView) closes it');
+    return true;
+  },
+  _fenceSays(id, how, why) {
+    console.warn(`[resume-fence] refused ${how}(${id}): ${why} (lane phone-resume-keeps-layout r4 N5)`);
+    (this._fenceRefused ??= []).push({ win: id, how, at: Date.now() }); if (this._fenceRefused.length > 32) this._fenceRefused.shift();
+    try { window.__vsOp?.('resume-close-refused', { win: id, how }); } catch { }
+  },
+
+  /** `winInfo` is still the window under its id — the INSTANCE, never the id alone (r3 N2): a window re-made under the same id
+   *  (a re-opened row, a dead view rebuilt live) is another window; a request, a dialog's answer, a retry made for the old one
+   *  never acts on it. */
+  _winIs(winInfo) { return !!winInfo && this.wm.windows.get(String(winInfo.id)) === winInfo; },
+
+  /** The window a resume of conversation `backend:cid` still waits in (its create not answered yet, the window still that
+   *  instance) — or null (r3 N2). */
+  _pendingResumeWin(backend, cid) {
+    const k = `${backend || 'claude'}:${cid}`, w = cid ? this._resumeWins?.get(k) : null;
+    if (!w) return null;
+    if (!this._winIs(w)) { this._resumeWins.delete(k); return null; }
+    return w;
+  },
+
+  /** _reopenWin as a create's fields: the new window takes the row's id and place ({} — no such window). */
+  _reopenedAs(winId) { const re = this._reopenWin(winId); return re ? { syncId: re.id, winBounds: re.place } : {}; },
+
+  /** A CONVERSATION LIVE ELSEWHERE IS ATTACHED, NEVER RE-CREATED (r2 N2): row `re` (a _reopenWin result, or a held row's {id, desk,
+   *  place}) shows live session `serverId` as itself — same id, its carried place. A page that already shows that session live
+   *  raises its own window instead (attachSession's first look) — then the row's window was a second view: its close was real. */
+  _attachInRow(re, serverId, name, cwd, opts = {}) {
+    this._markResume(re.id); // its turn is the resume's (r4 N5)
+    const win = this.attachSession(serverId, name, cwd, { ...opts, syncId: re.id });
+    if (!win) { this.desktopManager?.purgeClosedWindow?.(re.id); return null; }
+    if (re.place) this._placeCarried(win, re.place);
+    this.desktopManager?.reopenedRow?.(re.id, re.desk);
+    this.layoutManager?.noteOwnRecipe?.(win.id); // the row names the live session now — owed to the hub until a save carries it (r3)
+    return win;
+  },
+
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, initialMessage, stay = false, fromWin = null, unattended = false } = {}) {
+    const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
+    // ONE RESUME IN FLIGHT PER CONVERSATION (r3 N2 — the r2 acceptance: a double click on a stopped card sent a second resume before the
+    // first create was answered; the row counted as held, the pending window was closed as its «tile» and a second one made under the
+    // same id, and the first create's answer built a phantom view in the closed one): a resume of a conversation whose create is still
+    // in flight JOINS it — no second create, no close; a person's press raises the window it waits in
+    const pend = this._pendingResumeWin(backend, targetBackendId);
+    if (pend) {
+      this._markResume(pend.id);
+      if (!stay && !unattended) { this.wm.revealWindow?.(pend.id, {}); showToast(t('Still resuming this conversation — its window is waiting for the session to start')); } // the join is SAID (r4 N2)
+      return { row: pend.id, desk: pend._desktopId || null, pending: true };
+    }
+    // THE WINDOW THE RESUME WAS PRESSED IN (r2 N1 — the Resume bar, the retry bar, the account bar, the terminal's exited overlay, a
+    // permission restart, a placeholder tile): `fromWin` is the row it re-opens — closed HERE as its re-opening (_reopenWin), never by
+    // the caller; its session is the one this resume replaces (dead, or just killed), never «the live window» it would raise
+    const from = fromWin != null && this.wm.windows.has(String(fromWin)) ? String(fromWin) : null;
+    if (from) this._markResume(from); // the window pressed in is the resume's this turn: its door closes nothing (r4 N5)
+    const gone = excludeWebuiId || (from && this.sessions.get(from)?.sessionId) || null;
     // If this session is already open in a LIVE window, focus it.
     // TWO staleness guards (2.241.0): a read-only view is a DEAD window, not a
     // live one (its ChatView keeps sessionId after 'exited'), and an
@@ -931,10 +1069,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     // still match here because _allSessions refreshes on a poll/broadcast that
     // may be seconds stale, and the silent return ate the whole resume.
     for (const [winId, term] of this.sessions) {
+      if (winId === from) continue;
       if (term.sessionId && !term._readOnly) {
         const sidebar = this.sidebar;
         const match = (sidebar._allSessions || []).find(s => (s.backendSessionId || s.sessionId) === targetBackendId && (s.backend || 'claude') === backend && s.webuiId);
-        if (match && term.sessionId === match.webuiId && match.webuiId !== excludeWebuiId) {
+        if (match && term.sessionId === match.webuiId && match.webuiId !== gone) {
+          if (from) this._closeSecondView(from, { backend, cid: targetBackendId }); // the window pressed in shows a conversation this page shows live — a second view
           this._focusExistingSession(match.webuiId, { replay: !!syncId });
           return;
         }
@@ -942,15 +1082,61 @@ export function installSessionLifecycle(App, ctx = {}) {
     }
     // Close any TERMINATED/read-only windows for the same backend session
     // (otherwise we'd end up with two windows pointing at the same conversation)
+    // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1 — userW 2026-11-05: his phone's «Resume all» after a hub restart
+    // minted a NEW window per conversation, the desktops' rows were retired for them, and the phone — no desktop geometry — wrote eleven
+    // desktops with no box): the window it closes IS the conversation's row (the restore built it under the row's id) — the record keeps
+    // the row (desktop-manager reopenRow) and the new window takes its id; a row a held record lists that this page has not built (a
+    // desktop not visited — the resume-all's scan) is re-opened the same way, its box / z / group carried. Never a second window.
+    const dm = this.desktopManager, given = !!winBounds || stay || !!from; // `stay`: a bulk resume (the resume-all) — every row re-opened where it is, no switch
+    let row = null;
+    if (from) { const re = this._reopenWin(from); row = { id: re.id, desk: re.desk }; if (!winBounds) winBounds = re.place; }
     for (const [winId, term] of [...this.sessions]) {
       const win = this.wm.windows.get(winId);
       const spec = win?._openSpec;
       if (spec?.backend === backend && spec?.backendSessionId === targetBackendId) {
         // The resumed conversation should stay where the old window was.
         if (!winBounds) winBounds = this._snapshotWinBounds(win);
-        this.wm.closeWindow(winId);
+        if (!row && !syncId) { const re = this._reopenWin(winId); row = { id: re.id, desk: re.desk }; }
+        else this._closeSecondView(winId, { backend, cid: targetBackendId }); // a second view of the conversation (its row is the one re-opened)
       }
     }
+    const found = !row && !syncId ? dm?.heldRowOf?.({ backend, backendSessionId: targetBackendId, hostId, winId: winBounds?.winId }) : null;
+    const live = found && this.sessions.get(found.id);
+    const held = found && !(live && live.sessionId && !live._readOnly) ? found : null; // a row whose window shows a LIVE session is no resume's to re-open
+    let tile = null;
+    if (held) {
+      row = { id: held.id, desk: held.desk };
+      const r = held.row || {};
+      winBounds = { ...(winBounds || {}), gridBounds: r.gridBounds || winBounds?.gridBounds || null, desktopId: held.desk, winId: held.id, ...(r.isMaximized ? { isMaximized: true } : {}), ...(r.preSnapBounds ? { preSnapBounds: r.preSnapBounds } : {}) };
+      if (this.wm.windows.has(held.id)) tile = this._reopenWin(held.id); // its placeholder tile (a press resumes): the row's own window, re-opened
+    }
+    const rec = row ? (held?.row || (dm?._savedStates?.get(row.desk)?.windows || []).find((w) => String(w?.winId || w?.id) === row.id)) : null;
+    // ITS Z FOLLOWS THE ACT (r3 N3 — the r2 acceptance: the record's z, the last SAVED capture, put a pressed resume back under the
+    // windows raised since — the resumed window held the keyboard focus under another): the BOX is the row's always; its stacking
+    // is the record's only for a resume nobody pressed — the resume-all (`stay`), the exit respawn and the pool's cold restart
+    // (`unattended`, r4 N3: they jumped above the window the person works in) — and such a window is drawn QUIET: the person's window
+    // keeps the focus (the r3 acceptance: a resume-all window focused at its record z sat under the window it took the keys from).
+    // The window the person is IN (the row they look at) is theirs: on top, focused. A press lands on top.
+    const unpressed = (stay || unattended) && !(row && String(row.id) === String(shown));
+    if (rec && unpressed) {
+      const z = Number(rec.zIndex != null ? rec.zIndex : rec.z);
+      if (z > 0) winBounds = { ...(winBounds || {}), zIndex: z };
+    }
+    // «LIVE» IS THE HUB'S TRUTH (r2 N2 — the r1 acceptance: the check read only THIS page's windows; a phone re-opened a row another page
+    // showed live, sent a create, the hub answered 'resume-already-live' and the row was closed for it — that page's live window with
+    // it): the row's own recipe names a session the hub runs now (the session list agrees) ⇒ the resume is that window's — a person's
+    // resume goes there, a bulk one leaves it where it is, a window of the row built here shows it as itself. Never a create.
+    const runs = (sid) => (sid && sid !== gone && (this.sidebar?._allSessions || []).find((s) => s.webuiId === sid && s.status !== 'stopped')) || null;
+    const liveRow = rec ? (runs(rec.openSpec?.serverId) || runs(rec.serverSessionId)) : null;
+    if (liveRow) {
+      const elsewhere = held && !tile && row.desk && row.desk !== dm?.activeDesktopId; // the row stands on a desktop not on show, unbuilt here
+      if (!elsewhere || (!given && this.stage?.isActive)) this._attachInRow({ ...row, place: winBounds }, liveRow.webuiId, sessionName, cwd, { mode: liveRow.webuiMode || rec.openSpec?.mode || mode, backend, backendSessionId: targetBackendId, hostId });
+      else if (!given) dm?.revealHeld?.(row.id, row.desk, sessionName || null);
+      return { row: row.id, desk: row.desk, live: liveRow.webuiId };
+    }
+    // the row's tab group waits for it BEFORE its window exists (r2 — the acceptance's probe g: createSession's move captured the window
+    // chainless first, and a card resume of a grouped row on a desktop not visited dissolved the group on the hub)
+    if (row) dm?.reopenedRow?.(row.id, row.desk);
 
     const sessionMode = mode || (this.settings.get('session.defaultMode') ?? 'chat');
     // Apply persisted per-session config (gear popover) for any param the caller
@@ -960,7 +1146,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // explicitly tagged with becomes the server's _initialGroupId again, so
     // the task context covers the pre-bind window on every resume.
     const contextTask = this.sidebar?._getSessionTasks?.({ backend, backendSessionId: targetBackendId })?.[0];
-    this.createSession({
+    const created = this.createSession({
       cwd,
       name: sessionName,
       resumeId: sessionId,
@@ -978,7 +1164,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,
       poolPin: savedCfg.poolPin, // 2026-09-28: the conversation's pool pin rides a resume (never a fork)
-      syncId,
+      syncId: syncId || row?.id, // LAW 1: the row's own id — the record keeps the row, its box and its group
+      ...(unpressed ? { quiet: true } : {}), // nobody pressed it: drawn, the person's window keeps the focus (r4 N3)
       backend,
       keeperSid,
       backendSessionId: backendSessionId || sessionId,
@@ -993,6 +1180,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       onCreateResult,
       initialMessage, // lane door-signin-card: the chat's «Send my message again» re-sends the waiting turn on resume
     });
+    if (row) {
+      // a resume a person asked for with no place named (a card, a sidebar row) of a row on a desktop not on show goes there — the
+      // storm chain's reveal (the window is the row's, on its own desktop); a resume-all names each place and switches nothing
+      if (!given && row.desk && row.desk !== dm?.activeDesktopId && !this.stage?.isActive) dm?.revealHeld?.(row.id, row.desk, sessionName || null);
+    }
+    return row ? { row: row.id, desk: row.desk, created } : created;
   },
 
   // RESUME ACCOUNT (lane resume-account-door, owner 2026-10-15 「无法 resume 一个对话」): the Resume press asks the PURE
@@ -1666,12 +1859,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       Promise.resolve(this.maybeOfferHarnessService?.(backend, {
         needsService: true,
         retry: () => {
-          if (!this.wm.windows.has(winInfo.id)) return;
+          if (!this._winIs(winInfo)) return; // this window, the instance (r3 N2) — one re-made under its id is not this retry's
           // keep the window where it was (geometry AND desktop) — the same
           // rule createSession's winBounds follows, or the reopened history
           // "moves" to whatever desktop happens to be active (2.295.0 class)
-          const bounds = this._snapshotWinBounds?.(this.wm.windows.get(winInfo.id));
-          this.wm.closeWindow(winInfo.id);
+          const re = this._reopenWin(winInfo.id), bounds = re?.place; // the row, re-opened under its own id (r2 N1)
+          if (re) syncId = re.id;
           const again = this.viewSession(sessionId, cwd, sessionName, { syncId, backend, backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, offerService: false });
           if (!again) return;
           if (bounds?.gridBounds) { again.gridBounds = { ...bounds.gridBounds }; this.wm._applyGridBounds(again); }
@@ -1743,7 +1936,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // Window closed before 'attached' — the request self-cleans so a stale
       // fire can't call loadHistory on a disposed ChatView (which throws
       // mid-dispatch and swallows every later handler's message).
-      isAlive: () => this.wm.windows.has(winInfo.id),
+      isAlive: () => this._winIs(winInfo), // the window INSTANCE (r3 N2): one re-made under the same id is another window
       timeoutMs: 20000,
       onTimeout: () => {
         try { track('event', 'ws-reply-timeout:view', viewId); } catch { }

@@ -187,7 +187,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const SP = (harness && harness.spawn) || {};
           const convIdField = SP.conversationIdField || null; // claude: the claudeSessionId twin beside backendSessionId
           if (!adapter) {
-            ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
+            ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Unknown backend "${backend}".` })); // the request named (r4 N2)
             break;
           }
           // An ACP harness whose executable is not on this machine (S8) is refused by THE ONE verdict below
@@ -1294,7 +1294,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
             try { h = hosts.get(data.hostId); }
-            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             const sp = await spawnFor(h).terminal(ladderCtx({ h, shq }));
             if (!sp) return; // the ladder answered the socket
@@ -1313,7 +1313,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // wrapper's appended flags land as harmless sh -lc positionals.
             let h;
             try { h = hosts.get(data.hostId); }
-            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // ── B-4058 writer sweep script, SHARED by the ssh AND dial resume
             // paths (audit #11/#47 — it was ssh-only, so a device-side orphan
@@ -1508,7 +1508,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30, cwd: spawnCwd, env: r6Env,
             });
           } catch (err) {
-            ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} cwd=${cwd}` }));
+            ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} cwd=${cwd}` })); // the request named (r4 N2): the page's window says it failed
             return;
           }
           if (ocPty) {

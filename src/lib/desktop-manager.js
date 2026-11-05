@@ -10,6 +10,7 @@ import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: t
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js';
 import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { duplicatesOf, refusalKey, namesOf, doorSessionOf } from './desktop-record.js'; // PURE (userW inc-mw1ogdno-5jny): one conversation, one window entry; a refusal is said once; a copy by the session its door attaches (r9)
+import { conversationOf, hostOf, hasBox, placeholderBoxes } from './desktop-record.js'; // PURE (lane phone-resume-keeps-layout): a resume re-opens its row; a row with no position is drawn, never nothing
 import { withoutMembers, withMembersBack, chainSyncKey } from './chain-layout.js'; // r2 (inc-mw1ogdno-5jny): a copy that leaves takes its place in its tab group with it; r4: a kept one keeps it
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
@@ -302,6 +303,7 @@ export class DesktopManager {
   // resurrected every closed window as a lazy replay (real report 2.151.1).
   purgeClosedWindow(winId) {
     if (!winId) return;
+    if (this._reopens?.delete(String(winId))) return; // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout): the row stays in every record — the new window takes its id
     const lm = this.app.layoutManager;
     const byUser = !(lm?._applying || lm?._booting); // a close the apply / the boot itself made is not this page's change to send; one the user made in the cooldown after an apply is (verify r3 ③)
     for (const [desk, st] of this._savedStates) {
@@ -433,6 +435,8 @@ export class DesktopManager {
 
   /** The server read a record of `desktopId` (the layout manager's ack): no longer owed. */
   noteCarried(desktopId) { if (desktopId) this._dirtyDesks.delete(desktopId); }
+  /** A desktop not on show owes the server its record (layout.js noteOwnRecipe — r4 N1: a recipe this page owes rides its next save) */
+  markDirty(desktopId) { if (desktopId && desktopId !== this._activeId && desktopId !== '__stage__') this._dirtyDesks.add(desktopId); }
 
   /** The evidence every layout-sync carries: the windows this page closed, moved, replaced or could not build lately. */
   evidence() {
@@ -502,6 +506,10 @@ export class DesktopManager {
     // page's drop is carried as the server's row, verbatim, and never dropped again by this page (a duplicate, an unbuilt window)
     // until the person closes it or the page reloads — the loop cannot exist by construction
     if (msg.reason === 'shrink-without-close') for (const id of msg.unexplained || []) this._keep(d, id);
+    // A REFUSED PAGE RE-SENDS THE KEPT ROW, NEVER THE DROP AGAIN (lane phone-resume-keeps-layout r2, N3): each row the hub kept for its
+    // box takes back the window this page opened in its place — before the capture below reads the page
+    const unplaced = (msg.unplaced || []).map(String);
+    for (const id of unplaced) this._takeKeptRow(d, id, rec);
     // A PAGE'S VIEW OF A DESKTOP IS THE RECORD (r4 I — the r3 acceptance: a refused dedup's group never formed on the proposer,
     // its two members loose for the page's life): every group the record has forms here around the members this page builds —
     // a kept copy is a member of it in what the page writes (rideKept), never one the group waits for (layout.js _reconcileChain)
@@ -535,20 +543,50 @@ export class DesktopManager {
       showToast(t('This page and the server disagree about desktop “{desktop}” — reload to take the server\'s record', { desktop: name }), { type: 'warn', duration: 12000, action: { label: t('Reload now'), run: () => location.reload() } });
       return;
     }
-    const told = (msg.unexplained || []).map(String).filter((id) => !dupDrops.has(id));
+    // POSITIONS ARE NEVER DROPPED (lane phone-resume-keeps-layout, LAW 3): the hub kept the boxes this write had none for — said once, in
+    // its own words, with EVERY other window the same refusal kept (r2 N5: one toast, both groups)
+    const told = (msg.unexplained || []).map(String).filter((id) => !dupDrops.has(id) && !unplaced.includes(id));
+    if (unplaced.length) { this._sayRefusal(d, 'unplaced', unplaced, rec, name, told); return; }
     if (told.length) this._sayRefusal(d, msg.reason, told, rec, name);
+  }
+
+  /** THE KEPT ROW TAKES ITS WINDOW BACK (r2 N3 — the r1 acceptance: after an `unplaced` refusal the page re-sent the very drop with no
+   *  evidence, and the hub took it — the box lost right after «kept their places»): row `id` of `desk`, kept by the hub for its box. This
+   *  page's close of it is void (its evidence went above, its held close goes here), and the window this page opened for the same
+   *  conversation in its place — not a row of the kept record — takes the row's id (wm.rekeyWindow; on a desktop page, its box): the
+   *  next write carries the kept row, never the drop again. true = a window took it. */
+  _takeKeptRow(desk, id, rec) {
+    const row = ((rec && rec.windows) || []).find((r) => rowId(r) === id), wm = this.app.wm;
+    this.app.layoutManager?.forgetClose?.(id);
+    const cid = row && conversationOf(row);
+    if (!cid || wm.windows.has(id)) return false;
+    const listed = new Set(windowIds(rec)), backend = row.backend || row.openSpec?.backend || 'claude';
+    const convOf = (x) => x._openSpec?.backendSessionId || x._conversation?.backendSessionId || null;
+    const w = [...wm.windows.values()].find((x) => !listed.has(String(x.id)) && (x._desktopId || this._activeId) === desk && convOf(x) === cid && (x._openSpec?.backend || x._conversation?.backend || 'claude') === backend);
+    // a member of a tab group keeps its seat under the row's id (r3 C3 — the r2 acceptance's edge m: rekeyWindow declined a grouped
+    // window, _replayMissing rebuilt the kept row beside it — two windows and two rows of the conversation); its box is its frame's
+    if (!w || !wm.rekeyWindow(w.id, id, { inChain: true })) return false;
+    this.app.layoutManager?.onWindowCreated?.(w);
+    if (!this.app.isMobile && !w._onStage && !w._tabChain && row.gridBounds) { w.gridBounds = { ...row.gridBounds }; wm._applyGridBounds(w); }
+    try { window.__vsOp?.('kept-row-retaken', { desk, id }); } catch { }
+    return true;
   }
 
   /** ONE TOAST PER CAUSE (userW inc-mw1ogdno-5jny — a warn every 500 ms): a refusal's toast names the windows the server kept and
    *  is said once per desktop and reason in REFUSAL_TOAST_MS; a repeat inside it is counted, and the next one says the count. */
-  _sayRefusal(desk, reason, ids, rec, name) {
+  _sayRefusal(desk, reason, ids, rec, name, others = []) {
     const said = this._refusalToasts || (this._refusalToasts = new Map());
     const k = desk + '|' + reason, now = Date.now(), s = said.get(k);
     if (s && now - s.at < REFUSAL_TOAST_MS) { s.count++; return false; }
-    const titles = ids.map((id) => { const w = (rec?.windows || []).find((x) => String(x && (x.winId || x.id)) === id); const nm = w ? [...namesOf(w)][0] : null; return '“' + String(nm || id).slice(0, 40) + '”'; });
-    const names = titles.length > 3 ? titles.slice(0, 3).join(', ') + ' +' + (titles.length - 3) : titles.join(', ');
+    const namesFor = (list) => {
+      const titles = list.map((id) => { const w = (rec?.windows || []).find((x) => String(x && (x.winId || x.id)) === id); const nm = w ? [...namesOf(w)][0] : null; return '“' + String(nm || id).slice(0, 40) + '”'; });
+      return titles.length > 3 ? titles.slice(0, 3).join(', ') + ' +' + (titles.length - 3) : titles.join(', ');
+    };
+    const names = namesFor(ids);
     const times = s ? s.count + 1 : 1;
     said.set(k, { at: now, count: 0 });
+    if (reason === 'unplaced' && others.length) { const o = namesFor(others); showToast(times > 1 ? t('{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet (refused {n} times)', { names, others: o, desktop: name, n: times }) : t('{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet', { names, others: o, desktop: name }), { type: 'warn', duration: 10000 }); return true; }
+    if (reason === 'unplaced') { showToast(times > 1 ? t('{names} on “{desktop}” kept their places — this page had no position to give them (refused {n} times)', { names, desktop: name, n: times }) : t('{names} on “{desktop}” kept their places — this page had no position to give them', { names, desktop: name }), { type: 'warn', duration: 8000 }); return true; }
     showToast(times > 1 ? t('{names} on “{desktop}” were kept — this page had not opened them yet (refused {n} times)', { names, desktop: name, n: times }) : t('{names} on “{desktop}” were kept — this page had not opened them yet', { names, desktop: name }), { type: 'warn', duration: 8000 });
     return true;
   }
@@ -730,9 +768,55 @@ export class DesktopManager {
       this._buildAttempts.delete(x.id);
       this._noteDeparted(x.id, 'dup', x.by);
       if (x.desk !== this._activeId) this._dirtyDesks.add(x.desk);
+      if (x.carry) this._placeSurvivor(x.by, x.carry); // THE SURVIVOR KEEPS THE POSITION (lane phone-resume-keeps-layout)
       n++;
     }
     return n;
+  }
+
+  /** THE SURVIVOR KEEPS THE POSITION (lane phone-resume-keeps-layout, LAW 1): a copy with a box retired in favour of window `id`, whose
+   *  row holds none (a phone wrote it), hands it `carry` (PURE duplicatesOf — the copy's arrangement): written into the survivor's row
+   *  (a phone's capture keeps the held arrangement — it writes it from now on) and, on a desktop page, put on the window itself. */
+  _placeSurvivor(id, carry) {
+    const w = this.app.wm.windows.get(String(id)), desk = (w && w._desktopId) || this._activeId, rec = this._savedStates.get(desk);
+    const row = ((rec && rec.windows) || []).find((r) => rowId(r) === String(id));
+    if (!row || hasBox(row)) return;
+    this._setRecord(desk, mergeDesktopRecord({ record: rec, add: [{ ...row, ...carry }] }));
+    if (w && !this.app.isMobile && !w._onStage && carry.gridBounds) { w.gridBounds = { ...carry.gridBounds }; this.app.wm._applyGridBounds(w); }
+    if (desk !== this._activeId) this._dirtyDesks.add(desk);
+  }
+
+  /** THE ROW A RESUME RE-OPENS (lane phone-resume-keeps-layout, LAW 1 — userW 2026-11-05: after a hub restart his PHONE accepted «Resume
+   *  all» first; each stopped conversation reopened in a NEW window, the desktops' rows were retired for it, and the phone, which owns
+   *  no desktop geometry, wrote eleven desktops' records with no box): the row a held record of this page lists for the conversation
+   *  (`backend` + `backendSessionId`, on `hostId` — none = this hub) — the row named `winId` first, then the desktop on show's. A held
+   *  row is re-opened AS ITSELF on every viewport (session-lifecycle resumeSession): its id, box, z and tab group stay; never a second
+   *  window. → {desk, id, row} | null. */
+  heldRowOf({ backend = 'claude', backendSessionId = null, hostId = null, winId = null } = {}) {
+    if (!backendSessionId) return null;
+    const mine = (w) => isSession(w) && conversationOf(w) === String(backendSessionId) && (w.backend || w.openSpec?.backend || 'claude') === (backend || 'claude') && (hostOf(w) || null) === (hostId || null);
+    const desks = [...this._savedStates.keys()].filter((d) => d !== '__stage__' && this._desktops.some((x) => x.id === d)).sort((a, b) => (b === this._activeId) - (a === this._activeId));
+    let hit = null;
+    for (const desk of desks) {
+      for (const w of this._savedStates.get(desk)?.windows || []) {
+        if (!mine(w)) continue;
+        if (winId != null && rowId(w) === String(winId)) return { desk, id: rowId(w), row: w };
+        if (!hit) hit = { desk, id: rowId(w), row: w };
+      }
+    }
+    return hit;
+  }
+
+  /** Window `id`'s close that follows is its row's RE-OPENING (LAW 1): every held record keeps the row — no 'closed' evidence, nothing
+   *  dirty (purgeClosedWindow); the resume's new window takes its id. */
+  reopenRow(id) { if (id != null) (this._reopens || (this._reopens = new Set())).add(String(id)); }
+
+  /** Row `id` of `desk` stands again as a window of that id (LAW 1): the mark is spent, and a tab group the row belongs to waits for it
+   *  as a record's does (layout.js queueRecordChains — until it forms, the window's capture writes the record's group). */
+  reopenedRow(id, desk) {
+    this._reopens?.delete(String(id));
+    const rec = desk ? this._savedStates.get(desk) : null;
+    if (rec) this.app.layoutManager?.queueRecordChains?.(desk, rec, { naming: [String(id)] });
   }
 
   /** A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H — the r2 acceptance: a reveal that waited ~5 s for a slow group pulled the
@@ -1043,6 +1127,12 @@ export class DesktopManager {
       lm._restoring = true; lm._applying = true; // these closes are the record's, not the user's (verify r3 ③)
       try { for (const w of gone) if (this.app.wm.windows.has(w.id)) this.app.wm.closeWindow(w.id); } finally { lm._restoring = was; lm._applying = false; }
     }
+    // EVERY OPEN PAGE FOLLOWS A ROW'S RE-KEY (lane phone-resume-keeps-layout r2, N2) — on a desktop not on show too: a DEAD view this
+    // page holds there (hidden) of a row whose record now names another session goes as the row's re-opening (no evidence), and the
+    // next switch builds the row from the record (layout.js _deadFor — the apply's own rule on the desktop on show)
+    const lmr = this.app.layoutManager, rows = new Map(((state && state.windows) || []).map((r) => [rowId(r), r]));
+    const dead = [...this.app.wm.windows.values()].filter((w) => w._desktopId === desktopId && w._hiddenByDesktop && !w._onStage && rows.has(String(w.id)) && lmr?._deadFor?.(w, rows.get(String(w.id)).openSpec));
+    if (dead.length) { lmr._applying = true; try { for (const w of dead) { this.reopenRow(w.id); this.app.wm.closeWindow(w.id); } } finally { lmr._applying = false; } }
     // the server's record, as it is — minus a window THIS page closed that no save has carried yet (the held close:
     // the record is older than the close; the next switch would replay it, and a save of this desktop re-send it)
     this._relisted(desktopId, state);
@@ -1257,6 +1347,7 @@ export class DesktopManager {
     const moved = this.captureBuilt(desktopId, { windows: [...(src.windows || []), ...(dst.windows || [])] }, ids);
     const replaced = ids.length === 1 ? replaces.map((r) => [ids[0], r]) : []; // lane layout-stopped-window: the resumed window takes the replaced entry's name
     this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved, remove: replaces, replaced }));
+    if (replaced.length) this.app.layoutManager?.queueRecordChains?.(desktopId, this._savedStates.get(desktopId), { naming: [String(ids[0])] }); // …its seat in the replaced row's group, held until the group forms here (lane phone-resume-keeps-layout)
     if (from && from !== desktopId && this._savedStates.has(from)) this._setRecord(from, mergeDesktopRecord({ record: this._savedStates.get(from), remove: ids }));
     for (const d of [desktopId, from]) if (d && d !== this._activeId && d !== '__stage__') this._dirtyDesks.add(d);
     for (const id of ids) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'moved'); }
@@ -1463,6 +1554,7 @@ export class DesktopManager {
       // Collect windows for this desktop and draw miniature rectangles
       // All windows exist in DOM (visibility:hidden for non-active), so check live state
       const winEntries = []; // { id, gridBounds, waiting }
+      const unplaced = []; // the rows it holds with NO position (lane phone-resume-keeps-layout, LAW 2): drawn as placeholders + their count
       let deskHasWaiting = false;
       if (desk.id === this._activeId) {
         for (const [id, win] of this.app.wm.windows) {
@@ -1502,7 +1594,7 @@ export class DesktopManager {
             if (wid && this.app.wm.windows.has(wid)) continue; // built: drawn above where it lives now
             if (ws.gridBounds && !ws.isMinimized) {
               winEntries.push({ id: wid, gridBounds: ws.gridBounds, waiting: false });
-            }
+            } else if (!ws.isMinimized) unplaced.push(wid); // A DESKTOP WHOSE ROWS HAVE NO POSITION SAYS SO (LAW 2) — never nothing
           }
         }
       }
@@ -1519,6 +1611,22 @@ export class DesktopManager {
         rect.style.width = (b.width * 100) + '%';
         rect.style.height = (b.height * 100) + '%';
         preview.appendChild(rect);
+      }
+      // LAW 2 (lane phone-resume-keeps-layout — «从来没有被加载过的 desktop 的窗口» previewed as nothing): a dashed cascade (PURE
+      // placeholderBoxes) and the count; visiting the desktop lays them out and saves their positions
+      if (unplaced.length) {
+        placeholderBoxes(unplaced.length).forEach((b, i) => {
+          const ph = document.createElement('div');
+          ph.className = 'desktop-preview-win desktop-preview-win-unplaced';
+          ph.dataset.winId = unplaced[i];
+          ph.style.left = (b.left * 100) + '%'; ph.style.top = (b.top * 100) + '%'; ph.style.width = (b.width * 100) + '%'; ph.style.height = (b.height * 100) + '%';
+          preview.appendChild(ph);
+        });
+        const badge = document.createElement('div');
+        badge.className = 'desktop-preview-unplaced';
+        badge.textContent = String(unplaced.length);
+        badge.title = unplaced.length === 1 ? t('1 window · not placed — opening this desktop lays it out') : t('{n} windows · not placed — opening this desktop lays them out', { n: unplaced.length });
+        preview.appendChild(badge);
       }
 
       // Wrapper: preview + label below

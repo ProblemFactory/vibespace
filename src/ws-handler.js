@@ -20,6 +20,7 @@ const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
 const { keepNames } = require('./lib/desktop-record.js'); // PURE (lane layout-stopped-window): a window that replaced a named one takes its name — never written nameless
 const { refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS } = require('./lib/desktop-record.js'); // PURE (userW inc-mw1ogdno-5jny): a refusal is said once — the server never answers a storm
+const { refusalsStanding } = require('./lib/desktop-record.js'); // PURE (lane phone-resume-keeps-layout r4 N4): the refused newcomers a desktop's record still remembers
 const { noteDupsLeft, chainsAgree, sessionOf } = require('./lib/desktop-record.js'); // PURE (r3, inc-mw1ogdno-5jny): the dedup trace (who is looking outlives the socket); a write never makes a record's chains disagree
 const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
@@ -624,7 +625,7 @@ function registerWsHandler(wss, ctx) {
         // A malformed/unexpected client message must never crash the server
         // (observed: array extraArgs → .trim() TypeError killed the process).
         console.error('[ws] message handler error:', err.message, '| type:', data?.type);
-        try { ws.send(JSON.stringify({ type: 'error', message: 'Internal error handling ' + (data?.type || 'message'), sessionId: data?.sessionId })); } catch {}
+        try { ws.send(JSON.stringify({ type: 'error', message: 'Internal error handling ' + (data?.type || 'message'), sessionId: data?.sessionId, reqId: data?.reqId })); } catch {} // the request it answers is named (r5: a create that throws ends its own wait, never every pending one)
       }
     });
 
@@ -1669,20 +1670,34 @@ function registerWsHandler(wss, ctx) {
           // carries a close for every window it drops. PURE rule: src/lib/desktop-record.js shrinkVerdict.
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && Array.isArray(data.state.windows)) {
             const stored = layoutData.desktops[desktopId].autoSave;
-            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws), elsewhere: otherRecords(layoutData, desktopId), showing: (sid) => showingElsewhere(ws, sid) });
+            // A REFUSED NEWCOMER STAYS REFUSED (lane phone-resume-keeps-layout r3 C1): the boxless windows a write was refused for, per
+            // desktop (`newcomers`, [newcomer, kept row]) — written again beside the placed row they were to replace, the same refusal (an
+            // old bundle's re-send never lands a second row of the conversation). KEPT IN THE DESKTOP'S RECORD (r4 N4 — the r3 acceptance:
+            // the memory lived on the socket; a phone woken, a hub restart — the incident's own setting — met an empty one and the re-send
+            // landed the boxless row): `refusedNewcomers` beside `autoSave` (persisted, ≤ 64), a pair leaving it when its newcomer is
+            // placed or its kept row is gone from the record (an accepted write below)
+            const refusedHere = Array.isArray(layoutData.desktops[desktopId].refusedNewcomers) ? layoutData.desktops[desktopId].refusedNewcomers : [];
+            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws), elsewhere: otherRecords(layoutData, desktopId), showing: (sid) => showingElsewhere(ws, sid), refused: refusedHere });
+            // THE NEWEST PAIR ALWAYS LANDS (r5 N2 — the r4 acceptance: a length test after the cut froze a full memory): a pair refused
+            // again moves to the end, the oldest beyond 64 leaves. WRITTEN WHEN ITS MEMBERSHIP CHANGES, NEVER WHEN ONLY ITS ORDER DOES (r6 —
+            // the r5 acceptance: two remembered pairs alternating wrote layouts.json at every refusal): a new pair or an eviction writes once;
+            // the move-to-end lives in the cache readLayouts hands every message and rides a write that happens anyway — never causes one
+            if (!v.ok && v.newcomers?.length) { const pk = ([a, b]) => a + '|' + b, had = new Set(refusedHere.map(pk)), now = new Map(v.newcomers.map((p) => [pk(p), p])), next = [...refusedHere.filter((p) => !now.has(pk(p))), ...now.values()].slice(-64); layoutData.desktops[desktopId].refusedNewcomers = next; if (next.length !== refusedHere.length || next.some((p) => !had.has(pk(p)))) writeLayouts(layoutData); } // the memory is written (never the record: autoSave, its stamp, nothing relayed)
             // UNBUILT IS NOT DROPPED (lane layout-stopped-window): the session windows a page dropped as 'unbuilt' are NAMED — titles, never a count
             const unbuiltTitles = (v.unbuilt || []).map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); return String(w && w.title ? w.title : id).slice(0, 48); });
             const unbuiltSaid = unbuiltTitles.length ? `; ${unbuiltTitles.length} stopped / unknown session window(s) dropped as 'unbuilt' — a page shows them as placeholders: ${unbuiltTitles.join(' · ')}` : '';
             const ringUnbuilt = unbuiltTitles.length ? { unbuilt: unbuiltTitles } : {};
             const shownSaid = v.shown?.length ? `; ${v.shown.length} offered as a duplicate while another page shows its conversation — kept (${v.shown.map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); const sid = w && (w.serverSessionId || (w.openSpec && w.openSpec.serverId)); return `${viewersElsewhere(ws, sid)} other page(s) attached`; }).join(', ')})` : ''; // r2: the hub's dedup verdict, said
+            // POSITIONS ARE NEVER DROPPED WITHOUT A MOVE (lane phone-resume-keeps-layout): the rows whose box this write loses are NAMED
+            const unplacedSaid = v.unplaced?.length ? `; ${v.unplaced.length} would lose their position with no move (${v.unplaced.join(', ')}) — a viewport that cannot see a position never drops it` : '';
             if (!v.ok && layoutStormed(ws, desktopId, refusalKey({ desktopId, reason: v.reason, unexplained: v.unexplained }))) break; // a storm is never answered (inc-mw1ogdno-5jny)
             if (!v.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               const arrived = (v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '') + (v.live?.length ? `; ${v.live.length} LIVE (the sender could not build them)` : '');
-              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}${unbuiltSaid}${shownSaid}; the server keeps its record`);
+              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}${unbuiltSaid}${shownSaid}${unplacedSaid}; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
               noteToRing({ refused: v.reason, desktopId, viewport: data.viewport || null, n: v.unexplained.length, live: v.live?.length || 0, ...ringUnbuilt });
-              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }
+              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], ...(v.unplaced?.length ? { unplaced: v.unplaced } : {}), state: stored, sentAt: data.sentAt ?? null })); } catch { }
               break;
             }
           }
@@ -1750,6 +1765,11 @@ function registerWsHandler(wss, ctx) {
             if (!layoutData.desktops[desktopId]) layoutData.desktops[desktopId] = {};
             if (Array.isArray(data.state?.windows)) noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws); // what this write ADDS is remembered against every OTHER socket
             layoutData.desktops[desktopId].autoSave = { ...data.state, updatedAt: Date.now() };
+            // the refused newcomers that still stand (r4 N4): the kept row still placed in this record, the newcomer not placed in it
+            if (layoutData.desktops[desktopId].refusedNewcomers) {
+              const left = refusalsStanding(layoutData.desktops[desktopId].refusedNewcomers, data.state?.windows);
+              if (left.length) layoutData.desktops[desktopId].refusedNewcomers = left; else delete layoutData.desktops[desktopId].refusedNewcomers;
+            }
             // THE DEDUP TRACE (r3 F): the copies this write let go, kept beside the record (persisted; relayed; every re-read reads it) —
             // a page that SHOWS one never closes it for this record; an id a write lists again leaves the trace (PURE noteDupsLeft).
             // r4 K/M: only a 'dup' drop enters it, each with its conversation; a window this write says left by a person's act (a

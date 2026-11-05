@@ -11840,4 +11840,13 @@ export default {
   "This conversation has no proposal in the Outbox list.": "この会話の提案は送信箱の一覧にありません。",
   "The newer proposal is not in the Outbox list any more": "新しい提案はもう送信箱の一覧にありません",
   "Outbox of this conversation": "この会話の送信箱",
+  "{names} on “{desktop}” kept their places — this page had no position to give them": "「{desktop}」の {names} は元の位置を保ちました — このページには書ける位置がありませんでした",
+  "{names} on “{desktop}” kept their places — this page had no position to give them (refused {n} times)": "「{desktop}」の {names} は元の位置を保ちました — このページには書ける位置がありませんでした（{n} 回拒否）",
+  "{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet": "「{desktop}」の {names} は元の位置を保ちました — このページには書ける位置がありませんでした。{others} も残されました — このページではまだ開いていませんでした",
+  "{names} on “{desktop}” kept their places — this page had no position to give them; {others} were kept too — this page had not opened them yet (refused {n} times)": "「{desktop}」の {names} は元の位置を保ちました — このページには書ける位置がありませんでした。{others} も残されました — このページではまだ開いていませんでした（{n} 回拒否）",
+  "1 window · not placed — opening this desktop lays it out": "1 個のウィンドウ · 未配置 — このデスクトップを開くと配置されます",
+  "{n} windows · not placed — opening this desktop lays them out": "{n} 個のウィンドウ · 未配置 — このデスクトップを開くと配置されます",
+  "Resumed 1 conversation where it was": "1 件の会話を元の位置で再開しました",
+  "Resumed {n} conversations where they were": "{n} 件の会話を元の位置で再開しました",
+  "Still resuming this conversation — its window is waiting for the session to start": "この会話はまだ再開中です — ウィンドウはセッションの起動を待っています",
 };

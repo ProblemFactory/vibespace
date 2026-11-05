@@ -952,7 +952,7 @@ else await (async () => {
       await SB.stop();
       const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8'), ASK = 'applyForViewport(this._viewport(), ';
       console.log('— ⑯ RED control: this source with every applyForViewport asking as a desk (the phone applies the record\'s chrome and arrangement again)');
-      if (ok(LSRC.split(ASK).length - 1 === 5, `⑯ RED: the five asks exist in src/lib/layout.js (the control judges this source)`)) {
+      if (ok(LSRC.split(ASK).length - 1 === 6, `⑯ RED: the six asks exist in src/lib/layout.js (the control judges this source; the sixth — the apply's ask over the record the page HELD, lane phone-resume-keeps-layout r4 — is a desk's only: a phone holds none)`)) {
         const SR = await startServer(mkTree('sb-red', 'HEAD', true, (t) => t.split(ASK).join("applyForViewport('desktop', ")), 'sb-red', fixtureSB);
         if (ok(SR.up, '⑯ RED: its server booted', SR.journal.slice(-600))) await sbLegs(SR, D, P, true);
         await SR.stop();

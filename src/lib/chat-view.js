@@ -4696,13 +4696,14 @@ class ChatView {
     this._persistSessionConfig({ permission: mode });
     const backend = ids.backend || 'claude';
     const name = this.app.sidebar?.getCustomName?.({ backend, backendSessionId }) || this.winInfo?.name || t('Session');
-    const winId = this.winInfo?.id;
+    const winId = this.winInfo?.id, killed = this.sessionId;
     const winBounds = winId ? this.app._snapshotWinBounds?.(this.app.wm.windows.get(winId)) : undefined;
     this.app.killSession(this.sessionId, backendSessionId);
     setTimeout(() => {
-      if (winId) this.app.wm?.closeWindow?.(winId);
+      if (!this._ownsWindow()) return; // its window went (or was re-made) during the flush — a disposed view never acts (r3 N4)
+      // the window is the row: resumeSession re-opens it as itself (r2 N1) — the killed session is the one it replaces
       this.app.resumeSession(backendSessionId, cwd, name, {
-        mode: 'chat', backend, backendSessionId,
+        mode: 'chat', backend, backendSessionId, fromWin: winId, excludeWebuiId: killed || undefined,
         hostId: ids.host || undefined, winBounds, permission: mode,
       });
     }, 900); // let the CLI flush its transcript before --resume
@@ -6815,7 +6816,9 @@ class ChatView {
     const btn = document.createElement('button');
     btn.className = 'chat-resume-btn';
     btn.innerHTML = `${UI_ICONS.refresh || ''} <span>${t('Try resuming anyway')}</span>`;
-    btn.onclick = () => { btn.disabled = true; try { onRetry?.(); } finally { this.app.wm?.closeWindow?.(this.winInfo?.id); } };
+    // the retry RE-OPENS this window's row itself (session-lifecycle _reopenWin — the window goes as its re-opening, the bar with it):
+    // never a close here (lane phone-resume-keeps-layout r3, N1: the close after the retry closed the RESUMED window — 'closed', no window)
+    btn.onclick = () => { btn.disabled = true; onRetry?.(); };
     bar.append(note, btn);
     if (this._statusBar?.element && this._statusBar.element.parentNode === container) container.insertBefore(bar, this._statusBar.element);
     else container.appendChild(bar);
@@ -6935,7 +6938,7 @@ class ChatView {
   // message (createSession's initialMessage, forwarded through resumeSession).
   // lane signin-card-real-screen: a LIVE wall's CLI is stopped first (resuming beside it = two writers).
   _resendWaiting() {
-    if (this._signinLive) { this._signinLive = false; this._afterLiveCli(() => this._resendWaiting()); return; }
+    if (this._signinLive) { this._signinLive = false; this._afterLiveCli(() => { if (!this._disposed) this._resendWaiting(); }); return; } // after the wait: a disposed view never acts (r3 N4)
     const ids = this._getSessionIds();
     const backend = ids.backend || 'claude';
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
@@ -6979,7 +6982,18 @@ class ChatView {
     this.ws.onGlobal(onAccounts);
   }
 
+  /** This view still shows ITS window — the instance, never the id (lane phone-resume-keeps-layout r3, N4: a window re-made under
+   *  the same id — another page's resume rebuilt this dead view live, layout _deadFor — is another window). */
+  _ownsWindow() { return !this._disposed && !!this.winInfo && this.app?.wm?.windows?.get?.(this.winInfo.id) === this.winInfo; }
+
   _resumeAndClose({ accountId, asked = false } = {}) {
+    // A DISPOSED VIEW NEVER ACTS (r3 N4): after the account check's wait this view may have lost its window — closed, or re-made
+    // under its id as the live session another page resumed: nothing to resume here (the live window is the answer — raised, said)
+    if (!this._ownsWindow()) {
+      const now = this.app?.wm?.windows?.get?.(this.winInfo?.id);
+      if (now) { this.app.wm.focusWindow?.(now.id); showToast(t('Already running — opened the live session instead')); }
+      return;
+    }
     const ids = this._getSessionIds();
     const backend = ids.backend || 'claude';
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
@@ -7005,10 +7019,12 @@ class ChatView {
     }
     const customName = this.app.sidebar?.getCustomName?.(backendSessionId);
     const name = customName || this.winInfo?.name || this.winInfo?.titleMeta?.name || 'Session';
-    const winId = this.winInfo?.id;
     this.app.resumeSession(backendSessionId, cwd, name, {
       mode: 'chat',
       backend,
+      // THE WINDOW PRESSED IN IS THE ROW (lane phone-resume-keeps-layout r2, N1): resumeSession closes it as its re-opening and the
+      // resumed session takes its id — never closed here (a close after the resume closed the RESUMED window: the row went as 'closed')
+      fromWin: this.winInfo?.id,
       backendSessionId,
       // remote sessions resume ON their host — omitting this spawned a LOCAL
       // `claude --resume <remote-id>` (wrong machine, double-writer class)
@@ -7020,8 +7036,6 @@ class ChatView {
       // the bar's account picker: the pick rides this create and is saved as the on-resume account once it spawned
       ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),
     });
-    // Close the read-only window — the resumed session opens in a new window
-    if (winId) this.app.wm?.closeWindow?.(winId);
   }
 
   // Billing identity chip in the status bar (fed by app.syncSessionIdentity,

@@ -38,6 +38,12 @@
 //   entry's `hostId`; keepIdentity carries it with the conversation it names), never the old window's server session or
 //   openSpec. mergeDesktopRecord's `replaced` ([[newId, oldId]]) is the client's twin: a moved window that `replaces` an
 //   entry takes that entry's name in the held record.
+//   A POSITION IS NEVER LOST BY A VIEWPORT THAT CANNOT SEE IT (lane phone-resume-keeps-layout, userW 2026-11-05 — after a hub
+//   restart his PHONE accepted «Resume all» first: each stopped conversation reopened in a NEW window, the desktops' rows were
+//   retired in its favour, and the phone, which owns no desktop geometry, wrote eleven desktops' records with no box at all):
+//   a newcomer that `replaced` a row with no box of its own takes that row's place — its ARRANGEMENT (carryPlace: the box, z,
+//   maximize / minimize / snap) and its seat in the row's tab group (every chain of the record names the newcomer where it named
+//   the row). hasBox(w) = the row holds a desktop position (gridBounds).
 //   THE WAY BACK (r3 — a window saved nameless is a «Session unavailable» tile): namedTwinIn(list, entry) finds, in another
 //   record of its desktop (a rollback point's), the entry that names a conversation for the same slot — the same id, else the
 //   ONE session entry of its name; the server's /api/layout-history answers the newest point that holds one (its `pick`).
@@ -85,6 +91,16 @@
 //     act, or when its conversation ENDS (`alive(sid)` false — r5 N: the hub's end seam, a kill; a STOPPED conversation's
 //     window is read-only history a page still shows, and one the hub has not adopted yet after a restart is not known gone —
 //     both stay) — never cut by count (r3's newest-50 cap closed the 51st copy).
+//     POSITIONS ARE NEVER DROPPED WITHOUT A MOVE (lane phone-resume-keeps-layout): a write that loses a row's desktop position is
+//     refused at ANY count, named in `unplaced` (and in `unexplained` — the page reconciles as for any refusal): a row it keeps
+//     (the same id) with no box where the record had one; a row it drops for a window that takes its place (evidence 'replaced' /
+//     'dup' whose `by` is a row of the write) when that window holds no box; a row with a box it drops as 'closed' while a NEW row
+//     of the same write names the same conversation with none (the resume that re-minted a held row on a phone — 11:30:40). A
+//     move takes the row away whole (its position with it) and is no drop of a position. A guest of a tab group with no box
+//     carries its frame's (no strip while the head keeps its box or was never placed — r3 C2; the head is judged as any row).
+//     `refused` (r3 C1) = the [newcomer, kept row] pairs the sender was refused for: that newcomer written again with no box
+//     beside the placed row is the same refusal; `newcomers` = each `unplaced` row's boxless newcomers in this write (the
+//     hub remembers them per socket).
 //   noteDupsLeft(trace, {left, listed, gone, alive, at}) → the trace after a write: the copies it let go ([{id, by, sid}])
 //     noted [{id, by, sid, at}] (newest last), every id it lists or `gone` names forgotten, every entry whose `sid` is no
 //     longer alive forgotten (an entry with no sid — an r3 trace — is judged by the first two alone).
@@ -103,7 +119,9 @@
 //     The page drops each from its record with evidence {id, why: 'dup', by} (the dedup is its own evidence, never a silent
 //     delete); the window the person sees is the one that stays. r10: an entry is a duplicate by THE ONE COPY VERDICT — the
 //     session its own door attaches (doorSessionOf against `live`) is one `shown` names — and it leaves by the name the hub
-//     checks a 'dup' by (its sessionOf, shown too: shrinkVerdict, unchanged).
+//     checks a 'dup' by (its sessionOf, shown too: shrinkVerdict, unchanged). THE SURVIVOR KEEPS THE POSITION (lane
+//     phone-resume-keeps-layout): a copy with a box retired in favour of a window whose row holds none (a phone's capture) hands
+//     it its arrangement — `carry` (carryPlace's fields); the page writes it into the survivor's row.
 //
 //   refusalKey({desktopId, reason, unexplained, fields, windows, base}) / refusalStorm(memory, {who, desktopId, key, now}) —
 //     A REFUSAL IS SAID ONCE (the same incident): a refusal's identity is its desktop, its reason and what it refused (the drop
@@ -129,6 +147,11 @@
 //     twin is PHONE_KEEPS (every record field outside the workspace — the grid, the chrome, the preference, derived from
 //     LAYERS): recordFor / presetState carry them from the held record verbatim on a phone (lane layout-layers-p1 — before
 //     it a phone wrote its own theme / fonts / bars, which the server half below now refuses).
+//
+//   placeholderBoxes(n) — A DESKTOP WHOSE ROWS HAVE NO POSITION SAYS SO IN ITS PREVIEW (lane phone-resume-keeps-layout — «初始化之后
+//     desktop preview 里没有正确 preview 出从来没有被加载过的 desktop 的窗口»: the preview drew `gridBounds` only, so a desktop whose
+//     rows a phone had written without boxes drew nothing): the boxes a preview draws for `n` rows without one — a cascade from the
+//     top-left, at most PLACEHOLDER_MAX of them (the count badge says the rest); a visit lays them out and saves positions.
 //
 //   desktopChanges(prev, next) — the rollback point's "what changed next" (routes/persistence.js LAYOUT ROLLBACK
 //     POINTS): per desktop whose window set changed, [name, before, after] — "HR 3 → 1".
@@ -388,6 +411,25 @@ function staleVerdict({ writes = [], who = null, storedAt = 0, base = null } = {
   return { ok: true, judged: true, held, base: b };
 }
 
+/** A row holds a desktop position (its box). */
+const hasBox = (w) => !!(w && typeof w === 'object' && w.gridBounds && typeof w.gridBounds === 'object');
+/** `next` (no box of its own) takes `from`'s ARRANGEMENT — box, z, maximize / minimize / snap: the position it had on its desktop. */
+function carryPlace(from, next) {
+  if (!hasBox(from) || !next || typeof next !== 'object' || hasBox(next)) return next;
+  const out = { ...next };
+  for (const k of ARRANGEMENT) { if (k in from) out[k] = from[k]; else delete out[k]; }
+  return out;
+}
+/** A tab chain with member `a` renamed `b` (tabs, order, the split's pair and sides) — the same object when it does not name `a`. */
+function renameMember(tc, a, b) {
+  if (!tc || typeof tc !== 'object' || !Array.isArray(tc.tabs) || !tc.tabs.some((m) => String(m) === a)) return tc;
+  const sw = (l) => (Array.isArray(l) ? l.map((m) => (String(m) === a ? b : m)) : l);
+  const out = { ...tc, tabs: sw(tc.tabs) };
+  if (Array.isArray(tc.order)) out.order = sw(tc.order);
+  if (tc.split && typeof tc.split === 'object') out.split = { ...tc.split, ...['pair', 'left', 'right'].reduce((o, k) => (Array.isArray(tc.split[k]) ? { ...o, [k]: sw(tc.split[k]) } : o), {}) };
+  return out;
+}
+
 function mergeDesktopRecord({ record = null, built = [], add = [], remove = [], replaced = [] } = {}) {
   const base = record && typeof record === 'object' ? record : {};
   const was = new Map(); // a newcomer → the record's entry it replaces (lane layout-stopped-window: it takes that entry's name)
@@ -411,11 +453,18 @@ function mergeDesktopRecord({ record = null, built = [], add = [], remove = [], 
     seen.add(id);
     windows.push(page.has(id) ? keepIdentity(w, page.get(id)) : w); // the page's capture, minus nothing it did not know (identity)
   }
+  const seats = new Map(); // a replaced row's id → the newcomer that takes its seat in its tab group
   for (const [id, w] of page) {
     if (seen.has(id)) continue;
     seen.add(id);
-    windows.push(was.has(id) ? carryName(was.get(id), w) : w);
+    const p = was.get(id);
+    if (!p) { windows.push(w); continue; }
+    // …and its POSITION, when it brings none (lane phone-resume-keeps-layout): the box, z, max / min / snap, its seat in the group
+    let next = carryPlace(p, carryName(p, w));
+    if (!next.tabChain && p.tabChain && Array.isArray(p.tabChain.tabs)) { next = { ...next, tabChain: p.tabChain, ...(p.isTabGuest != null ? { isTabGuest: p.isTabGuest } : {}) }; seats.set(idOf(p), id); }
+    windows.push(next);
   }
+  if (seats.size) for (let i = 0; i < windows.length; i++) { let tc = windows[i] && windows[i].tabChain; for (const [a, b] of seats) tc = renameMember(tc, a, b); if (tc !== (windows[i] && windows[i].tabChain)) windows[i] = { ...windows[i], tabChain: tc }; }
   return { ...base, windows };
 }
 
@@ -452,10 +501,15 @@ function duplicatesOf({ records = {}, shown = new Map(), live = [] } = {}) {
   const out = [];
   const pairs = records instanceof Map ? [...records] : Object.entries(records && typeof records === 'object' ? records : {});
   const shows = shown instanceof Map ? shown : new Map();
+  const rowOf = new Map(); // window id → its row (the survivor's — does it hold a position?)
+  for (const [, rec] of pairs) for (const w of Array.isArray(rec) ? rec : listOf(rec && rec.windows)) { const id = idOf(w); if (id && !rowOf.has(id)) rowOf.set(id, w); }
   for (const [desk, rec] of pairs) {
     for (const w of Array.isArray(rec) ? rec : listOf(rec && rec.windows)) {
       const id = idOf(w), sid = sessionOf(w), door = doorSessionOf(w, live), by = sid && door && shows.has(door) ? shows.get(sid) : null;
-      if (id && by != null && String(by) !== id) out.push({ desk, id, by: String(by), sid });
+      if (!id || by == null || String(by) === id) continue;
+      // THE SURVIVOR KEEPS THE POSITION (lane phone-resume-keeps-layout): the copy's arrangement, for a survivor whose row has no box
+      const s = rowOf.get(String(by)), carry = s && hasBox(w) && !hasBox(s) ? ARRANGEMENT.reduce((o, k) => (k in w ? { ...o, [k]: w[k] } : o), {}) : null;
+      out.push(carry ? { desk, id, by: String(by), sid, carry } : { desk, id, by: String(by), sid });
     }
   }
   return out;
@@ -514,6 +568,14 @@ function refusalStorm(memory, { who = null, desktopId = null, key = '', now = Da
   memory.set(k, { who, desktopId, key, count: 0, firstAt: now, lastAt: now });
   return { answer: true, ended: m && m.count ? stormOf(m) : null };
 }
+/** THE REFUSED NEWCOMERS A RECORD STILL REMEMBERS (lane phone-resume-keeps-layout r4 N4 — the memory lives in the desktop's record, not
+ *  on a socket): the [newcomer, kept row] pairs of `pairs` that still stand once `windows` is the record — the kept row still placed
+ *  there and the newcomer not placed there (placed: the person gave it a box; gone: the kept row closed — either ends the refusal). */
+function refusalsStanding(pairs, windows) {
+  const rows = new Map(listOf(windows).filter((w) => w && typeof w === 'object').map((w) => [String(idOf(w)), w]));
+  return listOf(pairs).filter((p) => Array.isArray(p) && p.length >= 2 && hasBox(rows.get(String(p[1]))) && !hasBox(rows.get(String(p[0])))).map(([a, b]) => [String(a), String(b)]);
+}
+
 /** A write of `desktopId` by `who` was accepted: what it refused before is settled — a storm it ran ends (returned once). */
 function stormEnd(memory, { who = null, desktopId = null } = {}) {
   if (!(memory instanceof Map)) return null;
@@ -531,7 +593,7 @@ function stormSweep(memory, { now = Date.now(), windowMs = STORM_MS } = {}) {
   return out;
 }
 
-function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [], elsewhere = [], showing = () => false } = {}) {
+function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true, min = 2, recent = [], elsewhere = [], showing = () => false, refused = [] } = {}) {
   const prevList = Array.isArray(prev) ? prev : listOf(prev && prev.windows);
   const nextList = Array.isArray(next) ? next : listOf(next && next.windows);
   const nextIds = new Set(windowIds(nextList));
@@ -543,6 +605,40 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   const shown = [];
   const live = [];
   const rec = recent instanceof Set ? recent : new Set(listOf(recent).map((x) => (x == null ? null : String(x))).filter(Boolean));
+  // POSITIONS ARE NEVER DROPPED WITHOUT A MOVE (lane phone-resume-keeps-layout): a kept row that lost its box (a member of a tab group
+  // excepted — it carries its frame's box, none while the frame was never placed: a merge is no strip, r2); a row dropped for a window
+  // of this write that takes its place with none ('replaced' / 'dup' + `by`); a boxed row dropped while a NEW row of this write names
+  // its conversation with no box (a held row re-minted — the phone's resume-all of 11:30:40) — THE SHAPE, NOT THE EVIDENCE (r2 N3: with
+  // evidence or without, its session alive or dead; the re-send that dropped it with no evidence was taken, the box lost by repetition)
+  const unplaced = [];
+  const prevBy = new Map(), nextBy = new Map();
+  for (const w of prevList) { const id = idOf(w); if (id && !prevBy.has(id)) prevBy.set(id, w); }
+  for (const w of nextList) { const id = idOf(w); if (id && !nextBy.has(id)) nextBy.set(id, w); }
+  const fresh = nextList.filter((w) => !prevBy.has(idOf(w)) && !hasBox(w)), freshBoxless = new Set(fresh.map(conversationOf).filter(Boolean));
+  // a GUEST of a tab group carries its FRAME's box (r3 C2 — the r2 acceptance: every grouped row was exempt, so a placed group whose head
+  // stripped its box — or the whole group — was taken): no box is no strip while its frame (the head) keeps its box or was never placed;
+  // the head is judged as any row (a guest with no chain to read keeps the old exemption)
+  const headOf = (w) => (w && w.tabChain && Array.isArray(w.tabChain.tabs) && w.tabChain.tabs.length > 1 ? String(w.tabChain.tabs[0]) : null);
+  const carriesFrame = (id, w) => { const h = headOf(w); if (!h) return !!(w && w.isTabGuest); return h !== id && (hasBox(nextBy.get(h)) || !hasBox(prevBy.get(h))); };
+  for (const [id, w] of nextBy) if (prevBy.has(id) && hasBox(prevBy.get(id)) && !hasBox(w) && !carriesFrame(id, w)) unplaced.push(id);
+  for (const [id, w] of prevBy) {
+    if (nextBy.has(id) || !hasBox(w)) continue;
+    const r = why.get(id), s = byOf.has(id) ? nextBy.get(byOf.get(id)) : null;
+    if (((r === 'replaced' || r === 'dup') && s && !hasBox(s)) || (conversationOf(w) && freshBoxless.has(conversationOf(w)))) unplaced.push(id);
+  }
+  // A REFUSED NEWCOMER STAYS REFUSED (r3 C1 — the r2 acceptance's old-client probe: a page that cannot give the kept row's id to its window
+  // — a pre-fix bundle — re-sent the kept row AND its boxless newcomer, and that was taken: a second row of the conversation, no box,
+  // beside its placed one): `refused` = the [newcomer, kept row] pairs this sender was refused for — the newcomer written again with no
+  // box beside the placed row it was to replace is that same refusal
+  const pairsOf = (l) => (l instanceof Map ? [...l] : listOf(l)).filter((x) => Array.isArray(x) && x.length >= 2).map(([a, b]) => [String(a), String(b)]);
+  for (const [nid, kid] of pairsOf(refused)) if (nextBy.has(nid) && !hasBox(nextBy.get(nid)) && hasBox(prevBy.get(kid)) && !unplaced.includes(kid)) unplaced.push(kid);
+  // …and each `unplaced` row's newcomers — the boxless rows of this write that take (or would take) its place — for the sender's memory
+  const newcomers = [];
+  for (const kid of unplaced) {
+    const k = prevBy.get(kid), cid = conversationOf(k), by = byOf.get(kid);
+    const ns = new Set([...(by && nextBy.has(String(by)) && !hasBox(nextBy.get(String(by))) ? [String(by)] : []), ...fresh.filter((w) => cid && conversationOf(w) === cid).map(idOf), ...pairsOf(refused).filter(([n, x]) => x === kid && nextBy.has(n)).map(([n]) => n)]);
+    for (const nid of ns) if (nid && nid !== kid) newcomers.push([nid, kid]);
+  }
   const dropped = [];
   const unexplained = [];
   const unbuilt = [];
@@ -567,8 +663,17 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   // a base older than its arrival (lane desktop-move verify r1: the moved window, dropped by a client that had missed
   // the broadcast); one of them is enough, the ≥ `min` rule is for the rest
   const arrived = unexplained.filter((id) => rec.has(id));
-  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length || dup.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt, dup, shown };
-  return { ok: true, dropped, unexplained, arrived, live, unbuilt, dup, shown };
+  for (const id of unplaced) if (!unexplained.includes(id)) unexplained.push(id);
+  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length || dup.length || unplaced.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt, dup, shown, unplaced, newcomers };
+  return { ok: true, dropped, unexplained, arrived, live, unbuilt, dup, shown, unplaced, newcomers };
+}
+
+const PLACEHOLDER_MAX = 6;
+function placeholderBoxes(n) {
+  const k = Math.max(0, Math.min(PLACEHOLDER_MAX, Math.floor(Number(n) || 0)));
+  const out = [];
+  for (let i = 0; i < k; i++) out.push({ left: 0.06 + i * 0.07, top: 0.08 + i * 0.09, width: 0.44, height: 0.44 });
+  return out;
 }
 
 /** Per desktop whose window SET differs between two layouts.json documents: [name, before, after] (a desktop only in
@@ -641,9 +746,12 @@ function captureForViewport({ held = null, built = [], viewport = 'desktop' } = 
     const id = idOf(w);
     if (!id) return w;
     const out = {};
-    for (const k of Object.keys(w)) if (!ARRANGEMENT.includes(k)) out[k] = w[k];
     const h = heldBy.get(id);
-    if (h) { for (const k of ARRANGEMENT) if (k in h) out[k] = h[k]; return out; }
+    // a held row is written in ITS OWN key order (lane phone-resume-keeps-layout): a phone's capture of a desktop it did not change
+    // is the record's rows byte for byte — the arrangement the held row's, every other field the page's
+    if (h) { for (const k of Object.keys(h)) { if (ARRANGEMENT.includes(k)) out[k] = h[k]; else if (k in w) out[k] = w[k]; } }
+    for (const k of Object.keys(w)) if (!ARRANGEMENT.includes(k) && !(k in out)) out[k] = w[k];
+    if (h) return out;
     out.zIndex = ++top; out.isMaximized = false; out.isMinimized = false;
     return out;
   });
@@ -701,4 +809,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, liveSessionOf, doorSessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree };
+module.exports = { refusalsStanding, mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, liveSessionOf, doorSessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn, duplicatesOf, refusalKey, refusalStorm, stormEnd, stormSweep, STORM_MS, noteDupsLeft, chainsAgree, hasBox, carryPlace, renameMember, placeholderBoxes, PLACEHOLDER_MAX };

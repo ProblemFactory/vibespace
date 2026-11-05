@@ -1296,6 +1296,12 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }
 .desktop-preview-waiting { border-color: var(--yellow, #e5c07b); }
 .desktop-preview-find-flash { animation: blink-fade 0.3s ease-in-out infinite reverse; background: var(--accent); }
+/* lane phone-resume-keeps-layout (LAW 2): a row the desktop holds with no position — a dashed placeholder in a cascade, and the count */
+.desktop-preview-win.desktop-preview-win-unplaced { background: transparent; border: 1px dashed var(--accent); box-shadow: none; opacity: 0.85; }
+.desktop-preview-unplaced {
+  position: absolute; right: 1px; bottom: 1px; min-width: 9px; padding: 0 2px; border-radius: 5px; pointer-events: auto;
+  font-size: 7px; line-height: 9px; font-weight: 700; text-align: center; color: var(--bg-input); background: var(--accent);
+}
 .desktop-preview-add {
   width: 24px; height: var(--desktop-preview-h, 32px); /* 24 = the mouse target floor (lane desktop-small P2-6) */ border-radius: 3px;
   border: 1.5px dashed var(--border); background: transparent; color: var(--text-dim);

@@ -13,6 +13,8 @@ const require = createRequire(import.meta.url);
 export const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 export const LIB = path.join(REPO, 'src/lib');
 export const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+/** window.js's rekeyWindow, its text as shipped, run on the rig's wm (`windows`; no strip to draw) */
+const REKEY = (() => { const src = read('src/lib/window.js'), i = src.indexOf('\n  rekeyWindow('), j = src.indexOf('\n  }\n', i); return new Function(`return ({\n${src.slice(i + 1, j + 4)}\n}).rekeyWindow;`)(); })();
 export const J = JSON.stringify;
 export const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 export const REAL = { log: console.log, warn: console.warn };
@@ -83,13 +85,15 @@ export const loadHandler = (over = {}) => {
  *  empty, its sockets new); `seed` null = the file as it is */
 let killDir = null; // the kill case's buffer dir (r5 N: the real end seam runs whole — its file sweeps find nothing here)
 const KILL_DIR = () => killDir || (killDir = fs.mkdtempSync(path.join(scratchDir('ldup-kill'), 'b-')));
-export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
+// `cache` (r6): readLayouts hands the LIVE object, as src/routes/persistence.js's cache does ("authoritative between flushes") — what a
+// handler changes without a write lives on for the next message; `disk()` = what the last write left. Default: every message reads a copy.
+export function hub(WSH, seed, { alive = [S, T], file = null, cache = false } = {}) {
   if (file && seed != null) fs.writeFileSync(file, J(seed));
-  let layouts = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : JSON.parse(J(seed)), writes = 0, peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
+  let layouts = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : JSON.parse(J(seed)), writes = 0, disk = J(layouts), peak = sessionIds(layouts).length; // peak = the most WINDOWS of S (distinct ids) any write left on disk
   const logs = [], tele = [];
   const quietly = async (fn) => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { return await fn(); } finally { console.warn = REAL.warn; console.log = REAL.log; } };
   const sessions = new Map(alive.map((sid) => [sid, { clients: new Map() }])); // each live session's viewers, as the attach case keeps them (`session.clients`)
-  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, BUFFERS_DIR: KILL_DIR(), broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, deleteSessionMeta: () => {}, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); if (file) fs.writeFileSync(file, J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: sessions, WS_OPEN: 1, BUFFERS_DIR: KILL_DIR(), broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, deleteSessionMeta: () => {}, readLayouts: () => (cache ? layouts : JSON.parse(J(layouts))), writeLayouts: (d) => { writes++; disk = J(d); layouts = cache ? d : JSON.parse(disk); if (file) fs.writeFileSync(file, J(d)); peak = Math.max(peak, sessionIds(layouts).length); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -111,7 +115,7 @@ export function hub(WSH, seed, { alive = [S, T], file = null } = {}) {
   const kill = async (sid) => { if (!sessions.has(sid)) sessions.set(sid, { clients: new Map() }); const k = connect(); await k.send({ type: 'kill', sessionId: sid }); await new Promise((r) => setTimeout(r, 20)); hangUp(k); return k.frames.find((f) => f.type === 'killed') || null; };
   /** a hub that ADOPTS late (r5 N — after a restart, R6 pipe sessions / readopted keepers join the live-session set seconds later) */
   const adopt = (sid) => { if (!sessions.has(sid)) sessions.set(sid, { clients: new Map() }); };
-  return { connect, attach, hangUp, end, stop, kill, adopt, layouts: () => layouts, writes: () => writes, logs, tele, peak: () => peak };
+  return { connect, attach, hangUp, end, stop, kill, adopt, layouts: () => layouts, disk: () => JSON.parse(disk), writes: () => writes, logs, tele, peak: () => peak };
 }
 export const refusals = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-refused');
 export const acks = (S0) => S0.frames.filter((f) => f.type === 'layout-sync-ack');
@@ -132,6 +136,7 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
   if (H) sock = H.connect(toPage);
   const app = {
     ws: { onGlobal: (fn) => handlers.push(fn), onStateChange: (fn) => stateFns.push(fn), connected: true, _attachInFlight: inFlight,
+      offGlobal: (fn) => { const i = handlers.indexOf(fn); if (i >= 0) handlers.splice(i, 1); }, offStateChange: (fn) => { const i = stateFns.indexOf(fn); if (i >= 0) stateFns.splice(i, 1); }, // ws.js's own pair (r4)
       request: (m) => {
         if (!(m && m.type === 'attach' && m.sessionId)) return () => {};
         const sid = String(m.sessionId); inFlight.set(sid, Date.now());
@@ -156,8 +161,11 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
       // tab-group's restoreTabChain (the shown tab = tabs[active]) and _detachFromChain, wide enough for the chain road
       restoreTabChain: (tabs, active = 0, o = {}) => { const chain = { tabs: tabs.map(String), active: Number(active) || 0, layout: o.layout || 'tabs', order: (o.order || tabs).map(String) }; for (const id of chain.tabs) { const w = wins.get(id); if (w) w._tabChain = chain; } ops.push(['chain', chain.tabs.join(','), chain.active]); app.wm.activeWindowId = chain.tabs[chain.active]; return chain; },
       _detachFromChain: (chain, id) => { const i = chain.tabs.indexOf(id); if (i >= 0) chain.tabs.splice(i, 1); const w = wins.get(id); if (w) w._tabChain = null; }, // a window id is unique across pages (the real one is random)
-      closeWindow: (id) => { if (!wins.has(id)) return; wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
-      setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; } },
+      closeWindow: (id) => { if (app._closeFenced?.(id, 'closeWindow')) return; if (!wins.has(id)) return; wins.get(id)._listenerCtl?.abort(); wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); }, // window.js's first line: THE FENCE's dynamic half (r4 N5)
+      // window.js's requestClose (r4 — the r3 acceptance: the rig had none, so `wm.requestClose?.()` did nothing): the fence, the window's own answer, the close
+      requestClose: (id, o = {}) => { const w = wins.get(id); if (!w) return false; if (app._closeFenced?.(id, 'requestClose')) return false; if (typeof w.onCloseRequest === 'function' && w.onCloseRequest(o) === false) return false; app.wm.closeWindow(id); return true; },
+      setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; },
+      rekeyWindow(a, b, o) { return REKEY.call(this, a, b, o); } }, // window.js's OWN method text (r3 C3: a grouped window keeps its seat — `inChain`)
     themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
     updateTaskbar() {}, _checkWelcome() {},
     // the real app's replay of a session window is attachSession's: a session this page already shows builds NOTHING (its shortcut)
@@ -169,7 +177,7 @@ export function world({ records, active = 'desk-x', DM = RealDM, LM = RealLM, H 
   };
   // `sessions` = the ATTACHED windows (r7 S — the acceptance's edit: the real app fills it at 'attached'; this getter counted every
   // built session window as attached at once, and the open's road through a window still attaching was invisible to the suite)
-  Object.defineProperty(app, 'sessions', { get: () => new Map([...wins.values()].filter((w) => w._attached && w._openSpec && w._openSpec.action === 'attachSession').map((w) => [w.id, { sessionId: w._openSpec.serverId, focus() {} }])) });
+  Object.defineProperty(app, 'sessions', { get: () => new Map([...wins.values()].filter((w) => w._view || (w._attached && w._openSpec && w._openSpec.action === 'attachSession')).map((w) => [w.id, w._view || { sessionId: w._openSpec.serverId, _readOnly: !!w._readOnly, focus() {} }])) }); // a dead view (read-only) is the window's own flag (r2 N2)
   lm = new LM(app); app.layoutManager = lm;
   dm = new DM(app); app.desktopManager = dm;
   dm._desktops = DESKS.map((d) => ({ ...d })); dm._activeId = active;
@@ -201,14 +209,36 @@ let lifecycleLoads = 0;
 export async function loadLifecycle(src = fs.readFileSync(path.join(LIB, 'session-lifecycle.js'), 'utf8')) {
   const map = {};
   for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';/gm)) { (map[m[2]] = map[m[2]] || new Set()); for (const n of m[1].split(',').map((s) => s.trim().split(/\s+as\s+/)[0]).filter(Boolean)) map[m[2]].add(n); }
-  const special = { t: 'export const t = (s) => s;', stripCwdHostLabel: 'export const stripCwdHostLabel = (c) => c;', attachSlab: "export const attachSlab = () => 'floor';", resumeSpawnPick: "export const resumeSpawnPick = () => ({ value: undefined, origin: 'none' });", uiRow: 'export const uiRow = () => ({});', legacyIdFor: "export const legacyIdFor = (b, id) => ((b || 'claude') === 'claude' ? id : null);", viewIdFor: "export const viewIdFor = (b, id) => 'view-' + id;", terminalOnly: 'export const terminalOnly = () => false;', carriedGeometry: 'export const carriedGeometry = (g) => g;', backendFeatureCaps: 'export const backendFeatureCaps = () => ({});' };
+  const special = { t: 'export const t = (s) => s;', stripCwdHostLabel: 'export const stripCwdHostLabel = (c) => c;', attachSlab: "export const attachSlab = () => 'floor';", resumeSpawnPick: "export const resumeSpawnPick = () => ({ value: undefined, origin: 'none' });", uiRow: 'export const uiRow = (b) => (globalThis.__uiRows && globalThis.__uiRows[b]) || ({});', showToast: 'export const showToast = (m) => { (globalThis.__lifeToasts ||= []).push(String(m)); return null; };', legacyIdFor: "export const legacyIdFor = (b, id) => ((b || 'claude') === 'claude' ? id : null);", viewIdFor: "export const viewIdFor = (b, id) => 'view-' + id;", terminalOnly: 'export const terminalOnly = () => false;', carriedGeometry: 'export const carriedGeometry = (g) => g;', backendFeatureCaps: 'export const backendFeatureCaps = () => ({});' };
   const STUBS = {};
-  for (const [p, names] of Object.entries(map)) STUBS[p] = [...names].map((n) => special[n] || `export const ${n} = function () { return null; };`).join('\n').replace(/export const (ChatView|TerminalSession) = function \(\) \{ return null; \};/g, 'export class $1 {}');
+  for (const [p, names] of Object.entries(map)) STUBS[p] = [...names].map((n) => special[n] || `export const ${n} = function () { return null; };`).join('\n').replace(/export const (ChatView|TerminalSession) = function \(\) \{ return null; \};/g, 'export class $1 { constructor(w, ws, sid) { this.winInfo = w; this.sessionId = sid; } applyStatus() {} noteHistoryInFlight() {} loadHistory() {} focus() {} dispose() {} }');
   const r = await esbuild.build({ stdin: { contents: src, resolveDir: LIB, sourcefile: 'session-lifecycle.js', loader: 'js' }, bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
     plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\.?\// }, (a) => (STUBS[a.path] ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
   const dir = scratchDir('ldup-lifecycle'), f = path.join(dir, `lifecycle-${++lifecycleLoads}.mjs`); // a fresh URL per load: ESM caches by URL (a mutant's bundle under the same name was the real one)
   fs.writeFileSync(f, r.outputFiles[0].text);
   try { return (await import(pathToFileURL(f).href)).installSessionLifecycle; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+/** the REAL src/lib/ws.js (or a patched copy) over a FAKE WebSocket (lane phone-resume-keeps-layout r5 N1): `open()` opens the
+ *  newest socket, `frame(m)` delivers an inbound frame, `drop()` closes it and opens the reconnect's socket at once (ws.js's 2–3 s
+ *  timer is taken, never waited for); `sent(k)` = the frames socket k carried. Globals it needs are set for the call and put back. */
+export async function loadWs(src = fs.readFileSync(path.join(LIB, 'ws.js'), 'utf8')) {
+  const r = await esbuild.build({ stdin: { contents: src, resolveDir: LIB, sourcefile: 'ws.js', loader: 'js' }, bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /telemetry-client\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const metric = () => {};', loader: 'js' })); } }] });
+  const dir = scratchDir('ldup-ws'), f = path.join(dir, `ws-${++lifecycleLoads}.mjs`);
+  fs.writeFileSync(f, r.outputFiles[0].text);
+  let WsManager; try { ({ WsManager } = await import(pathToFileURL(f).href)); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  return function realWs() {
+    const socks = [];
+    class FakeSocket { constructor(url) { this.url = url; this.readyState = 0; this.out = []; socks.push(this); } send(m) { this.out.push(JSON.parse(m)); } close() {} }
+    const g = globalThis, had = { location: g.location, WebSocket: g.WebSocket, fetch: g.fetch, setTimeout: g.setTimeout };
+    const withGlobals = (fn) => { g.location = { protocol: 'http:', host: 'hub.test' }; g.WebSocket = FakeSocket; g.fetch = () => Promise.resolve({ status: 200 }); let later = null; g.setTimeout = (cb, ms, ...a) => (ms >= 2000 && !later ? (later = cb, 0) : had.setTimeout(cb, ms, ...a)); try { fn(); } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete g[k]; else g[k] = v; } } return later; };
+    let ws; withGlobals(() => { ws = new WsManager(); });
+    const open = () => { const s = socks[socks.length - 1]; s.readyState = 1; s.onopen(); };
+    open();
+    const frame = (m) => socks[socks.length - 1].onmessage({ data: JSON.stringify(m) });
+    const drop = () => { const s = socks[socks.length - 1]; s.readyState = 3; const again = withGlobals(() => s.onclose()); if (again) withGlobals(again); open(); };
+    return { ws, frame, drop, sent: (k) => (socks[k] ? socks[k].out : []), sockets: () => socks.length };
+  };
 }
 /** a page (the real classes + the REAL attachSession) over the hub's CURRENT layouts, booted on `active` */
 export function pageOn(H, install, active, { DM = RealDM, LM = RealLM, attachMs = 500 } = {}) {
@@ -217,6 +247,6 @@ export function pageOn(H, install, active, { DM = RealDM, LM = RealLM, attachMs 
   const doc = H.layouts();
   const records = Object.fromEntries(Object.entries(doc.desktops).map(([d, v]) => [d, v.autoSave.windows]));
   const W = world({ records, active, H, DM, LM, attachMs, extra: { _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _closeSidebarOnMobile() {} } });
-  for (const k of ['attachSession', '_focusExistingSession', '_focusPendingAttach', '_windowPending']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
+  for (const k of ['attachSession', '_focusExistingSession', '_focusPendingAttach', '_windowPending', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (proto[k]) W.app[k] = proto[k].bind(W.app);
   return W;
 }

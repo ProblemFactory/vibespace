@@ -1225,8 +1225,8 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   ok(/this\.app\.resumeSession\(backendSessionId, cwd, name, \{\n\s*mode: 'chat',\n\s*backend,/.test(cv),
     'the chat RESUME BAR sends no model/effort at all — the path the owner hit');
   const lay = read('src/lib/layout.js');
-  ok(/this\.app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, d\.opts\)/.test(lay),
-    'resume-all replays the window\'s own opts and invents nothing');
+  ok(/this\.app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, \{ \.\.\.\(d\.opts \|\| \{\}\), stay: true \}\)/.test(lay),
+    'resume-all replays the window\'s own opts and invents nothing (lane phone-resume-keeps-layout: + `stay` — each row re-opened where it is, no switch)');
   // (3) the server states WHICH FACT it used, everywhere a client can read it
   const wc = read('src/ws-create.js');
   ok(wc.indexOf('resumeSpawnPick({') < wc.indexOf('adapter.buildSessionArgs({'),

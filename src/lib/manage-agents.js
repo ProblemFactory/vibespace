@@ -1313,7 +1313,7 @@ export function installManageAgents(App, ctx = {}) {
     const live = (this.sidebar?._allSessions || []).find((x) => x.webuiId === sess.serverId);
     const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || live?.name || sess.name || '';
     const mode = live?.webuiMode || 'chat';
-    const finish = () => this.resumeSession(sess.backendSessionId, sess.cwd || live?.cwd || '', name, { mode, backend: sess.backend, backendSessionId: sess.backendSessionId, accountId: poolId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId, ...(sess.model ? { model: sess.model } : {}) }); // (q-053 P0b) a move to another provider names the model its list serves
+    const finish = () => this.resumeSession(sess.backendSessionId, sess.cwd || live?.cwd || '', name, { mode, backend: sess.backend, backendSessionId: sess.backendSessionId, accountId: poolId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId, unattended: true, ...(sess.model ? { model: sess.model } : {}) }); // (q-053 P0b) a move to another provider names the model its list serves; nobody pressed it (r4 N3: the record's z, the person's window keeps the keys)
     let done = false;
     const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
     const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === sess.serverId) setTimeout(go, 400); }; // let the CLI flush its transcript

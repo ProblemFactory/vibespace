@@ -143,7 +143,10 @@ class WsManager {
   offGlobal(h) { const i = this.globalHandlers.indexOf(h); if (i >= 0) this.globalHandlers.splice(i, 1); }
   onStateChange(h) { this._stateListeners.push(h); }
   offStateChange(h) { const i = this._stateListeners.indexOf(h); if (i >= 0) this._stateListeners.splice(i, 1); }
-  _notifyState(connected) { for (const h of this._stateListeners) h(connected); }
+  // OVER A COPY (lane phone-resume-keeps-layout r5 N1 — a law of this client): a listener may remove itself or a neighbour while the
+  // state is told (a request's watch released at the reconnect) — splicing the live array inside the loop skipped the listener after
+  // it (a ChatView stayed «Disconnected», a resend attach was never re-sent). One removed before its turn is not told.
+  _notifyState(connected) { const live = this._stateListeners; for (const h of [...live]) if (live.includes(h)) h(connected); }
 }
 
 export { WsManager, ATTACH_CAPS, wireText };

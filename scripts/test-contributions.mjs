@@ -958,7 +958,11 @@ console.log('contributions — D. wiring pins');
   ok(onIdx > 0 && errIdx > onIdx && !term.slice(onIdx, errIdx).includes('onGlobal('), "terminal's error branch lives inside the PER-SESSION ws.on(sessionId) handler (never sees a sessionId-less frame)");
   const sl = read('src/lib/session-lifecycle.js');
   const slErr = [...sl.matchAll(/msg\.type === 'error'\)?[^\n]*/g)].map((m) => m[0]);
-  ok(slErr.length >= 4 && slErr.every((l) => /msg\.(reqId|sessionId) === /.test(l)), 'session-lifecycle error handlers are reqId/sessionId/viewId/virtualId-gated', J(slErr));
+  // ONE declared exception (lane phone-resume-keeps-layout r4 N2): an error naming NO request (an older hub's «Failed to spawn session» /
+  // «Unknown host» — this hub names the request) only RELEASES the pending resume's wait (`settled()` — a next press creates again);
+  // it rescues, closes and binds nothing, and the request stays armed
+  const RELEASE = /^msg\.type === 'error' && !msg\.reqId && !msg\.sessionId\) settled\(\);$/;
+  ok(slErr.length >= 4 && slErr.every((l) => /msg\.(reqId|sessionId) === /.test(l) || RELEASE.test(l)) && slErr.filter((l) => RELEASE.test(l)).length <= 1, 'session-lifecycle error handlers are reqId/sessionId/viewId/virtualId-gated (one declared release of a pending resume\'s wait)', J(slErr));
   ok(/if \(d\.sessionId\) \[\.\.\.\(this\.handlers\.get\(d\.sessionId\)/.test(read('src/lib/ws.js')), 'ws.js routes session-scoped handlers by d.sessionId only');
   // plugin host API
   const pc = read('src/lib/plugin-client.js');

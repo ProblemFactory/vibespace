@@ -31,7 +31,11 @@
 //      by its conversation id alone (S attaching on X, answered at +3 s, the visit at +1 s) — a copy by the restore's own ladder;
 //      r10 GS: V's row names T's conversation beside S's server id, S built on X — the person's act's save (normalizeDups its first
 //      step) keeps it, the visit at +2.6 s builds T's window (one verdict, the autosave's dup proposal too)
-import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press, sessionIds } from './layout-dup-world.mjs';
+//   §14 (lane phone-resume-keeps-layout, userW 2026-11-05 11:30Z): the user's shape on the real timing — the hub restarts (a new
+//      process over the same data/), a PHONE page accepts «Resume all» first (V read-only, X and Y never visited), then a DESKTOP
+//      page visits every desktop: every row keeps its id and box on the hub, each window stands where it was, 0 refusals, one
+//      toast «Resumed 4 conversations where they were»; mutant r14-remint (a5dedfed1's resume) RED
+import { REPO, LIB, read, J, tick, made, mkEl, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press, sessionIds } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratchDir } from './scratch.mjs';
 import fs from 'node:fs';
@@ -1330,6 +1334,296 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 27, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// §14 (lane phone-resume-keeps-layout, userW 2026-11-05 11:30Z — THE USER'S SHAPE ON THE PAGE'S REAL TIMING): the hub RESTARTS (a
+// new handler process over the same data/), a PHONE page reconnects first and accepts «Resume all» (the resume-all's 400 ms stagger,
+// the 500 ms autosave), then a DESKTOP page connects and visits each desktop (the 1 s gate) — every desktop's rows keep their ids and
+// boxes, the desktop's windows stand where they were, 0 refusals, ONE toast («Resumed 4 conversations where they were»)
+const R14C = (i) => `c0ffee1${i}-0000-4000-8000-00000000001${i}`;
+const R14GB = (i) => ({ left: 0.05 + 0.1 * i, top: 0.04 * i, width: 0.32, height: 0.42 });
+const r14Row = (id, i) => ({ winId: id, title: `Conv ${i} — /srv/q${i}`, type: 'chat', isMinimized: false, isMaximized: false, gridBounds: R14GB(i), zIndex: 400 + i, backend: 'claude', backendSessionId: R14C(i), claudeSessionId: R14C(i), cwd: '/srv/q' + i, serverSessionId: 'old-' + i });
+const R14_RECS = () => ({ 'desk-v': [r14Row('v-q1', 1), files('v-f', 0)], 'desk-x': [r14Row('x-q2', 2), r14Row('x-q4', 4), files('x-f', 3)], 'desk-y': [r14Row('y-q3', 3)] });
+const R14_AT = { 'v-q1': ['desk-v', 1], 'x-q2': ['desk-x', 2], 'x-q4': ['desk-x', 4], 'y-q3': ['desk-y', 3] };
+const r14Rows = (H) => ['desk-v', 'desk-x', 'desk-y'].map((d) => (H.layouts().desktops[d].autoSave.windows || []).map((w) => [w.winId, w.gridBounds ? J(w.gridBounds) : null]));
+const DATA14 = scratchDir('ldup-r14');
+let r14Runs = 0;
+async function r14Legs({ install = null, DM = RealDM, LM = RealLM, quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  if (!install) return failed;
+  const file = path.join(DATA14, `layouts-${++r14Runs}.json`);
+  const H1 = hub(loadHandler(), DOC(R14_RECS()), { file, alive: [] }), before = r14Rows(H1);
+  // THE RESTART: the old process ends with no page on it; a NEW process over the same data/ (its live sessions: the resumes' — the
+  // creates the phone sends are answered by the hub, here as the live list the restore reads)
+  const live = [1, 2, 3, 4].map((i) => ({ id: 'new-' + i, name: 'Conv ' + i, cwd: '/srv/q' + i, backend: 'claude', backendSessionId: R14C(i), mode: 'chat' }));
+  const H2 = hub(loadHandler(), null, { file, alive: live.map((s) => s.id) });
+  // THE PHONE reconnects FIRST: booted on V (q1's read-only window built under its row's id, drawn full screen), X and Y never visited
+  const P = pageOn(H2, install, 'desk-v', { DM, LM, attachMs: 300 });
+  class Life {} install(Life);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  Object.assign(P.app, { isMobile: true, _getBackendSessionDefaults: () => ({}) });
+  const creates = []; P.app.ws.request = (m) => { if (m && m.type === 'create') creates.push(m); return () => {}; };
+  P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
+  Object.assign(P.wins.get('v-q1'), { type: 'chat', gridBounds: { left: 0, top: 0, width: 1, height: 1 }, _attached: true, _openSpec: { action: 'attachSession', serverId: 'old-1', backend: 'claude', backendSessionId: R14C(1) } });
+  // the collector's list (restoreState's read-only window on V; scanStoppedInDesktopStates' rows on X and Y — each names its row)
+  const stopped = [{ sessionId: R14C(1), cwd: '/srv/q1', name: 'Conv 1', opts: { backend: 'claude', backendSessionId: R14C(1) } }]
+    .concat(['x-q2', 'x-q4', 'y-q3'].map((id) => { const [d, i] = R14_AT[id]; return { sessionId: R14C(i), cwd: '/srv/q' + i, name: 'Conv ' + i, opts: { backend: 'claude', backendSessionId: R14C(i), winBounds: { gridBounds: R14GB(i), desktopId: d, winId: id } } }; }));
+  const t0 = made.length, s0 = Date.now();
+  // the person accepts «Resume all» (the offer's dialog is the page's; its resumes run on the real 400 ms stagger)
+  const kept = P.lm._resumeAll ? await P.lm._resumeAll(stopped) : await (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(400); } return null; })();
+  await tick(1600); // the autosave's 500 ms debounce, its sends and acks
+  const phoneSaid = toasts(t0).map(toastText), phoneRefused = refusals(P.sock()).length, afterPhone = r14Rows(H2);
+  leg(creates.length === 4 && J(afterPhone) === J(before) && !phoneRefused && Date.now() - s0 >= 1200,
+    `§14 (the user's shape, real timing) THE PHONE first, after the restart: «Resume all» re-opens 4 conversations (V built read-only, X ×2 and Y never visited) — every desktop's rows on the hub keep their ids and boxes, 0 refusals`, { creates: creates.length, before, afterPhone, phoneRefused });
+  leg(kept === 4 && J(phoneSaid) === J(['Resumed 4 conversations where they were']), '§14 …the phone says it ONCE: «Resumed 4 conversations where they were»', { kept, phoneSaid });
+  // THE DESKTOP connects to the new process and visits each desktop — each conversation's window built where its row stands
+  const D = pageOn(H2, install, 'desk-v', { DM, LM, attachMs: 300 }), t1 = made.length;
+  for (const [d, v] of Object.entries(H2.layouts().desktops)) D.dm.noteStamp(d, v.autoSave.updatedAt); // its boot's base: the records as it read them (loadFromServer — the world seeds 1000)
+  D.app.sidebar._webuiSessions = live;
+  D.lm._bootJson = async (u) => (u === '/api/active' ? { sessions: live } : { sessions: [] });
+  for (const d of ['desk-x', 'desk-y', 'desk-v']) await switchTo(D, d);
+  await tick(1600);
+  const at = Object.entries(R14_AT).map(([id, [d, i]]) => { const w = D.wins.get(id); return [id, !!w, w && w._desktopId === d, w && J(w.gridBounds) === J(R14GB(i))]; });
+  const minted = [...D.wins.keys()].filter((id) => !(id in R14_AT) && !['v-f', 'x-f'].includes(id));
+  leg(at.every((r) => r[1] && r[2] && r[3]) && !minted.length, '§14 …THE DESKTOP connects and visits X, Y, V: every conversation\'s window is its row (its id) on its desktop at its box — windows where they were, none minted', { at, minted });
+  leg(J(r14Rows(H2)) === J(before) && !refusals(D.sock()).length && !toasts(t1).length, '§14 …after the desktop\'s saves every desktop\'s rows still hold their ids and boxes — 0 refusals on either page, 0 toasts beyond the phone\'s one', { rows: r14Rows(H2), refused: refusals(D.sock()).length, said: toasts(t1).map(toastText) });
+  return failed;
+}
+const install14 = await loadLifecycle();
+await section('§14 THE USER\'S SHAPE (lane phone-resume-keeps-layout): the hub restarts, a PHONE page accepts «Resume all» first, then a DESKTOP page visits every desktop — rows, ids and boxes kept; one toast', async () => {
+  await r14Legs({ install: install14 });
+  const LSRC = read('src/lib/session-lifecycle.js');
+  const a = '      syncId: syncId || row?.id, // LAW 1: the row\'s own id — the record keeps the row, its box and its group\n', b = '    this.desktopManager?.reopenRow?.(out.id);\n';
+  if (ok(LSRC.includes(a) && LSRC.includes(b), 'mutant r14-remint: the patched lines exist in session-lifecycle.js')) {
+    const f = await r14Legs({ install: await loadLifecycle(LSRC.replace(a, '      syncId,\n').replace(b, '')), quiet: true });
+    ok(f.some((n) => n.startsWith('§14 (the user\'s shape, real timing) THE PHONE first')), `mutant r14-remint (a5dedfed1's resume: a NEW window per conversation, its row closed / replaced for it): §14 RED (${f.length}: ${f.map((n) => n.slice(0, 40)).join(' | ')})`);
+  }
+});
+
+// §14b (lane phone-resume-keeps-layout r2 — the r1 acceptance: userW's DESKTOP TAB WAS OPEN across the restart while the phone resumed):
+// the desktop page D keeps showing V's two conversations as dead views (v-q1, v-q5 read-only); the phone accepts «Resume all» first
+// (real stagger, each create answered as the hub answers it); D's person presses the RESUME BAR on v-q1 while the phone's create of it
+// is in flight (the hub answers 'resume-already-live'); D's v-q5 follows the phone's record — every row keeps its id and box, D's
+// windows are the live ones under their ids, nothing writes a dead recipe back, 0 'closed', 0 refusals
+const { showToast: realToast14 } = await import(pathToFileURL(path.join(LIB, 'utils.js')).href);
+const resumeBarDoor14 = (src) => {
+  const i = src.indexOf('\n  _resumeAndClose({'), j = src.indexOf('\n  }\n', i), o = src.match(/\n {2}(_ownsWindow\(\) \{[^\n]*\})\n/);
+  const M = new Function('showToast', 't', `return ({\n${o ? o[1] + ',\n' : ''}${src.slice(i + 1, j + 4)}\n});`)(realToast14, (s) => s);
+  return function door(...a) { if (M._ownsWindow && !this._ownsWindow) this._ownsWindow = M._ownsWindow; if (!this._resumeAndClose) this._resumeAndClose = door; return M._resumeAndClose.apply(this, a); }; // the stand-in view gets the methods the door calls on itself (r3)
+};
+const R14B_RECS = () => ({ ...R14_RECS(), 'desk-v': [r14Row('v-q1', 1), r14Row('v-q5', 5), files('v-f', 0)] });
+const R14B_AT = { ...R14_AT, 'v-q5': ['desk-v', 5] };
+const r14bLive = (sid, i) => ({ action: 'attachSession', serverId: sid, backend: 'claude', backendSessionId: R14C(i), cwd: '/srv/q' + i, mode: 'chat', name: 'Conv ' + i });
+function r14Page(H, install, { phone, LM = RealLM }) {
+  const P = pageOn(H, install, 'desk-v', { DM: RealDM, LM, attachMs: 300 });
+  class Life {} install(Life);
+  for (const k of ['resumeSession', 'createSession', '_windowPending', '_snapshotWinBounds', '_placeCarried', '_reopenWin', '_reopenedAs', '_attachInRow', '_closeSecondView', '_markResume', '_closeFenced', '_fenceSays', '_winIs', '_pendingResumeWin']) if (Life.prototype[k]) P.app[k] = Life.prototype[k].bind(P.app);
+  Object.assign(P.app, { isMobile: phone, _getBackendSessionDefaults: () => ({}) });
+  P.app.sidebar.getSessionConfig = () => ({}); P.app.sidebar._getSessionTasks = () => [];
+  for (const [id, i] of [['v-q1', 1], ['v-q5', 5]]) Object.assign(P.wins.get(id), { type: 'chat', gridBounds: phone ? { left: 0, top: 0, width: 1, height: 1 } : R14GB(i), _attached: true, _readOnly: true, _openSpec: r14bLive('old-' + i, i) });
+  return P;
+}
+async function r14bLegs({ install = null, CV = read('src/lib/chat-view.js'), LM = RealLM, quiet = false, visits = true, r4 = true } = {}) { // `r4`: the round-4 scenarios to run — true (both), 'owe', 'rel', false (a mutant runs only what it targets)
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  if (!install) return failed;
+  const file = path.join(DATA14, `layouts-b${++r14Runs}.json`);
+  const H1 = hub(loadHandler(), DOC(R14B_RECS()), { file, alive: [] }), before = r14Rows(H1);
+  const rowOf = Object.fromEntries(Object.entries(R14B_AT).map(([id, [, i]]) => [R14C(i), [id, i]]));
+  const H2 = hub(loadHandler(), null, { file, alive: [1, 2, 3, 4, 5].map((i) => 'new-' + i) }); // THE RESTART: a new process over the same data/
+  const D = r14Page(H2, install, { phone: false, LM }), P = r14Page(H2, install, { phone: true, LM }), t0 = made.length;
+  for (const X of [D, P]) for (const [d, v] of Object.entries(H2.layouts().desktops)) X.dm.noteStamp(d, v.autoSave.updatedAt);
+  // the hub answers each create: the phone's spawn the conversation (its window attaches new-i, as ChatView's 'created' does); a
+  // second create of a conversation already live is answered 'resume-already-live'
+  const spawned = new Set(), creates = { P: 0, D: 0 };
+  for (const [k, X] of [['P', P], ['D', D]]) X.app.ws.request = (m, cb, o = {}) => {
+    if (!m || m.type !== 'create') return () => {};
+    creates[k]++;
+    const [, i] = rowOf[m.resumeId] || [];
+    const answer = (msg) => { if (!(o.isAlive && !o.isAlive())) cb(msg); }; // ws.js's rule: a window gone takes no answer
+    setTimeout(() => {
+      if (spawned.has(m.resumeId)) { answer({ type: 'error', code: 'resume-already-live', existingId: 'new-' + i, existingName: 'Conv ' + i, reqId: m.reqId }); return; }
+      spawned.add(m.resumeId); answer({ type: 'created', sessionId: 'new-' + i, cwd: '/srv/q' + i, mode: 'chat', reqId: m.reqId }); // createSession's own 'created' (r3: the window owes the hub its live recipe)
+    }, 60);
+    return () => {};
+  };
+  const stopped = [1, 5].map((i) => ({ sessionId: R14C(i), cwd: '/srv/q' + i, name: 'Conv ' + i, opts: { backend: 'claude', backendSessionId: R14C(i) } }))
+    .concat(['x-q2', 'x-q4', 'y-q3'].map((id) => { const [d, i] = R14_AT[id]; return { sessionId: R14C(i), cwd: '/srv/q' + i, name: 'Conv ' + i, opts: { backend: 'claude', backendSessionId: R14C(i), winBounds: { gridBounds: R14GB(i), desktopId: d, winId: id } } }; }));
+  const all = P.lm._resumeAll ? P.lm._resumeAll(stopped) : (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(400); } return null; })(); // a tree before the resume-all's own door (a5dedfed1): the same stagger
+  await tick(30); // the phone's create of q1 is out; D's person presses «Resume this session» on v-q1 before the hub's answer
+  resumeBarDoor14(CV).call({ winInfo: D.wins.get('v-q1'), app: D.app, _resumeBar: null, _getSessionIds: () => ({ backend: 'claude', backendSessionId: R14C(1), cwd: '/srv/q1' }) }, {});
+  const kept = await all;
+  await tick(1800); // the autosaves' 500 ms debounce, the relays, D's apply
+  const d1 = D.wins.get('v-q1'), d5 = D.wins.get('v-q5');
+  const evOf = (X) => X.syncs().flatMap((m) => m.evidence || []).filter((e) => e.why === 'closed' || e.why === 'replaced' || e.why === 'dup');
+  const fence = [...(D.app._fenceRefused || []), ...(P.app._fenceRefused || [])]; // r4 N5: a door that tried a close in a resume's turn is journaled
+  leg(kept === 5 && creates.P === 5 && creates.D === 1 && J(r14Rows(H2)) === J(before) && d1?._openSpec?.serverId === 'new-1' && J(d1?.gridBounds) === J(R14GB(1)) && d5?._openSpec?.serverId === 'new-5' && J(d5?.gridBounds) === J(R14GB(5)) && !evOf(D).length && !evOf(P).length && !refusals(D.sock()).length && !refusals(P.sock()).length && !fence.length,
+    '§14b (userW\'s case — the desktop tab open across the restart, real timing) the phone resumes 5, D\'s person presses the Resume bar on v-q1 meanwhile (\'resume-already-live\') — D\'s v-q1 and v-q5 are the live windows under their own ids at their boxes, every desktop\'s rows keep ids and boxes, 0 \'closed\', 0 refusals',
+    { kept, creates, rows: r14Rows(H2), before, d1: d1 && [d1._openSpec?.serverId, d1.gridBounds], d5: d5 && [d5._openSpec?.serverId, d5.gridBounds], ev: [evOf(D), evOf(P)], refused: [refusals(D.sock()).length, refusals(P.sock()).length], fence });
+  const v = H2.layouts().desktops['desk-v'].autoSave.windows;
+  leg(['v-q1', 'v-q5'].every((id, k) => v.find((w) => w.winId === id)?.openSpec?.serverId === 'new-' + [1, 5][k]), '§14b …the hub\'s V names the LIVE sessions for v-q1 and v-q5 — no page wrote a dead recipe back', v.map((w) => [w.winId, w.openSpec?.serverId || null]));
+  leg(J(toasts(t0).map(toastText)) === J(['Resumed 5 conversations where they were']), '§14b …one toast in all: the phone\'s «Resumed 5 conversations where they were»', toasts(t0).map(toastText));
+  if (r4 === true || r4 === 'owe') {
+    // (r4 N1) THE OWED RECIPE IS CARRIED ONCE AND NEVER ECHOES, on the real timing (the r3 acceptance's shape): the hub answers the phone's
+    // creates LATE — after the resume-all's saves were acked; the desktop tab stays open beside it ⇒ ONE phone save carries the five live
+    // recipes (V, and X / Y never on show there); then the phone idles and D's person moves v-f six times (each record applied on the
+    // phone) ⇒ the phone writes 0 records — nothing owed, no input fabricated
+    const H4 = hub(loadHandler(), DOC(R14B_RECS()), { alive: [1, 2, 3, 4, 5].map((i) => 'new-' + i) });
+    const D4 = r14Page(H4, install, { phone: false, LM }), P4 = r14Page(H4, install, { phone: true, LM });
+    for (const X of [D4, P4]) for (const [d, r] of Object.entries(H4.layouts().desktops)) X.dm.noteStamp(d, r.autoSave.updatedAt);
+    const late = [];
+    P4.app.ws.request = (m, cb, o = {}) => { if (m && m.type === 'create') late.push(() => { const [, i] = rowOf[m.resumeId] || []; if (!(o.isAlive && !o.isAlive())) cb({ type: 'created', sessionId: 'new-' + i, cwd: '/srv/q' + i, mode: 'chat', reqId: m.reqId }); }); return () => {}; };
+    await (P4.lm._resumeAll ? P4.lm._resumeAll(stopped) : (async () => { for (const s of stopped) { P4.app.resumeSession(s.sessionId, s.cwd, s.name, s.opts); await tick(400); } })());
+    await tick(1800); // the resume-all's saves leave and are acked
+    const idleAt = Date.now() - 120000; P4.lm._userDirty = false; P4.lm._lastUserInputAt = idleAt; // the person's last input on the phone: two minutes ago
+    const from = P4.syncs().length;
+    for (const f of late.splice(0)) f(); // the hub's answers, late
+    await tick(2200);
+    const saves = [...new Set(P4.syncs().slice(from).map((m) => m.sentAt))].length, v4 = H4.layouts().desktops;
+    const names = Object.entries(R14B_AT).map(([id, [d]]) => (v4[d].autoSave.windows.find((w) => w.winId === id) || {}).openSpec?.serverId || null);
+    const before4 = P4.syncs().length;
+    for (let k = 0; k < 6; k++) { const f = D4.wins.get('v-f'); if (f) f.gridBounds = { ...(f.gridBounds || {}), left: k % 2 ? 0 : 0.02 }; D4.act(); await tick(1700); }
+    const echoes = P4.syncs().length - before4;
+    leg(saves === 1 && names.every((s, k) => s === 'new-' + Object.values(R14B_AT)[k][1]) && echoes === 0 && P4.lm._lastUserInputAt === idleAt && !P4.lm._owedRecipes?.size,
+      '§14b (r4 N1) …THE OWED RECIPE IS CARRIED ONCE AND NEVER ECHOES: the phone\'s five creates answered after its saves were acked ⇒ ONE save carries the five live recipes (the hub names new-1…5); the phone then idles and D\'s person moves v-f six times ⇒ the phone writes 0 records — nothing owed, no input fabricated',
+      { saves, names, echoes, owed: [...(P4.lm._owedRecipes || [])], inputAge: Date.now() - P4.lm._lastUserInputAt });
+  }
+  if (r4 === true || r4 === 'rel') {
+    // (r4 N2) THE RELEASED PENDING, on the real timing: on a fresh desktop page the person presses Conv 1's Resume bar; the hub answers with
+    // an error naming no request (ws-create's «Failed to spawn session») ⇒ the wait is released — the person's next press (the card)
+    // sends a create and its answer lands in row v-q1 itself, live at its box; 0 'closed', no door tried a close
+    const H3 = hub(loadHandler(), DOC(R14B_RECS()), { alive: ['new-1'] }), D2 = r14Page(H3, install, { phone: false, LM });
+    for (const [d, r] of Object.entries(H3.layouts().desktops)) D2.dm.noteStamp(d, r.autoSave.updatedAt);
+    let n = 0;
+    D2.app.ws.request = (m, cb, o = {}) => { if (!m || m.type !== 'create') return () => {}; const k = ++n; setTimeout(() => { if (o.isAlive && !o.isAlive()) return; cb(k === 1 ? { type: 'error', message: 'Failed to spawn session: spawn ENOENT' } : { type: 'created', sessionId: 'new-1', cwd: '/srv/q1', mode: 'chat', reqId: m.reqId }); }, 60); return () => {}; };
+    resumeBarDoor14(CV).call({ winInfo: D2.wins.get('v-q1'), app: D2.app, _resumeBar: null, _getSessionIds: () => ({ backend: 'claude', backendSessionId: R14C(1), cwd: '/srv/q1' }) }, {});
+    await tick(400);
+    D2.app.resumeSession(R14C(1), '/srv/q1', 'Conv 1', { backend: 'claude', backendSessionId: R14C(1) });
+    await tick(1500);
+    const w = D2.wins.get('v-q1'), mine = [...D2.wins.values()].filter((x) => x._openSpec?.backendSessionId === R14C(1) || x._conversation?.backendSessionId === R14C(1));
+    leg(n === 2 && mine.length === 1 && w?._openSpec?.serverId === 'new-1' && J(w.gridBounds) === J(R14GB(1)) && !evOf(D2).length && !(D2.app._fenceRefused || []).length,
+      '§14b (r4 N2) …THE RELEASED PENDING: the Resume bar\'s create ended by an error naming no request ⇒ the next press sends a create (2 in all) and its answer lands in row v-q1 itself, live at its box — one window, 0 \'closed\'',
+      { creates: n, windows: mine.map((x) => x.id), w: w && [w._openSpec?.serverId, w.gridBounds], ev: evOf(D2), fence: D2.app._fenceRefused || [] });
+  }
+  if (visits) {
+    for (const d of ['desk-x', 'desk-y', 'desk-v']) await switchTo(D, d);
+    await tick(1200);
+    const at = Object.entries(R14B_AT).map(([id, [d, i]]) => { const w = D.wins.get(id); return [id, !!w, w && w._desktopId === d, w && J(w.gridBounds) === J(R14GB(i))]; });
+    leg(at.every((r) => r[1] && r[2] && r[3]) && J(r14Rows(H2)) === J(before) && !refusals(D.sock()).length, '§14b …D then visits X, Y, V: every conversation\'s window is its row at its box, the rows still hold — 0 refusals', { at, rows: r14Rows(H2) });
+  }
+  return failed;
+}
+await section('§14b THE DESKTOP TAB OPEN ACROSS THE RESTART (lane phone-resume-keeps-layout r2 — N1 the Resume bar, N2 every page follows the re-key, the c4 shape on the real timing)', async () => {
+  await r14bLegs({ install: install14 });
+  const CVSRC = read('src/lib/chat-view.js'), LYSRC = read('src/lib/layout.js');
+  const a = "    this.app.resumeSession(backendSessionId, cwd, name, {\n      mode: 'chat',\n      backend,\n      // THE WINDOW PRESSED IN IS THE ROW (lane phone-resume-keeps-layout r2, N1): resumeSession closes it as its re-opening and the\n      // resumed session takes its id — never closed here (a close after the resume closed the RESUMED window: the row went as 'closed')\n      fromWin: this.winInfo?.id,\n";
+  const b = "      ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),\n    });\n  }";
+  if (ok(CVSRC.includes(a) && CVSRC.includes(b), 'mutant r14b-resume-bar-closes: the patched lines exist in chat-view.js')) {
+    const cv = CVSRC.replace(a, "    const winId = this.winInfo?.id;\n    this.app.resumeSession(backendSessionId, cwd, name, {\n      mode: 'chat',\n      backend,\n").replace(b, "      ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),\n    });\n    if (winId) this.app.wm?.closeWindow?.(winId);\n  }");
+    const f = await r14bLegs({ install: install14, CV: cv, quiet: true, visits: false, r4: false });
+    ok(f.some((n) => n.startsWith('§14b (userW')), `mutant r14b-resume-bar-closes (461b41f78's Resume bar: resume, then close the window it named): §14b RED (${f.length})`);
+  }
+  const c = '          } else if (this._deadFor(win, rw.openSpec)) {\n';
+  if (ok(LYSRC.includes(c), 'mutant r14b-dead-view-kept: the patched line exists in layout.js')) {
+    const M = mutantCopies('ldup-r14b', REPO);
+    const LMp = (await import(pathToFileURL(M.write('src/lib/layout.js', LYSRC.replace(c, '          } else if (false) {\n'), 'r14b-dead-view-kept', { esm: true })).href)).LayoutManager;
+    const f = await r14bLegs({ install: install14, quiet: true, visits: false, LM: LMp, r4: false });
+    ok(f.some((n) => n.startsWith('§14b (userW')) || f.some((n) => n.startsWith('§14b …the hub')), `mutant r14b-dead-view-kept (461b41f78's apply: a dead view kept under the reused id): §14b RED (${f.length})`);
+    // r4: the owed recipe put back as 5033f0a06 shipped it (re-armed after every remote record, a fabricated input time); the wait an error naming no request ends
+    const cut = [
+      ["  noteOwnRecipe(winId) {\n    if (winId == null) return;\n    const id = String(winId), w = this.app.wm.windows.get(id);\n    this._recipeTries?.delete(id); // a NEW recipe (a resume re-opens its row under the same id) has its own two tries — per recipe, never per row for the page's life (r5)\n    (this._owedRecipes || (this._owedRecipes = new Set())).add(id);\n    this.app.desktopManager?.markDirty?.(w?._desktopId); // its desktop goes with the next save (the one on show always does)\n    this.scheduleAutoSave();\n  }\n",
+        "  noteOwnRecipe(winId) {\n    if (winId == null) return;\n    (this._owedRecipes || (this._owedRecipes = new Set())).add(String(winId));\n    this._resendOwedRecipes();\n  }\n  _resendOwedRecipes(tries = 0) {\n    if (!this._owedRecipes?.size) return;\n    if (this._restoring) { if (tries < 25) setTimeout(() => this._resendOwedRecipes(tries + 1), 200); return; }\n    this._userDirty = true;\n    this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, Date.now());\n    this.scheduleAutoSave();\n  }\n"],
+      ["    // (an owed RECIPE is not re-armed here — r4 N1: it is no act of the person's; it rides the next save of its desktop, once — noteOwnRecipe)\n", "    if (this._owedRecipes?.size) setTimeout(() => this._resendOwedRecipes(), 1000); // …and a live recipe this page owes the hub (noteOwnRecipe)\n"],
+      ["    if (!this._userDirty && this._owedDesks().size) { this._saveOwedRecipes(); return; } // a RECIPE this page owes the hub goes as its OWN save (r4 N1 — noteOwnRecipe)\n", ''],
+      ["{ this._userDirty = false; if (this._owedDesks().size) this._saveOwedRecipes(); return; } // (a recipe owed goes as its own — r4 N1)", '{ this._userDirty = false; return; }'],
+      ["    for (const d of this._owedDesks()) dm?.markDirty?.(d); // an owed recipe's desktop not on show (the person switched since its answer) goes too (r4 N1)\n", ''],
+      ["    if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time\n", ''],
+    ];
+    if (ok(cut.every(([x]) => LYSRC.includes(x)), 'mutant r14b-owed-rearm: the patched lines exist in layout.js')) {
+      const LMo = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [x, y]) => s.replace(x, y), LYSRC), 'r14b-owed-rearm', { esm: true })).href)).LayoutManager;
+      const f = await r14bLegs({ install: install14, quiet: true, visits: false, LM: LMo, r4: 'owe' });
+      ok(f.some((n) => n.startsWith('§14b (r4 N1)')), `mutant r14b-owed-rearm (5033f0a06's owed recipe: re-armed after every remote record with a fabricated input time): §14b (r4 N1) RED — the idle phone echoes (${f.length})`, f);
+    }
+    for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '§14b ' })) ok(r.pass, r.name, r.detail);
+  }
+  {
+    const LS = read('src/lib/session-lifecycle.js'), d = "      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled();\n";
+    if (ok(LS.includes(d), 'mutant r14b-reqless-holds: the patched line exists in session-lifecycle.js')) {
+      const f = await r14bLegs({ install: await loadLifecycle(LS.replace(d, '')), quiet: true, visits: false, r4: 'rel' });
+      ok(f.some((n) => n.startsWith('§14b (r4 N2)')), `mutant r14b-reqless-holds (5033f0a06's request: an error naming no request ends nothing — the next press joins the dead wait): §14b (r4 N2) RED (${f.length})`, f);
+    }
+  }
+});
+
+// §14c (lane phone-resume-keeps-layout r3 — the r2 acceptance: «Try resuming anyway» closed the window its own retry had re-opened; a
+// double press closed the first resume's window in flight) on the REAL timing, the same restart: (rb) D's person presses the Resume bar
+// on dead v-q1, the hub answers the no-transcript breaker, the rescued window's retry bar is pressed — the retry re-opens the row, its
+// answer lands there; (dp) the phone's person presses Conv 5's stopped card twice inside 200 ms while the hub takes 400 ms to answer —
+// ONE create, ONE window (row v-q5); every desktop's rows keep ids and boxes, the hub names the live sessions, 0 'closed', 0 refusals
+const retryBarOf14 = (src) => { const i = src.indexOf('\n  _showRetryResumeBar('), j = src.indexOf('\n  }\n', i); return new Function('t', 'UI_ICONS', `return ({\n${src.slice(i + 1, j + 4)}\n})._showRetryResumeBar;`)((x) => x, {}); };
+async function r14cLegs({ install = null, CV = read('src/lib/chat-view.js'), quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  if (!install) return failed;
+  const file = path.join(DATA14, `layouts-c${++r14Runs}.json`);
+  const H1 = hub(loadHandler(), DOC(R14B_RECS()), { file, alive: [] }), before = r14Rows(H1);
+  const rowOf = Object.fromEntries(Object.entries(R14B_AT).map(([id, [, i]]) => [R14C(i), [id, i]]));
+  const H2 = hub(loadHandler(), null, { file, alive: [1, 2, 3, 4, 5].map((i) => 'new-' + i) });
+  const D = r14Page(H2, install, { phone: false }), P = r14Page(H2, install, { phone: true });
+  for (const X of [D, P]) for (const [d, v] of Object.entries(H2.layouts().desktops)) X.dm.noteStamp(d, v.autoSave.updatedAt);
+  // the hub answers each create as ws.js delivers it (a window gone — isAlive false — takes no answer): D's first create of q1 is the
+  // breaker (no transcript turned up), every other is 'created'; the phone's hub is slow (400 ms — a remote create)
+  const creates = { P: [], D: [] };
+  for (const [k, X] of [['P', P], ['D', D]]) X.app.ws.request = (m, cb, o = {}) => {
+    if (!m || m.type !== 'create') return () => {};
+    creates[k].push(m);
+    const [, i] = rowOf[m.resumeId] || [];
+    const answer = (msg) => { if (!(o.isAlive && !o.isAlive())) cb(msg); };
+    setTimeout(() => answer(k === 'D' && i === 1 && !m.ignoreNoConvo ? { type: 'error', code: 'no-convo-breaker', transcriptKnown: false, message: 'No conversation found', reqId: m.reqId } : { type: 'created', sessionId: 'new-' + i, cwd: '/srv/q' + i, mode: 'chat', reqId: m.reqId }), k === 'P' ? 400 : 60);
+    return () => {};
+  };
+  D.app._viewIntoWindow = (w) => { w._readOnly = true; w._view = { winInfo: w, app: D.app, _container: mkEl(), _resumeBar: null, _statusBar: null, sessionId: null, _readOnly: true, focus() {}, _showRetryResumeBar: retryBarOf14(CV) }; };
+  const tap = (X) => { X.lm._userDirty = true; X.lm._lastUserInputAt = Date.now(); }; // the person's pointerdown on THAT page (its document listener)
+  tap(D); resumeBarDoor14(CV).call({ winInfo: D.wins.get('v-q1'), app: D.app, _resumeBar: null, _getSessionIds: () => ({ backend: 'claude', backendSessionId: R14C(1), cwd: '/srv/q1' }) }, {});
+  await tick(200);
+  const rescued = D.wins.get('v-q1'), btn = rescued && rescued._view && rescued._view._resumeBar && rescued._view._resumeBar.children.find((c) => c.tagName === 'BUTTON');
+  tap(D); btn?.onclick?.();
+  const press = () => tap(P) || P.app.resumeSession(R14C(5), '/srv/q5', 'Conv 5', { backend: 'claude', backendSessionId: R14C(5) });
+  press(); await tick(150); press();
+  await tick(2200); // the answers, the autosaves' 500 ms debounce, the relays, each page's apply
+  const d1 = D.wins.get('v-q1'), p5 = P.wins.get('v-q5');
+  const evOf = (X) => X.syncs().flatMap((m) => m.evidence || []).filter((e) => e.why === 'closed' || e.why === 'replaced' || e.why === 'dup');
+  leg(!!btn && creates.D.length === 2 && creates.D[1].ignoreNoConvo === true && !!d1 && d1 !== rescued && d1._openSpec?.serverId === 'new-1' && J(d1.gridBounds) === J(R14GB(1)) && !evOf(D).length && !refusals(D.sock()).length && !(D.app._fenceRefused || []).length,
+    '§14c (rb) «TRY RESUMING ANYWAY» on the real timing: D\'s Resume bar answered by the no-transcript breaker, the rescued window\'s retry pressed ⇒ one retry create, its answer lands in row v-q1 itself (live, at its box) — 0 \'closed\', 0 refusals',
+    { bar: !!btn, creates: creates.D.map((m) => [m.resumeId && m.resumeId.slice(0, 9), !!m.ignoreNoConvo]), d1: d1 && [d1.id, d1 === rescued, d1._openSpec?.serverId, d1.gridBounds], ev: evOf(D), refused: refusals(D.sock()).length });
+  leg(creates.P.length === 1 && !!p5 && p5._openSpec?.serverId === 'new-5' && [...P.wins.values()].filter((w) => w._openSpec?.backendSessionId === R14C(5) || w._conversation?.backendSessionId === R14C(5)).length === 1 && !evOf(P).length && !refusals(P.sock()).length,
+    '§14c (dp) the phone\'s person presses Conv 5\'s card TWICE inside 200 ms while the hub takes 400 ms ⇒ ONE create, ONE window — row v-q5 itself, live — 0 \'closed\', 0 refusals',
+    { creates: creates.P.length, p5: p5 && [p5.id, p5._openSpec?.serverId], ev: evOf(P), refused: refusals(P.sock()).length });
+  const v = H2.layouts().desktops['desk-v'].autoSave.windows;
+  leg(J(r14Rows(H2)) === J(before) && ['v-q1', 'v-q5'].every((id, k) => v.find((w) => w.winId === id)?.openSpec?.serverId === 'new-' + [1, 5][k]),
+    '§14c …every desktop\'s rows keep their ids and boxes, and the hub\'s V names the LIVE sessions for v-q1 and v-q5', { v: v.map((w) => [w.winId, w.openSpec?.serverId || null]), same: J(r14Rows(H2)) === J(before), rows: r14Rows(H2) });
+  return failed;
+}
+await section('§14c THE RETRY BAR AND THE DOUBLE PRESS ON THE REAL TIMING (lane phone-resume-keeps-layout r3 — N1 the retry bar closes nothing, N2 two presses join)', async () => {
+  await r14cLegs({ install: install14 });
+  const CVSRC = read('src/lib/chat-view.js'), LSRC = read('src/lib/session-lifecycle.js');
+  const a = '    btn.onclick = () => { btn.disabled = true; onRetry?.(); };';
+  if (ok(CVSRC.includes(a), 'mutant r14c-retry-bar-closes: the patched line exists in chat-view.js')) {
+    const f = await r14cLegs({ install: install14, CV: CVSRC.replace(a, '    btn.onclick = () => { btn.disabled = true; try { onRetry?.(); } finally { this.app.wm?.closeWindow?.(this.winInfo?.id); } };'), quiet: true });
+    ok(f.some((n) => n.startsWith('§14c (rb)')), `mutant r14c-retry-bar-closes (d159c081b's retry bar: a close after the retry): §14c (rb) RED (${f.length})`);
+  }
+  const b = '    const pend = this._pendingResumeWin(backend, targetBackendId);\n';
+  if (ok(LSRC.includes(b), 'mutant r14c-no-join: the patched line exists in session-lifecycle.js')) {
+    const f = await r14cLegs({ install: await loadLifecycle(LSRC.replace(b, '    const pend = null;\n')), quiet: true });
+    ok(f.some((n) => n.startsWith('§14c (dp)')), `mutant r14c-no-join (d159c081b's resume: the second press closes the first one's window in flight): §14c (dp) RED (${f.length})`);
+  }
+  const c = "        if (this.layoutManager.noteOwnRecipe) this.layoutManager.noteOwnRecipe(winInfo.id); else this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec — owed until a save carries it (r3)\n";
+  if (ok(LSRC.includes(c), 'mutant r14c-recipe-dropped: the patched line exists in session-lifecycle.js')) {
+    const f = await r14cLegs({ install: await loadLifecycle(LSRC.replace(c, '        this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec\n')), quiet: true });
+    ok(f.some((n) => n.startsWith('§14c …every')), `mutant r14c-recipe-dropped (d159c081b's created: the re-broadcast dropped once another page's record landed — the hub keeps the dead recipe): §14c RED (${f.length})`);
+  }
+});
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);
