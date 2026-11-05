@@ -703,7 +703,7 @@ console.log('§7 NEGATIVE CONTROLS — the pre-fix builders go red');
   const c1 = previewTable(builderRows(M.load('src/message-manager.js', mmOnCopy, 'pre-b40f8-turnmap'), CXreal)).filter((r) => !r.pass).map((r) => r.name);
   ok(`the pre-fix claude turnMap previews the nudge as "Stop hook feedback: …" — exactly its row goes red (${c1.join(', ')})`, c1.length === 1 && c1[0].startsWith('claude turnMap'), c1);
   const cxSrc = read('src/adapters/codex.js');
-  const p2 = cxSrc.replace("const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });", "const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;");
+  const p2 = cxSrc.replace("const p = turnPreviewOf(msg);", "const text = (msg.content || []).map((b) => b.text || '').join(''); const p = text.trim() ? { preview: text.trim().replace(/\\s+/g, ' ').slice(0, 60) } : null;"); // _turnOf takes THE normalizer's message (lane minimap-person-rows r2)
   ok('(the pre-fix JSONL scan patch applied)', p2 !== cxSrc);
   const c2 = previewTable(builderRows(MMreal, M.load('src/adapters/codex.js', p2, 'pre-b40f8-scan'))).filter((r) => !r.pass).map((r) => r.name);
   ok(`a JSONL scan that cuts its own text reddens both huge-session rows (${c2.join(', ')})`, c2.length === 2 && c2.every((n) => n.includes('JSONL scan')), c2);

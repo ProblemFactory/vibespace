@@ -148,6 +148,47 @@ function peerRecordOf(item, content) {
   return { content: body ? [{ type: 'text', text: body }] : content, from: group ? (group.self ? null : (group.from || from)) : from, via: group ? 'peer' : via, group, channel };
 }
 
+// THE MESSAGE A CODEX USER ITEM MAKES (lane minimap-person-rows r2, LAW A′ — one verdict = ONE function over ONE record
+// shape): _processResponseMessage's user branch and the huge-session scan (adapters/codex.js _codexUserTurn) both ask it,
+// so personRow reads the same message from the attach slab and from the scan (r1's scan read only the wrapper's marker:
+// the rollout's copy of a peer delivery was listed as the person's, the goal's auto-continue too).
+//   → null (no message: the goal's auto-continue, an item with no text or picture)
+//   | {content, webuiMsgId, queueMsgId, peer, stamps} — peer = a peer / notification record (its content = the words the
+//     card shows); stamps = the message's provenance: the peer card's originKind + name + PATH + group + channel, or a
+//     plain message's auto-resume label
+const GOAL_CONTINUE = 'Continue working toward the active thread goal';
+function userItemOf(item) {
+  if (asArray(item.content).map((b) => b.text || '').join('').includes(GOAL_CONTINUE)) return null; // the goal's auto-continue: never a message (its state: _processResponseMessage)
+  const content = [];
+  for (const block of asArray(item.content)) {
+    if (block.type === 'input_text') content.push({ type: 'text', text: block.text || '' });
+    if (block.type === 'input_image' && block.image_url) {
+      const match = /^data:([^;,]+);base64,(.+)$/.exec(block.image_url);
+      if (match) content.push({ type: 'image', mediaType: match[1], data: match[2] });
+    }
+  }
+  if (!content.length) return null;
+  const webuiMsgId = item.webui_msg_id || item.webuiMsgId || item.client_msg_id || item.clientMsgId || null;
+  // The bubble the WRAPPER wrote for a submission it never typed — an item
+  // INHERITED from the wrapper this session replaced, steered into the turn
+  // or drained by the app-server (2026-09-07). Its id is the app-server's
+  // own clientUserMessageId, which is also what the strip row advertises,
+  // so the queue chip joins. It is a SECOND-CLASS identity on purpose: it
+  // does NOT suppress peer detection below (most of the 25 inherited items
+  // in the owner's session were agent-to-agent messages and must keep their
+  // labelled card), and it never reaches the merge fingerprint.
+  const queueMsgId = item.webui_queue_id || item.webuiQueueId || null;
+  // Typed records (webuiMsgId) are never peer records, whatever their text looks like.
+  const peer = webuiMsgId ? null : peerRecordOf(item, content);
+  if (peer) return { content: peer.content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: peer.from,
+    ...(peer.via ? { peerVia: peer.via } : {}), // S3 verify F3: never read off the words
+    ...(peer.group ? { peerGroup: peer.group } : {}), // lane group-report-card: sender → group
+    ...(peer.channel ? { peerChannel: peer.channel } : {}) } }; // B-c127: the channel notice's conversation (its name is the link)
+  // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
+  const stamps = item.webui_origin === 'auto-resume' ? { originKind: 'auto-resume', ...(typeof item.webui_origin_note === 'string' && item.webui_origin_note ? { originNote: item.webui_origin_note } : {}) } : {};
+  return { content, webuiMsgId, queueMsgId, peer: false, stamps };
+}
+
 function toTs(value) {
   if (!value) return Date.now();
   const t = typeof value === 'number' ? value : Date.parse(value);
@@ -1257,40 +1298,20 @@ class CodexMessageManager extends MessageWindow {
       if (role === 'developer') return;
     }
     if (role === 'user') {
-      const content = [];
-      for (const block of asArray(item.content)) {
-        if (block.type === 'input_text') content.push({ type: 'text', text: block.text || '' });
-        if (block.type === 'input_image' && block.image_url) {
-          const match = /^data:([^;,]+);base64,(.+)$/.exec(block.image_url);
-          if (match) content.push({ type: 'image', mediaType: match[1], data: match[2] });
-        }
-      }
-      if (!content.length) return;
-      const webuiMsgId = item.webui_msg_id || item.webuiMsgId || item.client_msg_id || item.clientMsgId || null;
-      // The bubble the WRAPPER wrote for a submission it never typed — an item
-      // INHERITED from the wrapper this session replaced, steered into the turn
-      // or drained by the app-server (2026-09-07). Its id is the app-server's
-      // own clientUserMessageId, which is also what the strip row advertises,
-      // so the queue chip joins. It is a SECOND-CLASS identity on purpose: it
-      // does NOT suppress peer detection below (most of the 25 inherited items
-      // in the owner's session were agent-to-agent messages and must keep their
-      // labelled card), and it never reaches the merge fingerprint.
-      const queueMsgId = item.webui_queue_id || item.webuiQueueId || null;
+      // THE MESSAGE THIS ITEM MAKES (lane minimap-person-rows r2): userItemOf above — the huge-session scan asks the same function
+      const u = userItemOf(item);
+      if (!u) return;
+      const { content, webuiMsgId, queueMsgId, peer } = u;
       // Peer / notification record (rpc-queue lane live, rollout on rebuild)
       // → the labelled peer card, never an anonymous "You" bubble. NO
       // _finalizeStreaming here: a queued peer message is recorded while a
       // turn is still streaming, and closing its open streams fragmented the
       // active reply (the 2.368.16 class) — the turn's own task_complete
       // finalizes. Typed records (webuiMsgId) never take this branch.
-      const peer = webuiMsgId ? null : peerRecordOf(item, content);
       if (peer) {
         this.turnIndex++;
-        const msg = this._create({ role: 'user', status: 'complete', content: peer.content, turnIndex: this.turnIndex });
-        msg.originKind = 'peer-message';
-        msg.peerFrom = peer.from;
-        if (peer.via) msg.peerVia = peer.via; // S3 verify F3: never read off the words
-        if (peer.group) msg.peerGroup = peer.group; // lane group-report-card: sender → group
-        if (peer.channel) msg.peerChannel = peer.channel; // B-c127: the channel notice's conversation (its name is the link)
+        const msg = this._create({ role: 'user', status: 'complete', content, turnIndex: this.turnIndex });
+        Object.assign(msg, u.stamps); // originKind 'peer-message', the name, the PATH, the group, the channel (userItemOf)
         this._stampUserIdentity(msg, queueMsgId);
         if (emit) this._emit({ op: 'create', message: msg });
         return;
@@ -1316,7 +1337,7 @@ class CodexMessageManager extends MessageWindow {
       }
       this.turnIndex++;
       const msg = this._create({ role: 'user', content, turnIndex: this.turnIndex });
-      if (item.webui_origin === 'auto-resume') { msg.originKind = 'auto-resume'; if (typeof item.webui_origin_note === 'string' && item.webui_origin_note) msg.originNote = item.webui_origin_note; } // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
+      Object.assign(msg, u.stamps); // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32; userItemOf)
       // …and a bubble that does not CLOSE the turn's open streams must not be a
       // turn BOUNDARY for the backward scan either (round 2): skipping the
       // finalize while still stopping the scan left a reply that was open when
@@ -2513,4 +2534,4 @@ CodexMessageManager.SKIPPED_RESPONSE_ITEM_TYPES = SKIPPED_RESPONSE_ITEM_TYPES;
 CodexMessageManager.SKIPPED_EVENT_TYPES = SKIPPED_EVENT_TYPES;
 CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES = ITEM_COMPLETED_SKIPPED_TYPES;
 
-module.exports = { CodexMessageManager };
+module.exports = { CodexMessageManager, userItemOf };

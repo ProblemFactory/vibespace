@@ -77,7 +77,9 @@ const isCompactSummaryText = (text) => String(text || '').trimStart().startsWith
 // type this normalized user record?»: the minimap's message list folds the rows nobody typed (turnPreviewOf stamps
 // `other: why` on their turns — every turn builder already asks it) and the chat's renderer picks its system card by the
 // same verdict (chat-renderers renderUserMsg). Asked in the renderer's order, provenance before text (the normalizers'
-// law: the origin stamp wins, a TYPED record is never demoted by its words):
+// law: the origin stamp wins, a TYPED record is never demoted by its words — no text rule below reads a typed record;
+// r2, LAW A′: every builder hands it THE message its normalizer makes — message-manager userRecordOf /
+// codex-message-manager userItemOf — the huge-session scan too):
 //   attachment    CLI-injected page images (imageAttachment)
 //   note          a VibeSpace note to the assistant (userNoteOf — the Stop nudge, every NOTE_TAGS block)
 //   auto-resume   VibeSpace's continue after a usage limit
@@ -87,13 +89,17 @@ const isCompactSummaryText = (text) => String(text || '').trimStart().startsWith
 //   notification  a background-task wake (originKind 'task-notification'); for a record nobody marked typed: a CLI
 //                 synthetic record, or one opening with a CLI / harness tag or a Stop hook's words
 //   command       THE PERSON'S — a slash command they ran (the TUI's own row; drawn as the command bubble)
-//   compact       the CLI's compaction summary (isCompactSummaryText)
+//   interrupt     the CLI's interrupt marker «[Request interrupted by user]» / «… for tool use]» (permission-outcome's
+//                 census rows Jw / Ud, the binary's user-message markers): the person pressed Stop, but the row is the
+//                 CLI's words — nobody typed it (r2; the chat still draws it as before, B-3d90)
+//   compact       the CLI's compaction summary (isCompactSummaryText) — never a typed paste of its head (r2)
 //   tray-answer   THE PERSON'S — their answer from the For you tray (`[For you reply #ut-…]`, inbox-reply-text parseReply)
 //   typed         THE PERSON'S — everything else
 const PERSON_WHYS = Object.freeze(['typed', 'tray-answer', 'command']);
-const OTHER_WHYS = Object.freeze(['attachment', 'note', 'auto-resume', 'notice', 'peer', 'notification', 'compact']);
+const OTHER_WHYS = Object.freeze(['attachment', 'note', 'auto-resume', 'notice', 'peer', 'notification', 'interrupt', 'compact']);
 const CLI_TAG_RE = /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/; // the renderer's notification shapes (moved here from renderUserMsg)
 const STOP_HOOK_RE = /^(?:A session-scoped Stop hook is now active|Stop hook feedback:)/;
+const INTERRUPT_RE = /^\[Request interrupted by user(?: for tool use)?\]/; // permission-outcome rows Jw / Ud, letter for letter (test-message-origin pins it to the census)
 const COMMAND_NAME_RE = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/;
 const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/;
 function personRow(m) {
@@ -109,8 +115,9 @@ function personRow(m) {
   if (!r.typed) {
     if (r.originKind === 'local-command' || /^<command-name\b/.test(s)) return { person: true, why: 'command' };
     if (r.synthetic || CLI_TAG_RE.test(s) || STOP_HOOK_RE.test(s)) return other('notification');
+    if (INTERRUPT_RE.test(s)) return other('interrupt');
+    if (isCompactSummaryText(s)) return other('compact');
   }
-  if (isCompactSummaryText(s)) return other('compact');
   if (parseReply(text)) return { person: true, why: 'tray-answer' };
   return { person: true, why: 'typed' };
 }
@@ -122,7 +129,7 @@ function turnPreviewOf(m, max = 60) {
   const other = who.person ? {} : { other: who.why }; // the minimap's list folds it (lane minimap-person-rows)
   const note = userNoteOf(m);
   if (note) return { preview: '', note: note.what, ...other };
-  if (isCompactSummaryText(raw)) return { preview: COMPACT_PREVIEW, isCompact: true, ...other };
+  if (!who.person && isCompactSummaryText(raw)) return { preview: COMPACT_PREVIEW, isCompact: true, ...other }; // never on the person's row: a typed paste of the head is their words (r2)
   const cmd = who.why === 'command' ? COMMAND_NAME_RE.exec(raw) : null;
   const said = who.why === 'tray-answer' ? String(parseReply(textOf(m)).reply || '').trim() // the answer, never the tray's marker + quote
     : cmd ? ('/' + cmd[1] + ' ' + ((COMMAND_ARGS_RE.exec(raw) || [])[1] || '')).trim() // the command as the person typed it, never its tags

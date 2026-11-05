@@ -15,6 +15,8 @@ const crypto = require('crypto');
 // (the tiny module the daemon bundle and every discovery collector share)
 const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
 const { turnPreviewOf } = require('../assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the huge-session minimap too
+const { userRecordOf, applyPeerOrigin } = require('../message-manager.js'); // lane minimap-person-rows r2 (LAW A′): THE message a claude user record makes — the scan never keeps a ladder of its own
+const { userItemOf } = require('../codex-message-manager.js'); // …and THE message a codex user item makes
 const { capsOf, toolAllowlistArgs } = require('../backend-caps');   // responseStyle enum — the ONE list, never a second copy here; the 「可用工具」 pick's PURE rule
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
@@ -566,39 +568,32 @@ function scanJsonlUserTurns(fp, backend) {
   return turns;
 }
 
-// B-40f8: THE turn preview (src/assistant-note.js) over the record's text and the
-// provenance its normalizer reads (typed = the CLI's promptSource; a peer / the
-// auto-resume continue are cards, never notes) — the nudge turn is a note here too
-function _turnOf(line, ts, text, prov = {}) {
-  const p = turnPreviewOf({ role: 'user', content: [{ type: 'text', text }], ...prov });
+// B-40f8: THE turn preview (src/assistant-note.js) over THE message the record's
+// normalizer makes (lane minimap-person-rows r2, LAW A′: message-manager
+// userRecordOf / codex-message-manager userItemOf — the same stamps the attach
+// slab's turnMap reads; a peer / the auto-resume continue are cards, never notes)
+function _turnOf(line, ts, msg) {
+  const p = turnPreviewOf(msg);
   return p ? { line, ts, preview: p.preview, isCompact: !!p.isCompact, ...(p.note ? { note: p.note } : {}), ...(p.other ? { other: p.other } : {}) } : null; // lane minimap-person-rows: `other` = nobody typed it (personRow) — the list folds it
 }
 
 function _claudeUserTurn(rec, line) {
   if (rec.type !== 'user' || rec.message?.role !== 'user') return null;
-  const content = rec.message.content;
-  let text = '';
-  if (typeof content === 'string') text = content;
-  else if (Array.isArray(content)) {
-    if (content.some((b) => b.type === 'tool_result')) return null; // tool result, not a real user turn
-    text = content.filter((b) => b.type === 'text').map((b) => b.text || '').join('');
-  }
+  if (Array.isArray(rec.message.content) && rec.message.content.some((b) => b.type === 'tool_result')) return null; // tool result, not a real user turn
+  const u = userRecordOf(rec); // THE normalizer's stamps (lane minimap-person-rows r2) — provenance before words, never a text test of the scan's own
+  if (u.companion || u.nudge) return null; // an isMeta companion line / the safety stop's nudge: the normalizer gives neither a turn of its own
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-  // lane minimap-person-rows: message-manager's ladder — a background-task wake (origin, or its text where a transport
-  // dropped the stamp) wins over the promptSource the CLI stamps on it too
-  const prov = rec.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(text) ? { originKind: 'task-notification' }
-    : rec.origin?.kind === 'peer' ? { originKind: 'peer-message' } : rec.originKind === 'auto-resume' ? { originKind: 'auto-resume' } : (rec.promptSource || rec._fromWebui) ? { typed: true } : {};
-  return _turnOf(line, ts, text, prov);
+  const msg = { role: 'user', ts, content: [{ type: 'text', text: u.text }], ...u.stamps, ...(u.synthetic ? { synthetic: true } : {}) };
+  if (u.peer) applyPeerOrigin(msg, u.peer.po, u.peer.said); // a peer delivery's name + PATH (a notice or another session) — and a group report's card
+  return _turnOf(line, ts, msg);
 }
 
 function _codexUserTurn(rec, line) {
   if (rec.type !== 'response_item' || rec.payload?.type !== 'message' || rec.payload?.role !== 'user') return null;
-  const content = rec.payload.content;
-  const text = Array.isArray(content)
-    ? content.filter((b) => b.type === 'input_text' || b.type === 'text').map((b) => b.text || '').join('')
-    : String(content || '');
+  const u = userItemOf(rec.payload); // THE codex normalizer's message (lane minimap-person-rows r2): the marker OR the rollout copy's frame, the goal's continue, auto-resume
+  if (!u) return null;
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-  return _turnOf(line, ts, text, rec.payload?.webui_peer ? { originKind: 'peer-message' } : {});
+  return _turnOf(line, ts, { role: 'user', content: u.content, ...u.stamps });
 }
 
 // ── Full-file streaming search ──

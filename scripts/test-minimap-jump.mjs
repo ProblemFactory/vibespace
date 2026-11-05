@@ -80,7 +80,8 @@ const SID2 = fixtureSid('3');
 const PR = { person: 6, other: 14 };
 {
   const recs = fs.readFileSync(path.join(repo, 'scripts/fixtures/message-origin/claude-user-records.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-    .filter((r) => !/^mo-attachment-/.test(r.uuid));   // page images make no turn
+    .filter((r) => !/^mo-attachment-/.test(r.uuid))   // page images make no turn
+    .filter((r) => !/^mo-(noturn|interrupt)-|^mo-typed-(picture|tasktag|compactpaste)$/.test(r.uuid));   // r2's cross-builder shapes (test-message-origin judges them) — this leg keeps its 20-turn conversation
   const like = (uuid, text, extra = {}) => { const r = JSON.parse(JSON.stringify(recs.find((x) => x.uuid.startsWith(uuid)))); r.uuid = uuid + '-b'; const c = r.message.content; if (Array.isArray(c)) c[0].text = text; else r.message.content = text; return Object.assign(r, extra); };
   const typedIdx = recs.findIndex((r) => r.uuid === 'mo-typed-2');
   recs.splice(typedIdx, 0,

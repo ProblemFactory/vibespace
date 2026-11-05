@@ -384,7 +384,7 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   const mmSrc = read('src/message-manager.js');
   const handled = "  'informational',";
   const branch = "    if (raw.subtype === 'informational' && typeof raw.content === 'string' && raw.content.trim()) {";
-  const fold = "        if (nudge && nudge.kind === 'nudge') {";
+  const fold = "      if (u.nudge) {"; // _processUser's fold — who is asked: userRecordOf (lane minimap-person-rows r2)
   ok('the three patch sites exist (a control is meaningful only if its line does)', mmSrc.includes(handled) && mmSrc.includes(branch) && mmSrc.includes(fold));
   const live = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl'); recs.forEach((r) => x.processLive(r)); return x; };
   const hist = (MMx, recs) => { const x = new MMx.MessageManager('test-stop-ctl-h'); x.convertHistory(recs); return x; };

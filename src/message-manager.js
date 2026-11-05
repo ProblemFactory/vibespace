@@ -299,6 +299,53 @@ const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed'
 
 // the isMeta companion lines that are never the person's message (r6: the measured shapes, nothing broader)
 const META_NOTE_RE = /^\s*(?:\[Image source: |Base directory for this skill: |Caveat: )/;
+// THE STAMPS OF A CLAUDE USER RECORD (lane minimap-person-rows r2, LAW A′ — one verdict = ONE function over ONE record
+// shape): what _processUser writes on the message it makes of `raw`, and the two rules that give the record no turn of
+// its own. The huge-session JSONL scan (adapters/codex.js _claudeUserTurn) asks this same function and hands personRow
+// the same message — r1's scan ran a ladder of its own and folded a TYPED message that opened with the task tag.
+// Provenance before words: the origin stamp wins, a record the person typed (promptSource / ours) is never demoted by
+// its text. → {text, stamps, synthetic, companion, nudge, peer}
+//   text       the record's text blocks, joined
+//   stamps     the message's provenance (originKind / typed / originNote), in _processUser's order
+//   synthetic  a CLI-synthesized record (isSynthetic — hook feedback on the live stream) or a companion line
+//   companion  an isMeta companion line (META_NOTE_RE — «[Image source: …]», a skill's body, «Caveat:»): a dim note,
+//              no turn of its own; never a record the person typed or one with an origin
+//   nudge      the safety stop's nudge (PURE safety-stop): it joins the stop card — no bubble, no turn
+//   peer       {po, said}: a peer delivery's name + PATH (peerOriginOf) and the words it carried (applyPeerOrigin)
+function userRecordOf(raw) {
+  const content = raw.message?.content;
+  const blocks = Array.isArray(content) ? content : [{ type: 'text', text: String(content ?? '') }];
+  const text = blocks.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
+  const typed = !!(raw.promptSource || raw._fromWebui);
+  const companion = raw.isMeta === true && !raw.origin && !typed && META_NOTE_RE.test(text);
+  // THE SAFETY STOP'S NUDGE (lane classifier-stop-card): the CLI's note to the MODEL after a classifier stop (isMeta +
+  // turnCompanion in the transcript, isSynthetic on the stream). Read from the census TEXT (a transport may drop the
+  // flags; the flags only widen who is asked); a sentence the user TYPED (promptSource / ours, no meta stamp), a
+  // delivery or a record with a picture stays itself.
+  const stop = !raw.origin && (raw.isMeta === true || raw.isSynthetic === true || raw.turnCompanion === true || !typed)
+    && !blocks.some((b) => b && b.type === 'image') ? safetyStopOf(text) : null;
+  // Provenance for the notification classifier: promptSource = the CLI's marker on HUMAN-submitted prompts (JSONL
+  // 'sdk'; our own live sends stamp it too), isSynthetic = CLI-synthesized records (hook feedback on the live stream).
+  // A user who literally types "Stop hook feedback: …" must NOT get their message demoted to a dim notification card.
+  // EXCEPT (2.229.2, real report "看不到后台任务唤醒"): the CLI stamps promptSource:"sdk" on SYSTEM-GENERATED deliveries
+  // too — a background task completing wakes the agent with a `<task-notification>` user record whose authoritative
+  // marker is top-level origin.kind. typed made it render as the USER'S OWN words (a "You" bubble of sanitized XML ≈
+  // invisible), so the wakeup had no trace in the chat. origin wins over promptSource; the text-shape check covers
+  // transports that drop the origin field — STRING content only (the TUI's shape): a typed send is a block list.
+  const contentStr = typeof content === 'string' ? content : '';
+  const stamps = raw.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(contentStr) ? { originKind: 'task-notification' }
+    // Cross-session PEER message (2.349.0, owner report "announce了但对话框里什么都看不到"): a Background-Work notify /
+    // another session's SendMessage wakes this conversation as a user record with origin.kind='peer' (+ isMeta), which
+    // fell into the invisible-meta path — the turn appeared to start from nothing. Same provenance law as
+    // task-notification: origin.kind wins, render a distinct card.
+    : raw.origin?.kind === 'peer' ? { originKind: 'peer-message' }
+    // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
+    : raw.originKind === 'auto-resume' ? { originKind: 'auto-resume', typed: false, ...(typeof raw.originNote === 'string' && raw.originNote ? { originNote: raw.originNote } : {}) }
+    : typed ? { typed: true } : {};
+  const said = stamps.originKind === 'peer-message' ? ((raw.message && (typeof content === 'string' ? content : (content || []).map((b) => b.text || '').join('\n'))) || '') : null;
+  return { text, stamps, synthetic: !!(raw.isSynthetic || companion), companion, nudge: stop && stop.kind === 'nudge' ? stop : null,
+    peer: said === null ? null : { po: peerOriginOf(raw.origin, said), said } };
+}
 /** How many leading blocks of a batched user record (from `off`) are THIS copy's (lane claude-steer-inject r5) — its blocks
  *  in order: each text trim-equal (the CLI joins a batch with a newline), a picture's place a picture or the CLI's line
  *  about it; 0 unless at least one of its words matched (a copy is never claimed by a picture's place alone). */
@@ -2022,18 +2069,13 @@ class MessageManager extends MessageWindow {
         return;
       }
 
+      // THE RECORD'S STAMPS (lane minimap-person-rows r2): userRecordOf above — the huge-session scan asks the same function
+      const u = userRecordOf(raw);
       // THE SAFETY STOP'S NUDGE (lane classifier-stop-card): the CLI's note to the
-      // MODEL after a classifier stop (isMeta + turnCompanion in the transcript,
-      // isSynthetic on the stream) rendered as a "You" bubble in history and a
-      // bare notification live, and counted as a turn. Read from the census TEXT
-      // (a transport may drop the flags; the flags only widen who is asked): it
-      // joins the stop card's expander — no bubble, no turn. A sentence the user
-      // TYPED (promptSource / ours, no meta stamp) or a delivery stays itself.
-      if (!raw.origin && (raw.isMeta === true || raw.isSynthetic === true || raw.turnCompanion === true || !(raw.promptSource || raw._fromWebui))
-          && normalizedContent.every((b) => b.type === 'text')) {
-        const nudge = safetyStopOf(normalizedContent.map((b) => b.text).join(''));
-        if (nudge && nudge.kind === 'nudge') { this._safetyStopCard({ nudge: normalizedContent.map((b) => b.text).join('').trim().slice(0, 4000), nudgeRow: nudge.row.id }, emit); return; }
-      }
+      // MODEL after a classifier stop rendered as a "You" bubble in history and a
+      // bare notification live, and counted as a turn: it joins the stop card's
+      // expander — no bubble, no turn (who is asked: userRecordOf).
+      if (u.nudge) { this._safetyStopCard({ nudge: u.text.trim().slice(0, 4000), nudgeRow: u.nudge.row.id }, emit); return; }
 
       // A peer record whose msg_id is already on screen (the turn-start card,
       // inc-mu6bfv1t-4drq; or the device stream filling a gap the parse already
@@ -2050,7 +2092,7 @@ class MessageManager extends MessageWindow {
       // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
       // NARROW (r6): the measured shapes only — the «[Image source: …]» line beside a pasted picture, a skill's body, the
       // «Caveat:» line of a local command; a Stop-hook feedback turn and a compaction's continuation keep their turns
-      const metaNote = raw.isMeta === true && !raw.origin && !raw.promptSource && !raw._fromWebui && META_NOTE_RE.test(normalizedContent.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      const metaNote = u.companion;
       if (!metaNote) this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
@@ -2059,23 +2101,11 @@ class MessageManager extends MessageWindow {
         this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, ran: 0 });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
-      // Provenance for the notification classifier: promptSource = the CLI's
-      // marker on HUMAN-submitted prompts (JSONL 'sdk'; our own live sends
-      // stamp it too), isSynthetic = CLI-synthesized records (hook feedback on
-      // the live stream). A user who literally types "Stop hook feedback: …"
-      // must NOT get their message demoted to a dim notification card.
-      // EXCEPT (2.229.2, real report "看不到后台任务唤醒"): the CLI stamps
-      // promptSource:"sdk" on SYSTEM-GENERATED deliveries too — a background
-      // task completing wakes the agent with a `<task-notification>` user
-      // record whose authoritative marker is top-level origin.kind. typed
-      // made it render as the USER'S OWN words (a "You" bubble of sanitized
-      // XML ≈ invisible), so the wakeup had no trace in the chat. origin
-      // wins over promptSource; the text-shape check covers transports that
-      // drop the origin field.
+      // Provenance for the notification classifier (userRecordOf's stamps: origin wins over promptSource, a typed record
+      // is never demoted by its words)
+      Object.assign(msg, u.stamps);
       const contentStr = typeof raw.message?.content === 'string' ? raw.message.content : '';
-      const isTaskNotif = raw.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(contentStr);
-      if (isTaskNotif) {
-        msg.originKind = 'task-notification';
+      if (msg.originKind === 'task-notification') {
         // CLOSE THE TASK LIFECYCLE (2.233.0, real report "popup 20条无完成
         // 状态"): in the current harness a background task's COMPLETION
         // signal is THIS user record — the system/task_notification subtype
@@ -2085,21 +2115,12 @@ class MessageManager extends MessageWindow {
         // edit the old path used.
         this._closeTaskFromNotification(contentStr, emit);
       }
-      else if (raw.origin?.kind === 'peer') {
-        // Cross-session PEER message (2.349.0, owner report "announce了但对话
-        // 框里什么都看不到"): a Background-Work notify / another session's
-        // SendMessage wakes this conversation as a user record with
-        // origin.kind='peer' (+ isMeta), which fell into the invisible-meta
-        // path — the turn appeared to start from nothing. Same provenance law
-        // as task-notification: origin.kind wins, render a distinct card.
-        msg.originKind = 'peer-message';
-        const said = (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '';
-        applyPeerOrigin(msg, peerOriginOf(raw.origin, said), said);
+      else if (u.peer) {
+        // Cross-session PEER message (2.349.0): its name, its PATH and — a group report — its card
+        applyPeerOrigin(msg, u.peer.po, u.peer.said);
         this._notePeerMsgId(raw.origin.msg_id);
       }
-      else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
-      else if (raw.promptSource || raw._fromWebui) msg.typed = true;
-      if (raw.isSynthetic || metaNote) msg.synthetic = true;
+      if (u.synthetic) msg.synthetic = true;
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
@@ -2670,4 +2691,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
-module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
+module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
