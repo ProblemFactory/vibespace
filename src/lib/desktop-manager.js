@@ -713,6 +713,19 @@ export class DesktopManager {
    *  desktop switch) starts a new generation; a deferred reveal acts only in the generation it was asked in. */
   _noteAct(target = null) { this._revealGen = (this._revealGen || 0) + 1; this._revealAsk = null; this.app.layoutManager?.dropFront?.(target); } // …and a front mark stays only for an act inside its window (r6 Q)
 
+  /** THE REVEAL'S OWN SWITCH IS NOT THE PERSON'S ACT (r7 Q′ — the r6 acceptance: keepInFront marked the conversation's tab, then the
+   *  caller's revealWindow switched to its desktop, and switchTo took that switch for the person's act — dropFront(null), every mark
+   *  gone: the group still forming there formed with the record's tab in front, the conversation just opened a hidden tab, focus
+   *  moved, nothing said). A switch is the reveal's own when it is the one a deferred reveal asked for (`_revealAsk`, r4 L) or one
+   *  made while a reveal performed now is still the generation (`_revealing`: keepInFront, then the caller's revealWindow; the
+   *  deferred reveal's revealWindow) — queued behind the 1 s gate or not. It is part of the act that set the mark: no new
+   *  generation, the mark kept. Only the person's own act leaves that generation — a press (a switch the person makes starts with
+   *  one), which drops the mark unless it is inside the marked window; their own switch then drops it as before. */
+  _revealsSwitch(desktopId) {
+    const ask = this._revealAsk;
+    return !!(ask && ask.desk === desktopId) || (this._revealing != null && this._revealing === (this._revealGen || 0));
+  }
+
   /** Reveal `id` (a person named it — never the replay's raise) on `desk` once the window exists — only while nothing has happened
    *  since the open that named it (`gen` is still the generation, `desk` still on show). A REVEAL WAITS ONLY FOR WHAT IS NOT YET
    *  STANDING (r5 O — the r4 acceptance's qR: a reveal that waited for the window's group to re-form revealed nothing when a member
@@ -737,15 +750,22 @@ export class DesktopManager {
     }
     this._revealAsk = null;
     this.app.layoutManager?.showWhenFormed?.(id, desk);
+    this._revealing = gen; // a switch its revealWindow makes is this reveal's own (r7 Q′)
     wm.revealWindow?.(id);
   }
 
   /** A reveal waiting for window `id` of `desk` (r6 R): 'coming' while its build is alive — its opener still answering (an async
    *  opener's promise, a restore's reads: _opening) or the page's attempt within its grace — else 'failed' with the opener's error
-   *  word (`why`), or 'failed' with none (no build of it is alive: it gave no sign of life). */
+   *  word (`why`), or 'failed' with none (no build of it is alive: it gave no sign of life). AN OPENER STILL OUT IS A SIGN OF LIFE
+   *  ONLY WITHIN THE SAME GRACE (r7 — the r6 acceptance's t3: a promise that never settles kept the reveal polling at 10 Hz for ever,
+   *  nothing said, `_revealAsk` set): past BUILD_GRACE_MS from its start it is said once, as a build with no sign of life. */
   _buildState(id, desk) {
     const o = this._openers?.get(String(id));
-    if (o && o.desk === desk) { if (o.why == null) return { s: 'coming' }; this._openers.delete(String(id)); return { s: 'failed', why: o.why }; }
+    if (o && o.desk === desk) {
+      if (o.why == null && Date.now() - o.at <= BUILD_GRACE_MS) return { s: 'coming' };
+      this._openers.delete(String(id));
+      return { s: 'failed', why: o.why };
+    }
     const a = this._buildAttempts.get(String(id));
     if (a && a.desk === desk && Date.now() - a.at <= BUILD_GRACE_MS) return { s: 'coming' };
     return { s: 'failed' };
@@ -754,7 +774,7 @@ export class DesktopManager {
   /** An opener of window `id` of `desk` still answering (a promise: an async opener, the restore's session reads) — a sign of life for
    *  a reveal waiting on it; a rejection's error word is kept for that reveal to say (_buildState). */
   _opening(id, desk, p) {
-    const o = this._openers || (this._openers = new Map()), me = { desk, why: null };
+    const o = this._openers || (this._openers = new Map()), me = { desk, why: null, at: Date.now() };
     o.set(String(id), me);
     while (o.size > 64) o.delete(o.keys().next().value);
     Promise.resolve(p).then(() => { if (o.get(String(id)) === me) o.delete(String(id)); }, (err) => { if (o.get(String(id)) === me) me.why = String((err && err.message) || err || ''); });
@@ -779,17 +799,23 @@ export class DesktopManager {
     if (!w || w._onStage) return;
     this._noteAct();
     this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);
+    this._revealing = this._revealGen || 0; // the caller's revealWindow switches to its desktop next: the reveal's own switch (r7 Q′)
   }
 
   /** ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — THE WRITER): a person opening a conversation (session-lifecycle
    *  attachSession, not a replay) whose window waits in the held record of ANOTHER desktop this page has not built goes to that
-   *  desktop — its switch builds the window — never a second window on the desktop on show. true = switched. */
+   *  desktop — its switch builds the window — never a second window on the desktop on show. true = switched. A COPY IS NEVER A
+   *  REVEAL TARGET (r7 S — the r6 acceptance: with the conversation's window still attaching on this page, the open went to another
+   *  desktop's entry of it, where nothing gets built — _replayMissing settles a copy at once — and said «its window did not appear»
+   *  while that window was on screen on the desktop just left): an entry of a conversation that already has a window on this page
+   *  (copiesOf — attached, still attaching, or past its attach's 15 s) is passed over; the open resolves to that window first
+   *  (session-lifecycle attachSession: the window shown, then the window still attaching, only then a held one). */
   revealHeldSession(serverId) {
     if (!serverId || this.app.stage?.isActive) return false;
     for (const [desk, st] of this._savedStates) {
       if (desk === '__stage__' || desk === this._activeId || !this._desktops.some((x) => x.id === desk)) continue;
       const e = (st?.windows || []).find((w) => w && w.openSpec && sessionOf(w) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
-      if (!e) continue;
+      if (!e || this.copiesOf(desk).includes(String(e.winId || e.id))) continue;
       const id = String(e.winId || e.id);
       try { window.__vsOp?.('desktop-reveal-held', { desk, win: id }); } catch { }
       // A PERSON'S OPEN REVEALS THE CONVERSATION (r2; inc-muiq348r-jwb5's rule — the USER named it ⇒ wm.revealWindow, its own tab
@@ -1021,8 +1047,9 @@ export class DesktopManager {
     if (this.app.stage?.isActive) return this.app.stage.leave(desktopId);
     if (desktopId === this._activeId) { this._pendingSwitch = null; return; }
     // a switch, whoever asked it, retires a reveal still waiting (r3 H) — except the switch that reveal ASKED for, queued or not, and
-    // a switch to that same desktop (r4 L: the queued switch's drain moved the generation and the person's open revealed nothing)
-    if (!(this._revealAsk && this._revealAsk.desk === desktopId)) this._noteAct();
+    // a switch to that same desktop (r4 L: the queued switch's drain moved the generation and the person's open revealed nothing) —
+    // and a switch a reveal performs now never drops the front mark it set (r7 Q′: _revealsSwitch)
+    if (!this._revealsSwitch(desktopId)) this._noteAct();
     // Rapid switching: a switch requested mid-flight is QUEUED (latest wins),
     // not dropped — dropping left the user's actual position out of sync with
     // _activeId, so a later capture/save could persist the WRONG desktop's

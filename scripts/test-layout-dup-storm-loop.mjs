@@ -22,6 +22,9 @@
 //   §9 ROUND 4 (I J K L M) · §10 ROUND 5 (O N P) · §11 ROUND 6: Q — the person's front tab belongs to the desktop (a relay of V while a
 //      member is still opening never moves it: a theme change, a box move, the deferred reveal, a double-click; an act elsewhere drops
 //      it); R — a reveal is never given up in silence (the open's error said once, a build with no sign of life said once, the ask clear)
+//   §12 ROUND 7: Q′ — only the person's act drops the mark (the switch a reveal performs — keepInFront's revealWindow, also held
+//      behind the 1 s gate — keeps it); S — an open resolves to the window this page has first (shown, then still attaching — `sessions`
+//      counts only ATTACHED windows now), never to a copy on another desktop; an opener still out past the grace is said once
 import { REPO, LIB, read, J, tick, made, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, pageOn, press } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratchDir } from './scratch.mjs';
@@ -816,6 +819,135 @@ await section('§11 ROUND 6 — the person\'s front tab belongs to the desktop (
   await r6Legs({ install: install0 });
 });
 
+/** ROUND 7 (the r6 acceptance of d5f74914f): Q′ — only the PERSON's act drops the front mark: the switch a reveal performs (keepInFront,
+ *  then the caller's revealWindow — at once or held behind the 1 s gate) is the act that SET it (d5f74914f: switchTo took it for the
+ *  person's act, dropFront(null) — the group forming on V came together with v-h in front, S hidden, nothing said); S — an open
+ *  resolves to the window this page has first (the one shown, then the one still attaching), only then to a held window elsewhere, and
+ *  never to a copy (d5f74914f: with S's window still attaching here the open went to another desktop's copy, where nothing is built,
+ *  and said «its window did not appear»); the minor — an opener still out past the grace is said once. → failed names. */
+async function r7Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (!install) return failed;
+  const HG = ['v-h', 'win-v-s', 'v-slow'];
+  const recs = () => ({ 'desk-x': [files('x-1', 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [member(files('v-h', 0), HG), member(chat('win-v-s', S, 1), HG), member(files('v-slow', 2), HG)] });
+  const page = (H, active, { slowAt = 6000, build = null, attachMs = 500 } = {}) => {
+    const P = pageOn(H, install, active, { DM, LM, attachMs });
+    const orig = P.app.replayOpenSpec;
+    P.app.replayOpenSpec = (spec, winId) => {
+      if (winId === 'win-v-s' && build) return build(spec);
+      if (winId !== 'v-slow') return orig(spec, winId);
+      setTimeout(() => { const w = P.mkWin('v-slow', 'desk-v', { type: 'viewer', _openSpec: spec }); P.lm.onWindowCreated(w); }, slowAt); return null;
+    };
+    return P;
+  };
+  const open = (P) => { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); press('pointerup'); };
+  const front = (P) => { const c = P.wins.get('win-v-s')?._tabChain; return J(c ? { tabs: c.tabs.join(','), front: c.tabs[c.active], focus: P.app.wm.activeWindowId } : { focus: P.app.wm.activeWindowId }); };
+  const IN_FRONT = J({ tabs: HG.join(','), front: 'win-v-s', focus: 'win-v-s' });
+  const waiting = (P) => (P.lm._pendingChains || []).some((e) => e.tc.tabs.includes('win-v-s'));
+  const marked = (P) => !!(P.lm._fronts && P.lm._fronts.get('desk-v') === 'win-v-s');
+  const sWins = (P) => [...P.wins.values()].filter((w) => w._openSpec && w._openSpec.serverId === S).map((w) => w.id + '@' + w._desktopId + (w._attached ? '' : '(attaching)'));
+  const reveals = (P) => P.ops.filter((o) => o[0] === 'reveal');
+  // the person's own switch: a press on the desktop strip, then the switch
+  const personSwitch = (P, d) => { press('pointerdown'); const p = P.dm.switchTo(d); press('pointerup'); return p; };
+  if (want('Q6')) {
+    // V's group waits on a slow member (v-slow stands 6 s after the first visit's replay); the page visited V (it built S's window
+    // there) and went back to X; at +2.7 s the person clicks S — its window stands on V: the page switches there and shows it
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    await P.dm.switchTo('desk-v'); await tick(1200);
+    await personSwitch(P, 'desk-x'); await tick(1500);
+    const t0 = made.length;
+    open(P); await tick(300);
+    const mid = P.dm.activeDesktopId === 'desk-v' && marked(P) && waiting(P);
+    await tick(4500);
+    leg(front(P) === IN_FRONT && mid && P.dm.activeDesktopId === 'desk-v' && toasts(t0).length === 0, `§12 r7 Q6: ONLY THE PERSON'S ACT DROPS THE MARK — the person on X opens S, whose window stands on V where its group still waits for a member: the page switches to V for the reveal, and THAT switch keeps the mark — the group forms with S's tab in front and focused, nothing said (d5f74914f: the reveal's own switch dropped every mark — v-h in front, S a hidden tab) — after the switch: active ${P.dm.activeDesktopId}, marked+waiting ${mid}; at the end ${front(P)}`);
+  }
+  if (want('Q7')) {
+    // …and when that switch is HELD behind the 1 s gate (r4 L: the person's own switch to X 0.3 s before still holds it) — queued, then
+    // drained: still the reveal's own (the generation of the open)
+    const H = hub(loadHandler(), DOC(recs())), P = page(H, 'desk-x');
+    await P.dm.switchTo('desk-v'); await tick(1200);
+    personSwitch(P, 'desk-x'); await tick(300);
+    const t0 = made.length;
+    open(P);
+    const queued = P.dm._pendingSwitch === 'desk-v' && P.dm.activeDesktopId === 'desk-x' && marked(P);
+    await tick(1000);
+    const mid = P.dm.activeDesktopId === 'desk-v' && marked(P) && waiting(P);
+    await tick(4800);
+    leg(front(P) === IN_FRONT && queued && mid && toasts(t0).length === 0, `§12 r7 Q7: …the reveal's switch held behind the 1 s gate (queued, drained 0.7 s later) is the reveal's own too — the mark is kept through both, the group forms with S's tab in front and focused (d5f74914f: dropped at the queued call) — queued+marked ${queued}, after the drain marked+waiting ${mid}; at the end ${front(P)}`);
+  }
+  // S: X lists S (its window built by the reload — layout.js restoreState's machine attach — STILL ATTACHING: answered at +3 s), V a copy
+  const recsS = () => ({ 'desk-x': [files('x-1', 0), chat('win-x-s', S, 1)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 1)] });
+  const reload = (H, { attachMs = 3000 } = {}) => {
+    const P = page(H, 'desk-x', { attachMs });
+    P.wins.delete('win-x-s'); // the boot builds it through attachSession (a machine open): attaching until its answer
+    P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID, syncId: 'win-x-s', machine: true });
+    return P;
+  };
+  if (want('S1')) {
+    const H = hub(loadHandler(), DOC(recsS())), P = reload(H);
+    await tick(300);
+    const t0 = made.length, attaching = !P.wins.get('win-x-s')._attached;
+    open(P); await tick(1500);
+    const at = [P.dm.activeDesktopId], ask = P.dm._revealAsk;
+    await tick(2000);
+    at.push(P.dm.activeDesktopId);
+    leg(attaching && J(at) === J(['desk-x', 'desk-x']) && J(reveals(P)) === J([['reveal', 'win-x-s', false]]) && P.app.wm.activeWindowId === 'win-x-s' && J(sWins(P)) === J(['win-x-s@desk-x']) && ask === null && toasts(t0).length === 0, `§12 r7 S1: AN OPEN RESOLVES TO THE WINDOW THIS PAGE HAS FIRST — S's window on X still attaching (answered at +3 s) and a copy listed on V: the person's open raises S's window on X, no switch, nothing said; it attaches there (d5f74914f: taken to V, where nothing is built, and told «Could not open “Atlas notes”: its window did not appear») — active ${J(at)}, reveals ${J(reveals(P))}, S windows ${J(sWins(P))}, toasts ${J(toasts(t0).map(toastText))}`);
+  }
+  if (want('S2')) {
+    // X lists no S; Y and V both do (the triple's copies): a DOUBLE-CLICK from X — the first open goes to Y and builds its window there
+    // (attaching, answered at +3 s); the second, 200 ms later, finds it still attaching
+    const H = hub(loadHandler(), DOC({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0), chat('win-y-s', S, 1)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 1)] }));
+    const P = page(H, 'desk-x', { attachMs: 3000 });
+    const t0 = made.length;
+    open(P); await tick(200);
+    const attaching = !!P.wins.get('win-y-s') && !P.wins.get('win-y-s')._attached;
+    open(P); await tick(1500);
+    const at = [P.dm.activeDesktopId];
+    await tick(2000);
+    at.push(P.dm.activeDesktopId);
+    const rv = reveals(P);
+    leg(attaching && J(at) === J(['desk-y', 'desk-y']) && rv.length >= 1 && rv.every((o) => o[1] === 'win-y-s') && P.app.wm.activeWindowId === 'win-y-s' && J(sWins(P)) === J(['win-y-s@desk-y']) && P.dm._revealAsk === null && toasts(t0).length === 0, `§12 r7 S2: …a DOUBLE-CLICK on a conversation listed on two other desktops: the second open finds the window the first is still attaching on Y and raises it — no switch to V's copy, nothing said (d5f74914f: the second open went to V and said its window did not appear) — active ${J(at)}, reveals ${J(rv)}, S windows ${J(sWins(P))}, toasts ${J(toasts(t0).map(toastText))}`);
+  }
+  if (want('S3')) {
+    // the HELD case (r2 C stays): no window of S on this page, V lists it — the open goes to V, builds it, reveals it
+    const H = hub(loadHandler(), DOC({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), chat('win-v-s', S, 1)] }));
+    const P = page(H, 'desk-x');
+    const t0 = made.length;
+    open(P); await tick(1500);
+    leg(P.dm.activeDesktopId === 'desk-v' && J(reveals(P)) === J([['reveal', 'win-v-s', false]]) && P.app.wm.activeWindowId === 'win-v-s' && J(sWins(P)) === J(['win-v-s@desk-v']) && toasts(t0).length === 0, `§12 r7 S3: …and with NO window of S on this page the held entry is still the open's answer — the switch to V builds it and reveals it, silently (r2 C) — active ${P.dm.activeDesktopId}, reveals ${J(reveals(P))}, S windows ${J(sWins(P))}`);
+  }
+  if (want('S4')) {
+    // A COPY IS NEVER A REVEAL TARGET — S's window on X still loading from a slow host past B-0cc8's 15 s in-flight window (a remote
+    // attach: 15–120 s), so the attach check no longer answers; V's entry of S is a copy of it
+    const H = hub(loadHandler(), DOC(recsS())), P = reload(H, { attachMs: 60000 });
+    P.app.ws._attachInFlight.set(S, Date.now() - 16000); // sent 16 s ago
+    const t0 = made.length;
+    open(P); await tick(1500);
+    leg(P.dm.activeDesktopId === 'desk-x' && P.dm._pendingSwitch == null && P.dm._revealAsk === null && !reveals(P).some((o) => o[1] === 'win-v-s') && toasts(t0).length === 0, `§12 r7 S4: …A COPY IS NEVER A REVEAL TARGET — S's window on X still loading past B-0cc8's 15 s (a slow host): the open never goes to V's copy and says nothing (d5f74914f: taken to V, «…its window did not appear»; past the 15 s the open attaches on X as master does) — active ${P.dm.activeDesktopId}, reveals ${J(reveals(P))}, S windows ${J(sWins(P))}, toasts ${J(toasts(t0).map(toastText))}`);
+  }
+  if (want('R4')) {
+    // the minor: an opener that NEVER settles (its promise out for ever) — a sign of life only within the page's grace for that build
+    const H = hub(loadHandler(), DOC(recs()));
+    const P = page(H, 'desk-x', { slowAt: 0, build: () => new Promise(() => {}) });
+    const t0 = made.length;
+    open(P); await tick(1500);
+    const before = toasts(t0).length, o = P.dm._openers?.get('win-v-s');
+    if (o) o.at -= 20000; // its start moved back past BUILD_GRACE_MS
+    await tick(400);
+    const said = toasts(t0).map(toastText), ask = P.dm._revealAsk;
+    let polls = 0; const own = P.dm._revealWhenBuilt; P.dm._revealWhenBuilt = function (...a) { polls++; return own.apply(this, a); };
+    await tick(600);
+    P.dm._revealGen = (P.dm._revealGen || 0) + 1; // whatever still polls retires (no timer outlives the leg)
+    leg(before === 0 && !!o && said.length === 1 && /Atlas notes/.test(said[0]) && /did not appear/.test(said[0]) && ask === null && polls === 0 && toasts(t0).length === 1, `§12 r7 R4: AN OPENER STILL OUT IS A SIGN OF LIFE ONLY WITHIN THE GRACE — an opener whose promise never settles: nothing said while within BUILD_GRACE_MS, then said ONCE «…its window did not appear», _revealAsk clear, the poll stopped (d5f74914f: 'coming' for ever, 10 Hz, silent) — before ${before}, toasts ${J(said)}, ask ${J(ask)}, polls after ${polls}`);
+  }
+  return failed;
+}
+await section('§12 ROUND 7 — only the person\'s act drops the mark (Q′); an open resolves to the window this page has first, never a copy (S); an opener past the grace is said (R)', async () => {
+  await r7Legs({ install: install0 });
+});
+
 await section('§6 MUTANTS — each fix removed turns its own legs RED', async () => {
   const M = mutantCopies('ldupl', REPO);
   const DSRC = read('src/lib/desktop-manager.js'), LSRC = read('src/lib/session-lifecycle.js');
@@ -944,7 +1076,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const DMo = await dm5('    if (!shows.size) return out;', '    return out;', 'r5-o-attempt');
     const fO = await r5Legs({ DM: DMo, install: install0, quiet: true, legs: ['O1', 'O3a', 'O5'] });
     ok(fO.some((n) => /r5 O1: A COPY THIS PAGE CANNOT BUILD IS A GHOST/.test(n)) && fO.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)) && fO.some((n) => /r5 O5: AN OPEN OF A WINDOW THAT STANDS/.test(n)), `mutant r5-O-build-attempt-until-save (4ad07d751's ghostsOf: only _kept / _carried): A's group taken apart by B's re-send (q1), the merge refused (q3), v-t's group still pending at the open (qR2) — RED (${fO.length}: ${fO.map((n) => n.slice(0, 22)).join(' | ')})`);
-    const kif = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage) return;\n    this._noteAct();\n    this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);\n  }";
+    const kif = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage) return;\n    this._noteAct();\n    this.app.layoutManager?.showWhenFormed?.(String(id), w._desktopId || this._activeId);\n    this._revealing = this._revealGen || 0; // the caller's revealWindow switches to its desktop next: the reveal's own switch (r7 Q′)\n  }";
     const r4k = "  keepInFront(id) {\n    const w = this.app.wm.windows.get(String(id));\n    if (!w || w._onStage || !this.app.layoutManager?.pendingChainOf?.(String(id))) return false;\n    const desk = w._desktopId || this._activeId;\n    if (desk !== this._activeId) return false;\n    this._noteAct();\n    const gen = this._revealGen || 0;\n    this._revealAsk = { id: String(id), desk, gen };\n    this._revealWhenBuilt(String(id), desk, gen);\n    return true;\n  }";
     const wl = '    if (this._activeId !== desk || !wm.windows.has(id)) {', wb = "      const b = this._activeId !== desk ? { s: 'coming' } : this._buildState(id, desk);";
     ok(DSRC5.includes(kif) && DSRC5.includes(wl) && DSRC5.includes(wb), 'mutant r5-O-reveal-waits-for-group: the patched lines exist in desktop-manager.js');
@@ -992,7 +1124,34 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const fS6 = [...await r3Legs({ DM: DMs, install: install0, quiet: true, legs: ['H2'] }), ...await r6Legs({ DM: DMs, install: install0, quiet: true, legs: ['R2', 'R3'] })];
     ok(fS6.some((n) => /r3 H2 \(r6 R\)/.test(n)) && fS6.some((n) => n.startsWith('§11 r6 R2:')) && fS6.some((n) => n.startsWith('§11 r6 R3:')), `mutant r6-R-silent-cap (a3fb7b40e's ~5 s cap, nothing said): H2 unrevealed, the open's failure unsaid, the build with no sign of life unsaid, _revealAsk left set — RED (${fS6.length})`);
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 24, label: '§6 ' })) ok(r.pass, r.name, r.detail);
+  // r7: Q′ the reveal's own switch taken for the person's act (d5f74914f's switchTo: every switch but a deferred reveal's drops the
+  // mark); S the open's order (revealHeldSession before the attaching check) and the copies rule; R an opener 'coming' with no grace
+  {
+    const DSRC7 = read('src/lib/desktop-manager.js'), LSRC7 = read('src/lib/session-lifecycle.js');
+    const sq = '    if (!this._revealsSwitch(desktopId)) this._noteAct();';
+    ok(DSRC7.includes(sq), 'mutant r7-Q-switch-drops: the patched line exists in desktop-manager.js');
+    const DMq = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC7.replace(sq, '    if (!(this._revealAsk && this._revealAsk.desk === desktopId)) this._noteAct();'), 'r7-q-drops', { esm: true })).href)).DesktopManager;
+    const fQ7 = await r7Legs({ DM: DMq, install: install0, quiet: true, legs: ['Q6', 'Q7'] });
+    ok(fQ7.some((n) => n.startsWith('§12 r7 Q6:')) && fQ7.some((n) => n.startsWith('§12 r7 Q7:')), `mutant r7-Q-switch-drops (d5f74914f's switchTo — r6's _noteAct, dropFront(null), on every switch but a deferred reveal's): the reveal's own switch drops the mark, at once and behind the gate — RED (${fQ7.length}: ${fQ7.map((n) => n.slice(0, 13)).join(' | ')})`);
+    const fa = "    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame\n";
+    const rh = "    if (!(syncId || machine) && this.desktopManager?.revealHeldSession?.(serverId)) return null;\n";
+    const cp = '      if (!e || this.copiesOf(desk).includes(String(e.winId || e.id))) continue;';
+    ok(LSRC7.includes(fa + '    // ONE CONVERSATION') && LSRC7.includes(rh) && DSRC7.includes(cp), 'mutant r7-S: the patched lines exist in session-lifecycle.js and desktop-manager.js');
+    const heldFirst = LSRC7.replace(fa, '').replace(rh, rh + fa);
+    const DMc = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC7.replace(cp, '      if (!e) continue;'), 'r7-s-copies', { esm: true })).href)).DesktopManager;
+    const fB7 = await r7Legs({ DM: DMc, install: await loadLifecycle(heldFirst), quiet: true, legs: ['S1', 'S2', 'S3', 'S4'] });
+    ok(['S1', 'S2', 'S4'].every((k) => fB7.some((n) => n.startsWith(`§12 r7 ${k}:`))) && !fB7.some((n) => n.startsWith('§12 r7 S3:')), `mutant r7-S-held-first (d5f74914f's open: revealHeldSession before the attaching check, no copies rule): taken to a copy's desktop and told its window did not appear — RED (${fB7.length}: ${fB7.map((n) => n.slice(0, 13)).join(' | ')}); S3, the held case, green`);
+    const fC7 = await r7Legs({ DM: DMc, install: install0, quiet: true, legs: ['S1', 'S2', 'S4'] });
+    ok(fC7.some((n) => n.startsWith('§12 r7 S4:')), `mutant r7-S-copies-ignored (the order kept, copiesOf not consulted): past B-0cc8's 15 s the open goes to V's copy — RED (${fC7.length}: ${fC7.map((n) => n.slice(0, 13)).join(' | ')})`);
+    const fH7 = await r7Legs({ install: await loadLifecycle(heldFirst), quiet: true, legs: ['S1', 'S2', 'S4'] });
+    ok(fH7.length === 0, `mutant r7-S-held-first ALONE (the copies rule kept) is EQUIVALENT — every entry of a conversation with a window on this page, attaching included, is a copy, so revealHeldSession passes it over and the attaching check answers next; should copiesOf ever stop counting a window still attaching, this turns RED (${fH7.length}: ${fH7.map((n) => n.slice(0, 13)).join(' | ')})`);
+    const og = "      if (o.why == null && Date.now() - o.at <= BUILD_GRACE_MS) return { s: 'coming' };";
+    ok(DSRC7.includes(og), 'mutant r7-R-opener-no-grace: the patched line exists in desktop-manager.js');
+    const DMr = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC7.replace(og, "      if (o.why == null) return { s: 'coming' };"), 'r7-r-no-grace', { esm: true })).href)).DesktopManager;
+    const fR7 = await r7Legs({ DM: DMr, install: install0, quiet: true, legs: ['R4'] });
+    ok(fR7.some((n) => n.startsWith('§12 r7 R4:')), `mutant r7-R-opener-no-grace (d5f74914f's _buildState: an opener entry with no error is 'coming' whatever its age): the never-settling opener polls for ever, nothing said — RED (${fR7.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 27, label: '§6 ' })) ok(r.pass, r.name, r.detail);
 });
 
 

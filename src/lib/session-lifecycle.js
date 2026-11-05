@@ -725,11 +725,15 @@ export function installSessionLifecycle(App, ctx = {}) {
     this._closeSidebarOnMobile();
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
     if (this._focusExistingSession(serverId, { replay: !!(syncId || machine) })) return null;
+    // AN OPEN RESOLVES TO THE WINDOW THIS PAGE HAS FIRST (r7 S — the r6 acceptance: with the conversation's window still attaching
+    // here — not yet in this.sessions, filled at 'attached' — the open went to another desktop that listed it, nothing was built
+    // there and the page said its window did not appear): the window shown (above), then the window still attaching, only then a
+    // held window on another desktop — never a copy of the one this page has (desktop-manager revealHeldSession)
+    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame
     // ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — the writer of the triple): the shortcut above sees only the windows
     // this page BUILT; a conversation whose window waits in the record of a desktop not visited since the page loaded got a SECOND
     // window here (three desktops listed one conversation). A person's open goes to that desktop instead — its switch builds it.
     if (!(syncId || machine) && this.desktopManager?.revealHeldSession?.(serverId)) return null;
-    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame
 
     this._hideWelcome();
     const isChat = mode === 'chat';
