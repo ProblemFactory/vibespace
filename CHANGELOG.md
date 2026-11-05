@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.382 — 2026-11-05
+
+### Added
+- A conversation's chat has an Outbox chip beside Artifacts: how many proposals it drafted and how many wait for you; a click shows only those in the Outbox.
+- Each proposal in the Outbox says whether you edited it or the agent replaced it ("replaced" opens the newer one); right-click a conversation for its Outbox.
+
+### Fixed
+- The Outbox no longer opens blank when you open it again after closing it.
+
 ## 2.369.381 — 2026-11-05
 
 ### Fixed
