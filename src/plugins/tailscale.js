@@ -16,6 +16,13 @@
 // person turned on the MagicDNS row); a resolv.conf Tailscale rewrote while the verdict says no is healed at start /
 // boot with ONE `tailscale set --accept-dns=false` (tailscaled restores the resolver it saved), logged once. Tailnet
 // names keep working without it: lookup(name) answers from OUR daemon's `status --json` (the hub's ssh host records).
+// BROWSERS REACH TAILNET HOSTS BY NAME (lane tailnet-names, 2026-11-05 — PURE src/tailnet-reach.js): reach() hands the same
+// table + Self (this machine is a device too) + the tailnet's suffix, the sign-in state, the mode and the proxy ports (no new
+// read: the status --json above carries them); the hub's browsers route only the devices through it (src/server/tailnet-door.js).
+// r2: the table is PERSISTED with its time (`tailnetTable` on the record: suffix, state, Self, peers) and read back at boot as
+// «stale but known» — a restarted hub's first browser knows the names; reachFresh(ms) waits for ONE bounded status read when
+// the table is stale (≤ 2 s), and a stopped plugin's miss can still say «a Tailscale name — the plugin is off». r3: the WHOLE
+// table (no cap — a 250-device tailnet routes its 250th); a read pending a whole wait is known hung (no second wait).
 // The plugin contract (create(h) → verbs, the host handle h) is described in src/plugins.js.
 const fs = require('fs');
 const path = require('path');
@@ -125,18 +132,41 @@ module.exports = {
     };
     // MagicDNS without the system resolver: OUR daemon's `status --json` → host records (status() refreshes them;
     // lookup() starts a background read when they are older than a minute — it is sync, ssh argv builders call it)
-    const names = { list: [], at: 0, busy: false };
+    const names = { list: [], at: 0, busy: false, pending: null, pendingAt: 0, peers: [], self: null, suffix: '', state: null, readAt: 0, live: false, failAt: 0 };
+    // lane tailnet-names r2: the table a hub read before its restart, read back as «stale but known» (its time kept)
+    { const t = h.peek().tailnetTable; if (t && typeof t === 'object' && Number(t.at) > 0) { names.peers = Array.isArray(t.peers) ? t.peers : []; names.self = t.self && typeof t.self === 'object' ? t.self : null; names.suffix = String(t.suffix || ''); names.state = typeof t.state === 'string' ? t.state : null; names.readAt = Number(t.at); } }
+    // lane tailnet-names: one `status --json` answer → the table (the peers + Self) + the tailnet's suffix + the sign-in state;
+    // PERSISTED with its time when it changes (and at most every 10 min while it does not) — the next boot knows it at once
+    const takeStatus = (j) => {
+      names.list = DNS.hostRecords(j); names.at = names.readAt = Date.now(); names.live = true;
+      names.peers = DNS.hostRecords({ Peer: j && j.Peer }); // the OTHER devices — ALL of them (r3: routing never caps; a display may)
+      names.self = DNS.hostRecords({ Self: j && j.Self })[0] || null; // THIS machine — a device on the tailnet too
+      const selfName = String((j && j.Self && j.Self.DNSName) || '').replace(/\.$/, '').toLowerCase(); // an older CLI names no suffix: Self's own
+      names.suffix = String((j && (j.MagicDNSSuffix || (j.CurrentTailnet && j.CurrentTailnet.MagicDNSSuffix))) || (selfName.includes('.') ? selfName.slice(selfName.indexOf('.') + 1) : '')).replace(/\.$/, '').toLowerCase();
+      names.state = j && typeof j.BackendState === 'string' ? j.BackendState : null;
+      const t = { at: names.readAt, suffix: names.suffix, state: names.state, self: names.self, peers: names.peers };
+      const was = h.peek().tailnetTable;
+      const same = (a, b) => !!a && JSON.stringify([a.suffix, a.state, a.self, a.peers]) === JSON.stringify([b.suffix, b.state, b.self, b.peers]);
+      if (!same(was, t) || names.readAt - (Number(was.at) || 0) > 600000) { h.rec().tailnetTable = t; h.save(); }
+    };
+    /** one background `status --json` read (never two at once) → its promise (null: no daemon of ours to ask) */
     const refreshNames = () => {
-      if (names.busy) return;
+      if (names.busy) return names.pending;
       names.at = Date.now();
       const cli = tsOurDaemonPid() ? tsBin('tailscale') : null; // a read: never through sudo (status() reads it plain too)
-      if (!cli) { names.list = []; return; }
-      names.busy = true;
-      execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20 }, (err, out) => {
+      if (!cli) { names.list = []; return null; }
+      names.busy = true; names.pendingAt = Date.now();
+      names.pending = new Promise((resolve) => execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20 }, (err, out) => {
         names.busy = false;
-        if (!err) { try { names.list = DNS.hostRecords(JSON.parse(out)); } catch { } }
-      });
+        let took = false;
+        if (!err) { try { takeStatus(JSON.parse(out)); took = true; } catch { } }
+        if (!took) names.failAt = Date.now();
+        resolve(took);
+      }));
+      return names.pending;
     };
+    /** stale = not read in this hub's life yet (a persisted table at most), or read over a minute ago */
+    const namesStale = () => !names.live || Date.now() - names.readAt > 60000;
 
     const verbs = {
       // the networking mode is a SETTINGS row (All Settings › Plugins › Tailscale); this old door writes it there and
@@ -250,6 +280,31 @@ module.exports = {
         return hit;
       },
 
+      /** lane tailnet-names: what a browser needs to reach tailnet hosts — cheap and sync (no pgrep, no CLI on the caller's
+       *  path: the table is the one lookup() reads, refreshed in the background when stale); `system` = the last status() saw a
+       *  system tailscaled (that machine routes its own) */
+      reach() {
+        const up = !!tsOurDaemonPid();
+        if (up && Date.now() - names.at > (names.list.length ? 60000 : 5000)) refreshNames();
+        const rec = h.peek();
+        return { up, mode: up ? (rec.mode || 'userspace') : (names.system ? 'system' : null), state: names.state, read: names.readAt > 0, loggedIn: up && names.state === 'Running',
+          browsers: h.setting('reachBrowsers') !== false, peers: up ? names.peers : [], self: up ? names.self : null, suffix: names.suffix,
+          known: [...names.peers, ...(names.self ? [names.self] : [])], at: names.readAt, stale: up && namesStale(), ports: { socks: SOCKS_PORT, http: SOCKS_PORT + 1 } };
+      },
+      /** lane tailnet-names r2: reach() AFTER one bounded status read when the table is stale (a restart, a minute old) — a
+       *  launch and a PAC wait ≤ `ms` for it; on its timeout (or a read that failed in the last 30 s) the last table serves,
+       *  its time said (`at`, `stale`) — «not yet read» is never «signed out». r3: ONE wait per read — a read already pending
+       *  is waited on only for what is left of `ms` since it started (one pending a whole `ms` is known hung: no wait) */
+      async reachFresh(ms = 2000) {
+        const bound = Math.max(0, Math.min(Number(ms) || 0, 2000));
+        if (tsOurDaemonPid() && namesStale() && Date.now() - names.failAt > 30000) {
+          const left = names.busy ? bound - (Date.now() - names.pendingAt) : bound;
+          const p = left > 0 ? refreshNames() : null;
+          if (p) await Promise.race([p, new Promise((r) => { const t = setTimeout(r, left); if (t.unref) t.unref(); })]);
+        }
+        return verbs.reach();
+      },
+
       stop() {
         const pid = tsOurDaemonPid();
         if (pid) {
@@ -284,7 +339,7 @@ module.exports = {
           try {
             const out = execFileSync(cli, [...(sockArg ? [`--socket=${sockArg}`] : []), 'status', '--json'], { encoding: 'utf-8', timeout: 5000 });
             const j = JSON.parse(out);
-            if (sockArg) { names.list = DNS.hostRecords(j); names.at = Date.now(); }
+            if (sockArg) takeStatus(j); // lane tailnet-names: the table + suffix + sign-in state of OUR daemon
             return {
               backendState: j.BackendState,
               self: j.Self ? { dnsName: j.Self.DNSName, ips: j.Self.TailscaleIPs } : null,
@@ -292,6 +347,7 @@ module.exports = {
             };
           } catch { return null; }
         };
+        names.system = !!sysPid; // lane tailnet-names: reach() says `system` (no pgrep on its own path)
         if (sysPid) {
           // system daemon: report its state read-only (default socket)
           return { ...base, running: true, mode: 'system', ...(cli ? probe(null) || {} : {}) };

@@ -22,6 +22,9 @@
  *        view and never relaunch it on Chrome (the measured relaunch rule).
  *   engineWrapperFor(name, spec) / dropEngineWrapper(name) — lane engine-args-string r2: THE ENGINE'S WRAPPER of one
  *        profile (`engine-<id>.sh` here, 0700, atomic, re-written when its text changes, removed with the profile).
+ *   tailnetFileFor(file, stamp)                 — lane tailnet-names: a browser LAUNCHED with the tailnet PAC (`rec.tailnet.arg`,
+ *        comma-free) names, at every call, the file it names anyway + that one switch last on the driver's line — the same
+ *        derived-file rule, so no call's view differs from the launch (a differing view relaunches Chrome).
  *
  * Never throws: a base file that cannot be read, or a dir that cannot be written, leaves the call on its base file
  * (said once in the journal — the launch then fails as it did before this lane, never worse).
@@ -129,6 +132,18 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
     return derived(file, cfg, baseFile, 'the engine view\'s config');
   }
+  /** lane tailnet-names: the file a call of a browser launched with the tailnet PAC names — `baseFile`'s content, its own PAC
+   *  switch (if any) left out, + `stamp.arg` last (sync, like fileFor). No switch on the stamp ⇒ the base file itself. */
+  function tailnetFileFor(baseFile, stamp) {
+    const arg = stamp && typeof stamp.arg === 'string' ? stamp.arg : '';
+    if (!baseFile || !/^--proxy-pac-url=http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9._/-]*$/.test(arg)) return baseFile;
+    const base = readCfg(baseFile);
+    if (!base) { say(`tread:${baseFile}`, `the tailnet road could not read ${baseFile} — its calls keep that file (tailnet names are not reached through it)`); return baseFile; }
+    const cfg = { ...base, args: [...V.driverArgsList(base.args).filter((a) => !/^--?proxy-pac-url(?:=|$)/.test(a)), arg] };
+    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + arg).digest('hex').slice(0, 10);
+    const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-tailnet-${tag}.json`);
+    return derived(file, cfg, baseFile, 'the tailnet road\'s config');
+  }
   /** lane engine-args-string r2: THE ENGINE'S WRAPPER of one profile — `<dir>/engine-<name>.sh` (`name` = the profile id: one
    *  per profile, which runs one engine at a time), its text src/browser-engines.js engineWrapperText. Written 0700 through a
    *  temporary file renamed over it (atomic), RE-WRITTEN at a launch only when its text changes (the derived rule: a regular
@@ -157,7 +172,7 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
   }
   /** …removed with its profile (the keeper's removeProfile). */
   function dropEngineWrapper(name) { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(String(name || ''))) return; const f = wrapperFile(name); memo.delete(f); try { fs.rmSync(f, { force: true }); } catch { /* best effort */ } }
-  return { factFor, fileFor, engineFileFor, engineWrapperFor, dropEngineWrapper, probe: probeNow, dir };
+  return { factFor, fileFor, engineFileFor, tailnetFileFor, engineWrapperFor, dropEngineWrapper, probe: probeNow, dir };
 }
 
 module.exports = { create };

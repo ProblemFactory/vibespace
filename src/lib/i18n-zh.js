@@ -2303,6 +2303,8 @@ export default {
   "tailscale up flags": "tailscale up 参数",
   "Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": "额外的 tailscale up 参数——下次登录/切换模式时生效。我们管理的可达性参数（--socket/--tun/--accept-routes/--accept-dns/代理）会被忽略。",
   "Let Tailscale set this machine's DNS (MagicDNS)": "让 Tailscale 接管本机 DNS（MagicDNS）",
+  "Reach tailnet hosts from browsers": "从浏览器访问 tailnet 里的机器",
+  "On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once.": "开：Tailscale 运行时，这里的浏览器可以直接用名字打开 tailnet 里的机器（https://nas:8006/）—— 只有 tailnet 里的主机走 Tailscale，其余一律直连，本机 DNS 不会被改。自己设了代理的浏览器保留它的代理。内核模式：改动对正在运行的浏览器立即生效。用户态：正在运行的浏览器在下次启动时跟上。这里关着时启动的浏览器，从下次启动起才能访问 tailnet 里的机器；页内浏览器总是立即跟上。",
   "Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.": "关：Tailscale 从不改动 /etc/resolv.conf，tailnet 名字照样经插件连到 ssh 主机。开：你自己的机器在内核模式下经 Tailscale（100.100.100.100）解析。集群实例上永远不开。",
   "DNS: Tailscale MagicDNS": "DNS：Tailscale MagicDNS",
   "DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it": "DNS：/etc/resolv.conf 仍被 Tailscale 占着——关掉再打开 Tailscale 即可恢复",

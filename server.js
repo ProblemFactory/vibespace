@@ -583,14 +583,14 @@ app.use(fileRoutes);
 // Rewrites all URLs in HTML/CSS, injects JS to rewrite XHR/WebSocket, strips security headers
 const Unblocker = require('unblocker');
 const unblocker = new Unblocker({
-  prefix: '/proxy/',
+  prefix: '/proxy/', ...require('./src/server/tailnet-door.js').agents(), // lane tailnet-names: a tailnet host by name — the plugin's table (kernel) or its HTTP proxy (userspace)
   responseMiddleware: [
     function stripFrameHeaders(data) {
       delete data.headers['x-frame-options'];
     }
   ],
 });
-app.use(unblocker);
+app.use(require('./src/server/tailnet-door.js').embedded(unblocker)); // lane tailnet-names (LAW 2): a tailnet host's miss says why through Tailscale
 
 // Ctrl+G editor: POST /api/editor/open (the `code` helper, vsst_ auth) + /api/editor/signal — src/routes/editor.js
 require('./src/routes/editor.js').registerEditorRoutes(app, { activeSessions, wss, WS_OPEN, readSessionMeta, writeSessionMeta, getRemoteFs: () => remoteFs });

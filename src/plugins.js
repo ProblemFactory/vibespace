@@ -21,7 +21,8 @@
 //                   config?(patch), mode?(mode),     settings (→ /config, /mode); absent ⇒ refused by name
 //                   enable?(on),                     owns the on-switch (default: rec.enabled, saved + broadcast)
 //                   bootReplay?(),                   owns its boot replay (default: enabled + desiredUp ⇒ start)
-//                   lookup?(name) } }                a 'tunnel' plugin's own name answers (tunnelLookup — the ssh hosts)
+//                   lookup?(name),                   a 'tunnel' plugin's own name answers (tunnelLookup — the ssh hosts)
+//                   reach?(), reachFresh?(ms) } }    …and what a browser needs to reach its hosts (tunnelReach / tunnelReachFresh — lane tailnet-names)
 //   h (the host handle) = { id, dir: ~/.vibespace/plugins/<id>, rec() (the persistent record, created),
 //     peek() (the record or {}), save(), notify() (broadcast plugins-updated), opts (the constructor's extra
 //     options, e.g. opencodeServe), probeProto(port, opts), vault() (the data dir's vault engine or null — a secret a
@@ -49,7 +50,7 @@ const SB = require('./secret-box.js');       // the data dir's vault (a plugin's
 // a BROWSER ENGINE answers the engine registry's two verbs — src/server/browser-engines.js, the contract src/browser-engines.js)
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'], 'browser-engine': ['probe', 'launchOptions'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
-const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
+const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -78,6 +79,7 @@ class PluginManager {
     this._settings = opts.settings || { read: () => mem, patch: (p) => { mem = { ...mem, ...p }; for (const [k, v] of Object.entries(mem)) if (v === null) delete mem[k]; } };
     this._file = path.join(dataDir, 'plugins.json');
     this.broadcast = broadcast || (() => {});
+    this._watchers = new Set(); // lane tailnet-names r4: watch() — what follows a plugin's state AND its rows (the tailnet door)
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = { plugins: {} }; }
     this._defs = new Map(); this._verbs = new Map();
     for (const def of plugins) {
@@ -181,19 +183,27 @@ class PluginManager {
     const config = record === 'moved' ? this.migrateConfigToSettings() : null;
     return { settings: { moved, dropped, seeded }, record, config };
   }
-  /** settings.json changed (server.js onSettingsWrite): a plugin whose `plugin-config` row moved re-applies it */
+  /** settings.json changed (server.js onSettingsWrite): a plugin whose `plugin-config` row moved re-applies it; lane tailnet-names
+   *  r4: EVERY moved row of a plugin (an `apply: 'server'` row too — the server reads those lazily, nobody re-applies them) is
+   *  told to watch() — {type: 'rows', id, keys} */
   onSettingsWrite(next, prev) {
     for (const [id, tbl] of Object.entries(PS.PLUGIN_SETTINGS)) {
-      const moved = tbl.rows.some((r) => r.apply === 'plugin-config' && JSON.stringify((next || {})[PS.rowPath(id, r)]) !== JSON.stringify((prev || {})[PS.rowPath(id, r)]));
+      const movedRows = tbl.rows.filter((r) => JSON.stringify((next || {})[PS.rowPath(id, r)]) !== JSON.stringify((prev || {})[PS.rowPath(id, r)]));
+      const moved = movedRows.some((r) => r.apply === 'plugin-config');
       const v = this._verbs.get(id);
       if (moved && v && typeof v.applySettings === 'function') { try { v.applySettings(); } catch (e) { console.warn(`[plugins] ${id} could not apply its settings:`, e.message); } }
+      if (movedRows.length && this._verbs.has(id)) this._tell({ type: 'rows', id, keys: movedRows.map((r) => r.key) });
     }
   }
+  /** lane tailnet-names r4: ONE subscription to what a plugin IS — its every broadcast ({type: 'plugins-updated'}: a start, a
+   *  stop, a sign-in, an on/off switch) AND its rows written through the settings store ({type: 'rows', id, keys}). → unwatch() */
+  watch(fn) { if (typeof fn !== 'function') return () => { }; this._watchers.add(fn); return () => { this._watchers.delete(fn); }; }
+  _tell(ev) { for (const fn of [...this._watchers]) { try { fn(ev); } catch (e) { console.warn('[plugins] a watcher failed:', e && e.message); } } }
 
   _rec(id) { return (this._state.plugins[id] = this._state.plugins[id] || {}); }
   // restored 2.343.1 — a dead-code sweep (dc37220) deleted this while 8 call
   // sites remained; every plugin-state broadcast (and publish) threw since.
-  _notify() { this.broadcast({ type: 'plugins-updated', ...this._snapshot() }); }
+  _notify() { this.broadcast({ type: 'plugins-updated', ...this._snapshot() }); this._tell({ type: 'plugins-updated' }); }
 
   // ── registry ──
   /** A plugin's verbs, or a refusal BY NAME: an unknown id, or a verb the plugin did not declare. */
@@ -335,6 +345,18 @@ class PluginManager {
   tunnelLookup(name) {
     const id = this.providerId('tunnel'), v = id && this._verbs.get(id);
     try { return v && typeof v.lookup === 'function' ? v.lookup(name) || null : null; } catch { return null; }
+  }
+  /** lane tailnet-names: what a browser needs to reach the tunnel's hosts by name ({up, mode, state, loggedIn, browsers, peers,
+   *  self, suffix, known, at, stale, ports} — src/tailnet-reach.js reads it) from whichever plugin declares 'tunnel'; null when
+   *  none answers. Sync. */
+  tunnelReach() {
+    const id = this.providerId('tunnel'), v = id && this._verbs.get(id);
+    try { return v && typeof v.reach === 'function' ? v.reach() || null : null; } catch { return null; }
+  }
+  /** r2: the same answer after ONE bounded status read when the table is stale (≤ `ms`) — a launch, a PAC, a /proxy request */
+  async tunnelReachFresh(ms) {
+    const id = this.providerId('tunnel'), v = id && this._verbs.get(id);
+    try { return v && typeof v.reachFresh === 'function' ? (await v.reachFresh(ms)) || null : this.tunnelReach(); } catch { return null; }
   }
 }
 

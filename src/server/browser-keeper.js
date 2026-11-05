@@ -143,6 +143,7 @@ function keeper() { return installed; }
 function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
   stderrPipeProbe = null, // lane browser-stderr-pipe: the /proc facts of a hung Chrome (default BE.probeStderrPipe; a fixture in the fast gate)
+  tailnet = null, // lane tailnet-names: the tailnet door ({launch, missFor} — default the hub's shared one, src/server/tailnet-door.js)
   // lane jobs-browser (B-dbc1): is this Background Work job's run alive (state starting | up)? A running job CARRIES its
   // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
   jobRunning = () => false,
@@ -305,7 +306,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     };
     const displayed = (opts, ex, file, rec) => {
       const eff0 = rec && rec.display ? displays.fileFor(file, rec.display) : file;
-      const eff = rec && rec.engineView ? displays.engineFileFor(eff0, rec.engineView) : eff0; // lane engine-plugin: a conversation's browser on an ENGINE names its program + arguments at every call
+      const eff1 = rec && rec.engineView ? displays.engineFileFor(eff0, rec.engineView) : eff0; // lane engine-plugin: a conversation's browser on an ENGINE names its program + arguments at every call
+      const eff = rec && rec.tailnet && rec.tailnet.arg ? displays.tailnetFileFor(eff1, rec.tailnet) : eff1; // lane tailnet-names: a browser LAUNCHED with the tailnet PAC names it at every call (a different view relaunches)
       return eff === ex[VERBS.CONFIG_KEY] ? opts : { ...opts, extraEnv: { ...ex, [VERBS.CONFIG_KEY]: eff } };
     };
     const out = { ...r };
@@ -681,7 +683,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function browserView(rec) {
     if (!rec) return null;
     const l = live.get(rec.profileId) || null;
-    return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, live: l ? { ...l } : null, runningBuild: BB.runningBuildOf(rec.cdpBrowser), // lane browser-admin 2a: the build the browser itself reports
+    return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, tailnet: require('../tailnet-reach.js').stampView(rec.tailnet), live: l ? { ...l } : null, runningBuild: BB.runningBuildOf(rec.cdpBrowser), // lane browser-admin 2a: the build the browser itself reports; lane tailnet-names r4: the tailnet stamp's {on, mode, why} — never its arg (the PAC token)
       cli: rec.cli ? { ...rec.cli, ...(cliFactOf(rec) || {}) } : null }; // verify r2 (H1): the CLI it runs (+ `gone` words when that version left this machine)
   }
   /** verify r1 (F5): a browser record for an AGENT — never its launch view (`launchEnv` carries the executable's path) and
@@ -1046,6 +1048,24 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return null;
     }
   }
+  /** lane tailnet-names: THE TAILNET ROAD of a launch — the door's verdict (src/server/tailnet-door.js over PURE src/tailnet-reach.js)
+   *  → the record's stamp `{arg, mode, why}`: `arg` = the ONE switch (--proxy-pac-url=http://127.0.0.1:<door>/tailnet-<token>.pac,
+   *  comma-free) every call of the browser carries (the derived config on the driver's road, the argv on the attach road), or
+   *  null and why not. A proxy the profile, the person's browser config or the launch's ENV names (HTTPS_PROXY / HTTP_PROXY /
+   *  ALL_PROXY — Chrome on Linux honours them; r2) WINS (Chromium ranks a PAC above --proxy-server and the env — the PAC is
+   *  never added beside one); never throws (a broken door = no PAC). */
+  const userConfigProxy = () => {
+    try { const u = JSON.parse(fs.readFileSync(path.join(homeDir, B.USER_CONFIG_REL), 'utf8')); return !!(u && typeof u === 'object' && !Array.isArray(u) && ((typeof u.proxy === 'string' && u.proxy.trim()) || VERBS.driverArgsList(u.args).some((a) => ENG.PROXY_ARG_RE.test(a)))); } catch { return false; }
+  };
+  async function tailnetFor(p, { engine = false, remote = false, env = rtEnv } = {}) {
+    try {
+      const explicit = !!(p && p.proxy) || userConfigProxy() || !!require('../tailnet-reach.js').envProxyOf(env);
+      const v = await (tailnet || require('./tailnet-door.js')).launch({ explicit, engine, remote, label: (p && p.label) || '' });
+      return v ? { arg: v.on && v.arg ? v.arg : null, mode: v.mode || null, why: v.on ? null : v.why || null } : null;
+    } catch { return null; }
+  }
+  /** lane tailnet-names: a browser's launch stamp (the audit route's LAW 2 words) — undefined when it has no record */
+  function tailnetOf(profileId) { const r = reg.browsers[String(profileId || '')]; return r ? (r.tailnet || null) : undefined; }
   /** The config file a command on THIS browser runs with — what `/resolve`
    *  names to the CLI (the file the keeper's own calls use): the pairs' own
    *  AGENT_BROWSER_CONFIG, else the keeper's file for the kind. null = none
@@ -1056,7 +1076,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane headless-fallback: an ephemeral whose launch fell back names the PLANNED file (the launch's own) — never the base
     const rec = ephemeral ? recordForCall(null, null, pe) : null;
     const planned = (file) => (rec && rec.display && file ? displays.fileFor(file, rec.display) : file);
-    const engined = (file) => (rec && rec.engineView && file ? displays.engineFileFor(file, rec.engineView) : file); // lane engine-plugin: the engine's view rides the agent's commands too
+    const engined0 = (file) => (rec && rec.engineView && file ? displays.engineFileFor(file, rec.engineView) : file); // lane engine-plugin: the engine's view rides the agent's commands too
+    const engined = (file) => { const f = engined0(file); return rec && rec.tailnet && rec.tailnet.arg && f ? displays.tailnetFileFor(f, rec.tailnet) : f; }; // lane tailnet-names: …and the tailnet PAC its launch carried
     if (typeof own === 'string' && own.startsWith('/')) return engined(planned(own));
     // r4: an ephemeral's command runs with the file its browser was LAUNCHED with (marked when the keeper launched it) —
     // a different one would relaunch its Chrome (measured); a lease's session with machine.json (it never launches)
@@ -2963,6 +2984,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // one refusal later). Reproduced on a rolled kept directory; both ride the new record now (the mark + this machine's name
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
+      if (prev && prev.tailnet !== undefined) rec.tailnet = prev.tailnet; // lane tailnet-names: an ADOPTED daemon runs with its launch's view (a fresh launch below decides again)
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
       rec.egress = engineLaunch && engineLaunch.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port the launch view names
       if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { wrapped: true } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress r2: a WRAPPED launch's proxy switches ride it too, last — `wrapped` = its config keeps no proxy switch of the base file
@@ -2988,6 +3010,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane browser-propose: the same rule for the automation flag — rung D's spawn file carries it (browser-env); pairs
         // naming none keep the keeper's file as it was (an escaped bare command must see the same launch view)
         rec.automationFlag = pairsAutomationFlag(pairs);
+        rec.tailnet = await tailnetFor(p, { engine: !!engineLaunch, env: { ...rtEnv, ...pairsEnv(pairs) } }); // lane tailnet-names: the tailnet road (its PAC rides the launch's derived config; the pairs' env proxy wins too)
         // r4 LOW 5 (lane H) = lane P verify r2 F2 (the same measured finding, reached by both lanes; measured on
         // 0.38.1): the launch passes the idle the PAIRS name — every other client of this daemon (the agent's verbs, a
         // live view's `stream status`) runs under them, and a client whose idle differs from the daemon's RESTARTS it
@@ -4046,6 +4069,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const ew = engineProgramOf(p, buildEnv);
         providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: ew.program }), ...engineEnvOf(p, prow, buildEnv, null, quietLog) };
       }
+      // lane tailnet-names: the tailnet road — asked before the record exists (the door listens before Chrome reads its PAC)
+      const tn = await tailnetFor(p, { engine: !!buildEnv.engine || argvPrefix.length > 0, remote: !!p.host || !prow.starts });
       const ns = nsOf(profileId);
       const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)
       const rec = { profileId, ns, pid: null, starttime: null, socketDir: null, cdpUrl: null, state: 'starting', startedAt: now(), endedAt: null, lastError: null, stoppedBy: null, lastLeaseDroppedAt: null, startedBy: why,
@@ -4057,6 +4082,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // display fact reads the base file)
         automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag,
         quietLog }; // lane browser-stderr-pipe: launched with the quiet log switches (its config carries them)
+      rec.tailnet = tn; // lane tailnet-names: the stamp every call reads (displayed / the attach argv) — a different view relaunches
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
       if (prevRec && prevRec.mark) rec.mark = prevRec.mark;
@@ -4393,6 +4419,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     commit();
     const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? ENG.engineArgs(engineLaunch) : []; // lane engine-plugin: the engine's own arguments, censused by the builder (lane engine-spi-egress: + the keeper's proxy arguments when wrapped)
+    if (rec.tailnet && rec.tailnet.arg) engineArgs.push(rec.tailnet.arg); // lane tailnet-names: the keeper's tailnet PAC (never on an engine's launch) — IN through the builder
     // lane engine-spi-egress L1b r3: the second wall on THIS road (the launch verdict refused them first) — an engine argument that starts
     // another program (src/browser-engines.js LAUNCHER_SWITCHES) never reaches an argv
     // r4: on the argument's TRIMMED form (src/browser-engines.js switchFormOf — Chromium's own reading), and a padded argument refused too
@@ -7514,7 +7541,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     factView, factFor, pinnedBy, clearPin, removeVerdict, removeOnMachine, onChange, creditUserInput, // lane S2: THE browser fact, the delete's refuse-or-warn, the re-publish hook, the input receipt's credit
     holdersFor: (browserKey) => { ensureLoaded(); return holders(B.leasesOf(reg.leases, String(browserKey || ''), { children: true })); }, // lane H: THE holder rows of one conversation (the recorder arms only on a holder)
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
-    configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
+    configFileFor, machineConfigFile, tailnetOf, // takeover r3: the config a command on a browser this keeper runs is NAMED with; lane tailnet-names: tailnetOf = a browser's launch stamp (the audit's LAW 2 words)
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
     setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; wireDisplayKeeper(); }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions); lane browser-display-holders: its records read the holders, its person's stop reaches the keeper
     pictureSourceFor, xWindowFor, nativeDialogsFor, // lane browser-x-in-window (B2): the picture switch — the source verdict, the holder's X window, Chrome's own dialog windows over it

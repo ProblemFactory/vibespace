@@ -589,7 +589,7 @@ router.get('/api/browser/profiles/:id', (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const p = k.profile(req.params.id);
   if (!p) return res.status(404).json({ error: `no profile ${req.params.id}`, code: 'not-found' });
-  res.json({ profile: require('../browser-profiles.js').publicProfileView(p), leases: k.leasesOn(p.id), browser: k.browserOf(p.id) ? { ...k.browserOf(p.id), cdpUrl: undefined } : null });
+  res.json({ profile: require('../browser-profiles.js').publicProfileView(p), leases: k.leasesOn(p.id), browser: k.browserOf(p.id) ? { ...k.browserOf(p.id), cdpUrl: undefined, tailnet: require('../tailnet-reach.js').stampView(k.browserOf(p.id).tailnet) } : null }); // lane tailnet-names r4: the stamp's {on, mode, why} — never its arg (the PAC token)
 });
 router.delete('/api/browser/profiles/:id', async (req, res) => {
   if (refuseHost(req, res)) return;
@@ -1961,12 +1961,21 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     if (profileId && since > 0 && typeof k.egressRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
       try { const hosts = k.egressRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts, typeof k.egressEngineOf === 'function' ? k.egressEngineOf(profileId) : null) }; } catch { egressRefused = null; } // lane engine-spi-egress: an engine's own list by its name
     }
+    // lane tailnet-names (LAW 2): a navigation that FAILED on a tailnet host is told why THROUGH TAILSCALE, by name and by its
+    // cause (r2: the CLI's net::ERR_* — a certificate, a refused port, no answer; the plugin off, not signed in, not a device,
+    // this browser started before Tailscale was up, its own proxy won) — never «cannot resolve»; an agent's answer never lists
+    // the person's devices (audience 'agent'); a failure that is no network error (a dialog, a prompt) says nothing of Tailscale
+    let tailnet = null;
+    const netCause = typeof req.body?.netError === 'string' ? req.body.netError.slice(0, 80) : null; // r3: a CDP timeout (`timedOut`) is never a network cause
+    if (req.body?.ok === false && typeof req.body?.url === 'string' && netCause) {
+      try { const m = require('../server/tailnet-door.js').missFor(req.body.url.slice(0, 4096), { failed: true, cause: netCause, audience: 'agent', launched: profileId && typeof k.tailnetOf === 'function' ? k.tailnetOf(profileId) : undefined }); if (m) tailnet = { why: m.why, text: m.text }; } catch { tailnet = null; }
+    }
     // lane browser-viewport-answer (B-6dae ①): the agent's own `set viewport|device` — the page's size read AFTER it (or instead
     // of it: a pin ruled), ONE line the CLI prints and ONE trace row (the bridge's)
     const vpq = req.body?.viewport && typeof req.body.viewport === 'object' ? req.body.viewport : null;
     let viewport = null;
     if (vpq && ctx.browserViewport) { try { viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: typeof vpq.handle === 'string' ? vpq.handle.slice(0, 200) : '', argv: Array.isArray(vpq.argv) ? vpq.argv.slice(0, 16).map((x) => String(x).slice(0, 200)) : [], ran: vpq.ran !== false }); } catch { viewport = null; } }
-    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}) });
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(egressRefused ? { egressRefused } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE

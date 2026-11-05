@@ -117,9 +117,10 @@ export const ROWS = [
   ['src/server/browser-disk-run.js', 'own-tree', 3, null, DATA],
   ['src/server/browser-engines.js', 'user-path', 3, 'DOOR\\.blocked\\(', 'lane engine-spi-egress L1b: the program the OWNER names for an engine (plugin.<id>.executablePath — one stat + its first 4 bytes, the core\'s verdict; asked at the door first: a stalled mount is answered «blocked», never read) + its package\'s kernel.json access (data/plugins/<id>/, the source)'],
   ['src/server/browser-display-config.js', 'own-tree', 5, null, DATA], // lane engine-args-string r2: + the engine wrapper's own() check (lstat + read of <dataDir>/browser-env/display/engine-<id>.sh)
+  ['src/server/tailnet-door.js', 'own-tree', 1, null, DATA], // lane tailnet-names: its kept port (data/tailnet-door.json)
   ['src/server/browser-env.js', 'own-tree', 22, null, DATA],
   ['src/server/browser-installs.js', 'own-tree', 5, null, DATA],
-  ['src/server/browser-keeper.js', 'own-tree', 36, null, DATA], // lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records); lane engine-args-string: + one line of its OWN config file under data/browser-env/ the driver refused (ownConfigLine — the refusal's words)
+  ['src/server/browser-keeper.js', 'own-tree', 37, null, DATA], // lane tailnet-names: + the person's ~/.agent-browser/config.json (its own proxy wins over the tailnet PAC — the file machine.json is composed from); lane browser-daemon-survives-update: + its own launch's Chrome DevToolsActivePort (the boot's re-own); lane browser-takeover-queue: + data/browser-takeovers.json (the request records); lane engine-args-string: + one line of its OWN config file under data/browser-env/ the driver refused (ownConfigLine — the refusal's words)
   ['src/server/browser-kept.js', 'own-tree', 3, null, DATA],
   ['src/server/browser-trace.js', 'own-tree', 13, null, DATA],
   ['src/server/channel-api-cards.js', 'own-tree', 2, null, DATA],

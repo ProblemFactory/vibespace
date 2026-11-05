@@ -13,11 +13,16 @@
 //      machine in kernel mode: the MagicDNS row on ⇒ `sudo -n tailscale … set --accept-dns=true`, off ⇒ false
 //   ④ the hub's ssh host records: a tailnet name dials the plugin's IP (HostName + HostKeyAlias = the name) — ssh argv
 //      and the rsync transport string; any other name is untouched; the wiring line
+//   ④b lane tailnet-names: the first launch after a restart knows the names (the persisted table, ONE wait), the whole table
+//      routed (250 devices); r4 — EVERY INPUT OF THE ROAD REACHES THE DOOR through the hub's own wiring: the REAL settings
+//      store (src/routes/persistence.js) writing «Reach tailnet hosts from browsers» off / on and the plugin's stop ⇒ the
+//      door (follow(plugins)) closes / listens again on its kept port — the tip's broadcast-only wiring ⇒ RED
 //   ⑤ the row's DNS words in zh / ja (the cluster line verbatim)
 //   ⑥ MUTANTS (copies outside the tree): start without the apply, Log in without the flag, no boot replay of its own
 //      ⇒ ② / ② / ③ go RED
 // Run: node scripts/test-tailscale-dns.mjs   (in-process: a scratch HOME, fake tailscale/tailscaled/pgrep/sudo, no network)
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -97,7 +102,7 @@ exe(path.join(TSDIR, 'bin', 'tailscale'), `#!/bin/sh
 echo "$*" >> "${LOG}/cli.log"
 for a in "$@"; do
   case "$a" in
-    status) cat "${LOG}/status.json"; exit 0;;
+    status) while [ -f "${LOG}/status.slow" ]; do sleep 0.05; done; cat "${LOG}/status.json"; exit 0;;
     up) echo "To authenticate, visit:"; echo; echo "	https://login.tailscale.com/a/0abc123"; exit 0;;
     set) exit 0;;
   esac
@@ -189,6 +194,15 @@ let pmA;
   ok('tunnelLookup: a tailnet name answers from OUR daemon\'s status --json (full, bare, any case); a stranger null', pm.tunnelLookup('mac-mini.tail1a2b.ts.net')?.ip === '100.64.0.3' && pm.tunnelLookup('MAC-MINI')?.ip === '100.64.0.3' && pm.tunnelLookup('github.com') === null);
   const noTunnel = new PluginManager({ dataDir, plugins: [{ id: 'acme-plain', label: 'Plain', description: 'x', provides: [], create: () => ({ install() {}, start() {}, stop() {}, status() { return {}; } }) }] });
   ok('tunnelLookup: no tunnel member ⇒ null (never a throw)', noTunnel.tunnelLookup('mac-mini') === null);
+  // lane tailnet-names: tunnelReach — what a browser needs (src/tailnet-reach.js reads it), from the SAME status --json read
+  const reachOf = (m) => (typeof m.tunnelReach === 'function' ? m.tunnelReach() : undefined); // a base without the verb reds BY NAME
+  const rc0 = lines('cli.log').length, rr = reachOf(pm);
+  ok('tunnelReach (lane tailnet-names): up · its mode · NOT signed in (NeedsLogin) · the peers without Self, Self apart (r2: a device too) · the suffix (Self\'s, the fixture names none) · the proxy ports — no new CLI call', rr && rr.up === true && rr.mode === 'userspace' && rr.loggedIn === false && rr.state === 'NeedsLogin' && rr.browsers === true && rr.peers.map((p) => p.short).join() === 'mac-mini' && rr.self?.short === 'pod-a' && rr.suffix === 'tail1a2b.ts.net' && rr.ports.socks === 1055 && rr.ports.http === 1056 && lines('cli.log').length === rc0, rr);
+  const kept0 = (pm._rec('tailscale') || {}).tailnetTable;
+  ok('tunnelReach: the table is PERSISTED with its time (r2: the peers + Self + the suffix + the state — a stopped plugin\'s words, a restarted hub\'s first launch); no tunnel member ⇒ null', !!kept0 && kept0.at > 0 && kept0.state === 'NeedsLogin' && kept0.self?.short === 'pod-a' && (kept0.peers || []).map((p) => p.short).join() === 'mac-mini' && (rr.known || []).map((p) => p.short).join() === 'mac-mini,pod-a' && reachOf(noTunnel) === null, kept0);
+  { const rk = PS.PLUGIN_SETTINGS.tailscale.rows.some((x) => x.key === 'reachBrowsers') ? rowKey('reachBrowsers') : 'plugin.tailscale.reachBrowsers'; // a base without the row reds BY NAME
+    const S = pm._settings.read(); S[rk] = false; const off = reachOf(pm) || {}; delete S[rk];
+    ok('tunnelReach: the «Reach tailnet hosts from browsers» row off ⇒ browsers:false (default on)', off.browsers === false && (reachOf(pm) || {}).browsers === true && (PS.PLUGIN_SETTINGS.tailscale.rows.find((x) => x.key === 'reachBrowsers') || {}).default === true); }
   ok('the settings row: plugin.tailscale.magicDns, boolean, default off, re-applied by the plugin', (() => { const row = PS.PLUGIN_SETTINGS.tailscale.rows.find((x) => x.key === 'magicDns'); return row && row.type === 'boolean' && row.default === false && row.apply === 'plugin-config' && PS.checkPluginRows(PS.PLUGIN_SETTINGS.tailscale.rows, { builtin: true }).length === 0; })());
 }
 
@@ -262,6 +276,140 @@ console.log('⑤ the row\'s DNS words (zh / ja)');
   ok('ja: every line translated (no English left)', [{ why: 'cluster' }, { why: 'userspace' }, { why: 'cluster', rewritten: true }].every((d) => /[ぁ-んァ-ン一-龯]/.test(ja(d))) && ja({ acceptDns: true }) === 'DNS：Tailscale MagicDNS', [ja({ why: 'cluster' }), ja({ why: 'userspace' })]);
   const zhD = dict('zh'), jaD = dict('ja'), row = PS.PLUGIN_SETTINGS.tailscale.rows.find((x) => x.key === 'magicDns');
   ok('the MagicDNS row\'s label + description in zh and ja', [row.label, row.description].every((s) => zhD[s] && jaD[s]));
+}
+
+console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART KNOWS THE NAMES (the table persisted with its time)');
+{
+  let DOOR = null; try { DOOR = require(path.join(REPO, 'src/server/tailnet-door.js')); } catch { DOOR = null; }
+  const statusFile = path.join(LOG, 'status.json'), was = fs.readFileSync(statusFile, 'utf8');
+  const RUN = (peers) => JSON.stringify({ BackendState: 'Running', MagicDNSSuffix: 'tail1a2b.ts.net', Self: { DNSName: 'pod-a.tail1a2b.ts.net.', TailscaleIPs: ['100.64.0.2'] }, Peer: Object.fromEntries(peers.map((n, i) => [`k${i}`, { DNSName: `${n}.tail1a2b.ts.net.`, TailscaleIPs: [`100.64.${(10 + i) >> 8}.${(10 + i) & 255}`] }])) });
+  const quietLog = { log() { }, warn() { }, error() { } };
+  const pacPath = (d) => { try { return new URL(d.url()).pathname; } catch { return '/tailnet.pac'; } }; // r3: the door's token path (an r2 door: its old path — red by name)
+  const pacOf = (d) => new Promise((resolve) => { if (!d.port()) return resolve('NO DOOR (it does not listen)'); const r = http.request({ host: '127.0.0.1', port: d.port(), path: pacPath(d) }, (res) => { let b = ''; res.on('data', (x) => { b += x; }); res.on('end', () => resolve(b)); }); r.on('error', (e) => resolve('ERR ' + e.message)); r.end(); });
+  const fresh = (pm) => (typeof pm.tunnelReachFresh === 'function' ? (ms) => pm.tunnelReachFresh(ms) : null);
+  /** a RESTARTED hub (a new manager over the same data dir, `def` = the plugin) → its door's first launch + the PAC Chrome fetches
+   *  at once (`took` = both: r3 — they share ONE wait) */
+  const firstLaunch = async (def, o = {}) => {
+    const pm = manager(def, { settings: { mode: 'userspace' } });
+    const d = DOOR.create({ reach: () => pm.tunnelReach(), fresh: fresh(pm), log: o.log || quietLog, ...(o.settleMs ? { settleMs: o.settleMs } : {}) });
+    const t0 = Date.now(); const v = await d.launch({ label: 'restart' });
+    const pac = await pacOf(d);
+    const took = Date.now() - t0;
+    return { pm, d, v, took, pac };
+  };
+  fs.writeFileSync(statusFile, RUN(['mac-mini']));
+  pmA.status('tailscale'); // OUR daemon's read: the table + its time persisted
+  const kept = (pmA._rec('tailscale') || {}).tailnetTable;
+  ok('the table persisted with its time (data/plugins.json: suffix, state, Self, peers)', !!kept && kept.at > 0 && kept.state === 'Running' && kept.suffix === 'tail1a2b.ts.net' && kept.self?.short === 'pod-a' && (kept.peers || []).map((p) => p.short).join() === 'mac-mini', kept);
+  const pm0 = manager(REAL, { settings: { mode: 'userspace' } });
+  const r0 = pm0.tunnelReach ? pm0.tunnelReach() : null;
+  ok('restarted: before any read the persisted table answers AT ONCE — stale but known (signed in, Self, mac-mini, its time); «not yet read» is never «not signed in»', !!r0 && r0.loggedIn === true && r0.stale === true && r0.at === kept.at && r0.self?.short === 'pod-a' && (r0.peers || []).map((p) => p.short).join() === 'mac-mini', r0);
+  if (!DOOR) ok('src/server/tailnet-door.js exists (the restarted hub\'s first launch)', false, 'missing');
+  else {
+    // the tailnet gained a device (nas) since the hub's last read
+    fs.writeFileSync(statusFile, RUN(['mac-mini', 'nas']));
+    const L = await firstLaunch(REAL);
+    ok('restarted: the FIRST launch\'s PAC (fetched at once, as Chrome does — it keeps it for the browser\'s life) carries nas + nas.<suffix> + Self — the launch waited for ONE bounded status read', L.v.on && /"nas":1/.test(L.pac) && /"nas\.tail1a2b\.ts\.net":1/.test(L.pac) && /"pod-a":1/.test(L.pac) && !/names as of/.test(L.pac), L.pac);
+    await L.d.close();
+    const pmS = manager(REAL, { settings: { mode: 'userspace' } });
+    const dS = DOOR.create({ reach: () => pmS.tunnelReach(), fresh: fresh(pmS), log: quietLog });
+    fs.writeFileSync(statusFile, RUN(['mac-mini', 'nas', 'nas-b']));
+    let seen = null;
+    const stub = (req, res, next) => { seen = dS.reach(); next(Object.assign(new Error('getaddrinfo ENOTFOUND nas-b'), { code: 'ENOTFOUND' })); };
+    const out = await new Promise((resolve) => { const res = { headersSent: false, writeHead(c) { this.code = c; }, end(b) { resolve({ code: this.code, body: String(b || '') }); } }; dS.embedded(stub)({ url: '/proxy/https://nas-b:8006/' }, res, (err) => resolve({ next: err && err.code })); });
+    ok('restarted: the FIRST /proxy request waits for the read (bounded) — its road chosen over the live table (nas-b a device, signed in) — and never says «not signed in — Log in»', !!seen && seen.loggedIn === true && (seen.peers || []).some((p) => p.short === 'nas-b') && !/not signed in|Log in/.test(out.body || ''), { seen: seen && { loggedIn: seen.loggedIn, peers: (seen.peers || []).map((p) => p.short) }, out });
+    // a status read that does not answer: the bound, then the persisted table + its time. (②'s start() left a plugins notify
+    // 1.5 s behind it: its snapshot runs the plugin's SYNC status() — execFileSync, not this lane's — which a hung CLI holds
+    // for its 5 s timeout, the whole event loop with it; silenced here so the bound measured is the async read's)
+    pmA._notify = () => { };
+    fs.writeFileSync(path.join(LOG, 'status.slow'), '1');
+    const said = [];
+    const T = await firstLaunch(REAL, { settleMs: 60, log: { log: (l) => said.push(l) } });
+    const mT = T.d.missFor('https://mac-mini:8006/', { failed: true, cause: 'ETIMEDOUT', via: 'embedded' });
+    fs.rmSync(path.join(LOG, 'status.slow'), { force: true });
+    ok('a status read that does not answer: the launch AND the PAC right after it wait only ONE bound together (r3: the PAC never waits again; never the CLI\'s 5 s, under even the production bound DOOR.SETTLE_MS) and the PERSISTED table serves — the PAC lists the names + «names as of <when>», the console says it ONCE, the words carry it', T.v.on && T.took < DOOR.SETTLE_MS && /"mac-mini":1/.test(T.pac) && /\/\/ names as of \d{4}-/.test(T.pac) && said.filter((l) => /names as of/.test(l)).length === 1 && /\(names as of \d{4}-\d\d-\d\d \d\d:\d\d UTC\)$/.test((mT && mT.text) || ''), { took: T.took, pac: T.pac.slice(0, 400), said, mT });
+    await T.d.close(); await dS.close();
+    // MUTANTS: the r1 tip's sync reach (no wait for the read) ⇒ the first PAC lacks the new device; no persisted table ⇒ a
+    // restarted hub whose read does not answer knows no names
+    const MR = mutantCopies('tailscale-reach', REPO);
+    const REL = 'src/plugins/tailscale.js', srcR = fs.readFileSync(path.join(REPO, REL), 'utf8');
+    const A1 = 'if (p) await Promise.race([p, new Promise(', A2 = "    { const t = h.peek().tailnetTable; if (t && typeof t === 'object' && Number(t.at) > 0) {";
+    ok('CONTROL the two edits apply once each', srcR.split(A1).length === 2 && srcR.split(A2).length === 2);
+    fs.writeFileSync(statusFile, RUN(['mac-mini', 'nas', 'nas-b', 'nas-c']));
+    const LS = await firstLaunch(MR.load(REL, srcR.replace(A1, 'if (p && false) await Promise.race([p, new Promise('), 'sync-reach'));
+    ok('MUTANT the r1 tip\'s sync reach (no wait for the read) ⇒ the first PAC lacks the new device (nas-c) ⇒ RED', LS.v.on && !/"nas-c":1/.test(LS.pac), LS.pac);
+    await LS.d.close();
+    fs.writeFileSync(path.join(LOG, 'status.slow'), '1');
+    const LP = await firstLaunch(MR.load(REL, srcR.replace(A2, '    { const t = null; if (t) {'), 'no-persist'), { settleMs: 60 });
+    fs.rmSync(path.join(LOG, 'status.slow'), { force: true });
+    ok('MUTANT no persisted table ⇒ a restarted hub whose status read does not answer launches with NO names ⇒ RED', !/"mac-mini":1/.test(LP.pac), LP.pac.slice(0, 300));
+    await LP.d.close();
+    // r3 N1: EVERY CURRENT DEVICE IS ROUTED — a 250-device tailnet (node-key order, nothing to do with names): the plugin keeps
+    // the WHOLE table (and persists it), the PAC lists dev237, its road is the plugin's; a copy with r2's 200 cap ⇒ dev237 DIRECT
+    const many = Array.from({ length: 250 }, (_, i) => `dev${i}`);
+    fs.writeFileSync(statusFile, RUN(many));
+    let TRm = null; try { TRm = require(path.join(REPO, 'src/tailnet-reach.js')); } catch { TRm = null; }
+    const routed = async (def) => {
+      const pm = manager(def, { settings: { mode: 'userspace' } });
+      pm.status('tailscale'); // OUR daemon's read: the table + its time
+      const d = DOOR.create({ reach: () => (typeof pm.tunnelReach === 'function' ? pm.tunnelReach() : null), fresh: fresh(pm), log: quietLog });
+      const v = await d.launch({ label: 'many' }); const pac = await pacOf(d); await d.close();
+      const rr = (typeof pm.tunnelReach === 'function' ? pm.tunnelReach() : null) || {}; // a base without the verb reds BY NAME
+      return { v, pac, peers: (rr.peers || []).length, kept: (((pm._rec('tailscale') || {}).tailnetTable || {}).peers || []).length, road: TRm ? TRm.routeFor('https://dev237:8006/', rr) : 'no module' };
+    };
+    const W = await routed(REAL);
+    ok('r3 N1 — EVERY CURRENT DEVICE IS ROUTED: a 250-device status ⇒ the plugin keeps (and persists) all 250, the PAC lists dev237 (past r2\'s 200 cap) by name and FQDN, its road is the plugin\'s (socks)',
+      W.v.on && W.peers === 250 && W.kept === 250 && /"dev237":1/.test(W.pac) && /"dev237\.tail1a2b\.ts\.net":1/.test(W.pac) && /"dev249":1/.test(W.pac) && W.road === 'socks', { peers: W.peers, kept: W.kept, road: W.road, dev237: /"dev237":1/.test(W.pac) });
+    const A3 = '      names.peers = DNS.hostRecords({ Peer: j && j.Peer }); // the OTHER devices';
+    ok('CONTROL the cap edit applies once', srcR.split(A3).length === 2);
+    const WC = await routed(MR.load(REL, srcR.replace(A3, '      names.peers = DNS.hostRecords({ Peer: j && j.Peer }).slice(0, 200); // the OTHER devices'), 'cap-200'));
+    ok('MUTANT r2\'s 200 cap on the plugin\'s table ⇒ dev237 not in the PAC, its road DIRECT ⇒ RED', !/"dev237":1/.test(WC.pac) && WC.road === 'direct', { peers: WC.peers, road: WC.road });
+    // r4 N1: EVERY INPUT OF THE ROAD REACHES THE DOOR — the hub's own wiring, never sync() by hand: the REAL settings store
+    // (src/routes/persistence.js — its write hook hands every write to plugins.onSettingsWrite, as server.js does), a
+    // PluginManager over it (the wiring's `settings`) with the real plugin, the shared door through follow(plugins)
+    // (mounts-plugins-wiring's ONE line); the row written as the client writes it (POST /api/settings ⇒ writeSettings)
+    fs.writeFileSync(statusFile, RUN(['mac-mini']));
+    const fetchUrl = (u) => new Promise((resolve) => { if (!u) return resolve({ status: 0, body: 'no url' }); const r = http.get(u, (res) => { let b = ''; res.on('data', (x) => { b += x; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); }); r.on('error', (e) => resolve({ status: 0, body: e.code || e.message })); });
+    const wired = async (D, tag) => {
+      const PR = require(path.join(REPO, 'src/routes/persistence.js'));
+      const DW = fs.mkdtempSync(path.join(tmp, `wire-${tag}-`));
+      let pmW = null;
+      PR.setup({ dataDir: DW, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, onSettingsWrite: (next, prev) => { try { pmW.onSettingsWrite(next, prev); } catch { } } });
+      pmW = new PluginManager({ dataDir: DW, plugins: [REAL], resolvConf: plant('k8s.conf', K8S), resolvBackup: NO_BACKUP, settings: { read: () => PR.router.readSettings(), patch: (p) => PR.router.patchSettings(p) } });
+      pmW.status('tailscale'); // OUR daemon's read: the table
+      if (!D || typeof D.follow !== 'function') return { out: { missing: 'tailnet-door.js follow(plugins) — the door hears the plugin broadcast only' } };
+      const d = D.follow(pmW, { dataDir: DW, log: quietLog });
+      const settled = async () => { if (d.synced) await d.synced(); }; // the follow the WRITE started (never one of its own)
+      const v = await d.launch({ label: 'Wired' });
+      const out = { on: v.on, port0: d.port(), url0: d.url() };
+      out.held0 = (await fetchUrl(out.url0)).status;
+      PR.router.patchSettings({ [rowKey('reachBrowsers')]: false }); await settled();
+      out.rowOff = d.port(); out.heldOff = (await fetchUrl(out.url0)).status;
+      const m = d.missFor('https://mac-mini:8006/', { failed: true, cause: 'ERR_PROXY_CONNECTION_FAILED', launched: { arg: 'x', mode: 'userspace', why: null } });
+      out.words = m ? { why: m.why, text: m.text } : null;
+      PR.router.patchSettings({ [rowKey('reachBrowsers')]: true }); await settled();
+      const held = await fetchUrl(out.url0);
+      out.rowOn = d.port(); out.url1 = d.url(); out.heldOn = held.status; out.lists = /"mac-mini":1/.test(held.body);
+      return { d, pmW, out };
+    };
+    const WR = await wired(DOOR, 'real');
+    const w = WR.out;
+    ok('r4 N1 — THE ROW REACHES THE DOOR through the hub\'s own wiring (the REAL settings store ⇒ plugins.onSettingsWrite ⇒ plugins.watch ⇒ the door; never sync() by hand): «Reach tailnet hosts from browsers» OFF ⇒ the door closes at once (the held PAC refused); a device opened then says «reaching Tailscale devices from browsers is off: turn on «Reach tailnet hosts from browsers»…» (r5: the person\'s words) — never «is that device online»; ON again ⇒ it listens on the SAME kept port and the browser\'s held PAC answers (the devices listed)',
+      w.on === true && !!w.port0 && w.held0 === 200 && w.rowOff === null && w.heldOff === 0 && !!w.words && w.words.why === 'setting' && /reaching Tailscale devices from browsers is off: turn on «Reach tailnet hosts from browsers»/.test(w.words.text) && !/online|road/.test(w.words.text)
+        && w.rowOn === w.port0 && w.url1 === w.url0 && w.heldOn === 200 && w.lists, w);
+    const dsrc = fs.readFileSync(path.join(REPO, 'src/server/tailnet-door.js'), 'utf8'), WA = '  unfollow = plugins.watch(() => roadChanged());';
+    ok('CONTROL the tip-wiring edit applies once', dsrc.split(WA).length === 2);
+    const DM = dsrc.includes(WA) ? MR.load('src/server/tailnet-door.js', dsrc.replace(WA, "  unfollow = plugins.watch((ev) => { if (ev && ev.type === 'plugins-updated') roadChanged(); }); // r3: the broadcast only"), 'tip-wiring') : null;
+    const WM = DM ? await wired(DM, 'tip') : null;
+    ok('MUTANT the tip\'s wiring (r3: only the plugin broadcast reaches the door) ⇒ the row OFF leaves the door listening ⇒ RED', !!WM && WM.out.rowOff !== null && WM.out.heldOff === 200, WM && WM.out);
+    if (WM && WM.d) await WM.d.close();
+    // the plugin's state: its stop (the plugin's own verb ⇒ its broadcast ⇒ watch) closes the door — the same ONE subscription
+    if (WR.d) { WR.pmW.stop('tailscale'); await (WR.d.synced ? WR.d.synced() : null); }
+    const stopped = WR.d ? { port: WR.d.port(), held: (await fetchUrl(w.url0)).status } : null;
+    ok('r4 N1 — THE PLUGIN\'S STATE REACHES THE DOOR through the same subscription: the plugin stopped (its own verb, its broadcast) ⇒ the door closes (the held PAC refused)', !!stopped && stopped.port === null && stopped.held === 0, stopped);
+    if (WR.d) await WR.d.close();
+  }
+  fs.writeFileSync(statusFile, was);
 }
 
 console.log('⑥ MUTANTS: copies of src/plugins/tailscale.js outside the tree');

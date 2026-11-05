@@ -252,6 +252,11 @@ userTodos?.setPluginGate?.((id) => !!(plugins.defs()[id] || {}).provides?.includ
 // port-forward can publish a forward publicly via the frp plugin (B-0b60)
 portForwards.plugins = plugins;
 hosts.nameLookup = (name) => plugins.tunnelLookup(name); // lane tailscale-plugin-pod-dns: tailnet names for ssh hosts, never the container's resolver
+// lane tailnet-names: browsers reach tailnet hosts BY NAME through the hub's tailnet door (the PAC, the kernel door, the in-page
+// browser's agents, LAW 2's words) — the plugin asked through tunnelReach (+ tunnelReachFresh: a stale table's one bounded read)
+// only; the container's resolver never touched. r4: follow() — EVERY input of the road reaches the door through ONE
+// subscription (plugins.watch: the plugin's every broadcast + its rows written through the settings store)
+require('./tailnet-door.js').follow(plugins, { dataDir: path.join(rootDir, 'data'), lang: () => require('./owner-facts.js').tray().lang });
 // Dropline voice input (q-029 P0): THE vendor module (src/server/dropline-client.js) + the hub proxy /api/voice/*;
 // the `dropline` row's Test = one GET /v1/me through the same module
 // P1 (lane voice-p1-oauth-teach): the OAuth tier (a `public` consent flow; the pair in data/dropline-oauth.json, 0600;

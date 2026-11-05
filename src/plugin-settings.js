@@ -129,6 +129,9 @@ const PLUGIN_SETTINGS = {
       // lane tailscale-plugin-pod-dns: the container's resolver is never Tailscale's unless asked here (PURE src/tailscale-dns.js)
       { key: 'magicDns', type: 'boolean', default: false, apply: 'plugin-config',
         label: t('Let Tailscale set this machine\'s DNS (MagicDNS)'), description: t('Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.') },
+      // lane tailnet-names: a browser here opens a tailnet machine by its name (PURE src/tailnet-reach.js) — read at a launch
+      { key: 'reachBrowsers', type: 'boolean', default: true, apply: 'server',
+        label: t('Reach tailnet hosts from browsers'), description: t('On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine\'s DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once.') },
       { key: 'upFlags', type: 'string', default: '', apply: 'server', migrate: { from: 'upFlags' },
         label: t('tailscale up flags'), description: t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.') },
     ],

@@ -1073,7 +1073,9 @@ async function runPage(c) {
     const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
     // int347 (the alert race): the verb's OWN daemon printed a page dialog line ⇒ the audit waits for the watch to have it
     const daemonSaw = DS && dlg && dlg.watched && !dialogVerb && !dialogHit ? DS.daemonDialogLine(outText + '\n' + errText) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
+    // lane tailnet-names r2: a failed navigation's own network error (Chrome's net::ERR_*) — the audit's words follow its cause
+    const navErr = navVerb && navUrl && code !== 0 ? ((/net::(ERR_[A-Z0-9_]+)/.exec(outText + '\n' + errText) || [])[1] || null) : null;
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(navErr ? { netError: navErr } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -1145,6 +1147,8 @@ async function runPage(c) {
     if (navVerb && au && !au._failed && au.proposalRejected && au.proposalRejected.text) console.error(`note: ${au.proposalRejected.text} [proposal_rejected]`);
     // verify r1 V1 (lane browser-propose): the sites a wrapped browser's list refused while this verb ran — by name, any page verb
     if (au && !au._failed && au.egressRefused && au.egressRefused.text) console.error(`note: ${au.egressRefused.text} [egress_refused]`);
+    // lane tailnet-names (LAW 2): a navigation that failed on a tailnet host — why, through Tailscale, by name
+    if (navVerb && au && !au._failed && au.tailnet && au.tailnet.text) console.error(`note: ${au.tailnet.text} [tailnet]`);
     // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the
     // browser) — the binary's own words name its hidden CLI; the way out is this tool's
     if (code !== 0 && /\btab_gone\b/.test(outText + errText)) console.error('note: your tab is gone (it was closed) — `vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one [tab_gone]');

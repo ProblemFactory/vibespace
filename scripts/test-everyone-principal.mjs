@@ -132,7 +132,10 @@ const MODEL_RE = /\b(PRINCIPAL_KINDS|WHO_KINDS|OWNER_KINDS)\s*=/;
 // int333: lane key-instance-scope's src/lib/automation-reach.js matches *-reach.js by NAME but is not an agent-principal / ALL
 // AGENTS surface — it is the words of a KEY GRANT's reach over conversations (opened | its Task Groups | the whole instance;
 // the "all" here is 整个 VibeSpace), the rule PURE src/automation-keys.js (reachOf / reachVerdict). Exempt, with the reason.
-const MODEL_EXEMPT = { 'src/lib/automation-reach.js': "a key grant's reach over CONVERSATIONS (opened | its Task Groups | the whole instance), not an agent-principal surface — the rule is PURE automation-keys (lane key-instance-scope)" };
+// lane tailnet-names: src/tailnet-reach.js matches *-reach.js by NAME too — it is a browser's NETWORK road to a device on the
+// person's tailnet (the Tailscale plugin's own peer table), no principal kinds, no grant, nobody's access. Exempt, with the reason.
+const MODEL_EXEMPT = { 'src/lib/automation-reach.js': "a key grant's reach over CONVERSATIONS (opened | its Task Groups | the whole instance), not an agent-principal surface — the rule is PURE automation-keys (lane key-instance-scope)",
+  'src/tailnet-reach.js': "a browser's NETWORK road to a device on the person's tailnet (the Tailscale plugin's peer table) — no principal, no grant, not an agent-principal surface (lane tailnet-names)" };
 const candidates = tracked.filter((f) => (MODEL_RE.test(read(f)) || /(^|\/|-)(acl|reach)\.js$/.test(f)) && !MODEL_EXEMPT[f]);
 const unlisted = candidates.filter((f) => !MODELS.some((m) => m.file === f));
 ok(!unlisted.length && candidates.length === MODELS.length, `every reach / ACL model is a row (${candidates.length} grep-derived: ${candidates.join(', ')})`, unlisted.length ? `no row: ${unlisted.join(', ')}` : MODELS.filter((m) => !candidates.includes(m.file)).map((m) => m.file));

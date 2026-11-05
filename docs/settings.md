@@ -500,6 +500,7 @@ now fails the build if a category ever goes unlisted again.
 |---------|------|---------|-------------|
 | `plugin.tailscale.mode` | enum | `auto` | **Networking** — Auto uses the kernel tunnel when /dev/net/tun is usable, else userspace (reach tailnet hosts through SOCKS5). A change reconnects a running Tailscale; the login persists. |
 | `plugin.tailscale.magicDns` | boolean | `false` | **Let Tailscale set this machine's DNS (MagicDNS)** — Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance. |
+| `plugin.tailscale.reachBrowsers` | boolean | `true` | **Reach tailnet hosts from browsers** — On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine's DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once. |
 | `plugin.tailscale.upFlags` | string | `''` | **tailscale up flags** — Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored. |
 <!-- /settings-table -->
 
