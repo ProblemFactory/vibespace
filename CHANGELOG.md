@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.380 — 2026-11-04
+
+### Changed
+- In the desktop previews, a waiting window blinks in its own colour (green blinks green, red blinks red); the blink itself is unchanged.
+
 ## 2.369.379 — 2026-11-04
 
 ### Fixed
