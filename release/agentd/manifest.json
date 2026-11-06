@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "version": "2.369.382",
-  "sha256": "6f529dfa69d22bf003374d0e9b1764e4d3424d6ac78e5dd73ebfa9a4ca0f60d5",
+  "version": "2.369.383",
+  "sha256": "b33bfef333f4547e994c60f70b083ec43c43e68d6ce12f5620b102eab270236f",
   "keyId": "634fa9b38a807bd4",
-  "sig": "DS32rbtULQMU7s2A5CiFSRgz2WTUsNF9u3vvBtF3yPTY7RbwM31ue9//yhfLjtvk/wF9leTnFCa03XQwVQw2AA==",
+  "sig": "mTkqrVBiE6yIU7y9TBNNFtjVb+9/0ix6KMk5t3psmrfagj8+O8oqNeJ5OZbdlO4r6Nay9flF7G6UcSEX4cSSDg==",
   "chain": [],
   "keys": [
     {
