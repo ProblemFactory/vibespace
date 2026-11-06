@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.383 — 2026-11-05
+
+### Changed
+- When your company updates its custom browser kernel, VibeSpace updates it within a few minutes, with no restart.
+- A browser that is already open keeps its kernel; the next browser you start uses the new one.
+
 ## 2.369.382 — 2026-11-05
 
 ### Added
