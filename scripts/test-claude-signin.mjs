@@ -434,6 +434,10 @@ await leg('⑰', async () => {
   const alive = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.split(') ')[1][0] !== 'Z' ? 'alive' : 'zombie'; } catch { return 'gone'; } };
   const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
   const descendants = (pid) => { const out = []; const walk = (p) => { for (const c of childrenOf(p)) { out.push(c); walk(c); } }; walk(pid); return out; };
+  const comm = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.indexOf('(') + 1, st.lastIndexOf(')')); } catch { return 'gone'; } };
+  // B-71a1: the stand-in prints its screen with `cat`, then execs sleep — a tree read the instant the prompt shows can hold the
+  // printer, which then ends BY ITSELF (Node 22 under a 4-cpu load: 3 of 20). A tree is judged once it is settled: only the stand-in left
+  const settled = (pid) => until(() => { const k = descendants(pid); return k.length >= 1 && k.every((c) => comm(c) === 'sleep') && k; }, 5000).then((k) => k || descendants(pid));
   const dir = fs.mkdtempSync(path.join(tmpRoot, 'real-'));
   const capFile = path.join(dir, 'screen.bin'); fs.writeFileSync(capFile, CAP_SCREEN);
   // the fake `claude auth login --claudeai`: prints the capture (or an unknown screen), reads the code, writes the credential, exits 0
@@ -493,13 +497,14 @@ process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
     let twinOut = ''; twin.onData((d) => { twinOut += d; });
     await until(() => /Paste code here/.test(twinOut), 5000);
     const mine = o._runs.get('acc-t1').pty.pid, mineKids = descendants(mine);
-    const theirs = other._runs.get('acc-t2').pty.pid, theirKids = descendants(theirs);
-    const twinKids = descendants(twin.pid);
+    const theirs = other._runs.get('acc-t2').pty.pid, theirKids = await settled(theirs);
+    const twinKids = await settled(twin.pid);
+    const seen = new Map([twin.pid, ...twinKids, theirs, ...theirKids].map((q) => [q, comm(q)])); // the names as settled — a red names what went
     await until(() => o.get('acc-t1').phase === 'failed', 3000);
     await sleep(400);
     ok(o.get('acc-t1').phase === 'failed' && [mine, ...mineKids].every((p) => alive(p) !== 'alive'), '⑰ the TTL ends its own run: its helper + grandchild gone', [mine, ...mineKids].map(alive));
-    ok([twin.pid, ...twinKids].every((p) => alive(p) === 'alive') && twinKids.length >= 1, '⑰ a TTL never kills another PTY on the SAME account dir (the same helper script, the same config dir)', [twin.pid, ...twinKids].map(alive));
-    ok([theirs, ...theirKids].every((p) => alive(p) === 'alive') && other.get('acc-t2').phase === 'waiting-code', '⑰ …nor another account\'s run', [theirs, ...theirKids].map(alive));
+    ok([twin.pid, ...twinKids].every((p) => alive(p) === 'alive') && twinKids.length >= 1, '⑰ a TTL never kills another PTY on the SAME account dir (the same helper script, the same config dir)', [twin.pid, ...twinKids].map((p) => `${seen.get(p)}:${alive(p)}`));
+    ok([theirs, ...theirKids].every((p) => alive(p) === 'alive') && other.get('acc-t2').phase === 'waiting-code', '⑰ …nor another account\'s run', [theirs, ...theirKids].map((p) => `${seen.get(p)}:${alive(p)}`));
     try { twin.kill('SIGKILL'); } catch { }
     other.cancel('acc-t2');
   }
