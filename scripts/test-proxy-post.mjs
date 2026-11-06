@@ -79,7 +79,10 @@ ok('non-proxy routes still get parsed JSON bodies', l.parsed && l.parsed.a === 1
 const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
 // lane webhook-l1-server: the skip is ONE pattern now (/proxy/ + the webhook door + its pairing route read their own bytes)
 ok('server.js json parser skips /proxy/', /OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv) && /OWN_BODY_RE\.test\(req\.path\) \? next\(\) : jsonBody/.test(sv));
-ok('unblocker still mounted AFTER auth (no open proxy)', sv.indexOf('auth.middleware()') < sv.indexOf('app.use(unblocker)'));
+// lane tailnet-names mounts it through the tailnet door (`app.use(require('./src/server/tailnet-door.js').embedded(unblocker))`):
+// the mount is found either way — a vanished mount still reads -1 and fails
+const unblockerAt = sv.search(/app\.use\((?:require\('\.\/src\/server\/tailnet-door\.js'\)\.embedded\()?unblocker\)/);
+ok('unblocker still mounted AFTER auth (no open proxy)', unblockerAt >= 0 && sv.indexOf('auth.middleware()') < unblockerAt);
 
 target.close(); proxySrv.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
