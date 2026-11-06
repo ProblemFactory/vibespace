@@ -15,6 +15,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - The Outbox no longer opens blank when you open it again after closing it.
+- Choosing «Resume all» on your phone after the server restarts no longer loses your desktops' window positions; each conversation reopens where it was.
+- A desktop you have not opened since the page loaded shows in its preview how many windows it holds, even those without a place yet.
+- If a save would lose window positions, the server keeps them and the page tells you once.
 
 ## 2.369.381 — 2026-11-05
 
