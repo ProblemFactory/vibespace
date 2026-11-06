@@ -223,8 +223,17 @@ await parityAll(uh, ix, 'after a remote harvest appended into an OLD month (a re
 uh.ingestRemoteEvents('host-7', 'Seven', [remote(3, T(2026, 9, 21)), remote(4, T(2026, 9, 22))].join('\n') + '\n');
 await parityAll(uh, ix, 'after a push that lands on a torn line (the worker re-reads from its mark)');
 {
-  const rids = new Set(uh._loadEvents().map((e) => e.rid));
-  ok(!rids.has('h:host-7:rr_3') && rids.has('h:host-7:rr_4'), '…and the torn fragment swallowed exactly the first pushed row (memory\'s line rule — the parity above says the index agrees)');
+  // int382 seam: the rows are asked of the WHOLE ledger — hot or cold (ledgerKnowsId: the hot ids, then the cold rows' hashes,
+  // whatever the row's ts) — never of _loadEvents()'s HOT window, which reaches LEDGER_WINDOW_DAYS (45) back from TODAY: rr_4
+  // (2026-09-22) left that window at 2026-11-06T00:00Z and the leg went red on every tree. No clock in the fixture's answer now.
+  uh._loadEvents();
+  const knows = (k) => uh.ledgerKnowsId('h:host-7:rr_' + k);
+  ok(!knows(3) && knows(4), '…and the torn fragment swallowed exactly the first pushed row (memory\'s line rule — the parity above says the index agrees)');
+  // THE CONTROL: the same ledger read with a 1-day window (every fixture row cold) — the OLD read (the hot set) misses rr_4, red by
+  // name; the whole-ledger ask still finds rr_4 and still not rr_3
+  const narrow = new UsageHistory({ dataDir: data, homeDir: home }); narrow.ledgerWindowMs = 864e5;
+  const hotRids = new Set(narrow._loadEvents().map((e) => e.rid));
+  ok(!hotRids.has('h:host-7:rr_4') && narrow.ledgerKnowsId('h:host-7:rr_4') && !narrow.ledgerKnowsId('h:host-7:rr_3'), 'CONTROL (the date-free ask): with a 1-day window every fixture row is cold — the old hot-set read misses rr_4 (the 2026-11-06 red, by name); ledgerKnowsId still finds rr_4 and not rr_3');
 }
 // a push that never arrived (the index detached for one append)
 uh.setIndex(null);
