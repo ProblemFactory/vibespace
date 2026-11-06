@@ -2075,7 +2075,7 @@ await (async () => {
         const frac = (v, room) => (/%$/.test(v) ? parseFloat(v) / 100 : room ? parseFloat(v) / room : 0.5);
         const [opx = '50%', opy = '50%'] = String(g.op || '').split(/\s+/);
         const cx = g.left + (g.width - dw) * frac(opx, g.width - dw) + px * dw / t0.w, cy = g.top + (g.height - dh) * frac(opy, g.height - dh) + py * dh / t0.h;
-        const before = clicks.length;
+        const before = clicks.length; let at = null;
         if (!control) {
           // B-b122 (the .190 heavy red: the control's press was LOST): a press is sent only once the point IS the live
           // picture and the view drives — both in two reads in a row. The boot splash (client.js) fades for 300 ms AFTER
@@ -2090,12 +2090,16 @@ await (async () => {
           // the PRE-FIX client: the same pointer through the same two calls of the PATCHED module, sent through the same socket
           const g0 = S0.frameGeometry({ picW: g.natW, picH: g.natH, page: g.page, meta: g.claim });
           const pre = g0 && S0.pointerToDevice({ clientX: cx, clientY: cy, elRect: { left: g.left, top: g.top, width: g.width, height: g.height }, frameW: g0.cssW, frameH: g0.cssH, picW: g0.picW, picH: g0.picH });
-          if (!pre) return { dropped: true };
+          if (!pre) return { dropped: true, claim: g.claim && `${g.claim.width}×${g.claim.height}`, pic: `${g.natW}×${g.natH}` };
+          at = pre;
           await q(`L.send(${JSON.stringify(S.mouseRecord({ kind: 'down', pt: pre }))}); L.send(${JSON.stringify(S.mouseRecord({ kind: 'up', pt: pre }))}); return true;`);
         }
         await until(() => clicks.length > before, 4000, 25);
         const c = clicks.slice(before).find((x) => x.n === n);
-        return c ? { x: c.x, y: c.y, dx: c.x - px, dy: c.y - py, off: Math.hypot(c.x - px, c.y - py) } : { lost: true };
+        // B-094d: the control's press lands where the OLD mapping's own geometry puts it (`at`, from the claim vs the real picture) — its
+        // miss is that geometry's, so its bar is too (never a fixed 20 px: one rung's claim-vs-picture miss is 18 px); the claim rides each result
+        const pred = at ? { exp: Math.hypot(at.x - px, at.y - py), at: [at.x, at.y], claim: g.claim && `${g.claim.width}×${g.claim.height}`, pic: `${g.natW}×${g.natH}` } : {};
+        return c ? { x: c.x, y: c.y, dx: c.x - px, dy: c.y - py, off: Math.hypot(c.x - px, c.y - py), ...pred } : { lost: true, ...pred };
       };
       for (const dsf of [2, 1]) for (const scale of [1, 1.25]) for (const win of [[1400, 800], [700, 900]]) {
         const fixed = await clickOnce({ dsf, scale, win });
@@ -2105,7 +2109,10 @@ await (async () => {
       const mine = results.filter((r) => r.kind === 'combo' && r.shape === shape.name);
       console.log(`    ⑤ ${shape.name}: page ${shape.page}, picture ${shape.picture}, metadata claims ${shape.claim} — click on grid cell (10,5) = page (525,275):\n` + mine.map((r) => `      DSF ${r.dsf} · UI ${Math.round(r.scale * 100)}% · window ${r.win}: FIXED ${r.fixed.lost ? 'LOST' : `(${r.fixed.x},${r.fixed.y}) off ${r.fixed.off.toFixed(1)}px`} · PRE-FIX ${r.pre.dropped ? 'dropped (mapped outside the picture)' : r.pre.lost ? 'LOST' : `(${r.pre.x},${r.pre.y}) off ${r.pre.off.toFixed(0)}px`}`).join('\n'));
       ok(mine.length === 8 && mine.every((r) => !r.fixed.lost && r.fixed.off <= 2), `⑤ ${shape.name}: at DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window, the click lands within 2 px of the drawn grid cell (worst ${Math.max(...mine.map((r) => (r.fixed.lost ? Infinity : r.fixed.off))).toFixed(1)} px)`, JSON.stringify(mine.filter((r) => r.fixed.lost || r.fixed.off > 2)));
-      ok(mine.every((r) => r.pre.dropped || (!r.pre.lost && r.pre.off > 20)), `⑤ ${shape.name}: control — the PRE-FIX mapping (the metadata's ${shape.claim}) misses by > 20 px or drops the click, on the same rung (worst ${Math.max(...mine.map((r) => (r.pre.dropped || r.pre.lost ? 0 : r.pre.off))).toFixed(0)} px)`, JSON.stringify(mine.map((r) => r.pre)));
+      // a rung proves the old mapping wrong when its press DROPS, or lands where the old geometry predicts (within 3 px) and that point is
+      // off the cell by more than twice the fixed mapping's 2-px tolerance — the claim-vs-picture ratio's own miss, measured per rung
+      const oldWrong = (p) => p.dropped || (!p.lost && p.exp > 4 && Math.abs(p.off - p.exp) <= 3);
+      ok(mine.every((r) => oldWrong(r.pre)), `⑤ ${shape.name}: control — the PRE-FIX mapping (the claim ${[...new Set(mine.map((r) => r.pre.claim).filter(Boolean))].join(' / ') || shape.claim} over the picture ${[...new Set(mine.map((r) => r.pre.pic).filter(Boolean))].join(' / ')}) lands where its own geometry puts it — off the cell by that geometry's miss (each rung > 4 px, within 3 px of its prediction) — or drops the click (rungs ${mine.map((r) => (r.pre.dropped ? 'dropped' : r.pre.lost ? 'LOST' : `${r.pre.off.toFixed(0)}≈${r.pre.exp.toFixed(0)}`)).join(', ')})`, JSON.stringify(mine.map((r) => r.pre)));
       if (shape.key === 'hl') {
         // the ephemeral browser's viewport after the agent opens a tab and after it resizes the page
         await q('L.send({ type: "handback" }); return true;');
