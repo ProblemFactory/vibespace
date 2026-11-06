@@ -610,7 +610,9 @@ console.log('⑤ MUTANTS (copies outside the tree)');
   ok('MUTANT r3 N5: a second wait (the PAC asks fresh() again, as r2) ⇒ ①\'s one-wait leg RED (fresh() twice, two bounds)', !!m11 && (m11.calls > 1 || m11.took >= 2 * SETTLE_MS), m11 && { calls: m11.calls, took: m11.took });
   const D12 = dm([['    const detail = plainDetail(err);', "    const detail = err ? `${err.code ? err.code + ': ' : ''}${err.message || ''}`.slice(0, 500) : '';"]], 'raw-detail');
   const m12 = D12 && TLS_PORT ? await driveEmbedded(mkDoor(null, {}, D12), ['miss']) : null;
-  ok('MUTANT r3 N6: Node\'s raw message under the sentence ⇒ ③\'s certificate leg RED (its developer hint shown to a person)', !!m12 && /use-system-ca|Node\.js/.test(m12.cert.body), m12 && m12.cert.body.slice(-300));
+  // what turns ③'s certificate leg red under the mutant on EVERY Node: the person's line («code — plain words») is gone and Node's
+  // own «code: message» stands — Node 24's message adds its developer hint (use-system-ca), Node 22's (the CI runner's) has none
+  ok('MUTANT r3 N6: Node\'s raw message under the sentence ⇒ ③\'s certificate leg RED (the person\'s detail line gone, Node\'s own «code: message» shown)', !!m12 && m12.cert.body.includes('data-error="DEPTH_ZERO_SELF_SIGNED_CERT"') && !m12.cert.body.includes('>DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate</p>') && />DEPTH_ZERO_SELF_SIGNED_CERT: [^<]+<\/p>/.test(m12.cert.body), m12 && m12.cert.body.slice(-300));
   const D13 = dm([["    if (!TR.roadOn(reachNow())) { res.once('close', () => sync()); head(404,", '    if (!TR.roadOn(reachNow())) sync(); if (false) { head(404,']], 'reset-pac');
   const m13 = D13 ? await drivePacOff(D13) : null;
   ok('MUTANT r4 N3: r3\'s order (the door cut BEFORE the PAC is answered) ⇒ ①\'s road-off PAC leg RED (the request reset)', !!m13 && m13.status !== 404, m13 && { status: m13.status, body: String(m13.body).slice(0, 60) });
