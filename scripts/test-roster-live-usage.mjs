@@ -345,9 +345,11 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   await red('session-lifecycle eff', hintLegs(hintOf(SL.replace(slRaw[0], slRaw[1]))), 'billing switcher: a member row');
   const ma1 = await patchedImport('src/lib/manage-agents.js', 'ma-host', [['const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x }; /* PATCHED */']]);
   if (ma1) await red('manage-agents host pill', maLegs(ma1), 'host\'s quota pill'); else ok('census RED manage-agents host pill: the patched line exists', false);
-  const ma2 = await patchedImport('src/lib/manage-agents.js', 'ma-donut', [['const v = bucketView(quotaModel, x0, est0, now, { readAt: u.fetchedAt });', 'const v = { reading: x0, est: est0 }; /* PATCHED */']]);
+  // the donut takes its bucket's reading instant since lane usage-two-rings (the cap ring hands `scopedFetchedAt || fetchedAt`) — same bypass
+  const ma2 = await patchedImport('src/lib/manage-agents.js', 'ma-donut', [['const v = bucketView(quotaModel, x0, est0, now, { readAt });', 'const v = { reading: x0, est: est0 }; /* PATCHED */']]);
   if (ma2) await red('manage-agents donut', maLegs(ma2), 'donuts are three'); else ok('census RED manage-agents donut: the patched line exists', false);
-  const ma3 = await patchedImport('src/lib/manage-agents.js', 'ma-pill', [['.map(([label, x0, e0, kind]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt });', '.map(([label, x0, e0, kind]) => { const v = { reading: x0, est: e0 }; /* PATCHED */']]);
+  // the pill's bucket carries capRing's words since lane usage-two-rings r4 (ONE sentence per cap) — same bypass
+  const ma3 = await patchedImport('src/lib/manage-agents.js', 'ma-pill', [['.map(([label, x0, e0, kind, words]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt });', '.map(([label, x0, e0, kind, words]) => { const v = { reading: x0, est: e0 }; /* PATCHED */']]);
   if (ma3) await red('manage-agents narrow pill', maLegs(ma3), 'narrow pill'); else ok('census RED manage-agents narrow pill: the patched line exists', false);
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
 }

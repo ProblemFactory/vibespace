@@ -371,6 +371,7 @@ const BACKEND_CAPS = {
     resetCredit: false,   // NEVER (§ban-safety): the CLI's own limit reset is the hidden interactive `/limit-reset`,
                           // a raw vendor POST with no control verb — kb-design-lessons §9 (2026-09-22)
     quotaProbe: 'cli-usage',      // `claude -p /usage` auto-cli rung
+    scopedCapsOnDemand: true,     // a not-read model-scoped weekly cap (e.g. Fable) only the ⟳ read can answer — essay at scopedCapsOnDemand below
     fork: true,                   // --fork-session (+ --resume-session-at for a mid-conversation fork)
     forkAtMessage: true,          // --resume-session-at <uuid> --fork-session (the per-message boundary the CLI accepts)
     review: false,                // no review verb on the stream-json control protocol
@@ -433,6 +434,7 @@ const BACKEND_CAPS = {
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
     quotaProbe: 'rpc-rate-limits', // account/rateLimits/read on a live app-server
+    scopedCapsOnDemand: false,    // its caps ride its pushes (a model-named limit such as Spark among them) — drawn as read, never a placeholder ring
     fork: true,                   // thread/fork (whole-thread fork; the wrapper sends it when CODEX_WEBUI_FORK=1)
     forkAtMessage: false,         // thread/fork takes no message boundary — a per-message button here would be a dead control
     review: true,                 // review/start: working tree / base branch / commit / custom, inline or detached
@@ -477,7 +479,7 @@ const BACKEND_CAPS = {
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
@@ -501,7 +503,7 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
     peerDelivery: 'stash-only',
     compactEnd: null,      // ACP v1 has no compaction verb we send or observe
@@ -551,7 +553,7 @@ const BACKEND_CAPS = {
   // settle), never declared by hand. steerJoinsTurn:false — its steer is a stop + a new turn, so a notification for a
   // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
-    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
     peerDelivery: 'rpc-queue',
     compactEnd: null,
@@ -574,7 +576,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -604,6 +606,18 @@ function capsOf(backend) {
 //                   and the pool-member delete heal read it. Tied to the descriptor's ui.billing.usage === 'accounts'.
 //   globalUsageKey  the usage ledger's key for this harness's MACHINE login (no named account) — the descriptor's
 //                   ui.billing.globalUsageKey (a harness without one books under '__global__').
+// THE ON-DEMAND SCOPED-CAPS ROW (lane usage-two-rings r4, renamed r5, its reason restated r6, 2026-11-05): is the ⟳
+// on-demand read the only road that can ANSWER this harness's not-read model-scoped weekly cap — claude's per-model weekly
+// limit (e.g. Fable; the owner: «除了 fable，没有模型 specific 的用量限制的»)? Its passive feed does write that cap when it
+// carries it (rate-limit-capture's scoped lane; the 2.1.274 statusline's `rate_limits.model_scoped[]`), but nothing
+// passive can be asked: a reading that names none is NOT READ, and only ⟳ can answer it. So the Agents roster's shared
+// usage renderer (agent-meta `scopedCapsReadOnDemand`) runs the cap ring for it — its words, and an empty
+// «no data yet — press ⟳» ring beside the weekly window of a reading without a session window. That ring is ALL this row
+// gates (r5): the caps a reading CARRIES are drawn for every harness as before — a Codex account's model-named limit (Spark:
+// codex-quota scope 'model', pushed beside the plan's own) keeps its donut, its pill bucket and its «spent» countdown, and
+// a Codex push that names only its week (no window of 8 h or less) is its weekly window alone. r4 named this row
+// `modelScopedCap` and skipped every cap where it was false — Spark vanished from the Codex roster. Gated on the row, never
+// the name; a register()ed harness gets false (NO_CAPS) until its row says otherwise.
 // THE SUBAGENT ROW (lane agy-subagent-cards, 2026-10-21 — the owner, in an Antigravity conversation: «子代理细节不在你设计的
 // harness框架里吗？»): what a harness can SHOW of the subagents its agent starts = the descriptor's ui.subagents, one of
 //   'virtual'  a live virtual session per subagent, streamed from its own transcript (claude: the sidechain)

@@ -2124,7 +2124,7 @@ console.log('— §12 the row says why its reading ages: never probed / the last
   const keySrc = keyAt > 0 && keyEnd > keyAt ? maSrc.slice(keyAt, keyEnd) : '';
   ck('§12 WIRING: the claude row stamps the note on its usage cell and renders the cell with it; the poll\'s repaint hands the stamp back',
     keySrc.includes("const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;") && keySrc.includes('${probeNoteAttrs(probeNote)}') && keySrc.includes('usageHtml(rowSnap.u, rowSnap.est, probeNote)')
-    && maSrc.includes('const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset));') && maSrc.includes('const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);'));
+    && maSrc.includes('const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);') && maSrc.includes('const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);'));
   if (!CHROME) console.log('  SKIP: no chrome binary on this machine (the §12 legs need headless chrome)');
   else {
     const { spawn } = await import('node:child_process');

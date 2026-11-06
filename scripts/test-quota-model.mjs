@@ -2775,14 +2775,21 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   ok(!/hit = \{ kind: 'sevenDay', guessed: true \}/.test(ENG) && /const hit = ClaudeCodeAdapter\.parseLimitBanner\(text\);/.test(ENG) && /if \(hit\.kind === 'fiveHour'\) \{ if \(!\(hit\.guessed && tomb5h\(own\)\)\) cache\.fiveHour = bump\(cache\.fiveHour, 5 \* 3600\); \}/.test(ENG),
     '㉑6a …the engine keeps the base wall KIND for a guessed banner (never rewritten to the week — r3), and on a «no 5h» member it has no 5h window to mark (driven in test-fable-cap-pool-storm ㉑3e/㉑3f)');
   const UM = fs.readFileSync(path.join(ROOT, 'src/lib/usage-meter.js'), 'utf8');
-  ok(/rows\.push\(renderRow\('claude', has5h \|\| noData \? '5h' : null,/.test(UM) && /\$\{primaryLabel == null \? '' : renderPie\(/.test(UM),
-    '㉑6b the taskbar donut pair draws no 5h donut for a reading without one (base: a 0 % «5h» donut)');
+  // lane usage-two-rings (owner 2026-11-05: «没有 5h 就显示 7d+fable») moved this pin: .367 drew a reading without a 5h window
+  // as ONE ring (the 7d); the row now keeps two — the 7d + the model-scoped cap ring (capRing) — and still never a 0 % «5h»
+  // arc (.367's law stands). The cap ring's three states are DRIVEN in test-usage-two-rings; this is the text half. (r3:
+  // capRing reads every reading — `acctCap` — so the popup's scoped note can say its «none»; the ring draws it only without a 5h)
+  ok(/const acctCap = noData \? null : capRing\(quotaModel, rl, estSel, Date\.now\(\),/.test(UM) && /const cap = has5h \? null : acctCap;/.test(UM) && /rows\.push\(ring \? ringRow\('claude', NO5H_RINGS\.map\(\(k\) => ring\[k\]\)\) : renderRow\('claude', '5h', pct5h, '7d', pct7d, noData, \[p5, p7\], \[v5, v7\]\)\);/.test(UM) && !/primaryLabel == null/.test(UM),
+    '㉑6b the taskbar row draws a reading without a 5h window as 7d + the model-scoped cap ring — never a 0 % «5h» donut, never one ring');
   ok(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM) && /t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && /const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM)
     && /t\('No 5-hour limit on this account since \{when\} — weekly limits only\.', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && !/Ultra|Max 20x|\$100/.test(UM),
     '㉑6b the popup shows the 5h row only when the reading has one; a lifted one says «5-hour limit lifted (<time>)» + what was MEASURED («No 5-hour limit on this account since <time> — weekly limits only.»), never a tier, a name or a price');
   const MA = fs.readFileSync(path.join(ROOT, 'src/lib/manage-agents.js'), 'utf8');
-  ok(/\[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 6,
-    '㉑6c the roster draws the week alone (no 0 % 5h donut, no 5h pill) and a weekly-only machine login is a reading (5 gates + the helper)');
+  // (r4/r5: only a harness whose not-read cap only the ⟳ read can answer — the caps row, `scopedCapsReadOnDemand` — runs
+  // capRing; any other reading without a 5h window keeps .367's week (+ the caps it carries, as the base drew them — a Codex
+  // Spark limit): the `[...(has5h ? …` form below is it)
+  ok(/const acctCap = wins \|\| !scopedCapsReadOnDemand\(backend\) \? null : capRing\(quotaModel, u, est, now,/.test(MA) && /const cap = has5h \? null : acctCap;/.test(MA) && /: ring \? NO5H_RINGS\.flatMap\(\(k\) => ring\[k\]\) : \[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 6,
+    '㉑6c the roster draws a reading without a 5h window as 7d + the cap ring (no 0 % 5h donut — lane usage-two-rings moved this from «the week alone»), no 5h figure in the narrow pill, and a weekly-only machine login is a reading (5 gates + the helper)');
   ok(/creditsSlotHtml\(hostOwnReading\(this\._hostOwnUsage\?\.\[selectedHost\]\)\)/.test(MA) && !/_hostOwnUsage\?\.\[[^\]]+\]\?\.fiveHour \?/.test(MA),
     '㉑3g the FIFTH machine-login gate (the credits-slot chip on the same row) reads hostOwnReading too — no gate asks `fiveHour` alone');
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
@@ -3346,8 +3353,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
       ['conic-gradient(${c} ${Math.round(p * 3.6)}deg', 'the donut draws p, the view\'s percent'],
       ['const has5h = !!(u.fiveHour && typeof u.fiveHour', 'presence of a 5h window (lane no-5h-window)'],
       ["donut('5h', u.fiveHour", 'hands each bucket to donut() (bucketView inside)'],
-      ['donut(String(sc.name', 'hands each scoped bucket to donut()'],
-      ['const scEst = (name) => (est?.scopedWeekly', 'an estimate lookup (bucketView decides whether it survives)'],
+      ["{ '7d': [donut('7d', u.sevenDay", 'a reading without a 5h window hands its 7d to donut() beside the cap ring (lane usage-two-rings)'],
       ['const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind])', 'the narrow pill\'s bucket list, bucketView\'d on the next line'],
     ],
     'session-lifecycle.js': [
@@ -3380,6 +3386,10 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
       ["for (const [label, w] of [['5h', a.reading && a.reading.fiveHour]", 'codexRefreshToast: the reading the ⟳ just fetched (fresh by definition)'],
       ['if (!w || w.usedPercent == null) continue;', '…the same toast'],
       ['const pct = Math.round(Number(w.usedPercent));', '…the same toast'],
+      ['const scopedEstOf = (estSel, name) => (estSel?.scopedWeekly', 'readingCaps / capRing (lane usage-two-rings): an estimate lookup (bucketView decides whether it survives)'],
+      ['return (Array.isArray(reading?.scopedWeekly)', 'readingCaps (r5) lists the scoped buckets — the roster draws each through bucketView (its donut), capRing through bucketView on top'],
+      ['const pct = Math.round((view.reading?.utilization', 'capRing: the percent OF A VIEW (bucketView just above)'],
+      ['const known = (estSel?.scopedWeekly', 'capRing: a cap NAME an older reading\'s estimate still holds — no percent is drawn from it'],
     ],
     'utils.js': [
       ['const rdRaw = readingBucket ?', 'estDisplayPair: its callers hand it a VIEW\'s reading'],

@@ -26,7 +26,7 @@ import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetc
 import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
-import { permissionRulesCaps, resetCreditCapable, billingRow, getBackendMeta } from './agent-meta.js';
+import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
@@ -35,7 +35,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one con
 // like search-card.js): the menu can only offer what the server will run, and
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
-import { overageChip, spendControlChip, creditsChipHtml, creditsState, bucketView, unconfirmedText } from './usage-source.js';
+import { overageChip, spendControlChip, creditsChipHtml, creditsState, bucketView, unconfirmedText, capRing, readingCaps, NO5H_RINGS } from './usage-source.js';
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
@@ -443,8 +443,10 @@ export function hostOwnReading(h) {
  *  leg (test-roster-live-usage) draws it. → html or ''. */
 export function hostQuotaPillHtml(hu, nowMs = Date.now()) {
   const pctOf = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
-  const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x)))
-    .map(([l, x]) => { const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt }); return [l, v.reading, v.unconfirmed]; }) : [];
+  // every cap from capRing, the ONE builder: two letters on the pill, its words in the tooltip («Fable weekly limit: 42%» — r4)
+  const caps = hu ? capRing(quotaModel, hu, null, nowMs, { pair: estDisplayPair, t }).all : [];
+  const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...caps.map((c) => [c.label, c.bucket, c.tipName])].filter(([, x]) => x && Number.isFinite(pctOf(x)))
+    .map(([l, x, words]) => { const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt }); return [l, v.reading, v.unconfirmed, words]; }) : [];
   if (!bs.length) return '';
   const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
   const wp = pctOf(wx);
@@ -456,7 +458,7 @@ export function hostQuotaPillHtml(hu, nowMs = Date.now()) {
   // …and the tightest bucket's compact reset countdown (2026-09-14, the same rule the roster donuts carry —
   // bucketEta refuses a window that may not name a deadline).
   const wEta = bucketEta(wx, nowMs);
-  const tip = bs.map(([l, x, un]) => `${l} ${pctOf(x)}%${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
+  const tip = bs.map(([l, x, un, words]) => `${words ? `${words}:` : l} ${pctOf(x)}%${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
   return `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
 }
 
@@ -464,14 +466,14 @@ export function rosterUsageSnapshot(stamp, maps) {
   const src = stamp && stamp.usageSrc, key = stamp && stamp.usageKey;
   if (!src) return null;
   const m = maps || {};
-  let u = null, est = null;
+  let u = null, est = null, backend = null; // `backend` = the harness the renderer asks its caps row for (absent = claude)
   if (src === 'accounts') { u = m.accounts?.[key] || null; est = m.estimates?.[key] || null; }
   else if (src === 'global') { u = m.rateLimit || null; est = m.estimates?.__global__ || null; }
   else if (src === 'host-own') { const h = m.hostOwn?.[key]; u = hostOwnReading(h); }
   else if (src === 'host-account') { u = m.hostAccounts?.[key] || null; }
-  else if (src === 'codex') { u = m.codex?.[key] || null; est = m.estimates?.[key] || null; }
+  else if (src === 'codex') { u = m.codex?.[key] || null; est = m.estimates?.[key] || null; backend = 'codex'; }
   else if (src === 'home') { u = onDemandUsageView(m.home?.[key]); }
-  return u ? { u, est } : null;
+  return u ? { u, est, backend } : null;
 }
 
 /** A NAMED ACCOUNT'S ON-DEMAND READING AS ROSTER DONUTS (lane antigravity-card-fixes): the typed limit set a person's
@@ -573,7 +575,7 @@ export function installManageAgents(App, ctx = {}) {
     for (const cell of cells) {
       const snap = rosterUsageSnapshot(cell.dataset, maps);
       if (!snap) continue;
-      const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset));
+      const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);
       if (cell.innerHTML !== html) { cell.innerHTML = html; n++; const list = cell.closest && cell.closest('.acct-list'); if (list) lists.add(list); }
       // …and the row's CREDITS CHIP from the SAME snapshot, patched in place
       const row = cell.closest && cell.closest('.acct-key-row');
@@ -1528,9 +1530,13 @@ export function installManageAgents(App, ctx = {}) {
   // Compact per-account usage readout (mini donuts, same visual language as
   // the taskbar quota pies) shared by the Claude and Codex rosters. Data:
   // Claude = the passive statusline cache; Codex = the per-account rate-limit
-  // buckets (both ride /api/usage). Scoped weekly buckets (e.g. Fable) get
-  // their own donut when present.
-  _acctUsageHtml(u, est, probeNote = null) {
+  // buckets (both ride /api/usage). Scoped weekly buckets (e.g. Fable, Codex's
+  // Spark) get their own donut when present. `backend` = the harness whose
+  // reading this is — its caps row decides whether a reading naming no
+  // model-scoped cap is NOT READ (only the ⟳ read can answer it), i.e. whether
+  // it gets the not-read cap ring (absent = claude, capsOf's own rule; the
+  // Codex roster passes 'codex').
+  _acctUsageHtml(u, est, probeNote = null, backend = null) {
     if (!u) return '';
     const now = Date.now();
     // a reading that states no window at all is NO READING (quota-model memberProofState) — words, never 0 % donuts (r2)
@@ -1562,8 +1568,9 @@ export function installManageAgents(App, ctx = {}) {
     // rows stay aligned.
     // A RESET NOT YET CONFIRMED (lane reset-unproven): a bucket whose reset landed since its reading is drawn RESET —
     // 0 % used, a dashed muted ring, a reset glyph under it, the words in its tooltip — never the stale pre-reset arc
-    const donut = (label, x0, tipName, est0) => {
-      const v = bucketView(quotaModel, x0, est0, now, { readAt: u.fetchedAt });
+    // `readAt` = the bucket's reading instant: the cap ring hands its own (capRing: `scopedFetchedAt || fetchedAt`, the popup's)
+    const donut = (label, x0, tipName, est0, readAt = u.fetchedAt) => {
+      const v = bucketView(quotaModel, x0, est0, now, { readAt });
       const x = v.reading, estBucket = v.est;
       const pair = estDisplayPair(x, estBucket);
       const p = pair.estPct != null ? pair.darkPct : pct(x);
@@ -1589,12 +1596,30 @@ export function installManageAgents(App, ctx = {}) {
     };
     // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
     const wins = Array.isArray(u.windows) ? u.windows : null;
-    // A READING WITHOUT A 5h WINDOW DRAWS NONE (lane no-5h-window): an Ultra account the vendor lifted the 5-hour limit
-    // from is shown by its weekly window alone — `pct(undefined)` used to draw a 0 % «5h» donut nobody measured.
+    // A READING WITHOUT A 5h WINDOW SHOWS ITS OTHER LIMIT (lane usage-two-rings r2, owner 2026-11-05 — the taskbar row's
+    // twin, ONE builder `capRing`): 7d + the model-scoped cap in NO5H_RINGS' order — never `pct(undefined)`'s 0 % «5h»
+    // donut nobody measured (lane no-5h-window), never an empty 5h beside a third donut. The cap donut it has always drawn
+    // moves into the 5h's place (every cap, the one that exhausts first leading); none in the reading ⇒ the cap ring says
+    // so in the last read's words — «no data yet — press ⟳» / «… the last ⟳ (<when>) returned no cap figure — press ⟳ to
+    // read again» (an empty track; never a slash, never «no cap» — an empty read proves nothing, r4).
+    // A READING'S OWN CAPS ARE DRAWN FOR EVERY HARNESS; ONLY THE PLACEHOLDER IS CLAUDE'S (r5): capRing — its words, its
+    // lead, its not-read ring — runs only for a harness whose not-read cap only the ⟳ read can answer (its caps row,
+    // `scopedCapsReadOnDemand` — Claude's); any other reading draws the caps it CARRIES exactly as the base drew them
+    // (`readingCaps`: a Codex Spark limit keeps its donut, its pill bucket, its «GP is spent» countdown) and never a ring
+    // it cannot fill — a Codex push that names only its week is its 7d alone (r4).
+    // `acctCap` = the account's caps as capRing reads them, with or without a 5h window (`cap` = it, drawn as the second ring)
     const has5h = !!(u.fiveHour && typeof u.fiveHour === 'object');
-    const parts = wins ? wins.map((w) => donut(w.label, w, null, null)) : [...(has5h ? [donut('5h', u.fiveHour, null, est?.fiveHour)] : []), donut('7d', u.sevenDay, null, est?.sevenDay)];
-    const scEst = (name) => (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
-    if (!wins) for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
+    const acctCap = wins || !scopedCapsReadOnDemand(backend) ? null : capRing(quotaModel, u, est, now, { pair: estDisplayPair, t, refreshOff: (this?.settings?.get?.('accounts.onDemandQuotaRefresh') || 'manual') === 'off' });
+    const cap = has5h ? null : acctCap;
+    const caps = wins ? [] : acctCap ? acctCap.all : readingCaps(u, est); // every cap the reading carries, in its order
+    const capDonut = (c) => (c.state === 'read' ? donut(c.label, c.bucket, c.tipName, c.est, c.readAt)
+      : `<span class="acct-donut-col"><span class="acct-usage-donut" title="${escHtml(c.tip)}" style="background:var(--bg-input)"><span>${escHtml(c.label)}</span></span><span class="acct-donut-eta-slot" aria-hidden="true"></span></span>`);
+    const ring = cap && { '7d': [donut('7d', u.sevenDay, null, est?.sevenDay)], cap: [cap, ...cap.rest].map(capDonut) };
+    const parts = wins ? wins.map((w) => donut(w.label, w, null, null)) : ring ? NO5H_RINGS.flatMap((k) => ring[k]) : [...(has5h ? [donut('5h', u.fiveHour, null, est?.fiveHour)] : []), donut('7d', u.sevenDay, null, est?.sevenDay)];
+    // no cap ring: every cap after the 5h + 7d, in the reading's order as the base drew them — Claude's in capRing's words
+    // («Fable weekly limit: 12% · resets in …», never a bare «Fable: 12%» — ONE sentence per cap, r3) at the cap's reading
+    // instant, any other harness's as the base drew them («GPT-5.3-Codex-Spark: 97% · resets in …» — r5)
+    if (!cap) parts.push(...caps.map(capDonut));
     const age = u.fetchedAt ? Math.round((now - u.fetchedAt) / 60000) : null;
     // The age span ALWAYS renders (empty when fresh) at a fixed min-width —
     // conditional rendering shifted the right-aligned donut group per row and
@@ -1607,23 +1632,27 @@ export function installManageAgents(App, ctx = {}) {
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
     // detail in the tooltip).
-    const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [...(has5h ? [['5h', u.fiveHour, est?.fiveHour, 'fiveHour']] : []), ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])])
-      .map(([label, x0, e0, kind]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt }); const x = v.reading; const pr = estDisplayPair(x, v.est); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind, v.unconfirmed]; }).filter(([, p]) => Number.isFinite(p));
+    // ONE SENTENCE PER CAP (r4): every cap rides `caps` — two letters on the pill; a Claude cap's words («Fable weekly limit:
+    // 42%») in the tooltip, never «Fa 42%»; any other harness's cap keeps the base's two letters (`words` null, r5 — «GP 97%»);
+    // `words` rides each bucket (null for the 5h / 7d)
+    const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [...(has5h ? [['5h', u.fiveHour, est?.fiveHour, 'fiveHour']] : []), ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...caps.map((c) => [c.label, c.bucket, c.est, 'weekly', c.words])])
+      .map(([label, x0, e0, kind, words]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt }); const x = v.reading; const pr = estDisplayPair(x, v.est); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind, v.unconfirmed, words || null]; }).filter(([, p]) => Number.isFinite(p));
     // THE ROW'S OWN countdown (2026-09-15): one full-precision token per
     // account — blocked ⇒ when its last spent bucket resets (the pool's hard
     // bars say what "spent" is), else the earliest reset any bucket names.
     // Rendered after the age cell (right-anchored ⇒ a straight column down
     // the roster) and folded into the narrow pill's tooltip.
-    const next = accountResetEta(buckets.map(([label, p, , x, kind]) => ({ bucket: x, pct: p, label, spentPct: 100 - THRESH[kind].hard })), now);
+    const next = accountResetEta(buckets.map(([label, p, , x, kind, , words]) => ({ bucket: x, pct: p, label: words || label, spentPct: 100 - THRESH[kind].hard })), now);
     const nextTip = next ? nextTipFor(next) : '';
     let mini = '', etaTitle = '';
     if (buckets.length) {
-      const [wl, wp, wEst, wx, , wUn] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const [wl, wp, wEst, wx, , wUn, wWords] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
       const allUn = buckets.every((b) => b[5]); // every bucket reset since its reading: the pill says so in words (lane reset-unproven)
       const wc = pressure(wp);
       const wEta = bucketEta(wx, now);
-      if (wEta) etaTitle = `${wl} ${t('resets in {dur}', { dur: fmtEta(resetMs(wx)) })}`;
-      const tip = [buckets.map(([l, p, isE, , , un]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
+      if (wEta) etaTitle = `${wWords || wl} ${t('resets in {dur}', { dur: fmtEta(resetMs(wx)) })}`;
+      // the cap ring's words when the reading has no cap figure (not read) — the narrow pill's tooltip says them too
+      const tip = [cap && cap.state !== 'read' ? cap.tip : '', buckets.map(([l, p, isE, , , un, words]) => `${words ? `${words}:` : l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
       mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}${wUn ? ' acct-mini-unconfirmed' : ''}" style="color:${wUn ? 'var(--text-secondary)' : wc}" title="${escHtml(tip)}">${allUn ? escHtml(t('reset · unconfirmed')) : `${escHtml(wl)} ${wp}%`}${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
     }
     // THE PROBE NOTE (acctProbeNote, lane auto-cli-oat-unprobeable): why this reading ages — never probed / the last probe's
@@ -1789,7 +1818,7 @@ export function installManageAgents(App, ctx = {}) {
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
-    const usageHtml = (u) => this._acctUsageHtml(u);
+    const usageHtml = (u) => this._acctUsageHtml(u, null, null, 'codex'); // a ChatGPT limit set: the caps its reading carries (Spark among them) are drawn as read — no on-demand placeholder ring (its caps row's scopedCapsOnDemand is false, r5)
     // THE RESET SLOT (p2): the local rows of a harness that can SPEND a stored
     // credit carry it, stamped with the usage key so the 8 s poll repaints the
     // count (`_repaintRosterUsage`); empty until the count is known and > 0
@@ -1860,7 +1889,7 @@ export function installManageAgents(App, ctx = {}) {
         : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your ChatGPT accounts') : t('ChatGPT account — runs on this machine (or a host you log into)');
       const usageCell = isPool
-        ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current]) : '')
+        ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current], null, 'codex') : '')
         : a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : '';
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>

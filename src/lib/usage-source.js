@@ -244,6 +244,73 @@ export function unconfirmedText(view, { t = fillParams, nowMs = Date.now(), loca
   return t('reset {time} · unconfirmed — confirms when a session uses it', { time: resetInstantText(view.display.resetAt, nowMs, { locale }) });
 }
 
+/** THE NO-5h ROW'S TWO RINGS (lane usage-two-rings r2, owner 2026-11-05 18:40 PT: 「我是说没有 5h 就显示 7d+fable」): a
+ *  reading without a 5h window — lifted (`fiveHourAbsent`) or simply absent — shows the account's OTHER limit, the
+ *  model-scoped weekly cap (`scopedWeekly[]`, e.g. Fable), beside its 7d: never a 5h ring nobody measured, never one
+ *  ring. The ORDER is this one constant; both twins (the taskbar row, the Agents roster) read it, so it flips in one line. */
+export const NO5H_RINGS = ['7d', 'cap'];
+
+/** A cap's estimate by its name (case-insensitive) — the lookup the roster has always made. */
+const scopedEstOf = (estSel, name) => (estSel?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
+
+/** A READING'S OWN CAPS (lane usage-two-rings r5): every model-scoped cap the reading CARRIES — `scopedWeekly[]`, in its
+ *  order — as the roster has always drawn them, whatever the harness: two letters in the hole, the cap's name in the
+ *  donut's tooltip, the two letters on the narrow pill (`words` null ⇒ «GP 97%»), the row's reading instant (no `readAt`).
+ *  A Codex account's Spark limit (codex-quota scope 'model', projected here by quota-model `toLegacyView`) is drawn from
+ *  this list exactly as the base drew it — its donut, its pill bucket, its «GP is spent» countdown. capRing builds on the
+ *  same list for a harness whose not-read cap only the ⟳ read can answer (Claude): its words, its lead, its not-read
+ *  placeholder.
+ *  → [{ state: 'read', label, name, tipName, words, bucket, est }] */
+export function readingCaps(reading, estSel) {
+  return (Array.isArray(reading?.scopedWeekly) ? reading.scopedWeekly : []).filter((sc) => sc && typeof sc === 'object').map((sc) => {
+    const name = String(sc.name || '?');
+    return { state: 'read', label: name.slice(0, 2), name, tipName: name, words: null, bucket: sc, est: scopedEstOf(estSel, sc.name) };
+  });
+}
+
+/** THE CAP RING — ONE builder for both twins (the taskbar row draws it as its second ring, the roster as its cap donuts)
+ *  for a harness whose not-read cap only the ⟳ on-demand read can answer (its caps row `scopedCapsOnDemand` — Claude):
+ *  which bucket, its label, its STATE and its words. It reads the limit set exactly as the popup's scoped sections do —
+ *  `readingCaps` (the reading's own list), its reading instant `scopedFetchedAt || fetchedAt` — and asks no vendor anything
+ *  (§ban-safety: a cap no reading has named is answered by the ⟳ on-demand refresh alone, never by a call of this builder).
+ *  `pair` = utils' `estDisplayPair` (injected: this module imports nothing). TWO states — read, and not read (r4):
+ *   - 'read'   the reading names a cap — several ⇒ the one that EXHAUSTS FIRST leads (the popup's phone-chip rule: the
+ *              highest effective %, a window not started never leads); `rest` = the others, worst-first order kept stable;
+ *              `all` = every cap in the READING's order (a row WITH a 5h window draws them so, in these words);
+ *              the full name rides the tooltip and the pills (`tipName` = `words`: «Fable weekly limit: 42% · resets …»),
+ *              two letters sit in the hole
+ *   - 'unread' no cap in the reading — an EMPTY track that says the FACT of the last read, never an absence: no ⟳ read of
+ *              the set ⇒ «model-scoped weekly cap (e.g. Fable): no data yet — press ⟳»; a ⟳ read that named no cap
+ *              (`scopedFetchedAt`, = `lastReadAt`) ⇒ «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read
+ *              again» (r5: the READ's result, never «no cap»); the cap's own name and two letters when an older reading's
+ *              estimate still names it, else t('cap') (r5: zh / ja «限», the character of 上限 / 制限 — one glyph the hole
+ *              holds); on-demand refresh off in Settings ⇒ the popup's own sentence for that (⟳ cannot read it again)
+ *  r3's third state — 'none', a slash + «no model-scoped cap on this account» on an empty ⟳ read — is WITHDRAWN (r4): an
+ *  empty list proves nothing (quota-model `authoritativeScopesOf`, B-9f4b: «indistinguishable from "my scoped parsing
+ *  broke"» — a drifted panel line, a limit with no name), and the enumeration mark never survives storage, so the client
+ *  cannot tell «enumerated and empty» from «lost parse». A proven absence needs a persisted verdict, not this ring.
+ *  → { state, label, tip, tipName, name, bucket, est, readAt, lastReadAt, view, pair, pct, rest, all } */
+export function capRing(model, reading, estSel, nowMs, { pair, t = fillParams, refreshOff = false } = {}) {
+  const readAt = (reading && (reading.scopedFetchedAt || reading.fetchedAt)) || null;
+  const caps = readingCaps(reading, estSel).map((c) => {
+    const view = bucketView(model, c.bucket, c.est, nowMs, { readAt });
+    const p = pair(view.reading, view.est);
+    const pct = Math.round((view.reading?.utilization || 0) * 100);
+    const tipName = t('{name} weekly limit', { name: c.name });
+    return { ...c, tipName, words: tipName, readAt, view, pair: p, pct, eff: windowNotStarted(c.bucket) ? -1 : (p.estPct ?? pct) };
+  });
+  if (caps.length) {
+    const lead = caps.reduce((a, b) => (b.eff > a.eff ? b : a));
+    return { ...lead, rest: caps.filter((c) => c !== lead), all: caps };
+  }
+  const known = (estSel?.scopedWeekly || []).find((x) => x && x.name)?.name;
+  const what = known ? t('{name} weekly limit', { name: String(known) }) : t('model-scoped weekly cap (e.g. Fable)');
+  const lastReadAt = Number(reading?.scopedFetchedAt) > 0 ? Number(reading.scopedFetchedAt) : null; // a ⟳ read that named no cap: a FACT, never a verdict
+  return { state: 'unread', label: known ? String(known).slice(0, 2) : t('cap'), name: known || null, readAt, lastReadAt, rest: [], all: [],
+    tip: refreshOff ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings')
+      : `${what}: ${lastReadAt ? t('the last ⟳ ({when}) returned no cap figure — press ⟳ to read again', { when: resetInstantText(lastReadAt, nowMs) }) : t('no data yet — press ⟳')}` };
+}
+
 /** The panel row for every limit an account holds, served-model first.
  *  `set` is a typed LimitSet (src/quota-model.js — `limitsOfCache` lifts a
  *  stored snapshot into one). Each row carries its OWN producer and age,

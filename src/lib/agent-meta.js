@@ -556,6 +556,16 @@ export function resetCreditCapable(backend) {
   return serverCapsOf(backend).resetCredit === true;
 }
 
+/** CAN ONLY THE ⟳ READ ANSWER THIS HARNESS'S NOT-READ MODEL-SCOPED CAP (lane usage-two-rings r4, renamed r5, reason r6)?
+ *  The SERVER row itself (src/backend-caps.js `scopedCapsOnDemand`, pulled into the bundle like `resetCredit`): only there
+ *  is a reading that names no cap NOT READ — Claude's passive feed writes its cap when it carries it, but nothing passive
+ *  can be asked; the ⟳ read is the only road that can answer — so only there does the Agents roster run capRing: its words
+ *  and its not-read ring (a reading without a 5h window ⇒ [7d, the cap ring]). Any other harness's caps are drawn as the
+ *  base drew them (usage-source `readingCaps`). Absent = claude (capsOf's own rule). */
+export function scopedCapsReadOnDemand(backend) {
+  return serverCapsOf(backend).scopedCapsOnDemand === true;
+}
+
 /** Every backend's agent-memory path pattern (see BACKEND_META.claude). */
 export function agentMemoryPathRes() {
   return Object.values(BACKEND_META).map((m) => m.memoryPathRe).filter(Boolean);

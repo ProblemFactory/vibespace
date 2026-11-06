@@ -8,7 +8,8 @@ import { backendFeatureCaps } from './agent-meta.js';
 // panel's latest number, and — for a member that can no longer produce one at
 // all — how old the last REAL reading is. DOM-free so scripts/test-readings-
 // attribution.mjs pins it in node.
-import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast, bucketView, unconfirmedText } from './usage-source.js';
+import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows, codexRefreshToast, bucketView, unconfirmedText, capRing, NO5H_RINGS } from './usage-source.js';
+import { bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the cap ring's «resets in …» (PURE)
 // The ONE overage verdict (PURE, CJS — the same function the spend
 // authorizer and the pool's voluntary-target rule read).
 import { overageState, spendControlState } from '../spend-authorizer.js';
@@ -373,7 +374,9 @@ export function installUsageMeter(App, ctx = {}) {
     // applies, so the whole arc renders light (estDisplayPair's rolled rule).
     // `view` = the bucket's bucketView (lane reset-unproven): a reset that landed since the reading draws an EMPTY pie
     // inside a dashed muted ring, and its tooltip says «reset <time> · unconfirmed — confirms when a session uses it»
-    const renderPie = (label, pct, noData, pair, view = null) => {
+    // `name` / `tail` = the tooltip's own name and suffix when they differ from the hole's label (the cap ring: «Fable weekly
+    // limit: 42% · resets in …» around «Fa»)
+    const renderPie = (label, pct, noData, pair, view = null, name = label, tail = '') => {
       const unconf = !noData && !!(view && view.unconfirmed);
       const clamped = Math.max(0, Math.min(100, Math.round(pct || 0)));
       const hasEst = !noData && pair?.estPct != null;
@@ -386,22 +389,32 @@ export function installUsageMeter(App, ctx = {}) {
       const bg = hasEst
         ? `conic-gradient(${color} ${darkDeg}deg, ${light} ${darkDeg}deg ${estDeg}deg, var(--bg-input) ${estDeg}deg)`
         : `conic-gradient(${color} ${darkDeg}deg, var(--bg-input) ${darkDeg}deg)`;
-      const tip = noData ? `${label}: ${t('no data yet')}`
-        : unconf ? `${label}: ${unconfirmedText(view, { t })}${hasEst ? ' · ' + t('est {pct}%', { pct: estP }) : ''}`
-        : hasEst ? `${label}: ${dark}% · ${t('est {pct}%', { pct: estP })}${pair.rolled ? ' · ' + t('window reset since last reading') : ''}`
-        : `${label}: ${clamped}%`;
+      const tip = noData ? `${name}: ${t('no data yet')}`
+        : unconf ? `${name}: ${unconfirmedText(view, { t })}${hasEst ? ' · ' + t('est {pct}%', { pct: estP }) : ''}`
+        : hasEst ? `${name}: ${dark}% · ${t('est {pct}%', { pct: estP })}${pair.rolled ? ' · ' + t('window reset since last reading') : ''}${tail}`
+        : `${name}: ${clamped}%${tail}`;
       return `<div class="usage-pie usage-donut${hasEst ? ' usage-donut-est' : ''}${unconf ? ' usage-donut-unconfirmed' : ''}" title="${escHtml(tip)}" style="background:${bg}"><span class="usage-donut-label">${label}</span></div>`;
     };
-    // a null primary label draws no primary donut (lane no-5h-window: a reading without a 5h window)
-    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs, views = null) => (
+    // A ROW IS ITS TWO RINGS (lane usage-two-rings — .367 drew a reading without a 5h window as ONE ring): [5h, 7d], or for
+    // a Claude reading without a 5h window [7d, cap] in NO5H_RINGS' order
+    const ringRow = (backend, rings) => (
       `<div class="taskbar-usage-row">
         ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: getBackendMeta(backend).label })}
         <div class="taskbar-usage-pair">
-          ${primaryLabel == null ? '' : renderPie(primaryLabel, primaryPct, noData, pairs?.[0], views?.[0])}
-          ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1], views?.[1])}
+          ${rings.join('\n          ')}
         </div>
       </div>`
     );
+    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs, views = null) => ringRow(backend, [
+      renderPie(primaryLabel, primaryPct, noData, pairs?.[0], views?.[0]), renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1], views?.[1])]);
+    // THE CAP RING (usage-source `capRing`, the roster's own builder): 'read' = the cap's arc — two letters in the hole, its
+    // full name + «resets in …» in the tooltip; not read = an EMPTY track that says the last read's fact («… no data yet —
+    // press ⟳» / «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again») — never a slash, never «no cap» (r4)
+    const capPie = (c) => {
+      if (c.state !== 'read') return `<div class="usage-pie usage-donut" title="${escHtml(c.tip)}" style="background:var(--bg-input)"><span class="usage-donut-label">${escHtml(c.label)}</span></div>`;
+      const dur = bucketMayNameDeadline(c.view.reading) ? fullEta(bucketResetMs(c.view.reading), Date.now()) : null;
+      return renderPie(escHtml(c.label), c.pct, false, c.pair, c.view, c.tipName, dur ? ' · ' + t('resets in {dur}', { dur }) : '');
+    };
     // Popup-bar companions: hatched light span from the confirmed fill to the
     // estimate + a dashed marker at the estimate; a stat chip naming it.
     const estBar = (pair) => {
@@ -455,9 +468,9 @@ export function installUsageMeter(App, ctx = {}) {
 
     if (rl || hasSwitch || glKnown) {
       const noData = !rl;
-      // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): an account Anthropic lifted the 5-hour limit from is shown by
-      // its weekly window alone — never a 0 % 5h donut — and its 5h row says when it was lifted. A reading that has
-      // no 5h bucket for any other reason shows no 5h figure at all (nobody measured one).
+      // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): an account Anthropic lifted the 5-hour limit from never shows a
+      // 0 % 5h figure — and its 5h row says when it was lifted. A reading that has no 5h bucket for any other reason
+      // shows no 5h figure at all (nobody measured one).
       const has5h = !!(rl && rl.fiveHour && typeof rl.fiveHour === 'object');
       const no5hSince = quotaModel.fiveHourAbsent(rl);
       // every bucket through its display verdict first (lane reset-unproven): a landed reset is drawn reset, unconfirmed
@@ -469,7 +482,14 @@ export function installUsageMeter(App, ctx = {}) {
       const color7d = usageColor(pct7d);
       const p5 = estDisplayPair(v5.reading, v5.est);
       const p7 = estDisplayPair(v7.reading, v7.est);
-      rows.push(renderRow('claude', has5h || noData ? '5h' : null, pct5h, '7d', pct7d, noData, [p5, p7], [v5, v7]));
+      // THE ROW KEEPS TWO RINGS (lane usage-two-rings, owner 2026-11-05: 「没有 5 hour 的话，你应该还是显示两个饼状图吧」 → 18:40
+      // PT 「我是说没有 5h 就显示 7d+fable」): a reading without a 5h window shows the account's OTHER limit — the model-scoped
+      // weekly cap (capRing: read / not read) — beside its 7d, in NO5H_RINGS' order; with a 5h window, 5h + 7d.
+      // `acctCap` = the account's cap as capRing reads it, with or without a 5h (r3: the popup's scoped note says its words)
+      const acctCap = noData ? null : capRing(quotaModel, rl, estSel, Date.now(), { pair: estDisplayPair, t, refreshOff: (this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off' });
+      const cap = has5h ? null : acctCap;
+      const ring = cap && { '7d': renderPie('7d', pct7d, false, p7, v7), cap: capPie(cap) };
+      rows.push(ring ? ringRow('claude', NO5H_RINGS.map((k) => ring[k])) : renderRow('claude', '5h', pct5h, '7d', pct7d, noData, [p5, p7], [v5, v7]));
       if (!noData) chipWorst = Math.max(chipWorst, has5h ? (p5.estPct ?? pct5h) : -1, p7.estPct ?? pct7d);
       // Account switcher — one chip per viewable identity. When the CLI login
       // is a named account (gl.accountId), NO separate CLI-login chip renders:
@@ -517,7 +537,10 @@ export function installUsageMeter(App, ctx = {}) {
       }
       if (!scopedSections.length && !noData) {
         const odOff = (this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off';
-        scopedSections.push(`<div class="usage-note">${odOff
+        // THE POPUP AGREES WITH THE RING (lane usage-two-rings r3/r4): after a ⟳ read that named no cap the note says the
+        // ring's own sentence — «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again», a fact, never «no cap
+        // on this account» (an empty read proves nothing — B-9f4b); no ⟳ read yet keeps the passive-feed sentence
+        scopedSections.push(`<div class="usage-note">${acctCap.lastReadAt ? escHtml(acctCap.tip) : odOff
           ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings')
           : t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand')}</div>`);
       }
@@ -537,7 +560,10 @@ export function installUsageMeter(App, ctx = {}) {
       </div>` : no5hSince ? `<div class="usage-session usage-session-lifted" data-window="5h">
         <div class="usage-session-name">${escHtml(t('5-hour limit lifted ({when})', { when: stampText(no5hSince) }))}</div>
         <div class="usage-note">${escHtml(t('No 5-hour limit on this account since {when} — weekly limits only.', { when: stampText(no5hSince) }))}</div>
-      </div>` : ''}
+      </div>` : `<div class="usage-session usage-session-unread" data-window="5h">
+        <div class="usage-session-name">${t('5-hour limit')}</div>
+        <div class="usage-session-stats"><span class="usage-stat">${escHtml(t('no data yet'))}</span></div>
+      </div>`}
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
         <div class="${barClass(v7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
