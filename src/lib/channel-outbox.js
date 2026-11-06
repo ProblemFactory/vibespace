@@ -1329,7 +1329,7 @@ export function openChannelOutbox(app, opts = {}) {
   fx.title = t('Show every proposal');
   fx.setAttribute('aria-label', fx.title);
   fx.appendChild(icon('close', 10));
-  fx.onclick = () => setFilter(null);
+  fx.onclick = () => setOutboxFilter(null);
   fchip.appendChild(fx);
   fbar.appendChild(fchip);
   const rowsShown = (whole) => outboxRowsOf({ proposals: (whole && whole.proposals) || [], apiCards }, filter);
@@ -1381,7 +1381,7 @@ export function openChannelOutbox(app, opts = {}) {
     placeArmed(list, nodes);
   }
   function dropFilter() { filter = null; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }
-  function setFilter(f) {
+  function setOutboxFilter(f) {
     const next = okFilter(f);
     if (!next) dropFilter();
     else { if (forcedFrom === undefined) forcedFrom = view; filter = next; view = 'all'; }
@@ -1403,7 +1403,7 @@ export function openChannelOutbox(app, opts = {}) {
   }
   // a door that names no filter (⚙ Outbox…, the panel's button, a For-you link) shows EVERYTHING — never an earlier filter kept
   // silently; «replaced» (`show`) and a layout replay (`syncId`) keep the view as it is
-  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setFilter(o.filter); else if (filter && !o.show && !o.syncId) setFilter(null); if (o.show) show(String(o.show)); };
+  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setOutboxFilter(o.filter); else if (filter && !o.show && !o.syncId) setOutboxFilter(null); if (o.show) show(String(o.show)); };
   segAwait.onclick = () => { view = 'awaiting'; forcedFrom = undefined; draw(last); };
   segAll.onclick = () => { view = 'all'; forcedFrom = undefined; draw(last); };
   async function refresh() {

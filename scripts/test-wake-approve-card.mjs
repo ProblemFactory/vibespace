@@ -936,6 +936,14 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) (?:return;|\{[^\n]*
   ok(shapes.every((x) => x.named && x.joined), `RED COPIES — the census over the AST names the ROUTE for every shape it missed (${shapes.length}): ${shapes.map((x) => x.what + (x.named ? ' ✓' : ' ✗')).join(' · ')}`, shapes);
   const shared = writerCensus({ ...SRC_FILES, 'src/routes/hooks-p6.js': "const router = require('express').Router();\nrouter.put('/api/exits/:id/access', async (req, res) => {\n  await exitProxy.setAccess(req.params.id, req.body, { by: 'user' });\n  res.json({ ok: true });\n});\n" });
   ok(c0.shared.includes('setAccess') && !shared.problems.some((x) => /hooks-p6|\/api\/exits\//.test(x)), `CONTROL: a writer NAME another engine also defines (derived: ${c0.shared.join(', ')}) counts only on a channels engine — an exit's setAccess is no channel write`, { shared: c0.shared, problems: shared.problems.filter((x) => /exits/.test(x)) });
+  // int382 (outbox-session-chip's local setFilter): a grain-writer's name a SECOND file comes to define is SHARED, and a shared name's
+  // stray calls count only on the engine getter — the census went blind to them (the RED COPY above). The shared set is the
+  // measured one; a new second definer is NAMED with its file, never shared in silence
+  const SHARED_KNOWN = ['setAccess', 'setReach'];
+  const newShared = (c, files) => c.shared.filter((n) => !SHARED_KNOWN.includes(n)).map((n) => `${n} (${Object.keys(files).filter((rel) => /^src\/.*\.js$/.test(rel) && !/^src\/server\/channels-[a-z]+\.js$/.test(rel) && scanOf(files[rel]).defs.has(n)).join(', ')})`);
+  ok(!newShared(c0, SRC_FILES).length, `a grain-writer's name is its own — no new second definer (${newShared(c0, SRC_FILES).join('; ') || 'shared: ' + c0.shared.join(', ')})`, c0.shared);
+  const helper = { ...SRC_FILES, 'src/lib/helper-p7.js': 'function setFilter(f) { return f; }\nmodule.exports = { setFilter };\n' };
+  ok(newShared(writerCensus(helper), helper).includes('setFilter (src/lib/helper-p7.js)'), 'RED COPY: a local helper wearing a grain-writer\'s name is named with its file', newShared(writerCensus(helper), helper));
 }
 
 // ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
