@@ -1910,7 +1910,12 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
       ok(e && e.code === 'profile_locked' && /your own browser/.test(e.message) && isAliveG(hu.pid) && singletonsG(dir).length === 3, '④g F5 ephemeral: …so a pre-mark CLI launch on the directory after the refusal is still refused by name and left running (the mark kept)', e ? `${e.code}: ${e.message.slice(0, 160)}` : `launched; holder alive ${isAliveG(hu.pid)}`);
       try { hu.kill('SIGKILL'); } catch { } unplant(dir);
       // lane engine-spi-egress L3 r2: the control cuts the CARRY alone (the two lines; since L1 r2 the record's egress line sits between them and the store write)
-      const noCarry = ksrcG.replace("      if (prev && prev.mark) rec.mark = prev.mark;\n      { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows\n", "      /* CONTROL: a refused ephemeral start carries nothing */\n");
+      // the control cuts the mark carry and the launch-host lineage carry EACH BY ITSELF — never as one adjacent block: tailnet-names
+      // put its own carry (rec.tailnet) between them, and an adjacency anchor stopped cutting (nightly382's red)
+      const MARK_CARRY = '      if (prev && prev.mark) rec.mark = prev.mark;\n';
+      const LINEAGE_CARRY = /^      \{ const lh = launchHostsFor\(prev, p\.dir \|\| null\); if \(lh\.length\) \{ rec\.hosts = lh;[^\n]*\n/m;
+      const noCarry = ksrcG.includes(MARK_CARRY) && LINEAGE_CARRY.test(ksrcG)
+        ? ksrcG.replace(MARK_CARRY, '      /* CONTROL: a refused ephemeral start carries nothing */\n').replace(LINEAGE_CARRY, '') : ksrcG;
       ok(noCarry !== ksrcG, '④g F5 control setup: the carry onto the new record is where the control cuts');
       const DATA_C5 = path.join(ROOT, 'data-g-eph-ctl'); fs.mkdirSync(DATA_C5, { recursive: true });
       const beC = BE.create({ dataDir: DATA_C5, homeDir: HOME, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-g-ctl'), env: { XDG_RUNTIME_DIR: XDG } }); const envC = beC.envFor({ browserKey: KG, cwd: HOME });

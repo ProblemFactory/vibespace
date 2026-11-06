@@ -895,6 +895,7 @@
 - (2026-11-05) A LANE'S STRAY HUB FETCHED FROM ORIGIN WITH THE BOX'S SSH KEY (fleet-plugin-catalog r6): a worktree's ./run.sh ⇒ git pull fetched before it failed (no upstream). 不变量 = a hub outside the temp dir pulls — a lane boots none there without NO_AUTO_UPDATE=1 (kb-bugfix-invariants)
 - (2026-11-05) THE LIFTED 5-HOUR LIMIT WAS A MISSING RING (usage-two-rings, owner) — 不变量 = a Claude row with no 5h shows its model cap beside the 7d; read / not read (never «no cap»); a reading's own caps drawn for every harness (Codex Spark), the empty ring Claude's alone ⇒ kb-bugfix-invariants
 - (2026-11-06) THE PHONE ROSTER OVERFLOWED WHEN A CLI WAS INSTALLED, AND ONLY THE OWNER'S BOX COULD SEE IT (nightly380, B-7671) — 不变量 = past three a phone row folds at its current tier; a render's listeners die with it; a suite injects what it judges; censuses start at doors ⇒ kb-bugfix-invariants
+- (2026-11-06) A CONTROL STOPPED CUTTING WHEN A LANE PUT A LINE BETWEEN ITS TWO ANCHORED LINES (share-model ④g F5, B-f0d1's class; tailnet-names). 不变量 = a control cuts each line by its OWN text, never an adjacent block; its setup fails by name when one is missing ⇒ kb-bugfix-invariants
 
 ## THE PHONE ROSTER OVERFLOWED WHEN A CLI WAS INSTALLED, AND ONLY THE OWNER'S BOX COULD SEE IT (nightly380, attributed by int361 2026-11-06, B-7671; lane phone-roster-fold)
 
