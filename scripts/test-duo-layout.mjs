@@ -231,6 +231,9 @@ const SIGNATURE = `(() => {
   // (the attention page #phone-home is the BOOT's first screen when a question is open — a fold keeps the conversation on
   // show instead, SPEC-v3 §7; it is checked on its own below, never compared)
   for (const s of ['#toolbar', '#taskbar', '#mobile-nav', '#sidebar', '#sidebar-rail', '#mobile-nav-menu', '#mobile-nav-gear', '#mobile-nav-new', '#sidebar-new', '.sidebar-tabs']) sig[s] = on(document.querySelector(s));
+  // lane phone-titlebar-title: the compact bar folds ⚙ into its «⋯» by the TITLE's measure (the fresh loads hold no window, the ladder
+  // two) — folded behind a ⋯ on show it is reachable, the same chrome; test-phone-titlebar-ui judges the fold itself
+  if (document.getElementById('mobile-nav-gear')?.classList.contains('bar-folded') && on(document.getElementById('mobile-nav-overflow')) === 'shown') sig['#mobile-nav-gear'] = 'shown';
   sig.homeOverWindow = on(document.getElementById('phone-home')) === 'shown' && !!document.querySelector('.window.window-active');
   return sig;
 })()`;
@@ -306,6 +309,10 @@ const DRAFT = 'this sentence must survive the fold';
 const putDraft = () => evalJs(`(() => { const t = document.querySelector('.window.window-active .chat-input'); t.value = ${JSON.stringify(DRAFT)}; t.dispatchEvent(new Event('input', { bubbles: true })); window.__duoDraft = t; return 1; })()`);
 const DRAFT_JS = `(() => { const t = document.querySelector('.window.window-active .chat-input'); return { same: t === window.__duoDraft, value: window.__duoDraft?.value }; })()`;
 const tap = async (sel) => { const p = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`); if (!p) throw new Error('tap: nothing at ' + sel); await tapAt(p.x, p.y); await sleep(500); };
+// lane phone-titlebar-title: on the compact bar the Desktops door (and ⚙) fold into ONE «⋯» while the title needs the room — the
+// door's press is then the ⋯'s Desktops row (the door's own sheet, anchored at the ⋯); on the regular bar it stands as before
+const deskFolded = () => evalJs(`!!document.getElementById('mobile-nav-desktops')?.classList.contains('bar-folded')`);
+const pressDesktops = async () => { if (!(await deskFolded())) return tap('#mobile-nav-desktops'); await tap('#mobile-nav-overflow'); await sleep(250); return tap('.mnav-more-menu .context-menu-item[data-key="desktops"]'); };
 
 try {
   console.log(`setup: ${sessions.length} stub conversations behind the real chat-wrapper`);
@@ -500,7 +507,7 @@ try {
       return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
     const d0 = await evalJs(DOOR);
     check('⑧ 951: the trailing bar\'s bottom section starts with Desktops (after the gap, before Task Groups), 44 × 44, badge «1», «(1/2)» in its label', !!d0 && d0.shown && d0.w === 44 && d0.h === 44 && d0.l >= d0.barL && d0.t > d0.gapT && d0.t < d0.tasksT && d0.badge === '1' && /\(1\/2\)/.test(d0.label || ''), d0);
-    await tap('#mobile-nav-desktops');
+    await pressDesktops();
     const m0 = await evalJs(MENU);
     check('⑧ …a tap: a menu INTO the conversation column (left of the bar) — every desktop by name with its window count, the active one marked, then «New desktop»; 44 px rows',
       !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
@@ -513,7 +520,7 @@ try {
       check(`⑧ …a long press on a row: the desktop's doors, the sheet gives way — Desk B is the last: Move down greyed WITH its why (${dd && dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ')})`,
         !!dd && !dd.sheet && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.items[3].off && dd.items[3].why === 'Already the last desktop' && dd.items[3].whyIn && dd.items.slice(0, 3).every((x) => !x.off) && dd.inside, dd);
       await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
-      await tap('#mobile-nav-desktops');
+      await pressDesktops();
     }
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 6000); await sleep(500);
@@ -547,9 +554,9 @@ try {
     check('⑧ ☰ again: the list column is back (0–320), the conversation 321–895', !l3.hidden && l3.list && (!l3.win || (l3.win.l === 321 && l3.win.w === 574)), l3);
     // the cover (compact): the same door on the top bar, the phone's sheet
     await device(382, 580); await settle(382);
-    const c0 = await evalJs(`(() => { const b = document.getElementById('mobile-nav-desktops'); const r = b.getBoundingClientRect(); const nav = document.getElementById('mobile-nav').getBoundingClientRect(); return { shown: getComputedStyle(b).display !== 'none' && r.width >= 36 && r.height >= 36, inNav: r.top >= nav.top - 0.5 && r.bottom <= nav.bottom + 0.5 && r.right <= 382, badge: b.querySelector('.mnav-badge')?.textContent || '', toggle: getComputedStyle(document.getElementById('list-column-toggle')).display }; })()`);
-    check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px), badge «1»; the regular class\'s list ☰ not there', c0.shown && c0.inNav && c0.badge === '1' && c0.toggle === 'none', c0);
-    await tap('#mobile-nav-desktops');
+    const c0 = await evalJs(`(() => { const b = document.getElementById('mobile-nav-desktops'); const r = b.getBoundingClientRect(); const nav = document.getElementById('mobile-nav').getBoundingClientRect(); const m = document.getElementById('mobile-nav-overflow'), mr = m && m.getBoundingClientRect(); return { shown: getComputedStyle(b).display !== 'none' && r.width >= 36 && r.height >= 36, inNav: r.top >= nav.top - 0.5 && r.bottom <= nav.bottom + 0.5 && r.right <= 382, folded: b.classList.contains('bar-folded'), more: !!mr && mr.width >= 44 && mr.top >= nav.top - 0.5 && mr.right <= 382, badge: b.querySelector('.mnav-badge')?.textContent || '', toggle: getComputedStyle(document.getElementById('list-column-toggle')).display }; })()`);
+    check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px) — or, while the title needs the room, in its «⋯» (lane phone-titlebar-title) — badge «1»; the regular class\'s list ☰ not there', ((c0.shown && c0.inNav) || (c0.folded && c0.more)) && c0.badge === '1' && c0.toggle === 'none', c0);
+    await pressDesktops();
     const m1 = await evalJs(MENU), g1 = await evalJs(GEOM);
     check('⑧ 382: the sheet inside the viewport, every row\'s name visible', inside(g1), g1);
     check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && m1.rows[0].active && m1.rows[1].name === 'Desk B' && /^1 window$/.test(m1.rows[1].count) && m1.left <= 10 && m1.right >= 372, m1);
@@ -565,7 +572,7 @@ try {
     await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
     await device(669, 867); await settle(669);
-    await tap('#mobile-nav-desktops');
+    await pressDesktops();
     const g2 = await evalJs(GEOM), nav2 = await evalJs(`Math.round(document.getElementById('mobile-nav').getBoundingClientRect().bottom)`);
     await shot('desktops-door-669.png');
     check('⑧ 669 (the inner portrait): the menu under the bar lying over the conversation, inside the conversation column, every row\'s name visible', inside(g2, { col: true }) && g2.t >= nav2, { g2, nav2 });
@@ -574,7 +581,7 @@ try {
     await device(375, 812); await settle(375);
     const deskC = await evalJs(`app.desktopManager.createDesktop('Desk C')`); await sleep(500);
     const ORDER = `app.desktopManager.desktops.map((d) => d.id)`;
-    const doorsOf = async (id, png) => { await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await tap('#mobile-nav-desktops'); await holdRow(id); const dd = await evalJs(DESK_DOORS); if (png) await shot(png); return dd; };
+    const doorsOf = async (id, png) => { await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await pressDesktops(); await holdRow(id); const dd = await evalJs(DESK_DOORS); if (png) await shot(png); return dd; };
     const said = (dd) => (dd ? dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ') : 'no menu');
     const four = (dd) => !!dd && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.inside && dd.items.every((x) => x.h >= 44);
     const mid = await doorsOf(deskB, 'desktop-doors-375-middle.png');
@@ -597,7 +604,7 @@ try {
     // KEPT at its place greyed WITH the why that names it; its long press opens its doors greyed with that why (8c680dcf: the
     // row stayed a live one, and its long press opened nothing) — and the world is back: [desk 1, Desk B]
     await evalJs(`app.desktopManager.reorderDesktop(${JSON.stringify(deskB)}, ${JSON.stringify(deskC)}); 1`); await sleep(600);
-    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await tap('#mobile-nav-desktops'); await sleep(400);
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await pressDesktops(); await sleep(400);
     const gws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, j) => { gws.on('open', r); gws.on('error', j); });
     gws.send(JSON.stringify({ type: 'desktop-delete', desktopId: deskC })); await sleep(300); try { gws.close(); } catch { }
     const goneIn = await waitFor(`app.desktopManager.desktops.length === 2`, 8000); await sleep(500);
@@ -630,8 +637,8 @@ try {
       swRuns.push({ how, opened, live, closed: !(await isOpen(SW)) });
     }
     const v1 = await vsCount();
-    for (const [how, shut] of [['an outside tap', () => outside(SH)], ['Esc', escKey], ['the row of the desktop on show', async () => tap(`.mdesk-menu .context-menu-item[data-desktop-id="${await evalJs('app.desktopManager.activeDesktopId')}"]`)], ['its button again (it opens anew — then an outside tap)', async () => { await tap('#mobile-nav-desktops'); await outside(SH); }], ['an outside tap', () => outside(SH)]]) {
-      await tap('#mobile-nav-desktops'); const opened = await isOpen(SH), live = (await vsCount()) - v1;
+    for (const [how, shut] of [['an outside tap', () => outside(SH)], ['Esc', escKey], ['the row of the desktop on show', async () => tap(`.mdesk-menu .context-menu-item[data-desktop-id="${await evalJs('app.desktopManager.activeDesktopId')}"]`)], ['its button again (it opens anew — then an outside tap)', async () => { await pressDesktops(); await outside(SH); }], ['an outside tap', () => outside(SH)]]) {
+      await pressDesktops(); const opened = await isOpen(SH), live = (await vsCount()) - v1;
       await shut(); await sleep(200);
       shRuns.push({ how, opened, live, closed: !(await isOpen(SH)) });
     }
@@ -671,6 +678,7 @@ try {
     for (const { sel, id } of targets) {
       const before = await evalJs(`[...app.wm.windows.keys()]`);
       try { await tap(sel); } catch { continue; }
+      if (id === 'mobile-nav-overflow' && await evalJs(`!!document.querySelector('.mnav-more-menu .context-menu-item[data-key="desktops"]')`)) { await tap('.mnav-more-menu .context-menu-item[data-key="desktops"]'); } // lane phone-titlebar-title: the folded Desktops door
       const rows = await evalJs(`document.querySelectorAll('.mdesk-menu [data-desktop-id], .mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)').length`);
       if (rows >= 2) doors.push(id);
       await evalJs(`(() => { document.querySelectorAll('.context-menu, .mobile-win-switcher, [data-popover]').forEach((m) => m.remove()); document.querySelectorAll('.usage-popup').forEach((p) => p.classList.add('hidden')); app.hideDialogs?.();
@@ -686,7 +694,7 @@ try {
     check('⑨ THE DOOR CENSUS at 951 (touch, the regular class): no taskbar — and the doors are the bar\'s Desktops + the conversation\'s head', !c951.taskbar && c951.doors.includes('mobile-nav-desktops') && c951.doors.includes('window-titlebar'), c951);
     await device(382, 580); await settle(382);
     const c382 = await doorCensus();
-    check('⑨ …at 382 (the compact class): the top bar\'s Desktops + its title', !c382.taskbar && c382.doors.includes('mobile-nav-desktops') && c382.doors.includes('mobile-nav-title'), c382);
+    check('⑨ …at 382 (the compact class): the top bar\'s Desktops (standing, or its «⋯» while the title needs the room — lane phone-titlebar-title) + its title', !c382.taskbar && (c382.doors.includes('mobile-nav-desktops') || c382.doors.includes('mobile-nav-overflow')) && c382.doors.includes('mobile-nav-title'), c382);
     mutantOn = 'door';
     await device(951, 585); await load(); await attachBoth();
     const red = await doorCensus();

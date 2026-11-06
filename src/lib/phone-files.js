@@ -15,7 +15,7 @@ import { escHtml, fetchJson } from './utils.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { loadHomeFolders, recentLocalCwds, chipWords } from './folder-chips.js';
 import { dayOneWords, dayOneUsed } from './sidebar-rail.js';
-import { filesCardChips, crumbsOf } from '../files-door.js'; // PURE: the card's chips, the breadcrumbs
+import { filesCardChips, crumbsOf, doorName, doorNameDir } from '../files-door.js'; // PURE: the card's chips, the breadcrumbs, the door's name + its direction
 
 const DOOR = 'files'; // the nav door's id in the day-one record
 
@@ -29,20 +29,42 @@ const z = (w) => Number(w.element?.style?.zIndex) || 0;
 /** Open the files: `path` ⇒ an explorer showing that folder (the one already there, else a new one); no path ⇒ the
  *  explorer this phone showed last, else a new one at home. Every reveal goes through app.goToWinId (the door). */
 export function openFilesDoor(app, { path = '' } = {}) {
-  const mine = explorersHere(app);
-  const there = path ? mine.find((w) => w._explorer.currentPath === path) : mine.sort((a, b) => z(b) - z(a))[0];
+  const there = path ? explorersHere(app).find((w) => w._explorer.currentPath === path) : filesDoorWindow(app);
   if (there) { app.goToWinId(there.id); return there; }
   return app.openFileExplorer(path || undefined);
 }
 
-/** The nav's 文件 button: one tap opens the files; its word shows for the first week (or until it was used). */
+/** The explorer the door brings back (lane phone-titlebar-title r3 — the «+» sheet's 文件 row names it): the one this phone showed
+ *  LAST — the highest z (a show raises it) — one on the desktop on show before one on another (the press never leaves a desktop
+ *  that has one); r4 (the r3 acceptance: the only explorer on another desktop gave none — the row opened a SECOND at home): on any
+ *  desktop, minimized, a tab group's guest or another machine's (goToWinId switches the desktop and reveals it); null when none
+ *  (the door then opens one at home). */
+export function filesDoorWindow(app) {
+  const here = (w) => (w._hiddenByDesktop ? 0 : 1);
+  return [...app.wm.windows.values()].filter((w) => w.type === 'files' && w._explorer).sort((a, b) => here(b) - here(a) || z(b) - z(a))[0] || null;
+}
+
+/** What the 文件 row names (r4 — G1): the folder `win`'s explorer shows, as its breadcrumbs name it (PURE doorName — never a path;
+ *  «host: » before it on another machine, the explorer's own title rule) — and (r5) the direction that FOLDER's own name is read
+ *  in (PURE doorNameDir; the host prefix is ours, never the name's) → { name, dir }; no explorer ⇒ { name: '', dir: 'ltr' }. */
+export function filesDoorName(app, win) {
+  const ex = win?._explorer;
+  if (!ex) return { name: '', dir: 'ltr' };
+  const host = ex._host ? (ex._hostSelect?.selectedOptions?.[0]?.textContent || ex._host) : '';
+  const path = ex.currentPath || win._explorerPath || '', at = { home: app._localHome || '', host };
+  return { name: doorName(path, at), dir: doorNameDir(path, at) };
+}
+
+/** The nav's 文件 door: one press opens the files; the button's word shows for the first week (or until it was used).
+ *  Returns THE press (lane phone-titlebar-title — the owner: a folder icon beside ☰ reads as the window's own icon): the
+ *  compact phone bar shows no folder icon, the «+» sheet's 文件 row runs this press; the regular class's bar keeps the button. */
 export function installNavFilesDoor(app) {
   const btn = document.getElementById('mobile-nav-files');
-  if (!btn) return null;
-  const paint = () => btn.classList.toggle('labelled', dayOneWords([DOOR]));
-  btn.onclick = () => { dayOneUsed(DOOR); paint(); openFilesDoor(app); };
+  const paint = () => btn?.classList.toggle('labelled', dayOneWords([DOOR]));
+  const press = () => { dayOneUsed(DOOR); paint(); return openFilesDoor(app); };
+  if (btn) btn.onclick = press;
   paint();
-  return btn;
+  return press;
 }
 
 let mountsCache = { at: 0, p: null };

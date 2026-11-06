@@ -19,7 +19,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
+import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { openAccountModelsDialog } from './account-models.js'; // q-053 §3 (lane models-at-session): a provider with no models — the door to its account's models
@@ -1195,7 +1195,7 @@ class App {
 
   _showGlobalSettings(anchor) {
     const pop = createPopover(anchor, 'global-settings-popover');
-    const rect = anchor.getBoundingClientRect();
+    const rect = drawnAnchorRect(anchor); // ⚙ folded into the phone's ⋯: from the bar, never a zero rect (lane phone-titlebar-title r5)
     pop.style.left = '';
     pop.style.top = ((rect.bottom + 4) / uiScale()) + 'px';
     pop.style.right = ((window.innerWidth - rect.right) / uiScale()) + 'px';

@@ -3,6 +3,8 @@
 //   · filesCardChips — the 文件 card's chips on the phone's For-you page: home first, the last folder used, the home's
 //     folders with files, the mounted mounts, the home's other folders, the recent folders — a path once, bounded.
 //   · crumbsOf — a folder as breadcrumbs (~ for the home), each with the folder it opens.
+//   · doorName — the folder a door names (lane phone-titlebar-title r4: the «+» sheet's 文件 row) — its last crumb, never a path;
+//     doorNameDir — the direction that name is read in (r5: the row cuts it where it begins).
 // PURE: imports only ./day-one.js (PURE → PURE); the bundle and its suite share it.
 const { folderChips } = require('./day-one.js');
 
@@ -52,4 +54,26 @@ function crumbsOf(dir, home = '') {
   return out;
 }
 
-module.exports = { CARD_MAX, filesCardChips, crumbsOf };
+/** The NAME a door says for the folder it brings back (lane phone-titlebar-title r4 — the r3 acceptance: the «+» sheet's 文件 row
+ *  named the explorer's window title, a path front-cut to 40 characters whose END the row's own ellipsis then cut — «Back to
+ *  …e/userW/workspace/AIWorkspace/vib…»): the folder as the phone's explorer names it — its LAST breadcrumb (the folder's name;
+ *  «~» the home, «/» the root) — with «host: » before it when the explorer lists another machine (the explorer's own window-title
+ *  rule, file-explorer.js navigate). '' ⇒ ''. */
+function doorName(dir, { home = '', host = '' } = {}) {
+  const last = crumbsOf(dir, host ? '' : home).pop();
+  return last ? (host ? `${host}: ` : '') + last.label : '';
+}
+
+/** The direction the FOLDER a door names is read in (lane phone-titlebar-title r5 — the r4 acceptance: a long Hebrew / Arabic name
+ *  lost its END, an LTR one its START): its last crumb's first strong letter, as <bdi> resolves a name (Unicode bidi P2–P3; digits
+ *  and marks are weak — skipped; none ⇒ 'ltr') — the folder's own letters, never the «host: » doorName puts before them. The row
+ *  cuts a name too long for its line where it BEGINS in reading order — the part read LAST stays, as the explorer's own title
+ *  keeps a long path's end (utils.js frontTruncate) — so its box runs the other way. Same arguments as doorName. */
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+function doorNameDir(dir, { home = '', host = '' } = {}) {
+  const last = crumbsOf(dir, host ? '' : home).pop();
+  const m = String(last ? last.label : '').match(/\p{L}/u);
+  return m && RTL_LETTER.test(m[0]) ? 'rtl' : 'ltr';
+}
+
+module.exports = { CARD_MAX, filesCardChips, crumbsOf, doorName, doorNameDir };

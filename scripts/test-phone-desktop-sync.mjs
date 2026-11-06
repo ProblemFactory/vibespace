@@ -13,7 +13,7 @@
 // it is uncommitted), each with its own data/ + HOME; page D = headless chrome 1440×900, page P = a second chrome emulating an
 // iPhone 390×844 (UA, touch, hover:none / pointer:coarse ⇒ app.isMobile AND app.isTouch) driven by REAL touch sequences.
 //   ① P taps its switcher through every window ×5 ⇒ D's z / boxes / maximize / minimize byte-identical (DOM + layouts.json)
-//   ② P opens Files from its "+" sheet ⇒ on D it lands at D's own default box (not the full workspace), on top
+//   ② P opens Files from its "+" sheet (the files door — then «Open in new window» on a folder: a NEW window) ⇒ on D it lands at D's own default box (not the full workspace), on top
 //   ③ P closes a window ⇒ D closes it (membership flows), the close evidence rides P's save, the belt never refuses
 //   ④ D drags one window and minimizes another ⇒ P keeps ITS window on show; P's next user-caused save carries D's box +
 //      isMinimized:true verbatim (guard 5 by construction)
@@ -103,7 +103,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 
 const DESK = 'desk-main';
 const FIELDS = ['zIndex', 'gridBounds', 'isMaximized', 'isMinimized', 'isSnapped', 'preSnapBounds'];
-const dir = (n) => { const d = path.join(ROOT, 'files', n); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, n + '.txt'), n); return d; };
+const dir = (n) => { const d = path.join(ROOT, 'files', n); fs.mkdirSync(path.join(d, ...Array(8).fill('sub')), { recursive: true }); fs.writeFileSync(path.join(d, n + '.txt'), n); return d; }; // a `sub` chain: openFiles' «Open in new window» road (lane phone-titlebar-title)
 const W = (n, gb, z, o = {}) => ({ winId: 'win-' + n, title: n, type: 'files', isMinimized: false, isMaximized: false, gridBounds: gb, zIndex: z, openSpec: { action: 'openFileExplorer', path: dir(n) }, explorerPath: dir(n), ...o });
 /** 3 overlapping freeform windows (distinct z) + 1 maximized + 1 minimized, one desktop. */
 const fixture = () => ({
@@ -299,9 +299,18 @@ else await (async () => {
   const TITLES = ['pd-alpha', 'pd-bravo', 'pd-charlie', 'pd-delta', 'pd-echo'];
   const nearFull = (gb) => !!gb && gb[0] < 0.1 && gb[1] < 0.1 && gb[2] > 0.85 && gb[3] > 0.85;
   const rawSock = async (port) => { const s = new WebSocket(`ws://127.0.0.1:${port}/ws`); await new Promise((r, e) => { s.on('open', r); s.on('error', e); }); return s; };
-  const openFiles = async (P) => { // the phone's "+" long-press sheet → Files (REAL touch: a 700 ms press, then a tap)
+  // the phone's "+" long-press sheet → Files (REAL touch: a 700 ms press, then a tap) — lane phone-titlebar-title: that row is the files
+  // DOOR now (the explorer this phone showed last, else a new one), so the NEW window is the explorer's own «Open in new window» on its
+  // `sub` folder (a 700 ms press on the row, then a tap) — every call one window more, born on the phone by touch as before
+  const openFiles = async (P) => {
+    const had = await P.ev(`[...app.wm.windows.keys()]`);
     await P.tap(`document.getElementById('mobile-nav-new')`, 700); await sleep(300);
     await P.tap(`[...document.querySelectorAll('.mobile-sheet span')].find((s) => s.textContent.trim() === 'Files')`); await sleep(400);
+    if (!had.includes(await P.ev(SHOWN))) return; // the row itself opened one (no explorer to reveal — or a base tree, whose row always opened a new one)
+    const SUB = `document.querySelector('.window.window-active .file-item[data-name="sub"]')`;
+    for (let i = 0; i < 40 && !(await P.ev(`!!${SUB}`)); i++) await sleep(150);
+    await P.tap(SUB, 700); await sleep(300);
+    await P.tap(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Open in new window')`); await sleep(400);
   };
 
   // ── ⑩–⑬ (lane phone-arrangement-fixes): a fresh two-desktop record; `red` = the base tree, where each judged check FAILS ──

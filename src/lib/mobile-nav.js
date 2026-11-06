@@ -1,12 +1,14 @@
 import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
+import { navBarFold, navTitleMinText, navMoreRows, navMoreLoud } from './title-chips.js'; // lane phone-titlebar-title: THE TITLE OWNS THE BAR — the chips beside it yield by measure
+import { FOLDED } from './bar-fold.js';
 import { t } from './i18n.js';
-import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
+import { escHtml, onOutsidePress, showContextMenu, uiScale } from './utils.js';
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
-import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
+import { installNavFilesDoor, filesDoorWindow, filesDoorName } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
 import { openDesktopSheet, untilGone } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
 import { doorState, followDesktops } from '../desktop-switch.js';
@@ -47,6 +49,18 @@ function fitRowPill(label, chip) {
  * for sidebar/window/session access.
  */
 
+/** THE BAR'S CHIPS by key (lane phone-titlebar-title): title-chips.js navBarFold's NAV_FOLD_ORDER / NAV_NEVER_FOLD name them;
+ *  any other visible child of the bar is measured as a door that stands. */
+const NAV_KEYS = Object.freeze({ 'mobile-nav-menu': 'menu', 'mobile-nav-desktops': 'desktops', 'mobile-nav-usage': 'usage', 'mobile-nav-vault': 'vault', 'mobile-nav-todos': 'todos', 'mobile-nav-gear': 'gear', 'mobile-nav-close': 'close', 'mobile-nav-new': 'new' });
+
+/** THE PHONE'S SURFACES UNDER THE BAR (lane phone-titlebar-title r4): every sheet and popup the bar or its ⋯ rows open — the «+»
+ *  sheet, the ⋯ menu, the Desktops sheet (.mobile-sheet), the Usage popup and the For-you tray (.usage-popup), the Settings
+ *  popover, the mini inbox — each placed by its style.css rule at `top: var(--phone-sheet-top)`, the ONE variable _publishUnder
+ *  writes. A press on the bar or on one of them is held (_installPressHold). r5 (the r4 acceptance): its ROOM from the same
+ *  variable (max-height = the screen − it − 12 px, every rule — a tall sheet under the lock strip ran off the screen), and the
+ *  bar's own title switcher (_showWindowSwitcher) is one of them — it hangs flush from the bar and follows it too. */
+const PHONE_SURFACES = '.mobile-sheet, .usage-popup, .global-settings-popover, .ut-mini-popover, .mobile-win-switcher';
+
 /** Is `w` minimized? A tab group is minimized as ONE frame — the HOST carries the flag, its guests are hidden with it. */
 const minimizedOf = (wm, w) => !!((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w).isMinimized;
 
@@ -63,18 +77,25 @@ export class MobileNav {
 
     // ☰: the phone's drawer; in the regular class (the Duo's inner portrait) the list COLUMN's show / hide (lane duo-build-1)
     document.getElementById('mobile-nav-menu').onclick = () => (app.viewportClass?.() === 'regular' ? app.sidebar.toggleList() : app.sidebar.toggle(true));
-    // 文件 (lane phone-files-door): the files were reachable only through the «+» long-press sheet — a person looking for
-    // their files never looks under «new». One tap: the explorer this phone showed last, else a new one at home
-    installNavFilesDoor(app);
+    // 文件 (lane phone-files-door): the explorer this phone showed last, else a new one at home. lane phone-titlebar-title (the
+    // owner: «最左边那个文件浏览器的图标也很容易误认为是当前窗口的图标»): the compact bar shows no folder icon — its press is the
+    // «+» sheet's 文件 row (and the For-you page's 文件 card); the regular class's trailing bar keeps the button
+    this._pressFiles = installNavFilesDoor(app);
     const newBtn = document.getElementById('mobile-nav-new');
-    newBtn.onclick = () => app.showNewSessionDialog();
-    // "+" LONG-PRESS SHEET (docs/design-mobile-gaps.md #3): #toolbar is
+    // «+» IS THE CREATE MENU (lane phone-titlebar-title r6 — the r5 acceptance: the owner put Files INTO «+», 「应该放进 + 菜单里」,
+    // but its sheet opened only on a 500 ms press and the tap opened New Session; with nothing waiting there is no For-you page,
+    // so no 文件 card, and NO door on the screen said Files): a TAP opens the sheet. New session — what the tap opened before —
+    // is its first row, accented; Files is two rows down (after Terminal). A second tap closes it (the sheet's outside-press closer leaves «+» to
+    // its toggle: _showCreateSheet).
+    newBtn.setAttribute('aria-haspopup', 'menu');
+    newBtn.onclick = (e) => { e.stopPropagation(); if (this._createMenu?.isConnected) { this._createMenu.remove(); return; } this._showCreateSheet(); };
+    // "+" SHEET (docs/design-mobile-gaps.md #3): #toolbar is
     // display:none ≤768px and with it the Terminal / Files / Browser / Desktop
     // entry points — a plain shell was reachable only through the dialog's
     // Backend=shell, the browser not at all. installLongPressContextMenu
     // synthesizes `contextmenu` on a 500 ms press (a mouse right-click lands
-    // here too); the tap keeps opening the New Session dialog.
-    newBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._showCreateSheet(); });
+    // here too) and swallows the press's click: a long press opens the same sheet.
+    newBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); if (!this._createMenu?.isConnected) this._showCreateSheet(); });
     // ⚙ — the taskbar (and its gear-adjacent chrome) is hidden on phones, so
     // without this the gs-menu (Usage/Manage agents/Diagnostics/Settings…)
     // has no entry point at all on mobile.
@@ -107,6 +128,243 @@ export class MobileNav {
     listBtn.onclick = (e) => { e.stopPropagation(); app.sidebar.toggleList(); };
     document.body.appendChild(listBtn);
     this.listBtn = listBtn;
+    this._installBarFold();
+  }
+
+  /** THE TITLE OWNS THE BAR (lane phone-titlebar-title — the owner 2026-11-06: 「手机端的标题栏被挤压得根本看不到聊天标题了」). On the
+   *  compact class the chips beside the title yield by MEASURE (PURE title-chips.js navBarFold: the fixed order, each chip's
+   *  forms, the ⋯) until the whole title fits; what folds lives in ONE «⋯» with its live value. Re-decided on the title's change
+   *  (updateTitle), a chip's change (a For-you arrival, the ring, the desktops' badge, the vault chip — the bar's subtree), the
+   *  bar's width (ResizeObserver) and the tier (vs-viewport-class); every watcher on the controller the bar owns. The regular
+   *  class and the desktop take every fold off: the base's bar. */
+  _installBarFold() {
+    const nav = document.getElementById('mobile-nav');
+    if (!nav) return;
+    const ctl = this._barCtl = new AbortController();
+    const more = document.createElement('button');
+    more.id = 'mobile-nav-overflow'; more.type = 'button'; more.className = 'mnav-overflow';
+    more.innerHTML = UI_ICONS.more;
+    more.title = t('More'); more.setAttribute('aria-label', more.title); more.setAttribute('aria-haspopup', 'menu');
+    // the ⋯ is its menu's ANCHOR (r2): exempt from the menu's outside-press closer (_openMore), so its second press — a finger's
+    // or a mouse's — finds the menu open and closes it
+    more.addEventListener('click', (e) => { e.stopPropagation(); if (this._moreMenu?.isConnected) { this._moreMenu.remove(); return; } this._openMore(); }, { signal: ctl.signal });
+    const close = document.getElementById('mobile-nav-close');
+    if (close && close.parentNode === nav) nav.insertBefore(more, close); else nav.appendChild(more);
+    this.moreBtn = more;
+    this._folded = [];
+    const fit = () => this._scheduleFit();
+    this._barMo = new MutationObserver(fit);
+    this._barMo.observe(nav, { subtree: true, childList: true, characterData: true });
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
+    ro?.observe(nav);
+    // r4: what stands ABOVE the bar moves it (the vault's lock strip, the maintenance banner — #main-wrapper's children before it,
+    // put in, taken out, re-worded): every surface under it follows (_publishUnder)
+    const above = () => { for (let el = nav.previousElementSibling; el; el = el.previousElementSibling) ro?.observe(el); fit(); };
+    const wrapMo = new MutationObserver((recs) => { for (const r of recs) for (const n of r.removedNodes) if (n.nodeType === 1) ro?.unobserve(n); above(); });
+    if (nav.parentNode) wrapMo.observe(nav.parentNode, { childList: true });
+    above();
+    window.addEventListener('vs-viewport-class', fit, { signal: ctl.signal });
+    document.fonts?.ready?.then(() => { if (!ctl.signal.aborted) fit(); });
+    this._installPressHold(ctl);
+    ctl.signal.addEventListener('abort', () => { this._barMo.disconnect(); wrapMo.disconnect(); ro?.disconnect(); if (this._fitRaf) cancelAnimationFrame(this._fitRaf); }, { once: true });
+    fit();
+  }
+
+  /** A PRESS HOLDS THE BAR AND WHAT HANGS UNDER IT (r4 — the r3 acceptance: r3 held the ⋯ menu's rows, ended only by the menu's own
+   *  lift, click or cancel — a MOUSE released off the menu, no implicit capture, left the hold on for the menu's life: rows stale,
+   *  the menu never following the bar; and a press on the ⋯ ITSELF was not held — another client's rename emptied the fold under a
+   *  finger on ⋯ and the lift ran ⚙, slid under it). From a pointerdown on the bar or a phone surface until the press ENDS — its
+   *  click there, its lift anywhere else (a lift on it: + 600 ms, a finger's click lands after its lift), a pointercancel, the
+   *  page's blur or hiding — the bar's folds, the ⋯'s rows and every surface's place stand still: the lift does what the press
+   *  began on, never what slid under it. Then ONE pass catches up. On the controller the bar owns. */
+  _installPressHold(ctl) {
+    const o = { signal: ctl.signal };
+    let root = null, press = null;
+    const end = () => {
+      clearTimeout(this._heldT); press?.abort(); press = null; root = null;
+      if (!this._held) return;
+      this._held = false;
+      if (this._heldMissed) { this._heldMissed = false; this._fitBar(); } // what changed meanwhile, in ONE pass
+    };
+    ctl.signal.addEventListener('abort', () => { clearTimeout(this._heldT); press?.abort(); this._held = this._heldMissed = false; }, { once: true });
+    document.addEventListener('pointerdown', (e) => {
+      const r = e.target?.closest?.(`#mobile-nav, ${PHONE_SURFACES}`);
+      if (!r) return;
+      clearTimeout(this._heldT);
+      this._held = true;
+      if (r === root) return;
+      press?.abort(); press = new AbortController(); root = r;
+      // its click ends it — after every handler of that click ran (a chip's own press stops its propagation)
+      r.addEventListener('click', () => { clearTimeout(this._heldT); this._heldT = setTimeout(end, 0); }, { capture: true, signal: press.signal });
+    }, { capture: true, passive: true, signal: ctl.signal });
+    document.addEventListener('pointerup', (e) => {
+      if (!this._held) return;
+      clearTimeout(this._heldT);
+      if (root?.isConnected && root.contains(e.target)) this._heldT = setTimeout(end, 600); else end();
+    }, { capture: true, signal: ctl.signal });
+    document.addEventListener('pointercancel', end, { capture: true, signal: ctl.signal });
+    window.addEventListener('blur', end, o);
+    document.addEventListener('visibilitychange', end, o);
+  }
+
+  /** ONE PLACE FOR EVERY PHONE SURFACE (r4 — the r3 acceptance: r3's sheetUnderNav lived in _sheet only; the Desktops sheet, the
+   *  Usage popup — the ⋯ rows' own doors, the only road on a locked phone — and the Settings popover still opened at the
+   *  stylesheet's 48 px OVER a bar the vault's lock strip had moved to 114–158, and an open «+» sheet never followed a lock or an
+   *  unlock): the bar's MEASURED bottom + the base's 4 px, written to the ONE variable every phone surface's rule reads — an open
+   *  one follows at once; never under a held press. The compact class only (the regular class's bar is a column: the stylesheet's
+   *  own 48); fixed body children take layout px (/uiScale). r5: each surface's ROOM is read from it too (style.css). */
+  _publishUnder() {
+    if (this._held) { this._heldMissed = true; return; }
+    const nav = document.getElementById('mobile-nav'), root = document.documentElement;
+    const nb = nav && this.app.viewportClass?.() === 'compact' && nav.getClientRects().length ? nav.getBoundingClientRect().bottom : 0;
+    const v = nb > 0 ? `${Math.round(nb / (uiScale() || 1)) + 4}px` : '';
+    if (root.style.getPropertyValue('--phone-sheet-top') === v) return;
+    if (v) root.style.setProperty('--phone-sheet-top', v); else root.style.removeProperty('--phone-sheet-top');
+  }
+
+  _scheduleFit() {
+    if (this._fitRaf || this._barCtl?.signal.aborted) return;
+    this._fitRaf = requestAnimationFrame(() => { this._fitRaf = 0; this._fitBar(); });
+  }
+
+  /** ONE pass: every chip at its widest, measured (layout px as the page draws them), the verdict applied. */
+  _fitBar() {
+    const nav = document.getElementById('mobile-nav'), more = this.moreBtn, title = this._titleEl;
+    if (!nav || !more || !title) return;
+    if (this._held) { this._heldMissed = true; return; } // a press is on the bar or under it: the pass waits for its end (r4)
+    const todos = document.getElementById('mobile-nav-todos');
+    const kids = [...nav.children].filter((el) => el !== title && el !== more);
+    for (const el of kids) el.classList.remove(FOLDED);
+    if (todos?.dataset.badges) delete todos.dataset.badges;
+    more.classList.remove('on');
+    let folded = [];
+    if (this.app.isMobile && this.app.viewportClass?.() === 'compact' && nav.getClientRects().length) {
+      const w = (el) => el.getBoundingClientRect().width;
+      const items = kids.filter((el) => el.getClientRects().length).map((el) => {
+        const key = NAV_KEYS[el.id] || el.id || el.className;
+        if (el !== todos) return { key, el, forms: [w(el)] };
+        const full = w(el); el.dataset.badges = 'one'; const one = w(el); delete el.dataset.badges;
+        return { key, el, forms: [full, one] };
+      });
+      more.classList.add('on'); const moreW = w(more); more.classList.remove('on');
+      const cs = getComputedStyle(nav), ts = getComputedStyle(title);
+      const k = nav.offsetWidth ? nav.getBoundingClientRect().width / nav.offsetWidth : 1; // computed px → drawn px (a zoomed page)
+      const roomPx = (nav.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) * k;
+      const text = title.textContent;
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit';
+      title.appendChild(probe);
+      const pad = (parseFloat(ts.paddingLeft) + parseFloat(ts.paddingRight)) * k;
+      probe.textContent = text; const titlePx = w(probe) + pad;
+      probe.textContent = navTitleMinText(text); const titleMinPx = w(probe) + pad;
+      probe.remove();
+      const v = navBarFold({ roomPx, gapPx: (parseFloat(cs.columnGap) || 0) * k, moreW, titlePx, titleMinPx, items: items.map(({ key, forms }) => ({ key, forms })) });
+      for (const it of items) if (v.folded.includes(it.key)) it.el.classList.add(FOLDED);
+      if (todos && v.forms.todos === 1) todos.dataset.badges = 'one';
+      if (v.folded.length) more.classList.add('on');
+      folded = v.folded;
+      this._barVerdict = v;
+    }
+    this._folded = folded;
+    // THE LOCK STAYS LOUD (r3, PURE navMoreLoud — lane vault-locked-loud's law: «the vault is locked» is said wherever Settings is
+    // reached from): ⚙ folded while the vault is locked ⇒ the ⋯ that stands in for it wears ⚙'s red lock — vault-unlock.js
+    // drawGearMark's mark, the same colour, its name says it; an unlock (any client's broadcast) takes it off at the next pass
+    const loud = navMoreLoud(folded, { vaultLocked: !!document.getElementById('mobile-nav-gear')?.classList.contains('vault-locked') });
+    if (more.classList.contains('vault-locked') !== loud) {
+      more.classList.toggle('vault-locked', loud);
+      more.querySelector(':scope > .vault-gear-mark')?.remove();
+      if (loud) { const m = document.createElement('span'); m.className = 'vault-gear-mark'; m.setAttribute('aria-hidden', 'true'); m.innerHTML = UI_ICONS.lock || ''; more.appendChild(m); }
+      more.title = loud ? t('More — Vault locked') : t('More'); more.setAttribute('aria-label', more.title);
+    }
+    this._barMo?.takeRecords(); // the pass's own writes are no change of the bar's inputs
+    this._publishUnder(); // r4: every phone surface under the bar as it stands now
+    if (this._moreMenu?.isConnected) this._syncMore(); // r3: an open ⋯ is PATCHED by key — never rebuilt under a finger
+  }
+
+  /** The ⋯ menu: the folded chips in bar order (PURE navMoreRows), each a 44 px row with its glyph, its label and its LIVE value in
+   *  the chip's own words — read from the chip itself at every repaint (the ring's arc and its %, ⚙'s lock), its press the chip's
+   *  own — the phone's sheet under the nav, like the «+» sheet. The ⋯ is the menu's anchor: exempt from its closer. Its rows are
+   *  KEYED (r3, _syncMore): a fold change while it is open patches them — and never while a press is on them. A PRESS ENDS ON THE
+   *  ROW IT BEGAN ON (r3 — measured by the r2 acceptance: Chrome sends a tap's click to whatever is under the finger at the lift,
+   *  so a row that moved there mid-press took it; another client's lock put «Vault locked» above «设置» and the UNLOCK ran): the
+   *  bar's press hold (_installPressHold, r4) keeps the rows still until the press ends, wherever it is lifted. */
+  _openMore() {
+    if (!this._moreRows().length) return;
+    const menu = this._sheet([]);
+    menu.classList.add('mnav-more-menu');
+    menu._closeExclude?.push(this.moreBtn); // attachPopoverClose's LIVE exclusion list: a press on the ⋯ is the toggle's, not «elsewhere»
+    this._moreMenu = menu;
+    const ctl = new AbortController();
+    untilGone(menu, ctl);
+    menu._paintMo = new MutationObserver(() => this._paintMore());
+    ctl.signal.addEventListener('abort', () => menu._paintMo.disconnect(), { once: true });
+    this._syncMore();
+  }
+
+  /** THE ⋯'S ROWS BY KEY (r3 — kb-patterns «keyed-row reconciliation», «live card: patch in place»; the r2 acceptance: a fold change
+   *  while the menu was open REBUILT it, and a finger already on «设置» lifted on the «Vault locked» row inserted above it). A row
+   *  that stays keeps its element (its listener, its value); a gone one leaves first, then a new one is built in its place in the
+   *  bar's order — a staying row is never moved; the menu closes only when nothing is folded. A press on the bar or under it holds
+   *  the row set (its values still repaint) until it ends (_installPressHold) — a menu opened by a held press is built at once. */
+  _syncMore() {
+    const menu = this._moreMenu;
+    if (!menu?.isConnected) return;
+    if (this._held && menu.children.length) { this._heldMissed = true; this._paintMore(); return; }
+    const rows = this._moreRows();
+    if (!rows.length) { menu.remove(); return; }
+    const keys = new Set(rows.map((r) => r.key));
+    for (const el of menu.querySelectorAll(':scope > .context-menu-item')) if (!keys.has(el.dataset.key)) el.remove();
+    rows.forEach((r, i) => {
+      let el = menu.querySelector(`:scope > .context-menu-item[data-key="${r.key}"]`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'context-menu-item'; el.dataset.key = r.key;
+        el.innerHTML = '<span class="mnav-more-icon"></span><span class="mnav-more-label"></span><span class="mnav-more-value"></span>';
+        el.onclick = () => { menu.remove(); this._moreDoor(el.dataset.key).run?.(); };
+      }
+      if (menu.children[i] !== el) menu.insertBefore(el, menu.children[i] || null);
+    });
+    menu._paintMo.disconnect();
+    for (const r of rows) menu._paintMo.observe(r.el, { subtree: true, childList: true, characterData: true, attributes: true });
+    this._paintMore(rows);
+  }
+
+  /** The ⋯ rows as the chips say them NOW: PURE navMoreRows over the fold and the chips' own facts, each with its door. */
+  _moreRows() {
+    const facts = { desktops: this.desktopsBtn?._door || null, usage: document.querySelector('#mobile-nav-usage .usage-donut-label')?.textContent || '', vaultLocked: !!document.getElementById('mobile-nav-gear')?.classList.contains('vault-locked') };
+    return navMoreRows(this._folded, facts).map((r) => ({ ...r, ...this._moreDoor(r.key) })).filter((r) => r.el);
+  }
+
+  /** Each row's glyph, words and value from its chip as it draws them now (ONE source at every repaint — r2) and ⚙'s lock (r3: the
+   *  mark rides ⚙'s glyph, the colour the row). */
+  _paintMore(rows = this._moreRows()) {
+    const menu = this._moreMenu;
+    if (!menu?.isConnected) return;
+    for (const r of rows) {
+      const row = menu.querySelector(`:scope > .context-menu-item[data-key="${r.key}"]`);
+      const icon = row?.querySelector('.mnav-more-icon'), label = row?.querySelector('.mnav-more-label'), val = row?.querySelector('.mnav-more-value'), g = r.glyph();
+      if (!icon || !label || !val) continue;
+      if (icon._glyph !== g) { icon.innerHTML = g; icon._glyph = g; }
+      icon.classList.toggle('mnav-more-ring', r.key === 'usage');
+      row.classList.toggle('vault-locked', r.loud);
+      if (label.textContent !== r.label) label.textContent = r.label;
+      if (val.textContent !== r.value) val.textContent = r.value;
+    }
+  }
+
+  /** A folded chip's ⋯ door: { el, glyph, label, run } — `glyph()` the chip's glyph as it draws it NOW, its words, its own press
+   *  ANCHORED AT ITS OWN DOOR (the folded chip — a menu keyed to the ⋯ would toggle shut on the ⋯'s next press, r2). ⚙'s glyph is
+   *  the whole chip (r3): the cog and, while the vault is locked, its lock mark (vault-unlock.js drawGearMark). */
+  _moreDoor(key) {
+    const app = this.app;
+    const el = document.getElementById(Object.keys(NAV_KEYS).find((id) => NAV_KEYS[id] === key) || '');
+    if (!el) return {};
+    const svg = () => el.querySelector('svg')?.outerHTML || '';
+    if (key === 'desktops') return { el, glyph: svg, label: t('Desktops'), run: () => openDesktopSheet(app, el, { onSwitch: (id) => this.switchDesktop(id) }) };
+    if (key === 'usage') return { el, glyph: () => el.innerHTML, label: t('Usage'), run: () => el.click() };
+    if (key === 'gear') return { el, glyph: () => el.innerHTML, label: t('Settings'), run: () => app._pressGlobalSettings(el) };
+    if (key === 'vault') return { el, glyph: svg, label: t('Vault locked'), run: () => el.click() };
+    return {};
   }
 
   /** THE DESKTOPS DOOR (lane desktop-switch-phone, 2026-10-25 — userW on the Duo's inner display: «如何在这个界面下切换桌面？»).
@@ -134,6 +392,7 @@ export class MobileNav {
     if (!b) return;
     const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: d.name, active: d.id === dm.activeDesktopId })));
     const label = s.k ? t('Desktops — {name} ({k}/{n})', { name: s.name, k: s.k, n: s.n }) : t('Desktops');
+    b._door = { k: s.k, n: s.n, name: s.name }; // the ⋯ row's words (r3): the PLACE of the total and the name, as the label says them
     if (b.title !== label) { b.title = label; b.setAttribute('aria-label', label); }
     const badge = b.querySelector('.mnav-badge');
     if (badge && badge.textContent !== s.badge) { badge.textContent = s.badge; badge.classList.toggle('hidden', !s.badge); }
@@ -173,17 +432,32 @@ export class MobileNav {
     // a two-word name would strip every row of .context-menu-item); the
     // sheet modifier is added afterwards.
     const menu = showContextMenu(0, 0, items);
-    menu.classList.add('mobile-sheet');
+    menu.classList.add('mobile-sheet'); // under the bar as it stands: style.css --phone-sheet-top (_publishUnder, r4)
     return menu;
   }
 
   _showCreateSheet() {
     const app = this.app;
-    const row = (icon, label, action) => ({ labelHtml: `${icon}<span>${escHtml(label)}</span>`, action });
+    const row = (icon, label, action, hint = '') => ({ labelHtml: hint ? `${icon}<span class="mnav-sheet-words"><span>${escHtml(label)}</span>${hint}</span>` : `${icon}<span>${escHtml(label)}</span>`, action });
+    // the 文件 row IS the nav door's press (lane phone-titlebar-title — the owner: the icon goes into «+»; r3: ONE act per row, said):
+    // with an explorer open its hint names the one it brings back; none ⇒ it opens one at home. A second explorer is that
+    // explorer's own «Open in new window» on any folder row. r4 (the r3 acceptance: the hint was the window's title — a path
+    // front-cut to 40, its END then cut by the line — «Back to …e/userW/workspace/AIWorkspace/vib…»): it names the FOLDER (PURE
+    // doorName — the explorer's last breadcrumb), the sentence's own words never cut; a name too long for the line loses its START
+    // («…», its end — the part a person knows — stays). r5 (the r4 acceptance: a long Hebrew / Arabic name lost its END): the START
+    // in READING order, whichever way the name runs — the part read last stays, as the explorer's title keeps a path's end
+    // (frontTruncate): the FOLDER's direction (filesDoorName → PURE doorNameDir, its first strong letter — never the «host: »'s) on
+    // the <bdi>, its box the other way (style.css)
+    const back = filesDoorWindow(app);
+    const named = ({ name, dir }) => {
+      const [pre, post = ''] = t('Back to {name}').split('{name}');
+      const d = name && dir === 'rtl' ? 'rtl' : 'ltr';
+      return `<span class="mnav-sheet-hint">${pre ? `<span class="mnav-sheet-said">${escHtml(pre)}</span>` : ''}<span class="mnav-sheet-name" data-dir="${d}"><bdi dir="${d}">${escHtml(name || t('Files'))}</bdi></span>${post ? `<span class="mnav-sheet-said">${escHtml(post)}</span>` : ''}</span>`;
+    };
     const items = [
       row(UI_ICONS.robot, t('Agent session'), () => app.showNewSessionDialog()),
       row(UI_ICONS.terminal, t('Terminal'), () => app.openShellTerminal()),
-      row(FILE_ICONS.folder, t('Files'), () => app.openFileExplorer()),
+      row(FILE_ICONS.folder, t('Files'), () => this._pressFiles(), back ? named(filesDoorName(app, back)) : ''),
       row(UI_ICONS.globe, t('Web view'), () => app.openBrowser()),
     ];
     // gated exactly like the toolbar button (app._vncAvailable = /api/vnc/status)
@@ -195,7 +469,11 @@ export class MobileNav {
     const APPS_ICON = getCommand('desktopApps.open')?.icon || UI_ICONS.monitor;
     if (app._desktopAppsAvailable) items.push(row(APPS_ICON, t('Apps…'), () => runCommand('desktopApps.open', { app }))); // design 009 §B6: one word — Apps
     if (app._browserProfiles) items.push(row(UI_ICONS.browserLive, t('Agent browser'), () => this._openAgentBrowser()));
-    return this._sheet(items);
+    const menu = this._sheet(items);
+    menu.querySelector(':scope > .context-menu-item')?.classList.add('mnav-sheet-lead'); // r6: New session leads, accented (style.css)
+    menu._closeExclude?.push(document.getElementById('mobile-nav-new')); // attachPopoverClose's LIVE exclusion list: a press on «+» is its toggle's
+    this._createMenu = menu;
+    return menu;
   }
 
   /** The phone's Agent browser row. The agent browser is SESSION-scoped (a live
@@ -262,6 +540,7 @@ export class MobileNav {
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
     this.bar?.update?.();
     this.updateDesktopsDoor();
+    this._scheduleFit?.();
   }
 
   _showWindowSwitcher(anchor = this._titleEl) {
@@ -276,7 +555,7 @@ export class MobileNav {
     // at the regular class's landscape the nav is the VERTICAL trailing bar (full height) — its bottom is the viewport's bottom;
     // the sheet then hangs from the top (HOTFIX 2.369.356), and from the conversation's head when that is the anchor
     const top = navRect.height > navRect.width ? 0 : navRect.bottom;
-    pop.style.top = top + 'px';
+    pop.style.top = top + 'px'; // the compact class: style.css places it — flush under the bar as it stands, the phone sheets' room (r5)
     // the regular class: over the conversation column only (the list column and the trailing bar stay)
     const col = this.app.viewportClass?.() === 'regular' && document.getElementById('workspace')?.getBoundingClientRect();
     if (col && col.width) { pop.style.left = col.left + 'px'; pop.style.right = Math.max(0, innerWidth - col.right) + 'px'; pop.style.top = Math.max(top, col.top) + 'px'; }

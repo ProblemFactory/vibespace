@@ -1,6 +1,7 @@
 // THE PHONE'S DOORS (lane phone-files-door, 2026-10-24 — the owner: 「我发现手机上好像不是很容易找到文件管理器」). The file
 // explorer's ONLY phone door was a row in the «+» sheet, and that sheet opens on a 500 ms press of a button whose TAP opens
 // New Session: a person looking for their files never looks under «new». A thing a person looks for is where they look.
+// (Lane phone-titlebar-title r6: a TAP on «+» opens that sheet now — New session its first row — so its Files row is two taps away.)
 //   · PHONE_TWINS — every desktop door (the toolbar's buttons, the rail's items) and where a phone person finds the same
 //     thing. A desktop door with no phone twin is a gap (the twin-set law, re-measured here); a deliberate «none» says
 //     why. Each twin is pinned to a LITERAL in a source file, so deleting the twin reds the census (test-phone-doors).
@@ -14,9 +15,9 @@ const T = (where, file, anchor) => Object.freeze({ where, file, anchor });
  *  item('<id>', …)); twins — [{ where, file, anchor }] (anchor = a literal of `file`), or null with a `why`. */
 const PHONE_TWINS = Object.freeze([
   // ── the toolbar ──
-  { door: 'btn-new-session', twins: [T('the nav «+» (a tap)', 'public/index.html', '<button id="mobile-nav-new"'), T('the «+» sheet «Agent session»', 'src/lib/mobile-nav.js', "t('Agent session'), () => app.showNewSessionDialog()")] },
+  { door: 'btn-new-session', twins: [T('the nav «+» (a tap opens its sheet — r6)', 'src/lib/mobile-nav.js', "newBtn.onclick = (e) => { e.stopPropagation(); if (this._createMenu?.isConnected)"), T('the «+» sheet «Agent session» (its first row, accented)', 'src/lib/mobile-nav.js', "t('Agent session'), () => app.showNewSessionDialog()")] },
   { door: 'btn-terminal', twins: [T('the «+» sheet «Terminal»', 'src/lib/mobile-nav.js', "t('Terminal'), () => app.openShellTerminal()")] },
-  { door: 'btn-file-explorer', twins: [T('the nav «文件» (one tap)', 'public/index.html', '<button id="mobile-nav-files"'), T('the For-you page\'s 文件 card', 'src/lib/user-todos-panel.js', 'home.append(filesCard(app));'), T('the «+» sheet «Files»', 'src/lib/mobile-nav.js', "t('Files'), () => app.openFileExplorer()")] },
+  { door: 'btn-file-explorer', twins: [T('the nav «文件» — the regular class\'s bar (the compact bar shows no folder icon: lane phone-titlebar-title)', 'public/index.html', '<button id="mobile-nav-files"'), T('the For-you page\'s 文件 card', 'src/lib/user-todos-panel.js', 'home.append(filesCard(app));'), T('the «+» sheet «Files» (the nav door\'s press; r6: a tap on «+», then the row)', 'src/lib/mobile-nav.js', "t('Files'), () => this._pressFiles")] },
   { door: 'btn-browser', twins: [T('the «+» sheet «Web view»', 'src/lib/mobile-nav.js', "t('Web view'), () => app.openBrowser()")] },
   { door: 'btn-desktop-apps', twins: [T('the «+» sheet «Apps…»', 'src/lib/mobile-nav.js', "t('Apps…'), () => runCommand('desktopApps.open', { app })"), T('⚙ «Apps…»', 'src/lib/desktop-app-launcher.js', "label: () => t('Apps…')")] },
   { door: 'btn-desktop', twins: [T('the «+» sheet «Desktop»', 'src/lib/mobile-nav.js', "t('Desktop'), () => openDesktopPicker(app)")] },

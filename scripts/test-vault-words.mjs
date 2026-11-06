@@ -74,6 +74,7 @@ const ROWS = {
     // named card and the nameless one (a use refused before any key was picked)
     ['The vault is locked — Unlock… at the top of the page', 'foryou', 'THE 使用失败 For-you card\'s locked CAUSE line (useFailCard, lanes conversations-archive-verb / vault-key-row-compact): under the head «<who> used “<key>” for “<verb>” — refused» — the vault is locked, and the door'],
   ],
+  'src/lib/mobile-nav.js': [['Vault locked', 'label', 'the phone bar\'s ⋯ row for the FOLDED lock chip (lane phone-titlebar-title) — the chip\'s own two words; its press is the chip\'s (THE unlock dialog), and the chip\'s title / the strip say the facts; and (r3) the ⋯\'s own name «More — Vault locked» while it stands in for a folded ⚙ and wears ⚙\'s lock (vault-locked-loud) — a button\'s name, the strip and the For-you item say the facts', { count: 2 }]],
   'src/lib/vault-unlock.js': [
     ['The vault is locked — {n} waiting on it', 'person', 'THE STRIP (place 1) — how many the lock stopped; its Unlock… button beside the words'],
     ['device links, the relay and account switching are waiting', 'person', 'THE STRIP before anything was stopped (place 1)'],

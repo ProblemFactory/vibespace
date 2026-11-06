@@ -98,7 +98,7 @@ export function openDesktopSheet(app, anchor, { onSwitch, drawn = null } = {}) {
   const menu = showContextMenu(regular ? ar.left : 0, regular ? ar.top : 0, items);
   menu.classList.add('mdesk-menu');
   untilGone(menu, ctl); // every road that takes the sheet out of the page aborts its listeners (r3 ①: its dismiss left one)
-  if (!regular) menu.classList.add('mobile-sheet'); // the phone's sheet under the nav (mobile-nav.js _sheet's own two lines)
+  if (!regular) menu.classList.add('mobile-sheet'); // the phone's sheet under the bar as it stands (style.css --phone-sheet-top — mobile-nav.js _publishUnder)
   else placeOverColumn(menu, ar);
   menu.querySelectorAll('.context-menu-item').forEach((el, i) => {
     const r = rows[i];

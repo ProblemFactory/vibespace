@@ -719,6 +719,7 @@ console.log('§5 the door census — every pointer drag in the client is on the 
     ['chat-view.js', /^(pointerup|pointercancel)$/, "the chat's press witness, not a drag"],
     ['channel-window.js', /^(pointerup|pointercancel)$/, 'the gutter-press FLAG (paging input): no element follows the pointer, judged at the next release anywhere'],
     ['mobile-nav.js', /^touchend$/, "the phone's edge swipe: a touch gesture on the document"],
+    ['mobile-nav.js', /^(pointerup|pointercancel)$/, "lane phone-titlebar-title r4's PRESS HOLD (capture): a press on the phone bar or a sheet under it holds the folds and the sheets' place until its release ANYWHERE (a mouse lifted off the menu) — a press witness, nothing follows the pointer"],
     ['taskbar.js', /^pointermove$/, "the grouped button's hover chooser (lane K): no button held"],
     ['window.js', /^mousemove$/, "the overlap switcher's hover: no button held"],
     ['customize-mode.js', /^mousemove$/, "the width PICKER's hover (capture): no button held, ended by its own click / Esc"],

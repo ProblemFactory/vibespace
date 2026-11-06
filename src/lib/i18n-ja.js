@@ -11885,4 +11885,10 @@ export default {
   "Resumed 1 conversation where it was": "1 件の会話を元の位置で再開しました",
   "Resumed {n} conversations where they were": "{n} 件の会話を元の位置で再開しました",
   "Still resuming this conversation — its window is waiting for the session to start": "この会話はまだ再開中です — ウィンドウはセッションの起動を待っています",
+  // lane phone-titlebar-title — r3: the ⋯ standing in for a folded ⚙; the «+» sheet's 文件 row with an explorer open. r7: «+»'s
+  // title + aria-label (a tap opens the create menu — New session, Files… — never one act). Comments on their own line: an
+  // entry with a trailing comment is invisible to scripts/i18n-check.mjs (its ENTRY_RE ends at the value)
+  "More — Vault locked": "その他 — 保管庫はロック中",
+  "Back to {name}": "{name} に戻る",
+  "Create or open…": "作成または開く…",
 };

@@ -40,10 +40,12 @@
 //       + the notices' line fit without scrolling (a CONTROL with whole words does not); a row's tap opens its
 //       conversation, the back gesture returns to the list; every ask answered ⇒ the next back lands on the
 //       conversation list and a boot draws no page; the 1280×800 desktop draws none
-//   THE FILES DOOR (lane phone-files-door, the owner 2026-10-23: 「手机上好像不是很容易找到文件管理器」): from the cold first
-//       screen ONE tap on the nav's 文件 lists the home (CONTROL = the base's screen: without the lane's two doors nothing on
-//       it says Files — the only road was a long-press on «+»); the explorer IS the screen; a second tap reveals the same
-//       explorer; ‹ returns to the For-you page, whose 文件 card sits AFTER the bands (chips ≥ 36 px, home first) and opens
+//   THE FILES DOOR (lane phone-files-door, the owner 2026-10-23: 「手机上好像不是很容易找到文件管理器」; lane phone-titlebar-title,
+//       2026-11-06: a folder icon beside ☰ read as the window's own — the compact bar shows none, its press is the «+» sheet's 文件
+//       row): from the cold first screen ONE tap — the For-you page's 文件 card, its Home chip — lists the home (CONTROL = the
+//       base's screen: without the lane's two doors nothing on it says Files — the only road was a long-press on «+»); the
+//       explorer IS the screen; the «+» sheet's Files row (the nav door's press) reveals the same explorer, never a second one;
+//       ‹ returns to the For-you page, whose 文件 card sits AFTER the bands (chips ≥ 36 px, home first) and opens
 //       the explorer THERE; on the explorer: rows ≥ 44 px, the path bar at 16 px, a RELATIVE name resolves against the
 //       folder on show (B-d027), the breadcrumbs scroll sideways (the folder in view, a crumb navigates), a long-press on a
 //       row's name is its menu with nothing selected, «New session here» opens New Session with the folder
@@ -362,18 +364,36 @@ try {
     const onTop = (el) => { const r = el.getBoundingClientRect(); if (!r.width || !r.height || r.bottom <= 0 || r.top >= innerHeight) return false; const h = document.elementFromPoint(Math.min(innerWidth - 1, r.left + r.width / 2), Math.min(innerHeight - 1, r.top + r.height / 2)); return !!h && (h === el || el.contains(h)); };
     return [...document.querySelectorAll('button, [role=button], a')].filter((el) => !skip.some((s) => el.closest(s)) && says(el) && onTop(el)).map((el) => el.id ? '#' + el.id : String(el.className));
   })()`);
-  const doorsNow = await filesDoors([]), doorsBase = await filesDoors(['#mobile-nav-files', '.ph-files']);
-  check(`the cold first screen holds a door that says Files (${doorsNow.join(', ')}) — CONTROL (the base's screen, without the lane's two doors): none (${doorsBase.length})`, doorsNow.includes('#mobile-nav-files') && doorsBase.length === 0, { doorsNow, doorsBase });
-  const navFiles = await evalJs(rectsOf('#mobile-nav-files, #mobile-nav-menu'));
-  check(`the nav's 文件 is ≥ 36×36 and sits right after ☰ (${navFiles.map((r) => r.w + '×' + r.h + '@' + r.l).join(', ')})`, navFiles.length === 2 && allAtLeast(navFiles) && navFiles[1].l > navFiles[0].l && navFiles[1].l - navFiles[0].r < 12, navFiles);
+  // lane phone-titlebar-title (the owner 2026-11-06: «最左边那个文件浏览器的图标也很容易误认为是当前窗口的图标…应该放进 + 菜单里»): the compact
+  // bar shows NO folder icon — the cold first screen's one-tap door is the page's 文件 card (a section headed Files: its Home chip is
+  // the door), the «+» sheet's 文件 row the nav door's press (the explorer this phone showed last)
+  const cardDoors = (without) => evalJs(`(() => {
+    const skip = ${JSON.stringify(without)};
+    const onTop = (el) => { const r = el.getBoundingClientRect(); if (!r.width || !r.height || r.bottom <= 0 || r.top >= innerHeight) return false; const h = document.elementFromPoint(Math.min(innerWidth - 1, r.left + r.width / 2), Math.min(innerHeight - 1, r.top + r.height / 2)); return !!h && (h === el || el.contains(h)); };
+    return [...document.querySelectorAll('section')].filter((c) => !skip.some((s) => c.closest(s)) && /^Files$/.test(c.firstElementChild?.textContent.trim() || '')).map((c) => c.querySelector('button')).filter((b) => b && onTop(b)).map((b) => String(b.className));
+  })()`);
+  await waitFor(`!!document.querySelector('#phone-home .ph-files-chip[data-kind="home"]')`, 8000);
+  const doorsNow = await filesDoors([]), cardNow = await cardDoors([]), doorsBase = (await filesDoors(['#mobile-nav-files', '.ph-files'])).concat(await cardDoors(['.ph-files']));
+  check(`the compact bar draws no folder icon (LAW 3 — no «Files» button on the bar: ${doorsNow.join(', ') || 'none'})`, !doorsNow.includes('#mobile-nav-files') && await evalJs(`document.getElementById('mobile-nav-files').getClientRects().length === 0`), doorsNow);
+  check(`the cold first screen holds a door that says Files — the page's 文件 card, its first chip on top (${cardNow.join(', ')}) — CONTROL (the base's screen, without the lane's two doors): none (${doorsBase.length})`, cardNow.length > 0 && /\bhome\b/.test(cardNow[0]) && doorsBase.length === 0, { cardNow, doorsBase });
   const homeDir = await evalJs('app._localHome');
-  await tap('#mobile-nav-files');
+  await tap('#phone-home .ph-files-chip[data-kind="home"]');
   const oneTap = await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(homeDir)} && w.element.querySelectorAll('.file-item').length >= 3 && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000);
-  check('ONE tap on it lists the home (taps from a cold open: 1 ≤ 2 — the base: a long-press on «+» and a tap, behind no word)', oneTap, await evalJs(`({ active: app.wm.windows.get(app.wm.activeWindowId)?.type, path: app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath, rows: document.querySelectorAll('.file-explorer .file-item').length })`));
+  check('ONE tap on its Home chip lists the home (taps from a cold open: 1 ≤ 2 — the base: a long-press on «+» and a tap, behind no word)', oneTap, await evalJs(`({ active: app.wm.windows.get(app.wm.activeWindowId)?.type, path: app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath, rows: document.querySelectorAll('.file-explorer .file-item').length })`));
+  // the «+» sheet's Files row by a real tap (its row marked for the finger — the sheet's rows carry no id); found by its word — with
+  // an explorer open a hint line under it names the folder it brings back (lane phone-titlebar-title r3; r4: the folder's name), returned here
+  const plusFiles = async () => {
+    await longPress('#mobile-nav-new');
+    const hint = await evalJs(`(() => { const r = [...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => [...el.querySelectorAll('span')].some((s) => !s.children.length && s.textContent.trim() === 'Files')); if (r) r.dataset.plusFiles = '1'; return r ? (r.querySelector('.mnav-sheet-hint')?.textContent || '') : null; })()`);
+    await tap('.mobile-sheet .context-menu-item[data-plus-files]');
+    return hint;
+  };
   const sheetGeo = await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const r = w.element.getBoundingClientRect(); const nb = document.getElementById('mobile-nav').getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), b: Math.round(r.bottom), nav: Math.round(nb.bottom), titlebar: getComputedStyle(w.titleBar).display }; })()`);
   check(`the explorer IS the screen: under the nav (top ${sheetGeo.t} = ${sheetGeo.nav}), the whole width (${sheetGeo.w}) and height (bottom ${sheetGeo.b}), no title bar`, sheetGeo.l === 0 && sheetGeo.t === sheetGeo.nav && sheetGeo.w === VW && sheetGeo.b === VH && sheetGeo.titlebar === 'none', sheetGeo);
-  await tap('#mobile-nav-files');
-  check('a second tap on 文件 reveals the same explorer — never a second one', await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1 && app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`));
+  const plusHint = await plusFiles();
+  check(`the «+» sheet's Files row says what it does with the home's explorer open — «${plusHint}» (r3: ONE act per row, said; r4: the FOLDER's name — the home is «~», as the explorer's breadcrumbs say it — never its path)`, plusHint === 'Back to ~', plusHint);
+  check('the «+» sheet\'s Files row (the nav door\'s press, moved) reveals the same explorer at the home — never a second one', await waitFor(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1 && app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath === ${JSON.stringify(homeDir)}`, 5000),
+    await evalJs(`[...app.wm.windows.values()].map((w) => w.type + ':' + (w._explorer?.currentPath || '')).join(', ')`));
   await tap('.window.window-active .file-phone-back');
   const backHome = await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('mobile-nav-title').textContent === 'For you'`, 5000);
   check('‹ in the explorer returns to the phone\'s home (the For-you page while it has rows — the back gesture\'s rule)', backHome);
@@ -442,7 +462,7 @@ try {
   check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Apps… / Agent browser gated like their ⚙ rows)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
   check('the sheet is full-width under the nav and every row is ≥ 44 px with an SVG icon', createSheet && createSheet.l <= 12 && createSheet.r >= VW - 12 && createSheet.t >= 40 && createSheet.rows.length >= 4 && createSheet.rows.every((r) => r.h >= 44 && r.svg), createSheet);
   check('no window opened yet (the press did not also fire the tap)', await evalJs('app.wm.windows.size') === 0);
-  await evalJs(`[...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => el.textContent.trim() === 'Files').click(); true`);
+  await evalJs(`[...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => [...el.querySelectorAll('span')].some((x) => !x.children.length && x.textContent.trim() === 'Files')).click(); true`); // by its word (r3: a hint line may ride under it)
   check('its Files row opens the file explorer', await waitFor(`!!document.querySelector('.file-explorer') && app.wm.windows.size === 1`));
 
   // ── #6 explorer phone layout ──
@@ -685,7 +705,12 @@ try {
   // ── #9 ⚙ System… / Ports… / Channels… land in windows (no rail on a phone) ──
   console.log('#9 gear rows → windows on the phone, WINDOWS on the desktop');
   // a REAL tap on the gear (user-dirty on the phone, so its saves go out)
-  const gearRows = async () => { await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`); await tap('#mobile-nav-gear'); await sleep(300); return evalJs(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((el) => el.textContent.trim())`); };
+  // lane phone-titlebar-title: the bar folds ⚙ into its «⋯» while a long title is on show — then the REAL tap is the ⋯'s Settings row (the ⚙'s own press)
+  const pressGear = async () => {
+    if (await evalJs(`document.getElementById('mobile-nav-gear').getClientRects().length > 0`)) return tap('#mobile-nav-gear');
+    await tap('#mobile-nav-overflow'); await sleep(250); return tap('.mnav-more-menu .context-menu-item[data-key="gear"]');
+  };
+  const gearRows = async () => { await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`); await pressGear(); await sleep(300); return evalJs(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((el) => el.textContent.trim())`); };
   const rows = await gearRows();
   check(`the ⚙ menu lists System monitor… / Ports… / Channels… on the phone (${rows.filter((r) => /System monitor…|Ports…|Channels…/.test(r)).join(' / ')})`, ['System monitor…', 'Ports…', 'Channels…'].every((l) => rows.some((r) => r.startsWith(l))), rows);
   const openGear = async (label, sel, type) => {

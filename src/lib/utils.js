@@ -1378,6 +1378,15 @@ export function installLongPressContextMenu() {
   }, { capture: true });
 }
 
+/** The rect a popup hangs from (lane phone-titlebar-title r5 — the r4 acceptance: the Usage popup opened from the phone's ⋯ row
+ *  was anchored on its FOLDED chip, display:none — a zero rect — and took the whole screen's height as its room): the
+ *  anchor's own rect when it is drawn, else the nearest drawn box that holds it (the bar that folded it). Viewport px. */
+export function drawnAnchorRect(anchor) {
+  let el = anchor;
+  while (el?.parentElement && !el.getClientRects().length) el = el.parentElement;
+  return el.getBoundingClientRect();
+}
+
 /**
  * Anchor a persistent position:fixed popup next to its trigger element.
  * The trigger can live ANYWHERE (customize mode moves chrome elements between
@@ -1389,7 +1398,7 @@ export function installLongPressContextMenu() {
  */
 export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
   if (!popup || !anchor) return;
-  const r = anchor.getBoundingClientRect();
+  const r = drawnAnchorRect(anchor); // a folded chip's popup: from the bar that holds it, never a zero rect (r5)
   const vw = window.innerWidth, vh = window.innerHeight;
   const Z = uiScale(); // viewport→layout px for fixed body children (F2)
   const openUp = r.top + r.height / 2 > vh / 2;

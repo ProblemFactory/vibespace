@@ -19,6 +19,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   --text: #e2e8f0; --text-secondary: #94a3b8; --text-dim: #8890a8;
   --border: rgba(255,255,255,0.07); --border-active: rgba(45,212,191,0.4);
   --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
+  --red-fg: #ffffff; --yellow-fg: #000000; /* words ON --red / --yellow (a theme with a light red or a dark yellow sets its own) */
   --radius: 8px; --radius-sm: 4px;
   --title-height: 32px; --toolbar-height: 40px; --taskbar-height: 44px;
   --shadow-window: 0 8px 32px rgba(0,0,0,0.4); --shadow-active: 0 12px 40px rgba(0,0,0,0.5);
@@ -2515,6 +2516,11 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   cursor: pointer; padding: 4px 0;
 }
 #mobile-nav-title:active { opacity: 0.6; }
+/* lane phone-titlebar-title r4: every phone sheet's top (the media block's sheets) — the bar at the page's top; mobile-nav.js
+   _publishUnder writes the bar's measured bottom + 4 on <html> while the compact bar stands. r5: and its ROOM — every phone
+   surface's max-height is calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px): its bottom 12 px above the
+   screen's, wherever the bar stands (the base's 48 + 12 = its old 60) */
+:root { --phone-sheet-top: 48px; }
 
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   /* Sidebar: full-width overlay (z-index must beat window z-index which can be 10000+) */
@@ -2537,16 +2543,28 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 
   /* Popups anchored to mobile-nav buttons: full-width sheets under the nav.
      !important intentionally beats the inline left/top that anchorFixedPopup /
-     _showGlobalSettings set (stylesheet !important > inline non-important). */
+     _showGlobalSettings set (stylesheet !important > inline non-important).
+     lane phone-titlebar-title r4: EVERY phone sheet's top is ONE variable — the bar's measured bottom + 4 (mobile-nav.js
+     _publishUnder writes it on <html>; 48 = the bar at the page's top): the vault's lock strip moves the bar down and every open
+     sheet follows (test-phone-titlebar's census: no phone sheet at a literal top; the variable's default is top-level, above).
+     r5 (the r4 acceptance: the tops moved, the max-heights still assumed 48 — under the lock strip a tall sheet ran ~102 px
+     past the screen, html/body overflow:hidden, its tail unreachable): its ROOM comes from the same variable, !important over
+     any inline max-height an opener computed (anchorFixedPopup's, menuPlace's) — the census reads both in every such rule */
   .usage-popup {
-    left: 8px !important; right: 8px !important; top: 48px !important;
+    left: 8px !important; right: 8px !important; top: var(--phone-sheet-top) !important;
     bottom: auto !important; width: auto !important; max-width: none;
-    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); z-index: 90001;
+    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px) !important; z-index: 90001;
   }
   .global-settings-popover {
-    left: 8px !important; right: 8px !important; top: 48px !important;
+    left: 8px !important; right: 8px !important; top: var(--phone-sheet-top) !important;
     width: auto !important; max-width: none;
-    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); overflow-y: auto; z-index: 90001;
+    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px) !important; overflow-y: auto; z-index: 90001;
+  }
+  /* r5 (the r4 acceptance): the bar's own title switcher is a phone surface too — it hangs FLUSH from the bar (its own look,
+     the variable's 4 px less), the same room; an open one follows a lock / an unlock (was: placed once, at open) */
+  html[data-vc="compact"] .mobile-win-switcher {
+    top: calc(var(--phone-sheet-top) - 4px) !important;
+    max-height: min(60vh, calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px)) !important;
   }
 
   /* Windows: fill workspace, only active visible, no chrome */
@@ -2691,13 +2709,17 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   }
   #phone-home .ph-files-chip.home { border-color: var(--accent); color: var(--accent); }
   #phone-home .ph-files-chip:active { background: var(--bg-hover); }
-  /* "+" long-press sheet (#3): a context menu laid out full-width under the
-     nav; !important beats showContextMenu's inline left/top like .usage-popup */
+  /* "+" sheet (#3; r6: a tap opens it, a long press too): a context menu laid out full-width under the
+     nav; !important beats showContextMenu's inline left/top like .usage-popup — r5: and its room (menuPlace capped a menu at
+     its OWN top's room; a tall «+» / Desktops sheet under the lock strip ran off the screen) — scrolled inside */
   .context-menu.mobile-sheet {
-    left: 8px !important; right: 8px !important; top: 48px !important; bottom: auto !important;
+    left: 8px !important; right: 8px !important; top: var(--phone-sheet-top) !important; bottom: auto !important;
+    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px) !important; overflow-y: auto;
     width: auto; max-width: none; padding: 6px 0; z-index: 90001;
   }
   .mobile-sheet .context-menu-item { min-height: 44px; font-size: 14px; gap: 12px; padding: 8px 16px; }
+  /* lane phone-titlebar-title r6: a TAP on «+» opens the «+» sheet — its first row, New session (what the tap opened before), leads in the accent */
+  .mobile-sheet .context-menu-item.mnav-sheet-lead { color: var(--accent); font-weight: 600; }
   .mobile-sheet .context-menu-item svg { width: 20px; height: 20px; flex-shrink: 0; }
   /* sidebar header, search row, tabs */
   .sidebar-header .icon-btn, .sidebar-section .icon-btn { min-width: 36px; min-height: 36px; }
@@ -2754,10 +2776,11 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* B-328d: the notice filter chips are touch targets too */
   #user-todos-popup .ut-chip, #phone-home .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
   #user-todos-popup .ut-notice-group-head, #phone-home .ut-notice-group-head { font-size: 12px; min-height: 28px; }
-  /* the title-bar mini inbox (chunk 3) takes the same full-width sheet shape and the same ≥36 px targets */
+  /* the title-bar mini inbox (chunk 3) takes the same full-width sheet shape and the same ≥36 px targets. r5: its room is the
+     phone surfaces' (from the variable), within its own 420 px — the base rule's cap, which won over this rule by coming later */
   .ut-mini-popover {
-    left: 8px !important; right: 8px !important; top: 48px !important;
-    width: auto !important; max-width: none; max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); z-index: 90002 !important;
+    left: 8px !important; right: 8px !important; top: var(--phone-sheet-top) !important;
+    width: auto !important; max-width: none; max-height: min(420px, calc(calc(100dvh / var(--ui-scale, 1)) - var(--phone-sheet-top) - 12px)) !important; z-index: 90002 !important;
   }
   .ut-mini-popover .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
   .ut-mini-popover .ut-actions { opacity: 1; gap: 4px; }
@@ -2822,6 +2845,56 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
 #mobile-nav .mnav-dest.selected { color: var(--accent); background: var(--bg-hover); }
 .mnav-badge { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-size: 11px; line-height: 16px; font-weight: 700; text-align: center; }
 .mnav-badge.hidden { display: none; }
+/* THE TITLE OWNS THE BAR (lane phone-titlebar-title — the owner 2026-11-06: 「手机端的标题栏被挤压得根本看不到聊天标题了」). On the
+   compact class: every control of the bar is a 44 px target and the bar spends no padding and no gap (a 44 px button carries its
+   own margin — the glyphs sit where the base's 36 px buttons + 6 px padding put them); no folder icon (its press is the «+» sheet's
+   文件 row — the owner: a folder beside ☰ reads as the window's own icon; the regular class's trailing bar keeps it); a chip the
+   fold takes (mobile-nav.js _fitBar over PURE title-chips.js navBarFold — bar-fold.js FOLDED) leaves the row for ONE «⋯»; the
+   For-you chip's five badges collapse to ONE (data-badges="one": the honest count in the worst urgency's colour). */
+#mobile-nav-overflow, .mnav-one { display: none; }
+html[data-vc="compact"] #mobile-nav { gap: 0; padding: 0; }
+html[data-vc="compact"] #mobile-nav-files { display: none; }
+html[data-vc="compact"] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-desktops, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-todos, #mobile-nav-gear, #mobile-nav-close, #mobile-nav-new, #mobile-nav-overflow) { min-width: 44px; min-height: 44px; }
+html[data-vc="compact"] #mobile-nav > .bar-folded { display: none !important; }
+html[data-vc="compact"] #mobile-nav-overflow.on { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; background: none; border: none; color: var(--text-secondary); cursor: pointer; }
+html[data-vc="compact"] #mobile-nav-overflow svg { width: 20px; height: 20px; }
+/* r3: the ⋯ that stands in for a folded ⚙ wears ⚙'s lock while the vault is locked (vault-locked-loud; mobile-nav.js _fitBar) */
+html[data-vc="compact"] #mobile-nav-overflow.vault-locked { position: relative; color: var(--red); }
+html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] { padding: 0 4px; }
+html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .ut-count { display: none; }
+html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .mnav-one { display: inline-block; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; background: var(--accent); color: var(--accent-fg); }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 12px; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 12px; }
+/* the ⋯ menu: the folded chips, each a 44 px row of ≥ 16 px words with its live value at the end */
+.mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px; display: flex; align-items: center; }
+/* r4: ONE glyph column — the widest glyph's (the ring's and the cog's 20 px; the desktops and lock glyphs draw 16), each centred in
+   it: every label starts at one x */
+.mnav-more-menu .mnav-more-icon { display: inline-flex; flex-shrink: 0; width: 20px; justify-content: center; }
+.mnav-more-menu .mnav-more-label { flex: 1 0 auto; }
+.mnav-more-menu .mnav-more-value { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+/* r3: the Settings row wears ⚙'s lock while the vault is locked — the mark rides its glyph, the colour its icon */
+.mnav-more-menu .context-menu-item.vault-locked .mnav-more-icon { position: relative; color: var(--red); }
+.mnav-more-menu .mnav-more-icon .vault-gear-mark { background: var(--bg-dialog); }
+/* r4: ⚙'s lock mark is drawn ONE way wherever it stands — on ⚙, on the ⋯ that stands in for it, on the ⋯ menu's 设置 row (the r3
+   acceptance: in the row the lock took the row's 16 px and covered the cog). Its size: .vault-gear-mark's own em below; its place:
+   on its GLYPH's corner — where the base's 36 px ⚙ wore it (8 px beyond the 20 px glyph's corner, 50% − 18 px from the chip's
+   middle) — never a 44 px box's corner (on the ⋯ it floated over the strip's border, «detached») */
+html[data-vc="compact"] #mobile-nav > :is(#mobile-nav-gear, #mobile-nav-overflow).vault-locked > .vault-gear-mark,
+.mnav-more-menu .context-menu-item.vault-locked .mnav-more-icon > .vault-gear-mark { top: calc(50% - 18px); right: calc(50% - 18px); }
+.mobile-sheet .context-menu-item .vault-gear-mark svg { flex-shrink: 1; } /* the sheet's own svg rule keeps 20 px glyphs whole */
+/* r3: the «+» sheet's 文件 row names the explorer it brings back (mobile-nav.js _showCreateSheet). r4: the FOLDER's name (PURE
+   files-door.js doorName), the sentence's own words never cut; a name too long for the line loses its START («…» — its end, the part
+   a person knows, stays: an rtl box over the isolated name). r5: its start in READING order — the box runs AGAINST the name's own
+   direction (data-dir = PURE doorNameDir): an LTR name in an rtl box, a Hebrew / Arabic one in an ltr box; «…» where it begins */
+.mobile-sheet .mnav-sheet-words { display: flex; flex-direction: column; min-width: 0; }
+.mobile-sheet .mnav-sheet-hint { display: flex; min-width: 0; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.mobile-sheet .mnav-sheet-said { flex: none; white-space: pre; }
+.mobile-sheet .mnav-sheet-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.mobile-sheet .mnav-sheet-name[data-dir="rtl"] { direction: ltr; }
+.mnav-more-menu .mnav-more-ring { --usage-pie-size: 20px; display: inline-flex; flex-shrink: 0; }
+.mnav-more-menu .mnav-more-ring .usage-donut::before { background: var(--bg-dialog); }
 .mnav-tip { display: none; position: fixed; z-index: 99999; pointer-events: none; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--bg-dialog); border: 1px solid var(--border-active); color: var(--text); font-size: 13px; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 
 /* ── landscape: the TRAILING BAR (SPEC-v3 §2.2 + the owner's bottom section) ── */
@@ -9084,6 +9157,9 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   color: var(--red, #ef4444); background: var(--bg-toolbar, var(--bg-root)); box-shadow: 0 0 0 1px var(--red, #ef4444);
 }
 .vault-gear-mark svg { width: 8px; height: 8px; }
+/* lane phone-titlebar-title r4: the lock's svg is sized `1em` inline (icons.js) — in the mark's OWN em, a ⚙ button's 13.333 px, never
+   its host's font (the ⋯ menu's 16 px row drew it 16×16 over the cog): 11 × 13.3 wherever the mark is drawn */
+.vault-gear-mark { font-size: 13.3333px; }
 @media (max-width: 600px) {
   .vault-dialog-box .dialog-footer button, .vault-actions button { min-height: 36px; }
   .vault-pw { min-height: 40px; font-size: 16px; }

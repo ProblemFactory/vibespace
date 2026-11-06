@@ -37,6 +37,7 @@ import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToast
 import { UI_ICONS } from './icons.js';
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
+import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
@@ -193,8 +194,11 @@ export function installUserTodos(app) {
     btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${segs}`;
     btn.title = actionWords(action, total) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
     if (mBtn) {
-      // same badge, same classes (the CSS colours by data-urgency / ut-has-items)
-      mBtn.innerHTML = UI_ICONS.inbox + segs;
+      // same badge, same classes (the CSS colours by data-urgency / ut-has-items). lane phone-titlebar-title: + the bar's ONE-badge
+      // form (style.css shows it while the phone bar's fold collapses the five — mobile-nav.js): the honest count in the worst
+      // urgency's colour, the notices' grey count when no question is open; never a .ut-count (the badge's readers count those)
+      const one = navOneBadge({ urgent: cu, high: ch, loud: n, total, notices });
+      mBtn.innerHTML = UI_ICONS.inbox + segs + (one ? `<span class="mnav-one" data-seg="${one.seg}">${one.count}</span>` : '');
       mBtn.title = btn.title;
       mBtn.classList.toggle('ut-has-items', total > 0);
       mBtn.classList.toggle('ut-has-notices', notices > 0);

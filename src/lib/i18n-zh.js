@@ -11886,4 +11886,10 @@ export default {
   "Resumed 1 conversation where it was": "已在原来的位置恢复 1 个会话",
   "Resumed {n} conversations where they were": "已在原来的位置恢复 {n} 个会话",
   "Still resuming this conversation — its window is waiting for the session to start": "这个会话还在恢复中——它的窗口正在等待会话启动",
+  // lane phone-titlebar-title — r3: the ⋯ standing in for a folded ⚙; the «+» sheet's 文件 row with an explorer open. r7: «+»'s
+  // title + aria-label (a tap opens the create menu — New session, Files… — never one act). Comments on their own line: an
+  // entry with a trailing comment is invisible to scripts/i18n-check.mjs (its ENTRY_RE ends at the value)
+  "More — Vault locked": "更多——保险库已锁定",
+  "Back to {name}": "回到 {name}",
+  "Create or open…": "新建或打开…",
 };
