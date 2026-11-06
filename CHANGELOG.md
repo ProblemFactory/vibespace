@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.383 — 2026-11-05
+## 2.369.383 — 2026-11-06
 
 ### Changed
 - When your company updates its custom browser kernel, VibeSpace updates it within a few minutes, with no restart.
@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - In the usage pies, an account without a 5-hour limit shows its weekly limit and its model cap (e.g. Fable) side by side, instead of a single pie.
+- On a phone, a row in Manage agents shows at most three buttons and puts the rest under More actions (…), so it no longer runs off the screen.
 
 ## 2.369.382 — 2026-11-05
 
