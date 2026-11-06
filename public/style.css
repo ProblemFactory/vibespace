@@ -4004,6 +4004,11 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .agent-btn:hover { border-color: var(--accent); color: var(--accent); }
 .agent-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .agent-btn.primary:hover { background: var(--accent-hover); color: var(--accent-fg); }
+/* THE PHONE ROW'S FOLD (lane phone-roster-fold — manage-agents.js foldPhoneRow): a folded button leaves the strip; the «…» is
+   the row's own agent-btn wearing the dots glyph; its menu's rows read at the touch scale (44 px, 16 px words) on a phone */
+.agent-actions > .bar-folded { display: none !important; }
+.agent-btn.row-more { display: inline-flex; align-items: center; justify-content: center; align-self: stretch; } /* as tall as its worded siblings */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .row-more-menu .context-menu-item { min-height: 44px; font-size: 16px; display: flex; align-items: center; } }
 .agents-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 4px 0 0; }
 /* Machine-sectioned overview (2.245.0): "This machine" + one section per host */
 .agents-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }

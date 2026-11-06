@@ -22,7 +22,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 }
 import { t } from './i18n.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
-import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
@@ -56,6 +56,64 @@ import { revealAccountKey } from './vault-reveal.js'; // lane vault-contents-win
 import { hubRegistrationRow, draftLine } from './cli-registration-words.js'; // lane cli-2-1-308-records: the hub's claude is a build with no record table ⇒ the line + 「生成记录草稿」
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (the same one the chat and the tour show)
+import { rowActionsFold } from './row-fold-model.js'; // PURE (lane phone-roster-fold): which of a phone row's buttons stand inline, which fold into its «…»
+import { FOLDED } from './bar-fold.js'; // the fold's ONE class (the chrome bars wear it too)
+
+// THE ROW'S FOLD FOLLOWS THE VIEWPORT TIER (lane phone-roster-fold — nightly380, B-7671: the Codex row's Re-check · Log in ·
+// Update · Rules & checks drew 362 px in a 352 px phone section). Every status row that holds buttons is handed here with the
+// tier's reader; ONE verdict (layout) runs when the row's WIDTH changes (its ResizeObserver) and on the tier's own signal
+// (viewport-switch's vs-viewport-class — the Agents form outlives a phone ↔ desktop crossing: the switch re-hosts the same
+// element, so the tier is read at every verdict, never once at render):
+//   · the phone tier (app.isMobile — a finger device under 1024 CSS px, the compact / regular class): at most THREE buttons
+//     stand inline; the rest, and whatever the row's width cannot hold, fold into ONE «…» whose menu lists each folded
+//     button by its own words (PURE rowActionsFold decides; the context menu shows it, Esc closes it). Each button is
+//     measured once per tier at its natural width in layout px (rect / uiScale: a crossing out of a zoomed desktop is
+//     measured under the zoom the page still wears);
+//   · the desktop tier: the base's inline bar, byte for byte — every folded class off, the «…» gone.
+// ITS LISTENERS ARE THE RENDER'S (r3): the window's vs-viewport-class listener is bound to the signal of the render that drew
+// the row and its ResizeObserver is disconnected by that signal's abort — the next render of the surface aborts it before it
+// draws, the surface's end aborts the last one. Never a teardown inside layout(): a row removed while its surface is
+// display:none (the rail panel of a collapsed sidebar, a minimized window) gets no resize callback, and every re-render of
+// the hidden surface left its rows' listeners behind.
+const ROW_MORE = 'row-more';
+function foldRowByTier(row, actions, isPhone, signal) {
+  if (signal.aborted) return;
+  let px = new WeakMap(), more = null, moreW = 0, lastW = -1, tier = null;
+  const layoutPx = (el) => el.getBoundingClientRect().width / (uiScale() || 1);
+  const layout = () => {
+    const phone = !!isPhone();
+    if (phone !== tier) { tier = phone; px = new WeakMap(); lastW = -1; if (more) { more.remove(); more = null; } }
+    if (!phone) { for (const b of actions.querySelectorAll(':scope > .' + FOLDED)) b.classList.remove(FOLDED); return; }
+    const cs = getComputedStyle(row);
+    const width = row.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    if (width <= 0 || width === lastW) return;
+    lastW = width;
+    const btns = [...actions.children].filter((el) => el.tagName === 'BUTTON' && el !== more);
+    for (const b of btns) if (!px.get(b)) { if (b.classList.contains(FOLDED)) b.classList.remove(FOLDED); const w = layoutPx(b); if (w > 0) px.set(b, w); }
+    if (!more) {
+      more = document.createElement('button'); more.type = 'button'; more.className = 'agent-btn ' + ROW_MORE;
+      more.innerHTML = UI_ICONS.more; more.title = t('More actions'); more.setAttribute('aria-label', t('More actions')); more.setAttribute('aria-haspopup', 'menu');
+      const own = more;
+      more.onclick = () => {
+        const r = own.getBoundingClientRect();
+        const items = [...actions.children].filter((el) => el.tagName === 'BUTTON' && el !== own && el.classList.contains(FOLDED))
+          .map((b) => ({ label: b.textContent, title: b.title || '', disabled: b.disabled, action: () => b.click() }));
+        showContextMenu(r.left, r.bottom + 4, items, 'context-menu', { extraClass: 'row-more-menu' });
+      };
+      actions.appendChild(more); moreW = layoutPx(more);
+    }
+    const v = rowActionsFold({ items: btns.map((b, i) => ({ key: String(i), px: px.get(b) || 0, primary: b.classList.contains('primary') })), widthPx: width, gapPx: parseFloat(getComputedStyle(actions).columnGap) || 0, moreW });
+    const folded = new Set(v.folded);
+    btns.forEach((b, i) => { const f = folded.has(String(i)); if (b.classList.contains(FOLDED) !== f) b.classList.toggle(FOLDED, f); });
+    if (!folded.size) more.remove(); else if (!more.isConnected) actions.appendChild(more);
+  };
+  const ro = new ResizeObserver(() => layout());
+  ro.observe(row);
+  window.addEventListener('vs-viewport-class', layout, { signal });
+  signal.addEventListener('abort', () => ro.disconnect(), { once: true });
+}
+/** The element a button's follow-up menu opens from: the button — or, while it is folded, its row's «…». */
+const foldAnchor = (btn) => (btn.classList.contains(FOLDED) && btn.parentElement?.querySelector(':scope > .' + ROW_MORE)) || btn;
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -2150,10 +2208,15 @@ export function installManageAgents(App, ctx = {}) {
     // lane dialog-unsaved-guard: the Advanced fold's instructions / stop-nudge numbers typed and not saved ⇒ ✕ / Esc / the
     // backdrop asks (every other row here acts at once); the fold registers its own test and Save below
     const adv = { dirty: () => false, save: () => true };
+    // THE SURFACE OWNS ITS ROWS' LISTENERS (lane phone-roster-fold r3): ONE controller per drawn surface, aborted by its end —
+    // every door of the form runs onClose (✕, Esc, its window closed, a queued form dropped); the rail panel's dispose is the
+    // function returned below. Each render holds its own controller under it (renderCtl), aborted by the next render
+    // before it draws; a row's fold binds to its render's signal
+    const surface = new AbortController();
     const shell = container ? { body: container, close: () => {} } : createModalShell({
       // one subject: the one Agents manager (every machine's section on one surface)
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
-      bodyClass: 'agents-dialog-body', escapeToClose: true, onClose, opener,
+      bodyClass: 'agents-dialog-body', escapeToClose: true, onClose: () => { surface.abort(); onClose?.(); }, opener,
       unsaved: { isDirty: () => adv.dirty(), save: () => adv.save() }, kind: 'form',
     });
     // lane dialog-yield r3: the manager opened again is RAISED — its refresh hook and its countdown tick stay bound to the live
@@ -2194,6 +2257,8 @@ export function installManageAgents(App, ctx = {}) {
     // resume after their next await and would keep appending. Generation
     // ticket; stale runs stop at every await/append point.
     let refreshGen = 0;
+    let renderCtl = null;
+    surface.signal.addEventListener('abort', () => renderCtl?.abort(), { once: true });
     // Render ONE machine's full block into its own section container. The
     // container param is deliberately named `body` so the extensive existing
     // append logic below (backend rows, rosters, integration) runs unchanged
@@ -2354,7 +2419,7 @@ export function installManageAgents(App, ctx = {}) {
           if (info.installed && checks.length) {
             const chkBtn = document.createElement('button'); chkBtn.className = 'agent-btn'; chkBtn.textContent = t('Rules & checks');
             chkBtn.title = t('Read-only: permission rules, plus local checks that make no network requests');
-            chkBtn.onclick = () => { const rect = chkBtn.getBoundingClientRect(); showContextMenu(rect.left, rect.bottom + 4, checks.filter((x) => !x.separator)); };
+            chkBtn.onclick = () => { const rect = foldAnchor(chkBtn).getBoundingClientRect(); showContextMenu(rect.left, rect.bottom + 4, checks.filter((x) => !x.separator)); };
             actions.appendChild(chkBtn);
           }
         }
@@ -2408,6 +2473,7 @@ export function installManageAgents(App, ctx = {}) {
         if (stale()) return;
         row.append(left, actions);
         body.appendChild(row);
+        foldRowByTier(row, actions, () => this.isMobile, renderCtl.signal); // the fold follows the CURRENT tier: on a phone beyond three buttons (or the row's width) the rest fold into «…»; on the desktop the row is the base's
         // Account roster for THIS backend, right under its status row.
         await renderRoster(b.key);
         if (stale()) return;
@@ -2510,6 +2576,7 @@ export function installManageAgents(App, ctx = {}) {
             }
             row.append(left, actions);
             body.appendChild(row);
+            foldRowByTier(row, actions, () => this.isMobile, renderCtl.signal);
           }
         }
       } else {
@@ -2620,6 +2687,7 @@ export function installManageAgents(App, ctx = {}) {
           }
           row.append(left, actions);
           body.appendChild(row);
+          foldRowByTier(row, actions, () => this.isMobile, renderCtl.signal);
           } // end non-dial actions
         }
       }
@@ -2632,7 +2700,8 @@ export function installManageAgents(App, ctx = {}) {
       const stale = () => myGen !== refreshGen;
       let hostsList = [];
       try { const hd = await fetchJson('/api/hosts'); hostsList = hd?.hosts || []; } catch {}
-      if (stale()) return;
+      if (stale() || surface.signal.aborted) return;
+      renderCtl?.abort(); renderCtl = new AbortController(); // the rows this pass replaces let go of their listeners before it draws
       this._agentsHostsList = hostsList; // the refresh-all fan-out reads this
       body.innerHTML = '';
       // ── 2.262.0 REDESIGN (user: 平铺缺分级看着累 + 指令环节孤立): three
@@ -2949,6 +3018,7 @@ export function installManageAgents(App, ctx = {}) {
       this._retickNextLabels(body);
     }, NEXT_TICK_MS);
     refresh();
+    if (container) return () => surface.abort(); // the rail panel's dispose (sidebar-rail _panelDispose): its rows' listeners end with it
   },
 
   // ── Anthropic accounts roster (rendered UNDER Claude Code in Manage

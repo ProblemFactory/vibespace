@@ -70,9 +70,30 @@ fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
 fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), expiredCreds);
 fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'userA@example.com' } }));
 
-const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
+// ── THE CLI SHAPE IS THE FIXTURE'S, NEVER THE BOX'S (lane phone-roster-fold — nightly380's red, B-7671) ──
+// The hub's login shell is the truth for where a CLI is (lane cli-shell-truth), and this suite used to hand the hub THIS
+// machine's PATH: every lane and the runner judged the shape their box happened to have («not installed»), while the
+// owner's box (claude AND codex in ~/.local/bin) drew the Codex row's Re-check · Log in · Update · Rules & checks — 362 px
+// in the 352 px phone section, red only there. Now the hub's SHELL is a scratch login shell (an sh script: its PATH = the
+// shape's bin + a tools dir holding printenv) and the hub's own PATH keeps no directory that holds a claude / codex:
+//   INSTALLED — a claude (2.1.314) and a codex stand-in that answer --version and refuse everything else, minted in the
+//               scratch HOME's ~/.local/bin (the owner's layout); the main boot draws it (§1–§6);
+//   NONE      — neither; §6 re-boots the hub over the same data/ and judges it too.
+const SHAPE = { installed: path.join(home, '.vs-shape', 'installed'), none: path.join(home, '.vs-shape', 'none') };
+const CLI_BIN = path.join(home, '.local', 'bin'), TOOLS = path.join(home, '.vs-shape', 'tools');
+for (const d of [CLI_BIN, TOOLS, SHAPE.installed, SHAPE.none]) fs.mkdirSync(d, { recursive: true });
+fs.writeFileSync(path.join(CLI_BIN, 'claude'), '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.314 (Claude Code)"; exit 0; }\nexit 1\n', { mode: 0o755 });
+fs.writeFileSync(path.join(CLI_BIN, 'codex'), '#!/bin/sh\n[ "$1" = --version ] && { echo "codex-cli 0.130.0"; exit 0; }\nexit 1\n', { mode: 0o755 });
+fs.symlinkSync(['/usr/bin/printenv', '/bin/printenv'].find((p) => fs.existsSync(p)) || '/usr/bin/printenv', path.join(TOOLS, 'printenv')); // the ask's control word
+for (const [k, dir] of Object.entries(SHAPE)) fs.writeFileSync(path.join(dir, 'login-shell'), `#!/bin/sh\nPATH='${k === 'installed' ? CLI_BIN + ':' : ''}${TOOLS}'; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; exec /bin/sh -c "$1";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
+const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !['claude', 'codex'].some((n) => fs.existsSync(path.join(d, n)))).join(':');
+const envFor = (shape) => { const e = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, PATH: hubPath, SHELL: path.join(SHAPE[shape], 'login-shell'), VIBESPACE_SKIP_AGENT_HOOKS: '1' }; for (const k of ['CLAUDE_CMD', 'CODEX_CMD', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) delete e[k]; return e; };
+let srvEnv = { ...VNC_ENV, ...envFor('installed') }; // VNC_ENV spelled at the definition: test-architecture §57 reads it here
 let srv = null;
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };
+// the hub answers the shape it was handed — read off /api/backend-status (the census row the roster draws)
+const cliShape = async () => { const s = await api('/api/backend-status'); const row = (k) => ({ installed: !!s?.[k]?.installed, path: s?.[k]?.cmdPath || null, provenance: s?.[k]?.provenance || null }); return { claude: row('claude'), codex: row('codex') }; };
+const shapeIs = (sh, want) => ['claude', 'codex'].every((k) => sh[k].installed === (want === 'installed') && (want !== 'installed' || (sh[k].provenance === 'shell' && String(sh[k].path).startsWith(CLI_BIN + path.sep))));
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1200,800', `--user-data-dir=${scratch('roster-eta-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
@@ -89,6 +110,8 @@ const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'a
 
 bootServer();
 check('worktree server boots', await waitServer());
+{ const sh = await until(async () => { const v = await cliShape(); return shapeIs(v, 'installed') ? v : null; }, 20000, 300);
+  check(`THE FIXTURE'S SHAPE, never the box's: the hub's (scratch) login shell finds the claude + codex stand-ins in the scratch HOME's ~/.local/bin (${JSON.stringify(sh || await cliShape())})`, !!sh); }
 
 // ── the fixture: three subscriptions, resets DERIVED from the clock ──
 const S = 1000, M = 60 * S, H = 60 * M, D = 24 * H;
@@ -208,6 +231,19 @@ const ROWS = (root) => `(() => {
 })()`;
 const LOCAL = `document.querySelector('.agents-machine-sec[data-host=""]')`;
 const byId = (rows, id) => rows.find((r) => r.id === id);
+// THE PHONE ROW'S FOLD (lane phone-roster-fold): each local status row's strip — the buttons it shows, the ones folded into
+// its «…», the «…» itself, the strip's right edge against the section's width
+const STRIPS = (root) => `(() => {
+  const sec = ${root}; if (!sec) return null;
+  const R = (el) => el.getBoundingClientRect(), secL = R(sec).left, vis = (el) => getComputedStyle(el).display !== 'none' && R(el).width > 0;
+  return [...sec.querySelectorAll('.ob-backend:not(.acct-section)')].map((row) => {
+    const a = row.querySelector(':scope > .agent-actions'); if (!a) return null;
+    const btns = [...a.children].filter((el) => el.tagName === 'BUTTON' && !el.classList.contains('row-more')), more = a.querySelector(':scope > .row-more');
+    return { name: (row.querySelector('b') || {}).textContent || '', inline: btns.filter(vis).map((b) => b.textContent), folded: btns.filter((b) => !vis(b)).map((b) => b.textContent),
+      classes: btns.map((b) => b.className), more: !!more && vis(more), moreName: more ? more.getAttribute('aria-label') : null, moreSvg: !!(more && more.querySelector('svg')),
+      foldedClass: btns.some((b) => b.classList.contains('bar-folded')), right: Math.round(R(a).right - secL), secW: sec.clientWidth, secScrollW: sec.scrollWidth, rowScrollW: row.scrollWidth, rowClientW: row.clientWidth, h: [...a.outerHTML].reduce((x, ch) => (x * 33 + ch.charCodeAt(0)) >>> 0, 5381).toString(16) }; // h = the strip's bytes (djb2): the desktop's equals the base's
+  }).filter(Boolean);
+})()`;
 
 try {
   // ── 1200×800: the Agents rail panel ──
@@ -364,6 +400,17 @@ try {
     const ma = byId(mrows, A.id), mb = byId(mrows, B.id);
     const geom = await evalJs(`(() => { const dlg = document.querySelector('#agents-dialog-overlay .dialog'); const body = dlg.querySelector('.dialog-body'); const rowsEl = [...document.querySelectorAll('#agents-dialog-overlay .agents-machine-sec[data-host=""] .acct-key-row')]; const secEl = document.querySelector('#agents-dialog-overlay .agents-machine-sec[data-host=""]'); const secL = secEl ? secEl.getBoundingClientRect().left : 0; const widest = secEl ? [...secEl.querySelectorAll('*')].map((el) => { const r = el.getBoundingClientRect(); return { el, right: r.right - secL, w: r.width }; }).filter((x) => x.w > 0).sort((a, b) => b.right - a.right).slice(0, 3).map((x) => x.el.tagName.toLowerCase() + '.' + (x.el.className && x.el.className.toString().split(' ')[0] || '') + '@' + Math.round(x.right) + 'w' + Math.round(x.w) + (x.el.textContent ? ':' + x.el.textContent.trim().slice(0, 18) : '')).join(' | ') : null; const rowW = rowsEl.length ? Math.max(...rowsEl.map((r) => r.scrollWidth)) + ' (' + rowsEl.map((r) => [...r.children].map((c) => c.className.split(' ')[0] + ':' + Math.round(c.getBoundingClientRect().width)).join('+')).sort((x, y) => y.length - x.length)[0] + ')' : null; return { rowW, widest, secOverflowX: secEl && getComputedStyle(secEl).overflowX, dlgW: dlg.getBoundingClientRect().width, vw: innerWidth, dlgScrollW: dlg.scrollWidth, dlgClientW: dlg.clientWidth, bodyScrollW: body.scrollWidth, bodyClientW: body.clientWidth, sec: (() => { const s = ${MODAL}; return s ? { scrollW: s.scrollWidth, clientW: s.clientWidth } : null; })() }; })()`);
     check(`the modal fits the phone (dialog ${geom.dlgW.toFixed(0)} of ${geom.vw}) and the roster section has no sideways overflow of its own (${geom.sec && geom.sec.scrollW}/${geom.sec && geom.sec.clientW}; body ${geom.bodyScrollW}/${geom.bodyClientW}; widest row ${geom.rowW}; rightmost ${geom.widest})`, geom.dlgW <= geom.vw && !!geom.sec && geom.sec.scrollW <= geom.sec.clientW + 1, geom);
+    // THE PHONE ROW'S FOLD (lane phone-roster-fold — nightly380, B-7671): the INSTALLED shape's Codex row has four actions
+    // (Re-check · Log in · Update · Rules & checks: its scratch HOME has no codex login) — at most three stand inline, the
+    // rest are the «…»'s; the strip ends inside the section
+    const strips = await evalJs(STRIPS(MODAL)), cx = strips && strips.find((r) => r.name === 'Codex');
+    check(`phone: no status row shows more than three buttons inline (${JSON.stringify(strips && strips.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, !!strips && strips.length >= 2 && strips.every((r) => r.inline.length <= 3), strips);
+    check(`phone: the Codex row's four actions fold beyond three — ${cx && cx.inline.join(' · ')} + «…» (${cx && cx.folded.join(', ')}); the strip ends inside the section (${cx && cx.right}/${cx && cx.secW})`, !!cx && cx.inline.length + cx.folded.length === 4 && cx.inline.length <= 3 && cx.more && cx.moreSvg && cx.moreName === 'More actions' && cx.folded.includes('Rules & checks') && cx.inline.includes('Log in') && cx.right <= cx.secW + 1, cx);
+    if (font) {
+      // CONTROL (the base's row): every folded button put back inline and the «…» hidden — the same section overflows under the wide font
+      const ctl = await evalJs(`(() => { const sec = ${MODAL}; const a = sec && [...sec.querySelectorAll('.ob-backend:not(.acct-section) > .agent-actions')].find((x) => x.querySelector(':scope > .row-more')); if (!a) return null; const folded = [...a.querySelectorAll(':scope > .bar-folded')], more = a.querySelector(':scope > .row-more'); folded.forEach((b) => b.classList.remove('bar-folded')); more.style.display = 'none'; const out = { scrollW: sec.scrollWidth, clientW: sec.clientWidth, inline: a.querySelectorAll(':scope > button:not(.row-more)').length }; folded.forEach((b) => b.classList.add('bar-folded')); more.style.display = ''; return out; })()`);
+      check(`CONTROL: the base's inline row (all ${ctl && ctl.inline} buttons inline, no «…») overflows the same section under the wide font (${ctl && ctl.scrollW}/${ctl && ctl.clientW}) — the fold is load-bearing`, !!ctl && ctl.inline === 4 && ctl.scrollW > ctl.clientW + 1, ctl);
+    }
     // HONEST BOUNDARY (not this branch's): `.dialog.agents-dialog .agents-dialog-body { min-width: 380px }` predates this work (byte-identical on master), so on a 375px phone the modal's BODY is wider than the 345px dialog and .dialog's overflow:hidden clips it — measured here as dialog scrollWidth > clientWidth. Recorded as an open issue; the roster cell itself is what this suite pins.
     if (geom.dlgScrollW > geom.dlgClientW) console.log(`  NOTE (pre-existing, master too): the Agents modal body min-width 380px exceeds the ${geom.dlgW.toFixed(0)}px dialog on a ${geom.vw}px phone (dialog scroll ${geom.dlgScrollW}/${geom.dlgClientW}) — outside this change`);
     const musage = mrows.filter((r) => r.cols.length > 0);
@@ -517,6 +564,168 @@ try {
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: dv.identifier });
     await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   }
+  // ── §6 BOTH CLI SHAPES, ON A PHONE AND ON THE DESKTOP (lane phone-roster-fold — nightly380, B-7671; the suite judges both
+  // shapes it injects, never the box's). INSTALLED (the main boot): en + zh at the 375 px phone (its section is 352 px) and at
+  // a 320 px section — at most three buttons inline, the rest behind ONE «…» whose menu lists them by their words (44 px
+  // rows, 16 px words), «Rules & checks» opens its own menu from the «…», Esc closes the menu and leaves the dialog; the
+  // desktop modal keeps every button inline (no «…», no folded class). r2 — THE FOLD FOLLOWS THE TIER: the open dialog crosses
+  // phone → desktop → phone (viewport-switch re-hosts the same element) and the desktop row is a fresh desktop's, byte for
+  // byte; a desktop at 150 % crossing into the phone is measured under the zoom it still wears (rect ÷ uiScale); with the
+  // device's text scaled up a 320 px section folds a THREE-button row by WIDTH. Then the hub re-boots over the same data/
+  // with the NONE shape: the phone rows are the base's (Install · Re-check, nothing folded) at 352 and 320. r3 — A RENDER'S
+// LISTENERS DIE WITH IT: a hidden surface (the rail panel of a collapsed sidebar, a minimized Agents window) re-rendered five
+// times keeps its rows' tier listeners + row observers flat, and its end lets go of every one ──
+  console.log('§6 both CLI shapes — beyond three a phone row folds into «…»; the desktop row keeps every button');
+  const MODAL6 = `document.querySelector('#agents-dialog-overlay .agents-dialog-body .agents-machine-sec[data-host=""]')`;
+  const openAgents = async ({ phone, lang }) => {
+    await cdp('Emulation.setDeviceMetricsOverride', phone ? { width: 375, height: 667, deviceScaleFactor: 2, mobile: true } : { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+    await openPage();
+    await evalJs(`(() => { ${lang === 'zh' ? "localStorage.setItem('vibespace.lang', 'zh')" : "localStorage.removeItem('vibespace.lang')"}; return 1; })()`);
+    await openPage();
+    await evalJs(`(() => { app._showAgentsDialog({ forceModal: true }); return 1; })()`);
+    await until(async () => evalJs(`(() => { const s = ${MODAL6}; return !!s && [...s.querySelectorAll('.ob-backend:not(.acct-section) b')].some((b) => b.textContent === 'Codex'); })()`), 20000, 300);
+    await sleep(400); // two frames for the row's ResizeObserver verdict
+    return evalJs(STRIPS(MODAL6));
+  };
+  const at320 = async () => { await evalJs(`(() => { const s = ${MODAL6}; if (s) s.style.width = '320px'; return 1; })()`); await sleep(300); const v = await evalJs(STRIPS(MODAL6)); await evalJs(`(() => { const s = ${MODAL6}; if (s) s.style.width = ''; return 1; })()`); await sleep(300); return v; };
+  // the section's own scroll at 352 (§3's measure); at a 320 px section the ACCOUNT rows' own minimum (≈ 322 px, not this
+  // lane's) may scroll it, so there each status row is judged: its strip ends inside the section and the row scrolls nothing
+  const noSideways = (st, { section = true } = {}) => !!st && st.length >= 2 && st.every((r) => (!section || r.secScrollW <= r.secW + 1) && r.right <= r.secW + 1 && r.rowScrollW <= r.rowClientW + 1);
+  // the viewport crosses the tier while the dialog stays open: settled = app.isMobile is the new tier AND the form stands in its
+  // new host (the phone's sheet / the desktop's window — form-window re-hosts the same root, its id kept)
+  const rotate = async ({ phone }) => {
+    await cdp('Emulation.setDeviceMetricsOverride', phone ? { width: 375, height: 667, deviceScaleFactor: 2, mobile: true } : { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+    const want = phone ? 'sheet' : 'window';
+    const host = await until(async () => evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); if (!o || app.isMobile !== ${phone}) return null; const h = o.classList.contains('form-sheet') ? 'sheet' : o.classList.contains('dialog-form') ? 'window' : null; return h === '${want}' ? h : null; })()`), 8000, 100);
+    await sleep(400); // two frames for the row's verdict
+    return { host: host || await evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); return o ? o.className + ' · isMobile ' + app.isMobile : 'no dialog'; })()`), strips: await evalJs(STRIPS(MODAL6)) };
+  };
+  const rowJs = (name) => `[...${MODAL6}.querySelectorAll('.ob-backend:not(.acct-section)')].find((r) => (r.querySelector('b') || {}).textContent === ${JSON.stringify(name)})`;
+  let phoneEn = null;
+  for (const lang of ['en', 'zh']) {
+    const st = await openAgents({ phone: true, lang }), cx = st && st.find((r) => r.name === 'Codex');
+    if (lang === 'en') phoneEn = st;
+    check(`${lang} · INSTALLED · 352: at most three buttons inline per row, the Codex row ${cx && cx.inline.length} + «…» (${cx && cx.folded.length} folded), no sideways overflow (${st && st.map((r) => r.right + '/' + r.secW).join(' ')})`, noSideways(st) && st.every((r) => r.inline.length <= 3) && !!cx && cx.more && cx.inline.length + cx.folded.length === 4 && cx.folded.length >= 1, st);
+    await evalJs(`(() => { const sec = ${MODAL6}; const row = [...sec.querySelectorAll('.ob-backend:not(.acct-section)')].find((r) => (r.querySelector('b') || {}).textContent === 'Codex'); if (row) row.scrollIntoView({ block: 'center' }); return 1; })()`); await sleep(200);
+    await shot(`roster-375-fold-${lang}.png`);
+    const menu = await evalJs(`(async () => { const sec = ${MODAL6}; const row = [...sec.querySelectorAll('.ob-backend:not(.acct-section)')].find((r) => (r.querySelector('b') || {}).textContent === 'Codex'); const more = row && row.querySelector(':scope > .agent-actions > .row-more'); if (!more) return null; more.scrollIntoView({ block: 'center' }); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); more.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const m = document.querySelector('.context-menu.row-more-menu'); if (!m) return { open: false }; const mr = m.getBoundingClientRect(), br = more.getBoundingClientRect(), items = [...m.querySelectorAll('.context-menu-item')]; return { open: true, menus: document.querySelectorAll('.context-menu').length, items: items.map((i) => i.textContent), itemH: Math.min(...items.map((i) => i.getBoundingClientRect().height)), fontPx: Math.min(...items.map((i) => parseFloat(getComputedStyle(i).fontSize))), inView: mr.left >= 0 && mr.right <= innerWidth && mr.bottom <= innerHeight, below: mr.top >= br.bottom - 1 }; })()`);
+    check(`${lang} · «…» opens ONE menu listing the folded buttons by their own words (${JSON.stringify(menu)}) — 44 px rows, 16 px words, under the «…», inside the viewport`, !!menu && menu.open && menu.menus === 1 && !!cx && JSON.stringify(menu.items) === JSON.stringify(cx.folded) && menu.itemH >= 44 && menu.fontPx >= 16 && menu.inView && menu.below, menu);
+    await shot(`roster-375-fold-menu-${lang}.png`);
+    if (lang === 'en') {
+      // «Rules & checks» from the «…»: its own menu opens where the «…» is (a folded button has no box of its own)
+      const rules = await evalJs(`(async () => { const m = document.querySelector('.context-menu.row-more-menu'); const it = m && [...m.querySelectorAll('.context-menu-item')].find((i) => i.textContent === 'Rules & checks'); if (!it) return null; it.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const c = document.querySelector('.context-menu'); const sec = ${MODAL6}; const more = [...sec.querySelectorAll('.agent-actions > .row-more')].pop(); if (!c || !more) return { open: false }; const cr = c.getBoundingClientRect(), br = more.getBoundingClientRect(); return { open: true, more: !!c.classList.contains('row-more-menu'), items: [...c.querySelectorAll('.context-menu-item')].map((i) => i.textContent).slice(0, 6), dx: Math.round(cr.left - br.left), dy: Math.round(cr.top - br.bottom) }; })()`);
+      check(`en · the folded «Rules & checks» opens its checks menu from the «…» (${JSON.stringify(rules)})`, !!rules && rules.open && !rules.more && rules.items.length >= 1 && rules.items.some((w) => /…$/.test(w)) && Math.abs(rules.dy - 4) <= 2, rules);
+      await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); const sec = ${MODAL6}; [...sec.querySelectorAll('.agent-actions > .row-more')].pop()?.click(); return 1; })()`); // ?. — the base's row (the mutant) has no «…»: its reds stay by name, the leg runs on
+    }
+    const menuOpen = await evalJs(`!!document.querySelector('.context-menu.row-more-menu')`); // no «…» (the base's row) ⇒ no Esc: it would close the dialog
+    if (menuOpen) for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+    check(`${lang} · Esc closes the «…» menu and leaves the Agents dialog open`, menuOpen && !!(await until(async () => evalJs(`!document.querySelector('.context-menu.row-more-menu') && !!${MODAL6}`), 3000, 100)), await evalJs(`({ wasOpen: ${menuOpen}, menu: !!document.querySelector('.context-menu.row-more-menu'), dialog: !!${MODAL6} })`));
+    const st320 = await at320(), cx320 = st320 && st320.find((r) => r.name === 'Codex');
+    check(`${lang} · INSTALLED · 320: at a 320 px section the verdict holds — at most three inline, no sideways overflow (Codex ${cx320 && cx320.inline.length} inline + ${cx320 && cx320.folded.length} folded; ${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')} — the WIDTH step is the scaled-text leg below)`, noSideways(st320, { section: false }) && st320.every((r) => r.inline.length <= 3) && !!cx320 && cx320.more && cx320.inline.length <= (cx ? cx.inline.length : 3), st320);
+    // THE FOLD FOLLOWS THE TIER (r2): the dialog stays open while the viewport crosses phone → desktop → phone; the desktop
+    // row is judged against a fresh desktop open (`desk`, below)
+    const rot = await rotate({ phone: false });
+    await shot(`roster-rotated-desktop-${lang}.png`);
+    const back = await rotate({ phone: true }), bcx = back.strips && back.strips.find((r) => r.name === 'Codex');
+    check(`${lang} · rotated back to the phone on the open dialog: the row folds again — Codex ${bcx && bcx.inline.join(' · ')} + «…» (${bcx && bcx.folded.join(', ')}), at most three inline, no sideways overflow (host ${back.host})`, back.host === 'sheet' && noSideways(back.strips) && back.strips.every((r) => r.inline.length <= 3) && !!bcx && bcx.more && !!cx && JSON.stringify(bcx.inline) === JSON.stringify(cx.inline) && JSON.stringify(bcx.folded) === JSON.stringify(cx.folded), back);
+    await shot(`roster-rotated-back-phone-${lang}.png`);
+    const desk = await openAgents({ phone: false, lang }), dcx = desk && desk.find((r) => r.name === 'Codex');
+    check(`${lang} · INSTALLED · desktop: every button inline, no «…», no folded class (Codex ${dcx && dcx.inline.length}: ${dcx && dcx.classes.join(' | ')}; strip bytes #${desk && desk.map((r) => r.h).join(' #')})`, !!desk && desk.length >= 2 && desk.every((r) => !r.more && !r.foldedClass && r.folded.length === 0) && !!dcx && dcx.inline.length === 4 && JSON.stringify(dcx.classes) === JSON.stringify(['agent-btn cli-recheck', 'agent-btn primary', 'agent-btn', 'agent-btn']), desk);
+    await shot(`roster-desktop-modal-${lang}.png`);
+    const rcx = rot.strips && rot.strips.find((r) => r.name === 'Codex');
+    check(`${lang} · rotated to the DESKTOP on the open dialog: the base's inline bar, byte for byte — every button inline, no «…», no folded class, the strip bytes a fresh desktop open draws (#${rot.strips && rot.strips.map((r) => r.h).join(' #')} vs #${desk && desk.map((r) => r.h).join(' #')}; host ${rot.host})`, rot.host === 'window' && !!rot.strips && !!desk && rot.strips.length === desk.length && rot.strips.every((r, i) => !r.more && !r.foldedClass && r.folded.length === 0 && r.h === desk[i].h) && !!rcx && rcx.inline.length === 4, { rot, desk });
+  }
+  // THE ZOOM CASE (r2 — the division the fold's measure makes): a desktop at 150 % (body zoom 1.5: a button's rect is 1.5× its
+  // layout px, the row's clientWidth is layout px) holds the dialog open and the viewport crosses into the phone. The class
+  // settles (vs-viewport-class, 120 ms) BEFORE the UI scale steps back to 1 on the phone (250 ms): the row is measured under
+  // the zoom it still wears, and rect ÷ uiScale keeps the fresh phone's verdict (a measure without the division caches 1.5×
+  // widths and folds Update too — for good: the cache outlives the zoom). 150 %, not 125 %: at 125 % this row's three still fit.
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+  await openPage();
+  await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); localStorage.setItem('vibespace.uiScale', '150'); return 1; })()`);
+  await openPage();
+  await evalJs(`(() => { app._showAgentsDialog({ forceModal: true }); return 1; })()`);
+  await until(async () => evalJs(`(() => { const s = ${MODAL6}; return !!s && [...s.querySelectorAll('.ob-backend:not(.acct-section) b')].some((b) => b.textContent === 'Codex'); })()`), 20000, 300);
+  await sleep(400);
+  const zoomed = await evalJs(`(() => { window.__tierAt = null; addEventListener('vs-viewport-class', () => { window.__tierAt = { zoom: document.body.style.zoom, phone: app.isMobile }; }, { once: true }); return document.body.style.zoom; })()`);
+  const zr = await rotate({ phone: true });
+  await until(async () => evalJs(`document.body.style.zoom === ''`), 3000, 100); await sleep(400);
+  const zs = await evalJs(STRIPS(MODAL6)), zat = await evalJs('window.__tierAt');
+  check(`zoom: a desktop at 150 % (body zoom ${zoomed}) crossing into the phone is measured under the zoom it still wears (at the tier's signal ${JSON.stringify(zat)}) — rect ÷ uiScale keeps the fresh phone's verdict (${JSON.stringify(zs && zs.map((r) => [r.name, r.inline.length, r.folded.length]))} = ${JSON.stringify(phoneEn && phoneEn.map((r) => [r.name, r.inline.length, r.folded.length]))}; host ${zr.host})`, zoomed === '1.5' && !!zat && zat.zoom === '1.5' && zat.phone === true && zr.host === 'sheet' && !!zs && !!phoneEn && zs.length === phoneEn.length && zs.every((r, i) => JSON.stringify(r.inline) === JSON.stringify(phoneEn[i].inline) && JSON.stringify(r.folded) === JSON.stringify(phoneEn[i].folded)) && noSideways(zs), { zoomed, zat, zs, phoneEn });
+  await evalJs(`(() => { localStorage.removeItem('vibespace.uiScale'); return 1; })()`);
+  // A ROW THE WIDTH FOLDS (r2 — the browser's width step, not only the count's): the device's text scaled up (the strip's
+  // buttons at 16 px for 12 — Android's largest text size) at a 320 px section. The Claude Code row holds THREE buttons, so
+  // the count never folds it: the WIDTH folds what the row cannot hold into its «…», whose menu carries it. CONTROL: the same
+  // row with every button back inline and no «…» overflows its row
+  const bigText = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = '.agent-actions > .agent-btn { font-size: 16px !important; }'; document.head.appendChild(st); });` });
+  await openAgents({ phone: true, lang: 'en' });
+  await evalJs(`(() => { const s = ${MODAL6}; if (s) s.style.width = '320px'; return 1; })()`); await sleep(400);
+  const sw = await evalJs(STRIPS(MODAL6)), wrow = sw && sw.find((r) => r.inline.length + r.folded.length <= 3 && r.folded.length >= 1);
+  const wmenu = wrow ? await evalJs(`(async () => { const row = ${rowJs(wrow ? wrow.name : '')}; const more = row && row.querySelector(':scope > .agent-actions > .row-more'); if (!more) return null; more.scrollIntoView({ block: 'center' }); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); more.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const m = document.querySelector('.context-menu.row-more-menu'); const out = m ? [...m.querySelectorAll('.context-menu-item')].map((i) => i.textContent) : null; return out; })()`) : null;
+  await shot('roster-320-width-fold-menu-en.png');
+  await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); return 1; })()`);
+  check(`width: the device's text scaled up at a 320 px section — the ${wrow && wrow.name} row holds ${wrow && wrow.inline.length + wrow.folded.length} buttons (the count folds none) and the WIDTH folds ${wrow && wrow.folded.join(', ')} into its «…», whose menu carries it (${JSON.stringify(wmenu)}); every strip inside its row (${sw && sw.map((r) => r.name + ' ' + r.inline.length + '+' + r.folded.length + ' ' + r.right + '/' + r.secW).join(' · ')})`, !!wrow && wrow.more && JSON.stringify(wmenu) === JSON.stringify(wrow.folded) && noSideways(sw, { section: false }) && sw.every((r) => r.inline.length <= 3), sw);
+  const wctl = wrow ? await evalJs(`(() => { const sec = ${MODAL6}, row = ${rowJs(wrow ? wrow.name : '')}; const a = row && row.querySelector(':scope > .agent-actions'); if (!a) return null; const folded = [...a.querySelectorAll(':scope > .bar-folded')], more = a.querySelector(':scope > .row-more'); folded.forEach((b) => b.classList.remove('bar-folded')); if (more) more.style.display = 'none'; const out = { inline: a.querySelectorAll(':scope > button:not(.row-more)').length, rowScrollW: row.scrollWidth, rowClientW: row.clientWidth, right: Math.round(a.getBoundingClientRect().right - sec.getBoundingClientRect().left), secW: sec.clientWidth }; folded.forEach((b) => b.classList.add('bar-folded')); if (more) more.style.display = ''; return out; })()`) : null;
+  check(`CONTROL: the same row with all ${wctl && wctl.inline} buttons back inline and no «…» overflows (row ${wctl && wctl.rowScrollW}/${wctl && wctl.rowClientW}, strip ${wctl && wctl.right}/${wctl && wctl.secW}) — the width step is load-bearing`, !!wctl && (wctl.rowScrollW > wctl.rowClientW + 1 || wctl.right > wctl.secW + 1), wctl);
+  await evalJs(`(() => { const s = ${MODAL6}; if (s) s.style.width = ''; return 1; })()`);
+  await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: bigText.identifier });
+  // A RENDER'S LISTENERS DIE WITH IT (r3 — the acceptor's probe): a HIDDEN surface re-rendered five times through the
+  // accounts-updated door (_agentsRefreshHook) — the rail panel of a collapsed sidebar (display:none, still connected: a row
+  // removed there gets no resize callback) and a minimized Agents window. Counted by the page: the window's vs-viewport-class
+  // listeners (CDP DOMDebugger.getEventListeners, less the count before the rows were drawn) and the ResizeObservers that
+  // watch a status row (the page's own ResizeObserver, wrapped at load to count what watches an .ob-backend) — FLAT across the
+  // re-renders; the surface's end (the rail goes to another panel; the window's ✕) ⇒ 0
+  const roWatch = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const RO = window.ResizeObserver, live = new Set(); window.__rowObservers = live; window.ResizeObserver = class extends RO { observe(el, o) { if (el && el.classList && el.classList.contains('ob-backend')) live.add(this); return super.observe(el, o); } unobserve(el) { live.delete(this); return super.unobserve(el); } disconnect() { live.delete(this); return super.disconnect(); } }; })();` });
+  const tierListeners = async () => { const w = await cdp('Runtime.evaluate', { expression: 'window', objectGroup: 'leak' }); const r = await cdp('DOMDebugger.getEventListeners', { objectId: w.result.objectId }); await cdp('Runtime.releaseObjectGroup', { objectGroup: 'leak' }); return r.listeners.filter((l) => l.type === 'vs-viewport-class').length; };
+  const leakRows = (root) => evalJs(`(() => { const r = ${root}; return r ? r.querySelectorAll('.ob-backend:not(.acct-section) > .agent-actions').length : -1; })()`);
+  const liveCount = async (root) => ({ win: await tierListeners(), ro: await evalJs('window.__rowObservers ? window.__rowObservers.size : -1'), rows: await leakRows(root) });
+  // one re-render, settled: the old rows left, as many rows stand again, the fills done
+  const rerender = (root, n) => evalJs(`(async () => { const root = () => ${root}; const old = root() && root().querySelector('.ob-backend:not(.acct-section)'); if (!old || !app._agentsRefreshHook || !app._agentsRefreshHook()) return false; const t0 = Date.now(); const rows = () => (root() ? root().querySelectorAll('.ob-backend:not(.acct-section) > .agent-actions').length : -1); while ((old.isConnected || rows() < ${n}) && Date.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 50)); await app._agentsFill; await new Promise((r) => setTimeout(r, 150)); return !old.isConnected && rows() === ${n}; })()`);
+  const spell = (base, list) => list.map((c) => `${c.win - base}+${c.ro}`).join(' → ');
+  const PANEL = `document.querySelector('.rail-panel-agents')`, WIN = `document.querySelector('#agents-dialog-overlay .agents-dialog-body')`;
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+  await openPage();
+  await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); localStorage.setItem('vibespace.railItem', 'folders'); return 1; })()`);
+  await openPage();
+  const base = await tierListeners();
+  await evalJs(`(() => { app.sidebar.toggle(true); const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`);
+  await until(async () => evalJs(`(() => { const s = document.querySelector('.rail-panel-agents .agents-machine-sec[data-host=""]'); return !!s && [...s.querySelectorAll('.ob-backend:not(.acct-section) b')].some((b) => b.textContent === 'Codex'); })()`), 20000, 300);
+  await evalJs('app._agentsFill'); await sleep(400);
+  const popen = await liveCount(PANEL);
+  await evalJs(`(() => { app.sidebar.toggle(false); return 1; })()`); await sleep(300);
+  const phidden = await evalJs(`(() => { const p = ${PANEL}; return !!p && p.isConnected && p.getBoundingClientRect().width === 0 && app.sidebar.el.classList.contains('rail-collapsed'); })()`);
+  const pruns = [];
+  for (let k = 0; k < 5; k++) { const done = await rerender(PANEL, popen.rows); pruns.push({ done, ...(await liveCount(PANEL)) }); }
+  check(`a render's listeners die with it — the rail panel of a COLLAPSED sidebar (hidden: ${phidden}) re-rendered five times: its ${popen.rows} rows' tier listeners + row observers stay FLAT (${spell(base, [popen, ...pruns])})`, phidden && popen.rows >= 2 && popen.win - base === popen.rows && popen.ro === popen.rows && pruns.every((c) => c.done && c.win === popen.win && c.ro === popen.ro), { base, popen, pruns });
+  await evalJs(`(() => { app.sidebar._railGo('folders'); return 1; })()`); await sleep(300);
+  const pend = await liveCount(PANEL);
+  check(`…and the panel's end (the rail goes to another panel) lets go of every one (${spell(base, [pend])})`, pend.win === base && pend.ro === 0, { base, pend });
+  await evalJs(`(() => { app._showAgentsDialog({ forceModal: true }); return 1; })()`);
+  await until(async () => evalJs(`(() => { const s = ${MODAL6}; return !!s && [...s.querySelectorAll('.ob-backend:not(.acct-section) b')].some((b) => b.textContent === 'Codex'); })()`), 20000, 300);
+  await evalJs('app._agentsFill'); await sleep(400);
+  const wopen = await liveCount(WIN);
+  const wmin = await evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); const w = o && [...app.wm.windows.values()].find((x) => x.element.contains(o)); if (!w) return null; app.wm.minimize(w.id); return { minimized: !!w.isMinimized, hidden: getComputedStyle(w.element).display === 'none', connected: o.isConnected }; })()`);
+  const wruns = [];
+  for (let k = 0; k < 5; k++) { const done = await rerender(WIN, wopen.rows); wruns.push({ done, ...(await liveCount(WIN)) }); }
+  check(`…the same for a MINIMIZED Agents window (${JSON.stringify(wmin)}): five re-renders, its ${wopen.rows} rows' count FLAT (${spell(base, [wopen, ...wruns])})`, !!wmin && wmin.minimized && wmin.hidden && wmin.connected && wopen.rows >= 2 && wopen.win - base === wopen.rows && wopen.ro === wopen.rows && wruns.every((c) => c.done && c.win === wopen.win && c.ro === wopen.ro), { base, wopen, wmin, wruns });
+  await evalJs(`(() => { const o = document.getElementById('agents-dialog-overlay'); const x = o && o.querySelector('.dialog-close'); if (x) x.click(); return 1; })()`); await sleep(300);
+  const wend = { ...(await liveCount(WIN)), dialog: await evalJs(`!!document.getElementById('agents-dialog-overlay')`) };
+  check(`…and its ✕ lets go of every one (${spell(base, [wend])}; dialog gone: ${!wend.dialog})`, !wend.dialog && wend.win === base && wend.ro === 0, { base, wend });
+  await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: roWatch.identifier });
+  // the NONE shape: the hub re-boots over the same data/ with a login shell that finds no CLI
+  { const old = srv; await new Promise((r) => { const t = setTimeout(() => { try { old.kill('SIGKILL'); } catch { } r(); }, 8000); old.once('exit', () => { clearTimeout(t); r(); }); old.kill('SIGTERM'); }); }
+  srvEnv = { ...VNC_ENV, ...envFor('none') }; bootServer();
+  check('the hub re-boots with the NONE shape', await waitServer());
+  { const sh = await until(async () => { const v = await cliShape(); return shapeIs(v, 'none') ? v : null; }, 20000, 300);
+    check(`THE FIXTURE'S SHAPE, never the box's: the hub's (scratch) login shell now finds no claude and no codex (${JSON.stringify(sh || await cliShape())})`, !!sh); }
+  for (const lang of ['en', 'zh']) {
+    const st = await openAgents({ phone: true, lang });
+    check(`${lang} · NONE · 352: the rows are the base's — Install · Re-check, nothing folded, no «…», no sideways overflow (${JSON.stringify(st && st.map((r) => [r.name, r.inline.length, r.folded.length, r.more]))})`, noSideways(st) && st.every((r) => !r.more && r.folded.length === 0 && r.inline.length <= 3) && ['Claude Code', 'Codex'].every((n) => (st.find((r) => r.name === n) || {}).inline?.length === 2), st);
+    if (lang === 'en') await shot('roster-375-none-en.png');
+    const st320 = await at320();
+    check(`${lang} · NONE · 320: still nothing folded and no sideways overflow (${st320 && st320.map((r) => r.right + '/' + r.secW).join(' ')})`, noSideways(st320, { section: false }) && st320.every((r) => !r.more && r.folded.length === 0), st320);
+  }
+  await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
   check('no JS errors', realErrors.length === 0, realErrors.slice(0, 5));
 } catch (e) {

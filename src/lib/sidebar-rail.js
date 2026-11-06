@@ -476,7 +476,7 @@ export function installSidebarRail(Sidebar) {
         const d = this.app.openPluginsDialog?.({ container: c });
         this._panelDispose = typeof d === 'function' ? d : null;
       }
-      else if (this._activeTab === 'agents') this.app._showAgentsDialog?.({ container: c });
+      else if (this._activeTab === 'agents') { const d = this.app._showAgentsDialog?.({ container: c }); this._panelDispose = typeof d === 'function' ? d : null; } // its rows' listeners end with the panel (lane phone-roster-fold r3)
       else if (this._activeTab === 'ports') this._renderPortsPanel(c);
       else if (this._activeTab === 'jobs') this._renderJobsRailPanel(c);
       else if (this._activeTab === 'channels') { const d = renderChannelsPanel(this.app, c); this._panelDispose = typeof d === 'function' ? d : null; }
