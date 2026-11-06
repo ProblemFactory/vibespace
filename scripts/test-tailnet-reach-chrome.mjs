@@ -243,7 +243,7 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     const v = await door.launch({ label: 'driver' });
     const line = V.driverArgsText(['--no-sandbox', ...QUIET, DRIVER_RULE, v.arg]);
     const cfgFile = path.join(ROOT, 'driver.json'); fs.writeFileSync(cfgFile, JSON.stringify({ args: line.args }));
-    const sock = fs.mkdtempSync('/tmp/vs-tn-'); // short: a unix socket path
+    const sock = fs.mkdtempSync('/tmp/vs-tn-' + process.pid + '-'); // short: a unix socket path — /tmp itself, never TMPDIR; per pid (test-ci-gate-tiers §6)
     const home = path.join(ROOT, 'abhome'); fs.mkdirSync(home, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: home, TMPDIR: ROOT, AGENT_BROWSER_SOCKET_DIR: sock, AGENT_BROWSER_SESSION: 'tn-driver', AGENT_BROWSER_CONFIG: cfgFile, AGENT_BROWSER_EXECUTABLE_PATH: CHROME, AGENT_BROWSER_IDLE_TIMEOUT_MS: '60000', AGENT_BROWSER_JSON: '1' };
     // ASYNC: the door and the SOCKS5 stub live in THIS process — a sync exec would block them while Chrome fetches its PAC
