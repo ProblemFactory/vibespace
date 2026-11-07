@@ -326,7 +326,9 @@ try {
   const menu = await evalJs(`[...document.querySelectorAll('.chat-status-channel-row')].map((r) => ({ key: r.dataset.key, name: r.querySelector('.chat-status-channel-name').textContent }))`);
   check('its menu lists the three, drafted first', menu.length === 3 && menu[0].key === 'fake-poll/fake-poll-ops', menu);
   await shot('chip-menu', '.chat-status-dropdown', 40);
-  check('a menu row opens its conversation (the drafted one)', await rowsStill('.chat-status-channel-row') && await realClick('.chat-status-channel-row[data-key="fake-poll/fake-poll-ops"]') && await waitFor(`!!(${channelWin('fake-poll-ops')})`, 8000));
+  // lane outbox-chip-door (inc-mw5r944f-60vt): the row names a drafted reply ⇒ its DRAFT, in THIS conversation's Outbox; the thread is one tap further, on the card
+  check('a menu row of a drafted reply opens its DRAFT in this conversation\'s Outbox (marked, «drafted by …»)', await rowsStill('.chat-status-channel-row') && await realClick('.chat-status-channel-row[data-key="fake-poll/fake-poll-ops"]') && await waitFor(`!!document.querySelector('.chan-outbox .chan-outbox-filter-text') && !!document.querySelector('.chan-outbox .chan-orow-pressed + .chan-prop')`, 8000) && !(await evalJs(`!!(${channelWin('fake-poll-ops')})`)), lastMiss);
+  check('…the thread is one tap further: the card\'s «Open the conversation»', await realClick('.chan-outbox .chan-orow-pressed + .chan-prop .chan-prop-link') && await waitFor(`!!(${channelWin('fake-poll-ops')})`, 8000), lastMiss);
 
   // ── ④ the reverse link ──
   console.log('④ the conversation window links back to the chat');

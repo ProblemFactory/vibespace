@@ -100,7 +100,7 @@ import { routeErrorText } from './channel-words.js';
 import { apiOutboxSection, outboxSecHead, paintSecHead } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 import { fateOf as apiFate } from '../channel-api-card.js';
 import { outboxCensus, outboxView } from '../outbox-census.js';   // lane outbox-window-scroll-filter: ONE count, ONE filter
-import { outboxRowsOf, outboxFilterOf, conversationKeys, partlySent } from '../outbox-chip.js';   // lane outbox-session-chip: «drafted by <conversation>» — the rows the chip counts
+import { outboxRowsOf, outboxFilterOf, conversationKeys, partlySent, proposalFaceOf } from '../outbox-chip.js';   // lane outbox-session-chip: «drafted by <conversation>» — the rows the chip counts
 import { noteOutbox, currentOutbox, onOutbox, conversationOutbox, wireOutboxFeed } from './outbox-feed.js';   // lane outbox-session-chip: the client's Outbox rows (the window follows them; its read feeds them) + the chip's ONE verdict
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
@@ -348,16 +348,28 @@ const stamp = (ms) => {
 
 /** lane outbox-session-chip: what a card says BY NAME beside its state — «edited by you» (the owner edited its text: `edited`)
  *  and «replaced» (its drafter replaced it: `replacedBy`; a press shows the newer one through the ONE Outbox door). */
+/** lane outbox-chip-door: THE WORDS A PROPOSAL WEARS — its state, then its marks, each `{cls, text}`, over the PURE verdict
+ *  (src/outbox-chip.js proposalFaceOf). The card's chip + marks and the Channels chip's row read this ONE call (ONE table:
+ *  stateLabel). */
+export function proposalWords(p) {
+  const f = proposalFaceOf(p);
+  const out = [{ cls: `chan-prop-state chan-prop-state-${f.state}`, text: f.state === 'partly' ? t('partly sent') : stateLabel(f.state) }];
+  if (f.edited) out.push({ cls: 'chan-prop-mark chan-prop-mark-edited', text: t('edited by you') });
+  if (f.replaced) out.push({ cls: 'chan-prop-mark chan-prop-mark-replaced', text: t('replaced') });
+  return out;
+}
 function proposalMarks(app, p) {
   const out = [];
-  if (p.edited) {
-    const m = el('span', 'chan-prop-mark chan-prop-mark-edited', t('edited by you'));
+  const words = proposalWords(p).slice(1);
+  const said = (cls) => words.find((w) => w.cls.includes(cls));
+  if (said('chan-prop-mark-edited')) {
+    const m = el('span', said('chan-prop-mark-edited').cls, said('chan-prop-mark-edited').text);
     m.title = t('You edited this text before you approved it');
     out.push(m);
   }
-  if (p.state === 'withdrawn' && p.replacedBy) {
+  if (said('chan-prop-mark-replaced')) {
     // a real button (its role, the Tab order, Enter / Space); on a phone / a touch screen its hit area is ≥ 36 px (style.css)
-    const b = el('button', 'chan-prop-mark chan-prop-mark-replaced', t('replaced'));
+    const b = el('button', said('chan-prop-mark-replaced').cls, said('chan-prop-mark-replaced').text);
     b.type = 'button';
     b.dataset.replacedBy = String(p.replacedBy);
     b.title = t('The agent replaced this draft with a newer one — click to see it');
@@ -392,7 +404,7 @@ function drafterMenu(app, p, ev) {
 /** lane lark-upload-preflight (userW inc-muxsy69b-mjg1): a SENT proposal a part of which did not land is "partly sent" —
  *  never a plain "sent" (the owner learned of the dropped file from the recipient). */
 //  (lane outbox-session-chip: the ONE predicate is src/outbox-chip.js `partlySent` — the chat chip counts the same)
-function stateChip(p) { return el('span', `chan-prop-state chan-prop-state-${partlySent(p) ? 'partly' : p.state}`, partlySent(p) ? t('partly sent') : stateLabel(p.state)); }
+function stateChip(p) { const w = proposalWords(p)[0]; return el('span', w.cls, w.text); }
 export function stateLabel(state) {
   switch (state) {
     case 'awaiting-approval': return t('awaiting your approval');
@@ -1160,11 +1172,11 @@ function chipWhat(p) {
   if (who) return g.verb === 'reply-all' ? t('Reply all to {who}', { who }) : t('Reply to {who}', { who });
   return t('Reply in {conv}', { conv: convNameOf(p) || p.adapterLabel || p.adapterId || '' });
 }
+/** lane outbox-chip-door (the ruling: ONE vocabulary): the tool-card row's state = the words the card wears (proposalWords); a sent one keeps when it went. */
 function chipState(p) {
-  if (p.state === 'awaiting-approval' || p.state === 'proposed') return t('awaiting approval');
-  if (p.state === 'sent') return partlySent(p) ? t('partly sent') : t('sent · {time}', { time: fateStamp((p.result && p.result.at) || p.updatedAt || p.at) });
-  if (p.state === 'rejected') return t('you rejected it');
-  return stateLabel(p.state);
+  const words = proposalWords(p).map((w) => w.text);
+  if (p.state === 'sent' && !partlySent(p)) words.splice(1, 0, fateStamp((p.result && p.result.at) || p.updatedAt || p.at));
+  return words.join(' · ');
 }
 function chatWanted() {
   const ids = new Set();
@@ -1307,18 +1319,27 @@ export function openChannelOutbox(app, opts = {}) {
   let last = null;
   let apiCards = [];
   // lane outbox-session-chip: THE «drafted by <conversation>» FILTER — this window's view state (never persisted, never broadcast;
-  // the openSpec stays bare). Three doors set it (a chat's Outbox chip, a card's «Only drafts by <agent>», the session menu's
-  // «Outbox of this conversation»); a removable chip at the top of the list says it; the census, the head and the API section
+  // the openSpec stays bare). Its doors (lane outbox-chip-door: EVERY door inside a conversation): a chat's Outbox chip, a card's
+  // «Only drafts by <agent>», the session menu's «Outbox of this conversation», a row that names a proposal — the Channels chip's
+  // rows and the tool-card rows, through openTouchRow (`inside`, `show`); a removable chip at the top of the list says it; the census, the head and the API section
   // read the filtered rows (PURE outboxRowsOf — both sections, every state kept, a replaced card too), newest first — the SAME
   // rows the chat's chip counts (outboxChipOf over outboxRowsOf + the same outboxCensus), so the head and the chip agree.
   const okFilter = (f) => (f && Array.isArray(f.keys) && f.keys.length ? { keys: f.keys.map(String), name: String(f.name || '') } : null);
   let filter = okFilter(opts.filter);
-  // acceptance r2 m3: a filter shows All (every state of that conversation) — and its All DIES WITH IT: `forcedFrom` is the view
-  // the filter replaced (`undefined` = none forced); the filter's removal puts it back (the census's default, null) unless the
-  // OWNER picked a view meanwhile (a segment, a folded section's «See them in All») — that pick stays
+  // lane outbox-chip-door (inc-mw5r944f-60vt): THE FILTERED WINDOW OPENS ON WHAT WAITS — a filter door hands the view to the census
+  // over the FILTERED rows (Awaiting while any of its proposals await, All when none do: the view null), so the chip's «M waiting»
+  // are the first thing under its name; `forcedFrom` is the view the filter replaced (`undefined` = none forced); the filter's removal
+  // puts it back (the census's default, null) unless the OWNER picked a view meanwhile (a segment, a folded section's «See them in
+  // All») — that pick stays, and a door naming the SAME conversation again keeps it too
   let forcedFrom = filter ? view : undefined;
-  if (filter) view = 'all';
-  let pendingShow = opts.show ? String(opts.show) : null;
+  // r2 (acceptance H3): A PRESS'S ALL IS THE PRESS'S, NEVER THE OWNER'S — a pressed proposal the view hides shows All over `view`, which
+  // keeps the owner's pick (or null, the census); the next press, a segment, a door with a filter or the filter's removal lifts it
+  let pressAll = false;
+  let pendingShow = opts.show ? { id: String(opts.show), inside: !!opts.inside } : null;
+  /** This window's own read failed: a press waiting for a list takes the one the feed holds next (its read decides otherwise — a list held from before may not have the proposal yet). */
+  let readFailed = false;
+  /** The proposal a door from inside a conversation pressed: its row wears the mark until the next such press / the filter's removal. */
+  let pressed = null;
   const fbar = el('div', 'chan-outbox-filter');
   const fchip = el('span', 'chan-outbox-filter-chip');
   fchip.appendChild(icon('filter', 11));
@@ -1351,6 +1372,7 @@ export function openChannelOutbox(app, opts = {}) {
   /** A folded section's 「在「全部」里看」: the All view, that section's head at the top of the list. */
   const onAll = (key) => {
     view = 'all';
+    pressAll = false;
     forcedFrom = undefined;
     draw(last);
     const h = [...list.querySelectorAll('.chan-outbox-sec')].find((x) => x.dataset.sec === key);
@@ -1368,7 +1390,7 @@ export function openChannelOutbox(app, opts = {}) {
     const shown = rowsShown(whole);
     const ob = filter && whole ? { ...whole, proposals: shown.proposals } : whole;
     const apiCards = shown.apiCards;
-    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });
+    const r = outboxNodes(app, list, ob, { view: pressAll ? 'all' : view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });
     for (const id of [...open]) if (!r.proposals.some((p) => p.id === id)) open.delete(id);
     segAwait.classList.toggle('chan-seg-on', r.view === 'awaiting');
     segAll.classList.toggle('chan-seg-on', r.view === 'all');
@@ -1379,45 +1401,64 @@ export function openChannelOutbox(app, opts = {}) {
     }
     const nodes = filter ? [fbar, ...r.nodes] : r.nodes;
     placeArmed(list, nodes);
+    for (const c of [...list.children]) if (c.dataset && c.dataset.orow) c.classList.toggle('chan-orow-pressed', c.dataset.orow === pressed);
   }
-  function dropFilter() { filter = null; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }
+  function dropFilter() { filter = null; pressAll = false; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }
   function setOutboxFilter(f) {
     const next = okFilter(f);
-    if (!next) dropFilter();
-    else { if (forcedFrom === undefined) forcedFrom = view; filter = next; view = 'all'; }
+    pressAll = false;
+    if (!next) { dropFilter(); pressed = null; }
+    else {
+      const same = !!filter && filter.keys.join('\n') === next.keys.join('\n');
+      if (!same) { if (forcedFrom === undefined) forcedFrom = view; view = null; }   // the census decides: what waits, first
+      filter = next;
+    }
     draw(last);
   }
-  /** «replaced» → the newer proposal: its card opened under its row, brought into view (the All view, the filter dropped, when
-   *  they hide it); one the list no longer holds is said. */
-  function show(id) {
-    if (!last) { pendingShow = id; return; }
+  /** «replaced» → the newer proposal / a row inside a conversation → the proposal it names (`inside`): its card opened under its
+   *  row, brought into view (the All view when the view hides it); one the list no longer holds is said. A filter that does not
+   *  hold it: «replaced» drops the filter; a door from inside shows the conversation that DRAFTED it (a subagent's viewer: its
+   *  parent's — a helper drafts under its parent's id), never the whole Outbox while a drafter is known. */
+  function show(id, { inside = false } = {}) {
+    if (!last) { pendingShow = { id, inside }; return; }
+    pendingShow = null;
     const p = (last.proposals || []).find((x) => x && x.id === id);
-    if (!p) { showToast(t('The newer proposal is not in the Outbox list any more')); return; }
-    if (filter && !outboxFilterOf([p], filter).length) dropFilter();
+    if (!p) { showToast(inside ? t('This proposal is not in the Outbox list any more') : t('The newer proposal is not in the Outbox list any more')); return; }
+    if (inside) pressAll = false;
+    if (!filter || !outboxFilterOf([p], filter).length) {
+      const own = inside ? drafterFilterOf(app, p) : null;
+      if (own) setOutboxFilter(own);
+      else if (filter) dropFilter();
+    }
     open.add(id);
+    pressed = inside ? id : null;
     draw(last);
     const rowOf = () => [...list.children].find((c) => c.dataset && c.dataset.orow === id);
-    if (!rowOf()) { view = 'all'; draw(last); }
+    if (!rowOf()) { pressAll = true; draw(last); }
     const row = rowOf();
+    if (row && inside) reveal(row.nextElementSibling, row);   // the card with its Approve, the row kept on screen
     if (row) { if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); if (row.focus) row.focus(); }
   }
-  // a door that names no filter (⚙ Outbox…, the panel's button, a For-you link) shows EVERYTHING — never an earlier filter kept
-  // silently; «replaced» (`show`) and a layout replay (`syncId`) keep the view as it is
-  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setOutboxFilter(o.filter); else if (filter && !o.show && !o.syncId) setOutboxFilter(null); if (o.show) show(String(o.show)); };
-  segAwait.onclick = () => { view = 'awaiting'; forcedFrom = undefined; draw(last); };
-  segAll.onclick = () => { view = 'all'; forcedFrom = undefined; draw(last); };
+  // a door from OUTSIDE a conversation that names no filter (⚙ Outbox…, the panel's button, a channel window's link, a For-you
+  // link) shows EVERYTHING — never an earlier filter kept silently; «replaced» (`show`), a layout replay (`syncId`) and a door from
+  // INSIDE a conversation (`inside`: openTouchRow) never clear a filter the person opened. The census: test-channel-outbox §OCD
+  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setOutboxFilter(o.filter); else if (filter && !o.show && !o.syncId && !o.inside) setOutboxFilter(null); else if (o.inside && !o.show && pressAll) { pressAll = false; draw(last); } if (o.show) show(String(o.show), { inside: !!o.inside }); };
+  segAwait.onclick = () => { view = 'awaiting'; pressAll = false; forcedFrom = undefined; draw(last); };
+  segAll.onclick = () => { view = 'all'; pressAll = false; forcedFrom = undefined; draw(last); };
   async function refresh() {
     const r = await fetchJson('/api/channels/outbox');
-    if (!r || r.error) { summary.textContent = (r && r.error) || t('The outbox is not available.'); return; }
+    if (!r || r.error) { readFailed = true; summary.textContent = (r && r.error) || t('The outbox is not available.'); if (last) showPending(); return; }
     const held = noteOutbox(r);   // lane outbox-session-chip: the window's read is the client's Outbox state too (the chips follow it); an answer older than a view already held is dropped — the window draws the held one
     if (!held || held !== last) draw(held || r);
-    if (pendingShow) { const id = pendingShow; pendingShow = null; show(id); }
+    showPending();
   }
+  /** A press that came before any list: shown by this window's read, or once that read failed by the list the feed holds. */
+  function showPending() { if (pendingShow) { const { id, inside } = pendingShow; pendingShow = null; show(id, { inside }); } }
   // acceptance r2 m1 + m2: THE WINDOW FOLLOWS THE FEED — it wires the feed itself on open (idempotent, shared with every chat's
   // chip: a page with no chat window too) and draws the view the feed HOLDS: every `channel-outbox-updated` reaches the window
   // through the feed's ONE `at` judge (noteOutbox), so a late OLDER push the feed drops is never drawn here either, and the
   // feed's read after a reconnect redraws the window; no socket handler of its own
-  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); });
+  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); if (readFailed && last) showPending(); });
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { offFeed(); apiSec.stop(); });
   refresh().catch(() => {});
   return winInfo;

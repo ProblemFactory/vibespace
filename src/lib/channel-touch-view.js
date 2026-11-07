@@ -60,7 +60,8 @@ import { agentCommandText } from '../agent-tool-rules.js';   // r3: THE unwrappe
 import * as T from '../channel-touch.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import { chatApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row
-import { chatProposalCards, refreshChatProposals } from './channel-outbox.js';   // lane chat-proposal-card: a reply / compose / react / recall's card at its call row — the Outbox's own card
+import { chatProposalCards, refreshChatProposals, proposalWords } from './channel-outbox.js';   // lane chat-proposal-card: a reply / compose / react / recall's card at its call row — the Outbox's own card
+import { heldProposalLookup } from './outbox-feed.js';   // lane outbox-chip-door: the client's list by id — the row's state words, the proposal its press shows
 
 
 const REBIND_MS = 80;
@@ -70,15 +71,31 @@ const clock = (at) => { const d = new Date(Number(at) || 0); return `${String(d.
 /** The ONE way a touched conversation is opened (the card row, the chip's menu). The verdict is PURE
  *  (T.openVerdict): an agent's SEARCH row opens the search results scoped to that conversation — the agent's query,
  *  its hits (lane channel-search-view, .212; the owner 2026-10-04: a click opened the first hit's conversation, the
- *  hits were nowhere to be seen); a read / a reply opens the conversation; a composed message not yet sent the Outbox. */
-export function openTouchRow(app, row) {
+ *  hits were nowhere to be seen); a read opens the conversation; a row that names a proposal the Outbox — lane outbox-chip-door:
+ *  `filter` = the chat's own «drafted by <this conversation>» (ChatView._outboxFilter), `show` = that proposal, `inside` = this door
+ *  is INSIDE a conversation: it never clears a filter the person opened. */
+export function openTouchRow(app, row, { filter = null } = {}) {
   if (!app || !row) return;
   if (row.ops && row.ops.api) { showApiAccessDialog(app, row.adapterId); return; }   // B-2198: a raw API call row opens its credential's API access (the waiting card, the log)
-  const v = T.openVerdict(row);
+  const v = T.openVerdict(row, { filter, recordOf: heldProposalLookup() });
   if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits, memo: v.memo, searchedAt: v.searchedAt });
   else if (v.open === 'connect') { if (typeof app.openChannelConnect === 'function') app.openChannelConnect(v.kind); }   // lane pod-oauth-callback: the agent's «Connect <type>» — the Connect dialog on that type
   else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
-  else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
+  else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox({ inside: true, ...(v.filter ? { filter: v.filter } : {}), ...(v.show ? { show: v.show } : {}) });
+}
+
+/** lane outbox-chip-door (law 3): the STATE a row's proposals are in, in the words their Outbox cards wear (proposalWords —
+ *  the ONE table), each `{cls, text}`; several proposals on one row («drafted 2 replies») are counted per word, what waits first.
+ *  A row that names no proposal, a raw API row and a proposal the client's list does not hold say nothing (never a guess). */
+export function rowProposalWords(row) {
+  const recordOf = heldProposalLookup();
+  if (!row || !recordOf || (row.ops && row.ops.api)) return [];
+  const ids = Array.isArray(row.proposalIds) && row.proposalIds.length ? row.proposalIds : row.proposalId ? [row.proposalId] : [];
+  const recs = ids.map((id) => recordOf(id)).filter(Boolean);
+  recs.sort((a, b) => (b.state === 'awaiting-approval') - (a.state === 'awaiting-approval'));
+  const seen = new Map();
+  for (const p of recs) for (const w of proposalWords(p)) { const k = `${w.cls}|${w.text}`; if (seen.has(k)) seen.get(k).n += 1; else seen.set(k, { ...w, n: 1 }); }
+  return [...seen.values()].map((w) => ({ cls: w.cls, text: w.n > 1 ? `${w.text} ×${w.n}` : w.text }));
 }
 
 /** lane touch-chip-cause: what a card's call IS for the cause rule (PURE T.callKindOf): a `command` (a shell call), a
@@ -222,6 +239,7 @@ export function createChannelTouchView(view) {
     const rows = T.foldTouches(touches);
     const expanded = box.dataset.expanded === '1';
     const { shown } = T.foldView(rows, { expanded });
+    const recordOf = heldProposalLookup();   // lane outbox-chip-door: the tooltip says what the press will do (a reply gone from the list opens the conversation)
     const have = new Map([...box.querySelectorAll(':scope > .chat-channel-touch')].map((e) => [e.dataset.key, e]));
     let i = 0;
     for (const r of shown) {
@@ -233,11 +251,12 @@ export function createChannelTouchView(view) {
         rowEl.dataset.key = r.key;
         const g = el('span', 'cct-glyph'); g.dataset.glyph = '';
         rowEl.append(g, el('span', 'cct-name', ''), el('span', 'cct-words chat-status-dim', ''), el('span', 'cct-time chat-status-dim', ''));
-        rowEl.addEventListener('click', (ev) => { ev.stopPropagation(); openTouchRow(view.app, rowEl._row); });
+        rowEl.addEventListener('click', (ev) => { ev.stopPropagation(); openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null }); });
       }
       rowEl._row = r;
-      const verdict = T.openVerdict(r).open;
-      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'connect' ? t('Sign in — the Connect dialog opens on this account type') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? t('Not sent yet — open the Outbox') : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
+      const openV = T.openVerdict(r, { recordOf });
+      const verdict = openV.open;
+      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'connect' ? t('Sign in — the Connect dialog opens on this account type') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? (openV.show ? t('Show this proposal in the Outbox') : t('Not sent yet — open the Outbox')) : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
       if (rowEl.title !== tip) rowEl.title = tip;
       const glyph = T.glyphFor(r.icon);
       const g = rowEl.querySelector('.cct-glyph');

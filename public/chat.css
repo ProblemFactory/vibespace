@@ -51,6 +51,9 @@
 .chat-status-channel-row { display: flex; flex-direction: column; gap: 1px; }
 .chat-status-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-status-channel-words { font-size: 11px; }
+.chat-status-channel-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; } /* lane outbox-chip-door: «drafted a message» + its state in the card's own chips */
+.chat-status-channel-states { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.chat-status-channel-states:empty { display: none; }
 .chat-status-dropdown-item.chat-status-browser-nudge { color: var(--yellow, #e5c07b); }
 /* The row carries BOTH classes, and `.chat-status-dropdown-item` (declared
    further down this file, same 0,1,0 specificity) sets `white-space: nowrap`

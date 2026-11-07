@@ -27,6 +27,13 @@ export function currentOutbox() { return latest; }
 /** THE ROWS the client holds of both Outbox sections — `{proposals, apiCards}`, what the Outbox window draws. */
 export function currentRows() { return { proposals: latest ? latest.proposals : [], apiCards: apiHeld || [] }; }
 
+/** lane outbox-chip-door: the held list by id — null while the client holds no list (never read: nothing can be said gone). */
+export function heldProposalLookup() {
+  if (!latest) return null;
+  const byId = new Map(latest.proposals.filter(Boolean).map((p) => [String(p.id), p]));
+  return (id) => byId.get(String(id)) || null;
+}
+
 /** THE chip's verdict for a conversation (its keys) over the held rows — the chat chip and the session menu ask this ONE call. */
 export function conversationOutbox(keys) { return outboxChipOf(currentRows(), keys, { apiFate }); }
 

@@ -7245,6 +7245,7 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-orow:hover { background: var(--bg-hover); }
 .chan-orow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .chan-orow.chan-orow-open { border-color: var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.chan-orow.chan-orow-pressed { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); } /* lane outbox-chip-door: the proposal the row inside a conversation named — the row you pressed, found */
 .chan-orow > .chan-av { grid-area: av; --av-size: 32px; }
 .chan-orow-line { grid-area: line; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .chan-orow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
@@ -7277,7 +7278,9 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-outbox-sec-folded { padding: 4px 0; }
 /* lane outbox-session-chip: the «drafted by <conversation>» filter — a removable chip at the top of the list (view state); a
    card's marks «edited by you» / «replaced» beside its state (replaced = a door to the newer proposal) */
-.chan-outbox-filter { display: flex; align-items: center; padding: 2px 0; }
+.chan-outbox-list { --chan-outbox-bar: 44px; } /* lane outbox-chip-door: THE FILTER BAR'S HEIGHT, its ONE number (a finger's × makes it 56 px, below) */
+.chan-outbox-filter { box-sizing: border-box; flex: none; height: var(--chan-outbox-bar); display: flex; align-items: center; padding: 12px 0 2px; margin-top: -10px; position: sticky; top: -10px; z-index: 2; background: var(--bg-window); } /* the pressed proposal scrolls into view — «drafted by <conversation>» stays on screen above it, the rows passing under an opaque bar; -10px = the list's padding: sticky rests at the padding's inner edge, a row would show above the bar */
+.chan-outbox-list:has(> .chan-outbox-filter) :is(.chan-orow, .chan-prop, .chan-outbox-sec) { scroll-margin-top: calc(var(--chan-outbox-bar) + 4px); } /* r2 (acceptance H2): EVERYTHING the window scrolls to — a row, a card, a section's head («See them in All») — lands below that bar; no bar, no margin: a plain window scrolls as it did */
 .chan-outbox-filter-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 2px 4px 2px 8px; border-radius: 999px; font-size: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .chan-outbox-filter-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-outbox-filter-x { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
@@ -7290,6 +7293,7 @@ button.chan-prop-mark-replaced:focus-visible, .chan-outbox-filter-x:focus-visibl
 /* a finger's target (acceptance r1 N3): on a phone / a touch screen the filter's × and the «replaced» door are ≥ 36 px, like their
    siblings in this window (.chan-outbox-sec-all, .chan-seg .jobs-btn, .chanwin-quote-x) */
 @media (max-width: 480px), (pointer: coarse) {
+  .chan-outbox-list { --chan-outbox-bar: 56px; }
   .chan-outbox-filter-x { min-width: 36px; min-height: 36px; }
   button.chan-prop-mark-replaced { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; min-height: 36px; padding: 0 12px; font-size: 12px; }
 }

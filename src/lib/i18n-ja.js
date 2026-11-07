@@ -5508,6 +5508,8 @@ export default {
   "Channel conversations of this turn that no call shown here ran": "このターンで触れたが、ここに表示されたどの呼び出しにもよらないチャンネルの会話", // lane touch-chip-cause: the note row's box
   "Open this conversation": "この会話を開く",
   "Not sent yet — open the Outbox": "まだ送信されていません — 送信箱を開く",
+  "Show this proposal in the Outbox": "この提案を送信箱で表示",
+  "This proposal is not in the Outbox list any more": "この提案は送信箱の一覧にもうありません",
   "Show less": "折りたたむ",
   "+{n} more": "ほか {n} 件",
   "Open that agent’s chat": "そのエージェントのチャットを開く",
@@ -10717,9 +10719,6 @@ export default {
   "Reply all to {who}": "{who} への全員返信",
   "Reply to {who}": "{who} への返信",
   "Reply in {conv}": "「{conv}」での返信",
-  "awaiting approval": "承認待ち",
-  "sent · {time}": "送信済み · {time}",
-  "you rejected it": "あなたが却下",
   "Proposals this call filed": "このステップが出した提案",
   "1 proposal awaiting approval": "承認待ちの提案 1 件",
   "{n} proposals awaiting approval": "承認待ちの提案 {n} 件",

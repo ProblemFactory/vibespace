@@ -494,11 +494,12 @@ function foldTouches(touches) {
     const key = touchKey(t);
     let r = rows.get(key);
     if (!r) {
-      r = { key, adapterId: t.adapterId, convId: t.convId || null, proposalId: t.proposalId || null, title: '', account: '', kind: t.kind || null, icon: t.icon || null, ops: Object.fromEntries(OPS.map((o) => [o, 0])), readCalls: 0, calls: 0, first: num(t.at), last: 0, lastAt: {} };
+      r = { key, adapterId: t.adapterId, convId: t.convId || null, proposalId: t.proposalId || null, proposalIds: [], title: '', account: '', kind: t.kind || null, icon: t.icon || null, ops: Object.fromEntries(OPS.map((o) => [o, 0])), readCalls: 0, calls: 0, first: num(t.at), last: 0, lastAt: {} };
       rows.set(key, r);
     }
     const at = num(t.at);
     r.calls += 1;
+    if (t.proposalId && !r.proposalIds.includes(t.proposalId)) r.proposalIds.push(t.proposalId);   // lane outbox-chip-door: «drafted 2 replies» = two proposals, each with its own state
     r.ops[t.op] += t.op === 'read' || t.op === 'search' ? Math.max(t.op === 'search' ? 1 : 0, num(t.count)) : 1;
     if (t.op === 'read') r.readCalls += 1;
     if (at >= r.last) {
@@ -544,14 +545,34 @@ function foldView(rows, { max = FOLD_SHOWN, expanded = false } = {}) {
   return { shown: list.slice(0, max), hidden: list.length - max };
 }
 
-/** WHAT A ROW'S CLICK OPENS: a composed message not yet sent ⇒ the Outbox; a row whose NEWEST op is a search that
- *  carries its query ⇒ the search results scoped to that conversation (the agent's query, its hit refs); anything
- *  else (a read, a reply, a search recorded before the query was kept) ⇒ the conversation, as before. */
-function openVerdict(row) {
+/** lane outbox-chip-door: THE PROPOSAL A ROW NAMES — the one its press shows. `recordOf(id)` = the client's list. Of those the
+ *  list still holds: the newest that WAITS (the row says it waits — a press lands on it), else the newest; none held ⇒ null.
+ *  NO LIST HELD (`recordOf` null — the feed's first read has not landed, or failed; r2, acceptance H4): nothing is guessed — a
+ *  reply names nothing, it has its conversation to open; a composed message still names its proposal, it has nowhere else, and
+ *  the window says what it knows (the card, «not in the list any more», or «The outbox is not available.»). Once the list lands
+ *  the row's door is the normal one. A raw API row is never one (its door is its credential's API access — B-2198). */
+function rowProposalOf(row, recordOf = null) {
+  if (!row || (row.ops && row.ops.api) || !row.proposalId) return null;
+  if (typeof recordOf !== 'function') return row.convId ? null : String(row.proposalId);
+  const newest = (a, b) => (Number(b.at) || 0) - (Number(a.at) || 0);
+  const ids = Array.isArray(row.proposalIds) && row.proposalIds.length ? row.proposalIds : [row.proposalId];
+  const held = ids.map((id) => recordOf(String(id))).filter(Boolean).sort(newest);
+  const pick = held.find((p) => p.state === 'awaiting-approval') || held[0];
+  return pick ? String(pick.id) : null;
+}
+/** WHAT A ROW'S CLICK OPENS: a row that NAMES a proposal ⇒ the Outbox, `show` = that proposal, with the conversation's `filter`
+ *  (lane outbox-chip-door, inc-mw5r944f-60vt: the name the person reads is the door they press — a drafted reply opens its DRAFT,
+ *  where it can be approved; the thread is one tap further, on the card); a composed message whose proposal the row does not
+ *  name ⇒ the Outbox with the filter; a row whose NEWEST op is a search that carries its query ⇒ the search results scoped to
+ *  that conversation (the agent's query, its hit refs); anything else (a read, a search recorded before the query was kept, a
+ *  reply whose proposal the list no longer holds) ⇒ the conversation, as before. PURE: `filter` and `recordOf` are handed in. */
+function openVerdict(row, { filter = null, recordOf = null } = {}) {
   if (!row) return null;
   // lane pod-oauth-callback: the agent asked the person to connect an account type ⇒ the Connect dialog on that type
   if (!row.convId && row.ops && row.ops.connect && String(row.key || '').endsWith('/~connect')) return { open: 'connect', kind: row.kind || row.adapterId };
-  if (!row.convId) return { open: 'outbox' };
+  const named = rowProposalOf(row, recordOf);
+  if (named) return { open: 'outbox', show: named, filter };
+  if (!row.convId) return { open: 'outbox', ...(row.proposalId && !(row.ops && row.ops.api) ? { show: String(row.proposalId) } : {}), filter };   // gone from the list: the window says so — a composed message has nowhere else to open
   const la = row.lastAt || {};
   const newest = Math.max(0, ...Object.values(la).map(num));
   if (row.query && num(la.search) >= newest) return { open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId, query: row.query, hits: Array.isArray(row.hits) ? row.hits : [], memo: memoOk(row.memo) ? row.memo : null, searchedAt: num(la.search) };
@@ -561,10 +582,10 @@ function openVerdict(row) {
  *  conversation, grouped by conversation) over the accounts its rows name; anything else ⇒ the fold expands. */
 function tailVerdict(rows, { max = FOLD_SHOWN } = {}) {
   const list = Array.isArray(rows) ? rows : [];
-  const hidden = list.slice(max).map(openVerdict);
+  const hidden = list.slice(max).map((r) => openVerdict(r));
   if (!hidden.length || hidden.some((v) => !v || v.open !== 'search' || v.query !== hidden[0].query)) return { open: 'expand' };
   const q = hidden[0].query;
-  const same = list.map(openVerdict).filter((v) => v && v.open === 'search' && v.query === q);
+  const same = list.map((r) => openVerdict(r)).filter((v) => v && v.open === 'search' && v.query === q);
   const adapterIds = [...new Set(same.map((v) => v.adapterId))];
   // lane search-card-open: ONE vendor search's rows name one memo scope — the unscoped dialog reads it first
   const memos = [...new Set(same.map((v) => v.memo).filter(Boolean))];
@@ -704,5 +725,5 @@ module.exports = {
   HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, channelsMayRun, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
   RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun, RUNS_A_COMMAND, REAPERS, producerOf,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, namesExactly, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
-  GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
+  GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, rowProposalOf, tailVerdict,
 };

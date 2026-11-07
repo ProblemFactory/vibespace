@@ -5509,6 +5509,8 @@ export default {
   "Channel conversations of this turn that no call shown here ran": "本轮触达、但不是这里任何一次调用产生的频道会话", // lane touch-chip-cause: the note row's box
   "Open this conversation": "打开这个会话",
   "Not sent yet — open the Outbox": "还没发出 —— 打开发件箱",
+  "Show this proposal in the Outbox": "在发件箱里看这条提案",
+  "This proposal is not in the Outbox list any more": "这条提案已不在发件箱的列表里",
   "Show less": "收起",
   "+{n} more": "另有 {n} 个",
   "Open that agent’s chat": "打开这个 agent 的对话",
@@ -10718,9 +10720,6 @@ export default {
   "Reply all to {who}": "回复全部 {who}",
   "Reply to {who}": "回复 {who}",
   "Reply in {conv}": "在「{conv}」里回复",
-  "awaiting approval": "待批准",
-  "sent · {time}": "已发送 · {time}",
-  "you rejected it": "你拒绝了",
   "Proposals this call filed": "这一步提交的提案",
   "1 proposal awaiting approval": "1 条提案待批准",
   "{n} proposals awaiting approval": "{n} 条提案待批准",

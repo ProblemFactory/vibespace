@@ -40,7 +40,8 @@
 //   ⑪ a finger's target (acceptance r1 N3): the filter's × and «已被替换» measured ≥ 36 px in a 480-px render of the real CSS over
 //      the window's own DOM and on the page under a coarse pointer (a 481-px render without one: the desktop sizes)
 // PNGs (for the owner): $OUTBOX_WINDOW_SHOTS (default: <scratch>/shots, removed with it) outbox-awaiting-zh.png, outbox-all-zh.png,
-// outbox-fold-zh.png, outbox-base-zh.png, chat-chip-zh.png, outbox-filtered-zh.png, chat-chip-live-zh.png, outbox-touch-480-zh.png.
+// outbox-fold-zh.png, outbox-base-zh.png, chat-chip-zh.png, outbox-filtered-zh.png, chat-chip-live-zh.png, outbox-touch-480-zh.png,
+// after-chip-rows-*, after-from-chip-row-*, after-from-tool-card-row-*, after-rejected-row-* (zh, en), after-see-them-in-all-en.png.
 // Run: node scripts/test-channel-outbox-window.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -74,7 +75,7 @@ const build = (out) => execSync(`npx esbuild src/client.js --bundle --outfile=${
 // THE CONTROL BUNDLE + STYLE first — the base's shape: the API section BESIDE the list, drawing itself outside the census
 const OBX = path.join(wt, 'src/lib/channel-outbox.js'), obxSrc = fs.readFileSync(OBX, 'utf-8');
 const MOUNT = "  const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });\n";
-const PASS = "    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });\n";
+const PASS = "    const r = outboxNodes(app, list, ob, { view: pressAll ? 'all' : view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });\n";
 const CSS = path.join(wt, 'public/style.css'), cssSrc = fs.readFileSync(CSS, 'utf-8');
 const NOSHRINK = ['\n.chan-outbox > .jobs-toolbar { flex-shrink: 0; }', '\n.chan-outbox-list > * { flex-shrink: 0; }'];
 ok(obxSrc.split(MOUNT).length === 2 && obxSrc.split(PASS).length === 2 && NOSHRINK.every((r) => cssSrc.split(r).length === 2), 'the control has its lines to cut: the API section mounted once and handed to the census once; the two no-shrink rules');
@@ -106,6 +107,7 @@ const OUTBOX = { proposals: MSGS, accounts: [{ id: 'lark', kind: 'lark', label: 
 const SID_A = 'c0ffee00-0000-4000-8000-0000000051a1', SID_B = 'c0ffee00-0000-4000-8000-0000000051b2', SID_C = 'c0ffee00-0000-4000-8000-0000000051c3';
 // the transcripts are filed under an /opt/… folder name, never the scratch cwd: src/fixture-guard.js keeps discovery off /tmp/vs-* dirs
 const CWD = `/opt/outbox-window-conv-${process.pid}/work`;
+const SID_D = 'c0ffee00-0000-4000-8000-0000000051d4', OCD_T0 = NOW - 600e3;
 {
   const proj = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'));
   fs.mkdirSync(proj, { recursive: true });
@@ -118,6 +120,18 @@ const CWD = `/opt/outbox-window-conv-${process.pid}/work`;
     ];
     fs.writeFileSync(path.join(proj, `${sid}.jsonl`), lines.map((o) => JSON.stringify(o)).join('\n') + '\n');
   }
+  // lane outbox-chip-door: the chat of the incident's shape — two channel calls (their tool cards carry the rows), every thread name invented
+  const iso = (ms) => new Date(ms).toISOString();
+  const call = (id, command, at) => [
+    { type: 'assistant', message: { id: `msg_${id}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `a-${id}`, timestamp: iso(at), cwd: CWD, sessionId: SID_D },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'filed' }] }, uuid: `r-${id}`, timestamp: iso(at + 4e3), cwd: CWD, sessionId: SID_D },
+  ];
+  fs.writeFileSync(path.join(proj, `${SID_D}.jsonl`), [
+    { type: 'user', message: { role: 'user', content: 'plan the club season' }, uuid: 'u-ocd', timestamp: iso(OCD_T0), cwd: CWD, sessionId: SID_D },
+    ...call('toolu_ocd1', 'vibespace-channels send mail "Overcharge on order 42"', OCD_T0 + 5e3),
+    ...call('toolu_ocd2', 'vibespace-channels reply mail/thread-4 "Kite festival permit"', OCD_T0 + 20e3),
+    { type: 'assistant', message: { id: 'msg_ocd', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Drafted them all — they wait in your Outbox.' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: 'a-ocd', timestamp: iso(OCD_T0 + 40e3), cwd: CWD, sessionId: SID_D },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
 }
 const DRAFT_A = { kind: 'agent', id: SID_A, name: 'draft the release notes' };
 const CHIP_MSGS = [
@@ -163,7 +177,7 @@ ok(await until(async () => (await fetch(`${BASE}/api/home`)).ok, 40000), 'the sc
 // ── CHROME ──
 const WebSocket = require('ws');
 await until(async () => (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).ok, 20000);
-async function newPage({ control = false, outbox = OUTBOX, api = APIS } = {}) {
+async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'zh' } = {}) {
   const tgt = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tgt.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((res) => ws.on('open', res));
@@ -191,7 +205,7 @@ async function newPage({ control = false, outbox = OUTBOX, api = APIS } = {}) {
     return r.result && r.result.result ? r.result.result.value : undefined;
   };
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try{localStorage.setItem('vibespace.lang','zh')}catch{}" });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try{localStorage.setItem('vibespace.lang',${JSON.stringify(lang)})}catch{}` });
   await cdp('Page.navigate', { url: `${BASE}/` });
   const loaded = await until(() => evaljs("!!(window.app && window.app.wm && window.app.sidebar) && (() => { const l = document.getElementById('loading-screen'); return !l || !l.isConnected || getComputedStyle(l).display === 'none' || Number(getComputedStyle(l).opacity) === 0; })()"), 40000);
   const shot = async (file) => {
@@ -338,10 +352,18 @@ const f8 = await p3.evaljs(FILTERED);
 // the chat's name as its window says it now (discovery may have retitled the view-only chat by the time of the press)
 const nameA = await p3.evaljs(NAME_A);
 ok(pr && pr.lands, '⑧ a press at the chip\'s centre lands on the chip', pr);
-ok(f8 && /chan-outbox-filter/.test(f8.first || '') && !!nameA && [nameA0, nameA].some((n) => f8.filter === `由 ${n} 起草`) && f8.x && J(f8.rows) === J(['p-osc-a1', 'p-osc-a2', 'p-osc-a0']) && J(f8.api) === J(['api-ow40', 'api-ow41']) && f8.summary === '2 条等你审批 · 共 5 条提案',
-  '⑧ …it opens the Outbox FILTERED: «由 <the chat\'s name> 起草» (a removable chip, ×) at the top of the list; only that chat\'s 3 cards, newest first — the replaced one too — and its 2 API calls; the head «2 条等你审批 · 共 5 条提案» = the chip\'s numbers', f8);
-ok(f8 && f8.marks && f8.marks['p-osc-a2'] === '已发送 | 你改过' && f8.marks['p-osc-a0'] === '已撤回 | 已被替换' && f8.marks['p-osc-a1'] === '等你审批',
-  '⑧ each card says it by name: «你改过» (the owner edited it), «已被替换» (the agent replaced it), beside its state', f8 && f8.marks);
+const seg8 = await p3.evaljs(SEG);
+ok(f8 && /chan-outbox-filter/.test(f8.first || '') && !!nameA && [nameA0, nameA].some((n) => f8.filter === `由 ${n} 起草`) && f8.x && seg8 === 'awaiting' && J(f8.rows) === J(['p-osc-a1']) && J(f8.api) === J(['api-ow40']) && f8.summary === '2 条等你审批 · 共 5 条提案',
+  '⑧ …it opens the Outbox FILTERED on what WAITS (lane outbox-chip-door): «由 <the chat\'s name> 起草» (a removable chip, ×) at the top of the list; 「待审批」: that chat\'s waiting card and its waiting API call; the head «2 条等你审批 · 共 5 条提案» = the chip\'s numbers', { seg8, f8 });
+await p3.evaljs(`(() => { const w = ${OBWIN}; const b = w && w.element.querySelector('.chan-seg [data-view="all"]'); if (b) b.click(); return 1; })()`);
+await sleep(300);
+const f8all = await p3.evaljs(FILTERED);
+ok(f8all && J(f8all.rows) === J(['p-osc-a1', 'p-osc-a2', 'p-osc-a0']) && J(f8all.api) === J(['api-ow40', 'api-ow41']),
+  '⑧ …「全部」: its 3 cards, newest first — the replaced one too — and its 2 API calls', f8all);
+ok(f8all && f8all.marks && f8all.marks['p-osc-a2'] === '已发送 | 你改过' && f8all.marks['p-osc-a0'] === '已撤回 | 已被替换' && f8all.marks['p-osc-a1'] === '等你审批',
+  '⑧ each card says it by name: «你改过» (the owner edited it), «已被替换» (the agent replaced it), beside its state', f8all && f8all.marks);
+await p3.evaljs(`(() => { const w = ${OBWIN}; const b = w && w.element.querySelector('.chan-seg [data-view="awaiting"]'); if (b) b.click(); return 1; })()`);
+await sleep(200);
 if (!f8) await p3.evaljs('app.openChannelOutbox(); true');   // the base: no chip, no filter — the plain window for the «before» picture
 await sleep(300);
 await p3.evaljs(`(() => { const w = ${OBWIN}; if (w) { w.element.style.left = '680px'; w.element.style.top = '20px'; } return 1; })()`);
@@ -385,8 +407,8 @@ await sleep(500);
 const f9c = await p3.evaljs(FILTERED);
 const mB = await menuOf(SID_B);
 await p3.evaljs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
-ok(cardSeen && doorA && f9 && /^由 .+ 起草$/.test(f9.filter || '') && J(f9.rows) === J(['p-osc-a1', 'p-osc-a2', 'p-osc-a0']),
-  '⑨ the sidebar session\'s right-click menu offers «这个会话的发件箱» on the chat that drafted — it opens the SAME filter (its 3 cards)', { cardSeen, items: mA.items, f9, side: cardSeen ? null : await sideDiag() });
+ok(cardSeen && doorA && f9 && /^由 .+ 起草$/.test(f9.filter || '') && J(f9.rows) === J(['p-osc-a1']) && f9.summary === '2 条等你审批 · 共 5 条提案',
+  '⑨ the sidebar session\'s right-click menu offers «这个会话的发件箱» on the chat that drafted — it opens the SAME filter (what waits first; the head its 5)', { cardSeen, items: mA.items, f9, side: cardSeen ? null : await sideDiag() });
 ok(doorC && f9c && /^由 .+ 起草$/.test(f9c.filter || '') && f9c.rows.length === 0 && J(f9c.api) === J(['api-ow42']) && f9c.summary === '1 条等你审批 · 共 1 条提案',
   '⑨ N1 …and on the chat whose ONLY Outbox row is a waiting API call: «这个会话的发件箱» opens its filter — its one call, the head «1 条等你审批 · 共 1 条提案»', { items: mC.items, f9c });
 ok(cardSeen && mB.items && mB.items.length > 0 && !mB.items.includes('这个会话的发件箱'), '⑨ …and not on the chat that drafted nothing', mB.items);
@@ -404,7 +426,7 @@ await sleep(300);
 const fl = await chipFace(SID_A), f10 = await p3.evaljs(FILTERED), still = await p3.evaljs('window.__oscNoReload === 1');
 ok(fl && fl.text === '发件箱 · 6' && fl.wait === '3 条在等' && fl.waiting && still && p3.served.outbox === readsBefore,
   `⑩ a live channel-outbox-updated changes the chip to «发件箱 · 6» + «3 条在等» — no reload, no extra read (${p3.served.outbox - readsBefore} reads)`, { fl, still, reads: p3.served.outbox - readsBefore });
-ok(f10 && f10.rows[0] === 'p-osc-a3' && f10.rows.length === 4 && f10.summary === '3 条等你审批 · 共 6 条提案', '⑩ …and the open filtered Outbox lists the 4th card first (the same push)', f10);
+ok(f10 && J(f10.rows) === J(['p-osc-a3', 'p-osc-a1']) && f10.summary === '3 条等你审批 · 共 6 条提案', '⑩ …and the open filtered Outbox lists the new waiting card first (the same push)', f10);
 // …then the owner approved the chat's API call elsewhere: `channel-api-updated` (the existing push) ⇒ the existing re-read
 const apiBefore = p3.served.api;
 CHIP_API[0] = { ...CHIP_API[0], status: 'ran', decidedBy: 'user', decidedAt: NOW, result: { status: 200, bytes: 64 } };
@@ -434,7 +456,9 @@ ok(await shotOf('chat-chip-live-zh.png', CHATWIN(SID_A)), 'chat-chip-live-zh.png
 // the rule, not the layout, makes the 36 px); (b) on the page itself under an emulated coarse pointer.
 const fo = await tryEval(`app.openChannelOutbox({ filter: { keys: [${J(SID_A)}], name: 'Writer' } }); true`);
 if (fo.err) console.log('  (⑪ the filtered open threw in the page:', fo.err.slice(0, 160) + ')');
-await sleep(400);
+await sleep(300);
+await p3.evaljs(`(() => { const w = ${OBWIN}; const b = w && w.element.querySelector('.chan-seg [data-view="all"]'); if (b) b.click(); return 1; })()`);   // «已被替换» sits under 「全部」
+await sleep(200);
 const TOUCH = (w) => `(async () => {
   const win = ${OBWIN}; if (!win) return null;
   const f = document.createElement('iframe');
@@ -465,6 +489,195 @@ const tc = await p3.evaljs(`(() => { const w = ${OBWIN}; if (!w) return null; co
 await p3.cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
 ok(tc && tc.coarse && big(tc.x) && big(tc.replaced), `⑪ N3 on the page under a coarse pointer (a touch screen at desktop width): × ${tc && tc.x && `${tc.x.w}×${tc.x.h}`}, «已被替换» ${tc && tc.replaced && `${tc.replaced.w}×${tc.replaced.h}`} — both ≥ 36 px`, tc);
 p3.close();
+
+// ══ lane outbox-chip-door (userW inc-mw5r944f-60vt, 2026-11-07 — 8 minutes after «A conversation wears its Outbox» shipped: «新加的 channel
+// chips 只能展示有哪些信息, 想要查看细节或发送需要点进去, 然后会跳转到常规 outbox 页面, 我还是无法分辨当前 session 相关的待发送 message 是哪些»): page 4 (zh) +
+// page 5 (en, the incident's language) — A FIXTURE OF THE REAL NUMBERS, every name invented: 23 drafted by this conversation (10
+// awaiting, 9 rejected, 4 sent), 23 awaiting across 11 conversations, the other ten conversations' cards NEWEST (on top of the plain
+// Outbox, as they were). The person presses the row that NAMES the message:
+//   ㉑ the Channels chip's seven rows each say their proposal's state in the card's own words
+//   ㉒ a chip row ⇒ «drafted by <this conversation>», 「Awaiting」, the head = the chip's numbers, only this conversation's ten cards,
+//     the pressed card marked, open under its row, Approve on screen where a press lands
+//   ㉓ a tool-card row of a drafted reply ⇒ the same door (never the thread; the card's «Open the conversation» is the next tap)
+//   ㉔ a row whose proposal no longer waits ⇒ 「All」, marked, in view, the filter kept; another press never clears the filter; a door
+//     from outside still does; ㉔b the five steps of a press's All (r2)
+//   ㉕ (below) what the window scrolls to is never under the sticky bar (r2) ══
+const OCD_WORDS = {
+  zh: { waiting: '等你审批', rejected: '已拒绝', sent: '已发送', edited: '你改过', chip: '发件箱 · 23', wait: '10 条在等', head: '10 条等你审批 · 共 23 条提案', filter: (n) => `由 ${n} 起草`, plain: '23 条等你审批 · 共 36 条提案', gone: '这条提案已不在发件箱的列表里' },
+  en: { waiting: 'awaiting your approval', rejected: 'rejected', sent: 'sent', edited: 'edited by you', chip: 'Outbox · 23', wait: '10 waiting', head: '10 awaiting your approval · 23 proposals', filter: (n) => `drafted by ${n}`, plain: '23 awaiting your approval · 36 proposals', gone: 'This proposal is not in the Outbox list any more' },
+};
+const DRAFT_D = { kind: 'agent', id: SID_D, name: 'plan the club season' };
+const MAIL = { ...LARK, identity: { sentAs: 'user', marking: 'none' } };
+const ocdProp = (id, state, k, extra = {}) => ({ ...MAIL, id, convId: `oc_d_${id}`, title: `Club thread ${id.slice(-2)}`, state, text: `Hello, about the club season (${id}).`, draftedBy: DRAFT_D, at: OCD_T0 + 5e3 + k * 1e3, updatedAt: OCD_T0 + 5e3 + k * 1e3, ...(state === 'awaiting-approval' ? { ttlAt: NOW + 86400e3 } : {}), ...(state === 'sent' ? { result: { vendorMessageId: `om_${id}`, parts: [{ part: 'text', ok: true }] } } : {}), ...extra });
+const OCD_MINE = [
+  ...Array.from({ length: 10 }, (_, i) => ocdProp(`p-ocd-a${i}`, 'awaiting-approval', i)),
+  ...Array.from({ length: 9 }, (_, i) => ocdProp(`p-ocd-r${i}`, 'rejected', 10 + i)),
+  ...Array.from({ length: 4 }, (_, i) => ocdProp(`p-ocd-s${i}`, 'sent', 19 + i, i === 1 ? { edited: true, originalText: 'x' } : {})),
+];
+// 13 more awaiting, across ten other conversations, all NEWER than this conversation's: the top of the plain Outbox
+const OCD_OTHERS = Array.from({ length: 13 }, (_, i) => ({ ...MAIL, id: `p-ocd-o${i}`, convId: `oc_o_${i}`, title: `Another thread ${i}`, state: 'awaiting-approval', text: `Somebody else's draft ${i}`, draftedBy: { kind: 'agent', id: `c0ffee00-0000-4000-8000-00000000f${String(i % 10).padStart(3, '0')}`, name: `Other conversation ${i % 10}` }, at: NOW - 30e3 - i * 1e3, updatedAt: NOW - 30e3 - i * 1e3, ttlAt: NOW + 86400e3 }));
+const OCD_OB = { proposals: [...OCD_OTHERS, ...OCD_MINE].sort((a, b) => b.at - a.at), accounts: OUTBOX.accounts };
+const touchOf = (i, op, proposalId, title, extra = {}) => ({ id: `t-ocd-${i}`, op, adapterId: 'lark', proposalId, title, account: 'ops@example.test', kind: 'lark', at: OCD_T0 + 6e3 + i * 50, ...extra });
+const OCD_TOUCHES = [
+  touchOf(1, 'compose', 'p-ocd-a0', 'Overcharge on order 42'),
+  touchOf(2, 'reply', 'p-ocd-a2', 'Bicycle rack quote', { convId: 'thread-1', placement: 'chat' }),
+  touchOf(3, 'reply', 'p-ocd-r0', 'Garden shed delivery', { convId: 'thread-2', placement: 'chat' }),
+  touchOf(4, 'compose', 'p-ocd-a1', 'Picnic rota for March'),
+  touchOf(5, 'compose', 'p-ocd-s0', 'Library card renewal'),
+  touchOf(6, 'reply', 'p-ocd-s1', 'Choir hall booking', { convId: 'thread-3', placement: 'chat' }),
+  touchOf(7, 'reply', 'p-ocd-a3', 'Kite festival permit', { convId: 'thread-4', placement: 'chat' }),
+  touchOf(8, 'reply', 'p-ocd-a3', 'Kite festival permit', { convId: 'thread-4', placement: 'chat', at: OCD_T0 + 21e3 }),
+];
+// the layout is the hub's: a later page restores the earlier pages' chats and offers to resume them — answered, those windows closed
+const cleanDesk = async (p) => {
+  const OFFER = `[...document.querySelectorAll('.dialog')].find((x) => /恢复被中断|Resume interrupted/.test(x.textContent))`;
+  await until(() => p.evaljs(`!!(${OFFER})`), 3500);
+  await p.evaljs(`(() => { const d = ${OFFER}; const b = d && [...d.querySelectorAll('button')].find((x) => !/全部恢复|Resume all/.test(x.textContent) && x.textContent.trim().length > 1); if (b) b.click(); for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return 1; })()`);
+  await sleep(400);
+};
+const ocdPage = async (lang) => {
+  const W = OCD_WORDS[lang];
+  const tag = (s) => `${lang} ${s}`;
+  const p = await newPage({ outbox: OCD_OB, api: [], lang });
+  ok(p.loaded, tag('㉑ the page of the incident\'s numbers loaded the app'));
+  await cleanDesk(p);
+  await p.evaljs(`app.viewSession(${J(SID_D)}, ${J(CWD)}, ${J(DRAFT_D.name)}); true`);
+  await until(() => p.evaljs(`(() => { const c = ${CHIP(SID_D)}; return !!c && /23/.test(c.textContent) && document.querySelectorAll('.chat-msg[data-tool-id]').length >= 2; })()`), 30000);
+  const VIEW = CHATV(SID_D);
+  const chatWin = `(${VIEW})._statusBar._element.closest('.window')`;
+  await p.evaljs(`(() => { const v = ${VIEW}; v._channelTouches.onTouch({ sessionId: v.sessionId, turnAt: ${OCD_T0 - 1000}, touches: ${J(OCD_TOUCHES)} }); const w = ${chatWin}; w.style.left = '20px'; w.style.top = '20px'; w.style.width = '640px'; w.style.height = '700px'; return 1; })()`);
+  await until(() => p.evaljs(`(() => { const v = ${VIEW}; const c = v._statusBar._element.querySelector('.chat-status-channels'); return !!c && document.querySelectorAll('.chat-msg[data-tool-id="toolu_ocd2"] .chat-channel-touch').length === 1; })()`), 15000);
+  await sleep(300);
+  const shotP = async (file, expr) => {
+    const box = await p.evaljs(`(() => { const e = ${expr}; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.max(0, r.x), y: Math.max(0, r.y), width: Math.min(r.width, innerWidth), height: Math.min(r.height, innerHeight) }; })()`);
+    const r = await p.cdp('Page.captureScreenshot', { format: 'png', ...(box && box.width > 0 ? { clip: { ...box, scale: 1 } } : {}) });
+    if (r.result && r.result.data) fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64'));
+    return !!(r.result && r.result.data);
+  };
+  const face = await p.evaljs(`(() => { const v = ${VIEW}; const c = v._statusBar._element.querySelector('.chat-status-outbox'); const w = c && c.querySelector('.chat-status-outbox-wait'); const t = c && c.cloneNode(true); if (t) { const x = t.querySelector('.chat-status-outbox-wait'); if (x) x.remove(); } return c ? { text: t.textContent.trim(), wait: w ? w.textContent : null } : null; })()`);
+  ok(face && face.text === W.chip && face.wait === W.wait, tag(`㉑ the conversation wears the incident's numbers: «${W.chip}» + «${W.wait}»`), face);
+  const openChip = async () => {
+    const b = await press(p, `(${VIEW})._statusBar._element.querySelector('.chat-status-channels')`);
+    await until(() => p.evaljs(`document.querySelectorAll('.chat-status-channel-row').length > 0`), 5000);
+    return b;
+  };
+  await openChip();
+  const rowsOf = await p.evaljs(`[...document.querySelectorAll('.chat-status-channel-row')].map((r) => ({ key: r.dataset.key, words: (r.querySelector('.chat-status-channel-words') || {}).textContent, state: [...r.querySelectorAll('.chat-status-channel-states > *')].map((x) => x.textContent).join(' | ') }))`);
+  const stateOf = (frag) => { const r = (rowsOf || []).find((x) => x.key.includes(frag)); return r ? r.state : null; };
+  ok(rowsOf && rowsOf.length === 7, tag('㉑ the Channels chip lists the turn\'s seven rows'), rowsOf);
+  ok(stateOf('p-ocd-a0') === W.waiting && stateOf('p-ocd-a1') === W.waiting && stateOf('thread-1') === W.waiting && stateOf('thread-4') === W.waiting, tag(`㉑ the rows still waiting say «${W.waiting}» — the card's own words`), rowsOf);
+  ok(stateOf('thread-2') === W.rejected && stateOf('p-ocd-s0') === W.sent && stateOf('thread-3') === `${W.sent} | ${W.edited}`, tag(`㉑ …a rejected row «${W.rejected}», a sent one «${W.sent}», one the owner edited «${W.sent} | ${W.edited}» — which of them still wait is readable in the popover`), rowsOf);
+  await shotP(`after-chip-rows-${lang}.png`, `document.querySelector('.chat-status-dropdown')`);
+  const OPENED = `(() => { const w = ${OBWIN}; if (!w) return null; const l = w.element.querySelector('.chan-outbox-list'); const lb = l.getBoundingClientRect(); const rows = [...l.querySelectorAll('.chan-orow[data-orow]')]; const pr = rows.filter((r) => r.classList.contains('chan-orow-pressed')); const f = l.querySelector('.chan-outbox-filter-text'); const seg = w.element.querySelector('.chan-seg .chan-seg-on'); const one = pr[0]; const card = one && l.querySelector('.chan-prop[data-proposal="' + one.dataset.orow + '"]'); const appr = card && card.querySelector('button[data-approve]'); const inView = (e) => { if (!e) return null; const b = e.getBoundingClientRect(); const cx = b.left + b.width / 2, cy = b.top + b.height / 2; const h = document.elementFromPoint(cx, cy); return b.top >= lb.top - 1 && b.bottom <= lb.bottom + 1 && !!h && (h === e || e.contains(h) || h.contains(e)); }; return { filter: f ? f.textContent : null, x: !!l.querySelector('.chan-outbox-filter-x'), seg: seg ? seg.dataset.view : null, head: w.element.querySelector('.jobs-summary').textContent, n: rows.length, foreign: rows.filter((r) => /p-ocd-o/.test(r.dataset.orow)).length, pressed: pr.map((r) => r.dataset.orow), rowInView: inView(one), card: !!card, approveInView: inView(appr), filterInView: inView(l.querySelector('.chan-outbox-filter-chip')), barGap: (() => { const x = l.querySelector('.chan-outbox-filter'); return x ? Math.round(x.getBoundingClientRect().top - lb.top) : null; })(), segInView: !!seg && seg.getBoundingClientRect().right <= innerWidth, link: !!(card && [...card.querySelectorAll('.chan-prop-link')].length) }; })()`;
+  const closeOB = () => p.evaljs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'channel-outbox') app.wm.closeWindow(w.id); return 1; })()`);
+  const waitOB = () => until(() => p.evaljs(`(() => { const w = ${OBWIN}; return !!w && !!w.element.querySelector('.chan-orow[data-orow]'); })()`), 15000);
+  // beside the chat, wholly on the page (a window's left is its desk's; the sidebar takes the page's first 260 px)
+  const placeOB = async () => { await p.evaljs(`(() => { const w = ${OBWIN}; if (w) { const e = w.element; e.style.top = '20px'; const over = e.getBoundingClientRect().right - innerWidth + 12; if (over > 0) e.style.left = (parseFloat(getComputedStyle(e).left) - over) + 'px'; } return 1; })()`); await sleep(200); };
+  // ㉒ the row the person pressed in the incident: a composed message (its card FIFTH and unmarked in the plain window)
+  const namedName = await p.evaljs(`String((${VIEW}).winInfo.name || (${VIEW}).winInfo.title || '').split(' — ')[0]`);
+  const prA = await press(p, `document.querySelector('.chat-status-channel-row[data-key*="p-ocd-a1"]')`);
+  await waitOB(); await sleep(400); await placeOB();
+  const a = await p.evaljs(OPENED);
+  const nameNow = await p.evaljs(`String((${VIEW}).winInfo.name || (${VIEW}).winInfo.title || '').split(' — ')[0]`);
+  ok(prA && prA.lands && a && [namedName, nameNow].some((n) => a.filter === W.filter(n)) && a.x, tag(`㉒ a chip row opens THIS conversation's Outbox: «${W.filter(nameNow)}» with its ×`), a);
+  ok(a && a.seg === 'awaiting' && a.head === W.head && a.n === 10 && a.foreign === 0, tag(`㉒ …on 「Awaiting」: the head «${W.head}» = the chip's numbers, its ten cards, no other conversation's`), a);
+  ok(a && J(a.pressed) === J(['p-ocd-a1']) && a.rowInView && a.card && a.approveInView, tag('㉒ …the pressed proposal marked, its row in view, its card open under it with Approve on screen where a press lands'), a);
+  ok(a && a.filterInView && a.segInView && a.barGap === 0, tag('㉒ …and «drafted by …» stays on screen above it, flush with the list\'s top (no row showing over it), 「Awaiting」 selected beside the head: the row scrolled under the bar, never the bar away'), a);
+  await shotP(`after-from-chip-row-${lang}.png`, `(${OBWIN} || {}).element`);
+  // ㉓ a tool-card row: a drafted reply opens its DRAFT
+  await closeOB(); await sleep(200);
+  const TOOLROW = `document.querySelector('.chat-msg[data-tool-id="toolu_ocd2"] .chat-channel-touch')`;
+  await p.evaljs(`(() => { const r = ${TOOLROW}; if (r) r.scrollIntoView({ block: 'center' }); return 1; })()`);
+  await sleep(200);
+  const tip = await p.evaljs(`(() => { const r = ${TOOLROW}; return r ? r.title : null; })()`);
+  const prB = await press(p, TOOLROW);
+  await waitOB(); await sleep(400); await placeOB();
+  const b = await p.evaljs(OPENED);
+  const threadOpened = await p.evaljs(`[...app.wm.windows.values()].some((w) => w && w._openSpec && w._openSpec.action === 'openChannel')`);
+  ok(prB && prB.lands && b && !!b.filter && b.seg === 'awaiting' && b.head === W.head && b.foreign === 0 && J(b.pressed) === J(['p-ocd-a3']) && b.approveInView && b.filterInView && !threadOpened, tag('㉓ a tool-card row of a drafted reply: the same door — the filter, 「Awaiting」, its draft marked with Approve in reach; the thread did not open'), { b, tip, threadOpened });
+  ok(b && b.link && !!tip && !/^(Not sent yet|还没发出)/.test(tip), tag('㉓ …the thread is one tap further: the card offers «Open the conversation»; the row\'s tooltip no longer says «not sent yet»'), { link: b && b.link, tip });
+  await shotP(`after-from-tool-card-row-${lang}.png`, `(${OBWIN} || {}).element`);
+  // ㉔ a row that no longer waits; a second press never clears the filter; a door from outside does
+  await openChip();
+  await press(p, `document.querySelector('.chat-status-channel-row[data-key*="thread-2"]')`);
+  await sleep(500);
+  const c = await p.evaljs(OPENED);
+  ok(c && !!c.filter && c.seg === 'all' && c.n === 23 && c.foreign === 0 && J(c.pressed) === J(['p-ocd-r0']) && c.rowInView && c.card && c.filterInView, tag('㉔ a row no longer waiting (rejected): 「All」, the filter kept, its 23 cards, the pressed one marked and in view'), c);
+  await shotP(`after-rejected-row-${lang}.png`, `(${OBWIN} || {}).element`);
+  await p.evaljs(`app.openChannelOutbox(); true`);
+  await sleep(300);
+  const d = await p.evaljs(OPENED);
+  ok(d && d.filter === null && d.head === W.plain && d.foreign > 0, tag(`㉔ a door from OUTSIDE (⚙ Outbox…) still shows the whole Outbox: «${W.plain}»`), d);
+  // a composed row whose proposal fell off the list: the conversation's Outbox, and the window says so in its own words
+  await p.evaljs(`(() => { const v = ${VIEW}; const b = document.getElementById('global-toasts'); if (b) b.replaceChildren(); app.openChannelOutbox({ inside: true, filter: v._outboxFilter(), show: 'p-ocd-gone' }); return 1; })()`);
+  await sleep(300);
+  const g = await p.evaljs(OPENED);
+  const said = await p.evaljs(`[...document.querySelectorAll('#global-toasts .global-toast-body')].map((n) => n.textContent)`);
+  ok(g && !!g.filter && g.seg === 'awaiting' && !g.pressed.length && (said || []).includes(W.gone), tag(`㉔ a proposal the list no longer holds: «${W.gone}», the conversation's filter on, nothing marked`), { g, said });
+  // ㉔b r2 (acceptance H3): the five steps by real presses — a press's All is the press's, never the owner's
+  await press(p, `(${OBWIN}).element.querySelector('.chan-seg [data-view="awaiting"]')`);
+  await sleep(200);
+  const h3a = await p.evaljs(OPENED);
+  await openChip();
+  await press(p, `document.querySelector('.chat-status-channel-row[data-key*="thread-2"]')`);
+  await sleep(400);
+  const h3b = await p.evaljs(OPENED);
+  await openChip();
+  await press(p, `document.querySelector('.chat-status-channel-row[data-key*="thread-1"]')`);
+  await sleep(400);
+  const h3c = await p.evaljs(OPENED);
+  ok(h3a && h3a.seg === 'awaiting' && h3b && h3b.seg === 'all' && J(h3b.pressed) === J(['p-ocd-r0']) && h3c && h3c.seg === 'awaiting' && h3c.head === W.head && J(h3c.pressed) === J(['p-ocd-a2']) && !!h3c.filter, tag('㉔b THE FIVE STEPS: 「Awaiting」 picked, a rejected row (「All」, marked), a waiting row of the same conversation ⇒ 「Awaiting」 again, marked, the filter kept'), { h3a, h3b, h3c });
+  await press(p, `(${OBWIN}).element.querySelector('.chan-outbox-filter-x')`);
+  await sleep(300);
+  const h3d = await p.evaljs(OPENED);
+  ok(h3d && h3d.filter === null && h3d.seg === 'awaiting' && h3d.head === W.plain, tag(`㉔b …× ⇒ what a plain open shows: 「Awaiting」, «${W.plain}»`), h3d);
+  p.close();
+};
+for (const lang of ['zh', 'en']) await ocdPage(lang);
+
+// ── ㉕ r2 (acceptance H2): WHAT THE WINDOW SCROLLS TO IS NEVER UNDER THE STICKY BAR. A conversation with twelve waiting messages and twenty
+// API calls all decided: its filtered window opens on 「Awaiting」, the API section one folded line; «See them in All» scrolls that
+// section's head to the top — below the bar, its first row whole. CONTROL r1's selector list (no margin on a head): the head sits under
+// the bar. A finger's bar (56 px) the same. No bar, no margin: a plain window's head lands at the list's top, as it did ──
+const SID_F = 'c0ffee00-0000-4000-8000-0000000051f6';
+const DRAFT_F = { kind: 'agent', id: SID_F, name: 'tidy the club list' };
+const FOLD_OB = { accounts: OUTBOX.accounts, proposals: Array.from({ length: 12 }, (_, i) => ({ ...MAIL, id: `p-fold-${i}`, convId: `oc_fold_${i}`, title: `Club list ${i}`, state: 'awaiting-approval', text: `Hello, about the club list (${i}).`, draftedBy: DRAFT_F, at: NOW - 60e3 - i * 1e3, updatedAt: NOW - 60e3 - i * 1e3, ttlAt: NOW + 86400e3 })) };
+// ran and refused in turn: twenty rows, no run folds them, or the head could not reach the list's top and the judge would say nothing
+const FOLD_API = Array.from({ length: 20 }, (_, i) => apiRec(60 + i, { ...byConv(SID_F, DRAFT_F.name), method: 'GET', path: `/open-apis/im/v1/chats/oc_fold_${i}`, ...(i % 2 ? { status: 'rejected', decidedBy: 'user', result: null } : { status: 'ran', result: { status: 200, bytes: 64 } }) }));
+const p5 = await newPage({ outbox: FOLD_OB, api: FOLD_API, lang: 'en' });
+ok(p5.loaded, '㉕ the page of the folded API section loaded the app');
+await cleanDesk(p5);
+await p5.evaljs(`app.openChannelOutbox({ inside: true, filter: { keys: [${J(SID_F)}], name: 'Club list' } }); true`);
+await until(() => p5.evaljs(`(() => { const w = ${OBWIN}; return !!w && !!w.element.querySelector('.chan-orow[data-orow]') && !!w.element.querySelector('.chan-api-outbox .chan-outbox-sec-all:not([hidden])'); })()`), 15000);
+await p5.evaljs(`(() => { const e = (${OBWIN}).element; e.style.top = '20px'; e.style.height = '460px'; const over = e.getBoundingClientRect().right - innerWidth + 12; if (over > 0) e.style.left = (parseFloat(getComputedStyle(e).left) - over) + 'px'; return 1; })()`);
+await sleep(300);
+const SEEALL = `(() => { const w = ${OBWIN}; const l = w.element.querySelector('.chan-outbox-list'); const bar = l.querySelector('.chan-outbox-filter'); const h = l.querySelector('.chan-api-outbox .chan-outbox-sec'); const row = l.querySelector('.chan-api-outbox .chan-api-orow'); const lb = l.getBoundingClientRect(), hb = h.getBoundingClientRect(), rb = row ? row.getBoundingClientRect() : null, bb = bar ? bar.getBoundingClientRect() : null; const hit = (e, b) => { const x = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!x && (x === e || e.contains(x)); }; const seg = w.element.querySelector('.chan-seg .chan-seg-on'); return { seg: seg && seg.dataset.view, scrollTop: l.scrollTop, barH: bb && Math.round(bb.height), barFits: bar ? bar.scrollHeight <= bar.clientHeight : null, barBottom: bb && Math.round(bb.bottom), listTop: Math.round(lb.top), headTop: Math.round(hb.top), headHit: hit(h, hb), rowTop: rb && Math.round(rb.top), rowBottom: rb && Math.round(rb.bottom), listBottom: Math.round(lb.bottom), rowHit: rb && hit(row, rb), margin: getComputedStyle(h).scrollMarginTop }; })()`;
+const seeAll = async () => {
+  await p5.evaljs(`(() => { (${OBWIN}).element.querySelector('.chan-seg [data-view="awaiting"]').click(); return 1; })()`);
+  await sleep(150);
+  await press(p5, `(${OBWIN}).element.querySelector('.chan-api-outbox .chan-outbox-sec-all')`);
+  await sleep(300);
+  return p5.evaljs(SEEALL);
+};
+const clear = (m) => !!m && m.seg === 'all' && m.scrollTop > 0 && m.headTop >= m.barBottom && m.headHit && m.rowTop >= m.barBottom && m.rowBottom <= m.listBottom && m.rowHit;
+const s25 = await seeAll();
+ok(clear(s25) && s25.headTop <= s25.barBottom + 12 && s25.barH === 44 && s25.barFits, `㉕ «See them in All» with a filter on: the API section's head (top ${s25 && s25.headTop}) lands below the ${s25 && s25.barH}-px bar (bottom ${s25 && s25.barBottom}), a press on it lands on it, its first row whole on screen`, s25);
+ok(await p5.shot('after-see-them-in-all-en.png'), 'after-see-them-in-all-en.png');
+await p5.evaljs(`(() => { const s = document.createElement('style'); s.id = 'r1-list'; s.textContent = '.chan-outbox-list .chan-outbox-sec { scroll-margin-top: 0 !important; }'; document.head.appendChild(s); return 1; })()`);
+const s25c = await seeAll();
+await p5.evaljs(`(() => { document.getElementById('r1-list').remove(); return 1; })()`);
+ok(s25c && s25c.headTop < s25c.barBottom && !s25c.headHit, `㉕ CONTROL r1's selector list (no margin on a section's head): the head sits at ${s25c && s25c.headTop}, under the bar (bottom ${s25c && s25c.barBottom}) — the judge above is red`, s25c);
+await p5.cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });   // a touch screen ⇒ (pointer: coarse): the × is 36 px, the bar 56
+await sleep(300);
+const s25t = await seeAll();
+await p5.cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+await sleep(200);
+ok(clear(s25t) && s25t.headTop <= s25t.barBottom + 12 && s25t.barH === 56 && s25t.barFits, `㉕ a finger's bar (${s25t && s25t.barH} px, its 36-px × inside): the head and the first row land below it all the same — one variable, the bar's height`, s25t);
+await press(p5, `(${OBWIN}).element.querySelector('.chan-outbox-filter-x')`);
+await sleep(300);
+const s25p = await seeAll();
+ok(s25p && s25p.barH === null && s25p.margin === '0px' && s25p.headTop >= s25p.listTop - 1 && s25p.headTop <= s25p.listTop + 12 && s25p.scrollTop > 0, `㉕ law 4 no bar, no margin: a plain window's head lands at the list's top (${s25p && s25p.headTop} over ${s25p && s25p.listTop}), as it did`, s25p);
+p5.close();
 
 console.log(`PNGs: ${SHOTS}`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

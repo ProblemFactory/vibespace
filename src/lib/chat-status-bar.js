@@ -77,7 +77,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, channelRowWords: rowStateWords = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null, onOpenOutbox = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -87,6 +87,8 @@ export class ChatStatusBar {
     this._app = app; this._onOpenArtifactsWindow = onOpenArtifactsWindow; // lane artifacts-list-scale: the list's ⋯ doors + the ⤢ window
     this._outbox = null; this._outboxKey = ''; this._onOpenOutbox = onOpenOutbox; // lane outbox-session-chip: the conversation's proposals (outboxChipFace) + the filtered Outbox door
     this._onChannelOpen = onChannelOpen;
+    this._channelRowStateWords = rowStateWords; // lane outbox-chip-door: a row's proposals' state (the Outbox card's words)
+    this._channelMenu = null;
     // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
@@ -246,7 +248,21 @@ export class ChatStatusBar {
   }
   /** lane outbox-session-chip: the conversation's Outbox — the PURE verdict `outboxChipOf` (src/outbox-chip.js) over the client's
    *  Outbox rows (outbox-feed `conversationOutbox`); no proposal drafted here ⇒ no chip. Repaints only when its words change. */
+  /** lane outbox-chip-door: a row's state words, patched in place — the feed's change reaches an open menu too. */
+  _paintChannelRowStates() {
+    const menu = this._channelMenu;
+    if (!menu || !menu.isConnected) { this._channelMenu = null; return; }
+    for (const it of menu.querySelectorAll('.chat-status-channel-row')) {
+      const box = it.querySelector('.chat-status-channel-states');
+      const words = (this._channelRowStateWords && this._channelRowStateWords(it._row)) || [];
+      const key = JSON.stringify(words);
+      if (box.dataset.said === key) continue;
+      box.dataset.said = key;
+      box.replaceChildren(...words.map((w) => { const s = document.createElement('span'); s.className = w.cls; s.textContent = w.text; return s; }));
+    }
+  }
   setOutbox(v) {
+    this._paintChannelRowStates();
     const face = outboxChipFace(v);
     const key = face ? JSON.stringify([face.text, face.waiting, face.cls, face.tip]) : '';
     if (key === this._outboxKey) return;
@@ -1598,10 +1614,18 @@ export class ChatStatusBar {
         const words = document.createElement('div');
         words.className = 'chat-status-dim chat-status-channel-words';
         words.textContent = channelRowWords(r, t);
-        it.append(name, words);
+        const states = document.createElement('div');
+        states.className = 'chat-status-channel-states';
+        const sub = document.createElement('div');
+        sub.className = 'chat-status-channel-sub';
+        sub.append(words, states);
+        it._row = r;
+        it.append(name, sub);
         it.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onChannelOpen?.(r); };
         dropdown.appendChild(it);
       }
+      this._channelMenu = dropdown;
+      this._paintChannelRowStates();
       return;
     }
     // Session-health chip -> the same rows the init card lists. Touch has no

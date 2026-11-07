@@ -310,7 +310,7 @@ await section('⑤', async () => {
     'chat-renderers draws the (hidden, empty) holder on all THREE card shapes of a vibespace-channels call, after the browser-actions row');
   const cv = read('src/lib/chat-view.js');
   const hook = cv.slice(cv.indexOf('  _applyElementMarks(el, msg) {'), cv.indexOf('\n  }\n', cv.indexOf('  _applyElementMarks(el, msg) {')));
-  ok(/this\._channelTouches\?\.observe\(el\);/.test(hook) && /msg\.type === 'channel-touch'\) \{\n[^\n]*\n\s*this\._channelTouches\?\.onTouch\(msg\);/.test(cv) && /this\._channelTouches\?\.noteTurn\(msg\.ts\)/.test(cv) && /this\._channelTouches\?\.dispose\(\)/.test(cv) && /this\._channelTouches\?\.onAttached\(\)/.test(cv) && /onChannelOpen: \(row\) => openTouchRow\(this\.app, row\)/.test(cv),
+  ok(/this\._channelTouches\?\.observe\(el\);/.test(hook) && /msg\.type === 'channel-touch'\) \{\n[^\n]*\n\s*this\._channelTouches\?\.onTouch\(msg\);/.test(cv) && /this\._channelTouches\?\.noteTurn\(msg\.ts\)/.test(cv) && /this\._channelTouches\?\.dispose\(\)/.test(cv) && /this\._channelTouches\?\.onAttached\(\)/.test(cv) && /onChannelOpen: \(row\) => openTouchRow\(this\.app, row, \{ filter: this\._outboxFilter\(\) \}\)/.test(cv),
     'ChatView: observe in the ONE element hook, the channel-touch broadcast, a live user message = a new turn, every attach re-reads, disposed; the chip opens through openTouchRow');
   const sb = read('src/lib/chat-status-bar.js');
   ok(/chip\('channels', 'chat-status-channels chat-status-clickable', tip, `\$\{glyph\} <span class="chat-status-channels-text">\$\{escHtml\(channelChipText\(v, t\)\)\}<\/span>`\)/.test(sb) && /setChannelTouches\(v\)/.test(sb) && /name\.textContent = channelRowName\(r\)/.test(sb),
@@ -362,6 +362,33 @@ await section('⑥', async () => {
   ok(T.openVerdict(T.foldTouches([sT({ at: 1000 }), touch({ op: 'read', adapterId: 'lark', convId: 'noc', at: 2000 })])[0]).open === 'conversation', 'VERDICT a search then a read of the same conversation ⇒ the conversation (the newest op is what the agent did)');
   ok(T.openVerdict(T.foldTouches([touch({ op: 'reply', at: 1000 })])[0]).open === 'conversation' && T.openVerdict(T.foldTouches([touch({ op: 'read', at: 1000 })])[0]).open === 'conversation', 'VERDICT a read / a reply ⇒ the conversation, as today');
   ok(T.openVerdict(T.foldTouches([touch({ op: 'compose', convId: null, proposalId: 'p1', at: 1000 })])[0]).open === 'outbox', 'VERDICT a composed message not yet sent ⇒ the Outbox, as today');
+  // lane outbox-chip-door (inc-mw5r944f-60vt): THE NAME THE PERSON READS IS THE DOOR THEY PRESS
+  {
+    const J = JSON.stringify;
+    const F = { keys: ['c1'], name: 'Writer' };
+    const list = (...ps) => { const m = new Map(ps.map((p) => [p.id, p])); return (id) => m.get(id) || null; };
+    const compose = T.foldTouches([touch({ op: 'compose', convId: null, proposalId: 'p1', at: 1000 })])[0];
+    const reply = T.foldTouches([touch({ op: 'reply', proposalId: 'p2', at: 1000 })])[0];
+    ok(J(T.openVerdict(compose, { filter: F })) === J({ open: 'outbox', show: 'p1', filter: F }), 'OCD VERDICT a composed row carries the proposal it names + the conversation\'s filter', J(T.openVerdict(compose, { filter: F })));
+    const heldP2 = list({ id: 'p2', state: 'awaiting-approval', at: 1 });
+    ok(J(T.openVerdict(reply, { filter: F, recordOf: heldP2 })) === J({ open: 'outbox', show: 'p2', filter: F }), 'OCD VERDICT a drafted reply opens its DRAFT (where it can be approved), not the thread', J(T.openVerdict(reply, { filter: F, recordOf: heldP2 })));
+    ok(T.openVerdict(reply, { recordOf: heldP2 }).show === 'p2' && T.openVerdict(reply, { recordOf: heldP2 }).filter === null, 'OCD VERDICT no conversation handed in: the proposal is still named, no filter invented');
+    // r2 (acceptance H4): no list held ⇒ nothing is guessed
+    ok(J(T.openVerdict(reply, { filter: F, recordOf: null })) === J({ open: 'conversation', adapterId: reply.adapterId, convId: reply.convId }), 'OCD H4 no list held: a reply row opens the conversation, its door before this lane', J(T.openVerdict(reply, { filter: F, recordOf: null })));
+    ok(J(T.openVerdict(compose, { filter: F, recordOf: null })) === J({ open: 'outbox', show: 'p1', filter: F }), 'OCD H4 no list held: a composed row opens the Outbox, it has nowhere else (the window says what it knows)', J(T.openVerdict(compose, { filter: F, recordOf: null })));
+    ok(T.rowProposalOf(reply) === null && T.rowProposalOf(reply, null) === null && T.rowProposalOf(compose) === 'p1' && T.rowProposalOf(reply, heldP2) === 'p2', 'OCD H4 rowProposalOf: a reply names nothing until a list is held; the list landed, it names its proposal');
+    ok(T.openVerdict(reply, { recordOf: list() }).open === 'conversation', 'OCD VERDICT a reply whose proposal the held list no longer has ⇒ the conversation, the door it always had');
+    ok(J(T.openVerdict(compose, { recordOf: list(), filter: F })) === J({ open: 'outbox', show: 'p1', filter: F }), 'OCD VERDICT a composed one gone from the list ⇒ still the Outbox (the window says it is gone)');
+    ok(T.openVerdict(reply, { recordOf: list({ id: 'p2', state: 'sent', at: 1 }) }).show === 'p2', 'OCD VERDICT a sent reply opens its card too (the state is the card\'s to say)');
+    const two = T.foldTouches([touch({ op: 'reply', proposalId: 'p-a', at: 1000 }), touch({ op: 'reply', proposalId: 'p-b', at: 2000 })])[0];
+    ok(J(two.proposalIds) === J(['p-a', 'p-b']) && two.proposalId === 'p-b', 'OCD FOLD a row of two replies keeps both proposals, the newest as its name', J(two.proposalIds));
+    ok(T.rowProposalOf(two, list({ id: 'p-a', state: 'awaiting-approval', at: 1 }, { id: 'p-b', state: 'rejected', at: 2 })) === 'p-a' && T.rowProposalOf(two, list({ id: 'p-a', state: 'sent', at: 1 }, { id: 'p-b', state: 'rejected', at: 2 })) === 'p-b' && T.rowProposalOf(two, list()) === null && T.rowProposalOf(two) === null, 'OCD rowProposalOf: the newest that WAITS, else the newest held, none held ⇒ null, no list yet ⇒ a reply names nothing');
+    const api = T.foldTouches([{ op: 'api', adapterId: 'lark', id: 'c9', proposalId: 'p-api', title: 'x', at: 1000 }])[0];
+    ok(T.rowProposalOf(api) === null && !T.openVerdict(api, { filter: F }).show, 'OCD a raw API row names no message proposal: its door stays its credential\'s API access (B-2198)');
+    ok(T.openVerdict(T.foldTouches([touch({ op: 'read', at: 1000 })])[0], { filter: F }).open === 'conversation', 'OCD VERDICT a read row ⇒ the conversation, a filter handed in or not');
+    const srch = T.foldTouches([sT({ at: 1000 }), sT({ at: 2000 })]);
+    ok(T.tailVerdict(srch, { max: 0 }).open === 'search-all', 'OCD the tail still reads every hidden row\'s verdict (Array.map\'s index never reaches the options)', J(T.tailVerdict(srch, { max: 0 })));
+  }
   ok(T.openVerdict(T.foldTouches([touch({ op: 'search', at: 1000 })])[0]).open === 'conversation', 'VERDICT a search recorded before the query was kept (a restored ring) ⇒ the conversation');
   const five = ['noc', 'gtm', 'api', 'ops', 'hr'].map((c, i) => sT({ convId: c, adapterId: i === 4 ? 'lark2' : 'lark', at: 1000 + i }));
   const tv = T.tailVerdict(T.foldTouches(five));
@@ -401,7 +428,7 @@ await section('⑥', async () => {
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3, label: '⑥ ' })) ok(c.pass, c.name, c.detail);
   // the wiring
   const tv2 = read('src/lib/channel-touch-view.js'), cp = read('src/lib/channels-panel.js'), app = read('src/lib/app.js'), cw = read('src/lib/channel-window.js');
-  ok(/const v = T\.openVerdict\(row\);\n  if \(v\.open === 'search' && typeof app\.openChannelSearch === 'function'\) app\.openChannelSearch\(\{ adapterIds: \[v\.adapterId\], q: v\.query, convId: v\.convId/.test(tv2) && /T\.tailVerdict\(more\._rows \|\| \[\], \{ max: more\._shown \?\? T\.FOLD_SHOWN \}\)/.test(tv2) && /T\.tailVerdict\(rows, \{ max: shown \}\)/.test(tv2)
+  ok(/const v = T\.openVerdict\(row, \{ filter, recordOf: heldProposalLookup\(\) \}\);\n  if \(v\.open === 'search' && typeof app\.openChannelSearch === 'function'\) app\.openChannelSearch\(\{ adapterIds: \[v\.adapterId\], q: v\.query, convId: v\.convId/.test(tv2) && /T\.tailVerdict\(more\._rows \|\| \[\], \{ max: more\._shown \?\? T\.FOLD_SHOWN \}\)/.test(tv2) && /T\.tailVerdict\(rows, \{ max: shown \}\)/.test(tv2)
     && /openChannelSearch\(opts\) \{ return openSearchResults\(this, opts \|\| \{\}\); \}/.test(app),
     'the row opens through T.openVerdict → app.openChannelSearch (the ONE door to the results); the tail through T.tailVerdict');
   ok(/\$\{sc \? `&conv=\$\{encodeURIComponent\(sc\.convId\)\}` : ''\}/.test(cp) && /app\.openChannel\(hit\.adapterId, hit\.convId, \{ jump: \{ vid: hit\.record\.vendorId/.test(cp) && /if \(sc && String\(h\.convId\) !== sc\.convId\) continue;/.test(cp)
@@ -440,7 +467,7 @@ await section('⑦', async () => {
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '⑦ ' })) ok(c.pass, c.name, c.detail);
   // the wiring: the card row draws them through the Outbox's ONE card module; a card with no touches clears them; a reattach re-reads
   const tv = read('src/lib/channel-touch-view.js');
-  ok(/^import \{ chatProposalCards, refreshChatProposals \} from '\.\/channel-outbox\.js';/m.test(tv) && /chatProposalCards\(view\.app, cardEl, T\.filedProposals\(touches\), \{ onCount: \(\) => \{ if \(typeof view\._updateRuns === 'function'\) view\._updateRuns\(\); \} \}\);/.test(tv)
+  ok(/^import \{ chatProposalCards, refreshChatProposals, proposalWords \} from '\.\/channel-outbox\.js';/m.test(tv) && /chatProposalCards\(view\.app, cardEl, T\.filedProposals\(touches\), \{ onCount: \(\) => \{ if \(typeof view\._updateRuns === 'function'\) view\._updateRuns\(\); \} \}\);/.test(tv)
     && /chatApiCards\(null, cardEl, \[\]\);\n    chatProposalCards\(null, cardEl, \[\]\);/.test(tv) && /ensureLoaded\(\); \}, REFETCH_MS\);\n    refreshChatProposals\(\);/.test(tv),
     'wiring: renderBox hands the call\'s filed proposals to channel-outbox chatProposalCards (a decision re-words the run fold), clearBox clears them, every attach re-reads them');
 });

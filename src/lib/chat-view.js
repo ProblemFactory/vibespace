@@ -35,7 +35,7 @@ import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-accou
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { agentCommandText } from '../agent-tool-rules.js'; // lane run-fold-channel-compact: a compact card's head names its command (touch-chip-cause r3: an argv call's head is its script's)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
-import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
+import { createChannelTouchView, openTouchRow, rowProposalWords } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
 import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): the waiting line's plain question
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
@@ -426,7 +426,8 @@ class ChatView {
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
-      onChannelOpen: (row) => openTouchRow(this.app, row),
+      onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter() }), // lane outbox-chip-door: a row inside this conversation opens THIS conversation's Outbox, the proposal it names in view
+      channelRowWords: rowProposalWords, // lane outbox-chip-door: the chip's rows say their proposals' state in the card's words
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-model: the Artifacts chip's row → the file beside the chat
       app: this.app, // lane artifacts-list-scale: the list's ⋯ (show in Files, a helper's conversation, a service's job / Ports)
       onOpenArtifactsWindow: () => this.app.openArtifacts?.({ sessionId: this.sessionId, name: String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0] }), // lane artifacts-list-scale: the popover's ⤢ → the Artifacts window
@@ -4297,8 +4298,10 @@ class ChatView {
     const ids = this._getSessionIds?.() || {};
     return conversationKeys({ claudeId: ids.claudeId || null, backendSessionId: ids.backendSessionId || null, webuiId: this.sessionId });
   }
-  /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted). */
+  /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted).
+   *  A subagent's viewer has none of its own (it drafts under its parent's id): null — the window shows the drafter of the row pressed. */
   _outboxFilter() {
+    if (typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-')) return null;
     const name = String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0];
     return { keys: this._outboxKeys(), name: name || t('this conversation') };
   }

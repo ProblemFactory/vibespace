@@ -7,7 +7,7 @@
 // headless chrome over raw CDP, the page in 中文 (the owner's language). A stub `claude` runs behind the REAL chat-wrapper
 // through the REAL create path; each user turn is a run of Bash calls running the SHIPPED data/bin/vibespace-channels
 // with its own session token (the real agent routes, the real engine, the §26 witness binding each touch to its call).
-//   ① turn 1 = `ls` · `read` · `reply` (one run, folded): the REPLY's call row carries the chip «提案 · … · 待批准» on its
+//   ① turn 1 = `ls` · `read` · `reply` (one run, folded): the REPLY's call row carries the chip «提案 · … · 等你审批» on its
 //      conversation's row and THE card (channel-outbox's own, five lines, ONE primary Approve) in the box after the rows;
 //      the CLI's answer says where the card is; the closed fold keeps the card on screen and its head counts it
 //      («· 1 条提案待批准»)
@@ -17,15 +17,15 @@
 //      re-appended), folded to its ONE line; the chip says «已发送 · HH:MM»; the fold head «1 条提案»; the conversation
 //      window and the Outbox say sent too
 //   ④ 390 px (phone, stacked): turn 2 files another reply ⇒ its card is whole on screen (nothing off the right edge, its
-//      actions reachable); a REAL Reject there ⇒ the chip «你拒绝了», the card its line
+//      actions reachable); a REAL Reject there ⇒ the chip «已拒绝», the card its line
 //   ⑤ the chat read LATER (a fresh page): both rows' chips say what became of them — from the server's record
 //   ⑥ THE ACCESS RULE: the owner removes the agent's access ⇒ the chat's read (`?ids=`) answers neither proposal (the
 //      Outbox still lists both — CONTROL) and a fresh chat draws no card and no chip
-//   ⑦ A REACTION IS APPROVED (lane reaction-approve-shown — the owner's hub, 2026-10-28: «提案 · 一个表情回应 · 待批准»,
+//   ⑦ A REACTION IS APPROVED (lane reaction-approve-shown — the owner's hub, 2026-10-28: «提案 · 一个表情回应 · 等你审批»,
 //      every Approve refused «shown is required … reload the page», since 2.369.197): access given back, this device
 //      remembering «wake now», turn 3 proposes three reactions. The chat card's Approve says the receipt rides the next
 //      turn (never «立即唤醒»); a REAL click ⇒ «已添加表情回应», sent, the vendor holds the account's own reaction; a REAL
-//      Reject on the second ⇒ «你拒绝了» (that road unchanged); the THIRD approved in the Outbox window (its row's 「批准…」
+//      Reject on the second ⇒ «已拒绝» (that road unchanged); the THIRD approved in the Outbox window (its row's 「批准…」
 //      opens the card) ⇒ «已添加表情回应», sent, the chat's copy says so too. RED on 90c995a3: the toast is the refusal.
 //      (A recall cannot be proposed on this fake hub — the fake vendor's messages are never the user's own; its road is
 //      test-channel-outbox's: the real card posts the digest, the real route + engine + fake vendor take it back.)
@@ -273,7 +273,7 @@ try {
   const v1 = await look('toolu_cpc1c', pid1);
   check('the REPLY\'s call row holds the card — in ONE box after its conversation rows (the call row\'s expanded body)', got1 && v1.box && v1.n === 1 && v1.afterRows && v1.inChat === 1, v1);
   check('the card is the Outbox\'s own five-line card: awaiting, ONE primary Approve, the agent\'s text', v1.state === 'chan-prop-awaiting-approval' && v1.approve && v1.primaries === 1 && v1.text === 'On it — drafted', v1);
-  check('the chip on the conversation\'s row: «提案 · 在「…」里回复 · 待批准»', /^提案 · 在「.+」里回复 · 待批准$/.test(v1.chip || '') && v1.chipState === 'awaiting-approval', v1.chip);
+  check('the chip on the conversation\'s row: «提案 · 在「…」里回复 · 等你审批»', /^提案 · 在「.+」里回复 · 等你审批$/.test(v1.chip || '') && v1.chipState === 'awaiting-approval', v1.chip);
   check('no other call row draws it (the read and the ls have no card)', await evalJs(`!document.querySelector('${CARD('toolu_cpc1a')} .chat-chan-props') && !document.querySelector('${CARD('toolu_cpc1b')} .chat-chan-props .chan-prop')`));
   for (let i = 0; i < 80 && !/^toolu_cpc1c /m.test(turnsLog()); i++) await sleep(250);   // the card lands with the touch, mid-call; the answer after it
   const said = (turnsLog().split('\n').find((l) => l.startsWith('toolu_cpc1c ')) || '');
@@ -329,15 +329,15 @@ try {
   check('turn 2 filed a second proposal', !!pid2);
   const ph = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(PCARD('toolu_cpc2a', pid2 || 'x'))}); if (!c || !c.offsetWidth) return null; c.scrollIntoView({ block: 'center' }); const off = [...c.querySelectorAll('*')].filter((e) => e.offsetWidth && (e.getBoundingClientRect().right > innerWidth + 0.5 || e.getBoundingClientRect().left < -0.5)).map((e) => e.className + ' ' + Math.round(e.getBoundingClientRect().right)); const r = c.getBoundingClientRect(); const btns = [...c.querySelectorAll('.chan-prop-actions button')].map((b) => { const q = b.getBoundingClientRect(); const hit = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!hit && (hit === b || b.contains(hit)); }); return { off, w: Math.round(r.width), vw: innerWidth, btns, chip: (document.querySelector(${JSON.stringify(CHIP('toolu_cpc2a'))}) || {}).textContent || null }; })()`, 30000);
   check('the phone card is whole on screen (nothing past the right edge) and every action is reachable', !!ph && ph.off.length === 0 && ph.w <= ph.vw && ph.btns.length >= 3 && ph.btns.every(Boolean), ph);
-  check('the phone row\'s chip: «… · 待批准»', !!ph && /^提案 · .+ · 待批准$/.test(ph.chip || ''), ph && ph.chip);
+  check('the phone row\'s chip: «… · 等你审批»', !!ph && /^提案 · .+ · 等你审批$/.test(ph.chip || ''), ph && ph.chip);
   await sleep(900);
   check('chat-card-phone-zh.png', await shot('chat-card-phone-zh.png', CARD('toolu_cpc2a'), 6));
   check('a REAL click on Reject… opens its reason box', await realClick(`${PCARD('toolu_cpc2a', pid2)} .chan-prop-actions button[data-reject]`) && await waitFor(`!!document.querySelector(${JSON.stringify(PCARD('toolu_cpc2a', pid2) + ' .chan-prop-rejectbox input')})`, 5000), lastMiss);
   await evalJs(`document.querySelector(${JSON.stringify(PCARD('toolu_cpc2a', pid2) + ' .chan-prop-rejectbox input')}).focus(); true`);
   await realType('not now');
   check('…and a REAL click on its Reject sends the decision', await realClick(`${PCARD('toolu_cpc2a', pid2)} .chan-prop-rejectbox button`), lastMiss);
-  const rj = await waitFor(`(() => { const ch = document.querySelector(${JSON.stringify(CHIP('toolu_cpc2a'))}); const c = document.querySelector(${JSON.stringify(PCARD('toolu_cpc2a', pid2))}); return ch && c && /你拒绝了$/.test(ch.textContent) && c.classList.contains('chan-prop-lined') ? ch.textContent : null; })()`, 15000);
-  check('rejected ⇒ the chip «提案 · … · 你拒绝了», the card its ONE line', !!rj, rj);
+  const rj = await waitFor(`(() => { const ch = document.querySelector(${JSON.stringify(CHIP('toolu_cpc2a'))}); const c = document.querySelector(${JSON.stringify(PCARD('toolu_cpc2a', pid2))}); return ch && c && /已拒绝$/.test(ch.textContent) && c.classList.contains('chan-prop-lined') ? ch.textContent : null; })()`, 15000);
+  check('rejected ⇒ the chip «提案 · … · 已拒绝», the card its ONE line', !!rj, rj);
   const rjStore = (await api('GET', `/api/channels/outbox?ids=${pid2}`)).body?.proposals?.[0];
   check('…the store says rejected with the reason the owner typed', rjStore && rjStore.state === 'rejected' && /not now/.test(JSON.stringify(rjStore)), rjStore && { state: rjStore.state });
 
@@ -347,7 +347,7 @@ try {
   await cdp('Page.reload', {}); await sleep(800); await waitApp(); await sleep(600);
   check('the chat attaches again', await attach(sid));
   const later = await waitFor(`(() => { const a = document.querySelector(${JSON.stringify(CHIP('toolu_cpc1c'))}), b = document.querySelector(${JSON.stringify(CHIP('toolu_cpc2a'))}); return a && b ? [a.textContent, b.textContent] : null; })()`, 20000);
-  check('a fresh page reads both outcomes off the server\'s record: «已发送 · HH:MM» and «你拒绝了»', !!later && /· 已发送 · \d\d:\d\d$/.test(later[0]) && /· 你拒绝了$/.test(later[1]), later);
+  check('a fresh page reads both outcomes off the server\'s record: «已发送 · HH:MM» and «已拒绝»', !!later && /· 已发送 · \d\d:\d\d$/.test(later[0]) && /· 已拒绝$/.test(later[1]), later);
 
   // ── ⑥ the access rule ──
   console.log('⑥ the agent loses its access ⇒ the chat no longer draws its proposals');

@@ -88,4 +88,12 @@ function outboxRowsOf({ proposals = [], apiCards = [] } = {}, filter = null) {
   return { proposals: outboxFilterOf(proposals, filter), apiCards: apiFilterOf(apiCards, filter) };
 }
 
-module.exports = { conversationKeys, draftedByAny, partlySent, outboxChipOf, outboxRowsOf, outboxFilterOf, apiFilterOf };
+/** lane outbox-chip-door (userW inc-mw5r944f-60vt: «我还是无法分辨当前 session 相关的待发送 message 是哪些»): WHAT A PROPOSAL SAYS BY NAME —
+ *  its state (`partly` = a sent one a part of which did not land) and its two marks. The Outbox card's state chip and marks and
+ *  the Channels chip's row wear this ONE verdict, so the row can never say another state than the card it opens. PURE: the
+ *  words stay the card's own (channel-outbox.js `proposalWords`). */
+function proposalFaceOf(p) {
+  return { state: partlySent(p) ? 'partly' : String((p && p.state) || ''), edited: !!(p && p.edited), replaced: !!(p && p.state === 'withdrawn' && p.replacedBy) };
+}
+
+module.exports = { conversationKeys, draftedByAny, partlySent, outboxChipOf, outboxRowsOf, outboxFilterOf, apiFilterOf, proposalFaceOf };

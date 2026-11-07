@@ -2501,7 +2501,7 @@ async function chatReadLegs(ENGmod, name) {
         // section mounted BESIDE the list, drawing itself, outside the census — the judge above is red, each way
         const OS2 = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
         const MOUNT = "  const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });\n";
-        const PASS = "    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });\n";
+        const PASS = "    const r = outboxNodes(app, list, ob, { view: pressAll ? 'all' : view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });\n";
         ok(OS2.split(MOUNT).length === 2 && OS2.split(PASS).length === 2, '§OW CONTROL setup: the API section is mounted once and handed to the census once');
         const bdir = fs.mkdtempSync(path.join(ROOT, 'ow-base-'));
         const abs = (src) => src.replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`);
@@ -2546,7 +2546,7 @@ async function chatReadLegs(ENGmod, name) {
           && !!c1.querySelector('.chan-prop-actions button[data-approve]') && !c1._cls.has('chan-prop-lined') && box.dataset.n === '1' && box.dataset.awaiting === '1' && counted === 1,   // a box born empty counts nothing; its first record moves it once
           'CPC ① the call row\'s ONE box (right after its conversation rows) holds THE card of the id its touch named — read through `?ids=` (the store), awaiting, whole, its Approve; the row\'s count moved once', JSON.stringify({ asked, n: box && box.dataset.n, counted }));
         const chip = row.querySelector('.cct-prop');
-        ok(!!chip && chip.textContent === 'Proposal · Reply all to Lee, Sam +2 · awaiting approval' && chip.dataset.state === 'awaiting-approval' && row.children.indexOf(chip) === row.children.length - 2 && row._cls.has('has-prop'),
+        ok(!!chip && chip.textContent === 'Proposal · Reply all to Lee, Sam +2 · awaiting your approval' && chip.dataset.state === 'awaiting-approval' && row.children.indexOf(chip) === row.children.length - 2 && row._cls.has('has-prop'),
           'CPC ① the chip on the conversation\'s row, before its time: «Proposal · Reply all to Lee, Sam +2 · awaiting approval» (the first To by name — a quoted comma is the name\'s —, the rest counted)', chip && chip.textContent);
         // ② ONE RECORD, THREE PLACES — the conversation window's inline card and the Outbox row draw the same record
         const sec = CO.renderInlineProposals(capp, [P0], null, {});
@@ -2569,17 +2569,17 @@ async function chatReadLegs(ENGmod, name) {
         // the chip's words, state by state and kind by kind (the device's language — en here)
         const W = (q) => CO.proposalChipText({ ...P0, ...q });
         const table = [
-          [W({ state: 'rejected' }), 'Proposal · Reply all to Lee, Sam +2 · you rejected it'],
+          [W({ state: 'rejected' }), 'Proposal · Reply all to Lee, Sam +2 · rejected'],
           [W({ state: 'expired' }), 'Proposal · Reply all to Lee, Sam +2 · expired'],
           [W({ state: 'failed' }), 'Proposal · Reply all to Lee, Sam +2 · failed'],
-          [W({ replyEnvelope: { to: 'Ada <ada@example.com>' } }), 'Proposal · Reply to Ada · awaiting approval'],
-          [W({ replyEnvelope: null }), 'Proposal · Reply in Room access · awaiting approval'],
-          [W({ replyEnvelope: null, compose: { to: ['b@example.com'], cc: [], subject: 's' } }), 'Proposal · New message to b@example.com · awaiting approval'],
-          [W({ kind: 'reaction', reaction: { msg: 'm-1', key: 'thumbsup', op: 'add' } }), 'Proposal · a reaction · awaiting approval'],
-          [W({ kind: 'recall', recall: { msg: 'm-2' } }), 'Proposal · taking back your message · awaiting approval'],
+          [W({ replyEnvelope: { to: 'Ada <ada@example.com>' } }), 'Proposal · Reply to Ada · awaiting your approval'],
+          [W({ replyEnvelope: null }), 'Proposal · Reply in Room access · awaiting your approval'],
+          [W({ replyEnvelope: null, compose: { to: ['b@example.com'], cc: [], subject: 's' } }), 'Proposal · New message to b@example.com · awaiting your approval'],
+          [W({ kind: 'reaction', reaction: { msg: 'm-1', key: 'thumbsup', op: 'add' } }), 'Proposal · a reaction · awaiting your approval'],
+          [W({ kind: 'recall', recall: { msg: 'm-2' } }), 'Proposal · taking back your message · awaiting your approval'],
         ];
         const offT = table.filter(([got, want]) => got !== want);
-        ok(!offT.length, 'CPC the chip\'s words: rejected «you rejected it», expired, failed; a reply to one person by name, a chat reply by its room, a new message, a reaction, a recall', JSON.stringify(offT));
+        ok(!offT.length, 'CPC the chip\'s words = the card\'s (lane outbox-chip-door, ONE vocabulary): rejected, expired, failed; a reply to one person by name, a chat reply by its room, a new message, a reaction, a recall', JSON.stringify(offT));
         // ④ THE ACCESS RULE: the read answers nothing (the drafter no longer sees) ⇒ no card, no chip
         answer = [];
         heard.forEach((fn) => fn({ type: 'channel-outbox-updated', changed: [] }));   // an account-wide change names none: every chat card re-reads
@@ -2761,10 +2761,17 @@ async function chatReadLegs(ENGmod, name) {
         const listW = () => content.children[0] && content.children[0].querySelector('.chan-outbox-list');
         const rowIds = () => (listW() ? listW().querySelectorAll('.chan-orow').map((r) => r.dataset.orow) : []);
         const sumW = () => (content.children[0] && content.children[0].querySelector('.jobs-summary') || { textContent: null }).textContent;
-        await legOSC('⑤ opened with the chip\'s filter: a removable «drafted by Writer» chip at the TOP of the list; only Writer\'s cards (the replaced one too), newest first; the head counts them', () => {
+        await legOSC('⑤ opened with the chip\'s filter (lane outbox-chip-door: on what WAITS): a removable «drafted by Writer» chip at the TOP of the list; only Writer\'s waiting card; the head counts all of Writer\'s', () => {
           const l = listW(), first = l && l.children[0];
           const ids = rowIds();
-          return [!!first && first._cls.has('chan-outbox-filter') && txt(first, 'chan-outbox-filter-text') === 'drafted by Writer' && !!first.querySelector('.chan-outbox-filter-x') && J(ids) === J(['p-osc-w', 'p-osc-e', 'p-osc-pt', 'p-osc-old', 'p-osc-f', 'p-osc-u']) && sumW() === '1 awaiting your approval · 6 proposals' && content.children[0].children.length === 2, { first: first && first.className, ids, sum: sumW() }];
+          return [!!first && first._cls.has('chan-outbox-filter') && txt(first, 'chan-outbox-filter-text') === 'drafted by Writer' && !!first.querySelector('.chan-outbox-filter-x') && J(ids) === J(['p-osc-w']) && sumW() === '1 awaiting your approval · 6 proposals' && content.children[0].children.length === 2, { first: first && first.className, ids, sum: sumW() }];
+        });
+        await legOSC('⑤ …its «All» lists EVERY state of Writer\'s, newest first (the replaced one too)', () => {
+          const b = (v) => content.children[0].querySelector(`[data-view="${v}"]`);
+          b('all').onclick();
+          const ids = rowIds();
+          b('awaiting').onclick();
+          return [J(ids) === J(['p-osc-w', 'p-osc-e', 'p-osc-pt', 'p-osc-old', 'p-osc-f', 'p-osc-u']), ids];
         });
         await legOSC('⑤ the filter is the window\'s view state: its openSpec stays bare (never persisted, never replayed)', () => [!!win && created.length === 1 && J(created[0].openSpec) === J({ action: 'openChannelOutbox' }) && typeof win._outboxDoor === 'function', created[0] && created[0].openSpec]);
         const segOn = () => { const r = content.children[0]; const on = r ? r.querySelectorAll('.chan-seg .jobs-btn').filter((b) => b._cls.has('chan-seg-on')) : []; return on.length === 1 ? on[0].dataset.view : on.map((b) => b.dataset.view).join('+'); };
@@ -2774,13 +2781,14 @@ async function chatReadLegs(ENGmod, name) {
           const ids = rowIds();
           return [!!x && !listW().querySelector('.chan-outbox-filter') && segOn() === 'awaiting' && J(ids.slice().sort()) === J(['p-osc-b1', 'p-osc-h', 'p-osc-w']) && sumW() === `3 awaiting your approval · ${FX.length} proposals`, { ids, seg: segOn(), sum: sumW() }];
         });
-        await legOSC('⑤ the door again (another conversation): ONE filter — «drafted by Reviewer», only its 2 cards', () => {
+        await legOSC('⑤ the door again (another conversation): ONE filter — «drafted by Reviewer», the head its 2 cards, what waits first', () => {
           win._outboxDoor({ filter: { keys: KB, name: 'Reviewer' } });
           const l = listW();
-          return [txt(l.children[0], 'chan-outbox-filter-text') === 'drafted by Reviewer' && J(rowIds()) === J(['p-osc-b1', 'p-osc-b2']), rowIds()];
+          return [txt(l.children[0], 'chan-outbox-filter-text') === 'drafted by Reviewer' && J(rowIds()) === J(['p-osc-b1']) && sumW() === '1 awaiting your approval · 2 proposals', { ids: rowIds(), sum: sumW() }];
         });
         await legOSC('⑤ «replaced» in the filtered list → the newer proposal: its card opens under its row (the same filter keeps it)', () => {
           win._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+          content.children[0].querySelector('[data-view="all"]').onclick();   // the owner's All: the replaced card is under it
           const old = listW().querySelectorAll('.chan-orow').find((r) => r.dataset.orow === 'p-osc-old');
           const b = old && old.querySelector('.chan-prop-mark-replaced');
           calls.length = 0;
@@ -2790,7 +2798,9 @@ async function chatReadLegs(ENGmod, name) {
           const kids = listW().children;
           const iRow = kids.findIndex((c) => c.dataset.orow === 'p-osc-w');
           const card = kids[iRow + 1];
-          return [asked === J([{ show: 'p-osc-w' }]) && iRow > 0 && !!card && card._cls.has('chan-prop') && card.dataset.proposal === 'p-osc-w' && txt(listW().children[0], 'chan-outbox-filter-text') === 'drafted by Writer', { asked, iRow, card: card && card.className }];
+          const held = [asked === J([{ show: 'p-osc-w' }]) && iRow > 0 && !!card && card._cls.has('chan-prop') && card.dataset.proposal === 'p-osc-w' && txt(listW().children[0], 'chan-outbox-filter-text') === 'drafted by Writer', { asked, iRow, card: card && card.className }];
+          content.children[0].querySelector('[data-view="awaiting"]').onclick();
+          return held;
         });
         await legOSC('⑤ a filter with none of its proposals in the list says so (never the empty Outbox\'s teaching line)', () => {
           win._outboxDoor({ filter: { keys: [CE], name: 'Quiet one' } });
@@ -2801,7 +2811,7 @@ async function chatReadLegs(ENGmod, name) {
           win._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
           const before = rowIds().length;
           win._outboxDoor({});
-          return [before === 6 && !listW().querySelector('.chan-outbox-filter') && segOn() === 'awaiting' && rowIds().length === 3 && sumW() === `3 awaiting your approval · ${FX.length} proposals`, { before, after: rowIds().length, seg: segOn(), sum: sumW() }];
+          return [before === 1 && !listW().querySelector('.chan-outbox-filter') && segOn() === 'awaiting' && rowIds().length === 3 && sumW() === `3 awaiting your approval · ${FX.length} proposals`, { before, after: rowIds().length, seg: segOn(), sum: sumW() }];
         });
         await legOSC('⑤ N4 a card\'s menu: right-click a row ⇒ «Only drafts by Writer» (the words name the DRAFTING agent) ⇒ the ONE filter door with the drafter\'s keys as the session list knows them', () => {
           win._outboxDoor({ filter: null });
@@ -2867,11 +2877,14 @@ async function chatReadLegs(ENGmod, name) {
           const root = c.children[0];
           return { w, root, head: root && (root.querySelector('.jobs-summary') || {}).textContent, list: root && root.querySelector('.chan-outbox-list') };
         };
-        await legOSC('N1 the filtered window (its API section fed the conversation\'s calls by their conv id) says «2 awaiting your approval · 8 proposals» and lists its 2 calls; the chip over the client\'s rows says «Outbox · 8» + «2 waiting» — the same numbers', async () => {
+        await legOSC('N1 the filtered window (its API section fed the conversation\'s calls by their conv id) says «2 awaiting your approval · 8 proposals», lists its waiting call and under «All» its 2 calls; the chip over the client\'s rows says «Outbox · 8» + «2 waiting» — the same numbers', async () => {
           const r = await openWith({ filter: { keys: KA, name: 'Writer' } }, OBX, APIX);
-          const apiRows = r.list ? r.list.querySelectorAll('.chan-api-orow').map((x) => x.dataset.key).sort() : [];
+          const apiOf = () => (r.list ? r.list.querySelectorAll('.chan-api-orow').map((x) => x.dataset.key).sort() : []);
+          const waitingRows = apiOf();
+          if (r.root) r.root.querySelector('[data-view="all"]').onclick();
+          const apiRows = apiOf();
           const v = OSC.conversationOutbox(KA), f = OSC.outboxChipFace(v);
-          return [r.head === '2 awaiting your approval · 8 proposals' && v.total === 8 && v.waiting === 2 && !!f && f.text === 'Outbox · 8' && f.waiting === '2 waiting' && J(apiRows) === J(['api-osc-ap', 'api-osc-ar']), { head: r.head, v: [v.total, v.waiting], f: f && [f.text, f.waiting], apiRows }];
+          return [r.head === '2 awaiting your approval · 8 proposals' && v.total === 8 && v.waiting === 2 && !!f && f.text === 'Outbox · 8' && f.waiting === '2 waiting' && J(waitingRows) === J(['api-osc-ap']) && J(apiRows) === J(['api-osc-ap', 'api-osc-ar']), { head: r.head, v: [v.total, v.waiting], f: f && [f.text, f.waiting], waitingRows, apiRows }];
         });
         await legOSC('N1 a conversation whose ONLY Outbox row is a pending API call: the session menu offers «Outbox of this conversation» (the same verdict), its chip says «Outbox · 1» + «1 waiting», the door opens its ONE filter', async () => {
           const SQ = { sessionId: CQ, claudeSessionId: CQ, backendSessionId: CQ, webuiId: 'wv-6', name: 'Caller', status: 'live' };
@@ -2993,7 +3006,7 @@ async function chatReadLegs(ENGmod, name) {
           const lib = (f) => JSON.stringify(path.join(REPO, 'src/lib', f));
           // the legs read the English words: the zh / ja dictionaries (4.4 of the bundle's 5.3 MB) are left out — five bundles stay cheap
           const swap = { name: 'swap', setup(b) { b.onLoad({ filter: /\/src\/lib\/i18n-(zh|ja)\.js$/ }, () => ({ contents: 'export default {};', loader: 'js' })); for (const [f, src] of Object.entries(swaps)) b.onLoad({ filter: new RegExp(`/src/lib/${f.replace('.', '\\.')}$`) }, () => ({ contents: src, loader: 'js', resolveDir: path.join(REPO, 'src/lib') })); } };
-          await esbuild.build({ stdin: { contents: `export * from ${lib('channel-outbox.js')};\nexport * from ${lib('outbox-feed.js')};\n`, resolveDir: path.join(REPO, 'src/lib'), sourcefile: `osc-r3-${name}.js`, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, swap] });
+          await esbuild.build({ stdin: { contents: `export * from ${lib('channel-outbox.js')};\nexport * from ${lib('outbox-feed.js')};\nexport * from ${lib('channel-touch-view.js')};\n`, resolveDir: path.join(REPO, 'src/lib'), sourcefile: `osc-r3-${name}.js`, loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, swap] });
           return import(out);
         };
         const r3Legs = (W) => {
@@ -3062,7 +3075,21 @@ async function chatReadLegs(ENGmod, name) {
                 if (allBtn) allBtn.onclick();
                 if (x()) x().click();
                 const owners = { seg: v.seg(), rows: v.rows().length };
-                return [want.seg === 'awaiting' && want.rows === 3 && filtered === 'all' && J(plain) === J(want) && J(byX) === J(want) && owners.seg === 'all' && owners.rows === FX.length, { want, filtered, plain, byX, owners }];
+                // lane outbox-chip-door: the owner's All BEFORE the door comes back with the ×; a press's forced All (a sent row) dies with it
+                if (allBtn) allBtn.onclick();
+                v.w._outboxDoor({ filter: { keys: KA, name: 'Writer' } });
+                const overAll = v.seg();
+                if (x()) x().click();
+                const backAll = v.seg();
+                v.root().querySelector('[data-view="awaiting"]').onclick();
+                const v2 = open(mkWS());
+                await settle();
+                v2.w._outboxDoor({ filter: { keys: KA, name: 'Writer' }, show: 'p-osc-e', inside: true });
+                const forced = v2.seg();
+                const x2 = v2.root().querySelector('.chan-outbox-filter-x');
+                if (x2) x2.click();
+                const afterForced = v2.seg();
+                return [want.seg === 'awaiting' && want.rows === 3 && filtered === 'awaiting' && J(plain) === J(want) && J(byX) === J(want) && owners.seg === 'all' && owners.rows === FX.length && overAll === 'awaiting' && backAll === 'all' && forced === 'all' && afterForced === 'awaiting', { want, filtered, plain, byX, owners, overAll, backAll, forced, afterForced }];
               });
             }],
             ['R3 m4 THE RECONNECT RE-READS BOTH HALVES (PROBE-D): a call approved elsewhere while the socket was down — on its return ONE read of each route, and the chip drops «1 waiting»', async () => {
@@ -3092,7 +3119,7 @@ async function chatReadLegs(ENGmod, name) {
         const coSrc = srcOf('channel-outbox.js'), feedSrc3 = srcOf('outbox-feed.js');
         const r3Red = async (file, src, name) => { const W = await winBundle(name, { [file]: src }); return (await runR3(W)).filter(([, r]) => !r[0]).map(([n]) => n); };
         const once = (src, line) => src.split(line).length === 2;
-        const FOLLOW = "  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); });\n";
+        const FOLLOW = "  const offFeed = onOutbox(app, () => { const held = currentOutbox(); if (held && held !== last) draw(held); if (readFailed && last) showPending(); });\n";
         await legOSC('MUTANT R3 m1 the window drawing every push as it comes (r2\'s own socket handler beside the feed) ⇒ RED by name on PROBE-A', async () => {
           if (!once(coSrc, FOLLOW)) return [false, 'the window\'s feed line is not spelled once'];
           const red = await r3Red('channel-outbox.js', coSrc.replace(FOLLOW, FOLLOW + "  app.ws.onGlobal((msg) => { if (msg.type === 'channel-outbox-updated' && msg.outbox) draw(msg.outbox); });\n"), 'm1');
@@ -3104,9 +3131,9 @@ async function chatReadLegs(ENGmod, name) {
           return [red.some((n) => /^R3 m2 /.test(n)), red];
         });
         await legOSC('MUTANT R3 m3 the filter\'s All outliving the filter (r2: the removal cleared only the filter) ⇒ RED by name on PROBE-C', async () => {
-          const DROP = '  function dropFilter() { filter = null; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }\n';
+          const DROP = '  function dropFilter() { filter = null; pressAll = false; if (forcedFrom !== undefined) { view = forcedFrom; forcedFrom = undefined; } }\n';
           if (!once(coSrc, DROP)) return [false, 'dropFilter is not spelled once'];
-          const red = await r3Red('channel-outbox.js', coSrc.replace(DROP, '  function dropFilter() { filter = null; }\n'), 'm3');
+          const red = await r3Red('channel-outbox.js', coSrc.replace(DROP, '  function dropFilter() { filter = null; pressAll = false; }\n'), 'm3');
           return [red.some((n) => /^R3 m3 /.test(n)), red];
         });
         await legOSC('MUTANT R3 m4 the reconnect re-reading the store\'s view only (r2) ⇒ RED by name on PROBE-D', async () => {
@@ -3114,6 +3141,292 @@ async function chatReadLegs(ENGmod, name) {
           if (!once(feedSrc3, BOTH)) return [false, 'the reconnect read is not spelled once'];
           const red = await r3Red('outbox-feed.js', feedSrc3.replace(BOTH, 'readOutboxView();'), 'm4');
           return [red.some((n) => /^R3 m4 /.test(n)), red];
+        });
+        // ── lane outbox-chip-door (userW inc-mw5r944f-60vt, 2026-11-07: «我还是无法分辨当前 session 相关的待发送 message 是哪些» — a row
+        // that NAMED the message opened the whole Outbox, its own card fifth and unmarked): §OCD. Law 1 a door inside a conversation
+        // shows THAT conversation's Outbox, the pressed proposal in view — the ONE door openTouchRow, the REAL window; never a clear
+        // of a filter the person opened; law 2 the filtered window opens on what waits; law 3 a row's state = the card's words; the
+        // door census: every `openChannelOutbox(` in src/ named inside / outside; r2: a press's All, no list held; seven mutants on the BUNDLE'S TEXT (no esbuild run) ──
+        const TOUCH = require(path.join(REPO, 'src/channel-touch.js'));
+        const ocdLegs = (W) => {
+          const mkWS = () => ({ hs: [], onGlobal(fn) { this.hs.push(fn); }, offGlobal(fn) { this.hs = this.hs.filter((h) => h !== fn); }, onStateChange() {} });
+          let stamp = 9.7e12;
+          const FILTER_A = { keys: KA, name: 'Writer' };
+          const open = async (opts, proposals = FX) => {
+            const c = new N('div');
+            const a = { ...appW, ws: mkWS(), wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
+            const ob = { ...OBX, proposals, at: (stamp += 1000) };
+            const keep = globalThis.fetch;
+            globalThis.fetch = async (url) => ({ ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? ob : /\/api\/channels\/api$/.test(String(url)) ? { cards: [] } : { ok: true }) });
+            let w;
+            try { w = W.openChannelOutbox(a, opts); await tick(8); } finally { globalThis.fetch = keep; }
+            const root = () => c.children[0], list = () => root().querySelector('.chan-outbox-list');
+            return {
+              w,
+              rows: () => list().querySelectorAll('.chan-orow').map((r) => r.dataset.orow),
+              head: () => (root().querySelector('.jobs-summary') || {}).textContent,
+              seg: () => root().querySelectorAll('.chan-seg .jobs-btn').filter((b) => b._cls.has('chan-seg-on')).map((b) => b.dataset.view).join('+'),
+              filter: () => { const f = list().querySelector('.chan-outbox-filter-text'); return f ? f.textContent : null; },
+              pressed: () => list().querySelectorAll('.chan-orow').filter((r) => r._cls.has('chan-orow-pressed')).map((r) => r.dataset.orow),
+              cardOpen: (id) => list().children.some((k) => k._cls && k._cls.has('chan-prop') && k.dataset.proposal === id),
+              pick: (v) => root().querySelector(`[data-view="${v}"]`).onclick(),
+              x: () => list().querySelector('.chan-outbox-filter-x').onclick(),
+            };
+          };
+          const door = (row, heldOb) => {
+            const calls = [], conv = [];
+            if (heldOb) W.noteOutbox({ ...OBX, proposals: heldOb, at: (stamp += 1000) });
+            W.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`) }, row, { filter: FILTER_A });
+            return { calls, conv };
+          };
+          const rowOf = (...ts) => TOUCH.foldTouches(ts.map((t, i) => ({ adapterId: 'lark', at: 1000 + i, kind: 'lark', ...t })))[0];
+          const COMPOSE = () => rowOf({ op: 'compose', proposalId: 'p-osc-w', title: 'A new thread' });
+          const REPLY = (id = 'p-osc-w') => rowOf({ op: 'reply', convId: 'oc_osc', proposalId: id, title: 'Ops room' });
+          return [
+            ['OCD law 1 the row of a composed message: the ONE door — the chat\'s filter AND `show` = the proposal it names, from inside', async () => {
+              const r = door(COMPOSE(), FX);
+              return [J(r.calls) === J([{ inside: true, filter: FILTER_A, show: 'p-osc-w' }]) && !r.conv.length, r];
+            }],
+            ['OCD law 1 the row of a drafted reply: its DRAFT, where it can be approved — never the thread (one tap further: the card\'s «Open the conversation»)', async () => {
+              const r = door(REPLY(), FX);
+              return [J(r.calls) === J([{ inside: true, filter: FILTER_A, show: 'p-osc-w' }]) && !r.conv.length, r];
+            }],
+            ['OCD law 1 a read row names no proposal: the conversation, as ever', async () => {
+              const r = door(rowOf({ op: 'read', convId: 'oc_read', count: 3 }), FX);
+              return [!r.calls.length && J(r.conv) === J(['lark/oc_read']), r];
+            }],
+            ['OCD a reply whose proposal the list no longer holds (the Outbox holds 200): the conversation, the door it always had; a composed one has nowhere else: the Outbox, the window says it is gone', async () => {
+              const a = door(REPLY('p-gone'), FX), b = door(rowOf({ op: 'compose', proposalId: 'p-gone' }), FX);
+              return [!a.calls.length && J(a.conv) === J(['lark/oc_osc']) && J(b.calls) === J([{ inside: true, filter: FILTER_A, show: 'p-gone' }]), { a, b }];
+            }],
+            ['OCD a row of two replies, the newest rejected, the older one waiting: the press lands on what WAITS', async () => {
+              const list = [{ id: 'p-two-1', state: 'awaiting-approval', at: 100 }, { id: 'p-two-2', state: 'rejected', at: 200 }];
+              const r = door(rowOf({ op: 'reply', convId: 'oc_osc', proposalId: 'p-two-1' }, { op: 'reply', convId: 'oc_osc', proposalId: 'p-two-2' }), list);
+              return [r.calls[0] && r.calls[0].show === 'p-two-1', r];
+            }],
+            ['OCD law 2 the door opens on what waits: filter chip, «Awaiting» selected, the head = the chip\'s numbers, the pressed card open and marked', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              return [v.filter() === 'drafted by Writer' && v.seg() === 'awaiting' && J(v.rows()) === J(['p-osc-w']) && v.head() === '1 awaiting your approval · 6 proposals' && v.cardOpen('p-osc-w') && J(v.pressed()) === J(['p-osc-w']), { f: v.filter(), s: v.seg(), r: v.rows(), h: v.head(), p: v.pressed() }];
+            }],
+            ['OCD law 2 a pressed proposal no longer waiting is in view too: «All», marked, its card open, the filter kept', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-e' });
+              return [v.filter() === 'drafted by Writer' && v.seg() === 'all' && v.rows().includes('p-osc-e') && v.cardOpen('p-osc-e') && J(v.pressed()) === J(['p-osc-e']), { f: v.filter(), s: v.seg(), r: v.rows(), p: v.pressed() }];
+            }],
+            ['OCD law 2 a conversation none of whose proposals wait opens on «All»', async () => {
+              const v = await open({ filter: FILTER_A }, FX.filter((p) => p.state !== 'awaiting-approval'));
+              return [v.seg() === 'all' && v.rows().length === 5 && v.head() === '0 awaiting your approval · 5 proposals', { s: v.seg(), r: v.rows(), h: v.head() }];
+            }],
+            ['OCD law 1 a door from INSIDE that names no conversation never clears a filter the person opened; `show` of a proposal the filter holds keeps it', async () => {
+              const v = await open({ filter: FILTER_A });
+              v.w._outboxDoor({ inside: true });
+              const bare = v.filter();
+              v.w._outboxDoor({ inside: true, show: 'p-osc-e' });
+              return [bare === 'drafted by Writer' && v.filter() === 'drafted by Writer' && J(v.pressed()) === J(['p-osc-e']), { bare, after: v.filter(), p: v.pressed() }];
+            }],
+            ['OCD law 4 a door from OUTSIDE (⚙ Outbox…, the panel\'s button) still clears it', async () => {
+              const v = await open({ filter: FILTER_A });
+              v.w._outboxDoor({});
+              return [v.filter() === null && v.head() === `3 awaiting your approval · ${FX.length} proposals`, { f: v.filter(), h: v.head() }];
+            }],
+            ['OCD a row of a helper\'s viewer (no filter of its own; the proposal drafted under its parent\'s id): the conversation that DRAFTED it, by the name the session list knows', async () => {
+              const v = await open({});
+              v.w._outboxDoor({ inside: true, show: 'p-osc-w' });
+              return [v.filter() === 'drafted by Writer' && v.seg() === 'awaiting' && J(v.pressed()) === J(['p-osc-w']), { f: v.filter(), s: v.seg(), p: v.pressed() }];
+            }],
+            ['OCD another conversation\'s door hands the view back to the census; the owner\'s All within the SAME conversation stays through a press', async () => {
+              const v = await open({ filter: FILTER_A });
+              v.pick('all');
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              const same = v.seg();
+              v.w._outboxDoor({ filter: { keys: KB, name: 'Reviewer' } });
+              return [same === 'all' && v.seg() === 'awaiting' && J(v.rows()) === J(['p-osc-b1']), { same, other: v.seg(), r: v.rows() }];
+            }],
+            ['OCD a proposal the list no longer holds: said (its own words), the conversation\'s filter stays', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-gone' });
+              const said = document.body.querySelectorAll('.global-toast-body').map((n) => n.textContent);
+              return [v.filter() === 'drafted by Writer' && v.seg() === 'awaiting' && !v.pressed().length && said.includes('This proposal is not in the Outbox list any more'), { f: v.filter(), s: v.seg(), said }];
+            }],
+            // r2 (acceptance H3): a press's forced All is the press's, never the owner's — the view under it stays what it was
+            ['OCD H3 THE FIVE STEPS: the filter → Awaiting picked → a rejected row (All) → a waiting row of the same conversation ⇒ Awaiting → × ⇒ what a plain open shows', async () => {
+              const fresh = await open({});
+              const want = { s: fresh.seg(), h: fresh.head(), r: fresh.rows() };
+              const v = await open({ filter: FILTER_A });
+              const steps = [];
+              v.pick('awaiting'); steps.push(v.seg());
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-e' }); steps.push(v.seg());
+              const marked = v.pressed().join();
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' }); steps.push(v.seg());
+              v.x();
+              const got = { s: v.seg(), h: v.head(), r: v.rows() };
+              return [J(steps) === J(['awaiting', 'all', 'awaiting']) && marked === 'p-osc-e' && J(got) === J(want) && want.s === 'awaiting' && v.filter() === null, { steps, marked, got, want }];
+            }],
+            ['OCD H3 a press\'s All dies with the filter: Awaiting picked, a rejected row, × straight away ⇒ Awaiting, not All', async () => {
+              const v = await open({ filter: FILTER_A });
+              v.pick('awaiting');
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-e' });
+              const forced = v.seg();
+              v.x();
+              return [forced === 'all' && v.seg() === 'awaiting' && v.head() === `3 awaiting your approval · ${FX.length} proposals`, { forced, s: v.seg(), h: v.head() }];
+            }],
+            ['OCD H3 no pick: the next press hands the view back to the census — a rejected row (All), a waiting row ⇒ Awaiting, a rejected row again (All), a bare press ⇒ Awaiting', async () => {
+              const v = await open({ filter: FILTER_A });
+              const s = [];
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-e' }); s.push(v.seg());
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' }); s.push(v.seg());
+              v.w._outboxDoor({ inside: true, show: 'p-osc-e' }); s.push(v.seg());
+              v.w._outboxDoor({ inside: true }); s.push(v.seg());
+              return [J(s) === J(['all', 'awaiting', 'all', 'awaiting']), s];
+            }],
+            ['OCD H3 the owner\'s All is the owner\'s: picked under the filter it stays through every press and the ×; a forced All the owner then presses becomes theirs', async () => {
+              const v = await open({ filter: FILTER_A });
+              v.pick('all');
+              const s = [];
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-e' }); s.push(v.seg());
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' }); s.push(v.seg());
+              v.x(); s.push(v.seg());
+              const u = await open({ filter: FILTER_A });
+              u.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-e' });
+              u.pick('all');
+              u.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              return [J(s) === J(['all', 'all', 'all']) && u.seg() === 'all', { s, u: u.seg() }];
+            }],
+            ['OCD H3 law 4 a door from OUTSIDE keeps its All where no filter stands: «replaced» on a plain window, then another', async () => {
+              const v = await open({});
+              const s = [v.seg()];
+              v.w._outboxDoor({ show: 'p-osc-e' }); s.push(v.seg());
+              v.w._outboxDoor({ show: 'p-osc-w' }); s.push(v.seg());
+              return [J(s) === J(['awaiting', 'all', 'all']) && !v.pressed().length, { s, p: v.pressed() }];
+            }],
+            ['OCD law 3 a row says each state in the card\'s OWN words: the row\'s words = the Outbox row\'s chip + marks, for every state', async () => {
+              W.noteOutbox({ ...OBX, proposals: FX, at: (stamp += 1000) });
+              const off = [];
+              for (const p of FX) {
+                const card = W.renderProposalRow({ ...appW }, p);
+                const want = [...card.querySelectorAll('.chan-prop-state'), ...card.querySelectorAll('.chan-prop-mark')].map((n) => n.textContent);
+                const got = W.rowProposalWords(rowOf({ op: 'compose', proposalId: p.id })).map((w) => w.text);
+                if (J(got) !== J(want) || !want.length) off.push({ id: p.id, want, got });
+              }
+              const named = W.rowProposalWords(rowOf({ op: 'compose', proposalId: 'p-osc-old' })).map((w) => w.text);
+              return [!off.length && J(named) === J(['withdrawn', 'replaced']), { off, named }];
+            }],
+            ['OCD law 3 two replies on a row are counted, what waits first; a read row, a raw API row and a proposal the list does not hold say nothing', async () => {
+              W.noteOutbox({ ...OBX, proposals: [{ id: 'pa', state: 'sent', at: 2 }, { id: 'pb', state: 'awaiting-approval', at: 1 }, { id: 'pc', state: 'sent', at: 3 }], at: (stamp += 1000) });
+              const three = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pa' }, { op: 'reply', convId: 'oc', proposalId: 'pb' }, { op: 'reply', convId: 'oc', proposalId: 'pc' })).map((w) => w.text);
+              const none = [rowOf({ op: 'read', convId: 'oc', count: 1 }), rowOf({ op: 'api', id: 'c1', proposalId: 'pa', title: 'x' }), rowOf({ op: 'compose', proposalId: 'p-gone' })].map((r) => W.rowProposalWords(r).length);
+              return [J(three) === J(['awaiting your approval', 'sent ×2']) && J(none) === J([0, 0, 0]), { three, none }];
+            }],
+          ];
+        };
+        const runOCD = async (W, only = null) => { const out = []; for (const [n, fn] of ocdLegs(W)) { if (only && !only.test(n)) continue; let r; try { r = W ? await fn() : [false, 'no bundle']; } catch (e) { r = [false, String((e && e.stack) || e).slice(0, 300)]; } out.push([n, r]); } return out; };
+        for (const [n, r] of await runOCD(R3)) await legOSC(n, () => r);
+        // the mutants: one line of the BUNDLE'S TEXT changed (a text swap and an import — no esbuild run, the row's budget)
+        const OCD_TEXT = fs.readFileSync(path.join(dir, 'osc-r3-real.mjs'), 'utf-8');
+        // r2 (acceptance H4): NO LIST HELD — a bundle imported fresh: its feed has read nothing, its real lookup is null
+        const NO_LIST = ['OCD H4 no list held (the feed\'s first read not landed, or failed): a reply row opens the conversation, its door before this lane', 'OCD H4 no list held: a composed row opens the Outbox with the proposal named — it has nowhere else; the row says no state it cannot know', 'OCD H4 the list landed: the row\'s door is the normal one — the reply opens its DRAFT; one the list no longer holds, the conversation', 'OCD H4 the window says what it knows: its read failed ⇒ «The outbox is not available.»; the list the feed then holds shows the press, marked'];
+        const noListLegs = async (name, text) => { try { return await noListRun(name, text); } catch (e) { return NO_LIST.map((n) => [n, [false, String((e && e.stack) || e).slice(0, 300)]]); } };
+        const noListRun = async (name, text) => {
+          const f = path.join(dir, `osc-ocd-nolist-${name}.mjs`);
+          fs.writeFileSync(f, text);
+          const M = await import(f);
+          const F = { keys: KA, name: 'Writer' };
+          const rowOf = (t) => TOUCH.foldTouches([{ adapterId: 'lark', at: 1000, kind: 'lark', ...t }])[0];
+          const REPLY = (id) => rowOf({ op: 'reply', convId: 'oc_osc', proposalId: id, title: 'Ops room' });
+          const COMPOSE = () => rowOf({ op: 'compose', proposalId: 'p-osc-w', title: 'A new thread' });
+          const pressOf = (M, row) => { const calls = [], conv = []; M.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`) }, row, { filter: F }); return { calls, conv }; };
+          const reply = pressOf(M, REPLY('p-osc-w')), composed = pressOf(M, COMPOSE()), words = M.rowProposalWords(REPLY('p-osc-w')).length;
+          // the window's read fails: it says so and keeps the press; the list the feed then holds shows it
+          const c = new N('div');
+          const a = { ...appW, ws: { hs: [], onGlobal(fn) { this.hs.push(fn); }, offGlobal() {}, onStateChange() {} }, wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
+          const keep = globalThis.fetch;
+          globalThis.fetch = async () => { throw new Error('the read failed'); };
+          try { M.openChannelOutbox(a, { inside: true, filter: F, show: 'p-osc-w' }); await tick(8); } finally { globalThis.fetch = keep; }
+          const list = () => c.children[0].querySelector('.chan-outbox-list');
+          const said = (c.children[0].querySelector('.jobs-summary') || {}).textContent;
+          M.noteOutbox({ ...OBX, proposals: FX, at: 9.8e12 });
+          await tick(2);
+          const marked = list().querySelectorAll('.chan-orow').filter((r) => r._cls.has('chan-orow-pressed')).map((r) => r.dataset.orow);
+          const landed = pressOf(M, REPLY('p-osc-w')), gone = pressOf(M, REPLY('p-gone'));
+          return [
+            [NO_LIST[0], [!reply.calls.length && J(reply.conv) === J(['lark/oc_osc']), reply]],
+            [NO_LIST[1], [J(composed.calls) === J([{ inside: true, filter: F, show: 'p-osc-w' }]) && !composed.conv.length && words === 0, { composed, words }]],
+            [NO_LIST[2], [J(landed.calls) === J([{ inside: true, filter: F, show: 'p-osc-w' }]) && !gone.calls.length && J(gone.conv) === J(['lark/oc_osc']), { landed, gone }]],
+            [NO_LIST[3], [said === 'The outbox is not available.' && J(marked) === J(['p-osc-w']), { said, marked }]],
+          ];
+        };
+        for (const [n, r] of await noListLegs('real', OCD_TEXT)) await legOSC(n, () => r);
+        const ocdRed = async (name, from, to, want) => {
+          if (OCD_TEXT.split(from).length !== 2) return null;
+          const f = path.join(dir, `osc-ocd-${name}.mjs`);
+          fs.writeFileSync(f, OCD_TEXT.replace(from, to));
+          return (await runOCD(await import(f), want)).filter(([, r]) => !r[0]).map(([n]) => n);   // the leg it must red, not all of them: the row's budget
+        };
+        for (const [name, label, from, to, want] of [
+          ['door', 'a door that drops the chat\'s filter ⇒ RED on the rows\' door', '...v.filter ? { filter: v.filter } : {}', '...{}', /^OCD law 1 the row of a composed message/],
+          ['clear', 'a door from inside clearing an open filter (the base\'s `_outboxDoor`) ⇒ RED on «never clears»', ' && !o.inside) setOutboxFilter(null)', ') setOutboxFilter(null)', /^OCD law 1 a door from INSIDE/],
+          ['all', 'the filter forcing «All» again (the base) ⇒ RED on «opens on what waits»', 'let forcedFrom = filter ? view : void 0;', 'let forcedFrom = filter ? view : void 0; if (filter) view = "all";', /^OCD law 2 the door opens on what waits/],
+          ['words', 'a row saying its proposal\'s raw state (a second vocabulary) ⇒ RED on «the card\'s OWN words»', 'for (const w of proposalWords(p))', 'for (const w of [{ cls: "x", text: p.state }])', /^OCD law 3 a row says each state/],
+          ['h3', 'a press writing its All over the owner\'s view (r1\'s `show`) ⇒ RED on the five steps', 'pressAll = true;', 'view = "all";', /^OCD H3 THE FIVE STEPS/],
+        ]) {
+          await legOSC(`MUTANT OCD ${label}`, async () => { const red = await ocdRed(name, from, to, want); return [!!red && red.some((n) => want.test(n)), red === null ? `not spelled once in the bundle: ${from}` : red]; });
+        }
+        for (const [name, label, from, to, want] of [
+          ['h4', 'a row naming its proposal with no list held (r1\'s guess) ⇒ RED on the reply\'s conversation', 'return row.convId ? null : String(row.proposalId);', 'return String(row.proposalId);', /^OCD H4 no list held \(the feed/],
+          ['h4p', 'a press forgotten when the window\'s read failed ⇒ RED on «says what it knows»', 'if (readFailed && last) showPending();', '', /^OCD H4 the window says what it knows/],
+        ]) {
+          await legOSC(`MUTANT OCD ${label}`, async () => {
+            if (OCD_TEXT.split(from).length !== 2) return [false, `not spelled once in the bundle: ${from}`];
+            const red = (await noListLegs(name, OCD_TEXT.replace(from, to))).filter(([, r]) => !r[0]).map(([n]) => n);
+            return [red.some((n) => want.test(n)), red];
+          });
+        }
+        // THE DOOR CENSUS: every `openChannelOutbox(` call in src/, by file and what it says — a new door must say which it is
+        await legOSC('OCD THE DOOR CENSUS: every call of openChannelOutbox is named INSIDE a conversation (names its filter / `inside`) or OUTSIDE (clears a filter); a new door is RED until it says which', () => {
+          const DOORS = [
+            ['src/lib/channel-touch-view.js', "app.openChannelOutbox({ inside: true, ...(v.filter ? { filter: v.filter } : {}), ...(v.show ? { show: v.show } : {}) })", 'inside', 'a row that names a proposal: the Channels chip\'s rows + the tool-card rows, the ONE door'],
+            ['src/lib/chat-view.js', 'this.app.openChannelOutbox?.({ filter: this._outboxFilter() })', 'inside', 'the chat\'s «Outbox · N» chip'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ show: String(p.replacedBy) })', 'keeps', '«replaced»: keeps the view, drops the filter only when it hides the newer one'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ filter: f })', 'inside', 'a card\'s «Only drafts by <agent>»'],
+            ['src/lib/channel-outbox.js', 'c.app.openChannelOutbox({ filter: { keys: sessionKeysOf(c.s), name: c.displayName || c.s.name || t(\'this conversation\') } })', 'inside', 'the session menu\'s «Outbox of this conversation»'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ syncId })', 'keeps', 'a layout replay'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox(); };', 'outside', 'a channel window\'s «Open the Outbox» (a Lark / Slack conversation, not a chat)'],
+            ['src/lib/channel-outbox.js', 'c.app.openChannelOutbox() })', 'outside', '⚙ command «Outbox…»'],
+            ['src/lib/channel-outbox.js', 'run: (c) => c.app.openChannelOutbox(),', 'outside', '⚙ menu «Outbox…»'],
+            ['src/lib/channels-panel.js', '() => app.openChannelOutbox()', 'outside', 'the rail panel\'s Outbox button'],
+            ['src/lib/channel-account-dialogs.js', 'close(); app.openChannelOutbox();', 'outside', 'an account dialog\'s «Open Outbox»'],
+          ];
+          const files = [...new Set(DOORS.map((d) => d[0]))];
+          const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
+          const sites = {};
+          for (const f of walk(path.join(REPO, 'src'))) {
+            const rel = path.relative(REPO, f).split(path.sep).join('/');
+            if (rel === 'src/lib/app.js') continue;   // the method itself
+            const n = fs.readFileSync(f, 'utf-8').split(/\bopenChannelOutbox(?:\?\.)?\(/).length - 1;
+            if (n) sites[rel] = n;
+          }
+          const fn = /export function openChannelOutbox\(/;
+          const bad = [];
+          for (const [f, n] of Object.entries(sites)) {
+            const src = fs.readFileSync(path.join(REPO, f), 'utf-8');
+            const named = DOORS.filter((d) => d[0] === f).length + (fn.test(src) ? 1 : 0);
+            if (!files.includes(f) || named !== n) bad.push({ f, calls: n, named });
+          }
+          for (const d of DOORS) if (!fs.readFileSync(path.join(REPO, d[0]), 'utf-8').includes(d[1])) bad.push({ gone: d[3] });
+          const insideRows = DOORS.filter((d) => d[2] === 'inside').every((d) => /inside: true|filter:/.test(d[1]));
+          return [!bad.length && insideRows && DOORS.length === 11, bad];
+        });
+        await legOSC('OCD the filter bar stays on screen: sticky over an opaque background; EVERYTHING the window scrolls to clears it — one selector list, one variable for the bar\'s height, no bar no margin (the geometry: chrome ㉕)', () => {
+          const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
+          const src = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+          const bar = /\n\.chan-outbox-filter \{([^}]*)\}/.exec(css);
+          const barOk = !!bar && /position: sticky/.test(bar[1]) && /top: -10px/.test(bar[1]) && /margin-top: -10px/.test(bar[1]) && /background: var\(--bg-window\)/.test(bar[1]) && /height: var\(--chan-outbox-bar\)/.test(bar[1]);
+          const rule = css.includes('.chan-outbox-list:has(> .chan-outbox-filter) :is(.chan-orow, .chan-prop, .chan-outbox-sec) { scroll-margin-top: calc(var(--chan-outbox-bar) + 4px); }');
+          const oneRule = (css.match(/chan-[^\n{]*\{[^}\n]*scroll-margin-top/g) || []).length === 1;
+          const targets = (src.match(/\.scrollIntoView\(/g) || []).length;   // reveal (a card, its row), onReview (a card), onAll (a head), show (a row): a new one says what it lands on
+          return [barOk && rule && oneRule && targets === 5, { bar: bar && bar[1], rule, oneRule, targets }];
+        });
+        await legOSC('OCD the wiring: the chip\'s rows and the tool-card rows reach the ONE door WITH the chat\'s filter; the row\'s state words come through the chat', () => {
+          const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf-8'), tv = fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf-8'), sb = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf-8');
+          return [cv.includes('onChannelOpen: (row) => openTouchRow(this.app, row, { filter: this._outboxFilter() })') && tv.includes('openTouchRow(view.app, rowEl._row, { filter: view._outboxFilter?.() || null })') && cv.includes('channelRowWords: rowProposalWords') && sb.includes('this._paintChannelRowStates();\n    const face = outboxChipFace(v);'), 'wiring'];
         });
       }
     } finally { Date.now = realNow; }
