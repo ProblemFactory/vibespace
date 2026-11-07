@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.386 — 2026-11-07
+
+### Fixed
+- A chat row where the agent replied, then searched, opens the search results again. Pressing a message gone from the Outbox clears the previous one's mark.
+
 ## 2.369.385 — 2026-11-07
 
 ### Fixed

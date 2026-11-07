@@ -4,6 +4,17 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.386 — 2026-11-07
+
+### outbox-chip-door round 3 — the newest op is still what the agent did; a press always moves the mark (the r2 acceptance; f0aa29802 shipped in .384 as is)
+- **J1, a behaviour change against .384.** `openVerdict` asked for the proposal a row names before its newest op, so a reply-then-search row opened the Outbox once the feed held the proposal and the hits before that, and the row's door disagreed with the fold's tail. The base's order is back with one step added after the search (lane channel-search-view, the owner 2026-10-04). A reply or a compose as the newest ⇒ the Outbox with `show`. **The choice the brief left open:** a read after a reply keeps the draft's door, since a thread is one tap away on the card and a search's hits have no other door; test-channel-touch pins it, kb-features' census states it.
+- **J2.** `pressed` moves on every press, before the gone guard: a gone proposal leaves no row marked and the toast says it. Same law, two more doors: a press naming nothing clears the mark, and a gone press in a helper's viewer lifts the last press's All, as the filter door always did. The old card stays open, as when a press lands on another row: closing it could drop what the person is editing.
+- **J3.** Both unpinned branches have legs and mutants: `refresh()`'s failed read with a list held; `show()`'s `pressAll` on the helper-viewer path, reached only when the filter already holds the next proposal. Trap: J3a's first stub failed only the Outbox read, the API read's notification took the press down the other branch, and the mutant stayed green. A failed-read stub fails every read.
+- **J4.** test-channel-touch's row by count: 372 legs (r1 360, r2 363). test-channel-outbox's row: 5.2 → 5.4 s, 657 legs, measured interleaved with r2's suite (+0.18 s). `FAST_SUM_CAP_MS` unchanged.
+
+### int386 — the .386 train's own notes (lane int361; on c6ddc30e6 = 2.369.385)
+- **test-chat-needs-card-chrome splits at ⑫|⑬ into two named halves (B-419b).** One 161-leg suite sat ~65 s under its 840-s ceiling; on master .383 and on the .385 mirror a red plus ci.mjs's retry ran a 45-min shard out. Split by meaning: the card half keeps ⓪–⑫ (the card, the accordion, the holds); NEW test-chat-needs-strip-chrome takes ⑬–㉒ whole (the stacked tail, the tail r2, the dock, the announce, the pick, the held stack) on the same boot harness. The round-five helpers and the desktop load are ONE module, scripts/chat-needs-kit.mjs; the strip half never runs ⓪, builds none of the card half's RED-control bundles, and its first assert names the bundle it was served. Each half's ceiling from its own measured wall (1.5 × wall × 1.21, up to 30 s): card 480 s / 540-s budget, strip 780 s / 840-s budget; the halves land in different shards; the kb's ⑬–㉒ gate pointers name the strip half.
+
 ## 2.369.385 — 2026-11-07
 
 ### cli-2-1-319-records — the box's claude 2.1.319 measured and classified (B-7a49)
