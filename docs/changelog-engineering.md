@@ -14,6 +14,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Round 3 (round-2 acceptance of ea741984b: D1, D2 and the core held; two minors in the new writer).** M1: a row held after a failed write was never written at shutdown, so freeing the space and restarting inside the 60-s retry lost it; `stop()` now writes what is held and server.js `shutdownNow` calls it. M2: one failed read that was not ENOENT emptied the store for the hub's life and the next lost write overwrote every other conversation's row; a failed read is now tried again, and a store that has not read its file never writes it. Pins in test-helper-ask ⑱f, RED on ea741984b.
 - **The real binary** ran only under the measurement's rung, against the loopback mock, plus one `--version` under strace behind a dead proxy (0 connects, nothing written to its scratch HOME). Every suite ran with VS_NO_REAL_CLI=1, the oracle on 0644 copies.
 
+### int385 — the .385 hotfix's own notes (lane int361; on 1f71a9879 = 2.369.384)
+- **cli-2-1-319-records, picked onto .384 (B-7a49: the box's Claude CLI updated to 2.1.319 at 2026-11-07 00:27Z; the owner's pool was 11 members short).** ONE commit c01592910 on 8b3fdb6ab; its bullet sat under «## 2.369.384» (written before .384 shipped), so its unit carries `{"head": "2.369.384"}` and the assembler re-heads it here. No hand resolution beyond the changelog (held) and one kb INDEX hunk (the resolver); i18n exact (10 added). test-record-shape green against 2.1.319, 2.1.314 and 2.1.312.
+- **test-helper-ask's fast row restates its measurement (the train's seam).** It stated 1.3 s; the lane's acceptance measured 1.37–1.49 s and the base itself 1.42 s (the row was stale); ×3 bare on the merged tree: 1.39 / 1.41 / 1.39 s ⇒ 1.4 s. The merged fast sum 937.69 s over 539 rows stays under the 938-s cap.
+
 ## 2.369.384 — 2026-11-06
 
 ### outbox-chip-door — every door inside a conversation opens THAT conversation's Outbox, the pressed proposal in view (HOTFIX; userW inc-mw5r944f-60vt: «我还是无法分辨当前 session 相关的待发送 message 是哪些»)
