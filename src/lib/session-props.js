@@ -5,6 +5,7 @@ import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
+import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
 import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): did a tasks-updated delta move anything but a log
@@ -73,6 +74,19 @@ function browserSessionsCount(s, onChange) {
  * needed except the account select, which re-applies its value).
  * openSpec `openSessionProps` replays across clients/restores.
  */
+/** lane mask-value-shape: a status's words holding a link a belt masked inside say so (escaped). r3 (H): the reason's note is its own
+ *  flex item after the row's words — the Now value is a nowrap row, so the note takes a line of its own (style.css `:has`). */
+const maskNoteHtml = (words) => { const n = maskedNoteOf(words, t); return n ? ` <span class="masked-link-note">${escHtml(n)}</span>` : ''; };
+/** THE «Now» VALUE of a session's status record (the current state, its reason — a cleared one in this device's words — and its detail),
+ *  as HTML (every string escaped). r4: module-level so the masked-note render leg draws the real markup. */
+export function statusNowHtml(st) {
+  const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: st.state, color: 'var(--text-dim)' }) : null;
+  const urgMark = st?.urgency ? (SESSION_URGENCY_META[st.urgency]?.mark || '') : '';
+  return meta
+    ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)"${isCleared(st) ? ' class="rc-cleared"' : ''}>— ${escHtml(isCleared(st) ? clearedText() : st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.reason && !isCleared(st) ? maskNoteHtml(st.reason) : ''}${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}${maskNoteHtml(st.detail)}</div></details>` : ''}`
+    : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
+}
+
 export function openSessionProps(app, sessionRef, { syncId } = {}) {
   const sidebar = app.sidebar;
   const refKey = typeof sessionRef === 'string' ? sessionRef : sidebar._getSessionStateKey(sessionRef);
@@ -103,14 +117,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   winInfo.content.appendChild(root);
 
   /** The "Now" value — the CURRENT status record's state, reason (a cleared one in this device's words) and detail. */
-  const nowHtml = (s) => {
-    const st = sidebar.getSessionStatus?.(s);
-    const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: st.state, color: 'var(--text-dim)' }) : null;
-    const urgMark = st?.urgency ? (SESSION_URGENCY_META[st.urgency]?.mark || '') : '';
-    return meta
-      ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)"${isCleared(st) ? ' class="rc-cleared"' : ''}>— ${escHtml(isCleared(st) ? clearedText() : st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}</div></details>` : ''}`
-      : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
-  };
+  const nowHtml = (s) => statusNowHtml(sidebar.getSessionStatus?.(s));   // lane mask-value-shape r4: the row's markup is module-level (a render leg draws the real one)
   /** The status HISTORY timeline, fetched and drawn into `histList` — the whole render and the select guard's in-place
    *  repaint below share it (a history entry is a record's words; the store's broadcast is the refetch). */
   const fillHistory = (histList, s) => {

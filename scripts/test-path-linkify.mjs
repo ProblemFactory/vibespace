@@ -413,7 +413,9 @@ const REVERT = [
 ];
 const hits8 = REVERT.map(([from]) => cr.split(from).length - 1);
 eq(hits8, [1, 1, 1], "the base control's three renderer patches each apply exactly once");
-const base = await renderer((src) => REVERT.reduce((s, [from, to]) => s.split(from).join(to), src), { linkify: BASE_GATE });
+// lane mask-value-shape (⑨): the base renderer also has no masked-link branches — its two lines cut in the SAME build (one esbuild pass)
+const MVS_CUT = [["      if (mask) return this._maskedToken(raw, mask);\n", ""], ["      if (anchor) { const masked = this._maskedAnchor(match); if (masked) return masked; } // lane mask-value-shape: a link a belt masked inside is words + the note\n", ""], ["    html = this._linkifyBareText(html, (txt) => !MARK_WORD_RE.test(txt) ? txt : txt.replace(MASKED_PATH_RE, (run) => { const mask = pathMask(run); return mask ? this._maskedToken(run, mask) : run; }));\n", ""], ["      const fmask = linkMask(raw); if (fmask) return this._maskedToken(raw, fmask);   // r3 (I): a file: URL a belt masked inside is words + the note\n", ""], ["            if (linkMask(txt)) { const cm = pathMask(txt); return open + (cm ? this._maskedWords(inner, cm) : inner) + close; }   // r3 (I, E): a masked relative path is words + the note; a bare mark is words\n", ""]];   // r3/r4: the five masked roads of the chat
+const base = await renderer((src) => [...REVERT, ...MVS_CUT].reduce((s, [from, to]) => s.split(from).join(to), src), { linkify: BASE_GATE });
 const baseAgy = base.renderMarkdown(AGY);
 ok(!spans(baseAgy).length && /<a>SKILL\.md<\/a>/.test(baseAgy) && /<a>inspect\.py<\/a>/.test(baseAgy), `RED CONTROL (the base): Antigravity's file: links render as a bare <a> with no href (the sanitizer dropped it) — no click handler reads one: «点不了» (${baseAgy.trim()})`);
 const baseDoc = base.renderMarkdown('[doc](/home/u/标书研究/a.md)');
@@ -423,6 +425,133 @@ ok(!spans(baseDoc).length && tgt.fp === '/home/u/%E6%A0%87%E4%B9%A6%E7%A0%94%E7%
 eq(spans(base.renderMarkdown('the full output in a file at file:///home/u/x/out.txt.')), [`${P1}|data-path="///home/u/x/out.txt"|///home/u/x/out.txt`], '…a bare file: URL links only its ///… tail');
 eq(base.renderMarkdown('`标书研究/方案.md`').trim(), '<p><code>标书研究/方案.md</code></p>', '…the CJK-first relative path is plain text');
 eq(base.renderMarkdown(CONV).trim(), CONV_TODAY, '…and the base control renders it the same: agy-subagent-cards markConversationLinks / conversationLinksHtml sit outside this suite\'s pick-2 revert');
+console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEVER LOOKS WHOLE in the chat — a peer card (a group message, a stashed one) draws a URL a belt masked inside as WORDS + the note; a whole URL stays one link');
+{
+  const RED = '«redacted»';
+  const MASKED = 'sign in at https://app.example.com/login?token=' + RED + '&next=%2Fhome then reply';
+  const VAULT = 'call https://api.example.com/v1/q?key=[vault:apikey:example] now';
+  const WHOLE = 'https://accounts.google.com/o/oauth2/auth?response_type=code&prompt=consent&token_usage=remote&access_type=offline';
+  const NOTE = 'Part of this link was masked, so it will not open — ask the agent to send the link without the secret.';
+  const linkOver = (h) => /<a\b[^>]*href="[^"]*(?:%C2%AB|«|%5Bvault|\[vault)[^"]*"/i.test(h) || /data-href="[^"]*(?:«|\[vault)/.test(h);
+  for (const [entry, fn] of Object.entries({ 'tool output (linkifyText)': (r, s) => r.linkifyText(s), 'a peer card / assistant markdown (renderMarkdown)': (r, s) => r.renderMarkdown(s) })) {
+    const h = fn(head, MASKED), hv = fn(head, VAULT), hw = fn(head, WHOLE);
+    ok(!linkOver(h) && /<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»&amp;next=%2Fhome<\/span> <span class="chat-link-note masked-link-note">/.test(h) && h.includes(NOTE), `${entry}: the masked URL is words + the note, no link to the mangled target`);
+    ok(!linkOver(hv) && /it holds the vault entry apikey:example: reveal it in Vault/.test(hv), `${entry}: a vault mark names its road (the entry, revealed in Vault)`);
+    ok(!/masked-link-note/.test(hw) && (/data-href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&amp;prompt=consent&amp;token_usage=remote&amp;access_type=offline"/.test(hw) || /<a href="https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?response_type=code&(?:amp;)?prompt=consent&(?:amp;)?token_usage=remote&(?:amp;)?access_type=offline"/.test(hw)), `${entry}: a whole URL (the owner's shape) stays ONE link to its whole target`);
+  }
+  // r2 (m3): a vault mark in an HREF — a titled link (marked leaves the colon raw: %5Bvault:…%5D), the reference-style link, the agent-entry
+  // label — is words + the note on the peer card; (m6) the label is words: a whole href stays a link whatever its label says; (m4) a PATH
+  // a belt masked inside is words + the note, a plain path stays a path link
+  const M3 = { 'a titled link': '[Call](https://api.example.com/v1/q?key=[vault:apikey:example]&x=1)', 'the reference-style link': 'see [d][r] now\n\n[r]: https://api.example.com/v1/q?key=[vault:apikey:example]', 'the agent-entry label': '[q](https://api.example.com/v1/q?key=[vault:agent:conv-1/gh-token])' };
+  for (const [n, s] of Object.entries(M3)) { const h = head.renderMarkdown(s); ok(!linkOver(h) && !/<a\b/.test(h) && /class="chat-link-masked"/.test(h) && /it holds the vault entry (apikey:example|agent:conv-1\/gh-token): reveal it in Vault/.test(h), `r2 (m3) ${n} with a vault mark in its HREF: words + the note naming the entry, no anchor`); }
+  const m6 = head.renderMarkdown('[how the «redacted» marker works](https://docs.example.com/belt)');
+  ok(/<a href="https:\/\/docs\.example\.com\/belt">how the «redacted» marker works<\/a>/.test(m6) && !/masked-link-note/.test(m6), 'r2 (m6): the label is words — a whole href stays ONE link whatever its label mentions');
+  for (const [entry, fn] of Object.entries({ 'tool output': (r, x) => r.linkifyText(x), 'a peer card': (r, x) => r.renderMarkdown(x) })) {
+    const hp = fn(head, 'The report: /home/u/out/[vault:secret:run]/report.md here'), hq = fn(head, 'plain /home/u/x/report.md');
+    ok(/<span class="chat-link-masked">\/home\/u\/out\/\[vault:secret:run\]\/report\.md<\/span> <span class="chat-link-note masked-link-note">/.test(hp) && !/data-path="\/home\/u\/out/.test(hp) && /data-path="\/home\/u\/x\/report\.md"/.test(hq), `r2 (m4) ${entry}: a masked PATH is words + the note; a plain path stays a path link`);
+  }
+  // r3 (D): a masked token is EXACTLY its path / URL token — in CJK prose the path before a masked KEY=value stays ONE link, no note
+  for (const [lg, x] of Object.entries({ en: 'Wrote /home/u/proj/config/app.env, where API_KEY=«redacted», see.', zh: '已写入 /home/u/proj/config/app.env，其中API_KEY=«redacted»，请查看。', ja: '/home/u/proj/config/app.env に書き込み、API_KEY=«redacted»、確認してください。' })) {
+    for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) {
+      const h = fn(head, x);
+      ok(/data-path="\/home\/u\/proj\/config\/app\.env"/.test(h) && !/masked-link-note|chat-link-masked/.test(h), `r3 (D) ${lg}, ${entry}: the path stays ONE link, the masked KEY=value is words with no note`);
+    }
+  }
+  const dUrl = head.linkifyText('请打开https://app.example.com/login?token=«redacted»，然后看。');
+  const dMd = head.renderMarkdown('请打开https://app.example.com/login?token=«redacted»，然后看。');
+  ok([dUrl, dMd].every((h) => /<span class="chat-link-masked">https:\/\/app\.example\.com\/login\?token=«redacted»<\/span>/.test(h) && /<\/span>，然后看。/.test(h)), 'r3 (D): a masked URL in CJK prose (text and markdown) — the masked span is the URL token, the prose after it words');
+  // r3 (E): a BARE vault mark is words — no masked «link», no note
+  for (const x of ['value: [vault:secrets/db/secret] then', 'API_KEY=[vault:secrets/db/secret]', '`[vault:secrets/db/secret]`']) { const h = head.linkifyText(x), m = head.renderMarkdown(x); ok(!/masked-link-note|chat-link/.test(h) && !/masked-link-note|chat-link/.test(m), `r3 (E): a bare mark is words — ${x}`); }
+  // r3 (I): every linkifier road asks the mark — a file: URL (text + markdown), a backticked path in tool output; the note itself is never
+  // linkified (an entry name holding a path); an entry name with & < is escaped ONCE
+  const fu = 'open file:///home/u/proj/«redacted»/x.md now';
+  ok(/class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.linkifyText(fu)) && /class="chat-link-masked">file:\/\/\/home\/u\/proj\/«redacted»\/x\.md</.test(head.renderMarkdown(fu)) && !/data-path="\/home\/u\/proj\/«/.test(head.linkifyText(fu)), 'r3 (I): a file: URL a belt masked inside is words + the note (text and markdown)');
+  const bt = head.linkifyText('run `/home/u/«redacted»/x.md` and `/home/u/proj/[vault:secret:run]/x.md`');
+  ok((bt.match(/class="chat-link-masked">/g) || []).length === 2 && !/data-path="\/home\/u\/«|data-path="\/home\/u\/proj\/\[vault"/.test(bt), 'r3 (I): a backticked masked path in tool output is words + the note, never a (truncated) path link');
+  const np = head.renderMarkdown('see /home/u/out/[vault:secret:/home/u/k.pem]/r.md');
+  ok(/it holds the vault entry secret:\/home\/u\/k\.pem: reveal it in Vault/.test(np) && !/data-path="\/home\/u\/k\.pem/.test(np), 'r3 (I): the note is never linkified — an entry name holding a path stays words in it');
+  const amp = head.renderMarkdown('see /home/u/out/[vault:secret:a&b<c]/r.md');
+  ok(/vault entry secret:a&amp;b&lt;c: reveal/.test(amp) && !/&amp;amp;|&amp;lt;/.test(amp), 'r3 (I): an entry name holding & < is escaped ONCE in the note');
+  // r3 (F): the masked-path pass is anchored on `/` — LINEAR BY THE COUNT (scripts/work-meter.mjs: every step and every regex backtrack, in a
+  // child), never a clock (test-ci-gate's ratchet): the pass's own regex, read from chat-renderers.js as it stands (an identifier resolves to
+  // its `new RegExp(…)` line), run over a bracket array with no `/` and one with many — ×4 input reads ×4 (r2's `(?<![^\s>(\[])[^…]*\/…`:
+  // 45 ms → 513 ms at 34 → 114 KB, 7.5 s at 450 KB)
+  {
+    const { judgeInChild } = await import('./work-meter.mjs');
+    const pass = /html = this\._linkifyBareText\(html, \(txt\) => (?:!MARK_WORD_RE\.test\(txt\) \? txt : )?txt\.replace\((\/(?:\\.|[^\/\n])+\/[a-z]*|[A-Z_]+), \(run\) =>/.exec(cr);
+    let expr = pass ? pass[1] : null;
+    if (expr && /^[A-Z_]+$/.test(expr)) { const d = new RegExp('const ' + expr + ' = (new RegExp\\(.+\\));').exec(cr); expr = d ? d[1] : null; }
+    ok(!!expr, 'r3 (F): the masked-path pass\'s regex is read from chat-renderers.js', expr);
+    if (expr) {
+      const MOD = path.join(SCR, 'masked-path-pass.cjs');
+      fs.writeFileSync(MOD, `const { CJK_PUNCT, SEG } = require(${JSON.stringify(path.join(ROOT, 'src/path-linkify.js'))});\nconst re = ${expr};\nmodule.exports = { pass: (x) => x.replace(re, (r) => r) };\n`);
+      for (const [k, mk] of Object.entries({ 'brackets, no /': '(n) => "[" + Array.from({ length: Math.floor(n / 14) }, (_, i) => "[" + i + ",[" + (i + 1) + "," + (i + 2) + "]]").join(",") + "]"', 'brackets and /': '(n) => "[" + Array.from({ length: Math.floor(n / 9) }, (_, i) => "[\\"/a" + i + "\\"]").join(",") + "]"', 'open parens': '(n) => "(".repeat(n)' })) {
+        const v = judgeInChild({ module: MOD, run: '(M, x) => M.pass(x)', mk: `(n) => n === 0 ? '' : (${mk})(n)`, n: 32768, kind: 'linear', backtracks: true, opts: { factor: 4 } });
+        ok(v.ok && v.w1 / 32768 <= 64, `r3 (F): the masked-path pass is linear by the count on ${k}: ${v.err ? 'the child failed: ' + v.err.slice(0, 200) : `${v.w1} → ${v.w2} steps, ×${v.r && v.r.toFixed(2)} (bound ×${v.bound}), ${(v.w1 / 32768).toFixed(1)} steps a character (≤ 64)`} at ×4 input`, v);
+      }
+    }
+  }
+  // r4 (M3): a clean URL then a masked one in ONE blank-free run — two tokens on the text AND the markdown road (the For-you grammar's)
+  for (const [lg, x] of Object.entries({ en: 'first open https://app.example.com/a, then https://x.example/cb?token=«redacted» to sign in', zh: '先打开https://app.example.com/a，再用https://x.example/cb?token=«redacted»登录', ja: 'まずhttps://app.example.com/a、次にhttps://x.example/cb?token=«redacted»でログイン' })) {
+    for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) {
+      const h = fn(head, x);
+      ok(/(?:data-href|href)="https:\/\/app\.example\.com\/a"/.test(h) && /<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»/.test(h) && (h.match(/masked-link-note/g) || []).length === 1 && !linkOver(h) && !/data-path="\/\/x\.example/.test(h), `r4 (M3) ${lg}, ${entry}: the clean URL ONE link, the masked one words + ONE note`);
+    }
+  }
+  // r4 (m5): a vault mark's `]` is INSIDE the URL token on the text road too — the same masked span as markdown and For-you
+  for (const x of ['https://x-access-token:[vault:gh/tok]@github.com/o/r.git (fetch)', 'see https://api.example/q?key=[vault:svc/k]&format=json now']) {
+    const ht = head.linkifyText(x), hm = head.renderMarkdown(x), span = (h) => (/<span class="chat-link-masked">([^<]*)<\/span>/.exec(h) || [])[1];
+    ok(span(ht) && span(ht) === span(hm) && /github\.com\/o\/r\.git|format=json/.test(span(ht)), `r4 (m5): one masked token on both chat roads — ${span(ht)}`);
+  }
+  // r5 (M1): both chat roads — a BALANCED full-width pair inside a URL token is the token's (`…/wiki/東京（都）` ONE whole link; markdown keeps
+  // marked's own anchor, the base's); an unpaired CJK mark ends it (the base ran on: `…/x，然后点` linked the comma and the words — the change, disclosed)
+  {
+    const hrefs = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
+    const M1C = { '…/wiki/東京（都） — a balanced pair: ONE whole link': ['see https://ja.example/wiki/東京（都） ok', 'https://ja.example/wiki/東京（都）'], '…/wiki/「東京」 — a corner-bracket pair': ['见https://ja.example/wiki/「東京」 ok', 'https://ja.example/wiki/「東京」'], '…/x，然后点 — the comma ends it': ['look https://a.example/x，然后点', 'https://a.example/x'], '…/x。 — the stop ends it': ['看https://a.example/x。', 'https://a.example/x'], '…/東京（都），再说 — the pair kept, the comma ends it': ['先看https://ja.example/wiki/東京（都），再说', 'https://ja.example/wiki/東京（都）'], '（…/a）吧 — the prose\'s own pair is not the token\'s': ['（https://x.example/a）吧', 'https://x.example/a'] };
+    for (const [n, [x, want]] of Object.entries(M1C)) for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) { const got = hrefs(fn(head, x)); ok(got === want, `r5 (M1) ${entry}: ${n}`, got); }
+    ok(/<a href="https:\/\/ja\.example\/wiki\/%E6%9D%B1%E4%BA%AC%EF%BC%88%E9%83%BD%EF%BC%89">https:\/\/ja\.example\/wiki\/東京（都）<\/a>/.test(head.renderMarkdown('see https://ja.example/wiki/東京（都） ok')), 'r5 (M1) a peer card: the balanced autolink keeps marked\'s own anchor (the base\'s bytes)');
+  }
+  // r6 (m6): the markdown road cuts an autolink at its first UNPAIRED CJK mark and the URL before it keeps MARKED's anchor (its balanced-paren
+  // and apostrophe rules) — the href marked gives the same URL with a blank after it; r5 re-read it with the text road's run (`…/Foo_(bar`)
+  {
+    const hrefs6 = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
+    for (const [n, cjk, blank] of [['…/Foo_(bar)，然后', '参见 https://en.wikipedia.org/wiki/Foo_(bar)，然后', '参见 https://en.wikipedia.org/wiki/Foo_(bar) 然后'], ["…?q=it's，ok", "link https://a.example/x?q=it's，ok", "link https://a.example/x?q=it's ok"], ['…&y=(2)、z', 'see https://a.example/q?x=1&y=(2)、z', 'see https://a.example/q?x=1&y=(2) z']]) {
+      const got = hrefs6(head.renderMarkdown(cjk)), want = hrefs6(head.renderMarkdown(blank));
+      ok(!!want && got === want, `r6 (m6) a peer card: ${n} links what marked links with a blank there (${want})`, got);
+    }
+    ok(hrefs6(head.renderMarkdown('先看https://ja.example/wiki/東京（都），再说')) === 'https://ja.example/wiki/東京（都）' && hrefs6(head.renderMarkdown('先打开https://app.example.com/a，再用https://app.example.com/b登录')) === 'https://app.example.com/a|https://app.example.com/b登录', 'r6 (m6) a peer card: the pair shape …/東京（都），再说 unchanged; two URLs in one blank-free run stay two links');
+    const mk6 = head.renderMarkdown('参见 https://x.example/cb?token=«redacted»&r=(a)，然后');
+    ok(/<span class="chat-link-masked">https:\/\/x\.example\/cb\?token=«redacted»&amp;r=\(a/.test(mk6) && !linkOver(mk6) && (mk6.match(/masked-link-note/g) || []).length === 1 && /，然后/.test(mk6), 'r6 (m6) a peer card: a MASKED autolink holding a paren still takes the mask path — its words to the CJK mark + ONE note, no link', mk6);
+  }
+  // r7 (M8): both chat roads — a dash / wave dash / ellipsis / curly quote INSIDE a URL stays in it (the stop is foryou-links URL_STOP only:
+  // CJK sentence punctuation + an unpaired full-width bracket); one at the END is shed — on markdown too (marked kept a trailing `”`)
+  {
+    const hrefs7 = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
+    const M8 = { '…/wiki/Mexican–American_War (an en dash inside)': ['see https://en.wikipedia.org/wiki/Mexican–American_War', 'https://en.wikipedia.org/wiki/Mexican–American_War'], '…/a〜b/c (a wave dash inside)': ['https://ja.example/a〜b/c ok', 'https://ja.example/a〜b/c'], '…/a…b (an ellipsis inside)': ['https://x.example/a…b ok', 'https://x.example/a…b'], '…/2024—report/index.html (an em dash in the path)': ['see https://x.example/2024—report/index.html ok', 'https://x.example/2024—report/index.html'], '“…/a” 的 (a closing curly quote shed, nothing else)': ['“https://x.example/a” 的', 'https://x.example/a'], '…/it’s-here (a curly apostrophe inside)': ['see https://x.example/it’s-here ok', 'https://x.example/it’s-here'], '…/a～b (a full-width tilde inside)': ['https://x.example/a～b ok', 'https://x.example/a～b'], '…/a–b，然后 (the dash kept, the comma still stops)': ['https://x.example/a–b，然后', 'https://x.example/a–b'] };
+    for (const [n, [x, want]] of Object.entries(M8)) for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) { const got = hrefs7(fn(head, x)); ok(got === want, `r7 (M8) ${entry}: ${n} — ONE link to ${want}`, got); }
+  }
+  // r5 (m4), the chat road: a code span holding a mark with no `/` before it is words on both chat roads — never a rel link (For-you's pins:
+  // test-secret-shapes segmentText + test-user-todos-layout renderRow)
+  for (const x of ['see `a«redacted».txt` now', 'see `x[vault:k].md` now']) { const hm = head.renderMarkdown(x), ht = head.linkifyText(x); ok(!/chat-link|data-rel|masked-link-note/.test(hm) && !/chat-link|data-rel|masked-link-note/.test(ht), `r5 (m4) the chat road: ${x.slice(4, -4)} is words (markdown and text) — no rel link`, [hm, ht]); }
+  // r6 (m7): a VERBATIM block reads exactly as written on the chat's roads — a masked run inside a fenced block, an inline code span or a tool's
+  // <pre> is its words (chat-link-masked), and THE note FOLLOWS the block; in prose the note stays inline (r5)
+  {
+    const V = 'curl https://api.example/q?key=[vault:svc/k]&x=1', NOTEV = 'it holds the vault entry svc/k: reveal it in Vault';
+    const txt = (h) => h.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&');
+    const fence = head.renderMarkdown('```\n' + V + '\n```'), fpre = (/<pre>[\s\S]*?<\/pre>/.exec(fence) || [''])[0];
+    ok(txt(fpre).trim() === V && !/masked-link-note/.test(fpre) && /<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(fence) && /chat-link-masked/.test(fpre), 'r6 (m7) a fenced block: its text is the command exactly, the masked run its words, THE note a block after </pre>', fence);
+    const inl = head.renderMarkdown('run `' + V + '` now'), code = (/<code>[\s\S]*?<\/code>/.exec(inl) || [''])[0];
+    ok(txt(code) === V && !/masked-link-note/.test(code) && /<\/code> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(inl), 'r6 (m7) an inline code span: its text is the command exactly, THE note after </code>', inl);
+    const el = mkEl(); head.wrapMsg(el, 'tool', '', '<pre class="chat-tool-out">' + head.linkifyText(V) + '</pre>'); const tool = el.innerHTML, tpre = (/<pre[^>]*>[\s\S]*?<\/pre>/.exec(tool) || [''])[0];
+    ok(txt(tpre) === V && !/masked-link-note/.test(tpre) && /<\/pre><div class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k/.test(tool), 'r6 (m7) a tool\'s <pre> (wrapMsg): its text is the output exactly, THE note after </pre>', tool);
+    const prose = head.renderMarkdown('see ' + V.slice(5) + ' now');
+    ok(/<\/span> <span class="chat-link-note masked-link-note">[^<]*it holds the vault entry svc\/k[^<]*<\/span> now<\/p>/.test(prose) && prose.includes(NOTEV), 'r6 (m7) prose: the note stays INLINE after the masked words (r5)', prose);
+  }
+  // RED CONTROL: the base renderer (the masked branches cut in its one build, MVS_CUT) links the mangled target
+  ok(MVS_CUT.every(([from]) => cr.split(from).length - 1 === 1), 'the control\'s five renderer patches each apply exactly once');
+  const r0 = base;
+  ok(linkOver(r0.linkifyText(MASKED)) && linkOver(r0.renderMarkdown(MASKED)) && !/masked-link-note/.test(r0.renderMarkdown(MASKED)) && /<a\b/.test(r0.renderMarkdown(M3['a titled link'])) && /data-path="\/home\/u\/out\/\[vault"/.test(r0.linkifyText('The report: /home/u/out/[vault:secret:run]/report.md here')), 'RED CONTROL (the base renderer): the masked URL, a titled vault href and a masked path are whole-looking links — the legs above go red');
+}
 
 console.log('⑩ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS — the chat\'s delegation acts on the chat\'s own links only, never a card\'s door (lane card-door-in-chat)');
 // The REAL delegation (⑥'s renderer: setupLinkHandler on LIST) over a fake DOM that reads the selectors it asks

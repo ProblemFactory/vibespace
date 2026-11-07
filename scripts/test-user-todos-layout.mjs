@@ -2553,5 +2553,76 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
   ok(!sp.threw && sp.v0 === '' && sp.vOpen === 'hidden' && sp.vCovered === '' && sp.vRaised === 'hidden' && !spx.threw && spx.vOpen === '',
     `RED-able (r19 — 1c4261dcc: the stack stayed over the new form until the next 1 s tick, «${spx.vOpen}»): a form window comes up under the stack, in front ⇒ it steps aside at once («${sp.vOpen}»); a window raised over the form ⇒ the stack shows again («${sp.vCovered}»); the form raised ⇒ aside («${sp.vRaised}») — every one at that moment, no tick`, { sp, spx });
 }
+console.log('lane mask-value-shape (the owner 2026-11-07, «URL被替换和redact了»): THE CARD\'S WORDS FOR A LINK — the owner\'s gcloud sign-in URL through the belt is ONE whole link; a URL the belt masked inside is WORDS + the note, never a link');
+{
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const belt = req(path.join(ROOT, 'src/agent-output-belt.js'));
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: (i) => i.detail, nameFor: () => 'S', replyState: () => ({ show: false }) };
+    // the owner's URL (Google's public gcloud client id; the per-flow nonces joined at runtime, the hygiene law)
+    const OWNER = ['https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2Fauthcode.html',
+      '&scope=openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=', 'G42wCKQftAKJ8', 'hXM23vRQmZRemWgo1', '&prompt=consent&token_usage=remote&access_type=offline&code_challenge=', '84YRSvbJxBuQKBxdqc59', 'MbopMncKgHbHST40pDWDBU4', '&code_challenge_method=S256'].join('');
+    const tok = ['Zk3', 'xQ9Lm2PwR7tYb4NcV8sHj6KdF1gA0eU5iO'].join('');
+    const filed = (detail) => ({ id: 'ut-mvs1', status: 'open', origin: 'agent', sessionKey: 'claude:c1', text: 'Open this link and paste the code back', detail: belt.maskForSink(detail), createdAt: Date.now() });
+    const h1 = R.renderRow({ item: filed('链接： ' + OWNER + ' — 拿到码后发我') }, ctx).innerHTML;
+    ok(h1.includes(`data-fy="url" data-ref="${OWNER.replace(/&/g, '&amp;')}"`) && !/masked-link-note|«redacted»/.test(h1), 'the owner\'s URL through the belt: the card draws ONE link whose target is the URL WHOLE (token_usage=remote, all ten parameters), no note');
+    const h2 = R.renderRow({ item: filed('sign in: https://app.example.com/login?token=' + tok + '&next=%2Fhome then reply') }, ctx).innerHTML;
+    ok(!h2.includes(tok) && /<span class="fy-masked">https:\/\/app\.example\.com\/login\?token=«redacted»&amp;next=%2Fhome<\/span> <span class="masked-link-note">Part of this link was masked, so it will not open — ask the agent to send the link without the secret\.<\/span>/.test(h2) && !/data-ref="https:\/\/app\.example/.test(h2),
+      'a sign-in link carrying a real token: the belt masks it and the card draws its WORDS + the note naming the road (ask the agent to send it without the secret) — never a link to the mangled target');
+    // r2: a vault mark under a HOLDER name (`?key=[vault:…]`) is a holder's value — masked like any other; the mark survives the belt
+    // where no name holds it (a path piece), and there the note names the vault's road
+    const h3 = R.renderRow({ item: filed('the file https://files.example.com/[vault:secret:0123456789]/report.pdf now') }, ctx).innerHTML;
+    ok(/it holds the vault entry secret:0123456789: reveal it in Vault/.test(h3) && !/data-ref="https:\/\/files\.example/.test(h3), 'a link holding a vault mark (a path piece — no holder name): the note names the vault\'s reveal road for that entry');
+    const h4 = R.renderRow({ item: filed('The report: /home/u/out/[vault:secret:run]/report.md here') }, ctx).innerHTML;
+    ok(/<span class="fy-masked">\/home\/u\/out\/\[vault:secret:run\]\/report\.md<\/span> <span class="masked-link-note">/.test(h4) && !/data-fy="path"/.test(h4), 'r2 (m4): a PATH a belt masked inside is words + the note on the card — never a truncated path link');
+    // r3 (D): in CJK prose the path before a masked KEY=value stays ONE link and no note is drawn; (E) a bare vault mark is words
+    const h5 = R.renderRow({ item: filed('已写入 /home/u/proj/config/app.env，其中API_KEY=«redacted»，请查看。') }, ctx).innerHTML;
+    ok(/data-fy="path" data-ref="\/home\/u\/proj\/config\/app\.env"/.test(h5) && !/masked-link-note|fy-masked/.test(h5), 'r3 (D): the card keeps the path ONE link in CJK prose; the masked KEY=value is words, no note');
+    const h6 = R.renderRow({ item: filed('value: [vault:secrets/db/secret] then API_KEY=[vault:secrets/db/secret]') }, ctx).innerHTML;
+    ok(!/masked-link-note|fy-masked|fy-link/.test(h6), 'r3 (E): a bare vault mark on the card is words — no masked «link», no note');
+    // r4 (M3): the owner's complaint shape — a clean URL then a masked one in ONE blank-free run; never ONE link whose ref holds the mark
+    for (const [lg, x] of Object.entries({ en: 'first open https://app.example.com/a, then https://x.example/cb?token=«redacted» to sign in', zh: '先打开https://app.example.com/a，再用https://x.example/cb?token=«redacted»登录', ja: 'まずhttps://app.example.com/a、次にhttps://x.example/cb?token=«redacted»でログイン' })) {
+      const h = R.renderRow({ item: filed(x) }, ctx).innerHTML;
+      ok(/data-fy="url" data-ref="https:\/\/app\.example\.com\/a"/.test(h) && !/data-ref="[^"]*redacted/.test(h) && (h.match(/masked-link-note/g) || []).length === 1, `r4 (M3) ${lg}: the card draws the clean URL as ONE link and the masked one as words + ONE note`);
+    }
+    // r5 (M1): a BALANCED full-width pair inside a URL token is the token's — the card links …/wiki/東京（都） WHOLE; an unpaired CJK mark ends it
+    {
+      const refs = (h) => [...h.matchAll(/data-ref="([^"]*)"/g)].map((m) => m[1]).join('|');
+      const got = ['see https://ja.example/wiki/東京（都） ok', '见https://ja.example/wiki/「東京」 ok', 'look https://a.example/x，然后点', '看https://a.example/x。'].map((x) => refs(R.renderRow({ item: filed(x) }, ctx).innerHTML));
+      ok(JSON.stringify(got) === JSON.stringify(['https://ja.example/wiki/東京（都）', 'https://ja.example/wiki/「東京」', 'https://a.example/x', 'https://a.example/x']), 'r5 (M1): the card links …/wiki/東京（都） and …/wiki/「東京」 WHOLE (a balanced full-width pair), …/x，然后点 and …/x。 to …/x (the comma / the stop ends the token)', got);
+    }
+    // r7 (M8): the card links a URL holding a dash / wave dash / ellipsis / curly apostrophe WHOLE; a closing curly quote is shed, nothing else
+    {
+      const refs8 = (h) => [...h.matchAll(/data-ref="([^"]*)"/g)].map((m) => m[1]).join('|');
+      const got = ['see https://en.wikipedia.org/wiki/Mexican–American_War', 'https://ja.example/a〜b/c ok', 'https://x.example/a…b ok', 'see https://x.example/2024—report/index.html ok', '“https://x.example/a” 的', 'see https://x.example/it’s-here ok'].map((x) => refs8(R.renderRow({ item: filed(x) }, ctx).innerHTML));
+      ok(JSON.stringify(got) === JSON.stringify(['https://en.wikipedia.org/wiki/Mexican–American_War', 'https://ja.example/a〜b/c', 'https://x.example/a…b', 'https://x.example/2024—report/index.html', 'https://x.example/a', 'https://x.example/it’s-here']), 'r7 (M8): the card links …/Mexican–American_War, …/a〜b/c, …/a…b, …/2024—report/…, …/it’s-here WHOLE and sheds only the closing ” of “…/a”', got);
+    }
+    // r5 (m4): a code span holding a mark is never a link on the card (the chat draws it as words) — a plain filename stays one
+    {
+      const hr = R.renderRow({ item: filed('see `a«redacted».txt` now') }, ctx).innerHTML, hv = R.renderRow({ item: filed('see `x[vault:k].md` now') }, ctx).innerHTML, hp = R.renderRow({ item: filed('see `a.txt` now') }, ctx).innerHTML;
+      ok(!/fy-link|data-ref/.test(hr) && !/fy-link|data-ref/.test(hv) && /data-fy="rel" data-ref="a\.txt"/.test(hp), 'r5 (m4): the card draws `a«redacted».txt` and `x[vault:k].md` as words — no press-to-open link to a file that does not exist; `a.txt` stays a rel link', { hr, hv });
+    }
+    // r6 (m7): the tray's own copy of a verbatim command (an exit-run ask's <pre>, a held ask's plan) reads exactly as written — a
+    // masked run's note is a block AFTER it, the same words the For-you window draws after its <pre>
+    {
+      const CMD = 'git clone https://x-access-token:[vault:gh/tok]@github.com/o/r.git';
+      const NOTE = 'Part of this link was masked, so it will not open — it holds the vault entry gh/tok: reveal it in Vault, or ask the agent to send the link without the secret.';
+      const ex = R.renderRow({ item: { id: 'ut-m7a', status: 'open', origin: 'system', sessionKey: 'claude:c1', text: 'Allow "ops" to run a command?', detail: CMD, action: { type: 'exit-run-ask', askId: 'k7', cmd: CMD }, createdAt: Date.now() } }, ctx).innerHTML;
+      const vr = R.renderRow({ item: { id: 'ut-m7b', status: 'open', origin: 'system', sessionKey: 'claude:c1', text: 'Allow a held hub act?', detail: CMD, action: { type: 'hub-act-ask', askId: 'k8' }, createdAt: Date.now() } }, ctx).innerHTML;
+      const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      ok(ex.includes(`<pre class="ut-exit-cmd">${esc(CMD)}</pre><div class="masked-link-note">${esc(NOTE)}</div>`), 'r6 (m7): the tray\'s exit-run ask — <pre class=ut-exit-cmd> holds the command exactly, THE note a block after it', ex);
+      ok(vr.includes(`<div class="ut-proposal-plan">${esc(CMD)}</div><div class="masked-link-note">${esc(NOTE)}</div>`), 'r6 (m7): the tray\'s held hub-act ask — its plan holds the command exactly, THE note a block after it', vr);
+    }
+  } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

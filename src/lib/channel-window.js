@@ -58,6 +58,7 @@
 // below: its composer sends as You, @name wakes.
 import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialog, copyText } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
 import { icon, el, btn, avatar, convAvatar, fileIcon, warmAvatars } from './channel-chrome.js';
@@ -1916,6 +1917,8 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       chip.title = t('Open this agent\'s conversation');
       body.appendChild(chip);
     }
+    const masked = maskedNoteOf(groupBodyRuns(rec).map((r) => r.text).join(''), t);   // lane mask-value-shape: a link a belt masked inside — the note
+    if (masked) body.appendChild(el('div', 'masked-link-note', masked));   // r2 (m7): its own line, never glued to the last word
     return body;
   };
   const openMember = (cid) => {

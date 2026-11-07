@@ -17,6 +17,7 @@
 // Every string is textContent (a peer's name is its own choice); the icons are the library's SVG.
 import { fetchJson, showToast } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { UI_ICONS } from './icons.js';
 import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords, handOverRefusalWords } from '../stash-summary.js';
 
@@ -90,7 +91,9 @@ export function createStashStrip({ sessionId }) {
     // rows are PATCHED in place (the strip's rule: a fact change writes text, it does not rebuild nodes under the
     // pointer): existing rows take the new words, extra rows are made only when the list grows, surplus rows leave
     const h = Number(summary && summary.previewsHeld) || 0;
-    const words = ((summary && summary.previews) || []).map((p) => ({ cls: 'chat-stash-row', text: previewWords(p, t) }));
+    // lane mask-value-shape r2 (m7): a head holding a link a belt masked inside gets THE note as a row of its own (a wrapping row — the
+    // head row is nowrap and cut the note to 0–17 of its characters)
+    const words = ((summary && summary.previews) || []).flatMap((p) => { const w = previewWords(p, t), n = maskedNoteOf(w, t); return n ? [{ cls: 'chat-stash-row', text: w }, { cls: 'chat-stash-row masked-link-note', text: n }] : [{ cls: 'chat-stash-row', text: w }]; });
     if (h) words.push({ cls: 'chat-stash-row chat-stash-row-more', text: h === 1 ? t('1 more is waiting, not previewed') : t('{n} more are waiting, not previewed', { n: h }) });
     const rows = [...list.children];
     words.forEach((w, i) => {

@@ -22,7 +22,45 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
-import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, fileUrlPath, hrefPath, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
+import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, fileUrlPath, hrefPath, CJK_PUNCT, SEG, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
+import { linkMask, pathMask, maskedLinkNote, fwGroupsSrc, fwFloor, URL_STOP } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside is WORDS + the note (one rule with For you); r5: THE full-width pairs a URL token holds
+// lane mask-value-shape r3 (D, F, I): a PATH token for the masked-path pass — anchored on its `/` (never mid-word, never inside a scheme's
+// `//`), ending at a blank, a quote, `<>`, a backtick or a CJK punctuation mark (path-linkify CJK_PUNCT, the one set): linear
+const CJK_STOP_RE = new RegExp('[' + CJK_PUNCT + ']');
+const MARK_WORD_RE = /redacted|vault/i;   // r4: maskedLink finds nothing without one of these words (its own gate, case-folded: a superset)
+const MASKED_PATH_RE = new RegExp('(?<![\\w:/.~])(?:~|\\.{1,2})?/(?:\\[vault:[^\\]\\[\\s<>"\']{1,440}\\]|' + SEG + ')*', 'g');
+// r4 (M3, m5): THE URL run of the text road — the token ends at a CJK punctuation mark (the For-you grammar's own stop), a whole vault mark
+// rides inside it (`https://x-access-token:[vault:gh/tok]@github.com/…`), ONE trailing `]` as before (an ordinary URL's is shed by cleanPath).
+// r5 (M1): a CJK mark now ENDS an ordinary URL on both chat roads (the base ran on: `…/x，然后点` linked the comma and the words) — EXCEPT a
+// BALANCED full-width pair inside the token (foryou-links FW_PAIRS: `…/wiki/東京（都）` stays ONE link, as the base's markdown drew it)
+// r7 (M8): the run stops only at foryou-links URL_STOP (CJK sentence punctuation, an unpaired full-width bracket) — a dash, a curly quote,
+// an ellipsis or a wave dash INSIDE a URL stays in it (r4–r6 cut `…/wiki/Mexican–American_War` at its en dash); at the END it is shed (_urlEnd)
+const URL_RUN_CH = '(?:[^\\s<>"\')\\]&' + URL_STOP + ']|&amp;)';
+const URL_RUN_RE = new RegExp('(https?:\\/\\/(?:\\[vault:[^\\]\\[\\s<>"\']{1,440}\\]|' + URL_RUN_CH + '|' + fwGroupsSrc(URL_RUN_CH) + ')+\\]?)', 'g');
+// r6 (m6): where an autolink's words END on the markdown road — at the first UNPAIRED CJK punctuation mark (a balanced full-width pair stays
+// inside, r5 M1); anything else is marked's to judge (its balanced-paren / apostrophe / trailing rules) — sticky, linear
+const CJK_CUT_AT = new RegExp('(?:[^' + URL_STOP + ']|' + fwGroupsSrc('[^' + URL_STOP + ']') + ')*', 'y');   // r7 (M8): the ONE stop set
+// r7 (M8): a CJK_PUNCT member that is NO stop (a dash, a curly quote, the ellipsis, the wave dash …) — shed from a run's END on the markdown
+// road (marked keeps a trailing `”`); ASCII trailing punctuation stays marked's own rule (its balanced parens)
+const TRAIL_ONLY_RE = new RegExp('(?![' + URL_STOP + '])[' + CJK_PUNCT + ']');
+const SCHEME_AT = /https?:\/\//gi;
+// r6 (m7): a masked run's NOTE never sits inside a verbatim block (a <pre>, a code element) — the block reads exactly as written (a copy of it
+// copies the command), the note follows it. One pass over the rendered HTML, only when a note is in it (notesAfterBlocks)
+const NOTE_SPAN_RE = / ?<span class="chat-link-note masked-link-note">([^<]*)<\/span>/g;
+const BLOCK_RE = /<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>/gi;
+export function notesAfterBlocks(html) {
+  if (typeof html !== 'string' || html.indexOf('chat-link-note') < 0) return html;
+  return html.replace(BLOCK_RE, (blk) => {
+    const notes = [];
+    const body = blk.replace(NOTE_SPAN_RE, (m, words) => { if (!notes.includes(words)) notes.push(words); return ''; });
+    if (!notes.length) return blk;
+    return /^<pre/i.test(blk)
+      ? body + notes.map((w) => `<div class="chat-link-note masked-link-note">${w}</div>`).join('')
+      : body + notes.map((w) => ` <span class="chat-link-note masked-link-note">${w}</span>`).join('');
+  });
+}
+// r4 (M4): path-linkify's TRAILING set as ONE character — a token's tail is shed by a backward walk, never cleanPath (`[…]+$`) over a run
+const TRAIL_CH_RE = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']');
 import { mcpParts } from './chat-run-summary.js';
 import { chatLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
@@ -693,6 +731,7 @@ class ChatRenderers {
    * role: 'user' | 'assistant' | 'tool'. Tool messages have no bubble in non-compact mode.
    */
   wrapMsg(el, role, label, html) {
+    html = notesAfterBlocks(html);   // lane mask-value-shape r6 (m7): a tool's verbatim <pre> reads as written — a masked run's note follows it
     if (this._compact) {
       el.innerHTML = `<div class="chat-compact-msg"><span class="chat-role chat-role-${role}">${label}</span><div class="chat-compact-content">${html}</div></div>`;
     } else if (role === 'tool') {
@@ -2512,7 +2551,7 @@ class ChatRenderers {
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      return this.linkify(html);
+      return notesAfterBlocks(this.linkify(html));   // lane mask-value-shape r6 (m7): a code block / span reads as written — the note follows it
     } catch {
       return escHtml(text || '');
     }
@@ -2777,6 +2816,71 @@ class ChatRenderers {
    * bare path becomes, its label the link's text, the path percent-decoded (marked encodes every non-ASCII character of
    * an href). A `/p/<id>` page anchor and every other href stay as written.
    */
+  /** lane mask-value-shape: a link a belt masked inside (`«redacted»` / `[vault:<entry>]` in its words or its href) — its
+   *  inner HTML (already sanitized / escaped) as WORDS + the note; never an <a> to a mangled target. */
+  _maskedWords(innerHtml, mask) {
+    // r3 (I): the note is a `chat-link…` span (every later pass skips one whole — an entry name holding a path / URL is never linkified),
+    // and the entry names read out of HTML text are un-escaped once before THE escape (never `&amp;lt;`)
+    const m = mask && Array.isArray(mask.vault) && mask.vault.length ? { ...mask, vault: mask.vault.map((v) => unescHtml(v)) } : mask;
+    return `<span class="chat-link-masked">${innerHtml}</span> <span class="chat-link-note masked-link-note">${escHtml(maskedLinkNote({ mask: m }, t))}</span>`;   // `chat-link-masked`: the later passes skip it whole (_linkifyBareText), the click handler never sees a .chat-link
+  }
+  /** A masked TOKEN (r3 D): the words to cleanPath's bound (a vault mark's closing `]` kept inside) + the note, then the rest as it was. */
+  _maskedToken(raw, mask) {
+    // r4 (M4): the tail shed by a backward character walk (a vault mark's closing `]` stays) — linear, never cleanPath over the run
+    let floor = 0; const k = raw.lastIndexOf('[vault:'); if (k >= 0) { const c = raw.indexOf(']', k); if (c >= 0) floor = c + 1; }
+    floor = Math.max(floor, fwFloor(raw));   // r5 (M1): a balanced full-width pair's closer is the token's own
+    let end = raw.length; while (end > floor && TRAIL_CH_RE.test(raw[end - 1])) end--;
+    return this._maskedWords(raw.slice(0, end), mask) + raw.slice(end);
+  }
+  /** r5 (M1): an unmasked URL run's end once its trailing punctuation is shed — cleanPath's set, by a backward walk (linear), a balanced
+   *  full-width pair's closer kept (`…/wiki/東京（都）`; cleanPath sheds every trailing CJK mark). */
+  _urlEnd(raw) {
+    const floor = fwFloor(raw);
+    let end = raw.length; while (end > floor && TRAIL_CH_RE.test(raw[end - 1])) end--;
+    return end;
+  }
+  /** An <a>…</a> whose HREF holds a belt's mark → its words + the note; else null (the anchor's own rules run). */
+  _maskedAnchor(a) {
+    const open = /^<a\b[^>]*>/i.exec(a);
+    if (!open) return null;
+    const href = /\shref\s*=\s*"([^"]*)"/i.exec(open[0]), inner = a.slice(open[0].length, -4);
+    // r2 (m3, m6): the HREF alone is judged — raw and decoded once (marked leaves a vault mark's colon raw); the label is words
+    const raw = href ? href[1].replace(/&amp;/g, '&') : '';
+    let dec = raw; try { dec = decodeURIComponent(raw); } catch { /* the raw href */ }
+    // r4 (M3): an AUTOLINK (its words are its href) that runs on across a CJK punctuation mark is re-read token by token — the text road's
+    // own grammar (a clean URL stays a link, a masked one is words + the note, the prose between is words); a titled link keeps its rules
+    // r5 (M1): an autolink whose CJK marks all sit inside BALANCED full-width pairs is ONE token — marked's own anchor stays (the base's).
+    // r6 (m6): one that runs on across an UNPAIRED CJK mark is cut THERE, and each URL before a cut keeps MARKED's anchor — never the text
+    // road's run (it stops at an ASCII `)` / `'`: r5 linked `…/Foo_(bar)，然后` as `…/Foo_(bar`). An http(s) autolink only (the URL run's own scheme)
+    if (/^https?:/i.test(inner) && CJK_STOP_RE.test(inner) && unescHtml(inner) === dec) { const cut = this._cjkAutolink(inner); if (cut !== null) return cut; }
+    const mask = linkMask(raw) || linkMask(dec);
+    return mask ? this._maskedWords(inner, mask) : null;
+  }
+
+  /** r6 (m6): an autolink's words (escaped) cut at each STOP (r7: foryou-links URL_STOP — CJK sentence punctuation, an unpaired full-width
+   *  bracket; a trailing dash / curly quote / ellipsis shed) → null when there is none (ONE token: the caller keeps
+   *  marked's anchor), else its HTML — each URL run before a cut re-autolinked by MARKED (ONE parseInline over the runs, U+2029 between
+   *  them: a blank to marked's url rule, never inside an autolink), a run a belt masked inside = its words + the note, the prose between
+   *  the runs words. Linear: each character is read by one sticky run or one scheme search. */
+  _cjkAutolink(words) {
+    const runs = [], gaps = []; let at = 0;
+    for (;;) {
+      CJK_CUT_AT.lastIndex = at; CJK_CUT_AT.exec(words); const cut = CJK_CUT_AT.lastIndex;
+      let end = cut; while (end > at && TRAIL_ONLY_RE.test(words[end - 1])) end--;   // r7 (M8): a non-stop mark at the END is shed, never cut inside
+      if (!runs.length && end >= words.length) return null;
+      runs.push(words.slice(at, end));
+      SCHEME_AT.lastIndex = cut; const n = SCHEME_AT.exec(words), next = n ? n.index : words.length;
+      gaps.push(words.slice(end, next));
+      if (!n) break;
+      at = next;
+    }
+    const masks = runs.map((r) => linkMask(unescHtml(r)));
+    const plain = runs.filter((r, i) => !masks[i]).map((r) => unescHtml(r));
+    const md = plain.length ? sanitizeHtml(marked.parseInline(plain.join('\u2029'))).split('\u2029') : [];   // sanitized as renderMarkdown's own parse (U+2029 is text to it)
+    if (md.length !== plain.length) return null;   // marked read the runs otherwise: keep its anchor whole (never a guess)
+    let k = 0;
+    return runs.map((r, i) => (masks[i] ? this._maskedToken(r, masks[i]) : md[k++].replace(/<a\b[\s\S]*?<\/a>/gi, (a) => this._pathAnchor(a))) + gaps[i]).join('');
+  }
   _pathAnchor(a) {
     const m = /^<a\b([^>]*)>([\s\S]*)<\/a>$/i.exec(a);
     const href = m && /\shref="([^"]*)"/i.exec(m[1]);
@@ -2797,9 +2901,11 @@ class ChatRenderers {
    * every `&` came back as `&amp;`). (issue #16)
    */
   linkifyUrls(text) {
-    const re = /(https?:\/\/(?:[^\s<>"')\]&]|&amp;)+)/g;
-    return text.replace(re, (raw) => {
-      const url = this.cleanPath(raw);
+    // lane mask-value-shape: THE URL run (URL_RUN_RE — r4: a CJK punctuation mark ends it, a whole vault mark rides inside it)
+    return text.replace(URL_RUN_RE, (raw) => {
+      const mask = linkMask(raw);   // lane mask-value-shape: a belt masked inside it — its words (already escaped) + the note, never a link
+      if (mask) return this._maskedToken(raw, mask);
+      const url = raw.slice(0, this._urlEnd(raw));   // r5 (M1): cleanPath's trailing set, a balanced full-width pair kept
       const after = raw.slice(url.length);
       return `<span class="chat-link" data-href="${url}" title="${t('Click to copy, Ctrl+Click to open')}">${url}</span>${after}`;
     });
@@ -2825,6 +2931,10 @@ class ChatRenderers {
   linkifyPathsTagSafe(html, esc) {
     const e = esc ? escHtml : s => s;
     const pathRe = sharedPathRe(); // src/path-linkify.js — the ONE definition of where a path ends
+    // lane mask-value-shape r2 (m4): a PATH a belt masked inside (`/home/u/[vault:…]/r.md`, `…/«redacted»/…`) is words + the
+    // note — its blank-free run wrapped first (`chat-link-masked`), so the path pass below skips it whole
+    // r4 (M4): a text with no mark word holds no masked path (maskedLink's own gate) — the scan is skipped, the base's cost kept
+    html = this._linkifyBareText(html, (txt) => !MARK_WORD_RE.test(txt) ? txt : txt.replace(MASKED_PATH_RE, (run) => { const mask = pathMask(run); return mask ? this._maskedToken(run, mask) : run; }));
     return this._linkifyBareText(html, (txt) => txt.replace(pathRe, (raw) => {
       const fp = this.cleanPath(raw);
       const after = raw.slice(fp.length);
@@ -2855,6 +2965,7 @@ class ChatRenderers {
    */
   linkifyFileUrls(text) {
     return this._linkifyBareText(text, (txt) => txt.replace(/(?<![\w/])file:\/\/?[^\s<>"'`]+/gi, (raw) => {
+      const fmask = linkMask(raw); if (fmask) return this._maskedToken(raw, fmask);   // r3 (I): a file: URL a belt masked inside is words + the note
       const url = this.cleanPath(raw);
       const fp = fileUrlPath(unescHtml(url));
       return fp ? `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${url}</span>${raw.slice(url.length)}` : raw;
@@ -2872,6 +2983,7 @@ class ChatRenderers {
    */
   linkify(html) {
     return html.replace(/(<a[\s>][\s\S]*?<\/a>)|(<code[\s>][\s\S]*?<\/code>)|(<[^>]*>)|([^<]+)/gi, (match, anchor, code, tag, text) => {
+      if (anchor) { const masked = this._maskedAnchor(match); if (masked) return masked; } // lane mask-value-shape: a link a belt masked inside is words + the note
       if (anchor) return this._pathAnchor(match); // a path anchor is a path span; any other <a>...</a> untouched
       if (code) {
         // Linkify paths/URLs inside <code> blocks while preserving the <code> wrapper
@@ -2884,6 +2996,7 @@ class ChatRenderers {
             // none of it linkified). Make it clickable and resolve against the
             // session cwd at CLICK time (existence-probed, no render-time IO).
             const txt = inner.trim().replace(/&amp;/g, '&');
+            if (linkMask(txt)) { const cm = pathMask(txt); return open + (cm ? this._maskedWords(inner, cm) : inner) + close; }   // r3 (I, E): a masked relative path is words + the note; a bare mark is words
             if (looksRelPath(txt)) { // src/path-linkify.js — THE relative rule (the For-you links read it too)
               return open + `<span class="chat-link chat-link-path chat-link-rel" data-rel="${escHtml(txt)}" title="${t('Click to copy, Ctrl+Click to locate & open')}">${inner}</span>` + close;
             }

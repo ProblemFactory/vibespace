@@ -34,7 +34,7 @@ import { tc, t as tr } from './i18n.js'; // lane foryou-honest: «Dismiss» in t
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
-import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
+import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
@@ -166,8 +166,11 @@ const takeoverBtnHtml = (i, t) => (i && i.action && i.action.type === 'browser-t
 const exitCmdOf = (i) => (i && typeof i.detail === 'string' && i.detail ? i.detail : String((i && i.action && i.action.cmd) || ''));
 const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
   ? `<pre class="ut-exit-cmd">${escHtml(exitCmdOf(i))}</pre>`
+    + planNoteHtml(exitCmdOf(i), t) // lane mask-value-shape r6 (m7): the command reads as written; a masked run's note FOLLOWS it
     + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
+/** lane mask-value-shape r6 (m7): the note of a masked run in a VERBATIM command — a block after it, never inside it ('' when none). */
+const planNoteHtml = (detail, t) => { const n = maskedNoteOf(String(detail || ''), t); return n ? `<div class="masked-link-note">${escHtml(n)}</div>` : ''; };
 
 /** lane hub-act-ask (design q-042 D4): a hub act nobody clicked, HELD on a cluster instance — answered where it appears:
  *  Allow once / Always on this machine / Deny; its words (what it would do, who asked, what each answer does) shown whole
@@ -236,6 +239,7 @@ const hubAskHtml = (i, t, detail, noPick = false) => (i && i.action && HELD_ASKS
   ? runCardOf(i, { t }) ? runFactsHtml(i, t, { strip: noPick }) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged); r15: the strip's own (below)
   : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
     + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+    + planNoteHtml(detail, t) // lane mask-value-shape r6 (m7): the command reads as written; a masked run's note FOLLOWS it (the window's pre says the same)
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
     + (drawsPick(i) ? (noPick ? scopeHtml(reachPickOf(i.id), t) : reachPickHtml(i, t)) : '') // r11: the dock draws no pick (one form per item); r12: it SAYS the pick
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(noPick && a === 'always' && drawsPick(i) ? dockAlwaysWord(reachPickOf(i.id), t) : hubAnswerWord(a, t, i.action.type, i.action))}</button>`).join('')}</div>` : '')
@@ -408,7 +412,7 @@ export const optionWords = (label, t) => t('Reply: {label}', { label: String(lab
 /** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
  *  (foryou-links linkedHtml — every segment escaped, a link a span around its own words), never markdown — the tray's rows
  *  and the For-you window's pane both draw this (the pane's markdown turned `__tests__/` into a bold «tests/»). */
-export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml });
+export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr) });   // lane mask-value-shape: a masked link = words + THE note
 /** The labels a row's chips stand for (lane foryou-honest): ctx.optionsOf (the model's — explicit, else parsed), else the item's own. */
 export const rowOptions = (i, ctx) => (ctx && typeof ctx.optionsOf === 'function' ? ctx.optionsOf(i) : i && Array.isArray(i.options) ? i.options : []) || [];
 
@@ -574,13 +578,24 @@ export function linkifyInto(el) {
   const nodes = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.data && !(n.parentElement && n.parentElement.closest('a, .fy-link'))) nodes.push(n);
   let made = 0;
+  const after = [];   // lane mask-value-shape r6 (m7): [{block, notes}] — the notes that FOLLOW a verbatim block (this call's own, never kept)
   for (const n of nodes) {
     const inCode = !!(n.parentElement && n.parentElement.closest('code'));
+    // r6 (m7): a VERBATIM block (a <pre> — the command an owner approves — or a code element) keeps its words exactly as written: a masked run in
+    // it is its words (fy-masked), and THE note is a sibling AFTER the block, never inside it (a copy of the block copies the command)
+    let block = n.parentElement ? n.parentElement.closest('pre') || n.parentElement.closest('code') : null;
+    if (block && !el.contains(block)) block = null;
     let segs = segmentText(inCode ? '`' + n.data + '`' : n.data);
     if (inCode) segs = segs.length > 1 && segs[0].s === '`' && segs[segs.length - 1].s === '`' ? segs.slice(1, -1) : segmentText(n.data);
-    if (!segs.some((g) => g.t === 'link')) continue;
+    if (!segs.some((g) => g.t === 'link' || g.t === 'masked')) continue;
     const frag = document.createDocumentFragment();
     for (const g of segs) {
+      if (g.t === 'masked') {   // lane mask-value-shape: a link a belt masked inside — its words + the note, never a link
+        const w = document.createElement('span'); w.className = 'fy-masked'; w.textContent = g.s;
+        if (block) { const words = maskedLinkNote(g, tr); let a = after.find((x) => x.block === block); if (!a) after.push(a = { block, notes: [] }); if (!a.notes.includes(words)) a.notes.push(words); frag.append(w); continue; }
+        const n = document.createElement('span'); n.className = 'masked-link-note'; n.textContent = maskedLinkNote(g, tr);
+        frag.append(w, ' ', n); continue;
+      }
       if (g.t !== 'link') { frag.append(document.createTextNode(g.s)); continue; }
       const a = document.createElement('span');
       a.className = 'fy-link'; a.setAttribute('role', 'link'); a.tabIndex = 0;
@@ -588,6 +603,14 @@ export function linkifyInto(el) {
       frag.append(a); made++;
     }
     n.replaceWith(frag);
+  }
+  for (const { block, notes } of after) {
+    let at = block;
+    for (const words of notes) {
+      const d = document.createElement(block.tagName === 'PRE' ? 'div' : 'span'); d.className = 'masked-link-note'; d.textContent = words;
+      if (block.tagName === 'PRE') at.after(d); else at.after(' ', d);
+      at = d;
+    }
   }
   return made;
 }

@@ -11943,4 +11943,7 @@ export default {
   "More — Vault locked": "更多——保险库已锁定",
   "Back to {name}": "回到 {name}",
   "Create or open…": "新建或打开…",
+  // lane mask-value-shape: THE note of a link a belt masked inside (src/lib/foryou-links.js maskedLinkNote)
+  "Part of this link was masked, so it will not open — ask the agent to send the link without the secret.": "这个链接有一部分被遮盖了，打不开——请让 agent 发一个不含密钥的链接。",
+  "Part of this link was masked, so it will not open — it holds the vault entry {entry}: reveal it in Vault, or ask the agent to send the link without the secret.": "这个链接有一部分被遮盖了，打不开——其中是保险库条目 {entry}：可在「保险库」里显示它，或让 agent 发一个不含密钥的链接。",
 };

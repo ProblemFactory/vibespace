@@ -23,8 +23,9 @@
  *      its next quote that is neither behind an odd backslash run (r2 F5) nor doubled by its twin (r5 F1: YAML's `'it''s'`, SQL, PowerShell, CSV)
  *      The words = browser-trace's CREDENTIAL_WORDS (token, secret, password, key, auth, credential, session, sig…)
  *      minus `code` (an exit code / an error code is diagnosis, never a secret) plus passphrase / cookie / private /
- *      cred(s) / bearer. `SSH_AUTH_SOCK=…` or `XDG_SESSION_ID=…` are hidden too: a false hide on an env dump costs
- *      nothing, a miss is a key on disk
+ *      cred(s) / bearer — judged by THE NAME GRAMMAR (below): the credential word must be the name's HEAD or sit under a
+ *      container head (`XDG_SESSION_ID=…` is hidden: a false hide on an env dump costs nothing, a miss is a key on disk);
+ *      one that only modifies a DESCRIPTOR head names a fact about a credential and stays (`SSH_AUTH_SOCK`, `TOKEN_TTL`)
  *   R2b a value continued on the FOLLOWING lines (verify r2 F3) — a secret-named key with nothing after its `:` / `=`
  *      (`"password":` ⏎ `"hunter2"`, YAML's plain multi-line scalar), a YAML block scalar (`token: |`), PuTTY's
  *      `Private-Lines: N`: the deeper-indented lines after it (the N lines) are the value
@@ -40,12 +41,31 @@
  *      secret word
  *   R6 a `reg query` row (verify r2 F4) — `<name with a secret word>    REG_SZ    <value>`: the value column (runs before R5, verify r4 F7)
  *   R7 a URL query value (inbox-verify F1, 2026-10-13) — `?token=…`, `&sig=…`, `;access_token=…`, `#key=…`: a parameter whose
- *      name carries a secret word (the R2 words) ⇒ its value to the next `& # ; ' " < >` or blank; the name stays (the judge,
- *      a reader, still sees what the link was)
+ *      name HOLDS a secret (THE NAME GRAMMAR — gcloud's `token_usage=remote` is a usage, not a token) ⇒ its value to the next
+ *      `& # ; ' " < >` or blank, a closing `) ] } . , : ! ?` / CJK closer that ENDS the run kept outside it (the link sits
+ *      in `[label](…)`, in parentheses, at a sentence's end); the name stays (the judge, a reader, still sees what the link was)
  *   R8 key material with no name (`{ runs: true }`, the LLM plugin's judge input only — inbox-verify F1): a 32+ run of
  *      hex with a digit and a letter, or of base64 / base64url with an upper, a lower and a digit and no lowercase word of
  *      4+ between its `/ _ - + =` (a path, a slug, an identifier keeps its words). Opt-in: a command's stored head
  *      keeps its commit shas and hashes (diagnosis); a text bound for a vendor's model loses them (nothing to diagnose)
+ * THE NAME GRAMMAR (lane mask-value-shape r2, the owner 2026-11-07 — «URL被替换和redact了»: R7 masked gcloud's PUBLIC
+ *   `token_usage=remote` because its name holds «token», and the sign-in link on his For-you card opened nothing). The
+ *   belt NEVER judges a value's shape in order to KEEP it (r1's value floor kept `API_KEY=changeme`, `REDIS_AUTH=foobared`,
+ *   `?token=letmein` — a secret a person types under a machine name has any shape). It judges the NAME (`holderName`, R2
+ *   and R7): a name HOLDS a secret when a credential word is its HEAD — its last piece (`access_token`, `api_key`,
+ *   `REDIS_AUTH`, `client_secret`, `X-Amz-Signature`, a bare `token`) — or its head is a bare CONTAINER of one
+ *   (CONTAINER_HEADS: `session_id`, `token_value`, `key_id`); a credential word that only MODIFIES a DESCRIPTOR head
+ *   (DESCRIPTOR_HEADS, an explicit allowlist: usage / type / ttl / sock / policy / name / path / scope …) names a
+ *   fact ABOUT a credential and is public (`token_usage`, `auth_type`, `TOKEN_TTL`, `SSH_AUTH_SOCK`,
+ *   `secret_scanning`, `password_policy`). Every other head keeps the old verdict — hidden (`SECRET_KEY_BASE`,
+ *   `token_blob`, `auth_payload`: fail closed). r4 (α): an ADDRESS head (url / uri / endpoint) is no descriptor — a
+ *   credential-named address (`AUTH_URL`, `SECRET_WEBHOOK_URL`, `token_uri`) is masked whole as on the base (a capability
+ *   URL, a connection string, an encoded nested holder all ride behind it). A PUBLIC query value is judged DECODED ONCE
+ *   (hidesHolder): a nested holder or a userinfo inside it ⇒ the whole value masked (fail closed, nothing re-encoded). r5: a userinfo
+ *   HOLDS only when it carries a PASSWORD (`user:pw@`, `:pw@`, an empty `key:@` — HTTP Basic's API-key form); a bare `user@` is an
+ *   identity (`ssh://git@github.com`) and public; the decoded value is read WHOLE (a userinfo one redirect deeper, raw or encoded,
+ *   masks it). ONE decode: a doubly-encoded value (`%253Ftoken%253D…`) is read as the text one decode leaves — no head opens in it.
+ *   R2b (a multi-line block), R5 and R6 keep the plain word test.
  * Every quantifier is bounded at the input bound and every run is consumed WHOLE (verify r2 F2: a cut inside a value kept
  * the value's tail past 4096 characters — a 6 KB bearer, an RSA-4096 `client-key-data`); no pass throws (a text that
  * cannot be judged is returned unchanged — never a stall, never a crash, and the caller's belt still runs).
@@ -160,7 +180,7 @@ function redactKv(text) {
   KV_HEAD.lastIndex = 0;
   while ((m = KV_HEAD.exec(text))) {
     const headEnd = KV_HEAD.lastIndex;
-    if (!secretName(m[4])) continue;                       // the next key may start right after this head
+    if (!holderName(m[4])) continue;                       // the next key may start right after this head; lane mask-value-shape: THE NAME GRAMMAR
     const q = text[headEnd] === '"' || text[headEnd] === "'" ? text[headEnd] : '';
     const sepColon = m[5].indexOf(':') >= 0;                        // round 23: a `:` key (JSON / YAML / a header) vs an `=` assignment (dotenv / shell / `--flag=`)
     const jsonCtx = sepColon && (m[3] === '"' || m[3] === "'");     // a QUOTED key under a `:` is a JSON document — only there does `,})]` close a bare value
@@ -256,8 +276,8 @@ const WORD_RUN_RE = /\b(token|secret|apikey|api[_-]key|auth|key|credential|priva
 // between Latin letters). A joiner between two ASCII word characters joins nothing: folded out here, before the rules, on
 // every copy the rule judges; one inside an emoji sequence or a non-ASCII word stays
 // R7 (inbox-verify F1): `[?&;#]name=value` — KV_HEAD's openers stop at `?` / `&` (a URL keeps its path words), so a
-// query value is judged here: the name by secretName (R2's words), the value one bounded run, consumed whole
-const URL_QUERY_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)([^&#;\s"'<>]{1,65536})/g;
+// query value is judged by R7: the name by THE NAME GRAMMAR, a holder's value consumed whole (lane mask-value-shape r3:
+// redactQuery — the head QUERY_HEAD_RE, the value a code scan, a public name's value walked on; beside the grammar below)
 // R8 (opt-in, inbox-verify F1): a maximal run of the base64 / base64url / hex class, judged in code (one linear scan)
 const RUN_RE = /[A-Za-z0-9+/=_\-]{32,65536}/g;
 function keyMaterial(run) {
@@ -266,6 +286,164 @@ function keyMaterial(run) {
   if (/^[0-9a-fA-F]+$/.test(core)) return /[0-9]/.test(core) && /[a-fA-F]/.test(core);
   if (!/[A-Z]/.test(core) || !/[a-z]/.test(core) || !/[0-9]/.test(core)) return false;
   return !core.split(/[/_\-+=]+/).some((w) => /^[a-z]{4,}$/.test(w));
+}
+// THE NAME GRAMMAR (lane mask-value-shape r2 → r4 — the header). The head = the name's last piece (split as secretName splits)
+const NAME_SPLIT_RE = /[_\-.\s]+|(?<=[a-z0-9])(?=[A-Z])/;
+/** A head that is a bare CONTAINER of the credential before it — the name still HOLDS one (`session_id`, `token_value`). */
+const CONTAINER_HEADS = new Set(['id', 'ids', 'value', 'val', 'string', 'str', 'data', 'hash', 'hex', 'b64', 'base64', 'header', 'field', 'param', 'params']);
+/** A head that DESCRIBES a credential (a fact about it, never it) — the explicit allowlist; any other head fails closed. */
+// r4 (α): url / uri / endpoint are NOT descriptors — a credential-named ADDRESS (`AUTH_URL`, `SECRET_WEBHOOK_URL`, `token_uri`) is the
+// credential's carrier: a capability URL, a connection string or an encoded nested holder all hide behind it, so it keeps the base's verdict
+const DESCRIPTOR_HEADS = new Set(['usage', 'type', 'ttl', 'sock', 'policy', 'scanning', 'through', 'name', 'path', 'file', 'dir', 'mode', 'method', 'kind', 'count', 'len', 'length', 'size', 'expires', 'expiry', 'expiration', 'scope', 'format', 'prefix', 'version', 'enabled', 'required', 'issuer', 'audience']);
+// r5 (M2 + M3): a userinfo HOLDS a secret only when it carries a PASSWORD — `scheme://user:pw@`, `scheme://:pw@`, and an EMPTY one
+// `scheme://key:@` (HTTP Basic's API-key form, curl's `-u key:` — the key is the user) — and it is looked for ANYWHERE in the decoded value
+// (a redirect nests one: `?next=https://a/b?r=https://u:pw@h`); a bare `user@` (`ssh://git@github.com`, `https://alice@social.example`) is
+// an identity and public. One forward read: each `://` found once, its authority walked to its first `/ ? # @` or blank (≤ 1 024 — r4's
+// bound, scheme 32 + userinfo 512 + slack); an authority never runs past the next `://` (its `/` ends it), so no character is read twice
+const SCHEME_CH = (c) => (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 43 || c === 45 || c === 46;
+function passwordUserinfo(d) {
+  for (let from = 0, i; (i = d.indexOf('://', from)) >= 0;) {
+    from = i + 3;
+    if (i === 0 || !SCHEME_CH(d.charCodeAt(i - 1))) continue;                      // no scheme before it
+    let colon = false;
+    for (let j = from, end = Math.min(d.length, from + 1024); j < end; j++) {
+      const c = d.charCodeAt(j);
+      if (c === 64) { if (colon) return true; break; }                            // `@`: a password before it ⇒ a credential
+      if (c === 47 || c === 63 || c === 35 || isBlankCode(c)) break;               // `/ ? #` or a blank: the authority ended, no userinfo
+      if (c === 58) colon = true;
+    }
+  }
+  return false;
+}
+/** Percent-decoded ONCE, tolerant: a malformed escape keeps its bytes, an ASCII one still decodes (a nested `?token=` is never hidden
+ *  behind one broken `%`). Linear. */
+function decodeOnce(v) {
+  if (v.indexOf('%') < 0) return v;
+  try { return decodeURIComponent(v); } catch { return v.replace(/%([0-7][0-9A-Fa-f])/g, (m, h) => String.fromCharCode(parseInt(h, 16))); }
+}
+const NAME_WORDS = new Map();   // a name's words, memoised (a name is ≤ 80 characters; the memo is bounded at 512 names)
+function nameWords(k) {
+  const key = String(k || ''); let words = NAME_WORDS.get(key);
+  if (words) return words;
+  words = key.split(NAME_SPLIT_RE).filter(Boolean).map((w) => w.toLowerCase());
+  if (key.length <= 80) { if (NAME_WORDS.size >= 512) NAME_WORDS.clear(); NAME_WORDS.set(key, words); }   // a head's name (KV_HEAD / QUERY_HEAD bound it at 80)
+  return words;
+}
+/** Does a NAME hold a secret? A credential word as its HEAD, under a CONTAINER head, or under any head the descriptor allowlist
+ *  does not name (fail closed: an address — url / uri / endpoint — too, r4 α); a DESCRIPTOR head is public. Never a value's shape. */
+const NAME_VERDICT = new Map();   // r4: the verdict per name, memoised beside its words (a head storm asks one name thousands of times)
+function holderName(k) {
+  const key = String(k || ''), known = NAME_VERDICT.get(key);
+  if (known !== undefined) return known;
+  const v = holderVerdict(key);
+  if (key.length <= 80) { if (NAME_VERDICT.size >= 512) NAME_VERDICT.clear(); NAME_VERDICT.set(key, v); }
+  return v;
+}
+function holderVerdict(k) {
+  const words = nameWords(k);
+  if (!words.some((w) => SECRET_WORDS.has(w))) return false;
+  const head = words[words.length - 1];
+  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;
+  return !DESCRIPTOR_HEADS.has(head);                                              // a head the table does not name: fail closed
+}
+// R7 (inbox-verify F1; lane mask-value-shape r3 — ONE linear walk): the HEAD `[?&;#]name=` is found by a bounded regex (no value
+// quantifier — r2's `[closers]+$` over a 64 KiB value backtracked: 1.9 s at 60 000 dots, verify r4 F1's shape); a HOLDER's value is
+// read by a code scan to the next `& # ; ' " < >` or blank and masked, a PUBLIC name's value is walked ON (the scan resumes right after
+// its `=`), so a holder nested in it (`?password_reset_url=https://app/reset?token=…`) is masked and the public name stays (r3 C)
+const QUERY_HEAD_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
+const isBlankCode = (c) => (c >= 9 && c <= 13) || c === 32 || c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029 || c === 0x202F || c === 0x205F || c === 0x3000 || c === 0xFEFF;   // `\s`'s set
+// r3 (G): what the PROSE opened before the head (in its blank-free run) — a closer that ends a holder's value goes outside the mask
+// ONLY when it closes one of these (the `)` of `[label](` / `(`, the `」` of `「`), or as ONE sentence-final `.` / `,` before a blank or
+// the text's end; nothing else of the value is shown, and a value of closers only is masked whole
+const PAIR_OPEN = '([{「『（【〔〈《', PAIR_CLOSE = ')]}」』）】〕〉》';
+const OPEN_AT = new Map([...PAIR_OPEN].map((ch, i) => [ch.charCodeAt(0), i])), CLOSE_AT = new Map([...PAIR_CLOSE].map((ch, i) => [ch.charCodeAt(0), i]));
+const TAIL_CLOSERS = new Set([...PAIR_CLOSE, ...'.,:!?、。，！？’”'].map((ch) => ch.charCodeAt(0)));
+function proseOpens() {   // incremental, monotonic: each character of the text is read once
+  const open = new Array(PAIR_OPEN.length).fill(0); let at = 0;
+  return (text, to) => {
+    for (; at < to; at++) {
+      const c = text.charCodeAt(at);
+      if (isBlankCode(c)) { open.fill(0); continue; }
+      const o = OPEN_AT.get(c); if (o !== undefined) { open[o]++; continue; }
+      const k = CLOSE_AT.get(c); if (k !== undefined && open[k] > 0) open[k]--;
+    }
+    return open.slice();
+  };
+}
+/** How many characters at the END of a holder's value [vs, ve) belong to the prose (kept outside the mask) — a backward walk, linear. */
+function queryTail(text, vs, ve, opens) {
+  let i = ve - 1, k = 0;
+  while (i >= vs && TAIL_CLOSERS.has(text.charCodeAt(i))) i--;
+  if (i < vs) return 0;                                                         // a value of closers only: masked whole
+  let j = ve - 1;
+  const last = text.charCodeAt(j);
+  if ((last === 46 || last === 44) && (ve >= text.length || isBlankCode(text.charCodeAt(ve)))) { k++; j--; }   // ONE sentence-final `.` / `,`
+  for (; j > i; j--) { const c = CLOSE_AT.get(text.charCodeAt(j)); if (c === undefined || opens[c] <= 0) break; opens[c]--; k++; }   // the prose's own wrapper
+  return k;
+}
+const QUERY_VALUE_RE = /[^&#;\s"'<>]{1,65536}/y;   // ONE class run, nothing after it: native and linear (no backtracking)
+/** r4: does a PUBLIC value hide a holder — a nested `?name=` / `&name=` whose name HOLDS, or a userinfo — once percent-decoded?
+ *  r5: a userinfo WITH A PASSWORD, anywhere in the decoded value; a nested holder head anywhere in it (the whole value read). */
+const NESTED_HEAD_RE = /[?&;#]([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)(?=[^&#;\s"'<>])/g;
+const ENC_HEAD_RE = /%(?:3F|26|3B|23)/i;   // an encoded `? & ; #` — the only escapes that can open a nested head once decoded
+const AT_RE = /@|%40/i;                    // r5: a userinfo needs an `@`, raw or encoded — no `@`, no userinfo (and no decode for it)
+function hidesHolder(value) {
+  const at = AT_RE.test(value), enc = ENC_HEAD_RE.test(value);
+  if (!at && !enc) return false;
+  const d = decodeOnce(value);                                                     // the value read and decoded ONCE
+  if (at && passwordUserinfo(d)) return true;                                      // r5: a password-carrying userinfo anywhere in it, raw or encoded
+  if (!enc) return false;                                                          // no encoded head: a nested one is raw — the walk's own
+  NESTED_HEAD_RE.lastIndex = 0; let n;
+  while ((n = NESTED_HEAD_RE.exec(d))) if (holderName(n[1])) return true;
+  return false;
+}
+// r4 (M4): a nested head can HOLD only where a credential word stands (holderVerdict needs one among the name's pieces) — the walk
+// into a public value skips a value with none; the next word's index is found once and reused while ahead (one forward scan)
+const SECRET_WORD_RE = new RegExp([...SECRET_WORDS].sort((a, b) => b.length - a.length).join('|'), 'gi');
+function redactQuery(text, onMask) {
+  if (text.indexOf('=') < 0) return text;
+  const at = proseOpens();
+  let out = '', last = 0, m, judgedTo = 0, wordAt = -1;
+  const wordFrom = (i) => {
+    if (wordAt >= i) return wordAt;
+    SECRET_WORD_RE.lastIndex = i; const w = SECRET_WORD_RE.exec(text);
+    return (wordAt = w ? w.index : Infinity);
+  };
+  QUERY_HEAD_RE.lastIndex = 0;
+  while ((m = QUERY_HEAD_RE.exec(text))) {
+    const vs = QUERY_HEAD_RE.lastIndex;
+    QUERY_VALUE_RE.lastIndex = vs;
+    let hold = holderName(m[2]), ve = -1;
+    if (!hold && vs >= judgedTo) {                                                  // r4: the OUTERMOST public value, judged decoded once
+      const v0 = QUERY_VALUE_RE.exec(text); ve = vs + (v0 ? v0[0].length : 0); judgedTo = ve;
+      hold = hidesHolder(text.slice(vs, ve));
+      if (!hold && wordFrom(vs) >= ve) { QUERY_HEAD_RE.lastIndex = ve; continue; }   // no credential word inside: no nested holder
+    }
+    if (!hold) { QUERY_HEAD_RE.lastIndex = vs; continue; }                           // public: walk on — the next head may sit inside its value
+    if (ve < 0) { const v = QUERY_VALUE_RE.exec(text); ve = vs + (v ? v[0].length : 0); }
+    const keep = queryTail(text, vs, ve, at(text, m.index));
+    out += text.slice(last, vs) + REDACTED; last = ve - keep; onMask();
+    QUERY_HEAD_RE.lastIndex = ve;
+  }
+  return last ? out + text.slice(last) : text;
+}
+// A MASKED LINK (lane mask-value-shape law 2): an address that holds a mark a belt left INSIDE it — `«redacted»` (these
+// rules) or `[vault:<entry>]` (the live-value masker, src/vault-run.js) — raw, or percent-encoded as an href carries it (marked
+// encodes the brackets and leaves the colon raw: both colon forms). Bounded at the vault's own entry length (440, vault-inventory
+// ENTRY_RE). Its target is mangled: every surface draws it as WORDS with a note (src/lib/foryou-links.js maskedLinkNote)
+const MASK_IN_LINK_RE = /«redacted»|%C2%ABredacted%C2%BB|\[vault:([^\]\[\s]{1,440})(?:\]|$)|%5Bvault(?::|%3A)((?:(?!%5[BD])[^\s\]\[]){1,440})(?:%5D|$)/gi;   // r3: a mark the token's end cut open (an entry name holding `<`) is still a mark
+/** → null (no mark in it) | { shape: boolean, vault: [entry…] } — what a belt masked inside this link or path. */
+function maskedLink(url) {
+  const u = String(url == null ? '' : url).slice(0, INPUT_MAX);
+  if (u.indexOf('redacted') < 0 && !/vault/i.test(u)) return null;
+  let shape = false; const vault = [];
+  for (const m of u.matchAll(MASK_IN_LINK_RE)) {
+    const e = m[1] || m[2];
+    if (!e) { shape = true; continue; }
+    let name = e; if (m[2]) { try { name = decodeURIComponent(e); } catch { /* the raw name */ } }
+    if (!vault.includes(name)) vault.push(name);
+  }
+  return shape || vault.length ? { shape, vault } : null;
 }
 const JOINER_IN_WORD_RE = /(?<=[A-Za-z0-9_.\-])[\u200C\u200D]+(?=[A-Za-z0-9_.\-])/g;
 function redactSecrets(raw, { runs = false } = {}) {
@@ -284,7 +462,7 @@ function redactSecrets(raw, { runs = false } = {}) {
     text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); return `${h ? h[1] : ''}${REDACTED}`; });
     text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
     text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
-    text = text.replace(URL_QUERY_RE, (m, sep, name) => { if (!secretName(name)) return m; n++; return `${sep}${name}=${REDACTED}`; });
+    text = redactQuery(text, () => { n++; });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
     if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; return REDACTED; });
   } catch { /* a text that cannot be judged is returned as far as it got — the caller's belt still runs */ }
   return { text, redacted: n };
@@ -304,4 +482,4 @@ function hasTokenShape(raw) {
   return false;
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, secretName, redactSecrets, hasTokenShape };
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, secretName, holderName, maskedLink, redactSecrets, hasTokenShape };

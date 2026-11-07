@@ -92,4 +92,4 @@ function hrefPath(href) {
   return CONTROL.test(p) ? null : p;
 }
 
-module.exports = { pathRe, cleanPath, looksRelPath, relCandidates, fileUrlPath, hrefPath, PATH_SRC, CJK_PUNCT };
+module.exports = { pathRe, cleanPath, looksRelPath, relCandidates, fileUrlPath, hrefPath, PATH_SRC, CJK_PUNCT, SEG };

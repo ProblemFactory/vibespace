@@ -11942,4 +11942,7 @@ export default {
   "More — Vault locked": "その他 — 保管庫はロック中",
   "Back to {name}": "{name} に戻る",
   "Create or open…": "作成または開く…",
+  // lane mask-value-shape: THE note of a link a belt masked inside (src/lib/foryou-links.js maskedLinkNote)
+  "Part of this link was masked, so it will not open — ask the agent to send the link without the secret.": "このリンクの一部はマスクされているため開けません——秘密を含まないリンクを送るよう agent に頼んでください。",
+  "Part of this link was masked, so it will not open — it holds the vault entry {entry}: reveal it in Vault, or ask the agent to send the link without the secret.": "このリンクの一部はマスクされているため開けません——保管庫のエントリ {entry} を含みます：「保管庫」で表示するか、秘密を含まないリンクを送るよう agent に頼んでください。",
 };

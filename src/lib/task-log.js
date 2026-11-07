@@ -1,5 +1,6 @@
 import { escHtml, showToast, showContextMenu } from './utils.js';
 import { t, tc, deviceLocale } from './i18n.js';
+import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { registerOpenAction } from './window-types.js';
 // the ONE backlog order every reader shares (PURE CJS, esbuild interop like
 // backend-caps): open by priority high → normal → low, newest first within one
@@ -326,6 +327,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     note.className = 'task-log-note' + (isCleared(p) ? ' rc-cleared' : '');
     note.textContent = isCleared(p) ? clearedText() : p.note; // TEXT — an agent's words
     line.appendChild(note);
+    const noteMask = isCleared(p) ? '' : maskedNoteOf(note.textContent, t);   // lane mask-value-shape: a link a belt masked inside — the note
+    if (noteMask) { const mn = document.createElement('span'); mn.className = 'masked-link-note'; mn.textContent = noteMask; note.appendChild(mn); }   // r2 (m7): inside the note's own column, its own line (a flex sibling squeezed the note to ~40 px)
     if (exp) { const dg = document.createElement('span'); dg.className = 'task-log-dagger'; dg.textContent = '†'; line.appendChild(dg); }
     if (menuItemsFor(p).length) { // a row with nothing on its menu offers no ⋯ (a cleared row while selecting)
       const more = document.createElement('button');
@@ -341,6 +344,8 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
       const d = document.createElement('div');
       d.className = 'task-log-detail';
       d.textContent = p.detail;
+      const detailMask = maskedNoteOf(d.textContent, t);   // lane mask-value-shape
+      if (detailMask) { const dm = document.createElement('span'); dm.className = 'masked-link-note'; dm.textContent = detailMask; d.append(' ', dm); }
       row.appendChild(d);
       // the USER's open / close is remembered; an open or close the paint made (setOpen) is not theirs
       row.addEventListener('toggle', () => {

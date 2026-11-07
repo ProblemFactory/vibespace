@@ -238,7 +238,7 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
   // THE CENSUS OVER BOTH DOORS: an item's words reach the screen through wordsHtml only — no markdown in either file
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
   const census = (row, iw) => ({
-    row: /export const wordsHtml = \(text\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail\)\}<\/div>/.test(row),
+    row: /export const wordsHtml = \(text\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\) \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail\)\}<\/div>/.test(row),
     pane: /function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(iw) && /wordsInto\(c\.title, v\.title\);/.test(iw) && /else wordsInto\(c\.detail, v\.detail\);/.test(iw),
     noMarkdown: ![row, iw].some((s) => /from ['"]marked['"]|new Marked\(|renderMarkdown\(|\bmdInto\(/.test(s)),
   });
