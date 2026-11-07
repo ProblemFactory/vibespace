@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.385 — 2026-11-07
+
+### Fixed
+- Accounts with a long-lived token are back in the pool on Claude Code 2.1.319, and the chat warns you when a full disk costs part of a conversation.
+
 ## 2.369.384 — 2026-11-06
 
 ### Fixed
