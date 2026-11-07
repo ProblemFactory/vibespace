@@ -912,6 +912,7 @@ process.on('uncaughtException', (e) => { if (e && e.code === 'EVSMOUNTSYNC') { c
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {}
   try { userTodos.flush(); } catch {}
+  try { require('./src/server/writes-lost.js').installed()?.stop(); } catch {} // a lost write's warning still held after a failed write (lane cli-2-1-319-records r4)
   console.error(e); process.exit(1);
 });
 process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });

@@ -1685,6 +1685,9 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     check('⑱f r3 M1 …a disk STILL full at stop(): it does not throw, and the journal says by name that the warning never reached the file — the one loss that stays', goneStore.stop() === false && jGone.some((l) => /the hub stops with a warning that never reached/.test(l)), jGone);
     const shutBody = (/function shutdownNow\(\) \{([\s\S]*?)\n\}/.exec(read('server.js')) || [])[1] || '';
     check('⑱f r3 M1 WIRING: server.js shutdownNow stops the installed store, before process.exit (SIGINT / SIGTERM both end there)', /require\('\.\/src\/server\/writes-lost\.js'\)\.installed\(\)\?\.stop\(\)/.test(shutBody) && shutBody.indexOf('writes-lost.js') < shutBody.indexOf('process.exit(0)'), shutBody.slice(0, 200));
+    // r4 (round-3 acceptance): the hub's other exit. A scratch hub with a row held and the cause cleared, an uncaught throw ⇒ exit 1, no file, no «never reached» line
+    const crashBelt = (/process\.on\('uncaughtException', \(e\) => \{([\s\S]*?)\n\}\);/.exec(read('server.js')) || [])[1] || '';
+    check('⑱f r4 WIRING: server.js\'s uncaughtException belt stops the installed store too, try-wrapped, before process.exit(1) — a crash inside the retry, with room on the disk, keeps the warning', /try \{ require\('\.\/src\/server\/writes-lost\.js'\)\.installed\(\)\?\.stop\(\); \} catch \{\}/.test(crashBelt) && crashBelt.indexOf('writes-lost.js') < crashBelt.indexOf('process.exit(1)') && crashBelt.includes('process.exit(1)'), crashBelt.slice(-260));
     // r3 M2: A READ THAT FAILED IS TRIED AGAIN, AND A STORE THAT HAS NOT READ ITS FILE NEVER WRITES IT. A directory in the file's place = a real EISDIR on any uid
     const dirRead = scratch('helper-ask-writes-lost-read'), jRead = [], fRead = path.join(dirRead, 'writes-lost.json'); fs.mkdirSync(dirRead, { recursive: true });
     const seedRead = WL.create({ dataDir: dirRead, now: () => t0, log: () => { } });

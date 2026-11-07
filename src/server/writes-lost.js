@@ -16,8 +16,9 @@
  *
  * THE DISK MAY BE THE ONE THAT IS FULL. A write that fails is never thrown at the stdout consumer: the row stays in
  * memory (every rebuild in this hub's life still draws it), the journal says so once, the write is retried until it
- * lands, and the hub's shutdown (SIGINT / SIGTERM) tries once more. Freeing the space and restarting therefore keeps it.
- * Lost: a hub that stops while the disk still has no room, or is killed outright inside the retry; the journal says it.
+ * lands, and both of the hub's exits (SIGINT / SIGTERM, and an uncaught exception's flush belt) try once more. Freeing the
+ * space and restarting therefore keeps it. Lost: a hub that exits while the disk still has no room (the journal says so), or
+ * one killed outright inside the retry: SIGKILL or the OOM killer, where no code runs.
  *
  * A READ THAT FAILED IS TRIED AGAIN (data/ can sit on NFS). A store that has not read its file never writes it, so one
  * transient error cannot replace every other conversation's warnings; what was noted meanwhile waits in memory and is
@@ -147,7 +148,7 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
     // the instant rides beside the record: `timestamp` is no field of its stream shape, and the replay would raise a drift card for it
     return rowsFor(cid).map(({ timestamp, ...record }) => ({ type: 'writes_lost', at: Date.parse(timestamp), record }));
   };
-  /** the hub's shutdown (server.js shutdownNow, the atomic-persistence law): a row still held is written now. What cannot be is said by name: the journal is all that is left of it. */
+  /** the hub's exits (server.js shutdownNow and the uncaughtException belt, the atomic-persistence law): a row still held is written now. What cannot be is said by name: the journal is all that is left of it. */
   const stop = () => {
     if (timer) { clearTimeout(timer); timer = null; }
     const ok = flush();
