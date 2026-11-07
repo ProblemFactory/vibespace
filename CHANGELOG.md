@@ -4,8 +4,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.386 — 2026-11-07
 
+### Changed
+- On a phone, tapping + now opens a menu: its first row, Agent session, opens the New Session dialog, and Files is in it.
+
 ### Fixed
 - A chat row where the agent replied, then searched, opens the search results again. Pressing a message gone from the Outbox clears the previous one's mark.
+- A phone's top bar shows the conversation's name first: if space is short, Desktops, Usage and Settings fold into ⋯ and For-you badges merge.
 
 ## 2.369.385 — 2026-11-07
 
