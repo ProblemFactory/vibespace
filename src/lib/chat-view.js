@@ -26,6 +26,7 @@ import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, fold
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { conversationKeys } from '../outbox-chip.js'; // PURE (lane outbox-session-chip): the ids this conversation drafts under — the filter's keys
 import { onOutbox, conversationOutbox } from './outbox-feed.js'; // lane outbox-session-chip: the client's Outbox rows (message proposals + API calls) and the chip's ONE verdict over them
+import { moveVerdict } from '../queue-chips.js'; // PURE (lane midturn-order): a server move, seen from the window this view holds
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
@@ -1447,7 +1448,8 @@ class ChatView {
           && this._windowEnd === this._total
           && this._windowStart === this._total - messages.length
           && lastCur && lastNew && lastCur.id === lastNew.id
-          && this._messages[0]?.id === messages[0]?.id) {
+          && this._messages[0]?.id === messages[0]?.id
+          && messages.every((m, i) => this._messages[i]?.id === m?.id)) { // lane midturn-order: a card moved inside the slab is another order
         this._trace('loadHistory:identical-skip', { n: messages.length });
         if (meta) {
           if (meta.chatStatus) this.applyStatus(meta.chatStatus);
@@ -4107,7 +4109,7 @@ class ChatView {
     // (_reattach), which clears the flag (_fullViewReset).
     try {
       if (op.op === 'create') {
-        this._onCreateMessage(op.message);
+        this._onCreateMessage(op.message, op.before ? op : null);
         this._noteRecordKind(op.message);
         if (op.message?.noticeKind === 'artifact') this._onArtifactCard(op.message, true); // lane artifacts-model: the LIVE birth (auto-open + the chip)
       } else if (op.op === 'edit') {
@@ -4116,6 +4118,8 @@ class ChatView {
         this._noteRecordKind(this._messages.find((m) => m.id === op.id));
       } else if (op.op === 'meta') {
         this._onMeta(op);
+      } else if (op.op === 'move') {
+        this._onMoveMessage(op);
       }
     } catch (e) {
       this._seqPoisoned = true;
@@ -4126,8 +4130,10 @@ class ChatView {
     if (typeof op.seq === 'number' && !this._seqPoisoned) { this._lastSeq = op.seq; this._seqEpoch = this._normEpoch; }
   }
 
-  // Create a new normalized message → render and append to DOM
-  _onCreateMessage(msg) {
+  // Create a new normalized message → render and append to DOM — or, THE DELIVERY ORDER (lane midturn-order), insert it
+  // ABOVE the person's messages the agent has not read yet: `place` = the live op's {before, at} (the server's
+  // src/message-window.js says where; a slab is already in order and passes none)
+  _onCreateMessage(msg, place = null) {
     if (this._renderedMsgIds.has(msg.id)) return;
     // set_model confirmation: the CLI echoes "Set model to X (resolved-id)" as a
     // user record — the RESOLVED id is the authoritative model for the status
@@ -4183,7 +4189,18 @@ class ChatView {
     // Teleport mode is always "viewing history" \u2014 its window accounting is
     // stale, so gate on the flag directly (else live messages leak into the
     // teleported slab and corrupt the minimap's visible-ts thumb).
+    const insertAt = place && typeof place.at === 'number' && place.at >= 0 ? place.at : -1;   // lane midturn-order: placed ABOVE an unread message
+    let insideWindow = false;
     if (!this._loadingHistory && (this._teleported || (!this._pinned && this._windowEnd < this._total))) {
+      // r2 F4 — A CREATE NEVER MOVES THE READER: placed above the window this view holds ⇒ the same cards, one index later;
+      // placed INSIDE it (its end cut through the afloat block) ⇒ drawn in place, below the window's earlier cards
+      if (insertAt >= 0 && !this._teleported && insertAt < this._windowEnd) {
+        if (insertAt < this._windowStart) { this._chatMinimap?.shiftFrom?.(insertAt); this._windowStart++; this._windowEnd++; this._total++; return; }
+        insideWindow = true;   // the render path below inserts it (and shifts the markers once)
+      }
+    }
+    if (!insideWindow && !this._loadingHistory && (this._teleported || (!this._pinned && this._windowEnd < this._total))) {
+      if (insertAt >= 0 && !this._teleported) this._chatMinimap?.shiftFrom?.(insertAt);
       this._total++;
       this._newMsgCount++;
       this._scrollBtn.innerHTML = `\u2193 <span class="chat-scroll-badge">${this._newMsgCount}</span>`;
@@ -4196,7 +4213,11 @@ class ChatView {
     // otherwise push duplicate copies — and _onEditMessage's findIndex would
     // then mutate the stale first copy instead of the rendered one.
     const existIdx = this._messages.findIndex(m => m.id === msg.id);
-    if (existIdx >= 0) this._messages[existIdx] = msg; else this._messages.push(msg);
+    const beforeEl = place && existIdx < 0 && !this._loadingHistory ? this._elements.get(place.before) : null;
+    const beforeIdx = beforeEl ? this._messages.findIndex(m => m.id === place.before) : -1;
+    // inside a window but the card it goes before is not drawn here: no place to put it — the slab is re-read
+    if (insideWindow && beforeIdx < 0) { this._renderedMsgIds.delete(msg.id); this._total++; this._reorderStale('create-inside-unheld'); return; }
+    if (existIdx >= 0) this._messages[existIdx] = msg; else if (beforeIdx >= 0) this._messages.splice(beforeIdx, 0, msg); else this._messages.push(msg);
     this._syncReviewAvailability();
 
     // Streaming indicator driven by server's streaming-label broadcast (no client-side derivation)
@@ -4225,7 +4246,12 @@ class ChatView {
       default: return;
     }
 
-    if (!el) return;
+    if (!el) {
+      // r2 m9: a live card that draws nothing (an unclassified record) is still a card of the server's list — counted, so
+      // every later index the server says (a create's `at`, a move's from / to) means the same card here
+      if (!this._loadingHistory) { const tail = this._windowEnd >= this._total; this._total++; this._windowEnd = tail ? this._total : this._windowEnd + 1; if (beforeIdx >= 0) this._chatMinimap?.shiftFrom?.(this._windowStart + beforeIdx); }
+      return;
+    }
     el.dataset.msgId = msg.id;
     if (msg.ts) el.dataset.ts = msg.ts; // for time-coordinate minimap positioning
     // Every per-element mark the VIEW owns (retraction §2.10, the executing-tool
@@ -4236,7 +4262,7 @@ class ChatView {
     // the same rewound history the live stream did — one code path for both.
     this._applyElementMarks(el, msg);
     this._elements.set(msg.id, el);
-    this._messageList.appendChild(el);
+    if (beforeIdx >= 0 && beforeEl.parentNode === this._messageList) this._messageList.insertBefore(el, beforeEl); else this._messageList.appendChild(el);
     this._renderers.addWrapToggles(el);
     this._renderers.addOpenInEditorBtn(el);
     // Update window bounds for live messages (not history batch)
@@ -4247,14 +4273,18 @@ class ChatView {
       // scrolls to THAT bottom and the next frame the real height lands — the
       // follow chases every append. Batch loads reserve per slab already.
       this._reserveFreshHeights([el], { live: true });
+      // r2 F4: a card drawn INSIDE a window that does not reach the tail grows that window by one, never to the tail
+      const tail = this._windowEnd >= this._total;
       this._total++;
-      this._windowEnd = this._total;
+      this._windowEnd = tail ? this._total : this._windowEnd + 1;
+      // r2 F3: the markers of the cards below an inserted one move down with them
+      if (beforeIdx >= 0) this._chatMinimap?.shiftFrom?.(this._windowStart + beforeIdx);
       if (!this._pinned) this._scheduleScrollBtnSync(); // a one-screen view may just have outgrown its screen: ↓ appears
       // Update minimap with new user turns (CLI-injected page-image
       // attachments share the previous turnIndex — not a turn, no marker)
       if (msg.role === 'user' && !msg.imageAttachment) {
-        const turn = { turnIndex: msg.turnIndex, startIdx: this._total - 1, ts: msg.ts, role: 'user', ...turnPreviewOf(msg) }; // B-40f8: the server builders' ONE rule
-        this._chatMinimap.addTurn(turn, this._total);
+        const turn = { turnIndex: msg.turnIndex, startIdx: beforeIdx >= 0 ? this._windowStart + beforeIdx : this._total - 1, ts: msg.ts, role: 'user', ...turnPreviewOf(msg) }; // B-40f8: the server builders' ONE rule
+        if (beforeIdx >= 0 && this._chatMinimap.insertTurn) this._chatMinimap.insertTurn(turn, this._total); else this._chatMinimap.addTurn(turn, this._total);
         // Huge-session (time-coordinate) minimap: extend the timeline too —
         // addTurn is a no-op in full-extent mode, and without this the map
         // froze at init time while the live session kept growing
@@ -4276,6 +4306,106 @@ class ChatView {
       this._trimTop();
       this._scrollToBottom();
     }
+  }
+
+  /** THE DELIVERY ORDER (lane midturn-order — the owner, 2026-11-07): the server moved ONE card (src/message-window.js
+   *  `_moveBefore`): a person's message the agent had not read takes its place — below every record that happened while
+   *  it waited, or back where it rode a tool result. `from` / `to` are its indices in the server's list (after the move).
+   *  Both inside the window this view holds ⇒ moved in place; both outside ⇒ only the window's bounds shift when the card
+   *  crossed it; one in, one out ⇒ the slab is re-read (never a guessed position). */
+  _onMoveMessage(op) {
+    const id = op && op.id, from = Number(op && op.from), to = Number(op && op.to);
+    if (!id || !Number.isInteger(from) || !Number.isInteger(to) || from === to) return;
+    this._chatMinimap?.moveCard?.(from, to);   // r2 F3: the marker follows its card (the whole conversation's indices)
+    // r2 F4: A MOVE NEVER MOVES THE READER. A teleported view's window bounds are stale — it is judged by the ids it holds
+    if (this._teleported) { this._moveInSlab(op); return; }
+    const w = moveVerdict({ from, to, start: this._windowStart, end: this._windowEnd });
+    this._trace?.('order:move', { id: String(id).slice(-12), from, to, kind: w.kind });
+    if (w.kind === 'none') return;
+    if (w.kind === 'shift+1' || w.kind === 'shift-1') { this._windowStart = w.start; this._windowEnd = w.end; return; }
+    const i = this._messages.findIndex((m) => m.id === id);
+    if (w.kind === 'leave') {
+      if (i < 0) { this._reorderStale('move-leave-unheld'); return; }
+      this._dropFromWindow(id, i);
+      this._windowStart = w.start; this._windowEnd = w.end;
+      return;
+    }
+    if (w.kind === 'enter') {
+      if (i >= 0 || !op.message || op.message.id !== id || !this._drawInWindow(op.message, w.at)) { this._reorderStale('move-enter'); return; }
+      this._windowStart = w.start; this._windowEnd = w.end;
+      return;
+    }
+    const el = this._elements.get(id);
+    if (i < 0 || !el) { this._reorderStale('move-unheld'); return; }
+    const [msg] = this._messages.splice(i, 1);
+    this._messages.splice(w.at, 0, msg);
+    this._placeEl(el, w.at);
+    if (this._pinned && !this._loadingHistory) this._scrollToBottom();
+  }
+  /** Put the element of the card at window place `k` where its place is in the list: before the next card that is DRAWN
+   *  (a card that draws nothing — an unknown-record notice — has no element: r3 m11, never a re-read), else after the
+   *  nearest drawn card before it, else at the list's end. */
+  _placeEl(el, k) {
+    for (let j = k + 1; j < this._messages.length; j++) {
+      const n = this._elements.get(this._messages[j].id);
+      if (n && n.parentNode === this._messageList) { this._messageList.insertBefore(el, n); return; }
+    }
+    for (let j = k - 1; j >= 0; j--) {
+      const p = this._elements.get(this._messages[j].id);
+      if (p && p.parentNode === this._messageList) { p.after(el); return; }
+    }
+    this._messageList.appendChild(el);
+  }
+  /** A teleported slab (a seek into history: its window counters are stale) is judged by the ids it HOLDS: both ends held ⇒
+   *  moved in place; the card held but not its place ⇒ it left the slab; its place held but not the card ⇒ drawn from the
+   *  op's own copy; neither ⇒ nothing (the slab is history; returning to the tail reads the slab anew). */
+  _moveInSlab(op) {
+    const i = this._messages.findIndex((m) => m.id === op.id);
+    const bi = op.before ? this._messages.findIndex((m) => m.id === op.before) : -1;
+    if (i >= 0 && bi >= 0) {
+      const el = this._elements.get(op.id), bEl = this._elements.get(op.before);
+      const [msg] = this._messages.splice(i, 1);
+      this._messages.splice(this._messages.findIndex((m) => m.id === op.before), 0, msg);
+      if (el && bEl && bEl.parentNode === this._messageList) this._messageList.insertBefore(el, bEl);
+    } else if (i >= 0) {
+      // its place is a card this slab does not hold (one created after the jump, which a teleported view never draws): the
+      // message STAYS — at the slab's end, after every card the slab holds (r3 m14: the reader's own jump target never
+      // vanishes; no re-read, the anchor unmoved)
+      const [msg] = this._messages.splice(i, 1);
+      this._messages.push(msg);
+      const el = this._elements.get(op.id);
+      if (el) this._placeEl(el, this._messages.length - 1);
+    } else if (bi >= 0 && op.message && op.message.id === op.id) this._drawInWindow(op.message, bi);
+  }
+  /** Drop ONE card this window holds (it moved out of it): its element, its slot, its rendered mark. */
+  _dropFromWindow(id, i) {
+    this._messages.splice(i, 1);
+    const el = this._elements.get(id);
+    if (el) { el.remove(); this._elements.delete(id); }
+    this._renderedMsgIds.delete(id);
+  }
+  /** Draw ONE card (a move's copy) at place `at` of the window this view holds — before the card now at `at`, else after
+   *  the window's last card. → drawn */
+  _drawInWindow(msg, at) {
+    const was = this._loadingHistory;
+    this._loadingHistory = true;
+    let el = null;
+    try { el = this._renderDetached(msg); } finally { this._loadingHistory = was; }
+    // _renderDetached appended it to _messages — it goes at its place
+    const j = this._messages.findIndex((m) => m.id === msg.id);
+    if (j >= 0) this._messages.splice(j, 1);
+    this._messages.splice(Math.min(at, this._messages.length), 0, msg);
+    if (!el) return true;   // a card that draws nothing still holds its slot
+    this._placeEl(el, this._messages.indexOf(msg));
+    return true;
+  }
+  /** A reorder this view cannot apply where it stands: the slab it holds is no longer the server's order — re-read it
+   *  (the poisoned-watermark heal: the next attach asks for no seq and rebuilds from the full rung). */
+  _reorderStale(why) {
+    try { this._trace('order:stale', { why }); } catch { }
+    this._seqPoisoned = true;
+    if (this._readOnly) return;
+    try { this._reattach(); } catch { }
   }
 
   // Edit an existing message → re-render in place
@@ -4764,7 +4894,7 @@ class ChatView {
       // claude (lane claude-steer-inject): what the person had already HANDED to the turn is the turn's — never put back:
       // read by the agent already, or still held by the CLI (it stays in the conversation, unanswered)
       if (op.landed > 0) parts.push(t('{k} message(s) you sent into the turn had already reached the agent', { k: op.landed }));
-      if (op.kept > 0) parts.push(t('{k} message(s) you sent into the turn stay with it', { k: op.kept }));
+      if (op.kept > 0) parts.push(t('{k} message(s) unread when stopped — they go with your next message', { k: op.kept }));
       if (parts.length) showToast(parts.join(' · '), { duration: 6000 });
       return;
     }

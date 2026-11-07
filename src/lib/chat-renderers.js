@@ -832,12 +832,19 @@ class ChatRenderers {
    *  cut it off, and its words went back into the input box — codex, lane
    *  codex-interrupted-putback), 'handed' (claude: written to the running turn,
    *  the agent reads it at its next tool call) or 'kept' (claude: Stop came
-   *  before the agent read it — it stays in the conversation; lane
-   *  claude-steer-inject). Idempotent: called on first render
+   *  before the agent read it — it stays in the conversation and goes with the
+   *  next message; lane claude-steer-inject — drawn BELOW the stop's records,
+   *  lane midturn-order). Idempotent: called on first render
    *  AND on the queueState edit op, so the chip never doubles.
    *  STATIC + injected click handler: the DOM-free render test drives it
    *  without a ChatRenderers instance, and the chip text is the ONE place the
    *  three states are worded. */
+  /** A card this renderer never draws (the UNKNOWN EVENT / NEW FIELDS notices — renderSystemMsg returns null): ONE rule, so
+   *  a reader of the list that needs «is it on screen» asks the same question (lane midturn-order r3 m11). */
+  static drawsNothing(msg) {
+    return !!msg && ((msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') || (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields'));
+  }
+
   static applyQueueChip(el, msg, onSteer) {
     if (!el) return null;
     const prev = el.querySelector(':scope > .chat-queue-chip');
@@ -853,7 +860,7 @@ class ChatRenderers {
     // holds it — the chip says so and counts down to the backstop (ChatView's one-second ticker rewrites the seconds)
     const settling = state === 'queued' && msg?.settling ? msg.settling : null;
     const label = settling ? (settling.running ? t('Held — the previous turn’s follow-up is running') : t('Held — the turn is settling')) : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
-      : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Stays with the stopped turn') : t('Removed');
+      : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Unread when stopped — goes with your next message') : t('Removed');
     // a countdown only while a timer exists, on THIS browser's clock (r6, the hub-clock law: ChatView turned the hub's `until`
     // into `localUntil` with the hub's `now` when the edit arrived; a restored page has no such pair and shows no seconds)
     const until = settling && !settling.running && Number(settling.localUntil) > 0 ? Number(settling.localUntil) : 0;
@@ -867,7 +874,7 @@ class ChatRenderers {
       : state === 'steered' ? t('Injected into the running turn')
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
           : state === 'handed' ? t('Handed to the running turn — the agent reads it at its next tool call')
-            : state === 'kept' ? t('Stop came before the agent read it — it stays in the conversation, and the agent reads it with your next message')
+            : state === 'kept' ? t('Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again')
               : t('Removed from the queue — it will not run');
     if (state === 'queued' && typeof onSteer === 'function') {
       chip.onclick = (e) => { e.stopPropagation(); onSteer(msg); };
@@ -1830,7 +1837,7 @@ class ChatRenderers {
     // signal the owner reads (ruling 2026-10-15) stays visible to the admin: ONE quiet chip in the chat's status bar counts
     // the kinds (the normalizer's `record-kinds`, src/message-window.js `_noteAddedKind`) and opens ⚙ Diagnostics, and the
     // rail's Diagnostics counter counts them. Here: nothing.
-    if ((msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') || (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields')) return null;
+    if (ChatRenderers.drawsNothing(msg)) return null;
     // THE REPL'S OWN NOTIFICATION (claude system/notification, design-unknown-
     // records 2026-09-21): a dim notice, priority-coloured (immediate = red,
     // high = yellow), the CLI's text verbatim (escaped). stop-hook-error points

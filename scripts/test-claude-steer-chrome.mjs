@@ -36,13 +36,13 @@
 //      ③ CONTROL: Alt+Enter still holds — the strip row with ✎ ✕ ⚡, the CLI never got it
 //      ④ CONTROL: a session spawned on the OLD wrapper (its hello names no steer): «Enter queues» alone — no Alt+Enter
 //        segment, no hold button, no ⚡ on its row
-//      ⑤ Stop with a handed message ⇒ ONE toast «1 message(s) you sent into the turn stay with it», the bubble reads
-//        «Stays with the stopped turn», nothing answers it, the box stays empty
+//      ⑤ Stop with a handed message ⇒ ONE toast «1 message(s) unread when stopped — they go with your next message», the bubble reads
+//        «Unread when stopped — goes with your next message», nothing answers it, the box stays empty
 //      ⑥ ≤ 768 px: the hold button beside Send (the hint hidden), and it holds — at idle too (the capability's, r2)
 //      ⑦ (r2) a SECOND TAB whose streaming flag lags (pinned false): its Alt+Enter mid-tool still HOLDS (eeece327 stamped
 //        it — the hold became a hand-over)
 //      ⑧ (r2) the server RESTARTS and the page reloads: every mid-turn bubble comes back ONCE with its last chip
-//        («Steered», «Stays with the stopped turn», a still-held «Queued»)
+//        («Steered», «Unread when stopped — goes with your next message», a still-held «Queued»)
 // Shots: $VS_STEER_SHOTS (a dir) — the hint, the ⚡, an injected row, the phone face.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1199,7 +1199,7 @@ else {
     await typeSend('v1', 'STOP-D handed, then Stop');
     await until(() => cliGot('STOP-D handed'), 3000, 50);
     const stopped = await realClick('[data-steer-leg="v1"] .chat-interrupt-btn');
-    await until(async () => (await ev(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => /stay with it/.test(t.textContent))`)), 6000, 100);
+    await until(async () => (await ev(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => /unread when stopped/.test(t.textContent))`)), 6000, 100);
     await waitTurnEnd('v1');
     await sleep(1500);   // the stand-in's follow-up turn answers 300 ms in — anything that would answer D has by now
     const toasts = await ev(`[...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent)`);
@@ -1207,8 +1207,8 @@ else {
     const box = await ev('window.__v1._chatInput._textarea.value');
     const answeredD = await ev(`(window.__v1._messages || []).some((m) => m.role === 'assistant' && /reply: STOP-D/.test(JSON.stringify(m.content || [])))`);
     await shot('5-stop-kept');
-    ok(stopped && toasts.filter((t) => /1 message\(s\) you sent into the turn stay with it/.test(t)).length === 1, '⑤ Stop with a handed message ⇒ ONE toast «1 message(s) you sent into the turn stay with it»', { stopped, toasts });
-    ok(dChip.chip === 'kept' && /Stays with the stopped turn/.test(dChip.label || '') && !answeredD && box === '', '⑤ …the bubble reads «Stays with the stopped turn», NOTHING answered it after Stop, and the box stays empty (it is the turn\'s, never put back)', { dChip, answeredD, box });
+    ok(stopped && toasts.filter((t) => /1 message\(s\) unread when stopped — they go with your next message/.test(t)).length === 1, '⑤ Stop with a handed message ⇒ ONE toast «1 message(s) unread when stopped — they go with your next message»', { stopped, toasts });
+    ok(dChip.chip === 'kept' && /^Unread when stopped — goes with your next message$/.test(dChip.label || '') && !answeredD && box === '', '⑤ …the bubble reads «Unread when stopped — goes with your next message» (lane midturn-order), NOTHING answered it after Stop, and the box stays empty (it is the turn\'s, never put back)', { dChip, answeredD, box });
 
     // ⑦ (r2) A SECOND TAB whose streaming flag LAGS: its Alt+Enter mid-tool is still the person's HOLD
     const tab2 = await openTab(s1, 'steer new');
@@ -1270,7 +1270,7 @@ else {
     const strip8 = await ev(STRIP('v1'));
     await shot('8-after-restart');
     ok(restarted && o1r && o1r.ok, '§B ⑧ the server restarted mid-turn and the reloaded page reopened the conversation live', { restarted, o1r, journal: journal.slice(-600) });
-    ok(S(after8['ENTER-B'].map((b) => b.chip)) === S(['steered']) && S(after8['ALT-C'].map((b) => b.chip)) === S(['steered']) && S(after8['STOP-D'].map((b) => b.chip)) === S(['kept']) && S(after8['LAG-G'].map((b) => b.chip)) === S([null]), '⑧ after the restart each handed message is back ONCE with its last chip — «Steered», «Steered», «Stays with the stopped turn» — and the one that was held and ran, once with none (eeece327: gone)', after8);
+    ok(S(after8['ENTER-B'].map((b) => b.chip)) === S(['steered']) && S(after8['ALT-C'].map((b) => b.chip)) === S(['steered']) && S(after8['STOP-D'].map((b) => b.chip)) === S(['kept']) && S(after8['LAG-G'].map((b) => b.chip)) === S([null]), '⑧ after the restart each handed message is back ONCE with its last chip — «Steered», «Steered», «Unread when stopped — goes with your next message» — and the one that was held and ran, once with none (eeece327: gone)', after8);
     ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && strip8.visible && /PHONE-E held with the button/.test(strip8.text), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8 });
     await waitTurnEnd('v1', 40000);
     await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), 8000, 100);

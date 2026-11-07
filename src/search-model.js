@@ -186,4 +186,32 @@ function rankRows(rows, { shown = HITS_SHOWN } = {}) {
   return [...groups.values()].map((g) => ({ key: g.key, sid: g.sid, host: g.host, best: g.best, hits: g.hits, more: g.all - g.hits.length }));
 }
 
-module.exports = { MAX_ROW_BYTES, MAX_ARTIFACT_BYTES, SNIPPET_SIDE, HITS_SHOWN, segment, termsOf, queryFor, highlightTerms, capUtf8, textOf, kindOf, htmlText, artifactTextOf, snippetOf, rankRows, isCjk };
+/** THE LIVE FLUSH'S WALK (lane midturn-order r2 m6): which of a normalizer's cards to send now, and where the next flush
+ *  starts. A card still open (streaming / pending) is skipped and holds the cursor at it; a card already sent is skipped.
+ *  The cursor never passes the AFLOAT block (src/message-window.js — the person's messages the agent has not read sit at
+ *  the end of the list, and every later card is inserted ABOVE them): an append-only cursor at the list's end never saw
+ *  those inserts until the 30-minute backfill. `walked` (r4 m13) = the ids every earlier walk PASSED (sent or not — a
+ *  batch the caller then dropped or the index rejected leaves `sent`, never `walked`). → {send: [index…], from, passed: [id…]} */
+function liveWalk(msgs, from, sent, afloatCount = 0, walked = null) {
+  const send = [];
+  let firstOpen = -1;
+  const floatStart = msgs.length - Math.max(0, afloatCount | 0);
+  // r3 m13: a message that went afloat AFTER the last walk pulled the block's start below the cursor, and a card placed
+  // above it since sits below the cursor too — the walk starts at the block (or the cursor) and steps back over every card
+  // no walk has PASSED yet (r4: exactly the cards placed since the last walk — never a card a dropped or rejected batch
+  // took back out of `sent`: those wait for the backfill, as before, instead of being re-walked and re-dropped at every flush)
+  const seen = walked || sent;
+  let start = Math.min(from, floatStart);
+  while (start > 0 && msgs[start - 1] && !seen.has(msgs[start - 1].id)) start--;
+  const passed = [];
+  for (let i = start; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.status && m.status !== 'complete') { if (firstOpen < 0) firstOpen = i; continue; }
+    passed.push(m.id);
+    if (sent.has(m.id)) continue;
+    send.push(i);
+  }
+  return { send, from: Math.min(firstOpen >= 0 ? firstOpen : msgs.length, floatStart), passed };
+}
+
+module.exports = { MAX_ROW_BYTES, liveWalk, MAX_ARTIFACT_BYTES, SNIPPET_SIDE, HITS_SHOWN, segment, termsOf, queryFor, highlightTerms, capUtf8, textOf, kindOf, htmlText, artifactTextOf, snippetOf, rankRows, isCjk };

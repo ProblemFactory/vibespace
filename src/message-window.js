@@ -11,7 +11,8 @@
 // key the subclass stamps before it mints cards, so a rebuild reproduces the
 // same ids; `seq` only names creates outside any record context.
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
-const { turnPreviewOf, COMPACT_PREVIEW } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
+const { turnPreviewOf, COMPACT_PREVIEW, personRow } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn (+ who wrote a row)
+const { placeOf } = require('./queue-chips.js'); // PURE (lane midturn-order): where a queue chip's bubble is drawn
 const { queueDroppedOf, putbackNotice } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): Stop's put-back record + its toast facts
 
 const asArray = (v) => (Array.isArray(v) ? v : []);
@@ -26,6 +27,17 @@ class MessageWindow {
     this.messageIndex = new Map(); // id → NormalizedMessage
     this.listeners = [];
     this.turnIndex = 0;
+    // THE DELIVERY ORDER (lane midturn-order — the owner, 2026-11-07: «你能不能确保chatview里的顺序就是事件的实际顺序»): the
+    // list is the order of events AS THE AGENT LIVED THEM. A person's message the agent has not read yet is AFLOAT — the
+    // trailing block of `messages`, in the order sent; every other card is placed ABOVE that block (`_place`), and each
+    // message leaves it where its fate puts it (`_landFloat`). Server-side facts: the wire says only where a card goes
+    // (a `create` op's `before`, a `move` op) — a live view and a rebuild apply the same rules to the same records.
+    this._afloat = [];
+    this._floatFacts = new Map(); // id → {ended: a turn ended since it was drawn, ride: it rode a tool result, rideBefore: the first card after that}
+    this._landedFloats = new Set(); // ids that took their place — never afloat again
+    this._floatSeq = new Map();     // id → the order it first went afloat (the order sent): the block is kept in it (r3 m12)
+    this._floatSeqN = 0;
+    this._live = true;            // moves are said as ops (a history conversion: false)
   }
 
   /** FNV-1a over a record's stable serialization → the `h:` record key every
@@ -47,6 +59,12 @@ class MessageWindow {
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
   _emit(op) {
+    // THE DELIVERY ORDER (lane midturn-order): a card created ABOVE the afloat messages says so — `before` = the card it
+    // goes before, `at` = its index in this list (the client inserts it there; without them a create is appended)
+    if (op && op.op === 'create' && op.message && this._afloat.length && !op.before) {
+      const i = this._indexNearEnd(op.message);
+      if (i >= 0 && i < this.messages.length - 1) op = { ...op, before: this.messages[i + 1].id, at: i };
+    }
     // lane parked-ask-inbox: an op carrying a permission (an ask opened / settled) is counted — feedLive tells the
     // For-you observer by it for a normalizer without the pending-asks level (codex / ACP)
     if (op && ((op.fields && op.fields.permission) || (op.op === 'create' && ((op.message && op.message.permission) || (op.msg && op.msg.permission))))) this._permOps = (this._permOps || 0) + 1;
@@ -157,10 +175,139 @@ class MessageWindow {
       taskInfo: fields.taskInfo || null,
     });
     for (const k of this.constructor.CARD_FIELDS) msg[k] = fields[k] || null;
-    this.messages.push(msg);
+    this._place(msg, { afloat: fields.afloat === true, startsTurn: fields.startsTurn === true });
     this.messageIndex.set(msg.id, msg);
     return msg;
   }
+
+  // ── THE DELIVERY ORDER (lane midturn-order) ──
+  /** Put a new card in the list. `afloat` = a person's message the agent has not read: it joins the trailing block. Every
+   *  other card goes ABOVE that block — and a card that OPENS the next turn (`_opensTurn`) first lands what an ended turn
+   *  left afloat (a kept message rides that turn's first request; a removed one never ran). `startsTurn` = the caller KNOWS
+   *  this message starts a turn (a person's prompt the CLI took with no turn running): every float but a held one lands,
+   *  whether or not the ended turn's result was seen. Every writer of a card calls this (the normalizers' placers too). → msg */
+  _place(msg, { afloat = false, startsTurn = false } = {}) {
+    const f = this._afloat;
+    if (afloat) { this.messages.push(msg); f.push(msg); this._floatFacts.set(msg.id, {}); this._seqOf(msg); return msg; }
+    if (f.length && this._opensTurn(msg)) {
+      const landed = this._landEndedTurn(null, { any: startsTurn });
+      // r2 m7: what this opener landed comes back afloat if the wrapper then HOLDS it (a send inside a Stop's window)
+      if (landed.length) this._openedBy = { id: msg.id, landed };
+    }
+    if (!f.length) { this.messages.push(msg); return msg; }
+    // r2 F3: a card placed ABOVE the block belongs to the running turn — never to the unread message's turn (the send ran
+    // turnIndex++; a card made before the next turn starts would carry the message's index, and turnMap would open the
+    // message's turn at that card: the person's message gone from the minimap / TOC)
+    if (f.some((x) => x.turnIndex === msg.turnIndex)) { const prev = this.messages[this.messages.length - f.length - 1]; if (prev) msg.turnIndex = prev.turnIndex; }
+    this.messages.splice(this.messages.length - f.length, 0, msg);
+    for (const x of f) { const st = this._floatFacts.get(x.id); if (st && st.ride && !st.rideBefore) st.rideBefore = msg.id; }
+    return msg;
+  }
+  /** Does this card open the next turn — the agent's own record (an assistant or tool card: the request that carried what
+   *  was afloat was answered), or a message that starts a turn (the person's, a peer's, a notice)? Never the CLI's
+   *  interrupt marker, a note, a picture attachment or a VibeSpace card (system). */
+  _opensTurn(msg) {
+    if (!msg) return false;
+    if (msg.role === 'assistant' || msg.role === 'tool') return true;
+    if (msg.role !== 'user') return false;
+    const why = personRow(msg).why;
+    return why !== 'interrupt' && why !== 'note' && why !== 'attachment';
+  }
+  /** The next turn opened: every afloat message an ENDED turn left (kept, removed, or one whose fate was never said) takes
+   *  its place now, in order — never one still held in the queue (its own delivery says where it goes). */
+  _landEndedTurn(except, { any = false } = {}) {
+    const landed = [];
+    for (const x of this._afloat.slice()) {
+      if (x === except || x.queueState === 'queued') continue;
+      const st = this._floatFacts.get(x.id);
+      if (st && (st.ended || any) && this._landFloat(x)) landed.push(x);
+    }
+    return landed;
+  }
+  /** A message's fate put it in the conversation: it leaves the afloat block — where it rode a tool result when records came
+   *  after that (a Stop's), else right above the messages still afloat. `opens` = it opens a turn of its own (it ran as
+   *  one): what the ended turn left lands first. `ride` = its fate says the agent READ it (steered): only then do its ride
+   *  facts place it (r2 M1: a frame that rode a tool result and was then named KEPT — the CLI still held it — never goes
+   *  back above the stop's rows). → was it afloat */
+  _landFloat(msg, { opens = false, ride: read = false } = {}) {
+    if (!msg || !this._afloat.includes(msg)) return false;
+    if (opens) this._landEndedTurn(msg);
+    const f = this._afloat;
+    f.splice(f.indexOf(msg), 1);
+    const st = this._floatFacts.get(msg.id) || {};
+    this._floatFacts.delete(msg.id);
+    this._landedFloats.add(msg.id);
+    const ride = read && st.rideBefore && this.messageIndex.has(st.rideBefore) && !f.some((x) => x.id === st.rideBefore) ? st.rideBefore : null;
+    this._moveBefore(msg, ride || (f.length ? f[0].id : null));
+    return true;
+  }
+  /** A chip state says the message is not read (yet): it joins the afloat block, below every card drawn since. Never a
+   *  message that already took its place. */
+  _floatMsg(msg) {
+    if (!msg || this._afloat.includes(msg) || this._landedFloats.has(msg.id) || !this.messageIndex.has(msg.id)) return;
+    // r2 m7: this message opened the next turn when it was drawn and landed what the ended turn left — the wrapper now says
+    // it HOLDS it (a send inside a Stop's window), so no turn opened: those come back afloat, ahead of it, in order
+    const back = this._openedBy && this._openedBy.id === msg.id ? this._openedBy.landed.filter((x) => this.messageIndex.has(x.id) && !this._afloat.includes(x)) : [];
+    this._openedBy = null;
+    // r3 m12: each goes back to ITS place in the block — the order sent (`_floatSeq`), never behind a message sent after it.
+    // r4: NO OP when they already stand there — the block they make with the messages afloat, in the order sent, is the
+    // list's tail as it is; else they go in from the NEWEST down (the newest to the end first), so a message already
+    // above its place is never moved away and back (r3 sent a cancelling pair for every send held inside a Stop's window)
+    const coming = [...back, msg];
+    for (const x of coming) { this._landedFloats.delete(x.id); this._seqOf(x); this._floatFacts.set(x.id, x === msg ? {} : { ended: true }); }
+    const block = [...this._afloat, ...coming].sort((a, b) => this._floatSeq.get(a.id) - this._floatSeq.get(b.id));
+    if (block.every((x, i) => this.messages[this.messages.length - block.length + i] === x)) { this._afloat = block; return; }
+    for (const x of coming.sort((a, b) => this._floatSeq.get(b.id) - this._floatSeq.get(a.id))) this._insertFloat(x);
+  }
+  /** The order a message first went afloat — given once, kept for a message that lands and comes back (r3 m12). */
+  _seqOf(msg) {
+    if (!this._floatSeq.has(msg.id)) { this._floatSeq.set(msg.id, ++this._floatSeqN); if (this._floatSeq.size > 512) this._floatSeq.delete(this._floatSeq.keys().next().value); }
+    return this._floatSeq.get(msg.id);
+  }
+  /** Put a message into the afloat block at its place by the order sent: before the first afloat message sent after it
+   *  (moved there — no op when it already stands there), else at the end. */
+  _insertFloat(msg) {
+    const seq = this._seqOf(msg);
+    const after = this._afloat.find((y) => (this._floatSeq.get(y.id) || 0) > seq) || null;
+    this._moveBefore(msg, after ? after.id : null);
+    this._afloat.splice(after ? this._afloat.indexOf(after) : this._afloat.length, 0, msg);
+  }
+  /** THE ONE READER of a chip state's place (src/queue-chips.js `placeOf`): 'here' lands it (no state = it ran: a turn of
+   *  its own opens with it), 'tail' / 'next-turn' keep it afloat. */
+  _placeByChip(msg, state) {
+    if (!msg) return;
+    if (placeOf(state) === 'here') this._landFloat(msg, { opens: !state, ride: state === 'steered' });
+    else this._floatMsg(msg);
+  }
+  /** A turn ended (its result): what is afloat now waits for the NEXT turn's first card at the latest. */
+  _noteTurnEnded() { for (const st of this._floatFacts.values()) st.ended = true; }
+  /** A tool result reached the CLI: a handed message rides the request built after it — read there unless a Stop says else. */
+  _noteRide() {
+    for (const x of this._afloat) {
+      const st = this._floatFacts.get(x.id);
+      if (st && x.queueState === 'handed') { st.ride = true; st.rideBefore = null; }
+    }
+  }
+  /** Move a card before `beforeId` (null = the end) — said as ONE `move` op on a live feed: `from` = its index before the
+   *  move, `to` = after it (the client moves it in place, shifts its window or re-reads — src/lib/chat-view.js). */
+  _moveBefore(msg, beforeId) {
+    const a = this._indexNearEnd(msg);
+    if (a < 0) return;
+    if ((a + 1 < this.messages.length ? this.messages[a + 1].id : null) === (beforeId || null)) return;
+    this.messages.splice(a, 1);
+    const b = beforeId ? this._indexNearEnd(this.messageIndex.get(beforeId)) : -1;
+    if (b >= 0) this.messages.splice(b, 0, msg); else this.messages.push(msg);
+    if (this._live) this._emit({ op: 'move', id: msg.id, before: b >= 0 ? beforeId : null, from: a, to: b >= 0 ? b : this.messages.length - 1, message: msg });
+  }
+  _indexNearEnd(msg) {
+    if (!msg) return -1;
+    for (let i = this.messages.length - 1; i >= 0; i--) if (this.messages[i] === msg) return i;
+    return -1;
+  }
+  /** The last card placed — never an afloat message (a streaming text card is edited where it is). */
+  _lastPlaced() { return this.messages[this.messages.length - 1 - this._afloat.length]; }
+  /** Diagnostics / suites: the ids afloat now, in order. */
+  afloatIds() { return this._afloat.map((m) => m.id); }
 
   /** ONE record into cards — `emit` = live (ops to listeners) vs a rebuild.
    *  Every normalizer declares its own (the record shapes are its business). */
@@ -182,7 +329,9 @@ class MessageWindow {
    */
   async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
     let sliceStart = Date.now(), done = 0;
-    for (const record of records || []) {
+    const wasLive = this._live;
+    this._live = false; // a history conversion says no op (a move included)
+    try { for (const record of records || []) {
       if (beforeRecord) { try { beforeRecord(record); } catch { } }
       try { this._feedRecord(record, false); }
       catch (e) { console.error(`[${this._logTag}] record skipped during history rebuild:`, e.message); }
@@ -192,7 +341,7 @@ class MessageWindow {
         await new Promise((r) => setImmediate(r));
         sliceStart = Date.now();
       }
-    }
+    } } finally { this._live = wasLive; }
     this._finishHistory();
     return this.messages;
   }

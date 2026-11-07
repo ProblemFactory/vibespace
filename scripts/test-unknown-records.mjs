@@ -102,7 +102,7 @@ console.log('§4 the fold owns the noise: kind "unknown", its own toggle, OFF by
 console.log('§5 the renderer (lane door-healthy-chat, 2.369.344): a record kind is NEVER drawn in a person\'s chat — the bar\'s quiet chip carries it');
 {
   const cr = read('src/lib/chat-renderers.js');
-  ok('renderSystemMsg: an unknown-record AND an unknown-fields notice render NOTHING (null — the chat view skips a null element), the card markup gone', /if \(\(msg\.noticeKind === 'unknown-record' && msg\.content\?\.\[0\]\?\.type === 'unknown_record'\) \|\| \(msg\.noticeKind === 'unknown-fields' && msg\.content\?\.\[0\]\?\.type === 'unknown_fields'\)\) return null;/.test(cr) && !/chat-unknown-event/.test(cr) && !/t\('Full record'\)/.test(cr));
+  ok('renderSystemMsg: an unknown-record AND an unknown-fields notice render NOTHING (null — the chat view skips a null element), the card markup gone — the rule is ChatRenderers.drawsNothing (lane midturn-order r3: one rule the chat view\'s placement reads too)', /static drawsNothing\(msg\) \{\n\s+return !!msg && \(\(msg\.noticeKind === 'unknown-record' && msg\.content\?\.\[0\]\?\.type === 'unknown_record'\) \|\| \(msg\.noticeKind === 'unknown-fields' && msg\.content\?\.\[0\]\?\.type === 'unknown_fields'\)\);/.test(cr) && /renderSystemMsg\(msg[^)]*\) \{[\s\S]*?if \(ChatRenderers\.drawsNothing\(msg\)\) return null;/.test(cr) && !/chat-unknown-event/.test(cr) && !/t\('Full record'\)/.test(cr));
   const css = read('public/chat.css');
   ok('…its red card CSS is gone; the chip is quiet (the theme\'s dim text, never --red)', !/\.chat-unknown-event/.test(css) && /\.chat-status-kinds \{ color: var\(--text-dim\); \}/.test(css));
   const BW = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-bar-words.js')).href);

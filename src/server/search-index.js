@@ -150,19 +150,20 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       if (!mm || !sid || st === 'disabled' || st === 'closed') return;
       const epoch = session._normEpoch || 0;
       let cur = session._searchIx;
-      if (!cur || cur.epoch !== epoch || cur.mm !== mm) cur = session._searchIx = { epoch, mm, from: 0, sent: new Set() };
+      if (!cur || cur.epoch !== epoch || cur.mm !== mm) cur = session._searchIx = { epoch, mm, from: 0, sent: new Set(), walked: new Set() };
       const msgs = mm.messages || [];
       const out = [];
-      let firstOpen = -1;
-      for (let i = cur.from; i < msgs.length; i++) {
+      // the walk is PURE (search-model liveWalk): the cursor never passes the afloat block — cards inserted above a
+      // person's unread message are indexed live (lane midturn-order r2 m6)
+      const walk = M.liveWalk(msgs, Math.min(cur.from, msgs.length), cur.sent, Array.isArray(mm._afloat) ? mm._afloat.length : 0, cur.walked);
+      for (const id of walk.passed) cur.walked.add(id);   // r4 m13: what a walk passed — a dropped batch below leaves `sent`, never this
+      for (const i of walk.send) {
         const m = msgs[i];
-        if (m.status && m.status !== 'complete') { if (firstOpen < 0) firstOpen = i; continue; }
-        if (cur.sent.has(m.id)) continue;
         const body = M.textOf(m);
         if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }] });
         cur.sent.add(m.id);
       }
-      cur.from = firstOpen >= 0 ? firstOpen : msgs.length;
+      cur.from = walk.from;
       if (!out.length) return;
       if (liveQueued + out.length > LIVE_QUEUE_MAX) {
         counts.dropped += out.length;

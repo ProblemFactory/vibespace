@@ -652,7 +652,7 @@ const MMreal = require(path.join(REPO, 'src/message-manager.js'));
 const CXreal = require(path.join(REPO, 'src/adapters/codex.js'));
 {
   for (const r of previewTable(builderRows(MMreal, CXreal))) ok(`${r.name}: the nudge turn is a note with no text, a question keeps its words${r.name.includes('claude') ? ', a TYPED quote of the nudge stays the user\'s, a compact summary says so' : ''}`, r.pass, r.got);
-  ok('the live append (chat-view) builds its turn with the SAME rule', /const turn = \{ turnIndex: msg\.turnIndex, startIdx: this\._total - 1, ts: msg\.ts, role: 'user', \.\.\.turnPreviewOf\(msg\) \};/.test(read('src/lib/chat-view.js')));
+  ok('the live append (chat-view) builds its turn with the SAME rule (its index where it was inserted — above an unread message, lane midturn-order)', /const turn = \{ turnIndex: msg\.turnIndex, startIdx: beforeIdx >= 0 \? this\._windowStart \+ beforeIdx : this\._total - 1, ts: msg\.ts, role: 'user', \.\.\.turnPreviewOf\(msg\) \};/.test(read('src/lib/chat-view.js')));
   // dc-twins M10: the three chat normalizers build turns in ONE place — src/message-window.js (each extends it, none
   // keeps a turnMap of its own)
   const NORMALIZERS = ['src/message-manager.js', 'src/codex-message-manager.js', 'src/acp-message-manager.js'];

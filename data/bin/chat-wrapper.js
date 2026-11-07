@@ -666,12 +666,23 @@ function deliverHeldInterrupt(why) {
 }
 /** A frame that RODE the tool result at Stop counted as held (the CLI may still hold it — r4); a window that closes with
  *  no follow-up turn proves the turn's last request took it: it is the turn's, as read — and the record says so. */
+// lane midturn-order r4 (m15): with follow-up turns, the riders are judged ONCE, here, when the window settles — against
+// EVERY uuid any follow-up's init named (`stopping.named`; the CLI may split what it held into several follow-ups, each
+// naming its own frames): a rider NO follow-up named went into the request built after its tool result (the model read
+// it) — landed; a rider some follow-up named was still the CLI's — kept. A CLI whose inits name nothing (before 2.1.307)
+// leaves every rider kept, as before.
 function landRiding(why) {
-  if (!stopping || !stopping.riding || !stopping.riding.length || stopping.follows) return;
-  record('input_handover', { state: 'landed', msg_ids: stopping.riding });
-  settleCopies(stopping.riding);
-  log(`the frame(s) that rode the last tool result went with the turn's last request — landed (${why})`);
-  stopping.riding = [];
+  if (!stopping || !stopping.riding || !stopping.riding.length) return;
+  let read = stopping.riding;
+  if (stopping.follows) {
+    if (!stopping.namesSaid) return;
+    read = stopping.riding.filter((id) => { const c = copies.get(id); return !!(c && c.cliUuid && !stopping.named.has(c.cliUuid)); });
+    if (!read.length) return;
+  }
+  record('input_handover', { state: 'landed', msg_ids: read });
+  settleCopies(read);
+  log(`the frame(s) that rode the last tool result went with the turn's last request — landed (${why}${stopping.follows ? `; no follow-up of ${stopping.follows} named them` : ''})`);
+  stopping.riding = stopping.riding.filter((id) => !read.includes(id));
 }
 /** EVERY FRAME A STOP TOUCHED SETTLES ONCE (acceptance r7) — each by name: KEPT (the follow-up's interrupted record holds
  *  it), RIDING with no follow-up (landed — landRiding), RIDING with a follow-up the window interrupted (the CLI still held
@@ -740,7 +751,7 @@ function dropHeldForStop() {
   const held = handed.length + (stopping ? stopping.held : 0);
   const live = turnBusy || cliOwesTurn || !!stopping;
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
-  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))) }; armBound(); }
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))) }; armBound(); }
   const dropped = promptQueue.splice(0, promptQueue.length);
   settleCopies(dropped.map((q) => q.msgId)); // put back (or VibeSpace's own): never run — its kept files go
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
@@ -980,6 +991,11 @@ function processLine(line) {
         if (!deliverHeldInterrupt('on the follow-up init')) sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
         stopping.follows++;
         log(`interrupt: the CLI started follow-up turn ${stopping.follows} for what it held at Stop — interrupted on its init`);
+        // WHO THE FOLLOW-UP CARRIES IS SAID BY ITS INIT (lane midturn-order r3–r4, m15; measured: `user_message_uuids` names every
+        // stamped frame the turn consumed, 2.1.307 on). Every follow-up's names are REMEMBERED — the CLI may split what it held
+        // into several follow-ups — and the riders are judged once, when the window settles (landRiding): never at an init,
+        // where a frame the next follow-up will name would be called read
+        if (Array.isArray(msg.user_message_uuids)) { stopping.namesSaid = true; for (const u of msg.user_message_uuids) stopping.named.add(String(u)); }
       } else if (cliOwesTurn) {
         // the CLI's own turn for what it was still holding: theirs now — a Stop in it stops a TURN, it keeps no message
         cliOwesTurn = false;

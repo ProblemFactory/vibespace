@@ -464,7 +464,7 @@ class MessageManager extends MessageWindow {
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
     this._currentTs = Date.now();
     this.turnIndex++;
-    const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
+    const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex, startsTurn: !this._turnLive });
     msg.originKind = 'peer-message';
     if (this._turnLive && !msg.turnStart) msg.midTurn = true; // lane touch-chip-cause r3: drawn while a turn RAN — it entered that turn (a peer message, a notice, Background Work)
     msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
@@ -726,6 +726,8 @@ class MessageManager extends MessageWindow {
    * Does NOT emit ops — caller uses the returned array directly.
    */
   convertHistory(claudeMessages) {
+    const wasLive = this._live;
+    this._live = false; // lane midturn-order: a history conversion says no op (a move included); r2 m8: the PRIOR value comes back
     for (const msg of claudeMessages) {
       // Per-record isolation: a single malformed/crashing record must skip,
       // not amputate everything after it (a ReferenceError here once truncated
@@ -733,6 +735,7 @@ class MessageManager extends MessageWindow {
       try { this._processMessage(msg, false); }
       catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
     }
+    this._live = wasLive;
     // Finalize any trailing streaming text
     this._finalizeStreaming(false);
     return this.messages;
@@ -755,7 +758,9 @@ class MessageManager extends MessageWindow {
   replay(raw, { at = null } = {}) {
     if (!raw || typeof raw !== 'object') return;
     this._replayAt = Number.isFinite(at) && at > 0 ? at : 0;
-    try { this._processMessage(raw, false); } finally { this._replayAt = null; }
+    const wasLive = this._live;
+    this._live = false;
+    try { this._processMessage(raw, false); } finally { this._replayAt = null; this._live = wasLive; } // r2 m8: inside a conversion it stays false
   }
 
   /** The instant a task record says its task is alive: now on the live stream
@@ -846,8 +851,9 @@ class MessageManager extends MessageWindow {
       }
       // Don't break early — stale streaming messages can exist anywhere
       // after pty re-attach incidents. Scan all recent messages.
-      // Stop at user messages (streaming never crosses turn boundaries).
-      if (m.role === 'user') break;
+      // Stop at user messages (streaming never crosses turn boundaries) — never at an AFLOAT one (lane midturn-order r2 M2:
+      // it sits below the turn's cards, not where the turn began; stopping there left every text card 'streaming' for good)
+      if (m.role === 'user' && !this._afloat.includes(m)) break;
     }
   }
 
@@ -1318,6 +1324,7 @@ class MessageManager extends MessageWindow {
       if (turn.durationMs == null && turn.messageCount == null) return;
       for (let i = this.messages.length - 1; i >= 0; i--) {
         const m = this.messages[i];
+        if (this._afloat.includes(m)) continue; // lane midturn-order: an afloat message is below the turn, never its start
         if (m.role === 'user' && !m.synthetic) break; // the turn began here: nothing of ours precedes it
         if (m.role === 'assistant' || m.role === 'tool' || (m.role === 'system' && m.status !== 'complete')) {
           m.meta = { ...(m.meta || {}), turn };
@@ -1759,7 +1766,7 @@ class MessageManager extends MessageWindow {
    *  (an older build's words-only copy), and the record's own words the copy lacks — the CLI's «[Image could not be
    *  processed …]» lines are its fact of what the model got, never hidden behind the copy. Never a copy Stop put back
    *  (removed / stopped: it never ran). */
-  _claimWebuiCopy(content, uuid, emit, merged) {
+  _claimWebuiCopy(content, uuid, emit, merged, opens = false) {
     if (!uuid || !this._webuiCopies.size) return false;
     let hit = null;
     for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
@@ -1807,6 +1814,9 @@ class MessageManager extends MessageWindow {
       const msg = this.messageIndex.get(this._webuiCopies.get(msgId).id);
       this._webuiCopies.delete(msgId);
       if (!msg) continue;
+      // lane midturn-order: the CLI's record of it IS where the agent got it (taken into the turn, or its own turn's prompt) —
+      // except a KEPT one: that record is the follow-up Stop interrupted, the agent reads it with the next turn
+      if (msg.queueState !== 'kept') this._landFloat(msg, { opens });
       const drawn = claimedContent(msg.content || [], blocks);
       if (JSON.stringify(drawn) !== JSON.stringify(msg.content)) { msg.content = drawn; if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } }); }
     }
@@ -1820,6 +1830,9 @@ class MessageManager extends MessageWindow {
     const id = this.userMessageIds.get(String(msgId));
     const msg = id ? this.messageIndex.get(id) : null;
     if (!msg) return false;
+    // THE DELIVERY ORDER (lane midturn-order): the chip's state says where the bubble is drawn — afloat below everything
+    // that happened while the agent has not read it, in its place once it has (src/queue-chips.js `place`)
+    this._placeByChip(msg, state);
     // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
     if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
     // the hub's `now` is re-said at every emit (r6): it pairs with `until` for the client's own deadline
@@ -1940,6 +1953,7 @@ class MessageManager extends MessageWindow {
     const toolResults = blocks.filter(b => b.type === 'tool_result');
     const textBlocks = blocks.filter(b => b.type !== 'tool_result');
 
+    if (toolResults.length) this._noteRide(); // lane midturn-order: a handed message rides the request built after this result
     // Merge tool results into pending tool messages
     for (const tr of toolResults) {
       const toolUseId = tr.tool_use_id;
@@ -2074,7 +2088,7 @@ class MessageManager extends MessageWindow {
       const isPageImages = !raw.promptSource && !raw._fromWebui && (raw.isSynthetic || raw.isMeta)
         && normalizedContent.every(b => b.type === 'image');
       if (isPageImages) {
-        const last = this.messages[this.messages.length - 1];
+        const last = this._lastPlaced(); // lane midturn-order: never an afloat message
         if (last && last.imageAttachment) {
           last.content = last.content.concat(normalizedContent);
           if (emit) this._emit({ op: 'edit', id: last.id, fields: { content: last.content, status: 'complete' } });
@@ -2104,7 +2118,7 @@ class MessageManager extends MessageWindow {
       // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
-      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit, raw.mergedSendUuids)) { this._turnStartPending = true; return; } // seam touch-chip-cause × claude-steer: the copied frame DELIVERED as a turn's prompt — that turn opens at its next record
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit, raw.mergedSendUuids, true)) { this._turnStartPending = true; return; } // seam touch-chip-cause × claude-steer: the copied frame DELIVERED as a turn's prompt — that turn opens at its next record
       // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
       // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
@@ -2113,7 +2127,11 @@ class MessageManager extends MessageWindow {
       const metaNote = u.companion;
       if (!metaNote) this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
-      const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
+      // THE DELIVERY ORDER (lane midturn-order): the person's message sent while a turn RUNS — the live send, or the
+      // wrapper's copy of it (a copy is made only of such a frame) — is AFLOAT: below every card the turn draws until the
+      // wrapper says what became of it (only a wrapper that publishes its queue says so)
+      const afloat = !!(raw._fromWebui && raw.msgId && (raw.webui_copy || (emit && this._turnLive && !this._turnStartPending && this._queuePublished)));
+      const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex, afloat, startsTurn: !afloat && !metaNote });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
         msg.midTurn = true; // seam touch-chip-cause × claude-steer: a copy is made only of a MID-TURN frame — it entered a running turn
         this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, ran: 0 });
@@ -2188,8 +2206,9 @@ class MessageManager extends MessageWindow {
         if (emit) this._emit({ op: 'create', message: msg });
 
       } else if (block.type === 'text') {
-        // Streaming detection: if last message is streaming assistant text, edit it
-        const last = this.messages[this.messages.length - 1];
+        // Streaming detection: if last message is streaming assistant text, edit it (the last PLACED — an afloat message
+        // below it is not «last» in the turn: lane midturn-order)
+        const last = this._lastPlaced();
         if (last && last.role === 'assistant' && last.status === 'streaming' && last.content[0]?.type === 'text') {
           last.content = [{ type: 'text', text: block.text || '' }];
           last.meta = recMeta; // later records of the same message carry the final usage
@@ -2244,7 +2263,7 @@ class MessageManager extends MessageWindow {
           permission: null, usage: null, taskInfo: null, meta: recMeta,
         };
         this._turnStartOf(msg); // lane touch-chip-cause r3: a turn whose first record is this call
-        this.messages.push(msg);
+        this._place(msg); // lane midturn-order: above every afloat message (the agent's own call opens the next turn)
         this.messageIndex.set(msgId, msg);
         this.pendingToolCalls.set(block.id, { msgId, block });
         if (emit) this._emit({ op: 'create', message: msg });
@@ -2266,6 +2285,7 @@ class MessageManager extends MessageWindow {
   }
 
   _processResult(raw, emit) {
+    this._noteTurnEnded(); // lane midturn-order: what is afloat now lands at the next turn's first card at the latest
     this._finalizeStreaming(emit);
     // Flush any pending tool calls that never got results (interrupted)
     // But preserve tool calls with unresolved permissions — they're still waiting for user input

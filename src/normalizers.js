@@ -212,6 +212,10 @@ function feedGroupCard(session, card) {
   if (!session._historyLoaded) return true;   // the first attach's rebuild places it from the ring
   return !!placeGroupCard(mm, stored, { emit: true });
 }
+/** A card placer's push (lane midturn-order, THE DELIVERY ORDER): through the normalizer's own `_place` — above the
+ *  person's messages the agent has not read yet (src/message-window.js) — never a bare push below them. */
+const placeIn = (mm, msg) => { if (typeof mm._place === 'function') mm._place(msg); else mm.messages.push(msg); };
+const floatCount = (mm) => (Array.isArray(mm._afloat) ? mm._afloat.length : 0);
 /** THE ONE writer of a report card into a normalizer (any harness: every normalizer keeps `messages`, `messageIndex`,
  *  `turnIndex`, `_emit` — the browser card's shape). The same user-role peer card `injectPeerCard` makes, with the
  *  card's stable id and `peerGroup`; idempotent by that id. `emit` = a live op; a history conversion emits nothing. */
@@ -225,7 +229,7 @@ function placeGroupCard(mm, card, { emit = false } = {}) {
   const msg = { id, role: 'user', status: 'complete', content: [{ type: 'text', text: c.text }], ts: c.shownAt || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex,
     toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: null,
     originKind: 'peer-message', peerFrom: c.fromName || null, peerVia: 'peer', peerGroup: c.group, ...(c.cleared ? { peerCleared: true } : {}) };   // a PEER's words — never a VibeSpace notice; a CLEARED one is worded by the renderer
-  mm.messages.push(msg);
+  placeIn(mm, msg);
   mm.messageIndex.set(id, msg);
   if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;
@@ -294,7 +298,7 @@ function placeProposalCard(mm, block, { emit = false } = {}) {
   if (mm.messageIndex.has(id)) return null;
   const msg = { id, role: 'system', status: 'complete', content: [{ ...block }], ts: Number(block.at) || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
     toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'browser-proposal' };
-  mm.messages.push(msg);
+  placeIn(mm, msg);
   mm.messageIndex.set(id, msg);
   if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;
@@ -335,11 +339,14 @@ function placeArtifactCard(mm, block, { emit = false, rebuilt = false } = {}) {
   if (where === 'none') return null;
   const msg = { id, role: 'system', status: 'complete', content: [{ ...block }], ts: Number(block.firstAt) || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
     toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'artifact' };
-  const slot = where === 'at' ? AF.timeSlot(mm.messages, msg.ts) : mm.messages.length;
-  if (slot < mm.messages.length) mm.messages.splice(slot, 0, msg);
-  else mm.messages.push(msg);
+  const slot = where === 'at' ? Math.min(AF.timeSlot(mm.messages, msg.ts), mm.messages.length - floatCount(mm)) : mm.messages.length;
+  if (slot < mm.messages.length - floatCount(mm)) mm.messages.splice(slot, 0, msg);
+  else placeIn(mm, msg);
   mm.messageIndex.set(id, msg);
-  if (emit && slot === mm.messages.length - 1 && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  // emitted when it took the LAST PLACED place (the base's «appended at the tail» — r2 m10: with a person's unread message
+  // afloat below, that place is above the block, and the create op carries {before, at})
+  const at = typeof mm._indexNearEnd === 'function' ? mm._indexNearEnd(msg) : mm.messages.indexOf(msg);
+  if (emit && at === mm.messages.length - 1 - floatCount(mm) && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;
 }
 /** The card already drawn gets the row's new block IN PLACE; false = not drawn (or unchanged). `emit` false = a history pass. */
@@ -421,7 +428,7 @@ function placeBrowserCard(mm, card, { emit = false } = {}) {
   if (mm.messageIndex.has(id)) return null;
   const msg = { id, role: 'system', status: 'complete', content: [block], ts: block.at || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
     toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'browser-session' };
-  mm.messages.push(msg);
+  placeIn(mm, msg);
   mm.messageIndex.set(id, msg);
   if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;

@@ -8,6 +8,7 @@ import { createPopover, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { noteSentence } from './chat-run-summary.js';
+import { movedIndex } from '../queue-chips.js'; // PURE (lane midturn-order r2 F3): where an index lands when one card moved
 
 // What a turn's drag label and outline row say (B-40f8): a VibeSpace note to the
 // assistant (the Stop nudge, an injection turn — src/assistant-note.js turnPreviewOf
@@ -198,6 +199,36 @@ export class ChatMinimap {
     this._markerByTurn.set(turn, marker);
     // Reposition existing markers since total changed
     this._repositionMarkers();
+  }
+
+  // ── THE DELIVERY ORDER (lane midturn-order r2 F3): a marker follows its card. The server places a card ABOVE a person's
+  // unread message (a create's `at`) and moves a message where it was read (a `move` op): the turns' indices change with
+  // them, so live = the reload's turnMap. Full-extent markers sit by time, never by index — untouched. ──
+  /** A card was inserted at index `at`: every turn at or after it is one index later. */
+  shiftFrom(at) {
+    if (this._fullExtent || !Number.isInteger(at)) return;
+    let n = 0;
+    for (const t of this._turnMap) if (t.startIdx >= at) { t.startIdx++; n++; }
+    if (n && !this._minimap.classList.contains('hidden')) this._repositionMarkers();
+  }
+  /** A card moved from → to: its turn moves with it, the turns between shift by one — the list and the markers in order. */
+  moveCard(from, to) {
+    if (this._fullExtent || !Number.isInteger(from) || !Number.isInteger(to) || from === to) return;
+    let n = 0;
+    for (const t of this._turnMap) { const s = movedIndex(t.startIdx, from, to); if (s !== t.startIdx) { t.startIdx = s; n++; } }
+    if (!n) return;
+    this._turnMap.sort((a, b) => a.startIdx - b.startIdx);
+    if (!this._minimap.classList.contains('hidden')) this.render(this._turnMap);
+  }
+  /** A live turn whose card was inserted ABOVE later turns (chat-view hands only the person's rows, as to addTurn): it takes
+   *  its place in the list, never appended past them. */
+  insertTurn(turn, total) {
+    if (this._fullExtent || !turn) return;
+    const i = this._turnMap.findIndex((t) => t.startIdx > turn.startIdx);
+    if (i < 0) { this.addTurn(turn, total); return; }
+    this._turnMap.splice(i, 0, turn);
+    this._total = total || this._total;
+    if (this._turnMap.length >= 3) { this._minimap.classList.remove('hidden'); this._messageList.classList.add('chat-minimap-active'); this.render(this._turnMap); }
   }
 
   /** Reposition all markers after total count changes */

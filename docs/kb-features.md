@@ -782,8 +782,9 @@ impossible rather than a review promise.
   session spawned on a .354 wrapper keeps «Enter queues» alone (honestly — that
   wrapper holds every frame) and one from before .354 shows no hint at all.
   **Stop with a handed message:** it is the turn's — never put back into the
-  box; ONE toast counts it («N message(s) you sent into the turn stay with it»)
-  and its bubble reads «Stays with the stopped turn». When the CLI had not taken
+  box; ONE toast counts it («N message(s) unread when stopped — they go with your next message», .387; was «…you sent into the turn stay with it»)
+  and its bubble reads «Unread when stopped — goes with your next message» (.387,
+  lane midturn-order; was «Stays with the stopped turn»). When the CLI had not taken
   it in yet, the CLI RUNS it +11 ms after the interrupt (measured) — the wrapper
   interrupts that follow-up turn on its first line, so nothing answers after
   Stop; the message stays in the conversation and the agent reads it with the
@@ -802,7 +803,7 @@ impossible rather than a review promise.
   **ONE record per Stop names each handed message's fate**, and the toast and
   the chips are drawn from it: read already («N message(s) you sent into the
   turn had already reached the agent», «Steered»), still held by the CLI («…stay
-  with it», «Stays with the stopped turn»), held by VibeSpace (back in the box);
+  with it», «Unread when stopped — goes with your next message»), held by VibeSpace (back in the box);
   a message whose OWN turn Stop ended is a stopped turn, in no count. **The hold
   door is the capability's**: Alt+Enter and the ≤768px clock button hold
   whatever this tab's streaming flag says (a second tab that lags still holds;
@@ -811,6 +812,29 @@ impossible rather than a review promise.
   false`). A message sent mid-turn **survives a server restart and a reload**
   with its last chip — the wrapper keeps a copy in its history buffer (a held
   «Queued» bubble too, which .354 lost the same way).
+  **Where a message sent mid-turn is drawn (2.369.387, lane midturn-order — the
+  owner, 2026-11-07: «你能不能确保chatview里的顺序就是事件的实际顺序»):** the chat's
+  order is the order of events AS THE AGENT LIVED THEM, never the order the words
+  were typed. While the agent has not read it (chip «Queued» or «Handed to the
+  turn»), the bubble stays BELOW everything the turn draws; read at a tool result
+  («Steered») it takes its place right below the tool card whose result carried
+  it — back above a Stop's rows if Stop came after that ride; run as a turn of its
+  own (the turn ended first) it sits where that turn starts, below the answer it
+  never saw. Stopped before the agent read it («Unread when stopped — goes with
+  your next message»), or put back by Stop («Removed»), it stays below the stop's
+  «[Request interrupted…]» rows and their «Interrupted» lines until the next turn
+  opens — the person's next message is drawn right below it (the CLI sends them
+  together). A reload and a hub restart draw the same order. A rebuild from the
+  transcript alone (the wrapper's buffer ring rotated past the stop) shows the
+  CLI's own order without the chip. Claude only (Codex / OpenCode / Antigravity
+  keep today's place). Round 2 (.387): a message that rode a tool result the CLI
+  still held stays below the stop too; the minimap / table of contents keep the
+  message as its own turn, live and after a reload; a new card never moves the
+  reader's place; Stop's toast says what the chip says («N message(s) unread when
+  stopped — they go with your next message»); on a phone the chip wraps under the
+  bubble instead of squeezing the words (.387 r4: on a phone every chip sits under its
+  bubble in bubble mode). A message the agent never read stays «Unread when stopped»
+  even when Claude splits what it held into several follow-ups after Stop.
   **Acceptance r4 (the same .363):** the Stop window and a turn the CLI owes
   wait for the CLI's own words — the follow-up's init (interrupted) or its idle —
   through the prompt hook the CLI runs first (the product's own waits on the hub

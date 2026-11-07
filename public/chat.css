@@ -1103,6 +1103,13 @@
   background: none; color: var(--text-dim); font-family: inherit; cursor: default;
 }
 .chat-queue-chip svg { width: 10px; height: 10px; }
+/* lane midturn-order r2: the chip never squeezes the person's words — when the bubble and the chip do not fit one line (a
+   phone's 360 px, a long message) the chip goes UNDER the bubble, and its own words wrap */
+.chat-msg-user:has(> .chat-queue-chip) { flex-wrap: wrap; }
+.chat-queue-chip { max-width: 100%; white-space: normal; text-align: left; }
+/* r4: on a phone every chip goes under its bubble in bubble mode — a SHORT chip («Steered») no longer shares the row and
+   pushes its bubble left of the other right-aligned bubbles */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-view:not(.chat-compact) .chat-msg-user:has(> .chat-queue-chip) { flex-direction: column; align-items: flex-end; } }
 .chat-queue-chip-queued { cursor: pointer; }
 .chat-queue-chip-queued:hover { background: var(--bg-hover); color: var(--text); }
 .chat-queue-chip:disabled { cursor: default; }

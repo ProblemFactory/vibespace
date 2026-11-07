@@ -163,11 +163,11 @@ await guard('§4 the normalizer', () => {
   mm.processLive({ type: 'input_handover', state: 'kept', msg_ids: ['m-d'] });
   mm.processLive({ type: 'input_handover', state: 'bogus', msg_ids: ['m-e'] });
   ok(S(handed) === S(['handed', 'handed', 'handed']), 'handed: the bubble reads «Handed to the turn» (the agent reads it at its next tool call)', handed);
-  ok(chip('m-b') === 'steered' && !chip('m-c') && chip('m-d') === 'kept' && !chip('m-e'), 'landed ⇒ «Steered» where it sits · own-turn ⇒ an ordinary message (no chip) · kept ⇒ «Stays with the stopped turn» · an unknown state changes nothing', ['m-b', 'm-c', 'm-d', 'm-e'].map(chip));
+  ok(chip('m-b') === 'steered' && !chip('m-c') && chip('m-d') === 'kept' && !chip('m-e'), 'landed ⇒ «Steered» where it sits · own-turn ⇒ an ordinary message (no chip) · kept ⇒ «Unread when stopped — goes with your next message» (lane midturn-order) · an unknown state changes nothing', ['m-b', 'm-c', 'm-d', 'm-e'].map(chip));
   ok(ops.filter((o) => o.op === 'edit' && o.fields && 'queueState' in o.fields).length === 6 && !mm.messages.some((x) => x.noticeKind === 'unknown-record'), 'one edit op per change, live to every client; no unknown-record card');
   ok(/'input_handover',/.test(read('server.js')), 'server.js CLAUDE_STREAM_TYPES knows the record (the unhandled-type breadcrumb stays quiet)');
   const rend = read('src/lib/chat-renderers.js');
-  ok(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend) && /state === 'kept' \? t\('Stays with the stopped turn'\)/.test(rend) && /&& state !== 'handed' && state !== 'kept'\) return null;/.test(rend), 'the chip renderer draws both new states, each with its own words');
+  ok(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend) && /state === 'kept' \? t\('Unread when stopped — goes with your next message'\)/.test(rend) && /&& state !== 'handed' && state !== 'kept'\) return null;/.test(rend), 'the chip renderer draws both new states, each with its own words');
 });
 
 // ── §5 STOP'S PUT-BACK COUNTS WHAT STAYS ──
@@ -183,7 +183,7 @@ await guard('§5 the put-back count', async () => {
   mm.processLive({ type: 'queue_dropped', dropId: '9-1', by: 'stop', turnId: null, items: [], omitted: 0, kept: 1 });
   const meta = ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
   ok(meta.length === 1 && meta[0].kept === 1 && meta[0].n === 0, 'a Stop that put nothing back but ends a turn holding a handed message still says ONE toast', meta);
-  ok(/if \(op\.kept > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn stay with it', \{ k: op\.kept \}\)\);/.test(cvSrc), 'the toast\'s words: «{k} message(s) you sent into the turn stay with it»');
+  ok(/if \(op\.kept > 0\) parts\.push\(t\('\{k\} message\(s\) unread when stopped — they go with your next message', \{ k: op\.kept \}\)\);/.test(cvSrc), 'the toast\'s words: «{k} message(s) unread when stopped — they go with your next message» (lane midturn-order r2 m5)');
   // r2: ONE record says EACH frame's fate, and the chips are drawn from it
   const d2 = PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-3', items: [{ id: 'q1', msgId: 'm-p', text: 'put back' }], kept: 1, keptIds: ['m-k'], landed: 1, landedIds: ['m-l'] });
   ok(d2 && S(d2.keptIds) === S(['m-k']) && S(d2.landedIds) === S(['m-l']) && d2.landed === 1 && S(PB.putbackNotice(d2)) === S({ n: 1, images: 0, others: 0, cut: 0, omitted: 0, started: 0, kept: 1, landed: 1 }), 'queueDroppedOf names each handed frame (keptIds / landedIds) and the toast\'s facts count both', { d2, facts: PB.putbackNotice(d2) });
@@ -194,7 +194,7 @@ await guard('§5 the put-back count', async () => {
   mm2.processLive({ type: 'queue_dropped', dropId: '9-3', by: 'stop', turnId: null, items: [{ id: 'q1', msgId: 'm-p', text: 'words m-p' }], omitted: 0, kept: 1, keptIds: ['m-k'], landed: 1, landedIds: ['m-l'] });
   const chip2 = (id) => mm2.messages.find((x) => x.webuiMsgId === id)?.queueState;
   const meta2 = ops2.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
-  ok(chip2('m-p') === 'removed' && chip2('m-k') === 'kept' && chip2('m-l') === 'steered' && meta2.length === 1 && meta2[0].kept === 1 && meta2[0].landed === 1, 'the chips come from THE record: put back «Removed», kept «Stays with the stopped turn», read «Steered» — and ONE toast', { chips: ['m-p', 'm-k', 'm-l'].map(chip2), meta2 });
+  ok(chip2('m-p') === 'removed' && chip2('m-k') === 'kept' && chip2('m-l') === 'steered' && meta2.length === 1 && meta2[0].kept === 1 && meta2[0].landed === 1, 'the chips come from THE record: put back «Removed», kept «Unread when stopped — goes with your next message», read «Steered» — and ONE toast', { chips: ['m-p', 'm-k', 'm-l'].map(chip2), meta2 });
   ok(/if \(op\.landed > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn had already reached the agent', \{ k: op\.landed \}\)\);/.test(cvSrc), 'the toast names a read one in its own words — never «stays with it»: «{k} message(s) you sent into the turn had already reached the agent»');
   const ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
   ok(!!zh['{k} message(s) you sent into the turn had already reached the agent'] && !!ja['{k} message(s) you sent into the turn had already reached the agent'], '…in zh and ja too');

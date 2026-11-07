@@ -69,6 +69,10 @@ const FOLLOW_MS = Number(process.env.STAND_IN_FOLLOW_MS || 300);
 const SPLIT_FOLLOW = process.env.STAND_IN_SPLIT_FOLLOW === '1';
 const NO_STATE = process.env.STAND_IN_NO_STATE === '1';
 const POST_MS = Number(process.env.STAND_IN_POST_MS || 5);
+// $STAND_IN_RIDE_MISS=1 (lane midturn-order r2 M1): a frame written while the tool ran MISSED the request built after its result
+// (the race the wrapper counts a riding frame KEPT for, chat-wrapper dropHeldForStop) — it stays held by the CLI, which runs it
+// as a follow-up turn after a Stop
+const RIDE_MISS = process.env.STAND_IN_RIDE_MISS === '1';
 const HELPER_MS = Number(process.env.STAND_IN_HELPER_MS || LONG_MS);
 const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
 const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
@@ -114,7 +118,9 @@ function end(subtype) {
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
     if (busy.follow && !busy.dropped) delivered('kept', busy.text);
   }
-  out({ type: 'result', subtype, is_error: interrupted, result: busy.text, session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
+  // an interrupted result carries NO `result` words (measured on 2.1.312: claude-steer-inject measure/r3-312/stop-late-*, `result`
+  // absent on error_during_execution) — the chat's row says «Interrupted» alone (lane midturn-order r2 r1)
+  out({ type: 'result', subtype, is_error: interrupted, ...(interrupted ? {} : { result: busy.text }), session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
   busy = null;
   // what the CLI was holding runs as a turn of its own — after an interrupt too (measured); after an interrupt its
   // request is still out for FOLLOW_MS when a second interrupt can end it
@@ -172,7 +178,7 @@ function begin(f, { follow = false } = {}) {
       // every frame that arrived while the tool ran rides THIS tool result into the turn (the CLI's own queue — a
       // slash command never does: it waits for its own turn)
       const took = [];
-      for (let i = 0; i < queued.length;) { const t = textOf(queued[i]); if (/^\s*\//.test(t)) { i++; continue; } took.push(t); queued.splice(i, 1); }
+      for (let i = 0; i < queued.length && !RIDE_MISS;) { const t = textOf(queued[i]); if (/^\s*\//.test(t)) { i++; continue; } took.push(t); queued.splice(i, 1); }
       for (const t of took) delivered('tool_result', t);
       busy.timer = setTimeout(() => { say('done after the tool' + (took.length ? ' — took in: ' + took.join(' | ') : '')); end('success'); }, POST_MS);
     }, /LONGER-/.test(text) ? LONG_MS * 3 : LONG_MS);
