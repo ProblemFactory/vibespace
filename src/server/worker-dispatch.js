@@ -31,7 +31,9 @@
  *      engine (`sendToAgent`): the pair group's log, reach re-asked by the
  *      engine, the wake through THE delivery ladder (spendReason
  *      `peer-message`, the ONE billed turn). `stash` posts it without a wake:
- *      it rides the worker's next turn, free.
+ *      it rides the worker's next turn, free. `park` (lane paced-wake-retry —
+ *      the PACE said no and named the wait) posts it and leaves the wake to
+ *      the retry park: sent when the window ends.
  * One journal line per dispatch (ids, never the brief's words).
  */
 const crypto = require('crypto');
@@ -142,7 +144,8 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       } finally { inFlight.delete(cid); }
     } else if (charge && charge.hold && releaseSpend) { try { releaseSpend({ hold: charge.hold }); } catch { } charge = null; }
     // ── wake (or stash) — the brief, as `send --wake` ──
-    const wakeNow = verdict.steps.includes('wake');
+    // lane paced-wake-retry: `park` posts like a wake — `reserved` answers the same refusal (its wait), and wakeAll parks the wake for the window's end
+    const wakeNow = verdict.steps.includes('wake') || verdict.steps.includes('park');
     const reserved = (m) => (m === cid ? pace : (typeof mayWake === 'function' ? mayWake(m) : true));
     reserved.refund = (m, o) => { if (typeof mayWake === 'function' && typeof mayWake.refund === 'function') mayWake.refund(m, o); };
     const noWake = () => ({ reason: verdict.why });
@@ -160,7 +163,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     const record = M.dispatchRecord({
       target: { cid, name }, verdict, compaction, charge, waitMs, reply,
       identity: charge && charge.identity ? charge.identity : null,   // the slot the compaction's authorization resolved for this worker — the ladder's wake lands on the same identityOf(session); unknown when nothing was compacted
-      wake: { woke, reason: woke ? null : (ref ? ref.reason : (wakeNow ? 'the worker gets it on its next turn' : verdict.why)) },
+      wake: { woke, paced: ref && ref.parked ? { retryInMs: ref.retryInMs, retryAt: ref.retryAt } : null, reason: woke ? null : (ref ? ref.reason : (wakeNow ? 'the worker gets it on its next turn' : verdict.why)) },
     });
     log(M.journalLine({ from, record, charge }));
     return { ok: true, record, post, attempt: nonce || null };

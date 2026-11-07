@@ -1874,7 +1874,7 @@ const I_RECV = {
   'src/lib/user-todos-actions.js|row': ['todo', 'an ask\'s --artifact row (its name / path — lane foryou-attachments; a clear drops the item\'s artifacts: SHAPES todo)'],
   'src/lib/user-todos-panel.js|wordsOf()': ['todo', 'a For-you item\'s words (the model\'s)'],
   'src/server/conversation-deliver.js|opts': ['carrier', 'the card label + text of a delivery (a job\'s `Background Work · <name>`)'],
-  'src/server/conversation-deliver.js|shown[0]': ['carrier', 'the retry park\'s single landed entry at its card (notify-retry verify r2: the card is built AFTER the post from the words as they stand — a clear that reached it mid-flight already rewrote them to the sentence)'],
+  'src/server/conversation-deliver.js|one': ['carrier', 'the retry park\'s single landed entry at its card (notify-retry verify r2: the card is built AFTER the post from the words as they stand — a clear that reached it mid-flight already rewrote them to the sentence)'],
   'src/server/groups-engine.js|wc': ['group-message', 'a wake\'s card words: the message that woke it, or each message its report showed (B-9fd6)'],
   'src/server/groups-engine.js|rep': ['group-message', 'a wake REPORT (a line per group message)'],
   'src/server/session-brain.js|fact': ['status', 'the vcs event entry of a session\'s status history (its branch) — the record itself'],
@@ -2145,9 +2145,9 @@ const I_SITES = {
   'src/server/conversation-deliver.js|peer|opts.cardText': ['transcript', 'the card drawn when a delivery reached the conversation'],
   // notify-retry verify r2: the retry park's landing card is built AFTER the post from the entry's words AS THEY STAND (a clear
   // that reached it mid-flight already rewrote them to the sentence — redactStash rewrites the park); `recorded` = the frame
-  'src/server/conversation-deliver.js|peer|shown[0].fromName': ['transcript', 'the parked delivery\'s landing card: the entry\'s name as it stands after any clear (the park is rewritten by the door)'],
-  'src/server/conversation-deliver.js|peer|shown[0].cardText': ['transcript', 'the parked delivery\'s landing card: the entry\'s card text as it stands (dropped by a clear)'],
-  'src/server/conversation-deliver.js|peer|shown[0].text': ['transcript', 'the parked delivery\'s landing card: the entry\'s words as they stand after any clear (a mid-flight clear = the sentence; the frame the CLI holds is `recorded`)'],
+  'src/server/conversation-deliver.js|peer|one.fromName': ['transcript', 'the parked delivery\'s landing card: the entry\'s name as it stands after any clear (the park is rewritten by the door)'],
+  'src/server/conversation-deliver.js|peer|one.cardText': ['transcript', 'the parked delivery\'s landing card: the entry\'s card text as it stands (dropped by a clear)'],
+  'src/server/conversation-deliver.js|peer|one.text': ['transcript', 'the parked delivery\'s landing card: the entry\'s words as they stand after any clear (a mid-flight clear = the sentence; the frame the CLI holds is `recorded`)'],
   'src/server/groups-engine.js|peer|rep.text': ['transcript', 'a wake report delivered to a member (a refused one rides the next report; a handed-back one is the stash the door rewrites)'],
   'src/server/groups-engine.js|peer|wc.text': ['transcript', 'a group message delivered to a member (the wake card\'s words — B-9fd6)'],
   'src/server/session-brain.js|status|fact.branch': ['own', 'the vcs entry\'s own write (the door drops its branch)'],

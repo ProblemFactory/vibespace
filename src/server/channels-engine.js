@@ -8419,7 +8419,7 @@ function create(deps = {}) {
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
-    approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
+    approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
     receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld, collectReceipt, stopCollect,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
@@ -8435,6 +8435,10 @@ function create(deps = {}) {
   let lastExpirySweep = 0;
   let offStash = deliver && typeof deliver.onStash === 'function'
     ? deliver.onStash((ev, cid, entries, extra) => { noteReceiptStash(ev, cid, entries, extra).catch((err) => log.warn(`[channels] receipt fate update failed: ${(err && err.message) || err}`)); })
+    : null;
+  // lane paced-wake-retry (D6): a decider's wake the pace held and the park could not send — the card and the owner hear it
+  let offRetryFell = deliver && typeof deliver.onRetry === 'function'
+    ? deliver.onRetry((ev, cid, e, extra) => { if (ev === 'fell' && e && e.producer === 'stash-wake' && e.meta && e.meta.ref) noteReceiptWakeFell(e.meta.ref, cid, extra).catch((err) => log.warn(`[channels] receipt ${e.meta.ref}: the fallen wake could not be noted: ${(err && err.message) || err}`)); })
     : null;
   // verify r3 (IDENTITY): the stash gate — what this engine filed for an agent's next turn is re-judged at every read
   let offStashGate = deliver && typeof deliver.registerStashGate === 'function' ? deliver.registerStashGate(stashGate) : null;
@@ -8671,6 +8675,7 @@ function create(deps = {}) {
     for (const c of censusTimed.values()) if (c.timer) { try { c.timer.cancel(); } catch { } c.timer = null; }   // B-f32b r2
     if (offIntegrations) { try { offIntegrations(); } catch {} offIntegrations = null; }
     if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
+    if (offRetryFell) { try { offRetryFell(); } catch {} offRetryFell = null; }   // lane paced-wake-retry: the fallen wake's listener
     if (offStashGate) { try { offStashGate(); } catch {} offStashGate = null; }   // verify r3: the stash gate
     if (timer) { clearInterval(timer); timer = null; }
     if (owedTimer) { clearInterval(owedTimer); owedTimer = null; }   // lane judged-watch-state: the owed look (what is owed is memory — a restart forgets it)

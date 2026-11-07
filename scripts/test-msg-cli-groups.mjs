@@ -179,6 +179,30 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   override = (key) => (key === 'POST /api/agent/msg/group' ? { status: 404, body: { error: 'no agent session "zed" you can message (not found, not live, or outside your reach — vibespace-msg list shows it)', code: 'unreachable' } } : null);
   r = await run(['group', 'invite', 'api', 'zed']);
   ok(r.code === 1 && /refused \[unreachable\]/.test(r.err) && /→ vibespace-msg list shows every session you can message/.test(r.err), 'unreachable: exit 1 + the remedy line', r.err);
+  // lane paced-wake-retry (D8): after a paced wake falls, `read` names the cause — no wake cap was reached
+  override = (key) => (key === 'GET /api/agent/msg/read' ? { status: 200, body: { ok: true, group: { id: 'g-0000abcd', name: 'api' }, records: [{ at: 1700000000000, from: 'alpha', kind: 'message', text: 'q1', await: { state: 'held', at: 1700000000001, fell: 'paced-out' } }, { at: 1700000000002, from: 'alpha', kind: 'message', text: 'q2', await: { state: 'held', at: 1700000000003, paced: true } }, { at: 1700000000004, from: 'alpha', kind: 'message', text: 'q3', await: { state: 'held', at: 1700000000005 } }] } } : null);
+  r = await run(['read', 'api']);
+  ok(r.code === 0 && /q1[^\n]*\(reply waiting — the wake could not land within its hour\)/.test(r.out) && /q2[^\n]*\(reply paced — sent when the window ends\)/.test(r.out) && /q3[^\n]*\(reply waiting — your wake cap reached\)/.test(r.out), 'read: a fall names its own cause; a paced reply and a real cap keep their words', r.out);
+  // P9: EVERY cause the engine can write has its own words here, from the ONE list; a new cause without a row is red by name
+  {
+    const causes = [...new Set([...require(path.join(REPO, 'src/channel-groups.js')).AWAIT_FELL, 'mode-changed', 'left', 'may-have-landed'])];   // the amendment's own causes named too, so a list that lost them is red here as well
+    override = (key) => (key === 'GET /api/agent/msg/read' ? { status: 200, body: { ok: true, group: { id: 'g-0000abcd', name: 'api' }, records: causes.map((fell, i) => ({ at: 1700000000000 + i, from: 'alpha', kind: 'message', text: 'cause-' + fell, await: { state: 'held', at: 1700000000000 + i, fell } })) } } : null);
+    r = await run(['read', 'api']);
+    const lines = r.out.split('\n');
+    const bad = causes.filter((c) => { const l = lines.find((x) => x.includes('cause-' + c)) || ''; return !/\(reply waiting — /.test(l) || /wake cap/.test(l) || /the wake was not sent\)/.test(l); });
+    ok(r.code === 0 && bad.length === 0, 'read: every fall cause in the ONE list has its own words, none says «wake cap», none the fallback', JSON.stringify(bad) + ' ' + r.out);
+  }
+  // lane paced-wake-retry (law 2): a wake the pace held is told as held — «paced — sent in N s» — never «refused … next turn»
+  const PACED = { name: 'beta', reason: 'paced — sent in 25 s (rate floor: one wake per target per 30s (a wake is a billed turn))', parked: true, retryInMs: 25000, retryAt: 1790000030000 };
+  override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 200, body: { posted: true, group: { id: 'g-00000001', name: 'api', pair: false }, pairCreated: false, woke: [], refused: [PACED, { name: 'gamma', reason: 'spend budget: hour cap' }], nextTurn: [], chars: 5 } } : null);
+  r = await run(['send', 'api', 'hello', '--wake']);
+  ok(r.code === 0 && /1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out) && /1 wake refused \(not billed\) — gamma: spend budget/.test(r.out) && !/beta: [^\n]*next turn instead/.test(r.out), 'a paced wake prints «paced — sent in N s»; a refused one keeps its own line', r.out);
+  override = (key) => (key === 'POST /api/agent/msg/group' ? { status: 200, body: { ok: true, op: 'invite', group: { id: 'g-00000001', name: 'api', archived: false, members: [] }, added: ['beta'], already: [], woke: [], refused: [PACED], quiet: false } } : null);
+  r = await run(['group', 'invite', 'api', 'beta']);
+  ok(r.code === 0 && /1 wake held \(not billed yet\) — beta: paced — sent in 25 s/.test(r.out) && !/they see it on their next turn/.test(r.out), 'an invite prints it too', r.out);
+  override = (key) => (key === 'POST /api/agent/msg/dispatch' ? { status: 200, body: { posted: true, group: { id: 'g-00000002', name: 'pair', pair: true }, pairCreated: false, woke: [], refused: [PACED], nextTurn: [], dispatched: true, replay: false, attempt: null, record: { target: { cid: 'c', name: 'beta' }, compacted: 'skipped', compactionCounted: false, why: 'the wake pace said no: paced — sent in 25 s — not compacted', wake: { billed: false, identity: null, delivered: 'paced', retryInMs: 25000, reason: PACED.reason } } } } : null);
+  r = await run(['dispatch', 'beta', 'the brief']);
+  ok(r.code === 0 && /held, not billed yet — paced — sent in 25 s/.test(r.out) && !/the brief reaches it on its next turn/.test(r.out), 'dispatch prints «paced — sent in N s»', r.out);
   override = (key) => (key === 'POST /api/agent/msg/send' ? { status: 429, body: { error: 'rate floor: one --wake per target per 30s' } } : null);
   r = await run(['send', 'api', 'again', '--wake']);
   ok(r.code === 1 && /refused \[rate-floor\] — rate floor/.test(r.err), 'a code-less 429 is still a typed refusal ([rate-floor]), exit 1', r.err);

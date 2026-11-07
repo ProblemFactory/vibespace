@@ -878,6 +878,8 @@ const PRINTS = {
     'r.records[].at': `${V}:the oldest record's instant (the --before hint; verify r3 F3 — the bracket grammar spells the field the r2 walker stopped before)`, 'x.at': `${V}:an instant`, 'x.kind': `${V}:the engine's record kind`,
     'x.from': 'judged:msgReadAnswer', 'x.text': 'judged:msgReadAnswer — a record\'s text as a block',
     'x.name': 'judged:msgGroupOpAnswer — a refused wake\'s member name / msgReadAnswer — a delivery row\'s recipient name (msgDeliveryRows: agentText line)', 'x.reason': `${V}:the pacer's / the authorizer's reason`,
+    // lane paced-wake-retry: a wake the pace HELD prints apart from a refused one — the same rows of the same answer
+    'r0.refused': 'judged:msgGroupOpAnswer — the answer\'s refusal rows (each name its x.name row, each reason its x.reason row), split into held and refused', 'held': 'judged:msgGroupOpAnswer — the rows of the answer the pace holds (x.name / x.reason)', 'x.parked': `${V}:the door's boolean: the pace holds this wake`, 'a.paced': `${V}:the await state's boolean (PURE awaitState)`, 'a.fell': `${V}:the await state's fall cause (PURE AWAIT_FELL, a closed set), looked up in this CLI's own words`,
     // lane group-pending (2026-10-01): where a message stands with each recipient — the read answer's `delivery` rows, printed by deliveryClause as one trailing clause
     'x.delivery': `${V}:the delivery rows the read answer carries (PURE deliveryOf: member id / state enum / instant; each row's name is the x.name row — judged at msgReadAnswer)`, 'x.state': `${V}:the delivery state enum (DELIVERY_STATES)`, 'x.why': `${V}:why an addressee ended — the ENDED_WHYS enum (archived | gone), lane pair-group-fate`, 'x.stopped': `${V}:a flag (the addressee is stopped — still waiting)`, 'x.await': `${V}:the await state the read answer carries (PURE awaitState: state enum + instant), B-eba8`, 'a.state': `${V}:the await state enum (awaitState)`, 'a.at': `${V}:an instant`, 'g.closed': `${V}:the closed fact (ENDED_WHYS enum + instant)`, 'r.closed.why': `${V}:the ENDED_WHYS enum (archived | gone)`,
     'res._neterr': `${V}:node's fetch error text`,
@@ -2486,7 +2488,9 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'c.fromName': "groups-engine's own cards (from `from`); normalizers' card read",
     'e.fromName || null': "the drain's card from the STORED entry — its producer belted it, a legacy entry is re-judged at the drain (the renderMsgStash row)",
     'opts.fromName || null': "the ladder relaying its caller's",
-    'shown[0].fromName || null': "the retry park's single landed entry at its card (notify-retry verify r2 ④): the STORED entry's name as it stands — the park relays opts.fromName at the park, the clear door rewrites it (redactStash)",
+    'one.fromName || null': "the retry park's single landed entry at its card (notify-retry verify r2 ④): the STORED entry's name as it stands — the park relays opts.fromName at the park, the clear door rewrites it (redactStash); an owed wake's: the groups engine's own `<sender> · <group>` read as the frame leaves (lane paced-wake-retry), the same spelling wakeOnce hands the ladder",
+    'wordsOf(e).fromName || null': "the retry park's batch row: the stored entry's name as it stands, or an owed wake's as the groups engine read it as the frame left",
+    'ent.fromName || null': "an owed wake's stash entry at its frame (producer `stash-wake`): the STORED entry's name — its producer belted it",
     'envelope.fromName || null': "the stash storing its caller's",
     'msg.fromName || null': "the wrapper's echo of the ladder's own (acp-events re-stash)",
     'msg.payload.fromName || null': "the wrapper's echo of the ladder's own (codex-events re-stash)",

@@ -590,7 +590,7 @@ class UserTodoManager {
    *  redrawRequest) — the ONE open item `pred` names, through THE bounds add() uses: the facts by normalizeCardFacts (the named
    *  cuts, the {dropped} stub), the detail by DETAIL_MAX, the i18n by normalizeI18n (a shape it refuses ⇒ nothing changes).
    *  ONE save + ONE broadcast. → { ok: true, facts } (the facts as stored) | { ok: false, code } */
-  redrawItem(pred, { detail, facts = null, i18n } = {}) {
+  redrawItem(pred, { detail, facts = null, i18n, text = null } = {}) {
     const it = this._state.items.find((x) => x.status === 'open' && pred(x));
     if (!it) return { ok: false, code: 'not_open' };
     let words;
@@ -603,6 +603,7 @@ class UserTodoManager {
     if (fx.facts) it.facts = fx.facts; else delete it.facts;
     if (words !== undefined) { if (words) it.i18n = words; else delete it.i18n; }
     delete it.judged;   // the card's words moved: its place in the list is judged again
+    if (typeof text === 'string' && text.trim()) it.text = clipText(text.trim(), TEXT_MAX);   // a producer whose ONE item counts what it says (lane paced-wake-retry): this file's own surrogate-safe cut
     this._save(); this._notify();
     return { ok: true, facts: fx.facts, detail: it.detail };
   }

@@ -122,7 +122,7 @@ A direct group defaults to next-turn for BOTH sides, so a reply waits for your n
 | the ASKER | `vibespace-msg send <agent> "question" --await` — the FIRST reply by anyone else within 2 h wakes you ONCE | one billed turn (yours), only if they reply |
 | the REPLIER | `vibespace-msg send <agent> "answer" --wake` — wakes them now (as always) | one billed turn |
 
-Both at once = still ONE wake. A second reply, a reply after 2 h, a reply you were already handed, or you muted / left / not running ⇒ no wake (the reply waits for your next turn). `read` shows `(awaiting reply)` / `(woke you HH:MMZ)` / `(await expired)`. The replier sees "(<asker> asked to be woken by your reply …)"; if you must not wake them, do not reply in that group.
+Both at once = still ONE wake. A second reply, a reply after 2 h, a reply you were already handed, or you muted / left / not running ⇒ no wake (the reply waits for your next turn). `read` shows `(awaiting reply)` / `(woke you HH:MMZ)` / `(await expired)`; when the wake pace held the reply's wake, `(reply paced — sent when the window ends)`; when that wake could not be sent, `(reply waiting — <why>)` with its cause: the wake could not land within its hour · your notify mode no longer asks for a wake · you left the group · the wake may have reached you · your conversation was not running · your conversation is running, but takes no message mid-session · your conversation is running in a terminal, where it takes no message mid-session · your process predates live messages — restart the session to receive them at once · the wake did not reach you · the spend ceiling refused the wake. A real wake cap reads `(reply waiting — your wake cap reached)`. The reply itself still reaches you on your next turn, whatever your notify mode. The replier sees "(<asker> asked to be woken by your reply …)"; if you must not wake them, do not reply in that group.
 
 ## When the other conversation ended
 
@@ -162,7 +162,8 @@ Each member of each group has a **notify mode** — its own choice, set with
   would wake **more than 5** agents is refused `confirm-wakes` with the number
   (every @, `--wake`, invitee and `always` member counted) until you add
   `--yes`. And **at most 8 of your wakes go out per minute** — the rest are
-  refused `rate floor` (not billed; the message still reaches them next turn).
+  **held and sent when the window ends** (`paced — sent in N s`; not billed
+  until it goes). An unattended chain does not stall on the pace.
 - **Without a wake the message is free**: it waits in the group and arrives
   in the receiver's next user-started turn as a report. Default to this.
   Wake only when the other agent must act NOW.
@@ -200,8 +201,11 @@ vibespace-msg send <agent> --wake --compact-first "text"   # the same thing
   wake per worker per 30 s, 8 per minute). The COMPACTION is a model call
   nobody typed, so it is counted too — authorized (held) under the same
   unattended ceiling BEFORE `/compact` is typed, as its own turn. When the
-  ceiling or the pace says no, nothing is compacted and the brief reaches the
-  worker on its next turn (free), said. The answer names both counts.
+  PACE says no, nothing is compacted and the wake is held: `paced — sent in N s`
+  (it opens the turn then; only a turn the worker starts first carries it
+  sooner, free). When the CEILING
+  says no, nothing is compacted and the brief reaches the worker on its next
+  turn (free), said. The answer names both counts.
 - **Whose worker**: an agent compacts only a worker in a **Task Group it
   belongs to as well** — a reach the owner opened (a session's reachability,
   a group's external visibility) lets you MESSAGE and wake a conversation,
@@ -289,9 +293,15 @@ vibespace-msg send <agent> --wake --compact-first "text"   # the same thing
 - The same text to the same target within 10 minutes is not resent. At most
   ONE wake per member per 30 seconds from you, and at most 8 wakes per minute
   in all — whatever caused them (`@name`, `--wake`, an invite, an `always`
-  member): a wake past either limit is refused as `rate floor` (not billed),
-  the message is still posted and reaches that member on its next turn. The
-  limits survive a server restart. A wake the spend ceiling refused does not
+  member): the message is posted at once, and a wake past either limit is
+  HELD — `paced — sent in N s` — and sent when the window ends: one billed
+  turn, however many wakes it holds; sooner and free only if that member starts
+  a turn first. A retry the pace refuses again waits for its new window, and past
+  an hour the wake goes regardless. Only the spend ceiling may refuse it (the
+  owner is told). If it cannot land (the ceiling, a conversation that is gone, a
+  CLI that never accepts: `paced-out`), YOU are told on your next turn, free, and
+  the message reaches them on theirs. The limits and a held wake survive a
+  server restart. A wake the spend ceiling refused does not
   count against the per-member 30 s limit, but it DOES count toward your 8 per
   minute — retrying into a refusal cannot hammer the ceiling.
 - A session sends only once it has a conversation id of its OWN (after its

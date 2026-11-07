@@ -141,8 +141,10 @@ const WAKE_CONFIRM_ABOVE = 5;
  *  when auth is off): one wake per (sender, member) per WAKE_FLOOR_MS, and at
  *  most SENDER_WAKES wakes per sender per SENDER_WINDOW_MS — so ONE command
  *  can never spend a credential slot's whole hour of unattended turns. A
- *  paced wake is a refusal like the authorizer's: not billed, the message is
- *  in the log and rides that member's next report. */
+ *  paced wake is not billed and the message is in the log — and (lane
+ *  paced-wake-retry, the owner: «那这样会不会导致我需要做自动化任务从此卡住了？»)
+ *  the wake is OWED: the verdict answers the wait (`retryInMs`) and the engine
+ *  parks it for the window's end (conversation-deliver's retry park). */
 const WAKE_FLOOR_MS = 30000;
 const SENDER_WAKES = 8;
 const SENDER_WINDOW_MS = 60000;
@@ -600,14 +602,27 @@ function paceFuture(state, at) {
   for (const list of Object.values(s.senders)) for (const v of Array.isArray(list) ? list : []) if (Number.isFinite(v) && v > at + PACE_SKEW_MS) n++;
   return n;
 }
-/** May `sender` wake `member` at `at`? → {ok:true} | {ok:false, why, reason}. */
+/** THE SENDER'S WORDS FOR A PACED WAKE (lane paced-wake-retry): «paced — sent in N s», never «rides the next turn» —
+ *  `pacedReason` while the wake is parked, `unparkedReason` only when nothing parked it. */
+const sentInS = (ms) => Math.max(1, Math.ceil((Number(ms) || 0) / 1000));
+const pacedWords = (ms) => `paced — sent in ${sentInS(ms)} s`;
+const pacedReason = (ms, rule) => (rule ? `${pacedWords(ms)} (${rule})` : pacedWords(ms));
+const unparkedReason = (rule) => `${rule || 'rate floor'} — it reaches them on their next turn instead`;
+const blockedReason = (why, rule) => `${why || 'not running'} — rides its next turn${rule ? ` (${rule})` : ''}`;   // the pace parks only a wake that COULD fire (acceptance r4, P13); `why` is the target's own truth, never «not running» for a live session (r5, P18)
+/** May `sender` wake `member` at `at`? → {ok:true} | {ok:false, why, rule, retryInMs, reason}. `retryInMs` = the instant
+ *  this verdict flips under THIS ledger: the later of the pair's 30-s floor and the sender's next per-minute slot (a
+ *  live stamp is `at - v < window`, so `v + window - at` is exact), ≥ 1 ms. */
 function paceVerdict(state, { sender, member, at }) {
   const s = paceState(state);
   const last = Number(s.pairs[sender + '|' + member]);
-  if (liveStamp(last, at, WAKE_FLOOR_MS)) return { ok: false, why: 'pair', reason: 'rate floor: one wake per target per 30s (a wake is a billed turn) — it reaches them on their next turn instead' };
-  const recent = (Array.isArray(s.senders[sender]) ? s.senders[sender] : []).filter((v) => liveStamp(v, at, SENDER_WINDOW_MS));
-  if (recent.length >= SENDER_WAKES) return { ok: false, why: 'sender', reason: `rate floor: at most ${SENDER_WAKES} wakes per sender per minute (each is a billed turn) — it reaches them on their next turn instead` };
-  return { ok: true };
+  const pairWait = liveStamp(last, at, WAKE_FLOOR_MS) ? last + WAKE_FLOOR_MS - at : 0;
+  const recent = (Array.isArray(s.senders[sender]) ? s.senders[sender] : []).filter((v) => liveStamp(v, at, SENDER_WINDOW_MS)).sort((a, b) => a - b);
+  const senderWait = recent.length >= SENDER_WAKES ? recent[recent.length - SENDER_WAKES] + SENDER_WINDOW_MS - at : 0;
+  if (!pairWait && !senderWait) return { ok: true };
+  const retryInMs = Math.max(1, pairWait, senderWait);
+  const why = pairWait ? 'pair' : 'sender';
+  const rule = pairWait ? 'rate floor: one wake per target per 30s (a wake is a billed turn)' : `rate floor: at most ${SENDER_WAKES} wakes per sender per minute (each is a billed turn)`;
+  return { ok: false, why, rule, retryInMs, reason: pacedReason(retryInMs, rule) };
 }
 /** Grant: a NEW state with the stamp, and the token that refunds it. */
 function paceGrant(state, { sender, member, at }) {
@@ -710,7 +725,7 @@ function awaitNote(r, member, group) {
  *   engine cards each shown message in that member's chat — lane
  *   group-report-card).
  */
-function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, lead = null } = {}) {
+function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, lead = null, also = null } = {}) {   // `also`: a record this report must carry though the member's mode would not hand it (an awaited reply: the asker's own request)
   const m = memberOf(group, member);
   if (!m || m.notify === 'mute') return null;
   const floor = m.joinedAt - 1;
@@ -719,7 +734,7 @@ function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, l
   const news = (Array.isArray(log) ? log : []).filter((r) => r && Number(r.at) > after && !(r.author && r.author.id === member));
   // B-a354: a `mention` member is handed only what @mentions it; what it is not handed is ACCOUNTED for (the marker
   // moves past it — never queued, never "waiting")
-  const recs = news.filter((r) => reachesReport(group, member, r))
+  const recs = news.filter((r) => reachesReport(group, member, r) || (typeof also === 'function' && also(r)))
     .sort((a, b) => (a.at - b.at) || String(a.vendorId).localeCompare(String(b.vendorId)));
   if (!recs.length) return null;
   const newest = news.reduce((x, r) => Math.max(x, Number(r.at) || 0), 0);
@@ -945,13 +960,40 @@ function awaitVerdict(group, rec, reply, { entry = null, liveness = null } = {})
   if (lv.state !== 'running') return no('not-running');
   return { wake: true, why: wake ? 'both' : 'await', by };
 }
+/** the causes a paced wake's fall leaves on an awaited record (lane paced-wake-retry, D8): each has its own words — no wake
+ *  cap was reached. THE ONE LIST: `owedOutcome` is the only way the engine names a fall (acceptance r3, P9: a hand-kept
+ *  list beside the engine's own strings let two new causes read «wake cap reached»), so a cause without a row cannot be written. */
+const LIVE_FALLS = Object.freeze(['no-mid-session', 'terminal', 'predates']);   // RUNNING, and the lane cannot reach it mid-session: never «not running» (the agy-peer-wake invariant; acceptance r6, P23)
+const AWAIT_FELL = Object.freeze(['paced-out', 'mode-changed', 'left', 'may-have-landed', 'not-running', ...LIVE_FALLS, 'not-reachable', 'spend-cap']);
+const i18nKey = (s) => s;   // marks a sentence the client says in its own language
+/** WHAT A CAUSE MEANS, as the owner reads it: the ONE table (acceptance r6, P23: the words follow the cause, on every road). */
+const FALL_WHY = Object.freeze({
+  'paced-out': i18nKey('it could not land within its hour'),
+  'mode-changed': i18nKey('its notify mode no longer asks for a wake'),
+  left: i18nKey('it left the group'),
+  'may-have-landed': i18nKey('the server stopped while the wake was on its way'),
+  'not-running': i18nKey('its conversation is not running'),
+  'no-mid-session': i18nKey('it is running, but takes no message mid-session'),
+  terminal: i18nKey('it is running in a terminal, where it takes no message mid-session'),
+  predates: i18nKey('it is running, but its process predates live messages — a restart of the session reaches it at once'),
+  'not-reachable': i18nKey('it did not reach the agent'),
+  'spend-cap': i18nKey('the spend ceiling refused the wake'),
+});
+const fallWhy = (cause) => FALL_WHY[cause] || FALL_WHY['not-reachable'];
+/** the causes after which a wake sent again may land (acceptance r8's nit: «send again» to a member who left, muted, is not running, takes no message mid-session or is held by the spend ceiling only meets the same answer) */
+const RESEND_HELPS = Object.freeze(['paced-out', 'not-reachable', 'mode-changed']);
+function owedOutcome(extra = {}) {
+  if (extra.maybeDelivered === true) return 'may-have-landed';
+  if (AWAIT_FELL.includes(extra.why)) return extra.why;
+  return AWAIT_FELL.includes(extra.kind) ? extra.kind : 'not-reachable';
+}
 /** Where an awaited record stands for the asker (`read`'s trailing clause, the window's line): `awaiting` / `woke`
  *  (`at` = the wake) / `held` (the reply waits — the asker's wake cap) / `expired`. null when the record awaits nothing. */
 function awaitState(rec, entry, now) {
   const aw = rec && rec.raw && rec.raw.await;
   if (!aw) return null;
   if (entry && Number.isFinite(entry.wokeAt)) return { state: 'woke', at: entry.wokeAt };
-  if (entry && Number.isFinite(entry.heldAt)) return { state: 'held', at: entry.heldAt };
+  if (entry && Number.isFinite(entry.heldAt)) return { state: 'held', at: entry.heldAt, ...(entry.held === 'paced' ? { paced: true } : {}), ...(AWAIT_FELL.includes(entry.held) ? { fell: entry.held } : {}) };   // lane paced-wake-retry: `paced` = parked, sent when the window ends
   if (entry && Number.isFinite(entry.answeredAt)) return { state: 'answered', at: entry.answeredAt };
   return Number(now) > Number(aw.until) ? { state: 'expired', at: aw.until } : { state: 'awaiting', at: aw.until };
 }
@@ -962,6 +1004,7 @@ function awaitLead(at, why) {
 
 module.exports = {
   LIVENESS_STATES, ENDED_WHYS, OWNERS, livenessFrom, AWAIT_MS, closePair, endedText, livenessOf, awaitVerdict, awaitState, awaitLead, awaitNote,
+  sentInS, pacedWords, pacedReason, unparkedReason, blockedReason, AWAIT_FELL, LIVE_FALLS, FALL_WHY, fallWhy, RESEND_HELPS, owedOutcome,
   NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,

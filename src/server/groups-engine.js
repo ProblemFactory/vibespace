@@ -142,6 +142,8 @@ function create({
   // lane pair-group-fate: `(cid) → {state: running|stopped|archived|gone}` — the wiring's ONE liveness reader (the live
   // roster, the sidebar's archived list, the transcript on disk); asked by `sweepEnded` only, never per view
   liveness = () => null,
+  // lane paced-wake-retry (P12): the For-you door. Sign-in off, the owner holds «sent when the window ends» too, and has no conversation to be told in
+  userTodos = null,
 } = {}) {
   if (!store || !store.groups) throw new Error('groups-engine: a channel store with the groups family is required');
   const A = G.GROUP_ADAPTER_ID;
@@ -314,17 +316,19 @@ function create({
    *  be stale-free or absent: `list()`/`listFor()` read no log after the
    *  first count. The first count is warmed in the background after boot. */
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
-  // B-a354: a `mention` member counts only what reaches it (G.reachesReport) — its mode is part of the memo's facts
+  // B-a354: a `mention` member counts only what reaches it (B-a354's rule, read through reachFor) — its mode is part of the memo's facts
   const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
   function unreadFor(g, who, since) {
     const key = g.id + '|' + who;
     const lastAt = Number(g.lastAt) || 0;
     const mode = modeOf(g, who);
-    if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, n: 0 }); return 0; }
+    const sig = mode === 'mention' ? reachSig(g, who) : '';
+    if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, sig, n: 0 }); return 0; }
     const m = unreadMemo.get(key);
-    if (m && m.since === since && m.lastAt === lastAt && m.mode === mode) return m.n;
-    const n = readLog(g.id).filter((r) => r.at > since && !(r.author && r.author.id === who) && (mode !== 'mention' || G.reachesReport(g, who, r))).length;
-    unreadMemo.set(key, { since, lastAt, mode, n });
+    if (m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig) return m.n;
+    const take = unreceivedFor(g, who);
+    const n = readLog(g.id).filter((r) => r.at > since && !(r.author && r.author.id === who) && take(r)).length;
+    unreadMemo.set(key, { since, lastAt, mode, sig, n });
     return n;
   }
   function bumpUnread(g, prevLastAt, at, author, rec = null) {
@@ -332,7 +336,7 @@ function create({
       const e = unreadMemo.get(g.id + '|' + who);
       if (!e || e.lastAt !== prevLastAt) continue;
       e.lastAt = at;
-      if (author !== who && at > e.since && (e.mode !== 'mention' || (rec && G.reachesReport(g, who, rec)))) e.n++;
+      if (author !== who && at > e.since && (rec ? unreceivedFor(g, who)(rec) : e.mode !== 'mention')) e.n++;
     }
   }
   const memberSince = (m) => (Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1);
@@ -427,6 +431,7 @@ function create({
     // is not a dirty signal (nothing sent). announce() re-publishes the pending strip like the bare call did.
     if (moved) announce([gid]);
     else pendingChanged();   // what waits for that member may still have moved (a marker already past it)
+    settleOwed(gid, member);   // lane paced-wake-retry: a parked wake this report carried is cancelled, never a second post
   }
 
   const WAKE_LEAD = {
@@ -457,9 +462,41 @@ function create({
       if (n > 0) wakesInFlight.set(flight, n); else wakesInFlight.delete(flight);
     }
   }
+  /** «REACHES», THE ONE READING (acceptance r7, P25, measured: four roads read it four ways — a wake that was not about the
+   *  await moved a mention-mode asker's marker past its awaited reply and the settle counted it carried, so the reply was
+   *  lost with nobody told; a fall told the sender «it will not reach them» about a reply the next turn hands). A record
+   *  reaches this member's report when B-a354's rule hands it (channel-groups' own) OR it is a reply to what the member awaited
+   *  that no wake carried yet (`answeredAt`, no `wokeAt`; r5, P20), or the reply the caller's own await wakes it for
+   *  (`own = {from, to}`: its row is written after the wake). Not a member / muted: nothing. EVERY road reads it — a wake's
+   *  report, the owed frame, the next turn's report, the marker's reading, the fall's words, wakeAll's next-turn promise, the
+   *  pending strip, the unread count, an ended pair's count — so what a report hands and what a sender is told are one fact.
+   *  → a predicate over records. */
+  function reachFor(g, member, own = null) {
+    const m = g && G.memberOf(g, member);
+    if (!m || m.notify === 'mute') return () => false;
+    const spans = Object.values(g.awaits || {}).filter((e) => e && e.by === member && Number.isFinite(e.answeredAt) && !Number.isFinite(e.wokeAt)).map((e) => [Number(e.at), Number(e.answeredAt)]);
+    if (own && Number.isFinite(Number(own.from))) spans.push([Number(own.from), Number(own.to)]);
+    return (r) => !!r && (G.reachesReport(g, member, r) || spans.some(([from, to]) => Number(r.at) > from && Number(r.at) <= to));
+  }
+  const isMessage = (r) => !!r && ((r.raw && r.raw.kind) || 'message') === 'message';   // a record with no kind is an old message
+  /** «NEVER RECEIVED», THE ONE COUNT (acceptance r8, F3, measured: the ended pair's count read «reaches» and called a
+   *  muted member's 3 undelivered messages 0, while its unread count said 3): every record for a mode that hands everything
+   *  (always / next-turn) or nothing (mute — none of them was received); for `mention`, what reaches it (reachFor). The
+   *  unread count and an ended pair's «N messages were not delivered» both read it. → a predicate over records.
+   *  …AND WHICH RECORDS COUNT (acceptance r9, F3′, measured: one rename after the marker ⇒ unread 4, «3 not delivered»):
+   *  the MESSAGES people wrote. A system row (create, invite, kick, leave, rename, archive, closed / ended, a clear's
+   *  replacement) is the group's own fact: it stays in the log and rides the report, it is never unread and never «not
+   *  delivered». The filter lives HERE only; neither reader keeps its own (the census). */
+  function unreceivedFor(g, who) {
+    const mode = modeOf(g, who);
+    const reach = mode === 'mention' ? reachFor(g, who) : null;
+    return (r) => isMessage(r) && (!reach || reach(r));
+  }
+  /** what the unread memo and the strip's memo must also key on: the awaited replies that reach a `mention` member (they change with no new record) */
+  const reachSig = (g, who) => Object.values(g.awaits || {}).filter((e) => e && e.by === who && Number.isFinite(e.answeredAt) && !Number.isFinite(e.wokeAt)).map((e) => `${e.at}:${e.answeredAt}`).join(',');
   async function wakeOnce(g, gid, member, rec, why, awaitAt = null, { pressed = null } = {}) {
     const lead = `${why === 'await' || why === 'both' ? G.awaitLead(awaitAt, why) : WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
-    const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead });
+    const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead, also: reachFor(g, member, awaitAt != null ? { from: awaitAt, to: rec.at } : null) });   // an awaited reply reaches the asker whatever its mode, on every road and whatever this wake is about (acceptance r4, P14; r7, P25)
     if (!rep || rep.fits === false) return { ok: false, reason: rep ? 'the report does not fit a wake' : 'nothing to deliver' };
     let r;
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired' };
@@ -504,7 +541,7 @@ function create({
       if (fut) (log.warn || log.log || (() => {})).call(log, `[groups] wake-pace.json held ${fut} stamp(s) in the future (the clock stepped back, or a clock-ahead boot wrote them) — dropped; they were not wakes`);
       const st = G.prunePace(live0, at);
       const v = G.paceVerdict(st, { sender, member, at });
-      if (!v.ok) { store.pace.set(st); return { reason: v.reason, why: v.why }; }
+      if (!v.ok) { store.pace.set(st); return { reason: v.reason, why: v.why, rule: v.rule, retryInMs: v.retryInMs }; }
       const gr = G.paceGrant(st, { sender, member, at });
       store.pace.set(gr.state);
       tokens.set(member, gr.token);
@@ -522,8 +559,241 @@ function create({
       // blocked / full store) — not an attempt, so the minute goes back too
       store.pace.set(G.paceRefund(store.pace.live(), tk, { keepSender: attempted !== false }));
     };
+    mayWake.sender = sender;   // lane paced-wake-retry: a producer that parks a refused wake names whose ledger re-judges it
+    /** THE HARD BOUND (the owner's rule): a paced wake past its 60 min goes whatever the verdict; the slot is stamped all the same, so the next wake reads a true ledger */
+    mayWake.force = (member) => {
+      const at = paceClock();
+      const gr = G.paceGrant(G.prunePace(store.pace.live(), at), { sender, member, at });
+      store.pace.set(gr.state);
+      tokens.set(member, gr.token);
+    };
     return mayWake;
   }
+  // ── THE WAKE OWED (lane paced-wake-retry, 2026-11-07 — the owner: «目前 wake 的消息如果被节流排队了，节流时间到了会自动发出吗？…
+  // 那这样会不会导致我需要做自动化任务从此卡住了？»). A wake the pace refused used to wait for a turn nothing would start: an
+  // unattended chain stalled until a person typed. It is PARKED now (conversation-deliver's retry park): the first
+  // retry at the window's end, then the backoff and the 60-min / attempt bounds. THE PARK HOLDS NO WORDS — the group log
+  // stays the one store, so a clear reaches what the retry reads, a turn's report that carried the message is what
+  // cancels it, and `meta` names only the group, the newest record owed and the senders. ONE entry per (group, member)
+  // ⇒ two paced wakes = ONE frame, one wake; the report is rendered when the frame leaves. THE OWNER'S RULE: the intention
+  // was a WAKE. It opens a turn at the window's end, at the latest at the park's hard bound; the only earlier end is a turn
+  // that carried the words; only the spend gate may refuse it outright (said to the owner by the guard, to the sender here).
+  const OWED = 'groups';
+  const i18nKey = (s) => s;   // marks a sentence the client says in its own language
+  function mergeOwed(a, b) {
+    const awaited = (x) => x && (x.why === 'await' || x.why === 'both');
+    const lead = awaited(b) ? b : awaited(a) ? a : b;
+    return { gid: b.gid, at: Math.max(Number(a.at) || 0, Number(b.at) || 0), fromAt: Math.min(...[a, b].map((x) => Number(x.fromAt ?? x.at)).filter(Number.isFinite)), why: lead.why, awaitAt: lead.awaitAt == null ? null : lead.awaitAt, vids: [...new Set([...(a.vids || []), ...(b.vids || [])])] };
+  }
+  const blockedBy = (member) => (deliver && typeof deliver.wakeBlock === 'function' ? deliver.wakeBlock(member) : null);   // {cause, why} | null, the park's own gate read for its words
+  /** Park the wake `pace` refused → {parked, id, retryAt, retryInMs} | null (no wait was named, or no park is wired: the
+   *  caller's words say the message rides the next report, which is then the truth). */
+  function parkPaced(gid, member, rec, why, pace, { awaitAt = null, vid = null } = {}) {
+    if (!pace || !(Number(pace.retryInMs) > 0) || !deliver || typeof deliver.parkOwedWake !== 'function') return null;
+    // THE PACE PARKS ONLY A WAKE THAT COULD FIRE (acceptance r4, P13, measured: a --wake to 30 stopped members parked 22, each fell with its own notice, and two real receipts fell off the sender's stash cap): a target that is not running is answered at once with the truth. The gate is the park's own door (r6, P22); `parked:false` ⇒ null
+    try {
+      const owed = deliver.parkOwedWake(member, {
+        producer: OWED, key: gid, retryInMs: Number(pace.retryInMs), spendReason: 'peer-message', kind: 'peer', sender: rec.author && rec.author.id, reason: pace.rule || pace.reason || 'rate floor',
+        text: `A wake VibeSpace held for the pace — vibespace-msg read ${gid}`, meta: { gid, at: rec.at, fromAt: rec.at, why, awaitAt, vids: vid ? [vid] : [] }, merge: mergeOwed,
+      });
+      return owed && owed.parked ? owed : null;
+    } catch (e) { (log.warn || log.log || (() => {})).call(log, `[groups] a paced wake of ${String(member).slice(0, 8)} in ${gid} could not be parked: ${(e && e.message) || e} — it rides that member's next report`); return null; }
+  }
+  /** an awaited reply's row follows its parked wake (`vids` = the awaits it carries) */
+  async function patchAwaits(gid, vids, patch) {
+    if (!Array.isArray(vids) || !vids.length) return;
+    await store.groups.update((gr) => { const g = gr.groups[gid]; if (g && g.awaits) for (const vid of vids) if (g.awaits[vid]) { const next = { ...g.awaits[vid], ...patch }; for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k]; g.awaits[vid] = next; } });
+    announce([gid], null, null, { pending: false });
+  }
+  /** THE WORDS OF THE OWED WAKE, as the frame leaves: the member's pending report (a clear, a rename, a later message all
+   *  count), under a lead that says VibeSpace held it for the pace. null = nothing is owed any more. The group sits out
+   *  the member's turn reports until `release` (`wakesInFlight`, as a wake on its way does). */
+  /** THE ONLY SILENT END IS A REPORT THAT CARRIED THE MESSAGE (acceptance r6, P24, measured: under B-a354 the marker also moves past a record the member's mode does not hand it; an owed wake was cancelled as «carried», posts 0, the sender still held «sent in N s»). THE ONE READING of a marker past an owed record, for the settle and for the frame: null = carried, the silent end; else the fall, said. A sender none of whose records the report handed hears it even when another sender's rode. */
+  function owedPastMarker(g, m, e) {
+    let j;
+    try { j = sendersRide(g, m, e); } catch (err) { (log.warn || log.log || (() => {})).call(log, `[groups] an owed wake's records could not be read (${(err && err.message) || err}): read as carried`); return null; }
+    if (j.carried && !j.unread.length) return null;
+    if (j.carried) { e.senders = j.unread; e.meta = { ...(e.meta || {}), vids: [] }; }   // the carried half settles as carried: its await rows are not this fall's — only a SENDER's record carries a half (r9, F1′)
+    if (!j.span.length) return { fall: 'no report would reach it' };
+    return { fall: modeFall(m), fallDetail: { why: 'mode-changed' } };
+  }
+  const modeFall = (m) => `its notify mode is ${m.notify} now, so it no longer asks for a wake`;
+  /** WHICH SENDERS' MESSAGES RIDE — THE ONE PER-SENDER READING (acceptance r6, P24; r8, F1: the frame road read only «does
+   *  any record still wake it», so a frame went for one sender's @ and another sender's plain line ended unsaid). The entry's
+   *  records in [fromAt, at] — after `since` while the marker has not passed them — each judged by reachFor; a sender none of
+   *  whose records reach is `unread`. The marker-moved branch (owedPastMarker) and the frame (owedWords) both read it. */
+  function sendersRide(g, m, e, since = null) {
+    const meta = e.meta || {};
+    const to = Number(meta.at);
+    const from = meta.fromAt != null && Number.isFinite(Number(meta.fromAt)) ? Number(meta.fromAt) : to;
+    const reach = reachFor(g, m.member);   // the SAME reading every report applies (r7, P25)
+    const span = readLog(g.id).filter((r) => r && Number(r.at) >= from && Number(r.at) <= to && (since == null || Number(r.at) > since) && !(r.author && r.author.id === m.member)).map((r) => ({ r, handed: reach(r) }));
+    const handed = span.filter((x) => x.handed);
+    const by = new Set(handed.map((x) => x.r.author && x.r.author.id));
+    const senders = Array.isArray(e.senders) ? e.senders : [];
+    const whole = meta.fromAt == null || !senders.length;   // an entry that keeps no span (or names no sender) names no one sender's record: read whole
+    const unread = whole ? [] : senders.filter((s) => !by.has(s));
+    // THE SENDERS' COVERAGE (acceptance r9, F1′, measured: every sender unread, a NON-sender's @ in the span handed ⇒ «something
+    // is handed», the frame went for delta's line alone, alpha kept «sent in N s» and was never told): `carried` = one of
+    // THIS ENTRY's senders has a record that rides. A record by someone else carries none of this entry's promise.
+    const carried = whole ? handed.length > 0 : unread.length < senders.length;
+    return { span, handed, unread, carried };
+  }
+
+  function owedWords(cid, e) {
+    const { gid, at, why, awaitAt } = e.meta || {};
+    const g = getGroup(gid);
+    const m = g && G.memberOf(g, cid);
+    // a sender holds «sent in N s»: when the promise cannot be kept, the fall says why (LAW 3, 主开发's answer on P3) — never a silent drop. Only a report that carried the message is a silent end: the promise was kept, better
+    if (!m) return { fall: 'it is no longer in that group', fallDetail: { why: 'left' } };
+    if (Number(m.reportedUpTo) >= Number(at)) return owedPastMarker(g, m, e);
+    const records = readLog(gid);
+    // THE VERDICT IS ASKED AGAIN AT THE FRAME (acceptance r2, P3, measured: a member who switched to next-turn after the park was woken and billed, under a lead that said «always»): the member's CURRENT mode decides whether an owed wake still fires, and the lead tells the truth. Any record still owed that wakes it is enough (an @ stands whatever the mode); an awaited reply is the asker's own request, until it mutes the group
+    const awaited = why === 'await' || why === 'both';
+    let nowWhy = why;
+    if (!awaited || m.notify === 'mute') {
+      const since = Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1;
+      const stands = records.filter((r) => r && Number(r.at) > since && Number(r.at) <= Number(at)).map((r) => G.wakeVerdict(g, cid, r)).filter((v) => v.wake);
+      if (!stands.length) return { fall: modeFall(m), fallDetail: { why: 'mode-changed' } };
+      nowWhy = stands[stands.length - 1].why;
+    }
+    // …AND PER SENDER (r8, F1): a sender none of whose records this frame hands is told now, through the park's door; the frame goes for the rest.
+    // NO SENDER RIDES ⇒ NO FRAME (r9, F1′): what the span hands is then only others' records, and each had its own road and
+    // verdict (a refusal that named no wait or an undelivered wake: the member's next report, free; a spend refusal: the
+    // owner's dial). A frame for them is a billed turn no promise of this entry holds: the entry falls whole, every sender told
+    try {
+      const j = sendersRide(g, m, e, Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1);
+      if (j.unread.length && !j.carried) return { fall: modeFall(m), fallDetail: { why: 'mode-changed' } };
+      if (j.unread.length && deliver && typeof deliver.fellOwedPart === 'function') deliver.fellOwedPart(cid, e, j.unread, modeFall(m), { why: 'mode-changed' });
+    } catch (err) { (log.warn || log.log || (() => {})).call(log, `[groups] an owed frame's senders could not be read (${(err && err.message) || err})`); }
+    const base = awaited ? G.awaitLead(awaitAt, why) : WAKE_LEAD[nowWhy] || 'You were woken';
+    const rep = G.reportFor(g, records, cid, { budget: WAKE_BUDGET, lead: `${base} (VibeSpace held this wake for the wake pace) — group messages (vibespace-msg):`, also: reachFor(g, cid, awaited ? { from: awaitAt, to: at } : null) });
+    if (!rep) return { fall: 'no report would reach it' };   // the marker has not passed it, so nothing carried it: never a silent end (acceptance r4, P14)
+    if (rep.fits === false) return { fall: 'the report does not fit a wake' };
+    const shown = (Array.isArray(rep.lines) ? rep.lines : []).map((x) => x && x.rec).filter(Boolean);
+    const rec = records.find((r) => r && Number(r.at) === Number(at)) || shown[shown.length - 1] || null;
+    if (!rec) return { fall: 'no report would reach it' };
+    const flight = gid + '|' + cid;
+    wakesInFlight.set(flight, (wakesInFlight.get(flight) || 0) + 1);
+    const self = !!(rec.author && rec.author.id === G.OWNER);
+    const wc = wakeCardOf(rep, rec);
+    return {
+      text: rep.text, kind: 'peer', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text,
+      group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors },
+      landed: async ({ lane = null } = {}) => {
+        try { store.audit({ kind: 'group-wake', groupId: gid, member: cid, why: nowWhy, ok: true, lane, reason: 'paced — sent when the window ended', refused: null, spendWhy: null }); } catch { }
+        await markReported(gid, cid, rep.upTo);
+        await patchAwaits(gid, e.meta.vids, { wokeAt: now(), why: nowWhy });
+      },
+      release: () => { const n = (wakesInFlight.get(flight) || 1) - 1; if (n > 0) wakesInFlight.set(flight, n); else wakesInFlight.delete(flight); },
+    };
+  }
+  /** THE CHAIN NEVER STALLS SILENTLY (law 3): the message stays in the log (the member's next report carries it, free) and
+   *  the FALL is said — the hub's journal + an audit row + a free notice on the SENDER's next turn (the park files it, on
+   *  its not-reachable road). `taken`: the group log is this entry's stash, a stashed copy would arrive twice. */
+  function owedFell(cid, e, extra = {}) {
+    const { gid, why, vids } = e.meta || {};
+    const g = getGroup(gid);
+    const outcome = G.owedOutcome(extra);
+    const said = String(extra.reason || 'not sent');
+    // what happens to the message is said as it IS: a member who left, muted, or whose mode no longer takes it reads nothing next turn (a log that cannot be read says the usual: its marker never moved)
+    // …through the ONE reading (r7, P25), PER SENDER AND PAST THE MARKER (r8, F2, measured: another sender's handed @ in the same span told the fallen sender «reaches them on their next turn» about a line the marker had passed): only the fallen senders' OWN records the marker has not passed, as the member's next report would hand them
+    let reaches = true;
+    try {
+      const mm = g && G.memberOf(g, cid);
+      const to = Number(e.meta && e.meta.at), from = e.meta && e.meta.fromAt != null && Number.isFinite(Number(e.meta.fromAt)) ? Number(e.meta.fromAt) : to;
+      const mine = new Set(Array.isArray(e.senders) ? e.senders : []);
+      const since = mm ? memberSince(mm) : Infinity;
+      const reach = reachFor(g, cid);
+      reaches = !!mm && readLog(gid).some((r) => r && Number(r.at) >= from && Number(r.at) <= to && Number(r.at) > since && r.author && mine.has(r.author.id) && reach(r));
+    } catch { }
+    (log.warn || log.log || (() => {})).call(log, `[groups] the paced wake of ${String(cid).slice(0, 8)} in ${gid} was not sent (${outcome}): ${said} — the message ${reaches ? 'rides that member\'s next report' : 'stays in the group, it will not reach that member'}`);
+    try { store.audit({ kind: 'group-wake', groupId: gid, member: cid, why, ok: false, lane: null, reason: said, refused: outcome, spendWhy: extra.kind === 'spend-cap' ? (extra.why || null) : null }); } catch { }
+    patchAwaits(gid, vids, { held: outcome }).catch(() => { });
+    const name = clipName(inertFrames(g ? displayName(g, cid) : String(cid).slice(0, 8)));
+    if ((Array.isArray(e.senders) ? e.senders : []).includes(G.OWNER)) tellOwnerOwedFell(cid, gid, name, g ? clipName(inertFrames(g.name)) : gid, outcome, reaches);
+    return {
+      taken: true,
+      notice: {
+        to: (Array.isArray(e.senders) ? e.senders : []).filter((s) => s && s !== G.OWNER && s !== cid),   // the owner has no conversation to tell: the journal + the audit row say it
+        why: outcome === 'paced-out' ? outcome : `paced-${outcome}`,   // every one reads under the «held» heading, never «unreachable»
+        outcome, name, reaches, command: `${gid}:${Number(e.meta && e.meta.at) || 0}`, where: g ? `group "${clipName(inertFrames(g.name))}"` : null,   // the park folds one sender's falls into ONE line from these
+        said,   // the facts: the park's ONE words function writes the line (acceptance r6, P21)
+      },
+    };
+  }
+  /** SIGN-IN OFF THE OWNER HOLDS THE PROMISE TOO (acceptance r3, P12): a For-you item. ONE PER GROUP, naming the count (r4, P13: a bucket of 20 is a person's attention), opening the group it names (r5, P19), keeping every fall's truth class (r5, P16) and saying which messages will never be read. A spend refusal's item is the guard's own. */
+  const OWNER_FALL_ITEMS_MAX = 5;   // past this many groups at once, the newest item names the others: it never floods the bucket
+  function tellOwnerOwedFell(cid, gid, name, group, outcome, reaches) {
+    if (outcome === 'spend-cap' || !userTodos || typeof userTodos.add !== 'function') return;
+    const KEY = `group-wake-falls:${gid}`;
+    let items = [];
+    try { items = typeof userTodos.snapshot === 'function' ? (userTodos.snapshot().open || []).filter((i) => i && i.sessionKey === 'channels' && i.action && String(i.action.key || '').startsWith('group-wake-falls:')) : []; } catch { items = []; }
+    const mine = items.find((i) => i.action.key === KEY) || null;
+    const overflow = !mine && items.length >= OWNER_FALL_ITEMS_MAX ? items[items.length - 1] : null;
+    const open = mine || overflow;
+    const causeKey = G.fallWhy;   // the ONE table (acceptance r6, P23)
+    const prev = open && open.facts && open.facts.owedFalls;
+    const f = prev ? JSON.parse(JSON.stringify(prev)) : { group, n: 0, counts: [], names: [], more: 0, mayNames: [], mayMore: 0, unread: [], unreadMore: 0, reach: 0, others: [] };
+    if (overflow) {
+      const o = f.others.find((r) => r.group === group);
+      if (o) o.n++; else f.others.push({ group, n: 1 });
+    } else {
+      f.n++;
+      const row = f.counts.find((r) => r.cause === outcome);   // ROWS: the store's facts keep plain keys only, and a cause has a hyphen
+      if (row) row.n++; else f.counts.push({ cause: outcome, n: 1 });
+      const maybe = outcome === 'may-have-landed';
+      const add = (list, moreKey, who) => { if (!f[list].includes(who)) { if (f[list].length < 5) f[list].push(who); else f[moreKey]++; } };
+      add(maybe ? 'mayNames' : 'names', maybe ? 'mayMore' : 'more', name);
+      if (reaches) f.reach++; else add('unread', 'unreadMore', name);
+    }
+    const whoOf = (list, more) => list.join(', ') + (more ? ` +${more}` : '');
+    const may = (f.counts.find((r) => r.cause === 'may-have-landed') || { n: 0 }).n;
+    const sure = f.n - may;
+    const members = whoOf([...f.names, ...f.mayNames], f.more + f.mayMore);
+    const note = i18nKey('With sign-in off your wakes are paced like an agent\'s. Each message stays in its group.');
+    const lines = [];
+    const line = (key, params, english) => lines.push({ key, params, english });
+    for (const r of f.counts) line(i18nKey('{n} — {why}'), { n: r.n, why: { key: causeKey(r.cause) } }, `${r.n} — ${causeKey(r.cause)}`);
+    if (may) { const w = whoOf(f.mayNames, f.mayMore); line(i18nKey('The wake may already have reached {members}, so waking them again may start a second turn.'), { members: w }, `The wake may already have reached ${w}, so waking them again may start a second turn.`); }
+    if (f.unread.length) { const w = whoOf(f.unread, f.unreadMore); const k = f.unread.length + f.unreadMore; line(i18nKey('{n} will not reach them: {members}'), { n: k, members: w }, `${k} will not reach them: ${w}`); }
+    if (f.reach) line(i18nKey('{n} reach them on their next turn.'), { n: f.reach }, `${f.reach} reach them on their next turn.`);
+    if (f.others.length) { const w = f.others.map((r) => `${r.group} (${r.n})`).join(', '); line(i18nKey('More fell in other groups: {groups}'), { groups: w }, `More fell in other groups: ${w}`); }
+    line(note, {}, note);
+    const detail = lines.map((l) => l.english).join('\n');
+    const single = f.n === 1 && !f.others.length;
+    const singleMay = may === 1;
+    const title = single
+      ? (singleMay ? { key: i18nKey('{member} may have been woken in {group}: the server stopped while the wake was on its way'), params: { member: name, group }, english: `${name} may have been woken in ${group}: the server stopped while the wake was on its way` } : { key: i18nKey('{member} was not woken in {group}: {why}'), params: { member: name, group, why: { key: causeKey(outcome) } }, english: `${name} was not woken in ${group}: ${causeKey(outcome)}` })
+      : may && sure ? { key: i18nKey('{may} of your wakes in {group} may have been woken, {sure} not sent: {members}'), params: { may, sure, group: f.group, members }, english: `${may} of your wakes in ${f.group} may have been woken, ${sure} not sent: ${members}` }
+        : may ? { key: i18nKey('{n} of your wakes in {group} may have been woken: {members}'), params: { n: may, group: f.group, members }, english: `${may} of your wakes in ${f.group} may have been woken: ${members}` }
+          : { key: i18nKey('{n} of your wakes in {group} were not sent: {members}'), params: { n: f.n, group: f.group, members }, english: `${f.n} of your wakes in ${f.group} were not sent: ${members}` };
+    const i18n = { text: { key: title.key, params: title.params }, detail: lines.map((l) => ({ key: l.key, params: l.params })), source: { key: i18nKey('Channels') } };
+    try {
+      if (open && typeof userTodos.redrawItem === 'function') { userTodos.redrawItem((i) => i.id === open.id, { text: title.english, detail, facts: { owedFalls: f }, i18n }); return; }
+      userTodos.add('channels', { origin: 'channels', text: title.english, action: { type: 'open-channel', adapterId: G.GROUP_ADAPTER_ID, convId: gid, key: KEY }, facts: { owedFalls: f }, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n });
+    } catch (err) { (log.warn || log.log || (() => {})).call(log, `[groups] the owner's item for a fallen paced wake in ${gid} could not be filed: ${(err && err.message) || err}`); }
+  }
+  /** a turn's report (or another wake) carried it: no second post, nothing billed; an awaited reply reads «answered» */
+  function owedCancelled(cid, e) {
+    const { gid, vids } = e.meta || {};
+    patchAwaits(gid, vids, { heldAt: undefined, held: undefined }).catch(() => { });
+  }
+  /** the marker moved past what a parked wake owes ⇒ it rode that report: the park's cancel via 'prompt' (its own road) */
+  function settleOwed(gid, member) {
+    if (!deliver || typeof deliver.owedEntries !== 'function' || typeof deliver.retryTake !== 'function') return;
+    const g = getGroup(gid);
+    const m = g && G.memberOf(g, member);
+    if (!m) return;
+    const covered = deliver.owedEntries(member, OWED).filter((e) => e.meta && e.meta.gid === gid && Number(m.reportedUpTo) >= Number(e.meta.at));
+    const rode = covered.filter((e) => { const end = owedPastMarker(g, m, e); if (end && typeof deliver.fellOwed === 'function') { deliver.fellOwed(member, e, end.fall, end.fallDetail || {}); return false; } return true; });
+    if (rode.length) deliver.retryTake(member, rode, { via: 'prompt' });
+    // a report that carried an awaited reply settles its record: «held» would be a lie now (acceptance r5, P20)
+    const carried = Object.entries(g.awaits || {}).filter(([, a]) => a && a.by === member && Number.isFinite(a.heldAt) && !Number.isFinite(a.wokeAt) && Number(m.reportedUpTo) >= Number(a.answeredAt)).map(([vid]) => vid);
+    if (carried.length) patchAwaits(gid, carried, { heldAt: undefined, held: undefined }).catch(() => { });
+  }
+  if (deliver && typeof deliver.registerOwedWake === 'function') deliver.registerOwedWake(OWED, { render: owedWords, fell: owedFell, cancelled: owedCancelled, merge: mergeOwed });
+  if (deliver && typeof deliver.registerWakePacer === 'function') deliver.registerWakePacer((sender) => pacerFor(sender));
   /** `consent(n) → true | refusal` — asked of the number of wakes an act
    *  would cause, INSIDE the door, before anything is written. */
   const consentOf = (consent, n) => {
@@ -535,8 +805,9 @@ function create({
   /** `mayWake(member) → true | {reason}` = the CALLER's pacing (the agent
    *  route's per-(sender, target) floor), asked of EVERY wake a post / an
    *  invite would cause — an @mention and `--wake` are one act, paced alike.
-   *  A floored wake is a refusal like the authorizer's: not billed, journaled,
-   *  the message rides that member's next report. */
+   *  A floored wake is not billed, is journaled, and is PARKED for the window's
+   *  end (lane paced-wake-retry, `parkPaced`); only a refusal that names no wait
+   *  leaves the message to that member's next report. */
   async function wakeAll(gid, rec, candidates, mayWake = null, { pressed = null } = {}) {
     const woke = [], refused = [], later = [];
     const g0 = getGroup(gid);
@@ -544,12 +815,14 @@ function create({
       const g = getGroup(gid) || g0;
       const v = G.wakeVerdict(g, m, rec);
       const name = displayName(g, m);
-      if (!v.wake) { if (v.why !== 'mute' && v.why !== 'own-message' && v.why !== 'not-member' && G.reachesReport(g, m, rec)) later.push({ member: m, name }); continue; }   // verify r1 D3: never promise a `mention` member a next turn it is not handed (B-a354)
+      if (!v.wake) { if (v.why !== 'mute' && v.why !== 'own-message' && v.why !== 'not-member' && reachFor(g, m)(rec)) later.push({ member: m, name }); continue; }   // verify r1 D3: never promise a `mention` member a next turn it is not handed (B-a354)
       const pace = typeof mayWake === 'function' ? mayWake(m) : true;   // reserves the pace slot when it grants
       if (pace !== true) {
-        const reason = (pace && pace.reason) || 'rate floor';
+        const owed = parkPaced(gid, m, rec, v.why, pace);
+        const stopped = !owed && pace && pace.rule ? blockedBy(m) : null;
+        const reason = owed ? G.pacedReason(owed.retryInMs, pace.rule) : stopped ? G.blockedReason(stopped.why, pace.rule) : pace && pace.rule ? G.unparkedReason(pace.rule) : (pace && pace.reason) || 'rate floor';
         try { store.audit({ kind: 'group-wake', groupId: gid, member: m, why: v.why, ok: false, lane: null, reason, refused: 'rate-floor', spendWhy: null }); } catch { }
-        refused.push({ member: m, name, why: v.why, reason, refused: 'rate-floor' });
+        refused.push({ member: m, name, why: v.why, reason, refused: 'rate-floor', ...(owed ? { parked: true, retryInMs: owed.retryInMs, retryAt: owed.retryAt } : {}) });
         continue;
       }
       const r = await wake(gid, m, rec, v.why, null, { pressed });
@@ -794,7 +1067,8 @@ function create({
    *  wake through the SAME `wake()` (the ladder, spendReason peer-message), the entry stamped in the groups door:
    *  `answeredAt` by the first reply whatever the verdict, `wokeAt` when a wake carried it (one already made by
    *  wakeAll — a mention / always / --wake — CONSUMES it: never a second billed turn), `heldAt` when the ladder or the
-   *  pace refused (the reply waits for next-turn, said on the record's line). */
+   *  pace refused (a ladder refusal waits for next-turn; a paced one is PARKED, `held: 'paced'`, and its landing stamps
+   *  `wokeAt` — lane paced-wake-retry — both said on the record's line). */
   async function awaitWakes(gid, rec, w, mayWake, replyWake, { pressed = null } = {}) {
     const g0 = getGroup(gid);
     const from = rec.author && rec.author.id;
@@ -816,11 +1090,13 @@ function create({
         if (made) Object.assign(patch, { wokeAt: now(), why: v.why });
         else {
           const pace = typeof mayWake === 'function' ? mayWake(asker) : true;
-          const r = pace === true ? await wake(gid, asker, rec, v.why, e.at, { pressed }) : { ok: false, reason: (pace && pace.reason) || 'rate floor', refused: 'rate-floor' };
+          const owed = pace === true ? null : parkPaced(gid, asker, rec, v.why, pace, { awaitAt: e.at, vid });
+          const r = pace === true ? await wake(gid, asker, rec, v.why, e.at, { pressed }) : { ok: false, reason: (pace && pace.reason) || 'rate floor', refused: owed ? 'paced' : 'rate-floor' };
           if (r.ok) Object.assign(patch, { wokeAt: now(), why: v.why });
           else {
             if (pace === true && typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(asker); } catch { } }
-            Object.assign(patch, { heldAt: now(), held: r.refused || r.reason || 'refused' });
+            const stoppedNow = r.refused === 'paced' ? null : blockedBy(asker);
+            Object.assign(patch, { heldAt: now(), held: stoppedNow ? stoppedNow.cause : r.refused || r.reason || 'refused' });
           }
         }
       }
@@ -852,7 +1128,8 @@ function create({
         if (!m || g.archivedAt) continue;
         if (!g.pair && prev && prev.why === why) continue;   // already said in this group
         const since = Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1;
-        const lost = readLog(g.id).filter((r) => r && Number(r.at) > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === cid) && G.reachesReport(g, cid, r)).length;
+        const take = unreceivedFor(g, cid);   // the unread count's rule (r8, F3): a muted member's messages were not delivered either; its record filter too (r9, F3′)
+        const lost = readLog(g.id).filter((r) => r && Number(r.at) > since && !(r.author && r.author.id === cid) && take(r)).length;
         const name = displayName(g, cid);
         if (g.pair) {
           recs.push(appendIn(g, { author: cid, text: G.endedText({ name, why, n: lost, closed: true }), raw: { kind: 'closed', member: cid, why, lost } }));
@@ -1171,7 +1448,7 @@ function create({
   const previewMemo = new Map();   // cid → {sig, value}
   function pendingSig(cid) {
     const parts = [];
-    for (const g of Object.values(all())) { const m = G.memberOf(g, cid); if (m) parts.push(`${g.id}:${Number(g.lastAt) || 0}:${memberSince(m)}:${m.notify}`); }
+    for (const g of Object.values(all())) { const m = G.memberOf(g, cid); if (m) parts.push(`${g.id}:${Number(g.lastAt) || 0}:${memberSince(m)}:${m.notify}:${m.notify === 'mention' ? reachSig(g, cid) : ''}`); }   // the awaited rows too (r8, U1): an awaited reply's stamp moves no lastAt
     return parts.join('|');
   }
   function pendingOf(cid) {
@@ -1181,8 +1458,9 @@ function create({
       if (!m || m.notify === 'mute' || g.closed) continue;   // lane pair-group-fate: a CLOSED pair's entries are nobody's to wait for
       const since = memberSince(m);
       if (!((Number(g.lastAt) || 0) > since)) continue;
+      const reach = reachFor(g, cid);   // the strip waits for what the report hands, an awaited reply included (r7, P25)
       for (const r of readLog(g.id)) {
-        if (!r || !(Number(r.at) > since) || (r.author && r.author.id === cid) || ((r.raw && r.raw.kind) || 'message') !== 'message' || !G.reachesReport(g, cid, r)) continue;   // B-a354: a `mention` member waits only for what @mentions it
+        if (!r || !(Number(r.at) > since) || (r.author && r.author.id === cid) || ((r.raw && r.raw.kind) || 'message') !== 'message' || !reach(r)) continue;   // B-a354: a `mention` member waits only for what @mentions it
         const self = !!(r.author && r.author.id === G.OWNER);
         out.push({ groupId: g.id, groupName: g.name, at: r.at, from: self ? null : ((r.author && (r.author.name || r.author.id)) || null), self, text: String(r.text == null ? '' : r.text).slice(0, PENDING_TEXT_MAX) });
       }
@@ -1222,7 +1500,7 @@ function create({
     const entries = [], quiet = [], waiting = [];
     for (const g of cands) {
       if (room < MIN_REPORT_ROOM) { waiting.push(g); continue; }
-      const rep = G.reportFor(g, readLog(g.id), cid, { budget: Math.min(G.REPORT_BUDGET, room) });
+      const rep = G.reportFor(g, readLog(g.id), cid, { budget: Math.min(G.REPORT_BUDGET, room), also: reachFor(g, cid) });
       if (!rep) { quiet.push({ groupId: g.id, upTo: g.lastAt }); continue; }   // only its own messages since — nothing to say, move the marker
       if (rep.fits === false) { waiting.push(g); continue; }
       entries.push({ g, text: rep.text, mark: { groupId: g.id, upTo: rep.upTo, cards: cardsOf(g, rep) } });

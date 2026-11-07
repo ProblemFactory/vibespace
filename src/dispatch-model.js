@@ -14,8 +14,11 @@
  *   dispatchVerdict(facts) → {ok, steps, compact, code?, skip?, why}
  *     steps  ['compact','wait','wake'] — compact, wait for its end, wake with the brief
  *            ['wake']                  — the brief alone, as `send --wake` (no compaction, and `why` says so)
- *            ['stash']                 — no wake: the brief rides the worker's NEXT turn (the pacer or
- *                                        the spend ceiling said no — a compaction is never paid for then)
+ *            ['park']                  — the wake PACE said no and answered the wait (`retryInMs`): the brief is posted
+ *                                        and its wake PARKED — sent when the window ends (lane paced-wake-retry);
+ *                                        a compaction is never paid for a refused wake
+ *            ['stash']                 — no wake: the brief rides the worker's NEXT turn (the spend ceiling said no,
+ *                                        or a pacer that named no wait — a compaction is never paid for then)
  *            ['replay']                — NOTHING: this very brief already reached this worker (a retry
  *                                        after a lost answer / a restart) — never a second compaction, never a second wake
  *     The compact step needs ALL of: a SESSION caller (never a jbt_ job), reach
@@ -72,6 +75,7 @@ const STEPS = Object.freeze({
   compactFirst: Object.freeze(['compact', 'wait', 'wake']),
   wake: Object.freeze(['wake']),
   stash: Object.freeze(['stash']),
+  park: Object.freeze(['park']),
   replay: Object.freeze(['replay']),
 });
 /** Why a compaction was skipped — a closed set, each with its sentence. */
@@ -159,6 +163,8 @@ function dispatchVerdict({ callerKind = null, senderReach = 'none', targetKind =
   // verify r1 ②: the same brief already reached this worker — before the pace (nothing is reserved, nothing is sent)
   if (replay === 'delivered') return skip('replay', STEPS.replay);
   // a refused wake never pays for a compaction: the brief rides the worker's next turn, free
+  // a PACED wake is OWED (lane paced-wake-retry): the pacer answered the wait, so the brief is posted and its wake parked for the window's end
+  if (pacer !== true && Number(pacer && pacer.retryInMs) > 0) return { ...skip('paced', STEPS.park, `${reasonOf(pacer, 'rate floor')} — not compacted`), retryInMs: Number(pacer.retryInMs) };
   if (pacer !== true) return skip('paced', STEPS.stash, `${reasonOf(pacer, 'rate floor')} — the brief rides the worker's next turn (free), not compacted`);
   if (spend !== true) return skip('spend', STEPS.stash, `${reasonOf(spend, 'refused')} — the brief rides the worker's next turn (free), not compacted`);
   if (compactFirst !== true) return skip('not-asked', STEPS.wake);
@@ -179,7 +185,7 @@ function dispatchVerdict({ callerKind = null, senderReach = 'none', targetKind =
  *   compaction  null (not attempted) | {sent:false, error} | {ended:true, result, error?, waitedMs}
  *               | {ended:false, timedOut:true, waitedMs}
  *   charge      null | {counted:boolean, identity} — the compaction's own count against the unattended ceiling
- *   wake        {woke:boolean, nextTurn?:boolean, reason?:string, refused?:string|null}
+ *   wake        {woke:boolean, nextTurn?:boolean, reason?:string, refused?:string|null, paced?:{retryInMs, retryAt}}
  *   identity    the slot the wake was authorized on ({key, name}) — named only when the wake billed
  */
 function dispatchRecord({ target = null, verdict = null, compaction = null, charge = null, wake = null, identity = null, waitMs = COMPACT_WAIT_MS, reply = null } = {}) {
@@ -207,9 +213,13 @@ function dispatchRecord({ target = null, verdict = null, compaction = null, char
   }
   const replay = steps.includes('replay');
   const woke = !!(wake && wake.woke);
-  const delivered = replay ? 'already' : woke ? 'woken' : 'next-turn';
+  const paced = !replay && !woke && wake && wake.paced && Number(wake.paced.retryInMs) > 0 ? wake.paced : null;
+  const delivered = replay ? 'already' : woke ? 'woken' : paced ? 'paced' : 'next-turn';
   const w = { billed: woke, identity: woke && identity && identity.key ? { key: String(identity.key), name: String(identity.name || identity.key) } : null, delivered };
+  if (paced) { w.retryInMs = Number(paced.retryInMs); if (Number.isFinite(Number(paced.retryAt))) w.retryAt = Number(paced.retryAt); }
   if (!woke && wake && wake.reason) w.reason = String(wake.reason);
+  // the verdict promised a parked wake and nothing parked it: the sentence says what happened, never «sent in N s»
+  if (steps.includes('park') && !paced && !woke) why = `${w.reason || 'the wake pace said no'} — not compacted`;
   const replyMode = NOTIFY_SET.has(reply) ? reply : null;
   const out = { target: t, compacted, compactionCounted: !!(charge && charge.counted), why, wake: w };
   if (replyMode) out.reply = { notify: replyMode, words: replyWords(replyMode) };   // verify r2: how the worker's reply reaches the dispatcher

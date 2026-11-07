@@ -12,6 +12,7 @@ const caps = require('../channel-caps.js');
 const F = require('../channel-filter.js');
 const CR = require('../channel-ref.js');
 const P = require('../channel-policy.js');
+const { owedOutcome, LIVE_FALLS, fallWhy } = require('../channel-groups.js');   // lane paced-wake-retry: a fall's cause and its words, from the ONE list
 const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: an attended receipt / send rides the door's PRESS (`pressed`)
 const ACL = require('../channel-acl.js');
 const Drain = require('../channel-drain.js');
@@ -375,7 +376,7 @@ function create(engineCtx) {
     if (typeof mayWake !== 'function') return { ok: true, granted: false };
     const pace = mayWake(convId);
     if (pace !== true) {
-      const reason = String((pace && pace.reason) || 'rate floor').replace(/ — it reaches them on their next turn instead$/, '');
+      const reason = String((pace && (pace.rule || pace.reason)) || 'rate floor');   // the rule alone: this send moved nothing, so no wake is owed — «send again»
       return { ok: false, code: 'rate-floor', error: `${reason} — nothing was sent (send again once the floor passes, or post in a group: that reaches them on their next turn, free)`, why: (pace && pace.why) || null, wakes: n };
     }
     return { ok: true, granted: true };
@@ -1132,17 +1133,23 @@ function create(engineCtx) {
   /** With sign-in OFF the owner's routes are paced like an agent (`mayWake`,
    *  the groups engine's persisted ledger, keyed by the drafter): a floored
    *  wake-now is DOWNGRADED to the next message and says so — the decision
-   *  itself is never refused for it. `{choice, paced}`. */
+   *  itself is never refused for it — and the wake is OWED (lane paced-wake-retry:
+   *  `receiptNow` parks it beside the stashed receipt). `{choice, paced, pacedMs, pacedBy}`. */
   function receiptPaceFor(p0, rch, mayWake) {
     if (!rch.n || typeof mayWake !== 'function') return { choice: rch.choice, paced: null };
     let pace = null;
     try { pace = mayWake(p0.draftedBy.id); } catch (err) { pace = { reason: `the wake pace failed (${(err && err.message) || err})` }; }
     if (pace === true) return { choice: rch.choice, paced: null };
-    return { choice: 'next-turn', paced: String((pace && pace.reason) || 'rate floor').slice(0, 200) };
+    // THE SAME GATE AS EVERY PARK, asked before anything is promised (acceptance r6, P22, measured: a live agy drafter was told «sends it in N s» and later «its conversation is not running»): a drafter no wake could reach is answered with its own reason
+    let blocked = null;
+    try { blocked = deliver && typeof deliver.wakeBlock === 'function' ? deliver.wakeBlock(p0.draftedBy.id) : null; } catch { blocked = null; }
+    return { choice: 'next-turn', paced: String((pace && (pace.rule || pace.reason)) || 'rate floor').slice(0, 200), pacedMs: !blocked && Number(pace && pace.retryInMs) > 0 ? Number(pace.retryInMs) : 0, ...(blocked ? { blocked: blocked.cause } : {}), pacedBy: mayWake.sender || null };
   }
   function stampReceiptChoice(p, rc) {
     p.receiptChoice = rc.choice;
     if (rc.paced) p.receiptChoicePaced = rc.paced;
+    if (rc.blocked) p.receiptChoiceBlocked = rc.blocked;
+    if (rc.pacedMs) { p.receiptPacedMs = rc.pacedMs; p.receiptPacedAt = now(); p.receiptPacedBy = rc.pacedBy; }
   }
 
   async function reject(id, { reason = null, by = 'user', deliver = null, consent = null, mayWake = null, pressed = null } = {}) {
@@ -1299,6 +1306,7 @@ function create(engineCtx) {
       }
     });
     if (changed.length) notifyOutbox(changed);
+    if (ev === 'drained') for (const id of changed) await retractReceiptWakeItem(id);   // lane paced-wake-retry (P4)
     if (ev === 'evicted' && changed.length) log.warn(`[channels] receipt(s) for ${changed.join(', ').slice(0, 300)} fell off ${cid}'s stash cap UNREAD (${Number(extra && extra.held) || '?'} held) — the card says so; the receipt stays on the proposal`);
   }
   /**
@@ -1691,6 +1699,55 @@ function create(engineCtx) {
       });
       if (item && item.id) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].partialTodoId = item.id; });
     } catch (e) { log.warn(`[channels] outbox ${p.id}: could not file the partly-sent item: ${(e && e.message) || e}`); }
+  }
+  /** A DECIDER'S WAKE THE PACE HELD FELL (lane paced-wake-retry, D6): on the receipt road the owner IS the sender. The card's
+   *  fate changes, an audit row, ONE For-you item keyed by the proposal; a spend refusal's item is the guard's own. The
+   *  receipt itself still waits in the stash for the agent's next message. */
+  async function noteReceiptWakeFell(id, cid, extra = {}) {
+    if (!id || engineCtx.stopped) return;
+    // a frame that may have landed is said as that (acceptance r2, P4): never «not woken», never an invitation to a second wake by hand
+    const why = owedOutcome(extra);
+    const live = LIVE_FALLS.includes(why);   // running, and no lane reaches it: its own words, never «not running» (acceptance r6, P23)
+    let moved = false;
+    await store.outbox.update((ob) => {
+      const q = ob.proposals[id];
+      if (!q || !q.receiptDelivery || q.receiptDrainedAt) return;
+      const { paced, ...rest } = q.receiptDelivery;
+      q.receiptDelivery = { ...rest, wakeFell: { at: now(), why } };
+      moved = true;
+    });
+    if (!moved) return;
+    const p = store.outbox.snapshot().proposals[id];
+    auditOutbox(p, 'receipt-wake-fell', { why, reason: String(extra.reason || '').slice(0, 200) });
+    try { notify([p.convId]); } catch { }
+    if (why === 'spend-cap' || !userTodos || typeof userTodos.add !== 'function') return;
+    try {
+      const title = String(conversationName(p.adapterId, p.convId) || p.title || p.convId || '').slice(0, 120);
+      const agent = String((p.draftedBy && p.draftedBy.name) || 'The agent').slice(0, 120);
+      const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels',
+        text: live ? `${agent} was not woken about ${title}: ${fallWhy(why)}` : why === 'may-have-landed' ? `${agent} may have been woken about ${title}: the server stopped while the wake was on its way` : why === 'paced-out' ? `${agent} was not woken about ${title}: it could not land within its hour` : why === 'not-running' ? `${agent} was not woken about ${title}: its conversation is not running` : `${agent} was not woken about ${title}: it did not reach the agent`,
+        ...(p.convId ? { action: { type: 'open-channel', adapterId: p.adapterId, convId: p.convId, key: `outbox:${p.id}` } } : {}),
+        detail: why === 'may-have-landed' ? 'The wake may already have reached the agent, so waking it again may start a second turn. The receipt also waits for its next message, and this item closes when it reads it.' : 'You asked to wake the agent now and the wake pace held it; the wake could not be sent later. The receipt waits for its next message, and this item closes when it reads it.',
+        urgency: 'normal', by: 'agent', sessionName: 'Channels',
+        i18n: {
+          text: live ? { key: i18nKey('{agent} was not woken about {title}: {why}'), params: { agent, title, why: { key: fallWhy(why) } } } : { key: why === 'may-have-landed' ? i18nKey('{agent} may have been woken about {title}: the server stopped while the wake was on its way') : why === 'paced-out' ? i18nKey('{agent} was not woken about {title}: it could not land within its hour') : why === 'not-running' ? i18nKey('{agent} was not woken about {title}: its conversation is not running') : i18nKey('{agent} was not woken about {title}: it did not reach the agent'), params: { agent, title } },
+          detail: [{ key: why === 'may-have-landed' ? i18nKey('The wake may already have reached the agent, so waking it again may start a second turn. The receipt also waits for its next message, and this item closes when it reads it.') : i18nKey('You asked to wake the agent now and the wake pace held it; the wake could not be sent later. The receipt waits for its next message, and this item closes when it reads it.'), params: {} }],
+          source: INBOX_SOURCE,
+        },
+      });
+      if (item && item.id) await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receiptWakeTodoId = item.id; });
+    } catch (e) { log.warn(`[channels] outbox ${id}: could not file the fallen wake's item: ${(e && e.message) || e}`); }
+  }
+  /** The fallen wake's item is retracted by THIS producer, only its own still-open id, the moment the agent read the receipt (P4). */
+  async function retractReceiptWakeItem(id) {
+    const p = store.outbox.snapshot().proposals[id];
+    if (!p || !p.receiptWakeTodoId) return;
+    const todoId = p.receiptWakeTodoId;
+    await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receiptWakeTodoId = null; });
+    if (!userTodos || typeof userTodos.get !== 'function') return;
+    try { const it = userTodos.get(todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(todoId, 'done', RESOLVED_BY); }
+    catch (e) { log.warn(`[channels] outbox ${id}: could not close the fallen wake's item: ${(e && e.message) || e}`); }
   }
   /** An unknown outcome owes the USER a look (§9.4), not the agent a verdict. */
   async function speakUnknown(p) {
@@ -2104,9 +2161,21 @@ function create(engineCtx) {
     }
     // a stashed receipt for a drafter whose session is not live is KEPT for when it comes back — the card says so
     const gone = stashed && live === false;
+    // lane paced-wake-retry: the decider's wake the pace held is OWED — the stash keeps the words (its gate, its clear, the next
+    // prompt's drain all stand), the park fires the ONE wake when the window ends; a turn that drains it first cancels it
+    let owed = null;
+    if (stashed && !gone && Number(cur.receiptPacedMs) > 0 && deliver && typeof deliver.parkOwedWake === 'function') {
+      try { owed = deliver.parkOwedWake(cid, { producer: 'stash-wake', key: id, retryInMs: Math.max(0, Number(cur.receiptPacedAt) + Number(cur.receiptPacedMs) - now()), spendReason: 'channel-receipt', kind: 'notification', fromName, sender: cur.receiptPacedBy || null, reason: String(cur.receiptChoicePaced || 'paced'), meta: { ref: id } }); }
+      catch (err) { log.warn(`[channels] receipt ${id}: the wake the pace held could not be parked (${(err && err.message) || err}) — it rides the next turn`); }
+    }
+    // a wake no lane could carry is SAID on the card as what the drafter is (P22): the park's own answer, or the gate read again for a decision that promised nothing
+    let blocked = owed && owed.blocked ? owed.blocked : null;
+    if (!blocked && stashed && !gone && cur.receiptChoiceBlocked && deliver && typeof deliver.wakeBlock === 'function') { try { blocked = deliver.wakeBlock(cid); } catch { blocked = null; } }
     const delivery = {
       at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: stashErr ? 'stash-failed' : (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
       choice: cur.receiptChoice || 'next-turn', verdict: verdict.why || null, ...(gone ? { gone: true } : {}),
+      ...(owed && owed.parked ? { paced: { retryAt: owed.retryAt, retryInMs: owed.retryInMs } } : {}),   // the park as a FACT (D5): the toast and the card promise only this
+      ...(blocked ? { blocked: blocked.cause } : {}),
     };
     await store.outbox.update((ob) => {
       const q = ob.proposals[id];
@@ -2201,7 +2270,7 @@ function create(engineCtx) {
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
     outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
-    noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
+    noteReceiptStash, noteReceiptWakeFell, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
     releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers
     collectReceipt, stopCollect,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline; stop drops the collect timers

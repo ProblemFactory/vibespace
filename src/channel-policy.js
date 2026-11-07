@@ -1489,6 +1489,17 @@ function receiptFeedback(rc) {
  * "handed"; the receipt itself stays on the proposal). `null` = no fate to
  * speak of (no receipt, the user drafted it, or the agent withdrew it itself).
  */
+/** a target no wake could reach, in the reader's language: the words follow the cause (lane paced-wake-retry, acceptance r6, P22 + P23; r7, P26: EVERY cause the gate answers, a stopped one included — the toast and the card name the same one). The strings are G.FALL_WHY's rows (this module imports only channel-record; test-paced-wake-retry pins them equal) */
+function blockedText(cause, t) {
+  if (cause === 'not-running') return t('its conversation is not running');
+  return liveFallText(cause, t);
+}
+function liveFallText(cause, t) {
+  if (cause === 'no-mid-session') return t('it is running, but takes no message mid-session');
+  if (cause === 'terminal') return t('it is running in a terminal, where it takes no message mid-session');
+  if (cause === 'predates') return t('it is running, but its process predates live messages — a restart of the session reaches it at once');
+  return '';
+}
 function receiptFateOf(p) {
   const q = p || {};
   const d = q.draftedBy || {};
@@ -1508,7 +1519,7 @@ function receiptFateOf(p) {
   // …and a wake-now the ENGINE downgraded before the ladder (verify r4: the proposal's wake row could not be
   // written — `row-unwritten`) is said the same way; `already-woken` / `gone` are not refusals
   const rowLost = !del.woke && del.choice === 'wake-now' && del.verdict === 'row-unwritten';
-  if (del.stashed) return { kind: del.gone ? 'gone' : 'waiting', who, at: Number(del.at) || null, woke: false, wakeRefused: del.woke ? (del.refused || 'refused') : (rowLost ? 'row-unwritten' : null), why: del.woke ? (del.why || null) : null };
+  if (del.stashed) return { kind: del.gone ? 'gone' : 'waiting', who, at: Number(del.at) || null, woke: false, ...(del.paced ? { wakePaced: true } : {}), ...(del.wakeFell ? { wakeFell: del.wakeFell.why || 'not-reachable' } : del.blocked ? { wakeFell: del.blocked } : {}), wakeRefused: del.woke ? (del.refused || 'refused') : (rowLost ? 'row-unwritten' : null), why: del.woke ? (del.why || null) : null };
   return { kind: 'undelivered', who, at: Number(del.at) || null, woke: false, refused: del.refused || null, why: del.why || null };
 }
 /** The fate line's words. `stamp(ms)` = the card's own clock format;
@@ -1521,7 +1532,16 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
     case 'handed':
       if (!f.at) return t('Handed to {agent} with an earlier message', { agent });
       return f.woke ? t('Handed to {agent} at {time} — it was woken for it', { agent, time: stamp(f.at) }) : t('Handed to {agent} at {time}', { agent, time: stamp(f.at) });
-    case 'waiting': return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
+    case 'waiting':
+      // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands
+      if (f.wakeFell === 'may-have-landed') return t('Waiting for {agent}\'s next message — the wake may have reached it (the server stopped while it was on its way)', { agent });
+      if (f.wakeFell === 'paced-out') return t('Waiting for {agent}\'s next message — the wake could not land within its hour', { agent });
+      if (f.wakeFell === 'not-running') return t('Waiting for {agent}\'s next message — its conversation is not running, so it was not woken', { agent });
+      if (f.wakeFell === 'spend-cap') return t('Waiting for {agent}\'s next message — the spend ceiling refused the wake', { agent });
+      if (liveFallText(f.wakeFell, t)) return t('Waiting for {agent}\'s next message — {why}, so it was not woken', { agent, why: liveFallText(f.wakeFell, t) });
+      if (f.wakeFell) return t('Waiting for {agent}\'s next message — the wake did not reach it', { agent });
+      if (f.wakePaced) return t('The wake pace holds this — {agent} is woken for it shortly', { agent });
+      return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
     case 'gone': return t('{agent} is gone — receipt kept', { agent });
     case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
     case 'undelivered': return t('Receipt not delivered: {why}', { why: (f.refused && refusalText(f.refused)) || f.why || '' });
@@ -1529,6 +1549,22 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
     case 'recorded': return t('Receipt recorded');
     default: return '';
   }
+}
+
+/** THE TOAST AFTER A DECISION THE PACE HELD (lane paced-wake-retry, D5): «sent in N s» only when the answer carries the park
+ *  as a FACT (`receiptDelivery.paced`); a refusal nothing parked keeps the old truth, with its why. '' = nothing to say. */
+function receiptPacedText(p, { t = defaultT } = {}) {
+  if (!p || !p.receiptChoicePaced) return '';
+  // a drafter no lane reaches (acceptance r6, P22): its own reason, no promise of a wake
+  const blocked = (p.receiptDelivery && p.receiptDelivery.blocked) || p.receiptChoiceBlocked || (p.receiptDelivery && p.receiptDelivery.gone ? 'not-running' : null);   // a drafter that left between the decision and the receipt (r8's nit): the card says it is gone, the toast names the cause, never the rule
+  if (blocked && blockedText(blocked, t)) return t('The agent was not woken ({why}) — it hears with its next message', { why: blockedText(blocked, t) });
+  // a HELD send (acceptance r2, P5): the receipt has not run, and when the send goes it parks the wake from the stored wait — a wake WILL follow
+  const o = outcomeOf(p);
+  if (!p.receiptDelivery && Number(p.receiptPacedMs) > 0 && o && o.kind === 'held') return t('The agent is not woken yet — the wake follows the send if it is still running; sooner if it starts a turn first');
+  const paced = p.receiptDelivery && p.receiptDelivery.paced;
+  const ms = paced ? Number(paced.retryInMs) : 0;
+  if (ms > 0) return t('The agent is not woken yet — the wake pace sends it in {n} s (sooner if it starts a turn first)', { n: Math.max(1, Math.ceil(ms / 1000)) });
+  return t('The agent was not woken (paced: {why}) — it hears with its next message', { why: String(p.receiptChoicePaced) });
 }
 
 /**
@@ -1672,7 +1708,7 @@ module.exports = {
   sharedFilesOf, rekeyByFiles,   // lane slack-file-send-key
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
-  RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
+  RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, receiptPacedText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
   COLLECT_WINDOW_MS, receiptRoad, STASH_HEADINGS, stashHeading,   // lane channel-direct-send-sync: a direct send's receipt road + the held-batch heading by cause
   canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,

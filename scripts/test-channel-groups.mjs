@@ -754,7 +754,8 @@ console.log('§3g the owner\'s unread is NOT re-read from every log on every bro
   for (let i = 0; i < 200; i++) { const g = await f.eng.create({ by: A, name: `load ${i}`, members: [B], quiet: true }); ids.push(g.group.id); }
   // a few messages in some groups, the owner has read none
   for (let i = 0; i < 20; i++) await f.eng.post({ group: ids[i], from: A, text: `seed ${i}` });
-  const truth = (gid, who, since) => f.store.readTail('groups', gid, { limit: 5000 }).filter((r) => r.at > since && !(r.author && r.author.id === who)).length;
+  // lane paced-wake-retry r10 (F3′): «unread» = the MESSAGES people wrote — a system row (create / invite / rename …) is never unread
+  const truth = (gid, who, since) => f.store.readTail('groups', gid, { limit: 5000 }).filter((r) => r.at > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === who)).length;
   f.eng.list(); f.eng.listFor(B);   // warm
   let reads = 0;
   const real = f.store.readTail;
@@ -1398,9 +1399,9 @@ console.log('§4d3 a 4 KB report rides WHOLE beside a 3.4 KB tools section + a t
   ok(cr.ok, `a crowded turn (2 600 B left): the report fits the ROOM — the newest 1 700-character message whole, the older one pointed (${B8(cr.r.text)} B)`, cr.r.text.slice(0, 400));
   const MUTR = mutantCopies('chan-groups-room', REPO);
   const geSrcR = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
-  const roomNeedle = '{ budget: Math.min(G.REPORT_BUDGET, room) }';
+  const roomNeedle = '{ budget: Math.min(G.REPORT_BUDGET, room), also: reachFor(g, cid) }';
   if (!geSrcR.includes(roomNeedle)) throw new Error('mutation anchor missing: the room budget');
-  const NoRoom = MUTR.load('src/server/groups-engine.js', geSrcR.replace(roomNeedle, '{ budget: G.REPORT_BUDGET }'), 'no-room');
+  const NoRoom = MUTR.load('src/server/groups-engine.js', geSrcR.replace(roomNeedle, '{ budget: G.REPORT_BUDGET, also: reachFor(g, cid) }'), 'no-room');
   const fr = fixture('e4d3-ctl', { ge: NoRoom });
   const gr = (await fr.eng.create({ by: A, name: 'int226', members: [B], quiet: true })).group.id;
   for (const t of ['D1', 'D2']) await fr.eng.post({ group: gr, from: A, text: prog(t) });
@@ -1547,7 +1548,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     ok(N.redactGroupCards(s6, seenKeys[0].keys, RCm.CLEARED_TEXT) === 0, '…a second clear of the same record changes nothing');
     const rb = require(path.join(REPO, 'src/server/channels-wiring.js'));
     const wsrc = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
-    ok(/onCleared: onGroupCardsCleared, liveness \}\);/.test(wsrc) && /N\.redactGroupCards\(s, keys, RCm\.CLEARED_TEXT\)/.test(wsrc) && typeof rb.create === 'function', 'WIRING: the wiring hands the groups engine its onCleared — every LIVE session\'s cards re-worded through the ONE normalizer function');
+    ok(/onCleared: onGroupCardsCleared, liveness, userTodos \}\);/.test(wsrc) && /N\.redactGroupCards\(s, keys, RCm\.CLEARED_TEXT\)/.test(wsrc) && typeof rb.create === 'function', 'WIRING: the wiring hands the groups engine its onCleared — every LIVE session\'s cards re-worded through the ONE normalizer function');
     const rsrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
     ok(/if \(msg\.peerCleared\) core = clearedText\(\);/.test(rsrc), 'WIRING: the chat renderer draws a cleared group card as the sentence in the device\'s words');
     f6.close();
@@ -1995,7 +1996,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   const now = await laterOf(GE, 'v1-later');
   ok(now.ok && now.later.includes(C) && !now.later.includes(B) && !now.handed, 'D3: a plain post\'s answer promises the next turn to the `next-turn` member and NOT to the `mention` member it is never handed', JSON.stringify(now));
   const eSrc = read('src/server/groups-engine.js');
-  const oldE = eSrc.replace(" && G.reachesReport(g, m, rec)) later.push(", ') later.push(');
+  const oldE = eSrc.replace(" && reachFor(g, m)(rec)) later.push(", ') later.push(');   // lane paced-wake-retry r8: the engine reads «reaches» through ONE function
   const oldEFile = path.join(ROOT, 'groups-engine-v1-old.js');
   fs.writeFileSync(oldEFile, absReq(oldE, path.join(REPO, 'src/server')));
   const was = await laterOf(require(oldEFile), 'v1-later-old');

@@ -383,7 +383,8 @@ export function notifyModeText(mode) {
 export function wakeEchoText(r) {
   const w = wakeCount(r);
   const parts = [w.woke ? t('woke {n} agent(s) = {n} billed turn(s)', { n: w.woke }) : t('woke nobody — no billed turn')];
-  if (w.refused) parts.push(t('{n} wake(s) refused by the spend guard (not billed — they get it next turn)', { n: w.refused }));
+  if (w.refused) parts.push(t('{n} wake(s) not sent (not billed — they get it next turn)', { n: w.refused }));
+  if (w.paced) parts.push(t('{n} wake(s) held by the wake pace — sent when the window ends', { n: w.paced }));
   if (w.later) parts.push(t('{n} will read it on their next turn', { n: w.later }));
   return parts.join(' · ');
 }
@@ -420,7 +421,19 @@ export function awaitLineText(st, { t = tDevice, time = hhmmLocal } = {}) {
   switch (st.state) {
     case 'awaiting': return t('Awaiting a reply (it wakes the sender once)');
     case 'woke': return t('The reply woke the sender · {time}', { time: time(st.at) });
-    case 'held': return t('Reply waiting — the sender\'s wake cap reached');
+    case 'held':
+      if (st.paced) return t('Reply held by the wake pace — sent when the window ends');
+      if (st.fell === 'paced-out') return t('Reply waiting — the wake could not land within its hour');
+      if (st.fell === 'mode-changed') return t('Reply waiting — the sender\'s notify mode no longer asks for a wake');
+      if (st.fell === 'left') return t('Reply will not reach the sender — it left the group');
+      if (st.fell === 'may-have-landed') return t('Reply waiting — the wake may have reached the sender');
+      if (st.fell === 'not-running') return t('Reply waiting — the sender\'s conversation was not running');
+      if (st.fell === 'not-reachable') return t('Reply waiting — the wake did not reach the sender');
+      if (st.fell === 'no-mid-session') return t('Reply waiting — the sender is running, but takes no message mid-session');
+      if (st.fell === 'terminal') return t('Reply waiting — the sender is running in a terminal, where it takes no message mid-session');
+      if (st.fell === 'predates') return t('Reply waiting — the sender\'s process predates live messages; a restart of the session reaches it at once');
+      if (st.fell === 'spend-cap') return t('Reply waiting — the spend ceiling refused the wake');
+      return t('Reply waiting — the sender\'s wake cap reached');
     case 'expired': return t('Await expired');
     default: return '';
   }

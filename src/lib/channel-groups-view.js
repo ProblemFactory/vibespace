@@ -203,7 +203,9 @@ export function pickerSections(sessions, tasks = [], { exclude = [] } = {}) {
  *  message in their next report instead. */
 export function wakeCount(r) {
   const n = (x) => (Array.isArray(x) ? x.length : 0);
-  return { woke: n(r && r.woke), refused: n(r && r.refused), later: n(r && r.later) };
+  const refused = Array.isArray(r && r.refused) ? r.refused : [];
+  // lane paced-wake-retry: a wake the pace held is PARKED — sent when the window ends, never counted as refused
+  return { woke: n(r && r.woke), refused: refused.filter((x) => !(x && x.parked)).length, paced: refused.filter((x) => x && x.parked).length, later: n(r && r.later) };
 }
 
 /** The panel's secondary sections, persisted in user state

@@ -25,6 +25,11 @@
 // an entry on the wire or leaving is not listed to it); `prompt-take` = a prompt's injection carried a waiting entry
 // inline for free (retryTake via 'prompt': landed, no post, no charge, the hold given back). The hand-over's own landing
 // is `post-ok` on a claimed entry; its miss (`post-refused-*` on a claimed one) releases the claim.
+// lane paced-wake-retry: this table is the lifecycle of a parked delivery whose frame already left once. A wake the PACE
+// refused (the engine's `isOwed`, held.why = 'paced') lives in the same park with the same floor and money, one judge more
+// at its attempt — the pace re-asked, a refusal re-scheduled by its new wait — no words of its own (so a drain, a hand-over
+// and a clear never list it) and a different end: at the bound its WAKE GOES (the owner's rule), past the pace; only a frame
+// that cannot land falls there. scripts/test-paced-wake-retry.mjs pins that life; these cells stay the transient entry's.
 const STATES = Object.freeze(['waiting', 'cleared', 'claimed', 'inflight', 'maybeDelivered', 'landed', 'stashed', 'evicted', 'expired']);
 const TERMINAL = Object.freeze(new Set(['landed', 'stashed', 'evicted', 'expired']));
 const EVENTS = Object.freeze(['post-ok', 'post-refused-transient', 'post-refused-final', 'poster-never-answers', 'server-death-mid-post', 'graceful-stop-mid-post', 'turn-end', 'timer', 'bound-60min', 'max-attempts', 'clock-forward', 'clock-backward', 'clear-single', 'clear-batch', 'cap', 'boot-ho', 'boot-inflight', 'target-gone', 'spend-refused', 'handover-claim', 'prompt-take']);

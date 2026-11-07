@@ -83,7 +83,7 @@ const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentTe
 // the answer leaves the store — the same shape as the three answers above; the census names both doors.
 const msgName = (v) => agentText(v == null ? '' : v, { kind: 'line', max: 200 });
 const msgNames = (xs) => (xs || []).map((w) => msgName(w && typeof w === 'object' ? w.name : w));
-const msgRefusals = (xs) => (xs || []).map((w) => ({ name: msgName(w.name), reason: w.reason }));
+const msgRefusals = (xs) => (xs || []).map((w) => ({ name: msgName(w.name), reason: w.reason, ...(w.parked ? { parked: true, retryInMs: w.retryInMs, retryAt: w.retryAt } : {}) }));   // lane paced-wake-retry: a paced wake is parked — «sent in N s»
 // lane peer-census verify r4 F1: THE TASK ANSWERS' DOORS. A Task Group's backlog items and progress entries are ANOTHER
 // SESSION's words (any agent of the group writes them through vibespace-task; a manager agent's audit line; a TASK.md file
 // imported from disk), its title / objective the user's or a manager agent's — and `vibespace-task show / backlog / progress`
@@ -198,6 +198,8 @@ function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes 
     // leave an opener dangling); a notification's is VibeSpace's own frame (see the require above)
     const text = notice ? withoutNoticeHead(e.text || '') : String(e.text || '');
     const out = (t) => (notice ? t : agentText(t, { kind: 'block' }));
+    // lane paced-wake-retry (acceptance r1, D1, measured: two owed reports in one frame arrived as 400-char lines while their markers moved — the rest was lost): an owed report rides a batch WHOLE, it reads as the single-entry frame does; only the frame's own byte bound decides, and what it leaves stays owed
+    if (e.whole === true) return `- [${stamp}] ${said}\n${out(text)}`;
     if (MSG_STASH_BLOCK_SOURCES.has(e.source)) return `- [${stamp}] ${said}\n${out(clipBytes(text, MSG_STASH_BLOCK_MAX_BYTES))}`;
     // a NOTIFICATION is VibeSpace's own words (the PATH says so — a peer never gets here), and a long one is a whole
     // delivered frame the wrapper handed back (a hand-over, a channel wake): it renders as a block under the block
@@ -272,7 +274,7 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
   // lane channel-direct-send-sync: a drain rides THIS turn, so the conversation was never "unreachable" — the hub
   // HELD these (a turn was running ⇒ busy; idle, a delivery would have cost a wake ⇒ paced). Word the cause; a batch
   // whose entries carry no cause keeps renderMsgStash's default (reserved for a session that truly could not be reached).
-  const heldCause = (() => { let busy = false, paced = false; for (const e of waiting) { const w = e && e.held && e.held.why; if (w === 'busy') busy = true; else if (w === 'paced') paced = true; } return busy ? stashHeading('busy') : paced ? stashHeading('paced') : null; })();
+  const heldCause = (() => { let busy = false, paced = false; for (const e of waiting) { const w = e && e.held && e.held.why; if (w === 'busy') busy = true; else if (typeof w === 'string' && w.startsWith('paced')) paced = true; } return busy ? stashHeading('busy') : paced ? stashHeading('paced') : null; })();
   let pm = renderMsgStash(waiting, { maxBytes: budget, heading: heldCause });
   let need = needOf(pm);
   // the render budgets its ROWS; the head, the held line and the hints ride on top of them — so a fill that reached
@@ -1629,8 +1631,9 @@ const _msgDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('
 // src/channel-groups.js, the ledger PERSISTED in data/channels/wake-pace.json
 // — the in-memory Map it replaces forgot every floor on a restart), and a
 // wake that did not go out refunds its slot. A floored wake is not billed and
-// loses nothing: the message is in the group log and rides that member's
-// next report. The spend authorizer's ceiling still binds behind it.
+// loses nothing: the message is in the group log, and the wake is PARKED for
+// the window's end (lane paced-wake-retry — the groups engine's `parkPaced`).
+// The spend authorizer's ceiling still binds behind it.
 const GROUPS_MODEL = require('./channel-groups.js');
 function wakeFloorFor(senderCid) {
   const ge = groupsEngine();

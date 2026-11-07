@@ -308,6 +308,7 @@ const HELD_WHY = Object.freeze({
   'retrying': 'their delivery was being retried — delivered now',
   'maybe-delivered': 'the server stopped while they were being sent — some may have reached the agent already, delivered again now',   // verify r2: a may-have-landed entry (its own key — `heldKeyOf`)
   'rate-floor': 'they were paced by the 30 s per-conversation floor',
+  'paced': 'they were held for the wake pace — delivered now',   // lane paced-wake-retry: a parked wake's frame
   'spend-cap': 'the spending ceiling held them',
   'wrapper-no-steer': 'this agent’s process predates mid-turn notifications',
   'off': 'auto-notify was off for this conversation',

@@ -134,7 +134,8 @@ const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Grou
           --artifact <path|/p/id> (≤ 20) HANDS OVER what THIS conversation made (a file it wrote, a design folder it opened, a
           page it published) to the receiver: it shows in THEIR chat + Artifacts list (a design opens in the user's Design
           window). Nothing is copied — the receiver must run on the same machine. Into a group: name the receiver (@ / --at).
-          Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
+          Waking more than 5 at once is refused with the count until you add --yes; one wake per target per 30 s, at most 8 per minute are yours — a wake past
+          either is HELD and sent when the window ends (one wake; sooner, free, only if they start a turn first); you are told «paced — sent in N s».
         ← long or quoted text: --text-file <path> or --text - (stdin, a heredoc) instead of "text"; the CLI refuses stray words
           (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) — at most 16 KB (the route's bound); it answers sent: N characters
   vibespace-msg dispatch <agent> --file brief.md | --text - | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
@@ -154,19 +155,24 @@ Inside a Background Work job: list / group list / read / send only (as the conve
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 /** THE wake echo: every wake is a billed turn, so the count is always said. */
 const wakeCount = (n, who = 'agent') => `woke ${plural(n, who, who + 's')} = ${plural(n, 'billed turn', 'billed turns')}`;
-const wokeLine = (r) => {
+const wokeLine = (r0) => {
+  // lane paced-wake-retry: a wake the pace held is parked, not refused — the sender is told when it goes
+  const held = ((r0 && r0.refused) || []).filter((x) => x && x.parked);
+  const r = held.length ? { ...r0, refused: r0.refused.filter((x) => !(x && x.parked)) } : r0;
   const bits = [];
   const woke = r.woke || [];
   bits.push(`${wakeCount(woke.length)}${woke.length ? ': ' + woke.join(', ') : ''}`);
   if (r.refused && r.refused.length) bits.push(`${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they get it on their next turn instead`);
+  if (held.length) bits.push(`${plural(held.length, 'wake', 'wakes')} held (not billed yet) — ${held.map((x) => `${x.name}: ${x.reason}`).join('; ')}`);
   if (r.nextTurn && r.nextTurn.length) bits.push(`on their next turn (free): ${r.nextTurn.join(', ')}`);
   return bits.join(' · ');
 };
-/** B-eba8: an awaited record's trailing clause (the server's `await` state). */
+/** B-eba8: an awaited record's trailing clause (the server's `await` state). A paced wake's fall names its own cause (lane paced-wake-retry): no cap was reached. */
+const AWAIT_FELL = { 'paced-out': 'the wake could not land within its hour', 'mode-changed': 'your notify mode no longer asks for a wake', 'left': 'you left the group', 'may-have-landed': 'the wake may have reached you', 'not-running': 'your conversation was not running', 'no-mid-session': 'your conversation is running, but takes no message mid-session', 'terminal': 'your conversation is running in a terminal, where it takes no message mid-session', 'predates': 'your process predates live messages — restart the session to receive them at once', 'not-reachable': 'the wake did not reach you', 'spend-cap': 'the spend ceiling refused the wake' };
 const awaitClause = (a) => {
   if (!a || !a.state) return '';
   const hm = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
-  return a.state === 'awaiting' ? ' (awaiting reply)' : a.state === 'woke' ? ` (woke you ${hm(a.at)})` : a.state === 'held' ? ' (reply waiting — your wake cap reached)' : a.state === 'answered' ? ' (answered — not woken)' : a.state === 'expired' ? ' (await expired)' : '';
+  return a.state === 'awaiting' ? ' (awaiting reply)' : a.state === 'woke' ? ` (woke you ${hm(a.at)})` : a.state === 'held' ? (a.paced ? ' (reply paced — sent when the window ends)' : a.fell ? ` (reply waiting — ${AWAIT_FELL[a.fell] || 'the wake was not sent'})` : ' (reply waiting — your wake cap reached)') : a.state === 'answered' ? ' (answered — not woken)' : a.state === 'expired' ? ' (await expired)' : '';
 };
 const MEMBERSHIP_OPS = new Set(['create', 'invite', 'leave', 'kick', 'rename', 'archive', 'notify']);
 /** WHERE A MESSAGE STANDS with its recipients, as one trailing clause (the server's `delivery` rows — the same rule
@@ -234,6 +240,7 @@ const deliveryClause = (rows) => {
     const wk = rec.wake || {};
     if (r.replay) console.log(`  nothing re-sent, nobody woken (not billed)${wk.reason ? ' — ' + wk.reason : ''}`);
     else if (wk.billed) console.log(`  ${wakeCount(1)}${wk.identity ? ' (on ' + wk.identity.name + ')' : ''} — the brief is its next turn`);
+    else if (wk.delivered === 'paced') console.log(`  held, not billed yet — ${wk.reason || 'paced'}: the wake goes when the window ends (sooner, free, only if the worker starts a turn first)`);
     else console.log(`  not woken (not billed)${wk.reason ? ' — ' + wk.reason : ''} — the brief reaches it on its next turn`);
     if (rec.reply && rec.reply.notify) console.log(`  the worker's reply ${rec.reply.words}${r.group ? ` — change it with: vibespace-msg group notify ${r.group.id} <next-turn|mention|always|mute>` : ''}`);
     if (r.attempt) console.log(`  attempt ${r.attempt} — if this answer is lost, retry THIS exact attempt with: vibespace-msg dispatch ${to} --again=${r.attempt} …`);
@@ -317,6 +324,8 @@ const deliveryClause = (rows) => {
     else if (op === 'notify') console.log(r.noop ? `your notify mode in "${g.name}" was already ${r.notify}` : `your notify mode in "${g.name}" is now ${r.notify}`);
     if (op === 'create' || op === 'invite') {
       const n = (r.woke || []).length;
+      const held = (r.refused || []).filter((x) => x && x.parked);   // lane paced-wake-retry: parked, not refused
+      if (held.length) { r.refused = r.refused.filter((x) => !(x && x.parked)); console.log(`  ${plural(held.length, 'wake', 'wakes')} held (not billed yet) — ${held.map((x) => `${x.name}: ${x.reason}`).join('; ')}`); }
       if (r.quiet) console.log('  --quiet: woke 0 invitees = 0 billed turns; they see the invite on their next turn');
       else console.log(`  ${wakeCount(n, 'invitee')}${n ? ': ' + r.woke.join(', ') : ''}${(r.refused || []).length ? ` · ${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they see it on their next turn` : ''}`);
     }

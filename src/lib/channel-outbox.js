@@ -713,7 +713,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       // lane lark-send-hold: a send waiting the vendor's reset is approved — the toast says when it goes, never "Not sent"
       if (!sent && o && o.kind === 'held') showToast(P.outcomeText(o, { t }), { type: 'info' });
       else showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
-      if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
+      { const pacedWords = woke && r.proposal ? P.receiptPacedText(r.proposal, { t }) : ''; if (pacedWords) showToast(pacedWords, { type: 'warn' }); }
     };
     approve.onclick = armedOnly(card, () => doApprove(toAgent ? pressedDelivery(approve) : null));   // verify r3: what the button SAYS; r6 F6: armed only
     edit.onclick = () => {
@@ -740,7 +740,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
         const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver, expectWakes: woke } : {}) });
         if (!r) { go.disabled = false; return; }
         showToast(t('Rejected'));
-        if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
+        { const pacedWords = woke && r.proposal ? P.receiptPacedText(r.proposal, { t }) : ''; if (pacedWords) showToast(pacedWords, { type: 'warn' }); }
       });
       inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
       box.append(inp, go);

@@ -135,12 +135,15 @@ function mkEngine(opts = {}) {
   const stash = [];
   // the stash's own events (2026-09-27): a producer's `ref` entry is reported when it is stashed and drained
   const stashListeners = new Set();
+  const retryListeners = new Set();
   const held = new Map();
   const deliver = {
     delay: 0,   // verify: holds the ladder (a receipt in flight) for the sweep-window leg
     async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (deliver.delay) await new Promise((z) => setTimeout(z, deliver.delay)); if (o && o.noWake === false && deliver.wakeOk) return { ok: true, lane: 'message' }; return opts.deliverOk ? { ok: true, lane: 'rpc-queue', steered: true } : { ok: false, reason: 'no free lane', refused: 'no-wake' }; },
     stashFor(cid, env) { stash.push({ cid, env }); (held.get(cid) || held.set(cid, []).get(cid)).push(env); if (env.ref) for (const fn of stashListeners) fn('stashed', cid, [env]); },
     onStash(fn) { stashListeners.add(fn); return () => stashListeners.delete(fn); },
+    onRetry(fn) { retryListeners.add(fn); return () => retryListeners.delete(fn); },   // lane paced-wake-retry (D6): the park's events
+    retryEvent(ev, cid, entry, extra) { for (const fn of retryListeners) fn(ev, cid, entry, extra); },
     drain(cid) { const q = held.get(cid) || []; held.delete(cid); const r = q.filter((e) => e.ref); if (r.length) for (const fn of stashListeners) fn('drained', cid, r); return q; },
     // verify: the read the boot reconcile asks (copies, never a drain)
     stashPeek(cid) { return (held.get(cid) || []).map((e) => ({ ...e })); },
@@ -782,6 +785,78 @@ async function sweepWindowLeg(ENGmod, name) {
   const norecon = MV.load('src/server/channels-engine.js', esrc.replace(RECON, '    return [];'), 'no-reconcile');
   const lc = await legacyLeg(norecon, 'legacy-fate-ctl');
   ok(lc.gone === 'waiting', `CONTROL: an engine without the boot reconcile keeps saying "Waiting for Worker's next message" for a receipt the agent read an hour ago (${lc.gone}) — the leg would go red`);
+}
+// lane paced-wake-retry: A DECIDER'S WAKE THE PACE HELD IS OWED (sign-in off): the receipt waits in the stash (its gate, its
+// clear, the next prompt's drain), the park owes the ONE wake for the window's end — never «it hears with its next message»
+{
+  const W = mkEngine({ name: 'paced-receipt', deliverOk: false });
+  const { eng, deliver } = W;
+  await prime(eng);
+  const parks = [];
+  deliver.parkOwedWake = (cid, o) => { parks.push({ cid, ...o }); return { parked: true, id: 'rt-1', retryAt: 0, retryInMs: o.retryInMs }; };
+  const mayWake = Object.assign(() => ({ reason: 'paced — sent in 25 s (the rule)', rule: 'the rule', why: 'pair', retryInMs: 25000 }), { sender: 'user', refund() { } });
+  const p = await eng.propose(AGENT, A, C, { text: 'paced decision' });
+  await eng.approve(p.proposal.id, { deliver: 'wake-now', mayWake });
+  await sleep(10);
+  const stored = eng.store.outbox.snapshot().proposals[p.proposal.id];
+  ok(stored.receiptChoice === 'next-turn' && stored.receiptChoicePaced === 'the rule' && stored.receiptPacedMs === 25000 && stored.receiptPacedBy === 'user', 'a floored wake-now: the proposal records the rule (never a promise), the wait, and whose ledger re-judges it', JSON.stringify(stored.receiptChoicePaced));
+  ok(parks.length === 1 && parks[0].producer === 'stash-wake' && parks[0].key === p.proposal.id && parks[0].meta.ref === p.proposal.id && parks[0].sender === 'user' && parks[0].spendReason === 'channel-receipt' && parks[0].retryInMs > 0 && parks[0].retryInMs <= 25000, 'THE LAW: the receipt\'s wake is parked for the window\'s end, keyed by the stash entry that holds the words', JSON.stringify(parks));
+  ok(stored.receiptDelivery && stored.receiptDelivery.paced && stored.receiptDelivery.paced.retryInMs === parks[0].retryInMs, 'D5: the answer carries the park as a FACT (receiptDelivery.paced)', JSON.stringify(stored.receiptDelivery));
+  const parkedWords = P.receiptPacedText(stored, { t: (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n])) });
+  ok(/the wake pace sends it in \d+ s/.test(parkedWords) && !/next message/.test(parkedWords), 'D5: with the fact the toast says «sends it in N s»', parkedWords);
+  ok(/the wake pace holds this/i.test(P.receiptFateText(P.receiptFateOf(stored), { t: (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n])) })), 'D5: …and the card says the wake is held, not «next message»', JSON.stringify(P.receiptFateOf(stored)));
+  // D5's second leg: a refusal nothing parked (the no-pacer fallback names no wait)
+  const noPacer = Object.assign(() => ({ reason: 'the wake pace is not available on this instance', why: 'no-pacer' }), { refund() { } });
+  const p3 = await eng.propose(AGENT, A, C, { text: 'nothing parks this one' });
+  await eng.approve(p3.proposal.id, { deliver: 'wake-now', mayWake: noPacer });
+  await sleep(10);
+  const s3 = eng.store.outbox.snapshot().proposals[p3.proposal.id];
+  const unparkedWords = P.receiptPacedText(s3, { t: (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n])) });
+  ok(parks.length === 1 && !(s3.receiptDelivery && s3.receiptDelivery.paced), 'D5: no wait named ⇒ nothing parked, no fact on the answer', JSON.stringify(s3.receiptDelivery));
+  ok(/not woken \(paced: the wake pace is not available on this instance\)/.test(unparkedWords) && /next message/.test(unparkedWords) && !/sends it in/.test(unparkedWords), 'D5: …and the toast keeps the old truth with its why', unparkedWords);
+  const p2 = await eng.propose(AGENT, A, C, { text: 'not floored' });
+  await eng.approve(p2.proposal.id, { deliver: 'next-turn' });
+  await sleep(10);
+  ok(parks.length === 1, 'CONTROL: a next-turn choice owes no wake');
+  // D6: the wake falls — the card's fate changes, an audit row, ONE For-you item keyed by the proposal; a spend refusal's item is the guard's
+  const fellOne = async (id, cid, extra) => { deliver.retryEvent('fell', cid, { producer: 'stash-wake', meta: { ref: id } }, extra); await sleep(20); };
+  deliver.retryEvent('fell', C, { producer: 'jobs', meta: { ref: p.proposal.id } }, { kind: 'not-running' });
+  await sleep(20);
+  ok(!eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery.wakeFell, 'D6: another producer\'s fall moves nothing here');
+  await fellOne(p.proposal.id, C, { kind: 'not-reachable', why: 'paced-out', reason: 'paced-out — the agent did not accept the wake' });
+  const fell = eng.store.outbox.snapshot().proposals[p.proposal.id];
+  const fate = P.receiptFateOf(fell);
+  ok(fate.kind === 'waiting' && fate.wakeFell === 'paced-out' && !fate.wakePaced && !fell.receiptDelivery.paced, 'D6: the card\'s fate changes: waiting, the wake fell (paced-out)', JSON.stringify(fate));
+  ok(/could not land within its hour/.test(P.receiptFateText(fate, { t: (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n])) })), 'D6: …in its own words');
+  ok(eng.store.auditTail({ limit: 200 }).some((a) => a.kind === 'outbox' && a.op === 'receipt-wake-fell' && a.proposalId === p.proposal.id && a.why === 'paced-out'), 'D6: …an audit row');
+  const items = W.userTodos.snapshot().open.filter((i) => i && /was not woken about/.test(String(i.text)));
+  ok(items.length === 1 && /could not land within its hour/.test(items[0].text) && items[0].action && items[0].action.key === `outbox:${p.proposal.id}`, 'D6: …and the owner is told, ONE For-you item keyed by the proposal', JSON.stringify(items.map((i) => i.text)));
+  // a spend refusal's item is the guard's: the card still changes, no second item here
+  const p5 = await eng.propose(AGENT, A, C, { text: 'spend fall' });
+  await eng.approve(p5.proposal.id, { deliver: 'wake-now', mayWake });
+  await sleep(10);
+  await fellOne(p5.proposal.id, C, { kind: 'spend-cap', why: 'hour-cap', reason: 'spend budget: hour cap' });
+  ok(P.receiptFateOf(eng.store.outbox.snapshot().proposals[p5.proposal.id]).wakeFell === 'spend-cap' && W.userTodos.snapshot().open.filter((i) => i && /was not woken about/.test(String(i.text))).length === 1, 'D6: a spend refusal changes the card, and the For-you item stays the guard\'s');
+  // P4: a frame that may have landed is said as that, and the item closes when the agent reads the receipt
+  const p6 = await eng.propose(AGENT, A, C, { text: 'on the wire when the hub died' });
+  await eng.approve(p6.proposal.id, { deliver: 'wake-now', mayWake });
+  await sleep(10);
+  await fellOne(p6.proposal.id, C, { kind: 'not-reachable', maybeDelivered: true, reason: 'it was being posted when the previous server stopped' });
+  const f6 = eng.store.outbox.snapshot().proposals[p6.proposal.id];
+  const tt = (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n]));
+  ok(P.receiptFateOf(f6).wakeFell === 'may-have-landed' && /may have reached it/.test(P.receiptFateText(P.receiptFateOf(f6), { t: tt })) && !/did not reach/.test(P.receiptFateText(P.receiptFateOf(f6), { t: tt })), 'P4: a may-have-landed fall: the card says it may have reached it, never «did not reach»', JSON.stringify(P.receiptFateOf(f6)));
+  const it6 = W.userTodos.snapshot().open.find((i) => i && /may have been woken about/.test(String(i.text)));
+  ok(it6 && /waking it again may start a second turn/.test(String(it6.detail)) && !/was not woken/.test(String(it6.text)), 'P4: …the For-you item says «may have been woken», and warns off a second wake by hand', JSON.stringify(it6 && it6.text));
+  ok(f6.receiptWakeTodoId === (it6 && it6.id), 'P4: …its id is kept on the proposal', f6.receiptWakeTodoId);
+  deliver.drain('agent-1');
+  await sleep(20);
+  ok(W.userTodos.get(it6.id).status === 'done' && !eng.store.outbox.snapshot().proposals[p6.proposal.id].receiptWakeTodoId, 'P4: …and it closes when the agent reads the receipt', W.userTodos.get(it6.id).status);
+  // P5: a HELD send: the words match what will happen
+  const heldP = { state: 'sending', receiptChoicePaced: 'the rule', receiptPacedMs: 25000, failure: { code: 'rate-limited' }, held: { until: 1794000000000, vendor: 'lark' } };
+  ok(P.outcomeOf(heldP).kind === 'held', 'P5: (the fixture is a held send)', JSON.stringify(P.outcomeOf(heldP)));
+  ok(/the wake follows the send/.test(P.receiptPacedText(heldP, { t: tt })) && !/next message/.test(P.receiptPacedText(heldP, { t: tt })), 'P5: on a held send the toast says the wake follows the send, never «its next message»', P.receiptPacedText(heldP, { t: tt }));
+  ok(/next message/.test(P.receiptPacedText({ ...heldP, receiptPacedMs: 0 }, { t: tt })), 'P5: CONTROL: a pacer that named no wait keeps the old truth on a held send');
+  eng.stop();
 }
 // ONE BILLED TURN PER PROPOSAL, whatever the decider does (the verify's counts, pinned)
 {
