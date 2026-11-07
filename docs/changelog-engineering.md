@@ -16,6 +16,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### int384 — the .384 train's own notes (lane int361; on 8b3fdb6ab = 2.369.383)
 - **test-doc-window §16's two rig races (attributed by 主开发's doc-window agent; the old .383 cut's runner red).** (A) The resumed stub wrote its pid line — the suite's «the stub is up» — BEFORE it took the snapshot of commands it must never replay, so a prompt-context command written in that window was snapshotted and never run (⑤ {"len":0}); the --output-format stub writes its pid after the snapshot now. (B) comment() returned truthy on «no Comment button» and ② / ③ never looked, so a Comment offer closed under a focus move left one note unfiled («Stashed 1»); comment() counts the strip around the press (no growth ⇒ pressed once more, still none ⇒ an error by name), ② requires both notes, ③ expects «Stashed 2». Proof under the lock: the full seamed suite green; master + each planted race RED on ⑤ by name; seam + each planted race green.
+- **The outbox-chip-door hotfix (userW inc-mw5r944f-60vt, a .382 bug).** ONE commit f0aa29802 on 8b3fdb6ab, picked with no conflict after the two doc-window seams: every door inside a conversation opens THAT conversation's Outbox on Awaiting with the pressed card marked; the Channels chip's rows wear the card's state words. The merged tree's fast sum 937.59 s over 539 rows under the unchanged 938-s cap. Its three minors and the stale ci.mjs leg count ride as the lane's r3 in .385.
 
 ## 2.369.383 — 2026-11-06
 
