@@ -157,7 +157,7 @@ const PENDS = new Map();
 // needs-card-tail r5: a run by hand took the 300 s default, and its own clock fired at 270 s, 23 s into ⑬, on a suite that
 // runs ~430 s alone (int361's direct run of 497beb03; the gate's runs were green)
 const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
-// B-419b (int361, .385): this half (⑬–㉒) measured 420.6 s ALONE on the box under the lock; its own ceiling = 1.5 × that × 1.21
+// B-419b (int361, .386): this half (⑬–㉒) measured 420.6 s ALONE on the box under the lock; its own ceiling = 1.5 × that × 1.21
 // (the runner's factor, 757–803 s vs 663 s for the whole suite at 8b3fdb6ab), up to 30 s = 780 s, inside its row's 840 s budget less the
 // watchdog's 30 s (the whole suite's 840 s / 900 s before the split; lane needs-card-tail r10 had lifted it 600 → 840 s)
 const WD = armWatchdog({ capMs: 780e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '840000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });

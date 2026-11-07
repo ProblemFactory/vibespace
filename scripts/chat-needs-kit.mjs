@@ -1,5 +1,5 @@
 // chat-needs-kit.mjs — what test-chat-needs-card-chrome and test-chat-needs-strip-chrome share beyond their boot harness
-// (B-419b split the 160-leg suite at ⑫|⑬): the «round five» conversation helpers and the desktop page's load — ONE copy,
+// (B-419b split the 161-leg suite at ⑫|⑬): the «round five» conversation helpers and the desktop page's load — ONE copy,
 // imported by both, so the two halves never drift.
 /** the round-five helpers over the suite's own hub socket, work dir, user-todos API and chat-window finder */
 export function chatNeedsKit({ hubWs, WORK, api, sleep, CHAT }) {
