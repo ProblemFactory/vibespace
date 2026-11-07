@@ -273,7 +273,16 @@ try {
   const W = DW(P);
   const rectIn = (sel, p = P) => ev(`const w = ${DW(p)}; const e = w && w.content.querySelector(${S(sel)}); if (!e || !e.offsetParent) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height, text: e.textContent };`);
   const pmText = (p = P) => ev(`const w = ${DW(p)}; const e = w && w.content.querySelector('.doc-page .ProseMirror'); return e ? e.textContent : null;`);
+  // a press that filed nothing says so (the strip did not grow) and is pressed once more — §16's try 1 on the runner: the Comment
+  // offer closed under a focus move, «no Comment button» came back truthy, ② / ③ never looked, one note was never filed («Stashed 1»)
   async function comment(sel, wordFrac, note, p = P) {
+    const cnt = () => ev(`const w = ${DW(p)}; return w ? w.content.querySelectorAll('.doc-cmt').length : -1;`);
+    const n0 = await cnt(); let r = await comment1(sel, wordFrac, note, p);
+    if (r.error || (await cnt()) !== n0 + 1) { const first = r; r = await comment1(sel, wordFrac, note, p); r.retriedAfter = first.error || 'the strip did not grow'; }
+    if ((await cnt()) !== n0 + 1) r.error = r.error || 'the strip did not grow';
+    return r;
+  }
+  async function comment1(sel, wordFrac, note, p = P) {
     const r = await rectIn(sel, p);
     await click({ x: r.left + wordFrac, y: r.y }, 2); await sleep(500);
     const b = await until(() => ev(`const b = document.querySelector('.doc-cpop .doc-comment-btn'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, sel: String(getSelection()) };`), 4000);
@@ -1223,7 +1232,7 @@ try {
   // ② the chat STOPS (the product's Terminate: ws kill — its live record goes and its session-meta file is unlinked)
   ws.send(S({ type: 'kill', sessionId: SID16, reqId: 'k16' }));
   const gone = await until(async () => { const r = await (await fetch(`${base}/api/doc/owner?path=${encodeURIComponent(ST)}&from=${encodeURIComponent(SID16)}`)).json(); return r.owner && r.owner.via === 'stopped' ? r.owner : null; }, 15000, 250);
-  ok(!!n1 && !!n2 && !!gone && gone.sessionId === SID16, '② the chat stopped ⇒ GET /api/doc/owner still names it (via stopped), never null', { n1, n2, gone });
+  ok(!!n1 && !!n2 && !n1.error && !n2.error && !!gone && gone.sessionId === SID16, '② the chat stopped ⇒ GET /api/doc/owner still names it (via stopped), never null — and both notes filed', { n1, n2, gone });
   const ownerLine = await ev(`const w = ${DW(ST)}; const o = w.content.querySelector('.doc-owner'); return o ? { hidden: o.hidden, text: o.textContent } : null;`);
   // ③ Send all ⇒ stashed (the toast says the next turn), the strip empties, nothing typed into a stub
   const before16 = stdinTexts().length;
@@ -1232,7 +1241,7 @@ try {
   if (send16) await click(send16);
   const toast16 = await until(() => ev(`const t = [...document.querySelectorAll('[class*=toast]')].map((e) => e.textContent).find((x) => /next turn/i.test(x)); return t || null;`), 8000, 150);
   const empty16 = await until(async () => ((await ev(`return ${DW(ST)}.content.querySelectorAll('.doc-cmt').length;`)) === 0 ? true : null), 8000, 150);
-  ok(!!send16 && !!toast16 && !!empty16 && !/open (this document|it) from a chat/i.test(toast16) && stdinTexts().length === before16, '③ Send all on a stopped owner ⇒ "' + (toast16 || '') + '" (stashed, not refused), the strip empties, nothing typed', { send16, toast16, empty16, ownerLine });
+  ok(!!send16 && !!toast16 && /Stashed 2 /.test(toast16) && !!empty16 && !/open (this document|it) from a chat/i.test(toast16) && stdinTexts().length === before16, '③ Send all on a stopped owner ⇒ "' + (toast16 || '') + '" (stashed, not refused), the strip empties, nothing typed', { send16, toast16, empty16, ownerLine });
   // ④ resumed (same conversation, a new session id) ⇒ the chat's `stash` fact counts the message; the hand-over delivers it in order
   const pids1 = envPids();
   ws.send(S({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 80, rows: 24, reqId: 'dw16r', name: 'Stopped owner', resume: true, resumeId: CONV16 }));
