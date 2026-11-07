@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // THE NEEDS STRIP, THE ANNOUNCE AND THE HELD STACK, IN A REAL CHROME — the second half of test-chat-needs-card-chrome (B-419b
-// split the 160-leg suite at ⑫|⑬ by meaning: the card half judges the card, the accordion and the holds; THIS half the stacked
+// split the 161-leg suite at ⑫|⑬ by meaning: the card half judges the card, the accordion and the holds; THIS half the stacked
 // tail, the tail r2, the attention dock, the announce, the pick and the held stack). The SAME boot harness: a throwaway server
 // in a git worktree (this tree's src/ + built public/, the fake channel adapters on), ONE stub `claude` conversation behind the
 // real chat-wrapper whose turns RUN THE REAL CLIs, and headless Chrome over raw CDP; the round-five helpers and the desktop
@@ -48,17 +48,11 @@ const wt = scratch('chat-needs-wt');
 const fakeHome = scratchHome('chat-needs-home', fs);
 const chromeDir = scratch('chat-needs-chrome');
 const stubDir = scratch('chat-needs-stub');
-const MUT = scratch('chat-needs-mut');
-const MUT2 = scratch('chat-needs-mut2');
-const MUT4 = scratch('chat-needs-mut4');
-const MUT5 = scratch('chat-needs-mut5');
 const WORK = path.join(stubDir, 'work', 'ops');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1])  : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'test-chat-needs-strip-chrome') : scratch('chat-strip-shots'); // CI uploads VS_UI_SHOTS_DIR on a failure — each half under its own name
 for (const d of [stubDir, WORK, SHOTS]) fs.mkdirSync(d, { recursive: true });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0, skipped = 0;
-/** a leg whose premise is a FONT fact absent here: said BY NAME with what was measured, never assumed (lane needs-card-tail r13) */
-const skip = (n, why) => { skipped++; console.log(`  ○ SKIP ${n} — ${typeof why === 'string' ? why : JSON.stringify(why).slice(0, 1500)}`); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONV = 'fake-poll/fake-poll-ops';
@@ -136,58 +130,8 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
 process.stdin.on('end', () => setTimeout(() => process.exit(0), 300));
 `, { mode: 0o755 });
 
-// ── the RED CONTROL's bundle: THIS source without the needs cards (the base's chat — a missing anchor = a named red in ⓪) ──
-let MUT_BUNDLE = null, MUT_ERR = '';
-try {
-  fs.mkdirSync(MUT, { recursive: true });
-  execSync(`cp -r ${repo}/src ${MUT}/src`);
-  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT, 'node_modules'));
-  const sub = (rel, from, to) => { const f = path.join(MUT, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); };
-  sub('src/lib/chat-view.js', '    this._needsCards = new NeedsCards(this);\n    this._needsCards.start(winInfo?._listenerCtl?.signal);\n', '');
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
-  MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
-} catch (e) { MUT_ERR = String(e && e.message || e).split('\n')[0]; }
-// ── ②b's RED CONTROL: THIS source without the press arm's re-stamp on scroll (the old stamp: a row pass only) ──
-let ARM_BUNDLE = null, ARM_ERR = '';
-try {
-  fs.mkdirSync(MUT2, { recursive: true });
-  execSync(`cp -r ${repo}/src ${MUT2}/src`);
-  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT2, 'node_modules'));
-  const f = path.join(MUT2, 'src/lib/user-todos-panel.js'), s = fs.readFileSync(f, 'utf8');
-  const from = "    if (want) document.addEventListener('scroll', onArmScroll, { capture: true, passive: true });\n"; // round 3 (m4): armed only while a stamped button is on the page
-  if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/user-todos-panel.js: the scroll re-stamp');
-  fs.writeFileSync(f, s.replace(from, '    if (want) void 0; // RED: never listening\n'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
-  ARM_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
-} catch (e) { ARM_ERR = String(e && e.message || e).split('\n')[0]; }
-
-// ── ⑥'s RED CONTROL: THIS source with the accordion's open slot cut — every waiting card whole (the first commit's shape) ──
-const MUT3 = scratch('chat-needs-mut3');
-let FOLD_BUNDLE = null, FOLD_ERR = '';
-try {
-  fs.mkdirSync(MUT3, { recursive: true });
-  execSync(`cp -r ${repo}/src ${MUT3}/src`);
-  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT3, 'node_modules'));
-  const f = path.join(MUT3, 'src/lib/chat-needs-card.js'), s = fs.readFileSync(f, 'utf8');
-  const from = 'fold: x.item.id !== openSlot';
-  if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the open slot');
-  fs.writeFileSync(f, s.replace(from, 'fold: false'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT3 });
-  FOLD_BUNDLE = fs.readFileSync(path.join(MUT3, 'bundle-mut.js'));
-} catch (e) { FOLD_ERR = String(e && e.message || e).split('\n')[0]; }
-// ── ⑥c's guard's RED CONTROL: THIS source without the card's refusal of a verb an open moved under the pointer (round 4) ──
-let GUARD_BUNDLE = null, GUARD_ERR = '';
-try {
-  fs.mkdirSync(MUT4, { recursive: true });
-  execSync(`cp -r ${repo}/src ${MUT4}/src`);
-  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT4, 'node_modules'));
-  const f = path.join(MUT4, 'src/lib/chat-needs-card.js'), s = fs.readFileSync(f, 'utf8');
-  const from = 'if (unfold(ev) || card._openedAt == null';
-  if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the moved-verb refusal');
-  fs.writeFileSync(f, s.replace(from, 'if (unfold(ev) || true'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT4 });
-  GUARD_BUNDLE = fs.readFileSync(path.join(MUT4, 'bundle-mut.js'));
-} catch (e) { GUARD_ERR = String(e && e.message || e).split('\n')[0]; }
+// B-419b: the RED-control bundles (⓪'s base chat, ②b's press arm, ⑥'s open slot, ⑥c's moved-verb guard, ⑩b's pressed row) and the
+// helpers only ⓪–⑫ use (say, findOpen, openChat, CHIP, scrollThenPress, skip) live in the card half — this half never reads them.
 
 // ── throwaway server in a worktree (the tree's src/ + built public/ + data/bin — the CLIs the stub runs) ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
@@ -278,19 +222,6 @@ async function connect(target) {
   const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
   return { cdp, evalJs, waitFor, device, load, tapAt, clickAt, press, shot, front: () => cdp('Page.bringToFront'), close: () => { try { sock.close(); } catch { } } };
 }
-// ── ⑩b's RED CONTROL: THIS source without the pressed-row clause of the moved-verb stamp (round 5 — the line alone) ──
-let ROW_BUNDLE = null, ROW_ERR = '';
-try {
-  fs.mkdirSync(MUT5, { recursive: true });
-  execSync(`cp -r ${repo}/src ${MUT5}/src`);
-  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT5, 'node_modules'));
-  const f = path.join(MUT5, 'src/lib/chat-needs-card.js'), s = fs.readFileSync(f, 'utf8');
-  const from = 'Math.abs(landed - before) > 1 || under) el._openedAt';
-  if (s.split(from).length !== 2) throw new Error('mutant anchor src/lib/chat-needs-card.js: the pressed-row clause');
-  fs.writeFileSync(f, s.replace(from, 'Math.abs(landed - before) > 1) el._openedAt'));
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT5 });
-  ROW_BUNDLE = fs.readFileSync(path.join(MUT5, 'bundle-mut.js'));
-} catch (e) { ROW_ERR = String(e && e.message || e).split('\n')[0]; }
 
 const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((x) => x.type === 'page');
 let target = null;
@@ -303,14 +234,11 @@ const hubWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const frames = [];
 await new Promise((r) => hubWs.on('open', r)); hubWs.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch { } });
 hubWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: WORK, reqId: 'cn-ops' }));
 let SID = null; for (let i = 0; i < 100 && !SID; i++) { const f = frames.find((m) => m?.type === 'created' && m.reqId === 'cn-ops'); if (f) SID = f.sessionId; else await sleep(150); }
-const say = (text) => hubWs.send(JSON.stringify({ type: 'chat-input', sessionId: SID, text }));
 const api = async () => (await (await fetch(`${ORIGIN}/api/user-todos`)).json()).todos;
-const findOpen = async (pred, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const it = (await api()).open.find(pred); if (it) return it; await sleep(150); } return null; };
 const cliLog = () => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8'); } catch { return ''; } };
 /** the CLI's output lands in the log when the CLI EXITS — a moment after its item is on the hub */
 const logHas = async (re, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(cliLog())) return true; await sleep(120); } return re.test(cliLog()); };
 const CHAT = (sid) => `[...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${JSON.stringify(sid)})`;
-const openChat = (P) => P.evalJs(`(() => { if (!${CHAT(SID)}) app.attachSession(${JSON.stringify(SID)}, 'ops watch', ${JSON.stringify(WORK)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
 /** The card of item `id` in page P: where it sits (the record's command), its kind, its verbs, its words, its rect. */
 const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const host = c.closest('.chat-msg'); const raw = host && host._rawMsg; const b = c.getBoundingClientRect(); const lr = c.closest('.chat-message-list')?.getBoundingClientRect();
   return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), kind: c.dataset.kind, hostRole: raw && raw.role, hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', head: c.querySelector('.cn-head')?.textContent || '', text: c.querySelector('.ut-text')?.textContent || '', verb: c.querySelector('.cn-line-verb')?.textContent || '', line: c.querySelector('.cn-line')?.textContent || '',
@@ -322,20 +250,6 @@ const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && 
 // (a tap on its «View»), then waits the press arm (what the open moved under the finger answers nothing for ARM_MS)
 const OPENSTRIP = `(() => { const d = [...document.querySelectorAll('.chat-attn-dock:not([hidden])')].find((x) => x.getClientRects().length), b = d && d.querySelector(':scope > .cad-look'); if (!b || !b.getClientRects().length) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`;
 const openStrip = async (P) => { const at = await P.evalJs(OPENSTRIP); if (at) { await P.tapAt(at.x, at.y); await sleep(800); } return !!at; };
-/** lane needs-card-tail r10: THE ATTENTION DOCK's count (the strip above the message box — the bar's chip is gone) */
-const CHIP = `(() => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'); if (!c || !c.offsetParent) return null; return { text: c.textContent.trim(), title: c.title, clickable: !!c.closest('.chat-attn-dock').querySelector('.cad-rows .ut-text[role="button"]') }; })()`;
-/** THE PERSON'S PRESS AFTER A SCROLL: the transcript moves the card's Approve (the row pass stamped it before), rests 1.5 s
- *  (past ARM_MS), then a real click where it stands — → {moved, at, toast} */
-const scrollThenPress = async (P, id) => {
-  const sel = `.cn-card[data-item="${id}"] .ut-action-proposal[data-answer="approve"]`;
-  const m = await P.evalJs(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; const l = b.closest('.chat-message-list'); const t0 = b.getBoundingClientRect().top; b.scrollIntoView({ block: 'center' }); if (Math.abs(b.getBoundingClientRect().top - t0) < 2) { l.scrollTop = Math.max(0, l.scrollTop - 60); if (Math.abs(b.getBoundingClientRect().top - t0) < 2) l.scrollTop += 120; } return { moved: Math.round(b.getBoundingClientRect().top - t0) }; })()`);
-  await sleep(1500);
-  const at = m && await P.evalJs(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
-  if (at) await P.clickAt(at.x, at.y);
-  await sleep(700);
-  const toast = await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | ')`);
-  return { ...(m || {}), at, toast };
-};
 const T0 = Date.now();
 const lap = (what) => console.log(`  (${what} at ${((Date.now() - T0) / 1000).toFixed(1)} s)`);
 

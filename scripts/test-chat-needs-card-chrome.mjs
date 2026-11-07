@@ -46,7 +46,7 @@
 //     borrowed goes back on every road that ends its need. ROUND 6 (RED on d5e373b8): ⑫ the borrowing card's OWN «detail»
 //     opened, then closed, at the live tail — its line never moves (the card's own size neither returns nor needs the room)
 //   ⑬–㉒ (the stacked tail, the tail r2, the attention dock, the announce, the pick, the held stack) run in their own heavy
-//     suite on the same boot harness, scripts/test-chat-needs-strip-chrome.mjs (B-419b: one 160-leg suite near its 840-s
+//     suite on the same boot harness, scripts/test-chat-needs-strip-chrome.mjs (B-419b: one 161-leg suite near its 840-s
 //     ceiling — a red + its retry ran a 45-min shard out on master 2.369.383); the round-five helpers and the desktop
 //     page's load are ONE shared module, scripts/chat-needs-kit.mjs.
 //   SHOTS (desktop 1280 + phone 375): the watch request card, the ask with its chips, a resolved card, the accordion.
