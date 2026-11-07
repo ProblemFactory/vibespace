@@ -63,6 +63,7 @@ const feedbackForward = require('./feedback-forward.js').create({
 // <harness>:<conversation id>), the same report's older one replaced; never a wake
 const feedbackFilerKeyOf = (sid) => { for (const [id, s] of activeSessions) if (s && !s.isTmuxView && (id === sid || require('../claude-lock-capture.js').addressableId(s) === sid)) return sessionStatusKey ? sessionStatusKey(s, id) : null; return null; };
 const feedbackTell = (notice, row) => { const st = getSessionStatus ? getSessionStatus() : null; const key = st ? require('../feedback-model.js').filerKey(row, feedbackFilerKeyOf) : null; if (!key) return; st.dropNotices(key, (x) => x && x.kind === 'feedback-handled' && x.id === notice.id); st.pushNotice(key, notice); };
+require('./writes-lost.js').install({ dataDir: path.join(rootDir, 'data') }); // lane cli-2-1-319-records r2: a lost write's warning, kept past its process
 const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a), onNew: (row) => feedbackForward.enqueue(row), tell: feedbackTell });
 if (syncStores) syncStores.feedback = feedback.sync;
 require('../routes/feedback.js').registerFeedbackRoutes(app, {

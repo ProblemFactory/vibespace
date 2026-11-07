@@ -268,10 +268,17 @@ function setBrowserCardSource(fn) { browserCardSource = typeof fn === 'function'
 // SW.proposalCardBlock blocks) — the SAME seam: a rebuild and a view-only history place them by time with the session cards
 let proposalCardSource = null;
 function setProposalCardSource(fn) { proposalCardSource = typeof fn === 'function' ? fn : null; }
+// A LOST WRITE'S WARNING (lane cli-2-1-319-records r2): the transcript cannot carry its own loss, so src/server/writes-lost.js keeps the record and a
+// rebuild / a view-only history replays it BY TIME through the handler the live record took. One line, by the record's uuid, on every road.
+let writesLostSource = null;
+function setWritesLostSource(fn) { writesLostSource = typeof fn === 'function' ? fn : null; }
+const isWritesLostCard = (c) => !!(c && c.type === 'writes_lost' && c.record && c.record.subtype === 'session_writes_lost');
+const placeWritesLostCard = (mm, c) => { if (typeof mm.replay === 'function') mm.replay(c.record, { at: Number(c.at) || 0 }); };
 /** The cards of a conversation (`{session}` live, `{conversationId}` for a view-only history) — never throws. */
 function browserCardsFor(q) {
   const out = [];
   if (browserCardSource) { try { const r = browserCardSource(q || {}); if (Array.isArray(r)) out.push(...r); } catch (e) { console.warn('[normalizer] browser session cards not read:', e && e.message); } }
+  if (writesLostSource) { try { const r = writesLostSource(q || {}); if (Array.isArray(r)) out.push(...r.filter(isWritesLostCard)); } catch (e) { console.warn('[normalizer] lost-write warnings not read:', e && e.message); } }
   if (proposalCardSource) { try { const r = proposalCardSource(q || {}); if (Array.isArray(r)) out.push(...r.filter(isProposalBlock)); } catch (e) { console.warn('[normalizer] browser proposal cards not read:', e && e.message); } }
   return out;
 }
@@ -443,13 +450,13 @@ function slabOf(records) {
 // lane group-report-card: the list may also hold GROUP cards (the ring's report cards) — each placed at its own
 // instant (`GC.placeAt`: the injection + the slack, so the turn's user record comes first) through its own writer.
 const cardPlaceAt = (c) => (GC.isGroupCard(c) ? GC.placeAt(c) : (Number(c && c.at) || 0));
-const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : isProposalBlock(c) ? placeProposalCard(mm, c) : placeBrowserCard(mm, c));
+const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : isProposalBlock(c) ? placeProposalCard(mm, c) : isWritesLostCard(c) ? placeWritesLostCard(mm, c) : placeBrowserCard(mm, c));
 // lane artifacts-model: `opts.artifacts` = {artifactsOf, cwd, host} (src/server/artifact-registry.js deriveOpts) derives
 // the conversation's deliverable rows from the SAME records and places their cards; the rows land on `mm.derivedArtifacts`.
 async function convertWithCards(mm, records, cards, opts = {}) {
   const { artifacts = null, ...rest } = opts || {};
   const derive = artifacts && typeof artifacts.artifactsOf === 'function' ? artifactDeriver(mm, artifacts) : null;
-  const due = (cards || []).filter((c) => GC.isGroupCard(c) || isProposalBlock(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
+  const due = (cards || []).filter((c) => GC.isGroupCard(c) || isProposalBlock(c) || isWritesLostCard(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
   if (!due.length && !derive) return mm.convertHistoryAsync(records, rest);
   let i = 0;
   const beforeRecord = (raw) => { if (derive) derive.before(raw); const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
@@ -684,6 +691,6 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, addAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
-  setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard,
+  setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard, setWritesLostSource,
   placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, setArtifactHelperSource, artifactStoreRows, setArtifactServiceSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

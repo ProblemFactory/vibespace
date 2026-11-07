@@ -91,6 +91,18 @@ console.log('② the registry — said ONCE per build, kept across a restart');
   ok('a release that REGISTERS the build drops it: nothing unregistered, the hub\'s claude registered', next.status().unregistered.length === 0 && next.note('2.1.399', 'hub').registered === true && next.status().hub.registered === true);
 }
 
+console.log('②b THE LINE STOPS (lane cli-2-1-319-records): this release registers the hub\'s 2.1.319');
+{
+  const lines = [], events = [];
+  const on = REG.create({ dataDir: path.join(tmp, 'data-319'), rootDir: REPO, log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
+  const r = on.note('2.1.319 (Claude Code)', 'hub');
+  ok('2.1.319 is registered: no journal line, no telemetry event, nothing for ⚙ Diagnostics to list — the hub\'s «[cli-registration] claude 2.1.319 is not registered» stops', R.SCHEMA_CLI_VERSIONS.includes('2.1.319') && r.registered === true && r.said === false && lines.length === 0 && events.length === 0 && on.status().unregistered.length === 0 && on.status().hub.registered === true, { r, lines });
+  ok('…and its tracked dump is the road the registry\'s draft diffs against next', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json')) && R.SCHEMA_CLI_VERSION === '2.1.319');
+  const off = REG.create({ dataDir: path.join(tmp, 'data-319-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.319'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
+  off.note('2.1.319 (Claude Code)', 'hub');
+  ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.319 is not registered/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
+}
+
 console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the tracked dump); the binary is never run');
 {
   const dump = JSON.parse(read(`scripts/fixtures/claude-cli/${NEWEST}.json`));

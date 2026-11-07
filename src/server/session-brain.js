@@ -47,6 +47,12 @@ function noteHarnessNotification(session, sid, msg) {
   const key = `hn:${sid || session.sockName || '?'}:${String(msg.key || msg.text).slice(0, 60)}:${session._normalizer?.turnIndex ?? 0}`;
   sn(key, `${session.name ? session.name + ': ' : ''}${msg.text.slice(0, 300)}`, { level: msg.priority === 'immediate' ? 2 : 1 });
 }
+// `system`/`session_writes_lost` (2.1.319, lane cli-2-1-319-records r2) → the record kept past this process: the pty-exit path deletes the meta and the
+// buffer, and the transcript cannot carry its own loss (src/server/writes-lost.js). Before feedLive, so a rebuild never misses it.
+function noteWritesLost(session, sid, msg) {
+  const store = require('./writes-lost.js').installed();
+  if (store) store.note(msg, session.claudeSessionId || session.backendSessionId || null);
+}
 // `system`/`api_error` with 401/403 on the LIVE feed → the same pool auth-failure
 // side effect as the api_retry twin. HONESTY (r3 2026-09-21): the binary declares
 // api_error on its stream union, but the 2026-09-20 census of 35 live buffers saw
@@ -233,6 +239,7 @@ function claudeSideEffects(session, sid, msg) {
     if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') noteVcsState(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
     if (msg.type === 'system' && msg.subtype === 'session_title_changed') noteSessionTitle(session, sid, msg); // lane session-title-record
+    if (msg.type === 'system' && msg.subtype === 'session_writes_lost') noteWritesLost(session, sid, msg); // lane cli-2-1-319-records r2
     // lane artifacts-model: the deliverable rows — the parse makes the SAME call (the row moves once per call id)
     if (msg.type === 'assistant' || msg.type === 'user') { try { require('./artifact-registry.js').observe(session, msg); } catch { } } // lane artifacts-handover: + a helper's end
     // todo/task families mirror the parse's exact consumption (lines above):
@@ -251,6 +258,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle };
+  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
 }
 module.exports = { create };

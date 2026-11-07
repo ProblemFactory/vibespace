@@ -897,6 +897,7 @@
 - (2026-11-06) THE PHONE ROSTER OVERFLOWED WHEN A CLI WAS INSTALLED, AND ONLY THE OWNER'S BOX COULD SEE IT (nightly380, B-7671) — 不变量 = past three a phone row folds at its current tier; a render's listeners die with it; a suite injects what it judges; censuses start at doors ⇒ kb-bugfix-invariants
 - (2026-11-06) A CONTROL STOPPED CUTTING WHEN A LANE PUT A LINE BETWEEN ITS TWO ANCHORED LINES (share-model ④g F5, B-f0d1's class; tailnet-names). 不变量 = a control cuts each line by its OWN text, never an adjacent block; its setup fails by name when one is missing ⇒ kb-bugfix-invariants
 - (2026-11-07) A ROW THAT NAMED THE MESSAGE OPENED THE WHOLE OUTBOX (userW inc-mw5r944f-60vt, .382's chip) — 不变量 = a door inside a conversation shows that conversation's outbox, pending first, the pressed row in view; the name the person reads is the door they press ⇒ kb-bugfix-invariants
+- (2026-11-07) THE THIRD CLI UPDATE TO SHRINK THE POOL (.312, .314, .319; cli-2-1-319-records). 不变量 = a CLI update on the hub is measured and classified the same day; the treadmill's notice is the signal, the lane the response; the oracle pinned per version (kb-bugfix-invariants)
 
 ## A ROW THAT NAMED THE MESSAGE OPENED THE WHOLE OUTBOX (userW inc-mw5r944f-60vt, 2026-11-07 01:59Z, 8 minutes after updating to .382; lane outbox-chip-door)
 
@@ -9023,3 +9024,20 @@ Fix (CSS only):
 Gates:
 - scripts/test-card-list-indent.mjs (fast, PURE): ① the census of every renderMarkdown( site, printed, with a planted-site control; ② the stylesheet rules — 5 rows RED on the base
 - scripts/test-card-list-indent-chrome.mjs (heavy): 7 card kinds plus a markdown-preview box, each item and ::marker measured — 34 rows RED on the base by name
+
+## THE THIRD CLI UPDATE TO SHRINK THE POOL, AND THE WALKER THAT HID A SHAPE (lane cli-2-1-319-records, B-7a49, 2026-11-07)
+
+**What happened.** Claude CLI 2.1.319 landed on the hub's box on 2026-11-06 at 16:27 PT. The hub spawns `claude` from PATH, so the owner's conversations ran it at once. The journal said so within minutes: «[cli-registration] claude 2.1.319 is not registered» (16:29:44) and «[oat-file] claude CLI 2.1.319 is not measured: 11 pool member(s) cannot be placed until it is (their token files are kept)» (16:30:22). This was the third time, after 2.1.312 (inc-mvsjhna7) and 2.1.314. The treadmill did its job: the notice, the kept files. The pool stayed 11 members short until a release carried the measurement. Nothing in the tree can shorten that wait: the verdict is measured against the build itself.
+
+**The record gate.** Four reds against 2.1.319: the unclassified «[Agent call interrupted: …», the unlisted `session_writes_lost`, undeclared stream fields, a nested key.
+
+**Two findings a bump alone would have missed.**
+- **The oracle's walker hid a shape.** `extractZodUnion` stopped walking an object literal at 40 000 characters and skipped it with no word. 2.1.319's `result/success` is 58 668 characters, so the dump diff read «result/success gone» and eight fields were invisible. That is the same class as the depth-1 hole lane cli-2-1-307-records closed: an oracle that cannot read something must say so. A literal over the new bound is named in `unclosed`, and the gate fails on it.
+- **A lost write was said to nobody.** The chat no longer draws an unknown record (lane door-healthy-chat), so on .383 `session_writes_lost`, the only word that the disk refused the conversation's transcript, reached no one. The binary calls it «Safe to ignore», which is true for a program and not for the person: it is HANDLED, a warning line with its door.
+- **The warning did not outlive the process that said it (round-1 acceptance, D1).** r1 put the line in the live message list and said the door was the chat «because the line must still be there when the person comes back». It was not: the exit deletes the meta and the buffer, and a rebuild reads the JSONL, so a reload, a restart, a reopen or a restart-in-place dropped it. A notice about lost data has to be kept somewhere other than the data that was lost: src/server/writes-lost.js keeps the record for the conversation's lifetime.
+
+**不变量 = a CLI update on the hub is measured and classified the same day; the treadmill's notice is the signal, the lane is the response; the oracle is pinned per version.** The oracle's own reader is held to the same rule as the records: what it cannot read, it names, on the live gate a new CLI hits first and in the hub's draft (round-1 acceptance, D2: a mutant with the bound at 50 000 left every live leg green). A warning about lost data is kept outside the data that was lost.
+
+**The tests.** test-record-shape §4e (the 2.1.319 pin; three oracles, one suite), test-cli-caps ⑥, test-account-pool + test-oat-materialize (unmeasured ⇒ kept and unplaced; measured ⇒ placed), test-helper-ask ⑱e (the real renderer) + ⑱f (the warning after a rebuild from the JSONL), test-stdout-registry 3a' (the dumped shapes through the real consumer), test-cli-registration ②b (the line stops).
+
+**Not closed.** The measurement still ships with a release, so a CLI update still leaves the pool short for as long as the lane and the cut take. Pinning the box's CLI, or holding an update until it is measured, would close that window; it is the owner's call and is not built here. A hub that stops while the disk still has no room, or is killed outright inside the retry, loses the warning: its file could not be written either, and only the journal lines are left. Freeing the space and restarting keeps it (shutdownNow writes what is held).

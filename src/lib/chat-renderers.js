@@ -90,6 +90,21 @@ function attachmentsMissingWords(p) {
   return { text: t('{missing} of {sent} attached files did not reach Claude', { missing: Number(p.missing), sent: p.sent == null ? '?' : Number(p.sent) }), title: t('Harness message · {level}', { level: 'notice' }) + (codes ? ' · ' + codes : '') };
 }
 
+/** 2.1.319 `session_writes_lost` (lane cli-2-1-319-records): what the CLI could not save, why, and the door, in our words. Both of the record's
+ *  lists may grow: an unknown code or kind reads the general words, the raw values ride the hover. `transcript_session_ids` is not read: it is
+ *  usually session_id alone; after a /clear in the same process it names the earlier session, and these words still say «this conversation». */
+function writesLostWords(p) {
+  const code = String(p.code || ''), lost = Array.isArray(p.lost) ? p.lost.map(String) : [];
+  const chat = lost.includes('transcript'), config = lost.includes('global_config');
+  const why = code === 'EDQUOT' ? t('your disk quota is used up') : code === 'ENOSPC' ? t('the disk is full') : t('a disk write failed');
+  const what = chat && config ? t('Claude Code could not save all of this conversation, or its changes to ~/.claude.json, because {why}. If you continue it after a restart, part of it may be missing.', { why })
+    : chat ? t('Claude Code could not save all of this conversation because {why}. If you continue it after a restart, part of it may be missing.', { why })
+      : config ? t('Claude Code could not save its changes to ~/.claude.json because {why}.', { why })
+        : t('Claude Code could not save all of its work because {why}.', { why });
+  const door = code === 'EDQUOT' ? t('Free up space, or ask for a larger quota, before the next run.') : t('Free up space on that disk before the next run.');
+  return { text: what + ' ' + door, title: t('Harness message · {level}', { level: 'warning' }) + (code ? ' · ' + code : '') + (lost.length ? ' · ' + lost.join(', ') : '') };
+}
+
 function memoryBase(fp) {
   return fp && isAgentMemoryPath(fp) ? fp.split('/').pop() : null;
 }
@@ -1659,7 +1674,10 @@ class ChatRenderers {
     if (block.status === 'error' && block.toolName === 'Agent') {
       const desc = block.input?.description || '';
       const stopped = isStopRejection(resultText);
-      const body = stopped
+      // lane cli-2-1-319-records: 2.1.319's OU — the PROCESS ended under this agent and the resume says so. Nobody pressed Stop, nothing failed: never a red «Error»
+      const body = block.agentCutOff === true
+        ? `<div class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Interrupted — the process running this conversation stopped before this agent finished, so it returned no result'))}</div>`
+        : stopped
         ? `<div class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Stopped before it finished'))}</div>`
         : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>`;
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent${desc ? ': ' + escHtml(desc) : ''}${agentModelChip(block.input?.model)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${body}</div>`;
@@ -1840,7 +1858,7 @@ class ChatRenderers {
       // `say` = a notice in OUR words (2.1.288 instruction_size_warning carries numbers only); else the CLI's own text
       const p = b.params || {};
       const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: Number(p.chars).toLocaleString(), limit: p.limit == null ? '?' : Number(p.limit).toLocaleString() })) : null;
-      const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : b.say === 'attachments-missing' ? attachmentsMissingWords(p) : null; // lane bypass-no-prompts · lane record-oracle-2-1-296
+      const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : b.say === 'attachments-missing' ? attachmentsMissingWords(p) : b.say === 'writes-lost' ? writesLostWords(p) : null; // lane bypass-no-prompts · lane record-oracle-2-1-296 · lane cli-2-1-319-records
       el.innerHTML = `<span class="chat-system-text" title="${escHtml(auto ? auto.title : t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? (auto ? escHtml(auto.text) : escHtml(b.text || ''))}</span>`;
       return { el, sideEffect: null };
     }

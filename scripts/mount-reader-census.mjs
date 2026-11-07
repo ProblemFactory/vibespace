@@ -111,6 +111,7 @@ export const ROWS = [
   ['src/server/bridge-watch.js', 'own-tree', 6, null, PROC],
   ['src/server/browser-attach-launch.js', 'own-tree', 8, null, DATA], // lane one-browser-b1: the attach launch — Chrome on PATH (access/stat), the per-config socket dirs (lstat), the profile's DevToolsActivePort (stat/read) + its log tail
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],
+  ['src/server/writes-lost.js', 'own-tree', 1, null, DATA + ' (lane cli-2-1-319-records r2: data/writes-lost.json — a lost write\'s warning, kept past its process)'],
   ['src/server/browser-builds-keeper.js', 'own-tree', 8, null, DATA],
   ['src/server/browser-cli-install.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-clone-run.js', 'own-tree', 2, null, DATA],

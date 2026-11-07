@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312 / FIELDS_319; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -80,6 +80,7 @@ const RATE_LIMIT_INFO = sh(['status', 'resetsAt', 'rateLimitType', 'utilization'
     limitScope: NESTED_NOTE('≤2.1.287', 'which spend limit blocked the request when it is not the member\'s own cap (service | channel | group_pool) — a team / Slack budget; the pool reads the account\'s own windows'),
     errorCode: NESTED_NOTE('≤2.1.287', 'credits_required: the request needs purchased credits (no describe) — the limit card reads status / resetsAt'),
     canUserPurchaseCredits: NESTED_NOTE('≤2.1.287', 'whether the person may buy usage credits (no describe) — VibeSpace offers no purchase'),
+    dailyCapPaused: NESTED_NOTE('2.1.319', '@internal true while usage is paused for the ORGANIZATION (overageDisabledReason then reads as at its monthly cap; this tells the two apart) — the limit card reads status / resetsAt'),
     hasChargeableSavedPaymentMethod: NESTED_NOTE('≤2.1.287', 'whether the account has a saved payment method to charge (no describe) — VibeSpace offers no purchase'),
     usageCreditOffer: OFFER_NOTE('2.1.306', 'a limited-time usage-credit offer for the IDE extension\'s limit banner {kind, headlinePct, daysLeft, label}'),
     adminRequestOffer: OFFER_NOTE('2.1.307', 'the IDE limit banner\'s offer to ask a Team / Enterprise member\'s admin for a higher spend limit {state, label, doneLabel, confirm, confirmPrompt, lastFileFailed, revision}'),
@@ -196,6 +197,10 @@ const SHAPES = {
   // `Yd()` asks for an attached client only on a remote transport); card-less because the binary calls it display-only («no message
   // carries these rows») and only a `ui_render` surface draws the rows — VibeSpace serves none (message-manager KNOWN_IGNORED)
   "claude:stream:system/ui_placed": sh(['rows']),
+  // NEW in 2.1.319 (lane cli-2-1-319-records) — VERBATIM from the 2.1.319 union (scripts/fixtures/claude-cli/2.1.319.json, `zod` holds the
+  // literal; no enums: «More codes may be added», «More values may be added»): the transcript and/or ~/.claude.json lost writes to a full disk
+  // or a used-up quota, sent at most once as the CLI exits 0, stream-json only. Message-manager HANDLED: a warning line, never silent.
+  "claude:stream:system/session_writes_lost": sh(['error_code', 'lost', 'transcript_session_ids']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
@@ -348,12 +353,49 @@ const FIELDS_312 = Object.freeze({
   ]),
   'claude:stream:system/turn_handoff_available': { requires_rewind_request_id: NEW_312('handoff staging (cloud worker)') },
 });
+// The 19 fields 2.1.319 added to shapes 2.1.314 already declared (2026-11-06 census, lane cli-2-1-319-records: the box's claude self-updated at
+// 16:27 PT; the 2.1.319 dump, strings over a 0644 copy, minus the 2.1.314 dump; the dump's bundle `.describe()` text is the evidence). A grep
+// of src/ server.js data/bin found NO reader for any: each is an `ignored` row saying why nothing reads it. The new subtype session_writes_lost
+// is HANDLED (above); the two new `zod` non-records are ATTACHMENT_PAYLOADS.message_pdf_reads and ZOD_NON_RECORDS.not_forwarded. rate_limit_info's
+// dailyCapPaused sits with its siblings (RATE_LIMIT_INFO). Eight of these are on result/success alone — the 58 668-character literal the walker
+// used to drop (scripts/claude-cli-dump.mjs UNION_LITERAL_BOUND).
+const NEW_319 = (what) => what + ' (2.1.319) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const TURN_TIME_319 = NEW_319('@internal where the turn\'s time before its first request went, split further — sent only by a worker Anthropic hosts (the time_to_request_phases_ms set) — nothing in VibeSpace reads process telemetry');
+const TEXT_POST_319 = NEW_319('@internal how evenly the reply\'s text left a REMOTE transport — present only where first_text_post_ms is, never on a local stream-json — nothing in VibeSpace reads process telemetry');
+const FIELDS_319 = Object.freeze({
+  'claude:stream:result': Object.fromEntries([
+    ['stopped_by_permission_check', NEW_319('@internal a permission check ended this turn by itself and nobody asked for the stop (today only auto mode, after a run of responses with no usable safety verdict); terminal_reason reads as for a Stop — VibeSpace reads the turn\'s end from the result, never from this member')],
+    ['credential_expires_at', NEW_319('when the stored claude.ai login this process sends ends for good, ISO 8601 (the end of its refresh chain — a 30-day estimate when the server sent none, the real end up to 3 days earlier; absent for every other credential). A date, no token bytes. The account pool reads a login\'s end from its own record')],
+    ['process_turn_states', NEW_319('@internal CPU / wall time of the turn by state (main_stream, tool, agent_tool, …) — sent only by a worker Anthropic hosts — nothing in VibeSpace reads process telemetry')],
+    ['process_turn_threads', NEW_319('@internal CPU time of the turn by thread, by about one worker process in 4,096 — nothing in VibeSpace reads process telemetry')],
+    ...['tool_schema_build_detail', 'message_normalization_detail', 'request_build_detail'].map((f) => [f, TURN_TIME_319]),
+    ...['text_post_count', 'text_post_gap_over_500ms_count', 'text_post_flush_timer_max_late_ms'].map((f) => [f, TEXT_POST_319]),
+  ]),
+  'claude:stream:user': { plugin_prompt: NEW_319('@internal on a message a PLUGIN sent, what a host can show under the plugin\'s name in place of `message` ({name, text}; absent on the person\'s own words) — the bubble reads `message`') },
+  'claude:stream:system/init': {
+    ultrathink_available: NEW_319('@internal whether typing `ultrathink` raises this turn\'s effort on this frame\'s model — the composer colours no word from it'),
+    ultrathink_typed_raises: NEW_319('@internal whether a message carrying ultrathink_typed raises the turn — VibeSpace sends no such statement'),
+    synced_skills_path: NEW_319('@internal the synced-skills folder read_file serves — sent by a self-hosted runner\'s session alone'),
+    client_thinking: NEW_319('@internal the thinking this turn runs with — only on a Cowork cloud worker\'s init'),
+    flag_restate_noop: NEW_319('@internal an apply_flag_settings of exactly {switchModelsOnFlag: true} would add nothing — only on a Cowork cloud worker\'s init'),
+  },
+  'claude:stream:system/informational': { model_restriction: NEW_319('@internal on the warning that a requested model was refused: {requested_model, effective_model, at} so a host can word the notice itself — the dim line shows the record\'s own `content`, which says the same') },
+  'claude:stream:system/model_refusal_fallback': { api_refusal_cyber_verification: NEW_319('@internal the account\'s Cyber Verification Program status as the API gave it, only on notices whose api_refusal_category is cyber (the binary: «never display them») — the fallback card reads the two models and the CLI\'s own text') },
+  'claude:stream:system/status': { resume_held_for_plan: NEW_319('@internal once at start-up when CLAUDE_CODE_RESUME_INTERRUPTED_TURN asked for a re-run and the turn, run in plan mode, was held — VibeSpace never sets that variable, so it never asks') },
+});
+// …and what 2.1.319 grew OFF a stream shape (the dump's union also walks these object literals; no SHAPES row judges them): classified here on their key.
+const FIELDS_319_ELSEWHERE = Object.freeze({
+  'evaluated.cited_rule': 'ignored — (2.1.319) inside the auto-mode safety verdict the CLI parses off an API reply ({type, path} of the rule it cited): never a stream record',
+  'sse.displayName': 'ignored — (2.1.319) an optional name on an MCP server CONFIG of type sse (the settings file\'s, not a record): the CLI reads it, VibeSpace writes no such config',
+  'workflow_agent.endedWithRun': 'ignored — (2.1.319) on a workflow_progress item (completed | failed | stopped): the agent ended only because its run did. The Workflow card\'s two readers (normalizeWorkflowProgress, normalizeWorkflowSnapshot) take named fields, and its row keeps reading `state`',
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_306)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_307)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_312)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_319)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -528,6 +570,7 @@ const SHAPE_SINCE = Object.freeze({
   'system/file_attachments_missing': '2.1.296',
   'system/inherited_asks_settled': '2.1.312', // lane claude-steer-inject r3 — the 2.1.312 dump (scripts/fixtures/claude-cli/2.1.312.json)
   'system/ui_placed': '2.1.314', // lane cli-2-1-314-records — the 2.1.314 dump (scripts/fixtures/claude-cli/2.1.314.json)
+  'system/session_writes_lost': '2.1.319', // lane cli-2-1-319-records — the 2.1.319 dump (scripts/fixtures/claude-cli/2.1.319.json)
 });
 // Names the corpus carries that are NOT in the SDK union (the REPL's own rows): the oracle's reverse
 // check excuses them so a handled/ignored list entry is never called dead by mistake.
@@ -548,6 +591,7 @@ const ATTACHMENT_PAYLOADS = Object.freeze({
   hook_additional_context: 'known — message-manager _processAttachment: the "✓ Hook context" card (the injected text, deduped against the hook\'s stdout card)',
   async_hook_response: 'ignored — an ASYNC hook\'s protocol JSON (response / command / exitCode); _processAttachment has no branch, so nothing renders and no card is made; the CLI reads only its systemMessage + additionalContext, to rebuild session-start context',
   projects_thread_ask: 'ignored — (2.1.307) a Claude Code Projects thread\'s ask to its coordinator session (call {name, id, input}, after, deliveredAt, messageId), written at a compaction so auto mode still knows the ask was delivered (only a Projects thread session writes it); _processAttachment has no branch, so nothing renders and no card is made',
+  message_pdf_reads: 'ignored — (2.1.319) the PDF pages a message read, {reads: [{path, pages, result}]}, kept beside the transcript so a later request can replay them; base64 bytes for the model, nothing for a person: _processAttachment has no branch, so nothing renders and no card is made',
 });
 // The `workflow_progress` ITEMS a pinned dump's `zod` names (2.1.306: the CLI now PARSES the list a task_progress record carries — a
 // `type`-discriminated union over these two, its remote-session adapter's reader; 2.1.296 built the same items with no schema). They are
@@ -566,6 +610,7 @@ const ZOD_NON_RECORDS = Object.freeze({
   inactive: 'ignored — (2.1.312) the `inactive` {reason} variant of the same cyber_verification union in an API refusal body: the CLI words its own refusal text from it; never a stream record',
   search_result_location: 'ignored — (2.1.312) a web-search citation the CLI re-reads on an assistant text block\'s citations (only under CLAUDE_CODE_WEBSEARCH_CITATIONS and a server flag): API content inside a text block, never a stream record; the chat renders the block\'s text',
   source_revision_not_on_remote_error: 'ignored — (2.1.312) an error body a remote-session start answers when the local revision is not on the remote: the CLI words its own message from it; VibeSpace starts no remote session, and it is never a stream record',
+  not_forwarded: 'ignored — (2.1.319) an error body an MCP proxy answers ({error: {type: "not_forwarded", message}}) inside its «Error POSTing to endpoint: …» failure: the CLI lifts the message into its own error text; never a stream record',
   source_revision_stale_on_remote_error: 'ignored — (2.1.312) the same answer when the remote is behind (unpushed_commit_count, is_dirty, mid_operation): the CLI words its own message from it ("Anything you haven\'t pushed stays on this computer."); never a stream record',
 });
 
@@ -724,12 +769,14 @@ function unknownFieldsSample(record) {
 // (inherited_asks_settled, remote transport only), 13 fields on two shapes, five non-record zod keys: FIELDS_312 / ZOD_NON_RECORDS;
 // the same 14 sentences under new names) + 2.1.314 (2026-10-30 — the box's claude self-updated: one new subtype (ui_placed, the
 // plugin UI host's, card-less), no field, no nested key, no zod non-record; the 14 sentences + ONE, m9t — ww's sentence plus a
-// correction, a RUNNING call stopped (src/permission-outcome.js `stopped`) — so no FIELDS_314). Each
+// correction, a RUNNING call stopped (src/permission-outcome.js `stopped`) — so no FIELDS_314) + 2.1.319 (2026-11-06 — the box's claude
+// self-updated: one new subtype (session_writes_lost, HANDLED, a warning line), 19 fields + one nested key: FIELDS_319; two zod non-records,
+// file_unchanged gone (no row ever named it); one more sentence, OU — an Agent call its process died under). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

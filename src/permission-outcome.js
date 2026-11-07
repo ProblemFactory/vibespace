@@ -66,7 +66,8 @@
  * a denied tool never executes — the executor returns the synthetic result).
  * A call the CLI says was STOPPED WHILE IT RAN (2.1.314's m9t) ⇒ `stopped`:
  * it was allowed and ran — the permission was never refused — and a Stop cut
- * it off, so it may have run in part or in full.
+ * it off, so it may have run in part or in full. 2.1.319's OU is the same word
+ * for an Agent call its PROCESS died under (nobody pressed anything).
  * An is_error text OUTSIDE the table ⇒ `unknown`: it may be the tool's own
  * failure after an allow (hundreds per real transcript) or a sentence a newer
  * build invented — this reader cannot tell, so it says so, and a card is
@@ -80,7 +81,8 @@
  */
 
 /** The closed outcome vocabulary a tool_result can say. `stopped` (2.1.314, lane cli-2-1-314-records): the call was allowed and
- *  RAN, and a Stop cut it off while it ran — it may have run in part or in full; nobody refused it. */
+ *  RAN, and a Stop — or, 2.1.319's OU, the end of the process running it — cut it off while it ran; it may have run in part or in
+ *  full; nobody refused it. */
 const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'stopped', 'unknown']);
 /** The CLI build the census was last read from (test-record-shape §4d runs STRICT against the installed build).
  *  2.1.281 → 2.1.288 (lane cli-2-1-288-records): re-read from the 2.1.288 dump (scripts/fixtures/claude-cli/2.1.288.json
@@ -94,8 +96,10 @@ const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'st
  *  2.1.308 → 2.1.312 (lane claude-steer-inject r3): the 2.1.312 dump's `sentences` — the SAME 14 on the same lists (names Qu/Im/Kr), no `until`.
  *  2.1.312 → 2.1.314 (lane cli-2-1-314-records): the 2.1.314 dump's `sentences` — the 14 (names gf/Jm/Kr) and ONE more, `m9t` = ww's
  *  sentence + « Correction to the text above: this call was stopped while running, not refused before it ran. …» — the row `m9t`
- *  (outcome `stopped`), the first sentence that EXTENDS another row's: the lookup takes the LONGEST matching row. */
-const PERMISSION_OUTCOME_CLI_VERSION = '2.1.314';
+ *  (outcome `stopped`), the first sentence that EXTENDS another row's: the lookup takes the LONGEST matching row.
+ *  2.1.314 → 2.1.319 (lane cli-2-1-319-records): the 2.1.319 dump's `sentences` — the 15 (names Su/Hm/ni, m9t is `aan` now) and ONE more, `OU`
+ *  «[Agent call interrupted: …», on both lists — an Agent call the process died under, retired on the resume (outcome `stopped`). */
+const PERMISSION_OUTCOME_CLI_VERSION = '2.1.319';
 
 const row = (id, outcome, match, text, since, binary, evidence) => Object.freeze({ id, outcome, match, text, since, binary, evidence });
 
@@ -143,6 +147,8 @@ const PERMISSION_OUTCOME_ROWS = Object.freeze([
   // ── a call that RAN, stopped while it ran (2.1.314) — allowed, then cut off; nobody refused it ──
   row('m9t', 'stopped', 'prefix', "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed. Correction to the text above: this call was stopped while running, not refused before it ran. It may have run in part or in full, and its changes may have been written. No permission prompt was involved. Work it started elsewhere (a remote command, a background process) may still be running, so check before starting the same work again. The instruction to stop and wait still stands.", '2.1.314', 'IS',
     'createSyntheticErrorMessage "user_interrupted" (2.1.314 strings @33950197): `content: dq(s && reason === "remote-cancel" ? m9t : Nh)` with s = ql(call) = `call.callRunning === true` — the CALL WAS RUNNING (its permission, if any, already answered) when a stream-json Stop (`remote-cancel`: the interrupt control_request / control_cancel_request VibeSpace sends) cut it off; 2.1.312 wrote ww alone there, so a Stop of a running tool read «denied». On the exact is_error set only (`Kr`: m9t, m9t+SBe — not on `Jm()`, whose startsWith over ww covers it). The text is ww + the correction (`m9t=`${Nh} Correction…``), so ww is its PREFIX — the longest row wins; toolDenialKind stays "user-rejected" (the transcript\'s word, not ours)'),
+  row('OU', 'stopped', 'prefix', '[Agent call interrupted: the process running this conversation stopped before this agent finished, so it returned no result. Nobody asked it to stop.]', '2.1.319', 'Gd',
+    'the RESUME of a conversation whose process ended while an Agent call ran (2.1.319 strings @29277661: `XAe(…, {dropSiblingBlocks, shutdownUnwindResultsDoNotResolve}, …, OU)` over the in-flight calls `kd`; toolDenialKind interrupted — its own readers `tcr` / `Rgr` take it beside uT and Jx): the agent ran and returned no result, nobody refused it and nobody pressed Stop — so `stopped`: it may have run in part or in full, never «denied», never «Not run»'),
   // ── the CLI itself says UNKNOWN ──
   row('kH', 'unknown', 'prefix', "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]", '2.1.281', 'Gd',
     'the resume of a turn whose session ended mid-call (fHt @203295373 under wNo()) — the CLI\'s own word is unknown'),
@@ -175,8 +181,10 @@ function permissionOutcome(text, isError) {
 
 /** Did the CLI say this call was STOPPED WHILE IT RAN (outcome `stopped`)? — the tool card's words (never a literal elsewhere). */
 const isStoppedRun = (text, isError = true) => permissionOutcome(text, isError).outcome === 'stopped';
+/** Did the CLI say the PROCESS ended under this agent (the row OU, 2.1.319)? — the Agent card's own words: no Stop was pressed, so never «Stopped before it finished». */
+const isAgentCutOff = (text, isError = true) => { const r = permissionOutcome(text, isError).row; return !!r && r.id === 'OU'; };
 
 /** Is this word one the table may write onto a card? (a consumer never compares a literal) */
 const isPermissionOutcome = (w) => PERMISSION_OUTCOMES.includes(w);
 
-module.exports = { PERMISSION_OUTCOMES, PERMISSION_OUTCOME_CLI_VERSION, PERMISSION_OUTCOME_ROWS, permissionOutcome, outcomeHead, isPermissionOutcome, isStoppedRun };
+module.exports = { PERMISSION_OUTCOMES, PERMISSION_OUTCOME_CLI_VERSION, PERMISSION_OUTCOME_ROWS, permissionOutcome, outcomeHead, isPermissionOutcome, isStoppedRun, isAgentCutOff };

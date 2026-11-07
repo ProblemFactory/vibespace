@@ -102,6 +102,7 @@ const brainStub = {
   noteApiErrorAuth: (s, id, m) => brainCalls.push(['api_error', id, m.error?.status]),
   noteVcsState: (s, id, m) => brainCalls.push(['vcs', id, m.kind, m.branch]),
   notePublishedChange: (s, id, m) => brainCalls.push(['published', id, m.url]),
+  noteWritesLost: (s, id, m) => brainCalls.push(['writes-lost', id, m.uuid]),
 };
 // THE STUB IS A MODEL OF THE ENGINE, AND A HAND-WRITTEN MODEL DRIFTS
 // (2026-09-13). Every consumer destructures its engine deps by name from a
@@ -152,6 +153,26 @@ const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 const meta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META_DIR, s.sockName + '.json'), 'utf8')); } catch { return null; } };
 const labels = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'streaming-label').map((b) => b.label);
 const outputs = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'output').map((b) => b.data);
+
+// ── 3a'. lane cli-2-1-319-records: claude 2.1.319's records through the real consumer and the REAL normalizer, off a fake pty ──
+console.log('— stream-json (claude 2.1.319: the dumped shapes)');
+{
+  const dump = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json'), 'utf8'));
+  const OUT = dump.sentences.rows.find((r) => r.text.startsWith('[Agent call interrupted:')).text;
+  const s = mkSession('claude', 'w-319'); const p = fakePty();
+  so.setupSessionPty(s, 'w-319', p);
+  const sid = 'sid-claude-319';
+  p.data(J({ type: 'system', subtype: 'init', session_id: sid, uuid: 'u-319-i', apiKeySource: 'none', permissionMode: 'default', model: 'claude-fable-5', claude_code_version: '2.1.319', cwd: '/x', tools: [], mcp_servers: [], ultrathink_available: true, ultrathink_typed_raises: true }));
+  p.data(J({ type: 'assistant', session_id: sid, uuid: 'u-319-a', message: { id: 'msg_319', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_319', name: 'Agent', input: { description: 'Survey', prompt: 'x' } }], usage: { input_tokens: 1, output_tokens: 1 } } }));
+  p.data(J({ type: 'user', session_id: sid, uuid: 'u-319-u', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_319', content: OUT, is_error: true }] } }));
+  p.data(J({ type: 'result', subtype: 'success', session_id: sid, uuid: 'u-319-r', is_error: false, num_turns: 1, result: 'ok', duration_ms: 1, duration_api_ms: 1, stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], credential_expires_at: '2026-12-01T00:00:00.000Z', stopped_by_permission_check: true }));
+  p.data(J({ type: 'system', subtype: 'session_writes_lost', session_id: sid, uuid: 'u-319-l', error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: [sid] })); // «after the last result», as the CLI exits
+  ok('…the lost write reached its brain consumer first (lane cli-2-1-319-records r2: kept past this process — the exit deletes the meta and the buffer)', brainCalls.some((c) => c[0] === 'writes-lost' && c[1] === 'w-319' && c[2] === 'u-319-l'), brainCalls);
+  const msgs = s._normalizer.messages;
+  ok('the 2.1.319 frames (init, the Agent call, «[Agent call interrupted: …», result, session_writes_lost after it) reach the REAL normalizer through feedLive: no unknown-record, no drift card', s._fed.filter((m) => m.session_id === sid).length === 5 && msgs.every((m) => m.noticeKind !== 'unknown-record' && m.noticeKind !== 'unknown-fields'), msgs.map((m) => m.noticeKind).filter(Boolean));
+  const swl = msgs.find((m) => m.content && m.content[0] && m.content[0].say === 'writes-lost');
+  ok('…the lost write after the last result is a create op on the wire to the client (a warning line), its Agent card marked', !!swl && swl.content[0].level === 'warning' && s._ops.some((o) => o.op === 'create' && (o.message || o.msg)?.id === swl.id) && msgs.some((m) => m.content && m.content[0] && m.content[0].toolCallId === 'toolu_319' && m.content[0].agentCutOff === true));
+}
 
 // ── 3a. claude stream-json consumer ──
 console.log('— stream-json (claude)');

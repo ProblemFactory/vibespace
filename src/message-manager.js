@@ -23,7 +23,7 @@ const { MessageWindow } = require('./message-window.js'); // the ordered card li
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
-const { permissionOutcome, outcomeHead, isStoppedRun } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
+const { permissionOutcome, outcomeHead, isStoppedRun, isAgentCutOff } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -68,6 +68,7 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'task_updated',            // {task_id, patch:{status}} → applied to the task card (closes a failed task without waiting for task_notification)
   'code_change_published',   // ONE small "PR #608 pushed" card (escaped link) — the same fact as the transcript's pr-link row
   'instruction_size_warning', // 2.1.288 (lane cli-2-1-288-records): CLAUDE.md + rules + imports over the model's limit → the dim harness notice "the CLI warns the instructions are large: N characters (limit M)" — never red
+  'session_writes_lost', // 2.1.319 (lane cli-2-1-319-records): the transcript and/or ~/.claude.json lost writes to a full disk or a used-up quota, sent once as the CLI exits 0 → a WARNING line in our words with the door (free up space) — the binary calls it «safe to ignore», the person must still hear it
   'file_attachments_missing', // 2.1.296 (lane record-oracle-2-1-296): the files an inbound user message's file_attachments named that did not arrive → ONE plain dim line "N of M attached files did not reach Claude" (the reason codes on hover) — never red
   'informational',           // the CLI's text banner → a dim card, its words verbatim at `level`; the SAFETY STOP line (src/safety-stop.js) + its model-only nudge → ONE worded stop card (lane classifier-stop-card — was the red Unknown-event card)
 ]);
@@ -1245,6 +1246,22 @@ class MessageManager extends MessageWindow {
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
+    // WRITES THE DISK REFUSED (`system`/`session_writes_lost`, 2.1.319 — lane cli-2-1-319-records): the CLI could not save lines of the
+    // transcript, changes to ~/.claude.json, or both (error_code ENOSPC | EDQUOT; both lists may grow), said once as it exits 0, after the
+    // last result. A WARNING line in OUR words (`say` → the client's writesLostWords), with what is at risk and the door; an unknown code or
+    // kind keeps the warning, in the general words. The transcript cannot carry its own loss, so r2: src/server/writes-lost.js keeps the record
+    // and every rebuild replays it here. ONE line per record, by its uuid: a rebuild can place it while the live record waits in its queue.
+    if (raw.subtype === 'session_writes_lost') {
+      if (raw.uuid) { const seen = this._writesLostSeen || (this._writesLostSeen = new Set()); if (seen.has(raw.uuid)) return; seen.add(raw.uuid); }
+      const code = typeof raw.error_code === 'string' ? raw.error_code.slice(0, 40) : '';
+      const lost = (Array.isArray(raw.lost) ? raw.lost : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)).slice(0, 8);
+      const what = lost.includes('transcript') && lost.includes('global_config') ? 'all of this conversation or its changes to ~/.claude.json' : lost.includes('transcript') ? 'all of this conversation' : lost.includes('global_config') ? 'its changes to ~/.claude.json' : 'all of its work';
+      const text = `Claude Code could not save ${what}: ${code === 'EDQUOT' ? 'the disk quota is used up' : code === 'ENOSPC' ? 'the disk is full' : 'a disk write failed' + (code ? ' (' + code + ')' : '')}`;
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level: 'warning', say: 'writes-lost', params: { code, lost } }] });
+      if (this._replayAt) msg.ts = this._replayAt; // a kept record's own instant
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     // FILES THAT DID NOT ARRIVE (`system`/`file_attachments_missing`, 2.1.296 — lane record-oracle-2-1-296): the files an inbound user
     // message's file_attachments named that the CLI could not fetch, each with a short reason code (download / too_large / not_found /
     // write / no_token / not_finished / count_cap — "read an unknown one as 'did not arrive'"). ONE plain dim line in OUR words (`say`);
@@ -1970,6 +1987,7 @@ class MessageManager extends MessageWindow {
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
         ...(split.images.length ? { images: split.images } : {}),
         ...(tr.is_error && isStoppedRun(resultText) ? { stoppedWhileRunning: true } : {}), // lane cli-2-1-314-records: the census's word, for the tool card
+        ...(tr.is_error && isAgentCutOff(resultText) ? { agentCutOff: true } : {}), // lane cli-2-1-319-records: the process ended under this agent — the Agent card's words
       }];
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
       // LAUNCH-ACK taskInfo synthesis (2.368.30): works on HISTORY too (the

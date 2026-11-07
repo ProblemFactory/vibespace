@@ -32,6 +32,10 @@ const UNION_ANCHORS = ['compact_boundary', 'init', 'task_started'];
 const HELPER = '[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*';
 const NOT_AFTER_IDENT = '(?<![A-Za-z0-9_$.])';
 const reEsc = (s) => s.replace(/[$.]/g, '\\$&');
+// How far one object literal may run before the walk gives up. 2.1.319's result/success is 58 668 characters: the old 40 000 dropped the
+// whole shape with no word, and the dump diff read «result/success gone» (lane cli-2-1-319-records). A literal still open at this bound
+// is NAMED in `unclosed` (the dump carries it, §4e reads it red), never silently absent.
+export const UNION_LITERAL_BOUND = 400000;
 export function extractZodUnion(text) {
   const pairs = new Map();
   for (const a of UNION_ANCHORS) {
@@ -40,15 +44,15 @@ export function extractZodUnion(text) {
     while ((m = re.exec(text))) { const k = m[1] + ' ' + m[2]; if (!pairs.has(k)) pairs.set(k, { obj: m[1], lit: m[2], anchor: 'system/' + a }); }
   }
   if (!pairs.size) return { union: {}, helpers: [], error: 'NO ANCHOR: none of ' + UNION_ANCHORS.map((a) => '<obj>({type:<lit>("system"),subtype:<lit>("' + a + '")').join(' · ') + ' is in the bundle — the union\'s spelling changed again: read the binary around "compact_boundary" and teach extractZodUnion the new form' };
-  const walkTo = (i) => { let depth = 0; for (let j = i; j < text.length && j < i + 40000; j++) { const c = text[j]; if (c === '"' || c === "'" || c === '`') { const q = c; j++; while (j < text.length && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; } if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return j; } } return -1; };
-  const union = {};
+  const walkTo = (i) => { let depth = 0; for (let j = i; j < text.length && j < i + UNION_LITERAL_BOUND; j++) { const c = text[j]; if (c === '"' || c === "'" || c === '`') { const q = c; j++; while (j < text.length && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; } if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return j; } } return -1; };
+  const union = {}, unclosed = [];
   for (const { obj, lit } of pairs.values()) {
     const re = new RegExp(NOT_AFTER_IDENT + reEsc(obj) + '\\(\\{type:' + reEsc(lit) + '\\("([a-z_]+)"\\)(?:,subtype:' + reEsc(lit) + '\\("([a-z_]+)"\\))?', 'g');
     let m;
     while ((m = re.exec(text))) {
       const key = m[1] + (m[2] ? '/' + m[2] : '');
       if (union[key]) continue;
-      const i = m.index + m[0].indexOf('{'); const j = walkTo(i); if (j < 0) continue;
+      const i = m.index + m[0].indexOf('{'); const j = walkTo(i); if (j < 0) { if (!unclosed.includes(key)) unclosed.push(key); continue; }
       const body = text.slice(i, j + 1);
       let d = 0, cur = ''; const fields = [];
       for (let k = 0; k < body.length; k++) {
@@ -60,7 +64,9 @@ export function extractZodUnion(text) {
       union[key] = fields.filter((f) => f !== 'type' && f !== 'subtype');
     }
   }
-  return { union, helpers: [...pairs.values()], error: null };
+  // a key another literal did read is no miss (the same name, spelled twice in the bundle)
+  const missed = unclosed.filter((k) => !union[k]);
+  return { union, helpers: [...pairs.values()], error: null, ...(missed.length ? { unclosed: missed } : {}) };
 }
 
 /** §4d (lane S1 verify r5): the binary's OWN census of the tool_result texts it writes for a permission
@@ -206,7 +212,7 @@ export function nestedOf(text, helpers) {
 export function dumpBinary(bin, newKeys = [], opts = {}) {
   const text = opts.text || stringsOf(bin);
   const version = opts.version || (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [path.basename(bin)])[0];
-  const { union, helpers, error } = extractZodUnion(text);
+  const { union, helpers, error, unclosed } = extractZodUnion(text);
   if (error) throw new Error(error);
   const cen = extractPermissionSentences(text);
   const zod = {};
@@ -218,6 +224,7 @@ export function dumpBinary(bin, newKeys = [], opts = {}) {
     union: Object.fromEntries(Object.keys(union).sort().map((k) => [k, union[k]])),
     sentences: cen.error ? { error: cen.error } : { anchor: cen.anchor, list: cen.list, set: cen.set, suffixes: cen.suffixes, unresolved: cen.unresolved, rows: cen.sentences.map((x) => ({ name: x.name, from: x.from, text: x.text })) },
     nested: nestedOf(text, helpers),
+    ...(unclosed ? { unclosed } : {}),
     zod,
   };
 }
@@ -247,8 +254,10 @@ export function dumpDiff(prev, next) {
   for (const [at, keys] of Object.entries(next.nested || {})) { const was = (prev.nested || {})[at]; if (Array.isArray(keys) && Array.isArray(was)) { const add = keys.filter((f) => !was.includes(f)), gone = was.filter((f) => !keys.includes(f)); if (add.length || gone.length) nested[at] = { add, gone }; } else if (!Array.isArray(keys)) nested[at] = { error: keys && keys.error }; }
   const texts = (d) => new Set(((d.sentences || {}).rows || []).map((r) => r.text));
   const ps = texts(prev), ns = texts(next);
-  const out = { against: prev.version, newKeys: Object.keys(nu).filter((k) => !(k in pu)).sort(), goneKeys: Object.keys(pu).filter((k) => !(k in nu)).sort(), fields, nested, sentencesAdded: [...ns].filter((t) => !ps.has(t)), sentencesGone: [...ps].filter((t) => !ns.has(t)) };
-  out.changes = out.newKeys.length + out.goneKeys.length + Object.values(fields).reduce((s, f) => s + f.add.length + f.gone.length, 0) + Object.values(nested).reduce((s, f) => s + (f.error ? 1 : f.add.length + f.gone.length), 0) + out.sentencesAdded.length + out.sentencesGone.length;
+  // lane cli-2-1-319-records r2: a key the walker could not read (`unclosed`) is no «gone» — the diff names it and counts it as a change
+  const unread = Array.isArray(next.unclosed) ? next.unclosed : [];
+  const out = { against: prev.version, newKeys: Object.keys(nu).filter((k) => !(k in pu)).sort(), goneKeys: Object.keys(pu).filter((k) => !(k in nu) && !unread.includes(k)).sort(), ...(unread.length ? { unclosed: unread.slice().sort() } : {}), fields, nested, sentencesAdded: [...ns].filter((t) => !ps.has(t)), sentencesGone: [...ps].filter((t) => !ns.has(t)) };
+  out.changes = unread.length + out.newKeys.length + out.goneKeys.length + Object.values(fields).reduce((s, f) => s + f.add.length + f.gone.length, 0) + Object.values(nested).reduce((s, f) => s + (f.error ? 1 : f.add.length + f.gone.length), 0) + out.sentencesAdded.length + out.sentencesGone.length;
   return out;
 }
 const HERE = path.dirname(new URL(import.meta.url).pathname);

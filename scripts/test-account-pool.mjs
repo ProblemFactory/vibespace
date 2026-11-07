@@ -235,7 +235,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, '2.1.314': _m314a, ...two } = FX.versions;
+  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, '2.1.314': _m314a, '2.1.319': _r319d1, ...two } = FX.versions;
   const twoF = path.join(DATA, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-307'), oatFixture: twoF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -252,7 +252,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-308-records, the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same member on 2.1.308 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.308': _measured308, '2.1.312': _m312b, '2.1.314': _m314b, ...three } = FX.versions;
+  const { '2.1.308': _measured308, '2.1.312': _m312b, '2.1.314': _m314b, '2.1.319': _r319d2, ...three } = FX.versions;
   const threeF = path.join(DATA, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-308'), oatFixture: threeF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -270,7 +270,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane pool-silent-members R1: 2.1.312 measured 2026-10-28 (the loopback rung) ⇒ no escape on it; over the .360 base's
   // four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 is out of the pool — and, since R1, NAMED for it
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.312': measured312, '2.1.314': _m314c, ...four } = FX.versions;
+  const { '2.1.312': measured312, '2.1.314': _m314c, '2.1.319': _r319d3, ...four } = FX.versions;
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-312-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -295,7 +295,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane oat-in-file-2-1-314: 2.1.314 measured 2026-10-30 (the same loopback rung) ⇒ no escape on it; over the .364 base's
   // five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 is out of the pool, NAMED for it (the 10-30 hub)
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.314': measured314, ...five } = FX.versions;
+  const { '2.1.314': measured314, '2.1.319': _r319d4, ...five } = FX.versions;
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-314-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -315,6 +315,59 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   const fiveF = path.join(DATA, 'fx-to-2.1.312.json'); fs.writeFileSync(fiveF, JSON.stringify({ versions: five }));
   const base = await run('base', fiveF);
   ck('RED CONTROL (the .364 base, 43d0f8d2d): over the five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.314 unmeasured)', !!measured314 && Object.keys(five).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.314' && base.why.file === false, JSON.stringify(base));
+}
+{
+  // lane cli-2-1-319-records: the SWEEP'S VERDICT over a stub member set — 2.1.319 measured 2026-11-07 (the same loopback rung) ⇒ placed; over the .383
+  // base's six-version fixture (2.1.296 – 2.1.314) the same member on 2.1.319 is kept but unplaced, NAMED for it (the 11-06 hub's journal: 11 of them)
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.319': measured319, ...six } = FX.versions;
+  const run = async (tag, fxPath) => {
+    const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-319-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
+    const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+    const X = amB.createSubscription({ name: 'Login X' }).id;
+    fs.writeFileSync(path.join(amB.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+    const T = amB.createSubscription({ name: 'Token T' }).id;
+    fs.writeFileSync(path.join(amB.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+    const PB = amB.createPool({ name: 'Tok pool' }).id;
+    amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'n'.repeat(40));
+    amB.noteCliVersion('2.1.319 (Claude Code)');
+    await amB.oatFileSettled();
+    const why = amB.poolRoster(PB).find((r) => r.id === T)?.why || null;
+    return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
+  };
+  const now = await run('now', null);
+  ck('token slot: the hub auto-updated to 2.1.319 (measured 2026-11-07) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  const sixF = path.join(DATA, 'fx-to-2.1.314.json'); fs.writeFileSync(sixF, JSON.stringify({ versions: six }));
+  const base = await run('base', sixF);
+  ck('RED CONTROL (the .383 base, 8b3fdb6ab): over the six-version fixture (2.1.296 – 2.1.314) the same member on 2.1.319 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.319 unmeasured)', !!measured319 && Object.keys(six).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.319' && base.why.file === false, JSON.stringify(base));
+}
+{
+  // lane cli-2-1-319-records: THE 11 MEMBERS OF 11-06, through the REAL sweep (src/server/oat-file-sync.js, a stub --version): members placed on 2.1.314,
+  // the box updates to 2.1.319 while the fixture does not name it ⇒ every token file KEPT, none placeable, each NAMED; the release that ships the
+  // row (a restart over the same data dir) ⇒ the next tick places them, with nothing rewritten and no re-login
+  const OFS = require(path.resolve('src/server/oat-file-sync.js'));
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.319': rec319, ...six } = FX.versions;
+  const dir = path.join(DATA, 'sweep-319'); fs.mkdirSync(dir, { recursive: true });
+  const sixF = path.join(DATA, 'fx-sweep-to-2.1.314.json'); fs.writeFileSync(sixF, JSON.stringify({ versions: six }));
+  const sweep = async (am, v) => { const lines = []; const t = OFS.start({ accounts: am, machineProbes: { cliVersion: async () => v }, claudeCmd: 'claude', log: (...a) => lines.push(a.join(' ')), bootDelayMs: 36e5, recheckMs: 36e5 }); const caps = await t.tick(); t.stop(); return { caps, lines }; };
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const amA = new AccountManager({ dataDir: dir, oatFixture: sixF });
+  const X = amA.createSubscription({ name: 'Login X' }).id;
+  fs.writeFileSync(path.join(amA.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+  const members = ['A', 'B', 'C'].map((n) => { const id = amA.createSubscription({ name: 'Token ' + n }).id; fs.writeFileSync(path.join(amA.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 }); return id; });
+  const PS = amA.createPool({ name: 'Sweep pool' }).id;
+  const state = (am) => members.map((id) => { const f = path.join(am.subDir(id), '.credentials.json'); return { cand: am.poolMembers(PS).some((m) => m.id === id), file: am.readSubCreds(id).oatFile === true, why: am.poolRoster(PS).find((r) => r.id === id)?.why || null, bytes: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null, mtime: fs.existsSync(f) ? fs.statSync(f).mtimeMs : null }; });
+  amA.noteCliVersion('2.1.314 (Claude Code)');
+  members.forEach((id, i) => amA.setOat(id, ['sk', '-ant-oat01-'].join('') + 'SWEEPfake' + i + '_' + 'w'.repeat(40)));
+  await amA.oatFileSettled();
+  const on314 = state(amA);
+  ck('the 11-06 hub, three stub members: placed on 2.1.314 — candidates, each token in its folder, no reason', on314.every((m) => m.cand && m.file && m.why === null), JSON.stringify(on314.map((m) => [m.cand, m.file, m.why])));
+  const un = await sweep(amA, '2.1.319 (Claude Code)'), off = state(amA);
+  ck('the box updates to 2.1.319, the fixture without its row (the .383 base, 8b3fdb6ab) ⇒ the sweep says unmeasured: every token file KEPT byte for byte, none a candidate, each NAMED cli-unmeasured · 2.1.319', un.caps && un.caps.ok === false && un.caps.cli === '2.1.319' && off.every((m, i) => !m.cand && m.file && m.bytes === on314[i].bytes && m.why && m.why.code === 'cli-unmeasured' && m.why.cli === '2.1.319') && un.lines.some((l) => /claude CLI 2\.1\.319 — not measured/.test(l)), JSON.stringify({ caps: un.caps, lines: un.lines, off: off.map((m) => [m.cand, m.file, m.why]) }));
+  const amB = new AccountManager({ dataDir: dir }); // the release: the committed fixture, over the same data dir
+  const on = await sweep(amB, '2.1.319 (Claude Code)'), back = state(amB);
+  ck('the release that ships the row ⇒ the next tick places them: measured, every member a candidate again, no reason left, the same token bytes — no re-login, nothing pressed', !!rec319 && on.caps && on.caps.ok === true && on.caps.cli === '2.1.319' && back.every((m, i) => m.cand && m.file && m.why === null && m.bytes === on314[i].bytes) && on.lines.some((l) => /claude CLI 2\.1\.319 — measured/.test(l)), JSON.stringify({ caps: on.caps, lines: on.lines, back: back.map((m) => [m.cand, m.file, m.why]) }));
 }
 {
   // THE ONE ANSWER (R2): _unplaceableWhy is null EXACTLY when _placeable is true — over every shape a member can be in

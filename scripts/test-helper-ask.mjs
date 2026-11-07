@@ -1309,7 +1309,7 @@ console.log('⑱ (r4) the unknown word: a foreign resolution never locks the car
 console.log('⑱b (r5) the sentence census: every row drives the real rebuild; an unknown error sentence ⇒ unknown + the drift card; the fail-open copy goes red');
 {
   const rows = PO.PERMISSION_OUTCOME_ROWS;
-  check(`⑱b the census is a closed, typed table (${rows.length} rows: id, outcome ∈ PERMISSION_OUTCOMES, match prefix|contains, text, since, binary list, evidence), read from ${PO.PERMISSION_OUTCOME_CLI_VERSION}`, rows.length >= 17 && rows.every((r) => r.id && PO.PERMISSION_OUTCOMES.includes(r.outcome) && ['prefix', 'contains'].includes(r.match) && typeof r.text === 'string' && r.text.length > 20 && /^(≤)?2\.1\.\d+$/.test(r.since) && ['Gd', 'IS', 'fme', 'literal'].includes(r.binary) && r.evidence.length > 40) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.314' /* re-read 2.1.288 (lane cli-2-1-288-records), 2.1.296 (lane record-oracle-2-1-296), 2.1.306 (lane cli-2-1-306-records), 2.1.307 (lane cli-2-1-307-records), 2.1.308 (lane cli-2-1-308-records) and 2.1.312 (lane claude-steer-inject r3): same 14 sentences; 2.1.314 (lane cli-2-1-314-records): + m9t, stopped (⑱d) */ && Object.isFrozen(rows) && new Set(rows.map((r) => r.id)).size === rows.length && !rows.some((r) => r.outcome === 'allowed'), rows.map((r) => r.id));
+  check(`⑱b the census is a closed, typed table (${rows.length} rows: id, outcome ∈ PERMISSION_OUTCOMES, match prefix|contains, text, since, binary list, evidence), read from ${PO.PERMISSION_OUTCOME_CLI_VERSION}`, rows.length >= 17 && rows.every((r) => r.id && PO.PERMISSION_OUTCOMES.includes(r.outcome) && ['prefix', 'contains'].includes(r.match) && typeof r.text === 'string' && r.text.length > 20 && /^(≤)?2\.1\.\d+$/.test(r.since) && ['Gd', 'IS', 'fme', 'literal'].includes(r.binary) && r.evidence.length > 40) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.319' /* re-read 2.1.288 (lane cli-2-1-288-records), 2.1.296 (lane record-oracle-2-1-296), 2.1.306 (lane cli-2-1-306-records), 2.1.307 (lane cli-2-1-307-records), 2.1.308 (lane cli-2-1-308-records) and 2.1.312 (lane claude-steer-inject r3): same 14 sentences; 2.1.314 (lane cli-2-1-314-records): + m9t, stopped (⑱d) */ && Object.isFrozen(rows) && new Set(rows.map((r) => r.id)).size === rows.length && !rows.some((r) => r.outcome === 'allowed'), rows.map((r) => r.id));
   check('⑱b the r5 finding is a row: the SUBAGENT\'s own denial sentence (hL / v6 — "Permission for this tool use was denied…", cancelAndAbort with agentId set) reads denied; the main agent\'s (ww / Dx) too; the interrupt marker, the turn-ended marker, the parked approval that expired / was closed by new input read cancelled; the CLI\'s own "outcome is unknown" sentences read unknown', ['hL', 'v6', 'ww', 'Dx', 'p4n'].every((id) => rows.find((r) => r.id === id).outcome === 'denied') && ['Ud', 'ok', 'pb', 'ume', 'pme', 'l4e', 'c4e', 'Jw', 'conversation_ended', 'streaming_fallback'].every((id) => rows.find((r) => r.id === id).outcome === 'cancelled') && ['kH', 'TH'].every((id) => rows.find((r) => r.id === id).outcome === 'unknown'));
   // the PURE lookup
   const po = (t, e = true) => PO.permissionOutcome(t, e).outcome;
@@ -1534,6 +1534,201 @@ console.log('⑱c (r5) the WebFetch provenance re-ask (a fresh tool_use_id) bind
   NNo.feedLive(sN, { type: 'control_request', request_id: 'req-wf-9', request: { subtype: 'can_use_tool', tool_name: 'WebFetch', input: { url: URL_, prompt: 'summarise' }, tool_use_id: 'a-fresh-uuid' } });
   check('⑱c CONTROL: without the binding the main re-ask is stashed — no card lists it, the chip has nothing to point at (the pre-r5 silence)', NNo.pendingPermissions(sN).length === 0 && sN._normalizer._askStash && sN._normalizer._askStash.has('a-fresh-uuid'));
   check('⑱c the copies live outside the tree', M18c.files.every((f) => !f.startsWith(REPO)));
+}
+
+// ═══ ⑱e lane cli-2-1-319-records: AN AGENT THE PROCESS DIED UNDER — claude 2.1.319's «[Agent call interrupted: …» + the lost-writes warning, through the real renderer ═══
+// 2.1.319 retires an Agent call its process ended under, on the resume, with a new sentence (the row OU). .383's table had no row: the card read
+// unknown («the CLI wrote a result VibeSpace does not recognise») and the Agent card a red «Error». And `session_writes_lost` — the disk refused the
+// transcript or ~/.claude.json — was an unknown record, which a person's chat never draws: said to nobody.
+console.log('⑱e (2.1.319) an Agent call its process ended under reads stopped, its card says what happened; session_writes_lost is a warning with its door; RED on the .383 table');
+{
+  const dump19 = JSON.parse(read('scripts/fixtures/claude-cli/2.1.319.json'));
+  const OUT = dump19.sentences.rows.find((r) => r.text.startsWith('[Agent call interrupted:')).text; // the BINARY's words, never the table's
+  const use = { type: 'assistant', message: { id: 'm-o9', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_o9', name: 'Agent', input: { description: 'Survey the tree', prompt: 'x' } }] }, uuid: 'u-o9' };
+  const ask = { type: 'control_request', request_id: 'req-o9', request: { subtype: 'can_use_tool', tool_name: 'Agent', input: { description: 'Survey the tree', prompt: 'x' }, tool_use_id: 'toolu_o9' } };
+  const allow = { type: 'control_response', response: { subtype: 'success', request_id: 'req-o9', response: { behavior: 'allow', updatedInput: {} } } };
+  const res = (text = OUT, id = 'toolu_o9') => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, is_error: true }] }, uuid: 'u-o9r' });
+  const cardOf = (mm, id = 'toolu_o9') => mm.messages.filter((m) => m.content && m.content[0] && m.content[0].toolCallId === id);
+  const live = (MMx, recs, sid) => { const mm = new MMx(sid); for (const r of recs) mm.processLive(JSON.parse(JSON.stringify(r))); return mm; };
+  const rebuilt = (MMx, recs, sid) => { const mm = new MMx(sid); mm.convertHistory(JSON.parse(JSON.stringify(recs))); return mm; };
+  const drift = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-fields').length;
+  const L = live(MessageManager, [use, ask, allow, res()], 'sess-o9-live'), Rb = rebuilt(MessageManager, [use, ask, res(), allow], 'sess-o9-rb');
+  const cL = cardOf(L)[0], cR = cardOf(Rb)[0];
+  check('⑱e LIVE and REBUILT: ask → our allow → the 2.1.319 sentence: ONE card reading «stopped» (it ran; never denied, never «Not run», never unknown), its block marked stoppedWhileRunning + agentCutOff, no drift card', cardOf(L).length === 1 && cL.permission.resolved === 'stopped' && cL.content[0].stoppedWhileRunning === true && cL.content[0].agentCutOff === true && cardOf(Rb).length === 1 && cR.permission.resolved === 'stopped' && cR.content[0].agentCutOff === true && drift(L) === 0 && drift(Rb) === 0, { l: cL && cL.permission, r: cR && cR.permission });
+  // THE REAL RENDERER (node, as test-image-cards draws it; the `document` the system notice asks for is a stub)
+  const bv = path.join(REPO, 'src/lib/build-version.js');
+  if (!fs.existsSync(bv)) fs.writeFileSync(bv, "// GENERATED at build (gitignored) — stand-in written by test-helper-ask\nexport const BUILD_VERSION = 'test';\n");
+  const CR = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-renderers.js')).href);
+  const cr = new CR.ChatRenderers({ ws: null, sessionId: 'so9', app: null, messageList: { addEventListener() {} }, getSessionCtx: () => ({ cwd: '/w', host: null }) });
+  const CUT = 'Interrupted — the process running this conversation stopped before this agent finished, so it returned no result';
+  const html = (m) => (m ? cr.renderToolResult(m.content[0], m) : '');
+  const hO = html(cL);
+  const useT = { ...use, message: { ...use.message, content: [{ type: 'tool_use', id: 'toolu_o9b', name: 'Bash', input: { command: 'make' } }] } };
+  const hB = html(cardOf(live(MessageManager, [useT, res(OUT, 'toolu_o9b')], 'sess-o9-b'), 'toolu_o9b')[0]);
+  const hS = html(cardOf(live(MessageManager, [use, res('[Request interrupted by user for tool use]')], 'sess-o9-s'))[0]);
+  const hE = html(cardOf(live(MessageManager, [use, res('Agent type not found')], 'sess-o9-e'))[0]);
+  check('⑱e the AGENT CARD (the real renderer): «✗ ' + CUT + '» in the grey stopped class, no «Error», no error red, and never «Stopped before it finished» — nobody pressed Stop', hO.includes('✗ ' + CUT) && /chat-diff-summary chat-agent-stopped/.test(hO) && !/chat-tool-error/.test(hO) && !hO.includes('Stopped before it finished'), hO.slice(0, 500));
+  check('⑱e …CONTRAST, the class follows the mark: a Stop on an Agent keeps «Stopped before it finished»; an Agent\'s own failure keeps the open red «Error»; the same sentence on any other tool reads the plain stopped fold', hS.includes('Stopped before it finished') && !hS.includes(CUT) && /chat-tool-error-label/.test(hE) && hE.includes('Agent type not found') && !hE.includes(CUT) && hB.includes('Stopped while it ran — it may have run in part or in full') && !/chat-tool-error/.test(hB), { hS: hS.slice(0, 200), hE: hE.slice(0, 200), hB: hB.slice(0, 200) });
+  // session_writes_lost through the normalizer AND the renderer's system notice
+  const hadDoc = 'document' in globalThis, doc0 = globalThis.document;
+  globalThis.document = { createElement: () => ({ className: '', innerHTML: '' }) };
+  const line = (MMx, over, sid) => { const mm = new MMx(sid); mm.processLive({ type: 'system', subtype: 'session_writes_lost', error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: [sid], uuid: 'u-swl', session_id: sid, ...over }); const m = mm.messages[0]; const r = m && cr.renderSystemMsg(m); return { kind: m && m.noticeKind, n: mm.messages.length, html: (r && r.el && r.el.innerHTML) || '', cls: (r && r.el && r.el.className) || '' }; };
+  try {
+    const full = line(MessageManager, {}, 'sess-swl-1'), quota = line(MessageManager, { error_code: 'EDQUOT' }, 'sess-swl-2'), cfg = line(MessageManager, { lost: ['global_config'] }, 'sess-swl-3'), both = line(MessageManager, { lost: ['transcript', 'global_config'] }, 'sess-swl-4'), next = line(MessageManager, { error_code: 'EIO', lost: ['plugin_cache'] }, 'sess-swl-5');
+    check('⑱e session_writes_lost (the real renderer): the HIGH warning line (chat-harness-notice-high), in our words — what is at risk («part of it may be missing») and the DOOR («Free up space on that disk before the next run»)', /chat-harness-notice-high/.test(full.cls) && /chat-harness-info-warning/.test(full.cls) && /could not save all of this conversation because the disk is full\./.test(full.html) && /part of it may be missing\./.test(full.html) && /Free up space on that disk before the next run\./.test(full.html), full);
+    check('⑱e …the quota says its own door; ~/.claude.json alone promises nothing about the conversation; both kinds say both; a code and a kind this release has no word for keep the warning in the general words, raw values on the hover', /your disk quota is used up/.test(quota.html) && /ask for a larger quota/.test(quota.html) && /could not save its changes to ~\/\.claude\.json because the disk is full/.test(cfg.html) && !/conversation/.test(cfg.html) && /this conversation, or its changes to ~\/\.claude\.json/.test(both.html) && /could not save all of its work because a disk write failed/.test(next.html) && /EIO · plugin_cache/.test(next.html) && /chat-harness-notice-high/.test(next.cls), { quota, cfg, both, next });
+    const K = ['your disk quota is used up', 'the disk is full', 'a disk write failed', 'Claude Code could not save all of this conversation, or its changes to ~/.claude.json, because {why}. If you continue it after a restart, part of it may be missing.', 'Claude Code could not save all of this conversation because {why}. If you continue it after a restart, part of it may be missing.', 'Claude Code could not save its changes to ~/.claude.json because {why}.', 'Claude Code could not save all of its work because {why}.', 'Free up space, or ask for a larger quota, before the next run.', 'Free up space on that disk before the next run.', CUT];
+    const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+    check(`⑱e every word has zh + ja (${K.length}), and each placeholder survives`, K.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')) && K.filter((k) => k.includes('{why}')).every((k) => [zh, ja].every((d) => d.slice(d.indexOf(JSON.stringify(k) + ':')).split('\n')[0].split('{why}').length === 3)), K.filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':')));
+    // RED CONTROL: the .383 table and lists (no OU row, no session_writes_lost) through a copy of the normalizer
+    const MX = mutantCopies('helper-ask-319', REPO);
+    const poSrc = read('src/permission-outcome.js'), rowLines = poSrc.split('\n'), iOU = rowLines.findIndex((l) => l.startsWith("  row('OU', "));
+    const poNo = iOU > 0 ? MX.write('src/permission-outcome.js', rowLines.filter((_, i) => i !== iOU && i !== iOU + 1).join('\n'), 'no-ou') : null;
+    const mmSrc = read('src/message-manager.js'), REQ = "require('./permission-outcome.js')", SWL = mmSrc.split('\n').filter((l) => l.startsWith("  'session_writes_lost',"));
+    const MMx = poNo && mmSrc.split(REQ).length === 2 && SWL.length === 1 ? require(MX.write('src/message-manager.js', mmSrc.replace(REQ, 'require(' + JSON.stringify(poNo) + ')').replace(SWL[0] + '\n', '').replace("if (raw.subtype === 'session_writes_lost') {", 'if (false) {'), 'mm-383')).MessageManager : null;
+    const xL = MMx && live(MMx, [use, ask, res()], 'sess-o9-x'), xc = xL && cardOf(xL)[0], xh = html(xc), xs = MMx && line(MMx, {}, 'sess-swl-x');
+    check('⑱e RED CONTROL: on a copy with the .383 table + lists the same records read UNKNOWN with a drift card on the Agent\'s ask, its card a red «Error»; session_writes_lost is an unknown-record the chat never draws — the lost write says nothing', !!xc && xc.permission.resolved === 'unknown' && drift(xL) === 1 && !xc.content[0].agentCutOff && /chat-tool-error-label/.test(xh) && !xh.includes(CUT) && !!xs && xs.kind === 'unknown-record' && xs.html === '', { p: xc && xc.permission, xs });
+    check('⑱e the copies live outside the tree', MX.files.every((f) => !f.startsWith(REPO)));
+  } finally { if (hadDoc) globalThis.document = doc0; else delete globalThis.document; }
+}
+
+// ═══ ⑱f lane cli-2-1-319-records r2 (round-1 acceptance, D1): THE LOST WRITE'S WARNING SURVIVES A REBUILD ═══
+// r1's line lived only in the live normalizer. The pty-exit path deletes the meta and the buffer and every rebuild reads the JSONL, which cannot carry its
+// own loss: a reload, a hub restart, a reopen or a restart-in-place dropped it. src/server/writes-lost.js keeps the record for the conversation's lifetime.
+console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub restart, a reopen and a restart-in-place; the disk it complains of may be full; RED with no store');
+{
+  const WL = require(path.join(REPO, 'src/server/writes-lost.js'));
+  const dir = scratch('helper-ask-writes-lost'); fs.mkdirSync(dir, { recursive: true });
+  const CID = 'c0nv-319-a', t0 = Date.parse('2026-11-07T08:00:00.000Z'), iso = (t) => new Date(t).toISOString();
+  const jsonl = path.join(dir, CID + '.jsonl');
+  fs.writeFileSync(jsonl, [
+    { type: 'user', uuid: 'wl-u1', sessionId: CID, timestamp: iso(t0), message: { role: 'user', content: 'Survey the tree' } },
+    { type: 'assistant', uuid: 'wl-a1', sessionId: CID, timestamp: iso(t0 + 1000), message: { id: 'wl-m1', role: 'assistant', content: [{ type: 'text', text: 'On it.' }] } },
+    { type: 'user', uuid: 'wl-u2', sessionId: CID, timestamp: iso(t0 + 9000), message: { role: 'user', content: 'Carry on' } },
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const records = () => fs.readFileSync(jsonl, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); // the rebuild's input: the JSONL, as sm.raw() reads it
+  const rec = (over = {}) => ({ type: 'system', subtype: 'session_writes_lost', error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: [CID], uuid: 'u-swl-1', session_id: CID, ...over });
+  const journal = [], log = (...a) => journal.push(a.join(' '));
+  const opts = { dataDir: dir, now: () => t0 + 5000, log };
+  const session = (id, cid = CID) => ({ _normalizer: new MessageManager(id), _subNormalizers: new Map(), _webuiId: id, claudeSessionId: cid, backend: 'claude', mode: 'chat', buffer: '' });
+  const linesOf = (mm) => mm.messages.filter((m) => m.content && m.content[0] && m.content[0].say === 'writes-lost');
+  const orderOf = (mm) => mm.messages.map((m) => (linesOf({ messages: [m] }).length ? 'WARNING' : m.role));
+  const rebuild = async (id, cid) => { const s = session(id, cid); await N.rebuildHistory(s, id, records(), {}); return s._normalizer; };
+  const bv = path.join(REPO, 'src/lib/build-version.js');
+  if (!fs.existsSync(bv)) fs.writeFileSync(bv, "// GENERATED at build (gitignored) — stand-in written by test-helper-ask\nexport const BUILD_VERSION = 'test';\n");
+  const CR = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-renderers.js')).href);
+  const cr = new CR.ChatRenderers({ ws: null, sessionId: 'swl', app: null, messageList: { addEventListener() {} }, getSessionCtx: () => ({ cwd: '/w', host: null }) });
+  const hadDoc = 'document' in globalThis, doc0 = globalThis.document;
+  globalThis.document = { createElement: () => ({ className: '', innerHTML: '' }) };
+  try {
+    // the CLI exits: the parse (and the device feed) hand the record to the brain, BEFORE the normalizer sees it
+    let store = WL.install(opts);
+    const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null });
+    brain.noteWritesLost({ claudeSessionId: CID }, 'w-swl', rec({ planted: 'no such field', message: { content: 'x' } }));
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'writes-lost.json'), 'utf8'));
+    check('⑱f the brain keeps the record under the conversation id, reduced to the fields the warning reads, stamped with its instant — and the journal says it', onDisk.v === 1 && onDisk.byConversation[CID].length === 1 && onDisk.byConversation[CID][0].timestamp === iso(t0 + 5000) && !('planted' in onDisk.byConversation[CID][0]) && !('message' in onDisk.byConversation[CID][0]) && journal.some((l) => l.includes('[writes-lost]') && l.includes(CID) && l.includes('ENOSPC')), onDisk);
+    // THE NEW LEG: a hub restart ⇒ a new store over the same file, a new session, the rebuild reads the JSONL
+    store = WL.install(opts);
+    const afterRestart = await rebuild('w-restart');
+    const shown = linesOf(afterRestart)[0], drawn = shown && cr.renderSystemMsg(shown);
+    check('⑱f THE WARNING IS STILL SHOWN after a hub restart, rebuilt from the JSONL (which holds no such record): ONE line, BY TIME between the records it fell between, stamped with its own instant, no drift card beside it, in the real renderer\'s high notice with its door', linesOf(afterRestart).length === 1 && JSON.stringify(orderOf(afterRestart)) === JSON.stringify(['user', 'assistant', 'WARNING', 'user']) && shown.ts === t0 + 5000 && !records().some((r) => r.subtype === 'session_writes_lost') && !!drawn && /chat-harness-notice-high/.test(drawn.el.className) && /could not save all of this conversation because the disk is full\./.test(drawn.el.innerHTML) && /Free up space on that disk before the next run\./.test(drawn.el.innerHTML), { order: orderOf(afterRestart), html: drawn && drawn.el.innerHTML });
+    const reload = await rebuild('w-restart');
+    const inPlace = await rebuild('w-restart-in-place');
+    const viewOnly = N.createMessageManager('claude', 'view', { threadId: CID });
+    await N.convertWithCards(viewOnly, records(), N.browserCardsFor({ conversationId: CID }));
+    const other = await rebuild('w-other', 'c0nv-319-b');
+    check('⑱f …and after a reload (the same session rebuilt), a restart-in-place (a new webui id, the same conversation) and a reopen (the view-only road, by conversation id): one line each; another conversation\'s rebuild shows none', linesOf(reload).length === 1 && linesOf(inPlace).length === 1 && linesOf(viewOnly).length === 1 && linesOf(other).length === 0, { reload: linesOf(reload).length, inPlace: linesOf(inPlace).length, view: linesOf(viewOnly).length, other: linesOf(other).length });
+    // ONE line: the rebuild's card and the live record it holds in its queue are one record
+    const raced = session('w-race'); const p = N.rebuildHistory(raced, 'w-race', records(), {}); N.feedLive(raced, rec()); await p;
+    const livedFirst = session('w-lived'); await N.rebuildHistory(livedFirst, 'w-lived', records(), {}); N.feedLive(livedFirst, rec());
+    check('⑱f ONE line per record, by its uuid: a live record held in the rebuild\'s queue beside the kept one draws one line, and so does the record arriving after a rebuild that placed it', linesOf(raced._normalizer).length === 1 && linesOf(livedFirst._normalizer).length === 1, { raced: linesOf(raced._normalizer).length, lived: linesOf(livedFirst._normalizer).length });
+    const mmSrc = read('src/message-manager.js'), DEDUPE = mmSrc.split('\n').filter((l) => l.includes('this._writesLostSeen || (this._writesLostSeen = new Set())'));
+    const MXd = mutantCopies('helper-ask-319-r2', REPO);
+    const MMnoDedupe = DEDUPE.length === 1 ? require(MXd.write('src/message-manager.js', mmSrc.replace(DEDUPE[0] + '\n', ''), 'no-dedupe')).MessageManager : null;
+    const twice = MMnoDedupe && new MMnoDedupe('w-x'); if (twice) { twice.replay(rec(), { at: t0 }); twice.processLive(rec()); }
+    check('⑱f RED CONTROL: a copy without the uuid check draws the same record twice', !!twice && linesOf(twice).length === 2, twice && linesOf(twice).length);
+    store.note(rec({ uuid: 'u-swl-2', error_code: 'EDQUOT' }));
+    check('⑱f a second run that also lost writes is a second line, at its own time; the same uuid again adds none', linesOf(await rebuild('w-two')).length === 2 && (store.note(rec({ uuid: 'u-swl-2' })), store.rowsFor(CID).length === 2));
+    // THE DISK IT COMPLAINS OF MAY BE FULL
+    const dir2 = scratch('helper-ask-writes-lost-full'), j2 = []; fs.mkdirSync(dir2, { recursive: true });
+    let full = true; const realWrite = (file, text) => { if (full) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); fs.writeFileSync(file, text); };
+    const fullStore = WL.create({ dataDir: dir2, now: () => t0 + 5000, log: (...a) => j2.push(a.join(' ')), write: realWrite, retryMs: 5 });
+    const threw = (() => { try { fullStore.note(rec()); fullStore.note(rec({ uuid: 'u-swl-3' })); return false; } catch { return true; } })();
+    const heldFile = fs.existsSync(path.join(dir2, 'writes-lost.json')), held = fullStore.cards({ conversationId: CID }).length, saidFull = j2.filter((l) => /held in memory/.test(l)).length;
+    full = false;
+    for (let i = 0; i < 400 && !fs.existsSync(path.join(dir2, 'writes-lost.json')); i++) await new Promise((r) => setTimeout(r, 10));
+    fullStore.stop();
+    const reread = WL.create({ dataDir: dir2, log: () => { } });
+    check('⑱f THE DISK IS FULL: the consumer never sees a throw, every rebuild in this hub\'s life still has the warning from memory, the journal says so ONCE — and the retry lands it once the disk has room, so a later restart still shows it', !threw && !heldFile && held === 2 && saidFull === 1 && reread.cards({ conversationId: CID }).length === 2 && j2.some((l) => /reached the disk/.test(l)), { threw, heldFile, held, saidFull, j2 });
+    // BOUNDS, and an id from a CLI's stdout is data
+    const dir3 = scratch('helper-ask-writes-lost-bound'); let t3 = t0;
+    const bound = WL.create({ dataDir: dir3, now: () => (t3 += 1000), log: () => { } });
+    for (let i = 0; i < WL.MAX_PER_CONVERSATION + 3; i++) bound.note(rec({ uuid: 'many-' + i, transcript_session_ids: ['c-many'], session_id: 'c-many' }));
+    for (let i = 0; i < WL.MAX_CONVERSATIONS + 2; i++) bound.note(rec({ uuid: 'c-' + i, transcript_session_ids: ['c-' + i], session_id: 'c-' + i }));
+    const hostile = bound.note(rec({ uuid: 'h', session_id: '__proto__', transcript_session_ids: ['../../etc', 'a/b', '__proto__'] }));
+    const again = WL.create({ dataDir: dir3, log: () => { } });
+    check('⑱f the file is bounded (' + WL.MAX_PER_CONVERSATION + ' newest per conversation, ' + WL.MAX_CONVERSATIONS + ' newest conversations); a path-shaped id is no key; a `__proto__` id round-trips as plain data and pollutes nothing', bound.rowsFor('c-0').length === 0 && bound.rowsFor('c-' + (WL.MAX_CONVERSATIONS + 1)).length === 1 && hostile.ids.join() === '__proto__' && again.rowsFor('__proto__').length === 1 && ({}).uuid === undefined && Object.keys(JSON.parse(fs.readFileSync(path.join(dir3, 'writes-lost.json'), 'utf8')).byConversation).length === WL.MAX_CONVERSATIONS, { ids: hostile.ids });
+    const many = WL.create({ dataDir: scratch('helper-ask-writes-lost-many'), now: () => (t3 += 1000), log: () => { } });
+    for (let i = 0; i < WL.MAX_PER_CONVERSATION + 3; i++) many.note(rec({ uuid: 'many-' + i, transcript_session_ids: ['c-many'], session_id: 'c-many' }));
+    check('⑱f …the newest rows of one conversation are the ones kept', many.rowsFor('c-many').length === WL.MAX_PER_CONVERSATION && many.rowsFor('c-many').at(-1).uuid === 'many-' + (WL.MAX_PER_CONVERSATION + 2) && many.rowsFor('c-many')[0].uuid === 'many-3');
+    // r3 M1 (round-2 acceptance): A ROW HELD AFTER A FAILED WRITE IS WRITTEN AT SHUTDOWN. The person frees the space and restarts the hub inside the 60-s retry
+    const dirStop = scratch('helper-ask-writes-lost-stop'), jStop = []; fs.mkdirSync(dirStop, { recursive: true });
+    let stopFull = true; const stopWrite = (file, text) => { if (stopFull) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); fs.writeFileSync(file, text); };
+    const stopStore = WL.create({ dataDir: dirStop, now: () => t0 + 5000, log: (...a) => jStop.push(a.join(' ')), write: stopWrite, retryMs: 36e5 });
+    stopStore.note(rec());
+    const stopHeld = !fs.existsSync(path.join(dirStop, 'writes-lost.json'));
+    stopFull = false; stopStore.stop();
+    check('⑱f r3 M1: ENOSPC ⇒ the row only in memory; the disk then has room; stop() (the hub\'s SIGTERM, well inside the retry) ⇒ a new store over the same dir has the row', stopHeld && WL.create({ dataDir: dirStop, log: () => { } }).rowsFor(CID).length === 1, { stopHeld, jStop });
+    const dirGone = scratch('helper-ask-writes-lost-gone'), jGone = []; fs.mkdirSync(dirGone, { recursive: true });
+    const goneStore = WL.create({ dataDir: dirGone, log: (...a) => jGone.push(a.join(' ')), write: () => { throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); }, retryMs: 36e5 });
+    goneStore.note(rec());
+    check('⑱f r3 M1 …a disk STILL full at stop(): it does not throw, and the journal says by name that the warning never reached the file — the one loss that stays', goneStore.stop() === false && jGone.some((l) => /the hub stops with a warning that never reached/.test(l)), jGone);
+    const shutBody = (/function shutdownNow\(\) \{([\s\S]*?)\n\}/.exec(read('server.js')) || [])[1] || '';
+    check('⑱f r3 M1 WIRING: server.js shutdownNow stops the installed store, before process.exit (SIGINT / SIGTERM both end there)', /require\('\.\/src\/server\/writes-lost\.js'\)\.installed\(\)\?\.stop\(\)/.test(shutBody) && shutBody.indexOf('writes-lost.js') < shutBody.indexOf('process.exit(0)'), shutBody.slice(0, 200));
+    // r3 M2: A READ THAT FAILED IS TRIED AGAIN, AND A STORE THAT HAS NOT READ ITS FILE NEVER WRITES IT. A directory in the file's place = a real EISDIR on any uid
+    const dirRead = scratch('helper-ask-writes-lost-read'), jRead = [], fRead = path.join(dirRead, 'writes-lost.json'); fs.mkdirSync(dirRead, { recursive: true });
+    const seedRead = WL.create({ dataDir: dirRead, now: () => t0, log: () => { } });
+    const old = (i) => rec({ uuid: 'old-' + i, session_id: 'c-old' + i, transcript_session_ids: ['c-old' + i] });
+    for (let i = 0; i < 5; i++) seedRead.note(old(i));
+    const savedRead = fs.readFileSync(fRead);
+    fs.rmSync(fRead); fs.mkdirSync(fRead);
+    const sick = WL.create({ dataDir: dirRead, now: () => t0 + 1000, log: (...a) => jRead.push(a.join(' ')), retryMs: 0 });
+    const sickRows = [sick.rowsFor('c-old0').length, sick.rowsFor('c-old1').length].join();
+    fs.rmdirSync(fRead); fs.writeFileSync(fRead, savedRead);
+    const healed = sick.rowsFor('c-old0').length;
+    sick.note(rec({ uuid: 'new-1', session_id: 'c-new', transcript_session_ids: ['c-new'] }));
+    const keysRead = Object.keys(JSON.parse(fs.readFileSync(fRead, 'utf8')).byConversation).sort();
+    check('⑱f r3 M2: 5 conversations on disk, one read failure (EISDIR), the cause clears ⇒ the SAME store reads again; the next lost write leaves 6 keys, the five old rows intact — before r3: [c-new] alone. The journal said the failure once', sickRows === '0,0' && healed === 1 && keysRead.join() === 'c-new,c-old0,c-old1,c-old2,c-old3,c-old4' && [0, 1, 2, 3, 4].every((i) => sick.rowsFor('c-old' + i).length === 1 && sick.rowsFor('c-old' + i)[0].uuid === 'old-' + i) && jRead.filter((l) => /not read \(EISDIR\)/.test(l)).length === 1 && jRead.some((l) => /can be read again/.test(l)), { sickRows, healed, keysRead, jRead });
+    if (typeof process.getuid === 'function' && process.getuid() !== 0) {
+      // the acceptance's probe, on a file that stays in place: a rename over a chmod-000 file SUCCEEDS, so only the store's own rule protects it
+      const dirMode = scratch('helper-ask-writes-lost-mode'), fMode = path.join(dirMode, 'writes-lost.json'), jMode = []; fs.mkdirSync(dirMode, { recursive: true });
+      const seedMode = WL.create({ dataDir: dirMode, now: () => t0, log: () => { } }); for (let i = 0; i < 5; i++) seedMode.note(old(i));
+      const savedMode = fs.readFileSync(fMode);
+      fs.chmodSync(fMode, 0o000);
+      const denied = WL.create({ dataDir: dirMode, now: () => t0 + 1000, log: (...a) => jMode.push(a.join(' ')), retryMs: 0 });
+      denied.note(rec({ uuid: 'new-2', session_id: 'c-new', transcript_session_ids: ['c-new'] }));
+      const heldRow = denied.rowsFor('c-new').length;
+      fs.chmodSync(fMode, 0o644);
+      const untouched = fs.readFileSync(fMode).equals(savedMode);
+      const flushed = denied.flush();
+      const keysMode = Object.keys(JSON.parse(fs.readFileSync(fMode, 'utf8')).byConversation).sort();
+      check('⑱f r3 M2 …a lost write DURING the failure (chmod 000): the file is NOT overwritten, the row is held; once readable the two merge: 6 keys, nothing lost', heldRow === 1 && untouched && flushed === true && keysMode.join() === 'c-new,c-old0,c-old1,c-old2,c-old3,c-old4', { heldRow, untouched, flushed, keysMode, jMode });
+    } else console.log('  ○ SKIP ⑱f r3 M2 chmod leg: root reads a chmod-000 file (the EISDIR leg above holds the law on any uid)');
+    const dirJunk = scratch('helper-ask-writes-lost-junk'), jJunk = [], fJunk = path.join(dirJunk, 'writes-lost.json'); fs.mkdirSync(dirJunk, { recursive: true });
+    fs.writeFileSync(fJunk, '{"v":1,"byConversation":{"c-old0":[{"tor');
+    const junk = WL.create({ dataDir: dirJunk, now: () => t0 + 7, log: (...a) => jJunk.push(a.join(' ')), retryMs: 0 });
+    junk.note(rec({ uuid: 'new-3', session_id: 'c-new', transcript_session_ids: ['c-new'] }));
+    const aside = fs.readdirSync(dirJunk).filter((f) => f.includes('.unreadable-'));
+    check('⑱f r3 M2 …a file that parses as no store cannot heal by retrying: its bytes are set aside, named in the journal, and the warning is kept in a new file — the store is not stuck in memory for good', aside.length === 1 && fs.readFileSync(path.join(dirJunk, aside[0]), 'utf8').startsWith('{"v":1') && Object.keys(JSON.parse(fs.readFileSync(fJunk, 'utf8')).byConversation).join() === 'c-new' && jJunk.some((l) => l.includes(aside[0])), { aside, jJunk });
+    // THE WIRING: the hub installs it, the parse and the device feed call the same consumer
+    const wiring = read('src/server/mounts-plugins-wiring.js'), parse = read('src/server/stdout/claude-stream-json.js'), sb = read('src/server/session-brain.js');
+    check('⑱f the wiring: the hub installs the one store over data/; the parse and the device feed call the SAME noteWritesLost', /require\('\.\/writes-lost\.js'\)\.install\(\{ dataDir: path\.join\(rootDir, 'data'\) \}\)/.test(wiring) && /subtype === 'session_writes_lost'\) \{ try \{ brainRef\?\.noteWritesLost\?\.\(session, id, msg\)/.test(parse) && /subtype === 'session_writes_lost'\) noteWritesLost\(session, sid, msg\)/.test(sb));
+    // RED CONTROL, by behaviour: no store (r1, 668abfe5a) ⇒ the same restart shows nothing
+    WL.install(null);
+    const noStore = await rebuild('w-nostore');
+    check('⑱f RED CONTROL: with no store (668abfe5a) the same rebuild from the JSONL draws NO warning — the defect: the disk refused part of the conversation and the person comes back to silence', linesOf(noStore).length === 0 && noStore.messages.length === 3, orderOf(noStore));
+    check('⑱f the copies live outside the tree', MXd.files.every((f) => !f.startsWith(REPO)));
+  } finally { WL.install(null); if (hadDoc) globalThis.document = doc0; else delete globalThis.document; }
 }
 
 // ═══ ⑲ verify r5: THE ANSWER-SIDE CENSUS — one builder of a control_response, the 2.1.281 wire shape ═══
