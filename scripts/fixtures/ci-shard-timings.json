@@ -1,5 +1,5 @@
 {
- "about": "per-suite wall ms on the hosted Actions runner (2 lanes, 4 cpus) — the LPT split of `ci.mjs --heavy --shard i/n` reads ONLY this file (shardPlan); refresh with `node scripts/ci.mjs --shard-timings <gh run view --log output>…`",
+ "about": "per-suite wall ms on the hosted Actions runner (2 lanes, 4 cpus) — the LPT split of `ci.mjs --heavy --shard i/n` reads ONLY this file (shardPlan); refresh with `node scripts/ci.mjs --shard-timings <gh run view --log output>…` — STAND-INS (B-419b, int361 2026-11-07): test-chat-needs-card-chrome 304194 and test-chat-needs-strip-chrome 508926 are the box's alone walls × 1.21 (the runner factor), not runner walls; the first refresh after the split's mirror replaces them",
  "sources": [
   "41956440171-127012349835.log",
   "41956440171-127012349900.log",
