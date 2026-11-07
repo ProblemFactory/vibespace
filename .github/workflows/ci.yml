@@ -21,7 +21,7 @@ on:
   pull_request:
 jobs:
   fast:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 15 (B-f4cb). It was CANCELLED at 15 on .202/.203/.205: the tier had
     # grown back to 269 suites run one after another (792 s summed locally,
     # 1.3× that here). Lane fast-budget (2026-10-04) fixed or moved every
@@ -142,7 +142,7 @@ jobs:
   # below is the ONE status that reads green/red for the whole tier.
   heavy-shards:
     name: heavy ${{ matrix.shard }}/6
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -238,7 +238,7 @@ jobs:
   heavy:
     needs: heavy-shards
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: every heavy shard green
