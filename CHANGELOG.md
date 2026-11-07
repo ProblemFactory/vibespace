@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.384 — 2026-11-06
+
+### Fixed
+- Pressing a message named in a chat opens that chat's Outbox, waiting ones first, its card marked; the Channels chip's rows now show each one's state.
+
 ## 2.369.383 — 2026-11-06
 
 ### Changed
