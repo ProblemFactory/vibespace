@@ -9,6 +9,11 @@
 // ⑥⑦ (lane path-link-not-found, userW inc-mv1tlrix-eklc): a link that cannot be
 // opened is SAID (a toast: the path, the machine, a way on) and every link open's
 // end is an op-ring row — the path itself never.
+// ⑩ (lane card-door-in-chat, the owner 2026-11-07: a mail card in his agent's chat, its attachment row's ⤓ pressed ⇒
+// «已复制！» and no file — «这个按钮怎么是复制？！»): the chat's link delegation acts on the chat's OWN links only (a
+// .chat-link span, a bare markdown anchor); every card kind's door drawn inside the chat (a classed anchor,
+// src/lib/card-doors.js) is left to its card — no preventDefault, no copy, no flash, no menu. CONTROLS: the chat's own
+// links copy + flash as before. (⑨ is lane mask-value-shape's, the same train.)
 // ⑧ (lane agy-links-file-url, the owner 2026-10-21 in an Antigravity conversation: «文件链接怎么都点不了»): a path is a
 // path whatever syntax the harness writes it in — a `file:` URL (an anchor's, or bare), `<a href="/home/…">` — and
 // whatever script its first letter is (`标书研究/方案.md`); RED CONTROL = the base (the anchor dead, the path plain).
@@ -418,6 +423,128 @@ ok(!spans(baseDoc).length && tgt.fp === '/home/u/%E6%A0%87%E4%B9%A6%E7%A0%94%E7%
 eq(spans(base.renderMarkdown('the full output in a file at file:///home/u/x/out.txt.')), [`${P1}|data-path="///home/u/x/out.txt"|///home/u/x/out.txt`], '…a bare file: URL links only its ///… tail');
 eq(base.renderMarkdown('`标书研究/方案.md`').trim(), '<p><code>标书研究/方案.md</code></p>', '…the CJK-first relative path is plain text');
 eq(base.renderMarkdown(CONV).trim(), CONV_TODAY, '…and the base control renders it the same: agy-subagent-cards markConversationLinks / conversationLinksHtml sit outside this suite\'s pick-2 revert');
+
+console.log('⑩ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS — the chat\'s delegation acts on the chat\'s own links only, never a card\'s door (lane card-door-in-chat)');
+// The REAL delegation (⑥'s renderer: setupLinkHandler on LIST) over a fake DOM that reads the selectors it asks
+// (`.x`, `a[href]`) and a classList with a length, as a browser's. Every card kind that draws an
+// anchor inside the chat is one specimen — its classes and attributes as its module draws them.
+globalThis.document = DOC;
+const okd = (c, m, d) => ok(c, c || d === undefined ? m : `${m} — ${JSON.stringify(d).slice(0, 700)}`);
+class D extends El {
+  get classList() { const c = this._c; return { add: (...a) => a.forEach((x) => c.add(x)), remove: (...a) => a.forEach((x) => c.delete(x)), contains: (x) => c.has(x), toggle() {}, get length() { return c.size; } }; }
+  matches(sel) {
+    return String(sel).split(',').some((s) => {
+      const m = /^([a-z]*)((?:\.[\w-]+)*)(?:\[([\w-]+)(?:="([^"]*)")?\])?$/i.exec(s.trim());
+      if (!m) throw new Error('fake selector: ' + s);
+      const [, tag, cls, attr, val] = m;
+      if (tag && this.tagName !== tag.toUpperCase()) return false;
+      if (cls.split('.').filter(Boolean).some((c) => !this._c.has(c))) return false;
+      if (!attr) return true;
+      const v = attr.startsWith('data-') ? this.dataset[attr.slice(5).replace(/-([a-z])/g, (_, x) => x.toUpperCase())] : this.attrs[attr];
+      return v !== undefined && v !== null && (val === undefined || v === val);
+    });
+  }
+  closest(sel) { for (let n = this; n && typeof n.matches === 'function'; n = n.parentNode) if (n.matches(sel)) return n; return null; }
+}
+const node = (tag, cls = '', attrs = {}, data = {}) => { const n = new D(tag); n.className = cls; Object.assign(n.attrs, attrs); Object.assign(n.dataset, data); return n; };
+const under = (parent, ...kids) => { let p = parent; for (const k of kids) { p.appendChild(k); p = k; } return p; };   // a chain: each kid inside the one before
+// an event BUBBLES from its target up through the chat (each node's own listeners, then its parent's), stopped where a
+// listener stops it — as a browser's: a card's own handler runs before the chat's delegation sees anything
+const fire = (list, type, target, mods = {}) => { const e = { type, target, clientX: 5, clientY: 5, ctrlKey: false, metaKey: false, ...mods, dp: false, sp: false, preventDefault() { this.dp = true; }, stopPropagation() { this.sp = true; } }; for (let n = target; n && !e.sp; n = n.parentNode) for (const f of (n.ls && n.ls[type]) || []) f(e); return e; };
+const cardActs = [];   // what a card's OWN handler did (the open, the conversation) — the card's act, not the chat's
+const own = (a, act, { stop = false } = {}) => { a.addEventListener('click', (e) => { e.preventDefault(); if (stop) e.stopPropagation(); cardActs.push(act); }); return a; };
+const menus = () => DOC.body.children.filter((c) => c._c && c._c.has('context-menu'));
+const clearMenus = () => { for (const m of menus()) m.remove(); };
+const flashesOn = (n) => { const out = []; for (let p = n; p; p = p.parentNode) for (const c of p.children || []) if (c._c && c._c.has('chat-link-tooltip')) out.push(c.textContent); return out; };
+const chatMsg = (list = LIST) => under(list, node('div', 'chat-msg'));
+const API = '/api/channels/outbox/p-cd1/attachment/0';
+// THE CENSUS — every card kind that draws an anchor inside the chat's message list, its door as its module draws it
+const DOORS = [];
+{ // the Outbox card at the call row that filed it (channel-outbox renderProposalCard in chatProposalCards' box) — THE OWNER'S
+  const card = under(chatMsg(), node('div', 'chat-chan-props'), node('div', 'chan-prop chan-prop-awaiting-approval'));
+  const row = under(card, node('div', 'chan-prop-files'), node('div', 'chan-prop-file'));
+  const dl = under(row, node('a', 'chan-prop-file-dl', { href: API, download: '', title: 'Download notes.pdf' }));
+  DOORS.push(['the Outbox card: the attachment row\'s ⤓ — its icon pressed (the owner\'s press)', under(dl, node('svg', 'vs-icon'), node('path')), API]);
+  DOORS.push(['the Outbox card: the ⤓ anchor itself (Enter on it)', dl, API]);
+  DOORS.push(['the Outbox card: the file NAME (opens in the viewer by its own click)', own(under(row, node('a', 'chan-prop-file-name chan-prop-file-open', { href: API, title: 'Open notes.pdf' }, { open: 'viewer' })), 'viewer'), API, 'viewer']);
+  DOORS.push(['the Outbox card: a name with no preview (its download)', under(row, node('a', 'chan-prop-file-name', { href: API.replace(/0$/, '1'), download: '' })), API.replace(/0$/, '1')]);
+  DOORS.push(['the Outbox card: its conversation link (opens the conversation by its own click)', own(under(card, node('div', 'chan-prop-where'), node('a', 'chan-prop-link', { href: '#' })), 'conversation'), '#', 'conversation']);
+}
+DOORS.push(['the API card at its call row: the object\'s name (opens its conversation; its own handler stops the event, as before)', own(under(chatMsg(), node('div', 'chat-api-cards'), node('div', 'chan-api-card'), node('div', 'chan-api-head'), node('a', 'chan-api-obj', { href: '#' })), 'conversation', { stop: true }), '#', 'conversation']);
+DOORS.push(['the agent\'s file card (user-channel): the file\'s name opens its published page beside', under(chatMsg(), node('div', 'chat-userfile-list'), node('div', 'chat-userfile-row'), node('a', 'chat-userfile-link', { href: 'http://test/p/pgaaaaaaaaaa', target: '_blank', rel: 'noopener' })), 'http://test/p/pgaaaaaaaaaa']);
+DOORS.push(['the code-change card: the change\'s address opens beside', under(chatMsg(), node('div', 'chat-code-change-url'), node('a', 'chat-code-change-link', { href: 'https://example.com/acme/app/pull/12', target: '_blank', rel: 'noopener noreferrer' })), 'https://example.com/acme/app/pull/12']);
+for (const [what, target, href, act] of DOORS) {
+  reset(); clearMenus(); cardActs.length = 0;
+  const e = fire(LIST, 'click', target);
+  await tick();
+  const fl = flashesOn(target);
+  const did = act ? cardActs.length === 1 && cardActs[0] === act : !e.dp;   // its own handler ran once — or the browser's default is kept (the download, the tab)
+  okd(did && !clip.length && !fl.length && !menus().length && !ROWS.length, `CENSUS — ${what}: a click is the CARD'S (${act ? 'its own act' : 'the browser\'s default kept'}; no copy, no «Copied!», no row)`, { dp: e.dp, sp: e.sp, cardActs, clip, fl, href, rows: ROWS.map((r) => r.outcome) });
+}
+for (const [what, target] of [['⤓', DOORS[0][1]], ['file name', DOORS[2][1]]]) {
+  reset(); clearMenus();
+  const e = fire(LIST, 'contextmenu', target);
+  okd(!e.dp && !e.sp && !menus().length, `…a right-click on the Outbox card's ${what} keeps the browser's own menu (Save link as…) — never the chat's Open / Copy`, { dp: e.dp, menus: menus().map((m) => m.text) });
+}
+{ // a touch device: a tap on a link opens the chat's Open / Copy menu — never on a card's door
+  const LIST2 = new El('div');
+  const R2 = new R.constructor({ ws: null, sessionId: 's2', app: { ...APP, isTouch: true }, backend: 'claude', compact: false, messageList: LIST2, getSessionCtx: () => CTX });
+  const dl2 = under(chatMsg(LIST2), node('div', 'chat-chan-props'), node('div', 'chan-prop'), node('div', 'chan-prop-files'), node('div', 'chan-prop-file'), node('a', 'chan-prop-file-dl', { href: API, download: '' }));
+  const own2 = under(chatMsg(LIST2), node('span', 'chat-link chat-link-path', {}, { path: '/home/userW/x/notes.md' }));
+  reset(); clearMenus();
+  const e1 = fire(LIST2, 'click', dl2);
+  okd(R2 && !e1.dp && !menus().length && !clip.length, 'a TAP on the ⤓ (a touch device) downloads — never the chat\'s Open / Copy menu', { dp: e1.dp, menus: menus().length });
+  reset(); clearMenus();
+  const e2 = fire(LIST2, 'click', own2);
+  eq(menus().map((m) => m.children.map((c) => c.textContent).filter(Boolean)), [['Open', 'Copy path']], 'CONTROL: a tap on the chat\'s own path link still offers Open + Copy path');
+  okd(e2.dp, '…its default taken by the chat (as before)');
+  clearMenus();
+}
+// CONTROLS (law 4): the chat's OWN links are unchanged — a path span, a bare markdown anchor, a linkify span drawn inside a card
+{
+  const body = under(chatMsg(), node('div', 'chat-md'));
+  const span = under(body, node('span', 'chat-link chat-link-path', {}, { path: '/home/userW/x/notes.md' }));
+  const bare = under(body, node('a', '', { href: 'https://example.com/a?b=1&c=2', target: '_blank', rel: 'noopener noreferrer' }));
+  const inCard = under(chatMsg(), node('div', 'chat-chan-props'), node('div', 'chan-prop'), node('span', 'chat-link', {}, { href: 'https://example.com/b' }));
+  const sub = under(chatMsg(), node('span', 'chat-link chat-sub-link', {}, { sub: UUID }));
+  for (const [what, target, want] of [['the chat\'s path link', span, '/home/userW/x/notes.md'], ['a bare markdown anchor in the chat\'s text', bare, 'https://example.com/a?b=1&c=2'], ['a .chat-link span the linkify drew inside a card', inCard, 'https://example.com/b']]) {
+    reset(); clearMenus();
+    const e = fire(LIST, 'click', target);
+    await tick();
+    okd(e.dp && e.sp && clip.length === 1 && clip[0] === want && flashesOn(target).includes('Copied!') && ROWS.some((r) => r.outcome === 'copied'), `CONTROL — ${what}: a click still COPIES (${want}) and flashes «Copied!» (the chat's own, unchanged)`, { dp: e.dp, clip, fl: flashesOn(target) });
+  }
+  reset(); clearMenus();
+  const e3 = fire(LIST, 'contextmenu', span);
+  eq(menus().map((m) => m.children.map((c) => c.textContent).filter(Boolean)), [['Open', 'Copy path']], 'CONTROL — a right-click on the chat\'s path link still offers Open + Copy path');
+  okd(e3.dp, '…the browser\'s menu replaced by the chat\'s (as before)');
+  clearMenus(); reset();
+  const e4 = fire(LIST, 'click', sub);
+  okd(!e4.dp && !clip.length, 'CONTROL — a conversation:// link stays ChatView\'s (agy-subagent-cards, unchanged)');
+}
+// THE STATIC CENSUS: every module that draws a card INTO the chat's message list — each anchor it makes carries a class
+// (the mark the boundary reads). A new card that draws a bare anchor into the chat reds here by file:line. (Measured in
+// round 2 with the real row renderer: the For-you card's rows draw no anchor at all — escaped text + .fy-link spans.)
+const CHAT_CARD_MODULES = ['src/lib/chat-renderers.js', 'src/lib/chat-view.js', 'src/user-channel.js', 'src/collab-row.js', 'src/lib/channel-touch-view.js', 'src/lib/channel-outbox.js', 'src/lib/channel-api-card-view.js', 'src/lib/chat-needs-card.js', 'src/lib/user-todos-row.js', 'src/lib/artifact-card.js', 'src/lib/browser-proposal-card.js', 'src/lib/subagent-card.js', 'src/lib/chat-run-summary.js', 'src/lib/peer-card-model.js'];
+const anchorSites = (src, file) => {
+  const out = [];
+  src.split('\n').forEach((line, i) => {
+    const tr = line.trim();
+    if (/^(\/\/|\*|\/\*)/.test(tr)) return;   // a comment names an anchor, it draws none
+    for (const m of line.matchAll(/createElement\('a'\)|\bel\('a',\s*('[^']*'|`[^`]*`|[\w.]+)|(?<!\/)<a\s[^>]*/g)) {
+      let classed;
+      if (m[0].startsWith('createElement')) classed = /\.className = '[^']+'/.test(line.slice(m.index) + src.split('\n')[i + 1]);
+      else if (m[0].startsWith('el(')) classed = !/^''$/.test(m[1]);
+      else classed = /\sclass="[^"]+"/.test(m[0]);
+      out.push({ at: `${file}:${i + 1}`, classed });
+    }
+  });
+  return out;
+};
+const sites = CHAT_CARD_MODULES.flatMap((f) => anchorSites(fs.readFileSync(path.join(ROOT, f), 'utf8'), f));
+okd(sites.length >= 8 && sites.every((x) => x.classed), `STATIC CENSUS — ${CHAT_CARD_MODULES.length} modules that draw cards into the chat: each of their ${sites.length} anchor sites carries a class (${[...new Set(sites.map((x) => x.at.split(':')[0].split('/').pop()))].join(', ')})`, sites.filter((x) => !x.classed));
+const bareSite = anchorSites("const dl = document.createElement('a');\n  dl.href = url;\nreturn `<a href=\"${u}\">x</a>`;", 'mutant.js');
+okd(bareSite.length === 2 && bareSite.every((x) => !x.classed), 'STATIC CENSUS CONTROL: an anchor made with no class (by createElement or in a template) is caught by file:line', bareSite);
+globalThis.document = saved.document;
 fs.rmSync(SCR, { recursive: true, force: true });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

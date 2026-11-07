@@ -29,8 +29,15 @@
 //      opens the card) ⇒ «已添加表情回应», sent, the chat's copy says so too. RED on 90c995a3: the toast is the refusal.
 //      (A recall cannot be proposed on this fake hub — the fake vendor's messages are never the user's own; its road is
 //      test-channel-outbox's: the real card posts the digest, the real route + engine + fake vendor take it back.)
+//   ⑧ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS (lane card-door-in-chat — the owner, 2026-11-07: a mail card in his
+//      agent's chat, its PDF row's ⤓ pressed ⇒ the toast «已复制！» and no file: «这个按钮怎么是复制？！»). Turn 4 replies
+//      with `--attach` a real PDF; in the CHAT: a REAL press on the row's ⤓ ⇒ the browser's download lands with the
+//      file's bytes (size + sha256) and nothing is copied or flashed; the name ⇒ the viewer opens it (no copy); the card's
+//      conversation link ⇒ the conversation opens (no copy); a right-click on the ⤓ ⇒ never the chat's Open / Copy menu.
+//      CONTROL (the chat's own text unchanged): the path the agent wrote, pressed ⇒ copied + «已复制！». RED on c6ddc30e6.
 // PNGs: $CPC_SHOTS (default: the scratch dir) chat-card-zh.png, chat-card-sent-zh.png, chat-card-phone-zh.png,
-// chat-reaction-card-zh.png, chat-reaction-sent-zh.png, outbox-reaction-sent-zh.png.
+// chat-reaction-card-zh.png, chat-reaction-sent-zh.png, outbox-reaction-sent-zh.png, chat-door-card-zh.png,
+// chat-door-pressed-zh.png.
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-chat-proposal-card.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -57,6 +64,10 @@ const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 const SID = 'c9a20000-0000-4000-8000-00000000c9a2';
 const CONV = 'fake-poll/fake-poll-ops';
+// ⑧ (lane card-door-in-chat): a small real PDF the agent attaches — a neutral name, invented words
+const NOTES = path.join(CWD, 'meeting-notes.pdf');
+const NOTES_BYTES = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n% the team notes for a door test\n%%EOF\n');
+fs.writeFileSync(NOTES, NOTES_BYTES);
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,6 +100,11 @@ const TURNS = {
     { id: 'toolu_cpc3d', command: `vibespace-channels react ${CONV} fake-poll-ops-m2 rocket`, argvs: [['react', CONV, 'fake-poll-ops-m2', 'rocket']] },
     { id: 'toolu_cpc3e', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
     { id: 'toolu_cpc3f', command: `vibespace-channels react ${CONV} fake-poll-ops-m3 wave`, argvs: [['react', CONV, 'fake-poll-ops-m3', 'wave']] },
+  ] },
+  // ⑧ (lane card-door-in-chat): a reply with a real PDF attached; the agent's words name the file's path (the control)
+  'send the notes': { k: 4, text: `Attached the notes — the file is ${NOTES}`, calls: [
+    { id: 'toolu_cpc4a', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc4b', command: `vibespace-channels reply ${CONV} "The notes are attached" --attach ${NOTES}`, argvs: [['reply', CONV, 'The notes are attached', '--attach', NOTES]] },
   ] },
 };
 const stubPath = path.join(stubDir, 'claude');
@@ -144,7 +160,7 @@ process.stdin.on('end', () => process.exit(0));
 
 let srv = null;
 const LOG = path.join(stubDir, 'server.log');
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_FILES: '1' /* ⑧: the poll fake takes an agent's files (lane composer-file-only-send's seam) */ }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 startServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -424,6 +440,102 @@ try {
   await evalJs(`(() => { const w = [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(sid)}); app.wm.focusWindow(w[0]); for (const [id, x] of app.wm.windows) if (x && x.type === 'channel-outbox') app.wm.closeWindow(id); return true; })()`);
   const chat8 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx3))}); return !!c && c.classList.contains('chan-prop-sent'); })()`, 10000);
   check('…and the chat\'s copy of that card says sent (one record)', chat8);
+
+  // ── ⑧ a door in the chat does what its icon says (lane card-door-in-chat) ──
+  console.log('⑧ A DOOR IN THE CHAT DOES WHAT ITS ICON SAYS: the attachment row\'s ⤓ downloads, the name opens, nothing copies');
+  const DL = path.join(stubDir, 'downloads');
+  fs.mkdirSync(DL, { recursive: true });
+  await cdp('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
+  await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'send the notes' }); true`);
+  const pid4 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?conv=${encodeURIComponent(CONV)}').then((x) => x.json()); const p = (r.proposals || []).find((q) => q.state === 'awaiting-approval' && (q.attachments || []).some((a) => a.name === 'meeting-notes.pdf')); return p ? p.id : null; })()`, 25000);
+  check('turn 4 filed a reply with the PDF attached, awaiting approval (the store\'s)', !!pid4, turnsLog().split('\n').filter((l) => l.startsWith('toolu_cpc4')).map((l) => l.slice(0, 400)));
+  // the session's earlier attaches (④ ⑤ ⑥) left views whose lists hold the same card, hidden behind: every press and
+  // every shot aims inside THE list on screen, marked once (a list lives as long as its view; a message re-renders)
+  const LIST4 = '.chat-message-list[data-cdc-list="1"]';
+  const DCARD = (pid) => `${LIST4} .chat-chan-props > .chan-prop[data-proposal="${pid}"]`;
+  const DMSG = () => `${LIST4} .chat-msg:has(.chan-prop[data-proposal="${pid4}"])`;
+  const DDL = `${DCARD(pid4)} .chan-prop-file-dl`, DNAME = `${DCARD(pid4)} a.chan-prop-file-name`, DLINK = `${DCARD(pid4)} a.chan-prop-link`;
+  const PATHSPAN = `${LIST4} .chat-link-path[data-path="${NOTES}"]`;
+  const onScreen4 = await waitFor(`(() => { const all = [...document.querySelectorAll('.chat-message-list')].filter((l) => l.querySelector(${JSON.stringify(`.chat-chan-props > .chan-prop[data-proposal="${pid4}"] .chan-prop-file-dl`)}) && l.querySelector(${JSON.stringify(`.chat-link-path[data-path="${NOTES}"]`)})); const v = all.find((l) => { const q = l.getBoundingClientRect(); return q.width > 0 && q.height > 0; }); if (!v) return null; v.dataset.cdcList = '1'; return { lists: all.length }; })()`, 20000);
+  // the turn's last records land and the card repaints: press once the list has been quiet for a second (≤ 8 s)
+  const settled4 = onScreen4 && await evalJs(`new Promise((res) => { const l = document.querySelector(${JSON.stringify(LIST4)}); let last = Date.now(); const t0 = last; const mo = new MutationObserver(() => { last = Date.now(); }); mo.observe(l, { subtree: true, childList: true, characterData: true }); (function w() { const now = Date.now(); if (now - last >= 1000 || now - t0 > 8000) { mo.disconnect(); return res(now - t0); } setTimeout(w, 100); })(); })`);
+  const drawn4 = !!onScreen4;
+  // the probes: every copy (the clipboard door and the fallback), every «Copied!» flash, every open, and whether the
+  // press reached the page's top unprevented (the browser's own act) — read, never answered
+  await evalJs(`(() => {
+    window.__cdc = { copied: [], flashes: [], opened: [], channels: [], clicks: [], menus: [] };
+    const cb = navigator.clipboard;
+    if (cb && cb.writeText) { const w = cb.writeText.bind(cb); cb.writeText = (t) => { window.__cdc.copied.push(String(t)); return w(t); }; }
+    const ex = document.execCommand.bind(document);
+    document.execCommand = (c, ...r) => { if (c === 'copy') window.__cdc.copied.push('(fallback) ' + String(document.activeElement && document.activeElement.value)); return ex(c, ...r); };
+    new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('chat-link-tooltip')) window.__cdc.flashes.push(n.textContent); }).observe(document.body, { childList: true, subtree: true });
+    const of = app.openFile; app.openFile = function (x, ...r) { window.__cdc.opened.push(x && typeof x === 'object' ? { rawUrl: x.rawUrl, fileName: x.fileName } : { path: x }); return of.call(this, x, ...r); };
+    const oc = app.openChannel; app.openChannel = function (a, c, ...r) { window.__cdc.channels.push(a + '/' + c); return oc.call(this, a, c, ...r); };
+    document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a'); window.__cdc.clicks.push({ cls: a ? a.className : null, prevented: e.defaultPrevented }); });
+    document.addEventListener('contextmenu', (e) => { const a = e.target.closest && e.target.closest('a'); window.__cdc.menus.push({ cls: a ? a.className : null, prevented: e.defaultPrevented }); e.preventDefault(); });
+    return true; })()`);
+  const probe = () => evalJs('JSON.parse(JSON.stringify(window.__cdc))');
+  const probeReset = () => evalJs('(() => { for (const k of Object.keys(window.__cdc)) window.__cdc[k] = []; document.querySelectorAll(".context-menu, .chat-link-tooltip").forEach((n) => n.remove()); return true; })()');
+  const closeOthers = () => evalJs(`(() => { const w = [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(sid)}); for (const [id, x] of app.wm.windows) if (x && w && id !== w[0]) app.wm.closeWindow(id); if (w) app.wm.focusWindow(w[0]); return true; })()`);
+  const row4 = drawn4 ? await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(DDL)}); const n = document.querySelector(${JSON.stringify(DNAME)}); return { dl: d.getAttribute('href'), download: d.hasAttribute('download'), title: d.title, name: n ? n.textContent : null, open: n ? n.dataset.open || null : null, meta: (d.parentNode.querySelector('.chan-prop-file-meta') || {}).textContent || '' }; })()`) : null;
+  check('the chat draws the card with its attachment row: the name (opens in the viewer), «PDF · …», the ⤓ (a download anchor titled 下载…)', !!row4 && row4.name === 'meeting-notes.pdf' && row4.open === 'viewer' && row4.download && /^\/api\/channels\/outbox\/[^/]+\/attachment\/0$/.test(row4.dl) && /^PDF · /.test(row4.meta) && /下载/.test(row4.title), { row4, onScreen4, settled4 });
+  check('chat-door-card-zh.png', await shot('chat-door-card-zh.png', DMSG(), 8));
+
+  // 1. the ⤓: the browser's download — the file's name, its bytes — and nothing copied, nothing flashed
+  await closeOthers(); await probeReset();
+  const before4 = new Set(fs.readdirSync(DL));
+  const pressedDl = await realClick(DDL);
+  await waitFor('window.__cdc.flashes.length > 0', 700);   // a «Copied!» lands after the clipboard's promise — the shot shows it if there is one
+  check('chat-door-pressed-zh.png', await shot('chat-door-pressed-zh.png', DMSG(), 8));
+  let saved = null;
+  for (let i = 0; i < 60 && !saved; i++) { await sleep(150); const f = path.join(DL, 'meeting-notes.pdf'); if (fs.existsSync(f) && fs.statSync(f).size === NOTES_BYTES.length) saved = fs.readFileSync(f); }
+  const p1 = await probe();
+  const sha = (b) => require('node:crypto').createHash('sha256').update(b).digest('hex');
+  check('a REAL press on the ⤓ IN THE CHAT ⇒ the browser DOWNLOADS it: «meeting-notes.pdf», the file\'s bytes (size + sha256)', pressedDl && !!saved && saved.equals(NOTES_BYTES) && sha(saved) === sha(NOTES_BYTES), { pressed: pressedDl, miss: lastMiss, files: fs.readdirSync(DL).filter((f) => !before4.has(f)), size: saved ? saved.length : null, want: NOTES_BYTES.length });
+  check('…NOTHING is copied and no «已复制！» flashes (the base copied the attachment\'s /api/… address)', p1.copied.length === 0 && p1.flashes.length === 0, p1);
+  check('…the press reached the page unprevented — the browser\'s own act, not the chat\'s', p1.clicks.length === 1 && p1.clicks[0].cls === 'chan-prop-file-dl' && p1.clicks[0].prevented === false, p1.clicks);
+
+  // 2. the name: opens in the viewer, never copies
+  await probeReset();
+  const pressedName = await realClick(DNAME);
+  const p2 = await waitFor('window.__cdc.opened.length ? JSON.parse(JSON.stringify(window.__cdc)) : null', 4000) || await probe();
+  await sleep(300);
+  const p2b = await probe();
+  check('a REAL press on the file NAME in the chat ⇒ the viewer opens THIS attachment (its /api/… bytes, its name)', pressedName && p2.opened.length === 1 && /\/attachment\/0$/.test(p2.opened[0].rawUrl || '') && p2.opened[0].fileName === 'meeting-notes.pdf', { pressedName, miss: lastMiss, p2 });
+  check('…and nothing is copied, no «已复制！» (the base opened AND copied)', p2b.copied.length === 0 && p2b.flashes.length === 0, p2b);
+  await closeOthers();
+
+  // 3. the card's conversation link: opens the conversation, never copies «#»
+  await probeReset();
+  const hasLink = await evalJs(`!!document.querySelector(${JSON.stringify(DLINK)})`);
+  const pressedLink = hasLink && await realClick(DLINK);
+  const p3 = await waitFor('window.__cdc.channels.length ? JSON.parse(JSON.stringify(window.__cdc)) : null', 4000) || await probe();
+  await sleep(300);
+  const p3b = await probe();
+  check('a REAL press on the card\'s conversation link in the chat ⇒ that conversation opens, nothing copied, no flash', pressedLink && p3.channels.length === 1 && p3b.copied.length === 0 && p3b.flashes.length === 0, { hasLink, pressedLink, miss: lastMiss, p3b });
+  await closeOthers();
+
+  // 4. a right-click on the ⤓: the browser's own menu (Save link as…), never the chat's Open / Copy path
+  await probeReset();
+  const r4 = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(DDL)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); return { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }; })()`);
+  if (r4) {
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r4.x, y: r4.y });
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r4.x, y: r4.y, button: 'right', clickCount: 1 });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r4.x, y: r4.y, button: 'right', clickCount: 1 });
+    await sleep(400);
+  }
+  const p4 = await probe();
+  const menu4 = await evalJs('[...document.querySelectorAll(".context-menu")].map((m) => m.textContent)');
+  check('a REAL right-click on the ⤓ ⇒ never the chat\'s «打开 / 复制路径» menu; the event reaches the page unprevented (the browser\'s menu)', !!r4 && menu4.length === 0 && p4.menus.length === 1 && p4.menus[0].cls === 'chan-prop-file-dl' && p4.menus[0].prevented === false, { menu4, menus: p4.menus });
+  await evalJs('(() => { document.querySelectorAll(".context-menu").forEach((n) => n.remove()); return true; })()');
+
+  // CONTROL (law 4 — the chat's own text unchanged): the path the agent wrote, pressed ⇒ copied, «已复制！»
+  await probeReset();
+  // the list holds the agent's words twice (a folded copy draws 0×0): aim at the one on screen
+  const seen5 = await evalJs(`(() => { const all = [...document.querySelectorAll(${JSON.stringify(PATHSPAN)})]; const v = all.find((e) => { const q = e.getBoundingClientRect(); return q.width > 0 && q.height > 0; }); if (v) v.dataset.cdcOwn = '1'; return { n: all.length, shown: !!v }; })()`);
+  const pressedPath = seen5.shown && await realClick(`${LIST4} [data-cdc-own="1"]`);
+  const p5 = await waitFor('window.__cdc.flashes.length ? JSON.parse(JSON.stringify(window.__cdc)) : null', 4000) || await probe();
+  check('CONTROL: the chat\'s OWN path link (the agent\'s words) still copies — the path, «已复制！» — and opens nothing', pressedPath && p5.copied.includes(NOTES) && p5.flashes.includes('已复制！') && p5.opened.length === 0, { seen5, pressedPath, miss: lastMiss, p5 });
 
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {

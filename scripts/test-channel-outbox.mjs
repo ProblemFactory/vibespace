@@ -2065,6 +2065,45 @@ async function chatReadLegs(ENGmod, name) {
         await esbuild.build({ stdin: { contents: oSrc.replace(ONCLICK, "name.setAttribute('download', '');"), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'channel-outbox.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: mOut, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [stubBuildVersion] });
         const vm1 = judgeRows(await import(mOut));
         ok(!vm1.viewer, 'outbox-attachment-preview CONTROL: a row that DOWNLOADS on a click ⇒ the viewer leg is RED', JSON.stringify(vm1));
+        // lane card-door-in-chat (the owner 2026-11-07: this card's ⤓, drawn in his agent's chat, said «已复制！» — the chat's
+        // link delegation took it): THE boundary (src/lib/card-doors.js chatLinkOf — what the delegation acts on) judged over
+        // EVERY element of the REAL card, set inside a chat message — none is the chat's, each door stays the card's.
+        // CONTROLS in the same message: a bare markdown anchor and a .chat-link span ARE the chat's; the pre-lane rule (the
+        // delegation's two closest() calls) takes the card's doors — the defect, on the real card. This fake DOM reflects
+        // .href to the attribute and gives classList a length, as a browser does.
+        {
+          let CD = null; try { CD = await import(path.join(REPO, 'src/lib/card-doors.js')); } catch {}
+          ok(!!CD && typeof CD.chatLinkOf === 'function', 'card-door-in-chat: THE boundary exists (src/lib/card-doors.js chatLinkOf)');
+          const preLane = (t) => { const l = t.closest('.chat-link') || t.closest('a[href]'); return l && !l.classList.contains('chat-sub-link') ? l : null; };
+          const verdict = CD ? CD.chatLinkOf : preLane;   // a tree without the boundary is judged by what its delegation did
+          const appC = { openFile() {}, openChannel() {}, openChannelOutbox() {} };
+          const msg = document.createElement('div'); msg.className = 'chat-msg';
+          const box = document.createElement('div'); box.className = 'chat-chan-props'; msg.appendChild(box);
+          const cards = [['a reply with six files (picture, .md, .pdf, .docx, .zip, .html)', CO.renderProposalCard(appC, pv)],
+            ['the same reply, its files gone', CO.renderProposalCard(appC, { ...pv, id: 'p-cd2', state: 'sent', attachmentsGoneAt: 1 })],
+            ['a new message in a known conversation (Open the conversation)', CO.renderProposalCard(appC, { ...pv, id: 'p-cd3', compose: { to: ['ada@example.com'], cc: [], subject: 'Notes' }, attachments: [] })]];
+          for (const [, c] of cards) box.appendChild(c);
+          const bare = document.createElement('a'); bare.setAttribute('href', 'https://example.com/a'); msg.appendChild(bare);
+          const span = document.createElement('span'); span.className = 'chat-link chat-link-path'; span.dataset.path = '/home/userW/x/a.md'; msg.appendChild(span);
+          const all = [msg, ...msg._all()];
+          for (const e of all) {
+            if (e.nodeType !== 1) continue;
+            Object.defineProperty(e.classList, 'length', { get: () => e._cls.size, configurable: true });
+            if (e.tagName === 'A' && typeof e.href === 'string' && e.getAttribute('href') === null) e.setAttribute('href', e.href);
+          }
+          for (const [what, c] of cards) {
+            const els = [c, ...c._all()].filter((e) => e.nodeType === 1);
+            const doors = els.filter((e) => e.tagName === 'A');
+            const taken = els.filter((e) => verdict(e) !== null);
+            ok(doors.length >= 1 && !taken.length, `card-door-in-chat CENSUS — ${what}: none of its ${els.length} elements is the chat's link (its ${doors.length} anchors: ${[...new Set(doors.map((d) => d.className))].join(', ')})`, JSON.stringify(taken.map((e) => e.tagName + '.' + e.className)));
+            ok(doors.every((d) => d._cls.size > 0), `…every anchor it draws carries a class (the mark the boundary reads)`, JSON.stringify(doors.map((d) => d.className)));
+          }
+          ok(verdict(bare) === bare && verdict(span) === span, 'card-door-in-chat CONTROL: in the same message a bare markdown anchor and a .chat-link span ARE the chat\'s (its copy / open, unchanged)');
+          const dl0 = find(cards[0][1], 'chan-prop-file-dl')[0];
+          const icon0 = dl0 && dl0._all().find((e) => e.nodeType === 1);
+          const pre = [...cards[0][1]._all(), ...cards[2][1]._all()].filter((e) => e.nodeType === 1 && e.tagName === 'A' && preLane(e));
+          ok(!!icon0 && preLane(icon0) === dl0 && pre.length >= 11, `card-door-in-chat RED CONTROL: the pre-lane rule takes the ⤓ from its own icon, and ${pre.length} doors of the real cards — what said «已复制！»`, JSON.stringify({ icon: icon0 && icon0.tagName, n: pre.length }));
+        }
         // lane compose-chip-open (owner 2026-10-09 "上传上去的文件不能查看预览"): a file still in the owner's reply box opens
         // through THE SAME door from its local File — a blob: URL minted on the first open, reused after; a picture's
         // blob URL goes to the overlay WITHOUT ?inline=1 (a query on a blob URL names no blob: fetch fails — measured

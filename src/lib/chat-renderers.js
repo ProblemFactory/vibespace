@@ -24,6 +24,7 @@ import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model ech
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, fileUrlPath, hrefPath, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
 import { mcpParts } from './chat-run-summary.js';
+import { chatLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
@@ -2919,9 +2920,11 @@ class ChatRenderers {
   setupLinkHandler() {
     const isTouch = this.app?.isTouch || this.app?.isMobile;
     this._messageList.addEventListener('click', (e) => {
-      // Handle both our .chat-link spans and markdown-generated <a> tags
-      const link = e.target.closest('.chat-link') || e.target.closest('a[href]');
-      if (!link || link.classList.contains('chat-sub-link')) return; // lane agy-subagent-cards: a conversation:// link is ChatView's (it opens the sub)
+      // Our .chat-link spans and the markdown's bare <a> tags (chatLinkOf). A card's door (a classed anchor: the Outbox
+      // card's ⤓ / file name, a file card's link) does its own act (lane card-door-in-chat — the owner's ⤓ said
+      // «已复制！»); a conversation:// link is ChatView's (lane agy-subagent-cards)
+      const link = chatLinkOf(e.target);
+      if (!link) return;
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
@@ -2944,8 +2947,8 @@ class ChatRenderers {
     // Right-click / long-press on a link: same Open/Copy menu (desktop native
     // menu has no useful actions for .chat-link spans)
     this._messageList.addEventListener('contextmenu', (e) => {
-      const link = e.target.closest('.chat-link') || e.target.closest('a[href]');
-      if (!link || link.classList.contains('chat-sub-link')) return;
+      const link = chatLinkOf(e.target);   // a card's door keeps the browser's own menu (Save link as…)
+      if (!link) return;
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
