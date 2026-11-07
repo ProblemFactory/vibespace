@@ -45,7 +45,7 @@
 //   ⑨c ONE ROOM UNDER THE BAR (r5 K1 / K2) — every surface (the «+» sheet, the ⋯ menu, the Desktops sheet, the Usage popup, the
 //      Settings popover, the mini inbox's rule, the bar's own title switcher) with TALL content (40 rows of 44 px) at 360 px: its bottom
 //      ≤ the screen − 12 px and its last row reached by its own scroll — locked → unlocked → re-locked AND unlocked → locked → unlocked,
-//      in en and in ja (the lock strip on three lines); the switcher FLUSH under the bar, following; the Usage popup from the ⋯ row:
+//      in en and in ja (the bar under the lock strip, following the strip's OWN measured height); the switcher FLUSH under the bar, following; the Usage popup from the ⋯ row:
 //      its inline room from the bar, never its folded chip's zero rect — CONTROLS: r4's rooms (the screen − 60 px) put back on the
 //      page's rules RED by name; r4's switcher (no rule — placed once) RED
 //   ④ THE + ROAD (LAW 3) — a real long-press on «+»: the sheet lists Files; its row opens the explorer; a second time its hint names
@@ -676,7 +676,7 @@ else await (async () => {
   // the lock strip a TALL sheet ran ~102 px past the screen, html/body overflow:hidden, its tail unreachable; the Usage popup from the
   // ⋯ row took its inline room from its folded chip's ZERO rect) and the bar's own title switcher (r5 K2: placed once, at open — after
   // an unlock a 114 px gap): every surface with 40 rows — its bottom ≤ the screen − 12 px (the base's margin), its last row reached by
-  // its own scroll, under the bar (the switcher flush) — in BOTH open orders, en and ja (the strip on three lines). CONTROLS: r4's
+  // its own scroll, under the bar (the switcher flush) — in BOTH open orders, en and ja (the strip at its own height). CONTROLS: r4's
   // rooms put back on the page's own rules (the screen − 60 px, plain; the context menus none) RED by name; r4's switcher RED ──
   console.log('⑨c one room under the bar — every surface with tall content (r5 K1 / K2)');
   const ROOMGEO = (sel) => `(() => { const s = document.querySelector(${JSON.stringify(sel)}), nav = document.getElementById('mobile-nav').getBoundingClientRect();
@@ -748,10 +748,28 @@ else await (async () => {
     ok(!!s1 && !!s2 && Math.abs(s1.top - s1.navBottom) <= 1 && s2.top - s2.navBottom > 50, `⑨c K2 CONTROL — r4's switcher (no rule: placed once, at open): opened locked at ${s1?.top} (the bar's bottom ${s1?.navBottom}), after an unlock it stays at ${s2?.top} over the bar's ${s2?.navBottom} — a ${s2 ? Math.round(s2.top - s2.navBottom) : '?'} px gap — RED`, { s1, s2 });
     await shutAll(); await vault(false); await sleep(250); await settle();
   }
-  // ja: the lock's strip on THREE lines (the bar lower still) — the same rule
+  // ja: the lock's strip in ja's words — the same rule. THE LAW (the .386 train's seam, int361): the bar sits UNDER the strip, following
+  // the strip's OWN rendered height, and every surface's room follows that bar. Never a cross-language premise: r5 asserted ja's bar lower
+  // than en's, and on the runner's fonts (DejaVu Sans) the en strip wraps as tall as ja's (the ci/int386 mirror: ja 162 against en 163,
+  // the same on its retry; this box's fonts: ja lower). Measured here: the strip's lines (its text's line boxes) and its height, the
+  // bar's top against the strip's bottom; CONTROL: the strip gone (unlocked) ⇒ the bar higher by the strip's own height.
   await device(360, 780); await load('ja'); await dress({ title: OWNER }); await shutAll();
   await roomRun('ja');
-  ok(lockedAt.ja > lockedAt.en, `⑨c ja: the lock strip's three lines put the bar lower (its bottom ${lockedAt.ja} against en's ${lockedAt.en}) — every surface's room followed it`, lockedAt);
+  {
+    const STRIPGEO = `(() => { const st = document.getElementById('vault-lock-strip'), nav = document.getElementById('mobile-nav').getBoundingClientRect(), q = (n) => Math.round(n * 10) / 10;
+      const s = st && st.getClientRects().length ? st.getBoundingClientRect() : null, tx = st && st.querySelector('.vls-text');
+      let lines = null; if (tx) { const r = document.createRange(); r.selectNodeContents(tx); lines = new Set([...r.getClientRects()].filter((b) => b.width > 0).map((b) => Math.round(b.top))).size; }
+      return { strip: s ? { top: q(s.top), bottom: q(s.bottom), h: q(s.height) } : null, lines, navTop: q(nav.top), navBottom: q(nav.bottom) }; })()`;
+    await shutAll(); await vault(true); await sleep(300); await settle();
+    const sj = await evalJs(STRIPGEO);
+    await vault(false); await sleep(300); await settle();
+    const uj = await evalJs(STRIPGEO);
+    ok(!!sj && !!sj.strip && Math.abs(sj.navTop - sj.strip.bottom) <= 1 && Math.abs(sj.navBottom - lockedAt.ja) <= 1,
+      `⑨c ja: the lock strip's ${sj?.lines} line(s) — its own height ${sj?.strip?.h} px, its bottom ${sj?.strip?.bottom} — put the bar under it (the bar's top ${sj?.navTop}, its bottom ${sj?.navBottom}) — the bar every surface's room followed above (${lockedAt.ja}; en's ${lockedAt.en}, its own fonts' wrap)`, { sj, lockedAt });
+    ok(!!sj && !!sj.strip && !!uj && !uj.strip && uj.navTop < sj.navTop && Math.abs((sj.navTop - uj.navTop) - sj.strip.h) <= 1,
+      `⑨c ja CONTROL — the strip gone (unlocked): the bar higher by the strip's own height (its top ${uj?.navTop} against ${sj?.navTop} locked: ${sj && uj ? Math.round((sj.navTop - uj.navTop) * 10) / 10 : '?'} px for a ${sj?.strip?.h}-px strip)`, { sj, uj });
+    await shutAll(); await vault(false); await sleep(250); await settle();
+  }
   await load('en');
 
   // ── ⑩ A PRESS ENDS ON ITS ROW (r3 F2): the ⋯ PATCHED by key, its rows held still under a press ──
