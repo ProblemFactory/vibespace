@@ -121,7 +121,7 @@ const fs = require('fs'), path = require('path');
 const ROOT = ${S(ROOT)};
 const args = process.argv.slice(2);
 if (args.includes('--version') || args[0] === '-v') { process.stdout.write('2.1.281 (Claude Code)\\n'); process.exit(0); }
-fs.appendFileSync(ROOT + '/stub-env.ndjson', JSON.stringify({ pid: process.pid, args, api: !!process.env.VIBESPACE_API, token: !!process.env.VIBESPACE_SESSION_TOKEN }) + '\\n');
+if (!args.includes('--output-format')) fs.appendFileSync(ROOT + '/stub-env.ndjson', JSON.stringify({ pid: process.pid, args, api: !!process.env.VIBESPACE_API, token: !!process.env.VIBESPACE_SESSION_TOKEN }) + '\\n');
 if (!args.includes('--output-format')) { setInterval(() => {}, 1e6); return; }
 const SID = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : 'e2e00000-0000-4000-8000-' + String(process.pid).padStart(12, '0'); // a resume keeps its conversation id (§16)
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
@@ -132,6 +132,8 @@ process.stdin.setEncoding('utf8');
 // that arrives while a turn runs — a stub that never ends one would hold every later send)
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); fs.appendFileSync(ROOT + '/stub-stdin.ndjson', line + '\\n'); let m = null; try { m = JSON.parse(line); } catch {} if (m && m.type === 'user') out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 1, result: '', session_id: SID, total_cost_usd: 0 }); } });
 const done = new Set((() => { try { return fs.readdirSync(ROOT + '/cmds'); } catch { return []; } })()); // a stub started later never replays earlier commands (§16: a resumed stub replayed §5's prompt-context and drained its own stash)
+// its pid is written AFTER that snapshot: «pid visible» = «ready» — a command written between the two was snapshotted and never run (the .383 runner's ⑤ {len:0})
+fs.appendFileSync(ROOT + '/stub-env.ndjson', JSON.stringify({ pid: process.pid, args, api: !!process.env.VIBESPACE_API, token: !!process.env.VIBESPACE_SESSION_TOKEN }) + '\\n');
 setInterval(() => {
   let names = [];
   try { names = fs.readdirSync(ROOT + '/cmds').filter((n) => n.endsWith('.json')); } catch { return; }
