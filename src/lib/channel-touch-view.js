@@ -69,7 +69,7 @@ const REFETCH_MS = 250;
 const clock = (at) => { const d = new Date(Number(at) || 0); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
 /** The ONE way a touched conversation is opened (the card row, the chip's menu). The verdict is PURE
- *  (T.openVerdict): an agent's SEARCH row opens the search results scoped to that conversation — the agent's query,
+ *  (T.openVerdict): a row whose NEWEST op is a search opens the search results scoped to that conversation — the agent's query,
  *  its hits (lane channel-search-view, .212; the owner 2026-10-04: a click opened the first hit's conversation, the
  *  hits were nowhere to be seen); a read opens the conversation; a row that names a proposal the Outbox — lane outbox-chip-door:
  *  `filter` = the chat's own «drafted by <this conversation>» (ChatView._outboxFilter), `show` = that proposal, `inside` = this door

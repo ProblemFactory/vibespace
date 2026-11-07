@@ -1338,7 +1338,7 @@ export function openChannelOutbox(app, opts = {}) {
   let pendingShow = opts.show ? { id: String(opts.show), inside: !!opts.inside } : null;
   /** This window's own read failed: a press waiting for a list takes the one the feed holds next (its read decides otherwise — a list held from before may not have the proposal yet). */
   let readFailed = false;
-  /** The proposal a door from inside a conversation pressed: its row wears the mark until the next such press / the filter's removal. */
+  /** The proposal a door from inside a conversation pressed: its row wears the mark until the next press (one that names nothing, or a proposal gone from the list, leaves no row marked) / the filter's removal. */
   let pressed = null;
   const fbar = el('div', 'chan-outbox-filter');
   const fchip = el('span', 'chan-outbox-filter-chip');
@@ -1423,15 +1423,17 @@ export function openChannelOutbox(app, opts = {}) {
     if (!last) { pendingShow = { id, inside }; return; }
     pendingShow = null;
     const p = (last.proposals || []).find((x) => x && x.id === id);
-    if (!p) { showToast(inside ? t('This proposal is not in the Outbox list any more') : t('The newer proposal is not in the Outbox list any more')); return; }
     if (inside) pressAll = false;
+    // r3 (acceptance J2): A PRESS ALWAYS MOVES THE MARK — a gone proposal leaves no row marked, else the person may approve A thinking
+    // it is B. A's card stays open, as it does when a press lands on another row (it may hold what the person is editing)
+    pressed = p && inside ? id : null;
+    if (!p) { draw(last); showToast(inside ? t('This proposal is not in the Outbox list any more') : t('The newer proposal is not in the Outbox list any more')); return; }
     if (!filter || !outboxFilterOf([p], filter).length) {
       const own = inside ? drafterFilterOf(app, p) : null;
       if (own) setOutboxFilter(own);
       else if (filter) dropFilter();
     }
     open.add(id);
-    pressed = inside ? id : null;
     draw(last);
     const rowOf = () => [...list.children].find((c) => c.dataset && c.dataset.orow === id);
     if (!rowOf()) { pressAll = true; draw(last); }
@@ -1442,7 +1444,8 @@ export function openChannelOutbox(app, opts = {}) {
   // a door from OUTSIDE a conversation that names no filter (⚙ Outbox…, the panel's button, a channel window's link, a For-you
   // link) shows EVERYTHING — never an earlier filter kept silently; «replaced» (`show`), a layout replay (`syncId`) and a door from
   // INSIDE a conversation (`inside`: openTouchRow) never clear a filter the person opened. The census: test-channel-outbox §OCD
-  winInfo._outboxDoor = (o = {}) => { if (o.filter !== undefined) setOutboxFilter(o.filter); else if (filter && !o.show && !o.syncId && !o.inside) setOutboxFilter(null); else if (o.inside && !o.show && pressAll) { pressAll = false; draw(last); } if (o.show) show(String(o.show), { inside: !!o.inside }); };
+  // A press from inside that names nothing is a press too: it lifts the last one's All and leaves no row marked (r3, acceptance J2)
+  winInfo._outboxDoor = (o = {}) => { if (o.inside && !o.show && (pressed || pressAll)) { pressed = null; pressAll = false; draw(last); } if (o.filter !== undefined) setOutboxFilter(o.filter); else if (filter && !o.show && !o.syncId && !o.inside) setOutboxFilter(null); if (o.show) show(String(o.show), { inside: !!o.inside }); };
   segAwait.onclick = () => { view = 'awaiting'; pressAll = false; forcedFrom = undefined; draw(last); };
   segAll.onclick = () => { view = 'all'; pressAll = false; forcedFrom = undefined; draw(last); };
   async function refresh() {

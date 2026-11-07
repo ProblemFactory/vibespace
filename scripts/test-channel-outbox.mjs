@@ -3146,18 +3146,18 @@ async function chatReadLegs(ENGmod, name) {
         // that NAMED the message opened the whole Outbox, its own card fifth and unmarked): §OCD. Law 1 a door inside a conversation
         // shows THAT conversation's Outbox, the pressed proposal in view — the ONE door openTouchRow, the REAL window; never a clear
         // of a filter the person opened; law 2 the filtered window opens on what waits; law 3 a row's state = the card's words; the
-        // door census: every `openChannelOutbox(` in src/ named inside / outside; r2: a press's All, no list held; seven mutants on the BUNDLE'S TEXT (no esbuild run) ──
+        // door census: every `openChannelOutbox(` in src/ named inside / outside; r2: a press's All, no list held; r3: the newest op, the mark, the two branches; eleven mutants on the BUNDLE'S TEXT (no esbuild run) ──
         const TOUCH = require(path.join(REPO, 'src/channel-touch.js'));
         const ocdLegs = (W) => {
           const mkWS = () => ({ hs: [], onGlobal(fn) { this.hs.push(fn); }, offGlobal(fn) { this.hs = this.hs.filter((h) => h !== fn); }, onStateChange() {} });
           let stamp = 9.7e12;
           const FILTER_A = { keys: KA, name: 'Writer' };
-          const open = async (opts, proposals = FX) => {
+          const open = async (opts, proposals = FX, { readFails = false } = {}) => {
             const c = new N('div');
             const a = { ...appW, ws: mkWS(), wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
             const ob = { ...OBX, proposals, at: (stamp += 1000) };
             const keep = globalThis.fetch;
-            globalThis.fetch = async (url) => ({ ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? ob : /\/api\/channels\/api$/.test(String(url)) ? { cards: [] } : { ok: true }) });
+            globalThis.fetch = async (url) => { if (readFails) throw new Error('the read failed'); return { ok: true, json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? ob : /\/api\/channels\/api$/.test(String(url)) ? { cards: [] } : { ok: true }) }; };
             let w;
             try { w = W.openChannelOutbox(a, opts); await tick(8); } finally { globalThis.fetch = keep; }
             const root = () => c.children[0], list = () => root().querySelector('.chan-outbox-list');
@@ -3174,15 +3174,69 @@ async function chatReadLegs(ENGmod, name) {
             };
           };
           const door = (row, heldOb) => {
-            const calls = [], conv = [];
+            const calls = [], conv = [], search = [];
             if (heldOb) W.noteOutbox({ ...OBX, proposals: heldOb, at: (stamp += 1000) });
-            W.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`) }, row, { filter: FILTER_A });
-            return { calls, conv };
+            W.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`), openChannelSearch: (o) => search.push(o) }, row, { filter: FILTER_A });
+            return { calls, conv, search };
           };
           const rowOf = (...ts) => TOUCH.foldTouches(ts.map((t, i) => ({ adapterId: 'lark', at: 1000 + i, kind: 'lark', ...t })))[0];
           const COMPOSE = () => rowOf({ op: 'compose', proposalId: 'p-osc-w', title: 'A new thread' });
           const REPLY = (id = 'p-osc-w') => rowOf({ op: 'reply', convId: 'oc_osc', proposalId: id, title: 'Ops room' });
+          const SEARCHED = { op: 'search', convId: 'oc_osc', title: 'Ops room', query: 'picnic tables', hits: [{ msgId: 'm1', at: 9 }], count: 1 };
+          const REPLIED = { op: 'reply', convId: 'oc_osc', proposalId: 'p-osc-w', title: 'Ops room' };
+          // what THIS press said: the stack keeps four, so a new toast is a new node, not a longer list
+          const saidBy = (press) => { const had = new Set(document.body.querySelectorAll('.global-toast-body')); press(); return document.body.querySelectorAll('.global-toast-body').filter((n) => !had.has(n)).map((n) => n.textContent); };
           return [
+            // r3 (acceptance J1): the newest op is what the agent did (lane channel-search-view, the owner 2026-10-04)
+            ['OCD J1 THE NEWEST OP DECIDES: a reply then a search opens the HITS, the list holding its proposal; the Outbox stays shut', async () => {
+              const r = door(rowOf(REPLIED, SEARCHED), FX);
+              return [r.search.length === 1 && r.search[0].q === 'picnic tables' && r.search[0].convId === 'oc_osc' && !r.calls.length && !r.conv.length, r];
+            }],
+            ['OCD J1 a search then a reply opens the Outbox on its draft', async () => {
+              const r = door(rowOf(SEARCHED, REPLIED), FX);
+              return [J(r.calls) === J([{ inside: true, filter: FILTER_A, show: 'p-osc-w' }]) && !r.search.length && !r.conv.length, r];
+            }],
+            // r3 (acceptance J2): a press always moves the mark
+            ['OCD J2 A PRESS ALWAYS MOVES THE MARK: a press on a gone proposal leaves no row marked, the toast says it, the filter stays; the old card stays open, as when a press lands on another row', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              const before = v.pressed().join();
+              const said = saidBy(() => v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-gone' }));
+              return [before === 'p-osc-w' && !v.pressed().length && J(said) === J(['This proposal is not in the Outbox list any more']) && v.filter() === 'drafted by Writer' && v.cardOpen('p-osc-w'), { before, p: v.pressed(), said, f: v.filter() }];
+            }],
+            ['OCD J2 the same press in a helper\'s viewer (no filter passed): the mark goes, and the last press\'s All with it', async () => {
+              const v = await open({});
+              v.w._outboxDoor({ inside: true, show: 'p-osc-e' });
+              const forced = v.seg();
+              v.w._outboxDoor({ inside: true, show: 'p-gone' });
+              return [forced === 'all' && v.seg() === 'awaiting' && !v.pressed().length && v.filter() === 'drafted by Writer', { forced, s: v.seg(), p: v.pressed(), f: v.filter() }];
+            }],
+            ['OCD J2 a press from inside that names nothing leaves no row marked, with a filter passed or not; a later press marks again', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              v.w._outboxDoor({ inside: true, filter: FILTER_A });
+              const a = v.pressed().length;
+              v.w._outboxDoor({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              const b = v.pressed().join();
+              v.w._outboxDoor({ inside: true });
+              return [a === 0 && b === 'p-osc-w' && !v.pressed().length && v.filter() === 'drafted by Writer', { a, b, c: v.pressed() }];
+            }],
+            ['OCD J2 «replaced» on a newer proposal that is gone: said in its own words, no row marked, the filter kept', async () => {
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-w' });
+              const said = saidBy(() => v.w._outboxDoor({ show: 'p-gone' }));
+              return [J(said) === J(['The newer proposal is not in the Outbox list any more']) && !v.pressed().length && v.filter() === 'drafted by Writer', { said, p: v.pressed(), f: v.filter() }];
+            }],
+            // r3 (acceptance J3): the two branches r2 added and no leg reached
+            ['OCD J3a the window\'s own read fails while the feed already holds a list: the waiting press is shown from that list, marked, its card open, no second push needed', async () => {
+              W.noteOutbox({ ...OBX, proposals: FX, at: (stamp += 1000) });
+              const v = await open({ inside: true, filter: FILTER_A, show: 'p-osc-w' }, FX, { readFails: true });
+              return [J(v.pressed()) === J(['p-osc-w']) && v.cardOpen('p-osc-w') && v.filter() === 'drafted by Writer' && v.seg() === 'awaiting', { p: v.pressed(), f: v.filter(), s: v.seg(), h: v.head() }];
+            }],
+            ['OCD J3b a helper\'s viewer (no filter passed, the filter holds the next one too): a press from inside lifts a forced All — a rejected row (All), a waiting row of the same drafter ⇒ Awaiting', async () => {
+              const v = await open({});
+              const s = [];
+              v.w._outboxDoor({ inside: true, show: 'p-osc-e' }); s.push(v.seg());
+              v.w._outboxDoor({ inside: true, show: 'p-osc-w' }); s.push(v.seg());
+              return [J(s) === J(['all', 'awaiting']) && J(v.pressed()) === J(['p-osc-w']) && v.filter() === 'drafted by Writer', { s, p: v.pressed(), f: v.filter() }];
+            }],
             ['OCD law 1 the row of a composed message: the ONE door — the chat\'s filter AND `show` = the proposal it names, from inside', async () => {
               const r = door(COMPOSE(), FX);
               return [J(r.calls) === J([{ inside: true, filter: FILTER_A, show: 'p-osc-w' }]) && !r.conv.length, r];
@@ -3322,7 +3376,7 @@ async function chatReadLegs(ENGmod, name) {
         // the mutants: one line of the BUNDLE'S TEXT changed (a text swap and an import — no esbuild run, the row's budget)
         const OCD_TEXT = fs.readFileSync(path.join(dir, 'osc-r3-real.mjs'), 'utf-8');
         // r2 (acceptance H4): NO LIST HELD — a bundle imported fresh: its feed has read nothing, its real lookup is null
-        const NO_LIST = ['OCD H4 no list held (the feed\'s first read not landed, or failed): a reply row opens the conversation, its door before this lane', 'OCD H4 no list held: a composed row opens the Outbox with the proposal named — it has nowhere else; the row says no state it cannot know', 'OCD H4 the list landed: the row\'s door is the normal one — the reply opens its DRAFT; one the list no longer holds, the conversation', 'OCD H4 the window says what it knows: its read failed ⇒ «The outbox is not available.»; the list the feed then holds shows the press, marked'];
+        const NO_LIST = ['OCD H4 no list held (the feed\'s first read not landed, or failed): a reply row opens the conversation, its door before this lane', 'OCD H4 no list held: a composed row opens the Outbox with the proposal named — it has nowhere else; the row says no state it cannot know', 'OCD H4 the list landed: the row\'s door is the normal one — the reply opens its DRAFT; one the list no longer holds, the conversation', 'OCD H4 the window says what it knows: its read failed ⇒ «The outbox is not available.»; the list the feed then holds shows the press, marked', 'OCD J1 no list held: a reply then a search opens the same HITS; a search then a reply its conversation (H4), never the older search\'s hits'];
         const noListLegs = async (name, text) => { try { return await noListRun(name, text); } catch (e) { return NO_LIST.map((n) => [n, [false, String((e && e.stack) || e).slice(0, 300)]]); } };
         const noListRun = async (name, text) => {
           const f = path.join(dir, `osc-ocd-nolist-${name}.mjs`);
@@ -3332,8 +3386,12 @@ async function chatReadLegs(ENGmod, name) {
           const rowOf = (t) => TOUCH.foldTouches([{ adapterId: 'lark', at: 1000, kind: 'lark', ...t }])[0];
           const REPLY = (id) => rowOf({ op: 'reply', convId: 'oc_osc', proposalId: id, title: 'Ops room' });
           const COMPOSE = () => rowOf({ op: 'compose', proposalId: 'p-osc-w', title: 'A new thread' });
-          const pressOf = (M, row) => { const calls = [], conv = []; M.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`) }, row, { filter: F }); return { calls, conv }; };
+          const pressOf = (M, row) => { const calls = [], conv = [], search = []; M.openTouchRow({ openChannelOutbox: (o) => calls.push(o), openChannel: (a, c) => conv.push(`${a}/${c}`), openChannelSearch: (o) => search.push(o) }, row, { filter: F }); return { calls, conv, search }; };
           const reply = pressOf(M, REPLY('p-osc-w')), composed = pressOf(M, COMPOSE()), words = M.rowProposalWords(REPLY('p-osc-w')).length;
+          const SEARCHED = { op: 'search', adapterId: 'lark', kind: 'lark', convId: 'oc_osc', title: 'Ops room', query: 'picnic tables', hits: [{ msgId: 'm1', at: 9 }], count: 1 };
+          const REPLIED = { op: 'reply', adapterId: 'lark', kind: 'lark', convId: 'oc_osc', proposalId: 'p-osc-w', title: 'Ops room' };
+          const hitsFirst = pressOf(M, TOUCH.foldTouches([{ ...REPLIED, at: 1000 }, { ...SEARCHED, at: 2000 }])[0]);
+          const convFirst = pressOf(M, TOUCH.foldTouches([{ ...SEARCHED, at: 1000 }, { ...REPLIED, at: 2000 }])[0]);
           // the window's read fails: it says so and keeps the press; the list the feed then holds shows it
           const c = new N('div');
           const a = { ...appW, ws: { hs: [], onGlobal(fn) { this.hs.push(fn); }, offGlobal() {}, onStateChange() {} }, wm: { windows: new Map(), createWindow: () => ({ content: c, _listenerCtl: null }), revealWindow() {} } };
@@ -3351,6 +3409,7 @@ async function chatReadLegs(ENGmod, name) {
             [NO_LIST[1], [J(composed.calls) === J([{ inside: true, filter: F, show: 'p-osc-w' }]) && !composed.conv.length && words === 0, { composed, words }]],
             [NO_LIST[2], [J(landed.calls) === J([{ inside: true, filter: F, show: 'p-osc-w' }]) && !gone.calls.length && J(gone.conv) === J(['lark/oc_osc']), { landed, gone }]],
             [NO_LIST[3], [said === 'The outbox is not available.' && J(marked) === J(['p-osc-w']), { said, marked }]],
+            [NO_LIST[4], [hitsFirst.search.length === 1 && hitsFirst.search[0].q === 'picnic tables' && !hitsFirst.calls.length && !hitsFirst.conv.length && !convFirst.search.length && !convFirst.calls.length && J(convFirst.conv) === J(['lark/oc_osc']), { hitsFirst, convFirst }]],
           ];
         };
         for (const [n, r] of await noListLegs('real', OCD_TEXT)) await legOSC(n, () => r);
@@ -3366,6 +3425,10 @@ async function chatReadLegs(ENGmod, name) {
           ['all', 'the filter forcing «All» again (the base) ⇒ RED on «opens on what waits»', 'let forcedFrom = filter ? view : void 0;', 'let forcedFrom = filter ? view : void 0; if (filter) view = "all";', /^OCD law 2 the door opens on what waits/],
           ['words', 'a row saying its proposal\'s raw state (a second vocabulary) ⇒ RED on «the card\'s OWN words»', 'for (const w of proposalWords(p))', 'for (const w of [{ cls: "x", text: p.state }])', /^OCD law 3 a row says each state/],
           ['h3', 'a press writing its All over the owner\'s view (r1\'s `show`) ⇒ RED on the five steps', 'pressAll = true;', 'view = "all";', /^OCD H3 THE FIVE STEPS/],
+          ['j1', 'the proposal a row names deciding before its newest op (r2\'s `openVerdict`) ⇒ RED on «the newest op decides»', 'if (row.query && ', 'if (!rowProposalOf(row, recordOf) && row.query && ', /^OCD J1 THE NEWEST OP DECIDES/],
+          ['j2', 'a press on a gone proposal leaving the old mark (r2\'s `show`) ⇒ RED on «always moves the mark»', 'pressed = p && inside ? id : null;', 'if (p) pressed = inside ? id : null;', /^OCD J2 A PRESS ALWAYS/],
+          ['j3a', 'the failed read forgetting the press though the feed holds a list ⇒ RED on J3a', 'if (last) showPending();', '', /^OCD J3a /],
+          ['j3b', 'a press from inside not lifting a forced All ⇒ RED on J3b', 'if (inside) pressAll = false;', '', /^OCD J3b /],
         ]) {
           await legOSC(`MUTANT OCD ${label}`, async () => { const red = await ocdRed(name, from, to, want); return [!!red && red.some((n) => want.test(n)), red === null ? `not spelled once in the bundle: ${from}` : red]; });
         }

@@ -609,11 +609,16 @@ const ocdPage = async (lang) => {
   const d = await p.evaljs(OPENED);
   ok(d && d.filter === null && d.head === W.plain && d.foreign > 0, tag(`㉔ a door from OUTSIDE (⚙ Outbox…) still shows the whole Outbox: «${W.plain}»`), d);
   // a composed row whose proposal fell off the list: the conversation's Outbox, and the window says so in its own words
+  // r3 (acceptance J2): a row is marked first, so «nothing marked» is the press moving the mark, not a window that never had one
+  await p.evaljs(`(() => { const v = ${VIEW}; app.openChannelOutbox({ inside: true, filter: v._outboxFilter(), show: 'p-ocd-a3' }); return 1; })()`);
+  await sleep(300);
+  const g0 = await p.evaljs(OPENED);
+  ok(g0 && J(g0.pressed) === J(['p-ocd-a3']), tag('㉔ setup for the next press: a row is marked'), g0);
   await p.evaljs(`(() => { const v = ${VIEW}; const b = document.getElementById('global-toasts'); if (b) b.replaceChildren(); app.openChannelOutbox({ inside: true, filter: v._outboxFilter(), show: 'p-ocd-gone' }); return 1; })()`);
   await sleep(300);
   const g = await p.evaljs(OPENED);
   const said = await p.evaljs(`[...document.querySelectorAll('#global-toasts .global-toast-body')].map((n) => n.textContent)`);
-  ok(g && !!g.filter && g.seg === 'awaiting' && !g.pressed.length && (said || []).includes(W.gone), tag(`㉔ a proposal the list no longer holds: «${W.gone}», the conversation's filter on, nothing marked`), { g, said });
+  ok(g && !!g.filter && g.seg === 'awaiting' && !g.pressed.length && (said || []).includes(W.gone), tag(`㉔ a proposal the list no longer holds: «${W.gone}», the conversation's filter on, the mark gone from the row pressed before it`), { g, said });
   // ㉔b r2 (acceptance H3): the five steps by real presses — a press's All is the press's, never the owner's
   await press(p, `(${OBWIN}).element.querySelector('.chan-seg [data-view="awaiting"]')`);
   await sleep(200);

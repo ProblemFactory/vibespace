@@ -560,22 +560,28 @@ function rowProposalOf(row, recordOf = null) {
   const pick = held.find((p) => p.state === 'awaiting-approval') || held[0];
   return pick ? String(pick.id) : null;
 }
-/** WHAT A ROW'S CLICK OPENS: a row that NAMES a proposal ⇒ the Outbox, `show` = that proposal, with the conversation's `filter`
- *  (lane outbox-chip-door, inc-mw5r944f-60vt: the name the person reads is the door they press — a drafted reply opens its DRAFT,
- *  where it can be approved; the thread is one tap further, on the card); a composed message whose proposal the row does not
- *  name ⇒ the Outbox with the filter; a row whose NEWEST op is a search that carries its query ⇒ the search results scoped to
- *  that conversation (the agent's query, its hit refs); anything else (a read, a search recorded before the query was kept, a
- *  reply whose proposal the list no longer holds) ⇒ the conversation, as before. PURE: `filter` and `recordOf` are handed in. */
+/** WHAT A ROW'S CLICK OPENS. A row whose NEWEST op is a search that carries its query ⇒ the search results scoped to that
+ *  conversation (the agent's query, its hit refs), whatever else the row carries and whether a list is held or not: the newest op
+ *  is what the agent did (lane channel-search-view, the owner 2026-10-04), and those hits have no other door (r3, acceptance J1).
+ *  Otherwise a row that NAMES a proposal ⇒ the Outbox, `show` = that proposal, with the conversation's `filter` (lane
+ *  outbox-chip-door, inc-mw5r944f-60vt: the name the person reads is the door they press — a drafted reply opens its DRAFT, where
+ *  it can be approved; the thread is one tap further, on the card, which is why a read after the reply does not take the door);
+ *  a composed message whose proposal the row does not name ⇒ the Outbox with the filter; anything else (a read, a search recorded
+ *  before the query was kept, a reply whose proposal the list no longer holds) ⇒ the conversation, as before. PURE: `filter` and
+ *  `recordOf` are handed in. */
 function openVerdict(row, { filter = null, recordOf = null } = {}) {
   if (!row) return null;
   // lane pod-oauth-callback: the agent asked the person to connect an account type ⇒ the Connect dialog on that type
   if (!row.convId && row.ops && row.ops.connect && String(row.key || '').endsWith('/~connect')) return { open: 'connect', kind: row.kind || row.adapterId };
-  const named = rowProposalOf(row, recordOf);
-  if (named) return { open: 'outbox', show: named, filter };
-  if (!row.convId) return { open: 'outbox', ...(row.proposalId && !(row.ops && row.ops.api) ? { show: String(row.proposalId) } : {}), filter };   // gone from the list: the window says so — a composed message has nowhere else to open
+  if (!row.convId) {   // no conversation, no scoped hits. Gone from the list: the window says so — a composed message has nowhere else to open
+    const show = rowProposalOf(row, recordOf) || (row.proposalId && !(row.ops && row.ops.api) ? String(row.proposalId) : null);
+    return { open: 'outbox', ...(show ? { show } : {}), filter };
+  }
   const la = row.lastAt || {};
   const newest = Math.max(0, ...Object.values(la).map(num));
   if (row.query && num(la.search) >= newest) return { open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId, query: row.query, hits: Array.isArray(row.hits) ? row.hits : [], memo: memoOk(row.memo) ? row.memo : null, searchedAt: num(la.search) };
+  const named = rowProposalOf(row, recordOf);
+  if (named) return { open: 'outbox', show: named, filter };
   return { open: 'conversation', adapterId: row.adapterId, convId: row.convId };
 }
 /** WHAT THE FOLD'S TAIL ("+N more") OPENS: every hidden row a search of ONE query ⇒ that search UNSCOPED (every

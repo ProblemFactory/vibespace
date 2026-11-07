@@ -386,6 +386,23 @@ await section('⑥', async () => {
     const api = T.foldTouches([{ op: 'api', adapterId: 'lark', id: 'c9', proposalId: 'p-api', title: 'x', at: 1000 }])[0];
     ok(T.rowProposalOf(api) === null && !T.openVerdict(api, { filter: F }).show, 'OCD a raw API row names no message proposal: its door stays its credential\'s API access (B-2198)');
     ok(T.openVerdict(T.foldTouches([touch({ op: 'read', at: 1000 })])[0], { filter: F }).open === 'conversation', 'OCD VERDICT a read row ⇒ the conversation, a filter handed in or not');
+    // r3 (acceptance J1): THE NEWEST OP IS WHAT THE AGENT DID (lane channel-search-view, the owner 2026-10-04) — never the proposal a row also carries
+    const inNoc = (o) => touch({ adapterId: 'lark', convId: 'noc', title: 'NOC', ...o });
+    const replyThenSearch = T.foldTouches([inNoc({ op: 'reply', proposalId: 'p2', at: 1000 }), sT({ at: 2000 })]);
+    const searchThenReply = T.foldTouches([sT({ at: 1000 }), inNoc({ op: 'reply', proposalId: 'p2', at: 2000 })]);
+    const replyThenRead = T.foldTouches([inNoc({ op: 'reply', proposalId: 'p2', at: 1000 }), inNoc({ op: 'read', at: 2000 })]);
+    const replyAgain = T.foldTouches([inNoc({ op: 'reply', proposalId: 'p1', at: 1000 }), sT({ at: 2000 }), inNoc({ op: 'reply', proposalId: 'p2', at: 3000 })]);
+    ok(replyThenSearch.length === 1 && searchThenReply.length === 1 && replyThenRead.length === 1 && replyAgain.length === 1 && replyThenSearch[0].proposalId === 'p2', 'OCD J1 setup: each is ONE row of one conversation, the reply\'s proposal on it', J(replyThenSearch));
+    const hits = T.openVerdict(replyThenSearch[0]);
+    ok(hits.open === 'search' && hits.query === '@me attachments' && hits.convId === 'noc' && hits.hits.length === 1, 'OCD J1 a reply then a search, no list held ⇒ the hits', hits);
+    const sentP2 = list({ id: 'p2', state: 'sent', at: 1 });
+    ok(J(T.openVerdict(replyThenSearch[0], { filter: F, recordOf: heldP2 })) === J(hits) && J(T.openVerdict(replyThenSearch[0], { filter: F, recordOf: sentP2 })) === J(hits) && J(T.openVerdict(replyThenSearch[0], { recordOf: list() })) === J(hits), 'OCD J1 a reply then a search, the list holding its proposal (waiting or sent) ⇒ the same hits: one door, whatever the feed has read', J(T.openVerdict(replyThenSearch[0], { filter: F, recordOf: heldP2 })));
+    ok(J(T.openVerdict(searchThenReply[0], { filter: F, recordOf: heldP2 })) === J({ open: 'outbox', show: 'p2', filter: F }), 'OCD J1 a search then a reply, the list held ⇒ the Outbox with `show`', J(T.openVerdict(searchThenReply[0], { filter: F, recordOf: heldP2 })));
+    ok(J(T.openVerdict(searchThenReply[0], { filter: F, recordOf: null })) === J({ open: 'conversation', adapterId: 'lark', convId: 'noc' }), 'OCD J1 a search then a reply, no list held ⇒ the conversation (H4: nothing guessed), never the older search\'s hits', J(T.openVerdict(searchThenReply[0], { filter: F })));
+    ok(T.openVerdict(replyAgain[0], { filter: F, recordOf: heldP2 }).show === 'p2', 'OCD J1 a reply, a search, a reply again ⇒ the Outbox: the newest op decides each time', J(T.openVerdict(replyAgain[0], { filter: F, recordOf: heldP2 })));
+    ok(J(T.openVerdict(replyThenRead[0], { filter: F, recordOf: heldP2 })) === J({ open: 'outbox', show: 'p2', filter: F }), 'OCD J1 a read after the reply keeps the draft\'s door: the thread is one tap further on the card; a search\'s hits have no other door', J(T.openVerdict(replyThenRead[0], { filter: F, recordOf: heldP2 })));
+    ok(T.tailVerdict(T.foldTouches([inNoc({ op: 'reply', proposalId: 'p2', at: 1000 }), sT({ at: 2000 }), sT({ convId: 'gtm', at: 3000 })]), { max: 0 }).open === 'search-all', 'OCD J1 the fold\'s tail reads the row as the row\'s press does: a search');
+    ok(T.openVerdict({ convId: null, query: 'q', lastAt: { search: 5 }, ops: {} }, { filter: F }).open === 'outbox', 'OCD J1 a row with no conversation has no scoped hits: the Outbox, the base\'s order');
     const srch = T.foldTouches([sT({ at: 1000 }), sT({ at: 2000 })]);
     ok(T.tailVerdict(srch, { max: 0 }).open === 'search-all', 'OCD the tail still reads every hidden row\'s verdict (Array.map\'s index never reaches the options)', J(T.tailVerdict(srch, { max: 0 })));
   }
