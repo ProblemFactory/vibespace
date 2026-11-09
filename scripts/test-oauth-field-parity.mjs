@@ -571,7 +571,9 @@ if (isMain) {
   // §10 the re-authorize dialog's stop
   reddens('the dialog\'s stop goes back to the silent pre-r5 shape', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace(/setTimeout\(async \(\) => \{[\s\S]*?\}, 10 \* 60 \* 1000 \+ \d+\);/, 'setTimeout(stopPoll, 10 * 60 * 1000);'); });
   reddens('…or fires at the machine\'s own instant', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace('}, 10 * 60 * 1000 + 5000);', '}, 10 * 60 * 1000);'); });
-  reddens('…or leaves the button disabled', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace("status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');\n        btn.disabled = false;", "status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');"); });
+  // lane gmail-connect-wall r4: the stop moved into reauthDialog's per-press `watch()` (one indent less) — the control finds the
+  // re-enable after the timeout line at any indent
+  reddens('…or leaves the button disabled', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace(/(status\.textContent = st\.fail \|\| tr\('The sign-in was not finished in time — sign in again'\);)\n\s*btn\.disabled = false;/, '$1'); });
   reddens('the timeout sentence loses its ja translation', '"The sign-in was not finished in time — sign in again" — zh + ja', (t) => { t['src/lib/i18n-ja.js'] = t['src/lib/i18n-ja.js'].replace('"The sign-in was not finished in time — sign in again":', '"The sign-in was not finished in time (x)":'); });
 
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

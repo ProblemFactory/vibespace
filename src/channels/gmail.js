@@ -194,7 +194,10 @@ const OPTIONS = Object.freeze([
   // application client the relay page / this instance's https address / the FIXED 127.0.0.1 address (MANIFEST
   // GMAIL_LOOPBACK_URL); a Desktop app client 127.0.0.1 on any port, never an https address. Empty = not said (as before);
   // a company preset that says (its gdrive-clients entry's `clientType`) is the default. Read at each sign-in only.
-  { key: 'clientType', label: i18nKey('OAuth client type'), default: '', choices: Object.freeze(['', 'web', 'desktop']), rebuild: false, signIn: true,
+  // lane gmail-connect-wall (R4): `presetFact` — for an account under a COMPANY preset the kind is the admin's fact (the
+  // preset's `clientType`, or not said): the dialogs never ask it and clientTypeOf never reads the account's own value then
+  // (a stored value is kept, simply not read)
+  { key: 'clientType', label: i18nKey('OAuth client type'), default: '', choices: Object.freeze(['', 'web', 'desktop']), rebuild: false, signIn: true, presetFact: true,
     choiceLabels: Object.freeze({ '': i18nKey('Not said'), web: i18nKey('Web application'), desktop: i18nKey('Desktop app') }),
     help: i18nKey('The kind of Google OAuth client this account signs in through. Web application: the sign-in comes back through the relay page or this VibeSpace’s https address, and on this machine to the fixed 127.0.0.1 address. Desktop app: the sign-in comes back to 127.0.0.1 on any port — from another computer, paste the last page’s address back.') },
 ]);
@@ -273,9 +276,10 @@ const CONSENT = Object.freeze({
 });
 
 /** lane oauth-setup-instructions: the account's Google client kind — its own `clientType` option, else its company preset's
- *  (`values.clientType`, a gdrive-clients entry), else '' (not said). */
-function clientTypeOf(options, values) {
-  const own = options && typeof options.clientType === 'string' ? options.clientType : '';
+ *  (`values.clientType`, a gdrive-clients entry), else '' (not said). lane gmail-connect-wall (R4): under a COMPANY preset
+ *  (`preset`) the kind is the admin's fact ONLY — the account's own option is not read (kept on the record, unread). */
+function clientTypeOf(options, values, { preset: isPreset = false } = {}) {
+  const own = !isPreset && options && typeof options.clientType === 'string' ? options.clientType : '';
   if (CR.CLIENT_TYPES.includes(own)) return own;
   const preset = values && typeof values.clientType === 'string' ? values.clientType : '';
   return CR.CLIENT_TYPES.includes(preset) ? preset : '';
@@ -1314,15 +1318,18 @@ function create(record = {}, deps = {}) {
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Gmail consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { clientId, clientSecret } = cred.values;
         // lane oauth-setup-instructions: WHICH kind of Google client — the account's own option, else what its company preset says
-        const clientType = clientTypeOf(record.options, cred.values);
+        const clientType = clientTypeOf(record.options, cred.values, { preset: cred.source === 'cluster' });
         // lane pod-oauth-callback: THE ROAD — the instance's route (its https address, a browser elsewhere) or the ephemeral loopback;
         // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back;
         // lane oauth-setup-instructions: a Desktop client only the loopback (any port), a Web client's loopback the FIXED one
-        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, clientType, ...CR.relayOf(consent, cred) });
+        // lane gmail-connect-wall: a company preset's route only when it says its app lists this address; a preset that does not
+        // say its client's kind (`clientKinds`: Google has two) signs in at the documented Desktop form, the fixed address its other road
+        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, clientType, clientKinds: true, ...CR.relayOf(consent, cred) });
         const viaRoute = way.road !== 'loopback' && !!consent && typeof consent.sign === 'function';
         return oauth.begin({
           id: adapterId, label: 'Gmail',
           ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor: ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign), road: way.road } : way.fixed ? { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl } : { mode: 'ephemeral' }),
+          other: way.other || null,   // lane gmail-connect-wall: the dialog's visible second road
           successText: 'VibeSpace: Gmail connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state }) => AUTH_URL + '?' + new URLSearchParams({
             client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopesFor().join(' '),

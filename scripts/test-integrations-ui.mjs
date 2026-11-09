@@ -189,7 +189,7 @@ srv = bootServer();
 
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--window-size=375,667', '--disable-background-timer-throttling', '--force-device-scale-factor=1',
-  '--host-resolver-rules=MAP pod-road.example.test 127.0.0.1',   // ⑪: the page on a NAME (a browser that is not on the instance's loopback), served by this scratch server
+  '--host-resolver-rules=MAP pod-road.example.test 127.0.0.1, MAP other-name.example.test 127.0.0.1',   // lane gmail-connect-wall r3: + a page under ANOTHER name (state A from the page's own origin)   // ⑪: the page on a NAME (a browser that is not on the instance's loopback), served by this scratch server
   `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 
 const cleanup = () => {
@@ -531,7 +531,10 @@ const p2 = await newPage();
     const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && i.type !== 'hidden');
     return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], hint: hint && hint.className === 'mounts-field-hint' ? hint.textContent : null, block: block ? block.querySelector('button').textContent : null, blocks: d.querySelectorAll('.mounts-drive-connect').length, query: (inputs.find((i) => i.value === 'label:INBOX') || {}).value || null, scope: ([...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'inbox')) || {}).value || null, submit: d.querySelector('.dialog-actions .btn-create').textContent };
   })()`);
-  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox', 'OAuth client type']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) → the OAuth client type (read at each sign-in — lane oauth-setup-instructions) (${JSON.stringify(gm.labels)})`);
+  // lane gmail-connect-wall (law 3): under a COMPANY preset the client's kind is the admin's fact — the form does not ask it
+  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) — no «OAuth client type» under a company preset (law 3) (${JSON.stringify(gm.labels)})`);
+  const ctCustom = await p1.evaljs(`(() => { const d = ${DLG('connect')}; const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); const was = c.value; c.value = 'custom'; c.dispatchEvent(new Event('change')); const labels = ${visibleLabels('connect')}; c.value = was; c.dispatchEvent(new Event('change')); return labels.includes('OAuth client type'); })()`);
+  ok(ctCustom === true, 'CONTROL: Custom (a person\'s own client) still asks the OAuth client type — the hiding above is the preset\'s doing');
   ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', MOUNT_OPTION, 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + the storage mount's own client (r) + Custom, no Built-in (${JSON.stringify(gm)})`);
   ok(gm.hint === R.rowById('gmail').clientHint, 'the registry\'s clientHint is the .mounts-field-hint line under the select');
   ok(gm.block === 'Connect Google' && gm.scope === 'inbox' && gm.query === null && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the Mailbox scope on Inbox (the query field hidden), and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, scope: gm.scope, query: gm.query, submit: gm.submit })})`);
@@ -644,6 +647,15 @@ const p2 = await newPage();
   const re0 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; return { client: d.querySelector(':scope > select').value, title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, btn: d.querySelector(':scope > .mounts-btn-primary').textContent }; })()`);
   ok(re0.client === 'channels' && re0.title === 'Re-authorize "Gmail · ada@example.test"' && re0.btn === 'Sign in with Google', `…with the NEW client preselected (${JSON.stringify(re0)})`);
   ok(((await accounts()).find((a) => a.id === A.id) || {}).credentialKey === 'cluster:org1', 'and the account was NOT re-pointed by the Save');
+  // lane gmail-connect-wall r2 PIN (the acceptance: «keep it, say it, pin it»): reauthDialog's ten-minute end timer belongs to ITS
+  // press — a second press within ten minutes is not ended by the first press's timer (ONE shared component: the storage
+  // dialogs' re-authorize too). The FIRST ten-minute timer of the page is compressed to 1 s; the second press keeps its own.
+  await p1.evaljs(`(() => { window.__st0 = window.setTimeout; let first = true; window.setTimeout = (f, ms, ...a) => { if (ms >= 600000 && first) { first = false; ms = 1000; } return window.__st0(f, ms, ...a); }; ${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); return 1; })()`);
+  await p1.evaljs(`(async () => { const b = ${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary'); for (let i = 0; i < 60 && b.disabled; i++) await new Promise((r) => setTimeout(r, 50)); b.click(); return 1; })()`);
+  await sleep(1600);
+  const reT = await p1.evaljs(`(() => { window.setTimeout = window.__st0; const d = ${DLG('reauth')}; return { status: [...d.querySelectorAll(':scope > .mounts-field-hint')].map((e) => e.textContent).join(' | '), btn: d.querySelector(':scope > .mounts-btn-primary').textContent }; })()`);
+  ok(!/not finished in time/.test(reT.status) && reT.btn === 'Open the Google sign-in again', `r2 PIN: the first press's ten-minute timer (compressed to 1 s) fired AFTER a second press and changed nothing — the second press's sign-in is still the one shown (${JSON.stringify(reT).slice(0, 300)})`);
+  await api('POST', `/api/channels/adapters/${encodeURIComponent(A.id)}/auth/cancel`, {});   // the pin's sign-in ends here — the legs below meet the account as before
   await p1.evaljs(`document.querySelector('#chan-reauth-dialog .dialog-close').click(); 1`);
 
   // (k) Duplicate: settings copied, token not, its own consent; switched to a custom client
@@ -965,10 +977,10 @@ const p2 = await newPage();
 // while the company's app lives on Lark international; nobody walked the paste-the-address box): the scratch server
 // rebooted AS A POD — an https address (VIBESPACE_PUBLIC_URL) + a company Lark preset that names its brand ──
 {
-  console.log('\n⑪ a pod\'s Connect: the brand from the preset, the route as redirect, the paste-back folded last');
+  console.log('\n⑪ a pod\'s Connect: the brand from the preset; a silent company Google preset never rides the pod\'s own address — the live block (lane gmail-connect-wall)');
   const POD = 'https://pod-road.example.test';
   srv.kill('SIGKILL'); await waitDown();
-  srv = bootServer({ VIBESPACE_PUBLIC_URL: POD, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }]) });
+  srv = bootServer({ VIBESPACE_PUBLIC_URL: POD, VIBESPACE_GDRIVE_CLIENTS: JSON.stringify([...JSON.parse(PRESETS), { key: 'relayco', label: 'Relay Co', clientId: 'relayco.apps.googleusercontent.com', clientSecret: 'dummy-relayco-secret-0000', relayUrl: 'https://relay.company.example.test/relay/' }]), VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }, { id: 'slack', key: 'ws', label: 'Company Slack app', values: { clientId: '1234567890.1234567890', clientSecret: 'dummy-slack-wall-secret-1' } }]) });   // lane gmail-connect-wall r2: + a Slack company app that neither relays nor lists (E1)
   ok(await waitServer(), 'rebooted as a pod: an https address + a company Lark preset that names its brand (lark)');
   // the page on a NAME (mapped to this server): the browser is NOT on the instance's loopback, as a person's is on a pod
   ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on the pod\'s name (not the loopback)');
@@ -983,38 +995,168 @@ const p2 = await newPage();
   const f0 = await p1.evaljs(`(() => { const d = ${DLGC}; const brand = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'feishu') && [...s.options].some((o) => o.value === 'lark') && s.style.display !== 'none'); return brand ? brand.value : null; })()`);
   ok(f0 === 'feishu', `CONTROL: a preset that names no brand leaves the form at feishu (the testers' form) — the brand check can go red (${f0})`);
   await p1.evaljs(`(() => { if (window.__f0) { window.fetch = window.__f0; delete window.__f0; } return 1; })()`);
-  // Gmail (its loopback is an ephemeral port — the other road binds no machine-wide one): the route, then the fold
+  // lane gmail-connect-wall (the owner 2026-11-09, on the owner's own hub — this exact shape: a company Google preset that
+  // says nothing, an https address no company app lists, a browser on another computer): the press used to ask Google for
+  // the pod's own route (redirect_uri_mismatch), grey the button for the flow's 10 minutes and fold every way on
+  const GLOOP = require(path.join(wt, 'src/channels/gmail/manifest.js')).GMAIL_LOOPBACK_URL;
+  const visibleLabelsC = `[...${DLGC}.querySelectorAll(':scope > label')].filter((l) => l.style.display !== 'none').map((l) => l.textContent)`;
   ok(await openOn('gmail'), 'Connect an account on Gmail');
-  // addendum 1: the company preset names no relay page (and no fleet page here) — its setup says so, and offers no page
-  const bare = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return { notes: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^prn\\d+\\.gmail$/.test(e.dataset.field)).map((e) => e.textContent), links: [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis).map((e) => e.querySelector('input').value) }; })()`);
-  ok(bare.notes.length === 1 && bare.notes[0] === 'This company app has no relay page yet: a sign-in comes back to this VibeSpace’s own address. Your admin can give the app one relay page that serves every VibeSpace.' && !bare.links.some((v) => /github\.io/.test(v)),
-    `addendum 1: a company preset with no relay page says so in its setup — and offers no public page (${JSON.stringify(bare)})`);
-  const before = await p1.evaljs(`(window.__opened || []).length`);
-  await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
-  const opened1 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  const r1 = opened1 ? new URL(opened1).searchParams.get('redirect_uri') : null;
-  ok(r1 === `${POD}/api/channels/oauth/cb/gmail`, `Connect Google from the pod: the sign-in comes back to the instance's own route, never 127.0.0.1 (${r1})`);
-  const FOLD = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none').querySelector('details.mounts-oauth-paste')`;
-  const fold = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${FOLD}) break; await new Promise((r) => setTimeout(r, 100)); } const d = ${FOLD}; if (!d) return null; const kids = [...d.parentElement.children]; return { open: d.open, summary: d.querySelector('summary').textContent, last: kids[kids.length - 1] === d, boxVisible: !!d.querySelector('input') && (typeof d.querySelector('input').checkVisibility === 'function' ? d.querySelector('input').checkVisibility() : d.querySelector('input').getBoundingClientRect().height > 0) }; })()`);
-  ok(fold && fold.open === false && fold.summary === 'The sign-in did not come back here by itself?' && fold.last && fold.boxVisible === false, `the paste-back is LAST and FOLDED under one line that says when it is needed — the box itself is not shown (${JSON.stringify(fold)})`);
-  const inside = await p1.evaljs(`(() => { const d = ${FOLD}; d.open = true; const admin = d.querySelector('.mounts-oauth-admin'); const copy = admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input'); const other = d.querySelector('.mounts-oauth-other'); return { admin: admin ? admin.textContent : null, value: copy ? copy.value : null, other: other ? other.textContent : null, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; })()`);
-  // lane oauth-setup-instructions: the refusal fold carries the setup card's console lines — Google's own words, the path
-  const notes = await p1.evaljs(`[...${FOLD}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
-  ok(notes.length === 3 && /^If Google says “Error 400: redirect_uri_mismatch”/.test(notes[0]) && /under Google Cloud console → APIs & Services → Credentials → OAuth 2\.0 Client IDs → your client → Authorized redirect URIs\.$/.test(notes[1]) && /^An https address and Google still says “Error 400: redirect_uri_mismatch”\? The client is a Desktop app client/.test(notes[2]),
-    `the refusal fold names Google's own error, WHERE the address goes, and — for an https address — the Desktop-client case (${JSON.stringify(notes).slice(0, 400)})`);
-  ok(inside.admin && /^Google said this address is not allowed\? Add it to the app’s redirect URLs/.test(inside.admin) && inside.value === `${POD}/api/channels/oauth/cb/gmail` && inside.other === 'Sign in the other way: copy the last page’s address back here',
-    `unfolded: why in a person's words, the exact address an admin adds to the app, and the other road (${JSON.stringify(inside).slice(0, 400)})`);
-  const bareHints = await p1.evaljs(`[...${FOLD}.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent)`);
-  ok(bareHints.some((h) => /^This company app has no relay page yet, so this sign-in comes back to this VibeSpace’s own address \(pod-road\.example\.test\) — the app must list it, or your admin gives the app one relay page that serves every VibeSpace\./.test(h)),
-    `addendum 1: the fold says WHY the route — the company app has no relay page yet (${JSON.stringify(bareHints).slice(0, 300)})`);
-  await p1.probe('a pod\'s Connect Google: the route consent, the folded paste-back opened', `[id^="chan-account-"] .mounts-oauth-paste`);
-  const before2 = await p1.evaljs(`(window.__opened || []).length`);
-  await p1.evaljs(`(() => { ${FOLD}.querySelector('.mounts-oauth-other').click(); return 1; })()`);
-  const opened2 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before2}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  const r2 = opened2 ? new URL(opened2).searchParams.get('redirect_uri') : null;
-  const fold2 = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const d = ${FOLD}; if (d && !d.querySelector('.mounts-oauth-admin')) return { summary: d.querySelector('summary').textContent, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r2 || '') && fold2 && fold2.summary === 'The sign-in page ended on an address that would not load?' && /starts with 127\.0\.0\.1/.test(fold2.hint),
-    `the other road: the same sign-in the copy-the-address way (an ephemeral loopback), its fold saying why in a person's words (${r2}, ${JSON.stringify(fold2).slice(0, 300)})`);
+  const BLK = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none')`;
+  const stateOf = () => p1.evaljs(`(() => { const d = ${DLGC}; const b = ${BLK}; const vis = (e) => !!e && e.offsetParent !== null; const box = b && b.querySelector('.mounts-oauth-live');
+    return { button: b && b.querySelector('button.mounts-btn-primary').textContent, disabled: !!(b && b.querySelector('button.mounts-btn-primary').disabled), status: b ? b.querySelector(':scope > .mounts-field-hint').textContent : '',
+      pasteOpen: !!(box && box.dataset.paste === 'open' && vis(box.querySelector(':scope > input'))), other: vis(b && b.querySelector('.mounts-oauth-other')) ? b.querySelector('.mounts-oauth-other').textContent : null, otherInFold: !!(b && b.querySelector('details .mounts-oauth-other')),
+      cancel: vis(b && b.querySelector('.mounts-oauth-cancel')), otherWhy: (b && b.querySelector('.mounts-oauth-other-why') || {}).textContent || null,
+      admin: b && b.querySelector('details.mounts-oauth-admin-fold') ? { open: b.querySelector('details.mounts-oauth-admin-fold').open, summary: b.querySelector('details.mounts-oauth-admin-fold summary').textContent, notes: [...b.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent) } : null,
+      claim: !!b && [...b.querySelectorAll('*')].some((e) => e.childElementCount === 0 && /The client is a Desktop app client/.test(e.textContent)) }; })()`);   // the consent block (a person's own client's setup card, folded for Custom, keeps its sentence)
+  // STATE A (law 1, 3, 4): BEFORE the press the dialog says what will happen — no promise of the own-address road, no type asked
+  const sA = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return { notes: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^(prn|pwl|pwr|pwn)\\d+\\.gmail$/.test(e.dataset.field)).map((e) => [e.dataset.field.replace(/\\d.*/, ''), e.textContent]), labels: ${visibleLabelsC} }; })()`);
+  ok(sA.notes.length === 1 && sA.notes[0][0] === 'pwl' && /^With this company app the sign-in’s last page will not load — it points to 127\.0\.0\.1\./.test(sA.notes[0][1]) && !sA.labels.includes('OAuth client type'),
+    `STATE A: before the press the company preset says its last page is pasted back (never «comes back to this VibeSpace’s own address»), and the client's kind is not asked (${JSON.stringify(sA)})`);
+  await p1.probe('STATE A: the company preset\'s road, said before the press', `[id^="chan-account-"] .dialog-body > .mounts-note[data-field="pwl0.gmail"]`);   // the type-first dialog holds every type's notes: Gmail's own
+  const pressMain = async () => {
+    const b0 = await p1.evaljs(`(window.__opened || []).length`);
+    await p1.evaljs(`(() => { ${BLK}.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+    const u = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${b0}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+    await sleep(150);
+    return u ? new URL(u).searchParams.get('redirect_uri') : null;
+  };
+  const flowOf = async () => (await api('GET', '/api/channels/oauth/status?kind=gmail')).json || {};
+  const r1 = await pressMain();
+  const sB = await stateOf();
+  const f1 = await flowOf();
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r1 || '') && r1 !== `${POD}/api/channels/oauth/cb/gmail`, `LAW 1: Connect Google from another computer under a silent company preset asks Google for 127.0.0.1 on a free port, NO path (the documented Desktop form) — never the pod's own address no company app lists (${r1})`);
+  ok(sB.disabled === false && sB.button === 'Open the Google sign-in again' && /^A Google sign-in page opened\. After you approve, Google’s last page will not load/.test(sB.status) && sB.pasteOpen && sB.cancel && sB.other === 'Google refused this address? Sign in again at the fixed address' && !sB.otherInFold,
+    `LAW 2, STATE B: the button is never greyed (it opens the sign-in again), the status names the road while the person is at Google, the paste box is OPEN, Cancel and the other road are visible buttons — not inside a fold (${JSON.stringify(sB).slice(0, 500)})`);
+  ok(/Desktop app client takes 127\.0\.0\.1 on any port; a Web application client takes only the addresses it lists/.test(sB.otherWhy || '') && !sB.claim && sB.admin && sB.admin.open === false && /^For your admin:/.test(sB.admin.summary) && sB.admin.notes.some((n) => /^What this company preset does not say/.test(n)) && sB.admin.notes.some((n) => /"clientType": "web"/.test(n)) && sB.admin.notes.some((n) => /VIBESPACE_GDRIVE_CLIENTS/.test(n)),
+    `LAW 3 + 5: the other road's line names BOTH kinds of client and claims neither; no «it is a Desktop app client» sentence anywhere; the admin's part is a fold titled for the admin — what the preset does not say and where it is stated (${JSON.stringify({ why: sB.otherWhy, admin: sB.admin }).slice(0, 600)})`);
+  await p1.probe('STATE B: the live block (road line, open paste box, Cancel, the other road)', `[id^="chan-account-"] .mounts-oauth-live`);
+  // the other road: the fixed address (a Web client lists that one); the earlier sign-in is replaced, said once
+  const b2 = await p1.evaljs(`(window.__opened || []).length`);
+  await p1.evaljs(`(() => { ${BLK}.querySelector('.mounts-oauth-other').click(); return 1; })()`);
+  const o2 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${b2}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  await sleep(150);
+  const sD = await stateOf();
+  const f1after = (await api('GET', `/api/channels/oauth/status?flowId=${f1.flowId}`)).json || {};
+  ok(o2 && new URL(o2).searchParams.get('redirect_uri') === GLOOP && /^The earlier sign-in was ended — this is a new one\./.test(sD.status) && sD.other === 'Google refused this address? Sign in again at 127.0.0.1 on any port' && f1after.running === false,
+    `the other road: the FIXED address ${GLOOP}; the earlier sign-in ended on the hub (never left running beside it) and said once; the way back offered (${JSON.stringify({ r: o2 && new URL(o2).searchParams.get('redirect_uri'), status: sD.status.slice(0, 80), other: sD.other, earlier: f1after.running })})`);
+  // the main button again: a fresh sign-in, the earlier one replaced
+  const r3 = await pressMain();
+  const sE = await stateOf();
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r3 || '') && /^The earlier sign-in was ended — this is a new one\./.test(sE.status), `«Open the Google sign-in again»: a fresh sign-in, the earlier one ended and said once (${r3})`);
+  // Cancel: one press
+  await p1.evaljs(`(() => { ${BLK}.querySelector('.mounts-oauth-cancel').click(); return 1; })()`);
+  await sleep(400);
+  const sF = await stateOf();
+  const fF = await flowOf();
+  ok(sF.status === 'The sign-in was cancelled. Press the button to start again.' && sF.button === 'Connect Google' && !sF.pasteOpen && fF.running === false, `Cancel is ONE press: the hub ends the sign-in, the block is back at its first state (${JSON.stringify({ status: sF.status, button: sF.button, running: fF.running })})`);
+  // ── r2 (the acceptance of 4c73941e6) ──
+  // LAW B: the block follows ONE sign-in — the start's answer is held TWO seconds after the hub answered (the hub has already
+  // replaced the earlier sign-in), so a tick of the earlier watch lands inside it: nothing of the earlier sign-in reaches the
+  // screen and the button stays busy until the new block is drawn
+  await pressMain();
+  await p1.evaljs(`(() => { if (!window.__f2) { window.__f2 = window.fetch; window.fetch = async (u, o) => { if (String(u).includes('/api/channels/oauth/start') && window.__failStart) return new Response(JSON.stringify({ error: 'the hub said no (a test answer)' }), { status: 500, headers: { 'Content-Type': 'application/json' } }); const r = await window.__f2(u, o); if (String(u).includes('/api/channels/oauth/start') && window.__slowStart) await new Promise((q) => setTimeout(q, 2000)); return r; }; } window.__slowStart = true; window.__seen = []; const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); window.__mo = new MutationObserver(() => window.__seen.push([s.textContent, ${BLK}.querySelector('button.mounts-btn-primary').disabled])); window.__mo.observe(s, { childList: true, characterData: true, subtree: true }); return 1; })()`);
+  const rB = await pressMain();
+  await sleep(2600);
+  const seenB = await p1.evaljs(`(() => { window.__mo.disconnect(); window.__slowStart = false; return window.__seen; })()`);
+  const sB2 = await stateOf();
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB || '') && seenB.length >= 1 && /Preparing authorization/.test(seenB[0][0]) && seenB.every(([t, dis]) => dis || /The earlier sign-in was ended/.test(t)) && !seenB.some(([t]) => /superseded|not running|was cancelled|press the button to start again/i.test(t)) && sB2.pasteOpen && /^The earlier sign-in was ended — this is a new one\./.test(sB2.status),
+    `r2 LAW B: a press whose answer takes 2 s — the earlier watch ended at the press: no answer of the replaced sign-in reached the screen, the button stayed busy, then the new block (${JSON.stringify(seenB).slice(0, 300)})`);
+  // LAW C: a press that fails says what is true — the sign-in still running (shown again), or none and how to start
+  await p1.evaljs(`window.__failStart = true; 1`);
+  await p1.evaljs(`(() => { ${BLK}.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  await sleep(800);
+  const sC1 = await stateOf();
+  ok(/^This press did not start a sign-in: .*The Google sign-in you started earlier is still waiting\./.test(sC1.status) && sC1.pasteOpen && sC1.cancel && sC1.button === 'Open the Google sign-in again' && (await flowOf()).running === true,
+    `r2 LAW C: a press that FAILED with a sign-in still running — said, and that sign-in is shown again with its box, Cancel and its watch (${JSON.stringify(sC1).slice(0, 300)})`);
+  await p1.evaljs(`(() => { window.__failStart = false; ${BLK}.querySelector('.mounts-oauth-cancel').click(); return 1; })()`);
+  await sleep(400);
+  await p1.evaljs(`window.__failStart = true; 1`);
+  await p1.evaljs(`(() => { ${BLK}.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  await sleep(800);
+  const sC2 = await stateOf();
+  await p1.evaljs(`window.__failStart = false; 1`);
+  ok(/^This press did not start a sign-in: .* No sign-in is running — press the button to start again\.$/.test(sC2.status) && sC2.button === 'Connect Google' && !sC2.pasteOpen && sC2.disabled === false,
+    `r2 LAW C: a press that FAILED with nothing running — said, and how to start (${JSON.stringify(sC2).slice(0, 300)})`);
+  // LAW E2: a long address never runs past the dialog's edge — an unbroken 300-character line in the live block wraps
+  await pressMain();
+  const wrapE = await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); const was = s.textContent; s.textContent = 'https://' + 'x'.repeat(300) + '.example.test/api/channels/oauth/cb/gmail'; const body = ${DLGC}; const dlg = body.closest('.dialog'); const r = { bodyOver: body.scrollWidth - body.clientWidth, dlgOver: dlg.scrollWidth - dlg.clientWidth, statusW: s.getBoundingClientRect().width, bodyW: body.getBoundingClientRect().width }; s.textContent = was; return r; })()`);
+  ok(wrapE.bodyOver <= 1 && wrapE.dlgOver <= 1 && wrapE.statusW <= wrapE.bodyW + 1, `r2 LAW E2: an unbroken 300-character address in the live block wraps — no horizontal scroll in the dialog (${JSON.stringify(wrapE)})`);
+  // THE PHONE (the owner's rule on a finger device: 44 px targets, 16 px text) — the live block's own buttons and box
+  await p1.cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const touch = await p1.evaljs(`(() => { const b = ${BLK}; const m = (e) => e ? { h: Math.round(e.getBoundingClientRect().height), f: parseFloat(getComputedStyle(e).fontSize) } : null; return { coarse: matchMedia('(pointer: coarse)').matches, main: m(b.querySelector('button.mounts-btn-primary')), other: m(b.querySelector('.mounts-oauth-other')), cancel: m(b.querySelector('.mounts-oauth-cancel')), box: m(b.querySelector('.mounts-oauth-live > input')) }; })()`);
+  await p1.cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  ok(touch.coarse && ['main', 'other', 'cancel', 'box'].every((k) => touch[k] && touch[k].h >= 44 && touch[k].f >= 16), `THE PHONE: on a finger device the live block's button, the other road, Cancel and the paste box are ≥ 44 px tall with 16 px text (${JSON.stringify(touch)})`);
+  // LAW E1: Slack, a company app that neither relays nor lists this address — one truth: no «press Connect, then Allow»
+  ok(await openOn('slack'), 'Connect an account on Slack');
+  const sl = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => !!e && e.style.display !== 'none'; return { pwn: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^pwn\\d+\\.slack$/.test(e.dataset.field)).map((e) => e.textContent), wp: vis(d.querySelector(':scope > [data-field="wpnote.slack"]')) }; })()`);
+  ok(sl.pwn.length === 1 && /cannot come back here/.test(sl.pwn[0]) && sl.wp === false, `r2 LAW E1: a Slack company app with no way back says so and NOT «press Connect, then Allow — nothing to copy» (${JSON.stringify(sl)})`);
+  ok(await openOn('gmail'), 'Connect an account on Gmail again');
+  // ── r3 (the acceptance of b849e86dc) ──
+  // ITEM 2: Cancel while a press is IN FLIGHT ends what the hub runs — the shown sign-in AND the one the press is starting
+  await pressMain();
+  await p1.evaljs(`window.__slowStart = true; 1`);
+  await p1.evaljs(`(() => { ${BLK}.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  await sleep(250);
+  await p1.evaljs(`(() => { ${BLK}.querySelector('.mounts-oauth-cancel').click(); return 1; })()`);
+  await sleep(3200);
+  await p1.evaljs(`window.__slowStart = false; 1`);
+  const s2c = await stateOf(), f2c = await flowOf();
+  ok(f2c.running === false && /^The sign-in was cancelled\./.test(s2c.status) && !s2c.pasteOpen, `r3 ITEM 2: Cancel pressed while a press is in flight (its answer held 2 s) — the hub runs NO sign-in of this kind afterwards, and the dialog says «cancelled» only then (${JSON.stringify({ running: f2c.running, status: s2c.status.slice(0, 80) })})`);
+  // ITEM 3: the LATE answer of the old sign-in — a status request of sign-in A sent AFTER the press that replaced it (A is then
+  // superseded on the hub) and answered after the new block is drawn changes nothing on screen
+  await pressMain();
+  const fA = await flowOf();
+  await p1.evaljs(`(() => { window.__lateId = ${JSON.stringify(fA.flowId)}; if (!window.__f3) { window.__f3 = window.fetch; window.fetch = async (u, o) => { if (window.__lateId && String(u).includes('oauth/status?flowId=' + window.__lateId)) await new Promise((q) => setTimeout(q, 2600)); return window.__f3(u, o); }; } return 1; })()`);
+  await sleep(1700);   // a tick of A's watch is now waiting to be sent
+  const rB3 = await pressMain();
+  await sleep(3200);   // A's request goes out (A is superseded now) and its answer lands after B is drawn
+  const s3 = await stateOf();
+  await p1.evaljs(`window.__lateId = null; 1`);
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rB3 || '') && s3.pasteOpen && s3.cancel && /^The earlier sign-in was ended — this is a new one\./.test(s3.status) && s3.button === 'Open the Google sign-in again', `r3 ITEM 3: the replaced sign-in's late answer (its «superseded») landed after the new block was drawn and changed nothing — the new block keeps its box, Cancel and its line (${JSON.stringify(s3).slice(0, 300)})`);
+  // ITEM 6: E2 as the law said it — the road line with a 241-character host and an unbroken 300-character line, at 1280 px and 390 px
+  const wrapAt = async (width) => {
+    await p1.cdp('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(300);
+    const r = await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); const was = s.textContent; const body = ${DLGC}; const dlg = body.closest('.dialog'); const out = {}; const host = 'h'.repeat(228) + '.example.test';   // 228 + 13 = 241
+      for (const [k, txt] of [['host241', 'It comes back to this VibeSpace’s own address (' + host + ') and finishes by itself — approve access, then come back to this dialog.'], ['unbroken300', 'x'.repeat(300)]]) { s.textContent = txt; out[k] = { hostLen: host.length, len: txt.length, bodyOver: body.scrollWidth - body.clientWidth, dlgOver: dlg.scrollWidth - dlg.clientWidth, statusW: Math.round(s.getBoundingClientRect().width), bodyW: Math.round(body.getBoundingClientRect().width) }; }
+      s.textContent = was; return out; })()`);
+    if (process.env.GCW_SHOTS) { await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.dataset.was = s.textContent; s.textContent = 'It comes back to this VibeSpace’s own address (' + 'h'.repeat(228) + '.example.test) and finishes by itself — approve access, then come back to this dialog.'; s.scrollIntoView({ block: 'center' }); return 1; })()`); const shot = await p1.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.GCW_SHOTS, `e2-${width}.png`), Buffer.from(shot.result.data, 'base64')); await p1.evaljs(`(() => { const s = ${BLK}.querySelector(':scope > .mounts-field-hint'); s.textContent = s.dataset.was; return 1; })()`); }
+    return r;
+  };
+  const w1280 = await wrapAt(1280), w390 = await wrapAt(390);
+  // back to the suite's standing 375×667 phone viewport (line «setDeviceMetricsOverride 375»; ⑨'s setup-card fit below measures at it)
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 1, mobile: true });
+  await sleep(300);
+  const fits = (m) => m.bodyOver <= 1 && m.dlgOver <= 1 && m.statusW <= m.bodyW + 1;
+  ok(w1280.host241.hostLen === 241 && w1280.unbroken300.len === 300 && [w1280.host241, w1280.unbroken300, w390.host241, w390.unbroken300].every(fits), `r3 ITEM 6 (E2): the road line with a 241-character host and an unbroken 300-character line wrap inside the dialog at 1280 px AND 390 px — no horizontal scroll (${JSON.stringify({ w1280, w390 })})`);
+  // ITEM 1b CONTROL: a person's OWN client on an https road DOES draw the «it is a Desktop app client» claim — the pin in ⑫ can see it
+  ok(await openOn('gmail'), 'Connect an account on Gmail (a person\'s own client)');
+  await p1.evaljs(`(() => { const d = ${DLGC}; const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.value = 'custom'; c.dispatchEvent(new Event('change')); const vis = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && !i.readOnly); const id = vis.find((i) => i.placeholder && /googleusercontent/.test(i.placeholder)); const sec = vis.find((i) => i.type === 'password'); id.value = ${JSON.stringify(CUSTOM_ID)}; sec.value = ${JSON.stringify(CUSTOM_SECRET)}; return 1; })()`);
+  const rOwn = await pressMain();
+  const ownNotes = await p1.evaljs(`[...${BLK}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
+  ok(rOwn === `${POD}/api/channels/oauth/cb/gmail` && ownNotes.some((n) => /The client is a Desktop app client, which cannot take one/.test(n)), `CONTROL (r3 PIN, law 3): a person's OWN client on the https route draws the claim sentence — the preset leg in ⑫ would see it (${JSON.stringify(ownNotes).slice(0, 300)})`);
+  // ITEM 7: THE PAGE'S ORIGIN — a page under ANOTHER name than the instance's: a preset with its own relay page cannot come back to
+  // it (its relay sends only the instance's own host back), so state A says the paste road; computed from the instance's origin
+  // it would say nothing (the relay) — the cell where the two differ
+  ok(await p1.load(`http://other-name.example.test:${PORT}/`), 'page 1 under ANOTHER name (other-name.example.test)');
+  ok(await openOn('gmail'), 'Connect an account on Gmail (under the other name)');
+  await p1.evaljs(`(() => { const d = ${DLGC}; const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'relayco')); c.value = 'relayco'; c.dispatchEvent(new Event('change')); return 1; })()`);
+  await sleep(200);
+  const s7 = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^(pwl|pwr|pwn)\\d+\\.gmail$/.test(e.dataset.field)).map((e) => e.dataset.field.replace(/\\d.*/, '')); })()`);
+  const r7 = await pressMain();
+  ok(JSON.stringify(s7) === JSON.stringify(['pwl']) && /^http:\/\/127\.0\.0\.1:\d+$/.test(r7 || ''), `r3 ITEM 7: under another name, a preset whose own relay page cannot bring this page back — state A says the PASTE road (from the page's origin) and the start takes it (${JSON.stringify({ stateA: s7, redirect: r7 })})`);
+  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 back on the pod\'s name');
+  ok(await openOn('gmail'), 'Connect an account on Gmail again');
+  // R5: closing the dialog ends a sign-in that cannot finish without it (the paste box is here) — said once; a reopen is clean
+  await pressMain();
+  const fG = await flowOf();
+  await p1.evaljs(`(() => { document.querySelector('[id^="chan-account-"] .dialog-close').click(); return 1; })()`);
+  const toast = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const t = [...document.querySelectorAll('.global-toast-body')].map((x) => x.textContent).find((x) => /needed this dialog/.test(x)); if (t) return t; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  const fH = (await api('GET', `/api/channels/oauth/status?flowId=${fG.flowId}`)).json || {};
+  ok(fG.running === true && fH.running === false && toast === 'The Google sign-in was ended: it needed this dialog to finish.', `R5: closing the dialog ENDS a sign-in that needs it (a loopback from another computer) and says so once (${JSON.stringify({ before: fG.running, after: fH.running, toast })})`);
+  ok(await openOn('gmail'), 'reopened');
+  const sI = await stateOf();
+  ok(sI.button === 'Connect Google' && sI.status === '' && !sI.pasteOpen && !sI.cancel, `…and a reopened dialog is clean — nothing stranded (${JSON.stringify(sI).slice(0, 200)})`);
   await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
   // CONTROL: the same page on the instance's own loopback IS a browser on this machine — its Connect keeps the loopback
   // (the local hub's road, as before) — so the route check above is about where the browser is
@@ -1071,13 +1213,28 @@ const p2 = await newPage();
   const opened = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   const redirect = opened ? new URL(opened).searchParams.get('redirect_uri') : null;
   ok(redirect === ADMIN, `Connect Google from a private address: redirect_uri = the relay page (the fleet's here — one address for every instance), never 127.0.0.1 or a per-instance route (${redirect})`);
-  const FOLD = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none').querySelector('details.mounts-oauth-paste')`;
-  const fold = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${FOLD}) break; await new Promise((r) => setTimeout(r, 100)); } const d = ${FOLD}; if (!d) return null; d.open = true; const admin = d.querySelector('.mounts-oauth-admin'); return { summary: d.querySelector('summary').textContent, admin: admin && admin.textContent, value: admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input') && admin.nextElementSibling.querySelector('input').value, hints: [...d.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent), other: (d.querySelector('.mounts-oauth-other') || {}).textContent || null }; })()`);
-  ok(fold && fold.summary === 'The sign-in did not come back here by itself?' && fold.hints.some((h) => /^This sign-in comes back through the relay page admin\.fleet\.example\.test: one address, registered once on the app, serves every VibeSpace — the page sends your browser back here and keeps nothing\./.test(h)),
-    `the fold says the ROAD and WHY in a person's words (${JSON.stringify(fold && fold.hints).slice(0, 300)})`);
-  ok(fold && /^Google said this address is not allowed\? It is the relay page — add it ONCE to the app’s redirect URLs/.test(fold.admin || '') && fold.value === ADMIN && /^Sign in the other way/.test(fold.other || ''),
-    `a refused sign-in: the fold names the ONE address missing (the relay page) with Copy, and keeps the other road (${JSON.stringify(fold).slice(0, 300)})`);
-  await p1.probe('Connect Google through the relay page: the fold opened', `[id^="chan-account-"] .mounts-oauth-paste`);
+  // lane gmail-connect-wall (law 2): the LIVE block — the road said in the status line while the person is at Google, the
+  // paste-back folded (this road comes back by itself), the other road a visible button, the admin's part its own fold
+  const BLK12 = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none')`;
+  const live = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${BLK12}.querySelector('.mounts-oauth-live')) break; await new Promise((r) => setTimeout(r, 100)); } const b = ${BLK12}; const fold = b.querySelector('details.mounts-oauth-paste'); const af = b.querySelector('details.mounts-oauth-admin-fold'); if (af) af.open = true; const admin = af && af.querySelector('.mounts-oauth-admin');
+    return { status: b.querySelector(':scope > .mounts-field-hint').textContent, button: b.querySelector('button.mounts-btn-primary').textContent, disabled: b.querySelector('button.mounts-btn-primary').disabled, summary: fold && fold.querySelector('summary').textContent, foldOpen: !!(fold && fold.open), admin: admin && admin.textContent, value: admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input') && admin.nextElementSibling.querySelector('input').value, other: (b.querySelector('.mounts-oauth-actions .mounts-oauth-other') || {}).textContent || null, cancel: !!b.querySelector('.mounts-oauth-actions .mounts-oauth-cancel') }; })()`);
+  ok(live && /It comes back through the relay page admin\.fleet\.example\.test and finishes by itself/.test(live.status) && live.summary === 'The sign-in did not come back here by itself?' && live.foldOpen === false && live.disabled === false && live.button === 'Open the Google sign-in again',
+    `the status line says the ROAD in a person's words; the paste-back stays folded (this road comes back by itself); the button opens the sign-in again (${JSON.stringify(live).slice(0, 400)})`);
+  const notes12 = await p1.evaljs(`[...${BLK12}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
+  ok(notes12.some((n) => /^If Google says “Error 400: redirect_uri_mismatch”/.test(n)) && !notes12.some((n) => /The client is a Desktop app client, which cannot take one/.test(n)), `r2 PIN (law 3): the admin's fold of a COMPANY preset's https road DRAWS Google's refusal lines and never «the client is a Desktop app client» (${JSON.stringify(notes12).slice(0, 300)})`);
+  ok(live && /^It is the relay page — add it ONCE to the app’s redirect URLs/.test(live.admin || '') && live.value === ADMIN && /^Sign in the other way/.test(live.other || '') && live.cancel,
+    `a refused sign-in: the admin's fold names the ONE address missing (the relay page) with Copy; the other road and Cancel are visible buttons (${JSON.stringify(live).slice(0, 300)})`);
+  await p1.probe('Connect Google through the relay page: the live block', `[id^="chan-account-"] .mounts-oauth-live`);
+  // R5: a sign-in that comes back BY ITSELF keeps running after the dialog closes, and a reopened dialog SHOWS it (state B) —
+  // never a second sign-in; the landing then finishes it there
+  await p1.evaljs(`(() => { document.querySelector('[id^="chan-account-"] .dialog-close').click(); return 1; })()`);
+  await sleep(500);
+  const still = (await api('GET', '/api/channels/oauth/status?kind=gmail')).json || {};
+  const opensBefore = await p1.evaljs(`(window.__opened || []).length`);
+  ok(await openOn('gmail'), 'Connect an account on Gmail again (the relay sign-in still running)');
+  const re = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const b = ${BLK12}; if (b && b.querySelector('.mounts-oauth-live')) return { status: b.querySelector(':scope > .mounts-field-hint').textContent, cancel: !!b.querySelector('.mounts-oauth-cancel'), link: (b.querySelector('.mounts-oauth-link input') || {}).value || null }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(still.running === true && re && /^The Google sign-in you started earlier is still waiting\. It comes back through the relay page/.test(re.status) && re.cancel && re.link === opened && await p1.evaljs(`(window.__opened || []).length`) === opensBefore,
+    `R5: closing kept the relay sign-in running; the reopened dialog SHOWS it (its road, its link, Cancel) and opens nothing new (${JSON.stringify({ running: still.running, re }).slice(0, 400)})`);
   // the relay page, as shipped, with the admin copy's data-allow — the vendor sends the browser there with the stub's code
   const vm = await import('node:vm');
   const rctx = { URL, URLSearchParams, atob }; rctx.globalThis = rctx; vm.createContext(rctx);
@@ -1085,11 +1242,15 @@ const p2 = await newPage();
   const st = new URL(opened).searchParams.get('state');
   const d = rctx.VibeSpaceRelay.decide(`?code=stub-relay-code-12&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify&state=${encodeURIComponent(st)}`, ['fleet.example.test']);
   ok(d.act === 'redirect' && d.to.startsWith(`${base}/api/channels/oauth/cb/gmail?code=stub-relay-code-12&scope=`), `the relay page sends the browser to THIS instance's landing route with the query verbatim (${JSON.stringify(d).slice(0, 200)})`);
+  // r2 PIN: the sign-in lands WHILE the dialog is closed (a relay sign-in keeps running after a close) — the reopened dialog says it
+  await p1.evaljs(`(() => { document.querySelector('[id^="chan-account-"] .dialog-close').click(); return 1; })()`);
+  await sleep(300);
   const land = d.act === 'redirect' ? await fetch(d.to) : null;
   const page = land ? await land.text() : '';
-  ok(land && land.status === 200 && /data-landing="ok"/.test(page), `the landing page says connected (${land && land.status})`);
+  ok(land && land.status === 200 && /data-landing="ok"/.test(page), `the landing page says connected (${land && land.status}) — the dialog was CLOSED when it landed`);
+  ok(await openOn('gmail'), 'Connect an account on Gmail reopened after the landing');
   const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(/✓ Connected as \S+@example\.test — finish with the “Connect” button below\./.test(signed || ''), `the dialog's poll reads the sign-in that landed through the relay (${JSON.stringify(signed)})`);
+  ok(/✓ Connected as \S+@example\.test — finish with the “Connect” button below\./.test(signed || ''), `r2 PIN: the reopened dialog reads the sign-in that landed through the relay WHILE it was closed — «✓ Connected as …, finish with Connect» (${JSON.stringify(signed)})`);
   await p1.evaljs(`${DLGC}.querySelector('.dialog-actions .btn-create').click(); 1`);
   let n1 = n0;
   for (let i = 0; i < 60 && n1 === n0; i++) { n1 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length; if (n1 === n0) await sleep(100); }

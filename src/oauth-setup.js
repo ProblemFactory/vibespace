@@ -31,6 +31,15 @@
  *               public page is NEVER a preset's row (addendum 1 of lane oauth-relay-road).
  *     now     — {road, uri, key} — consentRoad's verdict for THIS page (null without an origin): the row it marks.
  *   docSection(rows) → the markdown deploy/README.md holds between DOC_BEGIN / DOC_END (scripts/gen-oauth-setup-doc.mjs).
+ *   lane gmail-connect-wall (the owner 2026-11-09: a company preset walked a Gmail connect into Google's wall): a preset's
+ *   facts gain `listed` (its entry says `"instanceAddress": "listed"` — the app lists every instance's own https address)
+ *   and `lacks` ⊆ LACK_KEYS: `clientType` (a vendor with two kinds of client, not said) and `road` (no relay page and no
+ *   listed address: a sign-in from another computer pastes its last page back). A preset's row is its relay page
+ *   (`preset`), else — when it says its app lists it — this instance's address (`presetRoute`), else `presetLoopback`.
+ *   lacksWords(lacks, source) → [{key, params}] — what the preset does not say and WHERE its admin says it (`source` = the
+ *   kinds digest's `oauthSetup.presetSource`: {from: dir | env, dir, file, env} — the presets directory is watched, an edit
+ *   takes effect without a restart; the environment is read at boot). The Connect dialog's admin fold and ⚙ → Integrations
+ *   draw the same words.
  *   PUBLIC_RELAY — the project's public relay page: a DOCUMENTED, STABLE contract (README, the card, the relay page's
  *                  published path) — scripts/test-integration-registry.mjs pins it.
  *
@@ -41,7 +50,8 @@ const CR = require('./consent-road.js');   // PURE → PURE: the three roads (re
 
 const i18nKey = (s) => s;
 const PUBLIC_RELAY = CR.RELAY_DEFAULT;   // the setup card's ① row (a person's own app only) — the page published from docs/slack-relay
-const ROW_KEYS = Object.freeze(['fleet', 'public', 'own', 'route', 'loopback', 'preset', 'presetRoute', 'also']);
+const ROW_KEYS = Object.freeze(['fleet', 'public', 'own', 'route', 'loopback', 'preset', 'presetRoute', 'presetLoopback', 'also']);
+const LACK_KEYS = Object.freeze(['clientType', 'road']);   // lane gmail-connect-wall: what a company preset may not say
 const CLIENT_TYPES = Object.freeze(['web', 'desktop']);
 const HOST_TPL = 'https://<host>';
 
@@ -70,13 +80,20 @@ const WORDS = Object.freeze({
   'row.loopback': i18nKey('This machine: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.'),
   'row.loopback.web': i18nKey('This machine, with a Web application client: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.'),
   'row.preset': i18nKey('This company app’s relay page — registered once by your admin.'),
-  'row.presetRoute': i18nKey('This company app has no relay page yet: this VibeSpace’s own address must be on the app — your admin adds it.'),
+  'row.presetRoute': i18nKey('This company app lists this VibeSpace’s own address (its preset says so): a sign-in from another computer comes back here.'),
+  'row.presetLoopback': i18nKey('This company app has no relay page and does not say it lists this VibeSpace’s address: a sign-in from another computer comes back to 127.0.0.1, and its last page’s address is pasted back into the Connect dialog.'),
   'row.presetRoute.tpl': i18nKey('This company app has no relay page yet, and this VibeSpace has no https address: a sign-in comes back only on this machine, or by pasting the last page’s address back.'),
   'row.also.drive': i18nKey('A Google Drive folder (storage) signs in with the same client at this address.'),
   'row.self': i18nKey('The address VibeSpace registers for it — where {provider} sends you back.'),
   now: i18nKey('used now'),
   inactive: i18nKey('Not set here: enter it in Settings → Channels → relay page to use it.'),
   'now.ephemeral': i18nKey('A sign-in from this page comes back to 127.0.0.1 on any free port (a Desktop app client).'),
+  'now.silent': i18nKey('A sign-in from this page comes back to 127.0.0.1 on any free port first; the fixed address above is its other road.'),
+  lacks: i18nKey('What this company preset does not say — your admin states it on the preset’s entry:'),
+  'lacks.clientType': i18nKey('which kind of {provider} client its app is: "clientType": "web" (a Web application client) or "desktop" (a Desktop app client). Until then a sign-in tries 127.0.0.1 on any port first and offers the fixed address.'),
+  'lacks.road': i18nKey('a way back for a sign-in from another computer: a relay page ("relayUrl": "https://…/relay/"), or that the app lists every VibeSpace’s own https address ("instanceAddress": "listed"). Until then the last page’s address is pasted back.'),
+  'lacks.where.dir': i18nKey('Where: the preset’s entry in {path} (or {override} for this instance alone). A saved change takes effect without a restart.'),
+  'lacks.where.env': i18nKey('Where: the preset’s entry in the environment variable {env}. A change there takes effect after VibeSpace restarts; the same entry in a presets directory’s {file} takes effect without one.'),
   last: i18nKey('If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.'),
   'where.custom': i18nKey('Then: Connect an account → OAuth client → Custom — enter the client ID and secret there.'),
   'where.preset': i18nKey('The client ID and secret are set by your admin in the cluster presets.'),
@@ -120,7 +137,8 @@ function setupCard({ kind, redirect = null, base = '', relayPages = [], preset =
   if (self) {
     if (route) row('route', route);
   } else if (preset) {
-    if (preset.relayPage) row('preset', preset.relayPage); else row('presetRoute', route);
+    // lane gmail-connect-wall: this instance's own address only when the preset says its app lists it
+    if (preset.relayPage) row('preset', preset.relayPage); else if (preset.listed || !route) row('presetRoute', route); else row('presetLoopback', null);
   } else {
     if (fleet) row('fleet', fleet.url, { active: true });
     else {
@@ -138,7 +156,7 @@ function setupCard({ kind, redirect = null, base = '', relayPages = [], preset =
   if (origin && !self) {
     const relay = preset ? (preset.relayPage ? { url: preset.relayPage, fleet: true } : { url: '', fleet: false }) : fleet ? { url: fleet.url, fleet: true } : { url: page ? page.url : '', fleet: false };
     if (r.loopback) {
-      const v = CR.consentRoad({ kind, publicUrl: base, origin, relayUrl: relay.url, relayFleet: relay.fleet, clientType: r.clientTypes ? ct : 'web' });
+      const v = CR.consentRoad({ kind, publicUrl: base, origin, relayUrl: relay.url, relayFleet: relay.fleet, clientType: r.clientTypes ? ct : 'web', preset: !!preset, listed: !!(preset && preset.listed), clientKinds: !!r.clientTypes });
       now = v.road === 'loopback' ? (v.fixed ? { road: 'loopback', uri: r.loopback } : { road: 'loopback', uri: null }) : { road: v.road, uri: v.redirectUri };
     } else if (relay.url) now = { road: 'relay', uri: relay.url };
     else if (route) now = { road: 'route', uri: route };
@@ -158,7 +176,31 @@ function setupCard({ kind, redirect = null, base = '', relayPages = [], preset =
     refusal: r.refusal || null,
     where: self ? 'self' : preset ? 'preset' : 'custom',
     now,
+    // lane gmail-connect-wall (law 5): what a company preset does not say, and where its admin says it
+    lacks: preset ? lacksWords(preset.lacks, preset.source) : [],
   };
+}
+
+/** lane gmail-connect-wall r3 (law 3's pin): the refusal lines an admin fold draws, as WORDS keys — for a vendor with two
+ *  kinds of client (`clientTypes`), an https address asked (`https`), a company preset (`preset`). The «it is a Desktop app
+ *  client» CLAIM (`refusal.desktop`) is drawn only for a person's OWN client: a company app's kind is its admin's fact. */
+function refusalKeys({ clientTypes = false, https = false, preset = false } = {}) {
+  return ['refusal', 'register', ...(clientTypes && https && !preset ? ['refusal.desktop'] : [])];
+}
+/** lane gmail-connect-wall (law 5, the admin's door NAMED, not built): the lines that say what a company preset does not
+ *  say (`lacks` ⊆ LACK_KEYS) and WHERE its admin says it (`source`: the presets directory — watched, no restart — or the
+ *  environment — read at boot). [] when nothing is missing. Keys of WORDS + params; names only, never a value. */
+function lacksWords(lacks, source = null) {
+  const L = (Array.isArray(lacks) ? lacks : []).filter((k) => LACK_KEYS.includes(k));
+  if (!L.length) return [];
+  const out = [{ key: 'lacks', params: {} }, ...L.map((k) => ({ key: `lacks.${k}`, params: {} }))];
+  const s = source && typeof source === 'object' ? source : null;
+  const file = s && typeof s.file === 'string' && s.file ? s.file : '<file>';
+  if (s && s.from === 'dir') {
+    const dir = typeof s.dir === 'string' && s.dir ? s.dir.replace(/\/+$/, '') : '<presets dir>';
+    out.push({ key: 'lacks.where.dir', params: { path: `${dir}/${file}`, override: `${dir}/override/${file}` } });
+  } else if (s) out.push({ key: 'lacks.where.env', params: { env: typeof s.env === 'string' ? s.env : '', file } });
+  return out;
 }
 
 /** The words of one row (the key the client t()s; params beside it). */
@@ -197,4 +239,4 @@ function docSection(entries) {
   return out.join('\n');
 }
 
-module.exports = { PUBLIC_RELAY, ROW_KEYS, CLIENT_TYPES, HOST_TPL, WORDS, DOC_BEGIN, DOC_END, setupCard, rowWords, docSection };
+module.exports = { PUBLIC_RELAY, ROW_KEYS, LACK_KEYS, CLIENT_TYPES, HOST_TPL, WORDS, DOC_BEGIN, DOC_END, setupCard, rowWords, docSection, lacksWords, refusalKeys };

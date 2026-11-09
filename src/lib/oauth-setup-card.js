@@ -27,7 +27,8 @@ export function setupModelOf(spec, { preset = null, clientType = '' } = {}) {
   const pf = preset ? ((f.presets || []).find((p) => p.key === preset.key) || { key: preset.key, relayPage: null, clientType: null }) : null;
   return OS.setupCard({
     kind: spec.kind, redirect: row.redirect, base: f.base || '', relayPages: f.relayPages || [], origin: pageOrigin(),
-    preset: pf ? { key: pf.key, label: preset.label || pf.key, relayPage: pf.relayPage || null } : null,
+    // lane gmail-connect-wall: + whether it lists this instance's address, what it does not say, where it is stated
+    preset: pf ? { key: pf.key, label: preset.label || pf.key, relayPage: pf.relayPage || null, listed: !!pf.listed, lacks: pf.lacks || [], source: f.presetSource || null } : null,
     clientType: clientType || (pf && pf.clientType) || '',
   });
 }
@@ -91,13 +92,20 @@ export function renderSetupCard(model, { provider = '' } = {}) {
     }
     card.appendChild(list);
   }
-  if (model.now && model.now.road === 'loopback' && !model.now.uri) card.appendChild(el('div', 'mounts-field-hint oauth-setup-now-ephemeral', t(OS.WORDS['now.ephemeral'])));
+  // lane gmail-connect-wall (law 3): a preset that does not say its client's kind is never called a Desktop client
+  if (model.now && model.now.road === 'loopback' && !model.now.uri) card.appendChild(el('div', 'mounts-field-hint oauth-setup-now-ephemeral', t(OS.WORDS[model.who === 'preset' && model.clientTypes && !model.clientType ? 'now.silent' : 'now.ephemeral'])));
+  // lane gmail-connect-wall (law 5): what the company preset does not say, and the file (or env) its admin says it in
+  if (model.lacks && model.lacks.length) {
+    const box = el('div', 'oauth-setup-lacks');
+    for (const w of model.lacks) box.appendChild(el('div', `mounts-field-hint oauth-setup-lack${w.key === 'lacks' ? ' oauth-setup-lacks-head' : ''}`, t(OS.WORDS[w.key], { ...p, ...w.params })));
+    card.appendChild(box);
+  }
   // 3. where the client ID and secret go; 4. the vendor's own refusal words; the last resort
   card.appendChild(el('div', 'plugin-detail oauth-setup-where', t(OS.WORDS[`where.${model.where}`], p)));
   if (model.refusal) {
     const ref = el('div', 'mounts-field-hint oauth-setup-refusal', t(OS.WORDS.refusal, p));
     card.appendChild(ref);
-    if (model.clientTypes) card.appendChild(el('div', 'mounts-field-hint oauth-setup-refusal-desktop', t(OS.WORDS['refusal.desktop'], p)));
+    if (model.clientTypes && model.who !== 'preset') card.appendChild(el('div', 'mounts-field-hint oauth-setup-refusal-desktop', t(OS.WORDS['refusal.desktop'], p)));   // lane gmail-connect-wall (law 3): never a claim about a company app's kind
   }
   if (model.who !== 'self') card.appendChild(el('div', 'mounts-field-hint oauth-setup-last', t(OS.WORDS.last)));
   return card;
@@ -140,12 +148,22 @@ export function setupFold(spec, opts = {}) {
 
 /** The refusal fold's console words (after an attempt): the vendor's own error and WHERE the missing address goes — the
  *  same facts as the card's own lines. `x` = the dialog's spec, `https` = the address the sign-in asked for is https. */
-export function refusalNotes(x, { https = false } = {}) {
+export function refusalNotes(x, { https = false, preset = false } = {}) {
   const row = x && x.integration ? R.rowById(x.integration) : null;
   const r = row && row.redirect;
   if (!r || r.selfRegisters || !r.console) return [];
   const p = { provider: providerOfRow(row), error: r.refusal, path: t(r.console.path) };
-  const out = [t(OS.WORDS.refusal, p), t(OS.WORDS.register, p).replace(/:$/, '.')];
-  if (r.clientTypes && https) out.push(t(OS.WORDS['refusal.desktop'], p));
-  return out;
+  // lane gmail-connect-wall (law 3; r3: the decision is PURE src/oauth-setup.js refusalKeys): the «it is a Desktop app client»
+  // sentence is about a person's OWN client — a company app's kind is its admin's fact, never claimed here
+  return OS.refusalKeys({ clientTypes: !!r.clientTypes, https, preset }).map((k) => (k === 'register' ? t(OS.WORDS.register, p).replace(/:$/, '.') : t(OS.WORDS[k], p)));
+}
+/** lane gmail-connect-wall (law 5): what the company preset `preset` ({key} — the dialog's choice) does not say and where its
+ *  admin says it — the kinds digest's `oauthSetup.presets[].lacks` + `presetSource`, in the card's own words. */
+export function lacksLines(x, preset) {
+  const f = x && x.oauthSetup;
+  const pf = f && preset ? (f.presets || []).find((q) => q.key === preset.key) : null;
+  if (!pf) return [];
+  const row = x.integration ? R.rowById(x.integration) : null;
+  const provider = providerOfRow(row);
+  return OS.lacksWords(pf.lacks, f.presetSource || null).map((w) => t(OS.WORDS[w.key], { provider, ...w.params }));
 }

@@ -68,6 +68,7 @@ const MANIFEST = require('./slack/manifest.js');   // lane dc-channels-manifest:
 const Text = require('./slack-text.js');
 const Limits = require('./slack-limits.js');
 const Manifest = require('./slack-manifest.js');
+const CR = require('../consent-road.js');   // lane gmail-connect-wall (PURE): routeAllowed — a company app's own-address road is its admin's fact
 const Words = require('./slack-words.js');
 const SR = require('../channel-search.js');   // lane slack-search: the search row's bounds + the snippet bound (PURE)
 
@@ -473,7 +474,7 @@ function create(record = {}, deps = {}) {
     const r = k && resolveIntegration ? resolveIntegration(INTEGRATION, { credentialKey: k }) : null;
     const v = (r && r.values) || {};
     if (!r || r.source === 'none' || !v.clientId || !v.clientSecret) throw new ChannelError('auth-expired', `the Slack workspace app is not usable: ${(r && r.why) || 'no client id / secret'}`, { retryable: false, detail: { why: 'client-missing' } });
-    return { source: r.source, clientId: String(v.clientId), secret: () => String(v.clientSecret), relayUrl: typeof v.relayUrl === 'string' ? v.relayUrl : '', teamDomain: typeof v.teamDomain === 'string' ? v.teamDomain : '' };
+    return { source: r.source, clientId: String(v.clientId), secret: () => String(v.clientSecret), relayUrl: typeof v.relayUrl === 'string' ? v.relayUrl : '', teamDomain: typeof v.teamDomain === 'string' ? v.teamDomain : '', listed: CR.listedOf(v) };
   }
   /** lane slack-org-team-id: the workspaces an org-wide install is granted — ONE `auth.teams.list` (an org method, no
    *  scope, Tier 3); the first names the record's workspace (several workspaces under one token = not now). */
@@ -863,9 +864,15 @@ function create(record = {}, deps = {}) {
           // lane oauth-relay-road addendum 1 (the owner 2026-10-22: the public page is never a company app's): a preset rides
           // its own relay page, else the fleet's (the presets' fleet.json) — never the setting; a custom app the setting
           const fleet = typeof consent.fleetRelayUrl === 'function' ? String(consent.fleetRelayUrl() || '').trim() : '';
-          const relay = c.source === 'cluster' ? (c.relayUrl || fleet) : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
-          const to = Manifest.redirectFor({ relayUrl: relay, origin: own });
+          // lane gmail-connect-wall r3 (law D's admin-typo cell): a company preset's relay is relayPick's — its own page when it is
+          // one, else the fleet's — the ONE function state A reads too (a malformed own page falls back, as for Gmail and Lark)
+          const relay = c.source === 'cluster' ? CR.relayPick({ fleet, preset: typeof c.relayUrl === 'string' ? c.relayUrl : '' }).url : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
+          // lane gmail-connect-wall (R3, the same law as Gmail and Lark — src/consent-road.js routeAllowed): a COMPANY app comes back
+          // to this instance's own https address only when its preset says the app lists it; Slack has no loopback road
+          const ownOk = CR.routeAllowed({ preset: c.source === 'cluster', listed: c.listed });
+          const to = Manifest.redirectFor({ relayUrl: relay, origin: ownOk ? own : null });
           if (to.via === 'bad-relay') throw new ChannelError('forbidden', 'the Slack relay page address is not an https URL — fix it (the company preset\'s relayUrl, or Settings → Channels → Slack relay page)', { retryable: false, detail: { why: 'bad-relay' } });
+          if (!to.uri && c.source === 'cluster' && !ownOk && own && own.startsWith('https://')) throw new ChannelError('not-supported', 'the company Slack app has no relay page and does not list this VibeSpace’s own address — your admin states one in the preset (its relayUrl, or "instanceAddress": "listed"); until then use "make your own app" instead', { retryable: false, detail: { why: 'preset-unlisted' } });
           if (!to.uri && c.source === 'cluster') throw new ChannelError('not-supported', 'this VibeSpace has no https address and the company Slack app names no relay page — use "make your own app" instead', { retryable: false, detail: { why: 'no-https' } });
           return oauth.begin({
             id: adapterId, mode: 'public', label: 'Slack', timeoutMs: 15 * 60 * 1000, redirectUri: to.uri,

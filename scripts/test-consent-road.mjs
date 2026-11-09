@@ -92,6 +92,18 @@
 //      shipped) forwards a chained state VERBATIM; THE REAL ENGINE + ROUTES on the route road (a pod) and the relay road (a
 //      fleet pod through the admin's page): one Re-authorize, every page landed in the same tab, the route's CSP unchanged,
 //      each next page's state signed with its place, the last page closes the tab, the token holds every permission
+// lane gmail-connect-wall (the owner 2026-11-09 on the owner's own hub: a Gmail connect under a company preset walked into
+// Google's «Error 400: redirect_uri_mismatch» — the route to the hub's own https address, which no company app lists — and
+// the dialog had no way on):
+//   ⑬ the road table for company presets (a route ONLY when the preset says `instanceAddress: "listed"`; a silent Google
+//      preset = the documented Desktop form — 127.0.0.1, any port, NO path — its other road the fixed address; Web / Desktop
+//      / Lark / a fleet relay / a person's own client); routeAllowed / listedOf / relayOf; THE REAL ENGINE in the owner's
+//      shape: the any-port loopback, the other road (`fixed`) superseding the earlier sign-in and freeing its port, status
+//      ?kind=, the paste that finishes it with the same path-less redirect_uri, oauthCancel + the routes, the digest's
+//      presets[].way / oauthSetup.presets[].lacks; a listed preset keeps the route; SLACK's workspace app refused BEFORE
+//      Slack opens (preset-unlisted). RED CONTROLS = f5e087bb5's verdict (no preset gate ⇒ the route — the owner's wall)
+//      and an engine without the one-pending rule (the earlier sign-in keeps running, its fixed port refuses the next)
+
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -154,6 +166,7 @@ console.log('① PURE src/consent-road.js');
     [{ kind: 'Lark', publicUrl: POD, origin: POD }, 'bad-kind'],
     [{ kind: '../x', publicUrl: POD, origin: POD }, 'bad-kind'],
     [{ kind: 'gmail', publicUrl: POD, origin: POD, relayUrl: PUBLIC_RELAY, clientType: 'desktop' }, 'desktop-client'],   // lane oauth-setup-instructions
+    [{ kind: 'lark', publicUrl: POD, origin: POD, preset: true }, 'preset-loopback'],   // lane gmail-connect-wall: a company preset that does not say its app lists this address
   ];
   const bad = rows.map(([i, why]) => { const v = R(i); return v.road === 'loopback' && v.redirectUri === null && v.why === why ? null : { i, v }; }).filter(Boolean);
   ok(!bad.length, `the loopback table (${rows.length} rows): a browser on this machine, no / an http / a loopback / a query-carrying address, the person's own other road, a bad kind`, bad);
@@ -207,11 +220,13 @@ console.log('① PURE src/consent-road.js');
   // rule 2: every instance on a preset WITH a page rides it — a pod (its own https host) AND a local hub; WITHOUT ⇒ the
   // route / the loopback, never the public page
   const viaPreset = (publicUrl, origin, values) => R({ kind: 'lark', publicUrl, origin, ...CR.relayOf(deps, PRESET(values)) });
-  const pr = { pod: viaPreset(FLEET, FLEET, { relayUrl: CO_RELAY }), hub: viaPreset('', HUB, { relayUrl: CO_RELAY }), lan: viaPreset('', 'http://100.101.102.103:3457', { relayUrl: CO_RELAY }), barePod: viaPreset(FLEET, FLEET, {}), bareHub: viaPreset('', HUB, {}) };
+  const pr = { pod: viaPreset(FLEET, FLEET, { relayUrl: CO_RELAY }), hub: viaPreset('', HUB, { relayUrl: CO_RELAY }), lan: viaPreset('', 'http://100.101.102.103:3457', { relayUrl: CO_RELAY }), barePod: viaPreset(FLEET, FLEET, {}), bareHub: viaPreset('', HUB, {}), listedPod: viaPreset(FLEET, FLEET, { instanceAddress: 'listed' }) };
   ok(pr.pod.road === 'relay' && pr.pod.redirectUri === CO_RELAY && pr.pod.u === FLEET && pr.hub.road === 'relay' && pr.hub.u === HUB && pr.lan.road === 'relay',
     'a preset WITH a relay page rides it on every instance: a pod (u = its own https host), a local hub, a hub reached over Tailscale (B-be43: 100.64/10 is private)', pr);
-  ok(pr.barePod.road === 'route' && pr.bareHub.road === 'loopback' && [pr.barePod, pr.bareHub].every((x) => x.redirectUri !== PUBLIC_RELAY),
-    'a preset with NO relay page (the setting at the public page) ⇒ the route on a pod, the loopback on a local hub — never the public page', { barePod: pr.barePod.road, bareHub: pr.bareHub.road });
+  // lane gmail-connect-wall (law 1): a company preset's person cannot add an address to the app — the route is a preset's road
+  // ONLY when the preset says its app lists it (`instanceAddress: "listed"`); else its loopback
+  ok(pr.barePod.road === 'loopback' && pr.barePod.why === 'preset-loopback' && pr.bareHub.road === 'loopback' && pr.listedPod.road === 'route' && [pr.barePod, pr.bareHub, pr.listedPod].every((x) => x.redirectUri !== PUBLIC_RELAY),
+    'a preset with NO relay page (the setting at the public page) ⇒ its LOOPBACK on a pod (preset-loopback — never the route it cannot list) and on a local hub; the route only when it says `instanceAddress: "listed"` — never the public page', { barePod: [pr.barePod.road, pr.barePod.why], bareHub: pr.bareHub.road, listedPod: pr.listedPod.road });
   // the state
   const st = CR.stateOf({ origin: POD, flowId: 'a1b2c3d4e5f60718', issuedAt: 1_800_000_000_000, kind: 'lark' }, sign);
   const v = CR.stateVerdict(st, { sign, now: 1_800_000_060_000, kind: 'lark' });
@@ -377,7 +392,9 @@ const hostOf = (p) => Object.entries(HOSTS).find(([, pre]) => p.startsWith(pre +
 // lane oauth-relay-one-source: `env` is the process env handed to the STORE (the fleet relay's one reader — the engine reads
 // no env for it) and to the engine; `presets` = a presets-directory reader (src/server/cluster-presets.js) or null; `eng` =
 // the engine module (a RED control hands a mutant copy)
-async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' } } = {}) {
+// lane gmail-connect-wall: the world's company presets SAY their apps list this instance's own address (`instanceAddress:
+// "listed"`) — every route leg below pins the road of such a preset, unchanged; ⑬ walks the presets that say nothing
+async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', instanceAddress: 'listed' } } = {}) {
   const dir = path.join(ROOT, tag);
   fs.mkdirSync(dir, { recursive: true });
   const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { ...env, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, presets, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
@@ -625,7 +642,7 @@ console.log('⑥ RED controls (mutant copies)');
   const ENGM = ENG;
   {
     const dir = path.join(ROOT, 'nohash'); fs.mkdirSync(dir, { recursive: true });
-    const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [], log: quiet });
+    const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' } }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [], log: quiet });
     const e = ENGM.create({ dataDir: path.join(dir, 'eng'), env: {}, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, publicUrl: () => POD });
     noHash.setup({ getEngine: () => e });
     const app = express(); app.use(express.json()); app.use(noHash.router);
@@ -698,6 +715,9 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     'a client kind not said: the verdict as before (no `fixed` — the adapter\'s own loopback)', v.unsaid);
   ok(GM.clientTypeOf({ clientType: 'desktop' }, { clientType: 'web' }) === 'desktop' && GM.clientTypeOf({ clientType: '' }, { clientType: 'web' }) === 'web' && GM.clientTypeOf({}, {}) === '' && GM.clientTypeOf({ clientType: 'bogus' }, {}) === '',
     'the account\'s own clientType option wins; else what its company preset says; else not said');
+  // lane gmail-connect-wall (R4): under a COMPANY preset the kind is the admin's fact only — the account's option is not read
+  ok(GM.clientTypeOf({ clientType: 'desktop' }, { clientType: 'web' }, { preset: true }) === 'web' && GM.clientTypeOf({ clientType: 'desktop' }, {}, { preset: true }) === '' && GM.clientTypeOf({ clientType: 'web' }, { clientType: 'desktop' }, { preset: true }) === 'desktop',
+    'R4: a company preset account never reads its own clientType option — the preset says it, or it is not said');
   const opt = GM.OPTIONS.find((o) => o.key === 'clientType');
   ok(opt && opt.default === '' && JSON.stringify(opt.choices) === JSON.stringify(['', 'web', 'desktop']) && opt.rebuild === false && GM.consent.callbackUrl === GMAN.GMAIL_LOOPBACK_URL && GM.consent.mode.includes('fixed') && GM.consent.mode.includes('ephemeral'),
     'Gmail\'s option `clientType` (not said / web / desktop) and its consent row: ephemeral + FIXED (the registry row\'s loopback) + public', { opt: opt && opt.choices, mode: GM.consent.mode });
@@ -713,8 +733,8 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   const hubConsent = { sign, publicUrl: () => '', relayUrl: () => '', fleetRelayUrl: () => '' };
   const gw = await asked({}, { clientType: 'web' }, HUBO, hubConsent);
   const gd = await asked({ clientType: 'desktop' }, { clientType: 'web' }, HUBO, { ...hubConsent, fleetRelayUrl: () => ADMIN_RELAY });
-  ok(gw && gw.mode === 'fixed' && gw.registeredCallbackUrl === GMAN.GMAIL_LOOPBACK_URL && gd && gd.mode === 'ephemeral',
-    'the Gmail adapter: a Web preset on a local hub binds the registry row\'s FIXED address; the account\'s own «Desktop app» beats the preset and rides the ephemeral port even beside a fleet relay', { web: gw && [gw.mode, gw.registeredCallbackUrl], desktop: gd && gd.mode });
+  ok(gw && gw.mode === 'fixed' && gw.registeredCallbackUrl === GMAN.GMAIL_LOOPBACK_URL && gd && gd.mode === 'public' && gd.road === 'relay',
+    'the Gmail adapter: a Web preset on a local hub binds the registry row\'s FIXED address; R4 (lane gmail-connect-wall): the account\'s own «Desktop app» is NOT read under a company preset — its Web kind rides the fleet relay', { web: gw && [gw.mode, gw.registeredCallbackUrl], desktop: gd && [gd.mode, gd.road] });
   // (b) THE REAL ENGINE: a company Google client that says it is a Web client
   const w = await world('webclient', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', clientType: 'web' } });
   try {
@@ -730,10 +750,13 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     const made = await w.e.connect('gmail', { flowId: st.flowId });
     ok(made && made.adapter && made.adapter.options && made.adapter.options.clientType === 'web', 'the new account takes the preset\'s kind as its option (the dialog sent none)', made && made.adapter && made.adapter.options);
     const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
-    ok(kg && kg.presets[0] && kg.presets[0].facts && kg.presets[0].facts.clientType === 'web' && kg.oauthSetup && kg.oauthSetup.base === POD && kg.oauthSetup.relayPages.length === 0 && JSON.stringify(kg.oauthSetup.presets) === JSON.stringify([{ key: 'org1', relayPage: null, clientType: 'web' }]),
+    ok(kg && kg.presets[0] && kg.presets[0].facts && kg.presets[0].facts.clientType === 'web' && kg.oauthSetup && kg.oauthSetup.base === POD && kg.oauthSetup.relayPages.length === 0 && JSON.stringify(kg.oauthSetup.presets) === JSON.stringify([{ key: 'org1', relayPage: null, clientType: 'web', listed: false, lacks: ['road'] }]) && kg.oauthSetup.presetSource && kg.oauthSetup.presetSource.from === 'env' && kg.oauthSetup.presetSource.env === 'VIBESPACE_GDRIVE_CLIENTS',
       'the kinds digest: the preset\'s kind as a fact + the setup card\'s facts (this instance\'s https base, no relay page, the preset\'s page and kind)', kg && { facts: kg.presets[0] && kg.presets[0].facts, oauthSetup: kg.oauthSetup });
+    // lane gmail-connect-wall (R4): the dialog's «Desktop app» on a COMPANY preset is not read (the select is not even shown);
+    // on a person's own client it still decides
     const d = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: HUBO, options: { clientType: 'desktop' } });
-    ok(d.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(d.url).searchParams.get('redirect_uri')), 'the dialog says «Desktop app» ⇒ the ephemeral port (any port — nothing registered)', d.flow.mode);
+    const dc = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'custom', clientId: '456-own.apps.googleusercontent.com', clientSecret: 'dummy-own-gsecret-1', origin: HUBO, options: { clientType: 'desktop' } });
+    ok(d.flow.mode === 'fixed' && dc.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(dc.url).searchParams.get('redirect_uri')), 'R4: «Desktop app» on a company preset changes nothing (its Web kind: the FIXED address); on a person\'s own client ⇒ the ephemeral port (any port — nothing registered)', { preset: d.flow.mode, own: dc.flow.mode });
   } finally { await w.close(); }
   // (c) THE SETUP CARD — the exact addresses this instance needs, per shape (PURE src/oauth-setup.js)
   const G = REG.rowById('gmail').redirect, L = REG.rowById('lark').redirect, S = REG.rowById('slack').redirect, D = REG.rowById('dropline').redirect;
@@ -757,9 +780,10 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   const preset = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: FLEET, preset: { key: 'co', relayPage: CO_RELAY } });
   const presetBare = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: FLEET, preset: { key: 'co', relayPage: null } });
   const presetHub = OS.setupCard({ kind: 'lark', redirect: L, base: '', relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: HUBO, preset: { key: 'co', relayPage: null } });
-  ok(keys(preset) === 'preset*' && preset.create.key === 'preset' && preset.where === 'preset' && keys(presetBare) === 'presetRoute* loopback' && presetBare.rows[0].uri === `${FLEET}/api/channels/oauth/cb/lark` && keys(presetHub) === 'presetRoute loopback*' && presetHub.rows[0].uri === null
-    && ![preset, presetBare, presetHub].some((c) => uris(c).includes(PUBLIC_RELAY)),
-    'a COMPANY preset: its relay page only (registered by your admin); without one, this instance\'s own address (or, with no https address, this machine) — the public page NEVER (the fleet presets never show ①)', { preset: keys(preset), bare: keys(presetBare), hub: keys(presetHub) });
+  const presetListed = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: FLEET, preset: { key: 'co', relayPage: null, listed: true } });
+  ok(keys(preset) === 'preset*' && preset.create.key === 'preset' && preset.where === 'preset' && keys(presetBare) === 'presetLoopback loopback*' && presetBare.rows[0].uri === null && keys(presetListed) === 'presetRoute* loopback' && presetListed.rows[0].uri === `${FLEET}/api/channels/oauth/cb/lark` && keys(presetHub) === 'presetRoute loopback*' && presetHub.rows[0].uri === null
+    && ![preset, presetBare, presetHub, presetListed].some((c) => uris(c).includes(PUBLIC_RELAY)),
+    'a COMPANY preset: its relay page only (registered by your admin); without one, this instance\'s own address ONLY when the preset says its app lists it (lane gmail-connect-wall), else its loopback (the last page pasted back; with no https address, this machine) — the public page NEVER (the fleet presets never show ①)', { preset: keys(preset), bare: keys(presetBare), listed: keys(presetListed), hub: keys(presetHub) });
   const slack = OS.setupCard({ kind: 'slack', redirect: S, base: POD, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: POD });
   const drop = OS.setupCard({ kind: 'dropline', redirect: D, base: POD, origin: POD });
   const dropNone = OS.setupCard({ kind: 'dropline', redirect: D, base: '' });
@@ -905,7 +929,6 @@ console.log('⑫ a chain of consent pages: the signed place, the landing that se
   chainFake = null;
 }
 
-await new Promise((r) => vendor.close(r));
 // ── ⑩ lane oauth-relay-one-source: the fleet's relay page has ONE source — the presets' fleet.json ──
 console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.json (live) › the deprecated env › none');
 {
@@ -989,6 +1012,691 @@ console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.js
   reader.stop();
 }
 
+// ── ⑬ lane gmail-connect-wall (the owner 2026-11-09 on the owner's own hub: a Gmail connect under a company preset walked into
+// Google's «Error 400: redirect_uri_mismatch» — the route to the hub's own https address, which no company app lists — and
+// the dialog had no way on): NO DEFAULT ROAD INTO A PREDICTABLE WALL ──
+console.log('⑬ a company preset never rides an address its app does not list; a silent Google preset signs in at the documented Desktop form, the fixed address its visible other road; one pending sign-in per kind');
+{
+  const R = (o) => CR.consentRoad(o);
+  const HUB13 = `http://127.0.0.1:${await freePort()}`;
+  const P = (values) => CR.relayOf({ fleetRelayUrl: () => '', relayUrl: () => PUBLIC_RELAY }, PRESET(values));
+  const v = (o) => { const x = R(o); return [x.road, x.why, x.fixed ? 'fixed' : (x.road === 'loopback' ? 'any' : x.redirectUri), x.other]; };
+  const table = [
+    // [the case, the verdict, the want]
+    ['gmail silent preset, remote', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, ...P({}) }), ['loopback', 'preset-loopback', 'any', 'fixed']],
+    ['gmail silent preset, local hub', v({ kind: 'gmail', publicUrl: POD, origin: HUB13, clientKinds: true, ...P({}) }), ['loopback', 'local-browser', 'any', 'fixed']],
+    ['gmail silent preset, asked fixed', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, road: 'fixed', ...P({}) }), ['loopback', 'asked', 'fixed', 'loopback']],
+    ['gmail silent preset, asked any port', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, road: 'loopback', ...P({}) }), ['loopback', 'asked', 'any', 'fixed']],
+    ['gmail WEB preset, remote', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, clientType: 'web', ...P({ clientType: 'web' }) }), ['loopback', 'preset-loopback', 'fixed', null]],
+    ['gmail DESKTOP preset, remote', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, clientType: 'desktop', ...P({ clientType: 'desktop' }) }), ['loopback', 'desktop-client', 'any', null]],
+    ['gmail silent preset that LISTS the address', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, ...P({ instanceAddress: 'listed' }) }), ['route', 'https-address', ROUTE_GMAIL, 'loopback']],
+    ['gmail preset with its relay page (fleet)', v({ kind: 'gmail', publicUrl: FLEET, origin: FLEET, clientKinds: true, ...CR.relayOf({ fleetRelayUrl: () => ADMIN_RELAY }, PRESET({})) }), ['relay', 'relay-page', ADMIN_RELAY, 'loopback']],
+    ['lark preset, remote', v({ kind: 'lark', publicUrl: POD, origin: POD, ...P({}) }), ['loopback', 'preset-loopback', 'any', null]],
+    ['lark preset that LISTS the address', v({ kind: 'lark', publicUrl: POD, origin: POD, ...P({ instanceAddress: 'listed' }) }), ['route', 'https-address', ROUTE_LARK, 'loopback']],
+    ['a person\'s OWN gmail client, remote (untouched)', v({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, ...CR.relayOf({ relayUrl: () => '' }, { source: 'user', values: {} }) }), ['route', 'https-address', ROUTE_GMAIL, 'loopback']],
+    ['a person\'s OWN gmail client, local hub (untouched)', v({ kind: 'gmail', publicUrl: POD, origin: HUB13, clientKinds: true, ...CR.relayOf({ relayUrl: () => '' }, { source: 'user', values: {} }) }), ['loopback', 'local-browser', 'any', null]],
+  ];
+  const off = table.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
+  ok(!off.length, `the road table (${table.length} rows): a company preset's route ONLY when it says its app lists the address; a silent Google preset = the documented Desktop form (any port, no path), the FIXED address its other road (and back); a Web preset its fixed address; a Desktop preset any port; Lark its registered loopback; a fleet relay unchanged; a person's own client unchanged`, off);
+  ok(CR.routeAllowed({}) && CR.routeAllowed({ preset: false }) && !CR.routeAllowed({ preset: true }) && CR.routeAllowed({ preset: true, listed: true }) && CR.listedOf({ instanceAddress: 'listed' }) && !CR.listedOf({ instanceAddress: 'yes' }) && !CR.listedOf(null) && CR.LISTED === 'listed',
+    'routeAllowed / listedOf: a person\'s own client, or a preset whose values say `instanceAddress: "listed"` — exactly that word');
+  const rp = [P({}), P({ instanceAddress: 'listed' }), CR.relayOf({ relayUrl: () => '' }, { source: 'user', values: { instanceAddress: 'listed' } })];
+  ok(rp[0].preset === true && rp[0].listed === false && rp[1].listed === true && rp[2].preset === false && rp[2].listed === false, 'relayOf answers preset + listed (a person\'s own client never "lists" — the fact is a preset\'s)', rp);
+  // the dialog's other road is a verdict field on EVERY road (never derived in the client)
+  ok(['relay', 'route', 'loopback'].every((road) => table.some(([, got]) => got[0] === road)) && table.every(([, got]) => got[3] === null || CR.ASKED_ROADS.includes(got[3])), 'every verdict names its other road (null | loopback | fixed) — the dialog\'s visible second button');
 
+  // (b) THE REAL ENGINE — the owner's shape: a silent company Google preset, an https address, a browser elsewhere
+  const SILENT = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' };
+  const w = await world('wall', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, larkPreset: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } });
+  try {
+    const a = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const ra = new URL(a.url).searchParams.get('redirect_uri');
+    ok(a.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(ra) && a.flow.other === 'fixed' && !a.superseded,
+      'Connect Gmail under a silent company preset from another computer: redirect_uri = 127.0.0.1 on a free port with NO path (Google\'s documented Desktop form) — never the instance\'s own address; the flow names its other road', { mode: a.flow.mode, ra, other: a.flow.other });
+    const b = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
+    const sa = w.e.oauthStatus(a.flowId);
+    ok(b.flow.mode === 'fixed' && new URL(b.url).searchParams.get('redirect_uri') === w.fixed && b.flow.listening === true && b.superseded === 1 && b.flow.other === 'loopback' && sa.running === false && /superseded/.test(String(sa.error || (sa.flow && sa.flow.cancelled))),
+      'the other road (asked `fixed`): the FIXED address, listening; the earlier sign-in is replaced (superseded — said once by the answer), never left running beside it', { b: [b.flow.mode, b.superseded, b.flow.other], a: { running: sa.running, error: sa.error } });
+    const c = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
+    ok(c.flow.mode === 'fixed' && c.flow.listening === true && c.superseded === 1 && !(c.flow.refusal), 'a third press on the fixed address: the earlier one is superseded FIRST, so the port is free — listening, no port-busy refusal', { listening: c.flow.listening, refusal: c.flow.refusal });
+    const byKind = w.e.oauthStatus(null, { kind: 'gmail' });
+    let larkNone = null; try { w.e.oauthStatus(null, { kind: 'lark' }); } catch (er) { larkNone = er.code; }
+    ok(byKind.flowId === c.flowId && byKind.running === true && larkNone === 'no-flow', 'status ?kind= answers the latest sign-in of THAT kind (a reopened dialog finds its own) — none of another kind', { byKind: byKind.flowId === c.flowId, larkNone });
+    // the paste completes the owner's road: the last page's address (127.0.0.1, never loaded) handed back
+    const d = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const back = new URL(new URL(d.url).searchParams.get('redirect_uri') + '/'); back.searchParams.set('state', new URL(d.url).searchParams.get('state')); back.searchParams.set('code', 'wall-paste-code');
+    seen.length = 0;
+    const pasted = await w.e.oauthCallback({ url: back.toString(), flowId: d.flowId });
+    const done = await waitDone(w.e, d.flowId);
+    const tk = seen.find((x) => x.path === '/google-oauth/token');
+    ok(pasted.ok && done.ok && tk && /^http:\/\/127\.0\.0\.1:\d+$/.test(tk.body.redirect_uri) && tk.body.code === 'wall-paste-code', 'the person pastes the last page\'s address: the hub finishes the exchange with the SAME path-less redirect_uri — signed in', { pasted: pasted.ok, done: done && done.ok, redirect: tk && tk.body.redirect_uri });
+    // cancel: one press, said by its answer; a second press finds it ended
+    const f = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const c1 = w.e.oauthCancel(f.flowId), c2 = w.e.oauthCancel(f.flowId), sf = w.e.oauthStatus(f.flowId);
+    let noId = null; try { w.e.oauthCancel(null); } catch (er) { noId = er.code; }
+    ok(c1.cancelled === true && c2.cancelled === false && sf.running === false && /cancel/i.test(String(sf.error || '')) && noId === 'no-flow', 'oauthCancel: ends a running sign-in in one call (cancelled), a second finds it ended, the status says cancelled; no id ⇒ refused by name', { c1, c2, error: sf.error, noId });
+    // the route: POST /api/channels/oauth/cancel (owner-only like its siblings) and GET status?kind=
+    const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const post = (p, body) => new Promise((resolve) => { const rq = http.request(`${w.origin}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => { let s = ''; res.on('data', (x) => { s += x; }); res.on('end', () => { let j = null; try { j = JSON.parse(s); } catch {} resolve({ status: res.statusCode, json: j }); }); }); rq.end(JSON.stringify(body)); });
+    const rs = await w.get(`/api/channels/oauth/status?kind=gmail`);
+    const rc = await post('/api/channels/oauth/cancel', { flowId: g.flowId });
+    const rx = await post('/api/channels/oauth/cancel', {});
+    ok(rs.status === 200 && JSON.parse(rs.body).flowId === g.flowId && rc.status === 200 && rc.json && rc.json.ok === true && rc.json.cancelled === true && rx.status === 400, 'the routes: GET /api/channels/oauth/status?kind=gmail names the running one; POST /api/channels/oauth/cancel {flowId} ends it; no flowId ⇒ 400', { status: rs.status, cancel: rc.json, none: rx.status });
+    // the digest: each preset's road for a browser elsewhere (the dialog's words BEFORE the press) + what it does not say
+    const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
+    const kl = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'lark');
+    const wg = kg && CR.wayOf({ kind: 'gmail', origin: POD, inputs: kg.presets[0].wayIn }), wl = kl && CR.wayOf({ kind: 'lark', origin: POD, inputs: kl.presets[0].wayIn });
+    ok(kg && JSON.stringify(wg) === JSON.stringify({ road: 'loopback', why: 'preset-loopback', fixed: false, other: 'fixed', uri: null }) && wl && wl.road === 'loopback' && wl.why === 'preset-loopback'
+      && JSON.stringify(kg.oauthSetup.presets[0].lacks) === JSON.stringify(['clientType', 'road']) && kg.oauthSetup.presets[0].listed === false,
+      'the kinds digest: presets[].wayIn = the START\'s own inputs, read in the page by wayOf with the page\'s origin (Gmail: the loopback, its other road the fixed address; Lark: its loopback); oauthSetup.presets[].lacks = what the preset does not say (the client\'s kind, a way back)', { gmail: wg, lark: wl, lacks: kg && kg.oauthSetup.presets[0].lacks });
+  } finally { await w.close(); }
+  // a LISTED preset keeps the route; the digest says so (nothing about pasting)
+  const wl = await world('wall-listed', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: { ...SILENT, instanceAddress: 'listed' } });
+  try {
+    const l = await wl.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const kg = (wl.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
+    const wy = CR.wayOf({ kind: 'gmail', origin: POD, inputs: kg.presets[0].wayIn });
+    ok(l.flow.mode === 'public' && new URL(l.url).searchParams.get('redirect_uri') === ROUTE_GMAIL && wy.road === 'route' && wy.uri === ROUTE_GMAIL && JSON.stringify(kg.oauthSetup.presets[0].lacks) === JSON.stringify(['clientType']),
+      'a preset that says `instanceAddress: "listed"`: the route, as before; its way says so and its lacks no longer name a way back', { mode: l.flow.mode, way: wy, lacks: kg.oauthSetup.presets[0].lacks });
+  } finally { await wl.close(); }
+  // (c) SLACK — the same law on its own road (src/channels/slack.js asks CR.routeAllowed)
+  const slackWorld = async (tag, values, extraEnv = {}) => {
+    const dir = path.join(ROOT, tag); fs.mkdirSync(dir, { recursive: true });
+    const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { ...extraEnv, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'slack', key: 'ws', label: 'Workspace app', values: { clientId: '1234567890.1234567890', clientSecret: 'dummy-slack-ws-secret-1', ...values } }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [], log: quiet });
+    const oauth = OL.createOAuthLoopback({ log: quiet });
+    const e = ENG.create({ dataDir: path.join(dir, 'eng'), env: {}, serverSetting: () => undefined, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => POD });
+    return { e, close: async () => { try { oauth.stopAll(); } catch {} try { await e.stop(); } catch {} } };
+  };
+  const s0 = await slackWorld('wall-slack', {});
+  const s1 = await slackWorld('wall-slack-listed', { instanceAddress: 'listed' });
+  try {
+    let refused = null; try { await s0.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: POD }); } catch (er) { refused = { code: er.code, why: er.detail && er.detail.why, msg: String(er.message) }; }
+    const okl = await s1.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: POD });
+    const ks = (s0.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'slack');
+    const wsl = ks && CR.wayOf({ kind: 'slack', origin: POD, inputs: ks.presets[0].wayIn });
+    ok(refused && refused.why === 'preset-unlisted' && /make your own app/.test(refused.msg) && new URL(okl.url).searchParams.get('redirect_uri') === `${POD}/api/channels/oauth/cb/slack` && wsl && wsl.road === 'none',
+      'SLACK (R3, the same law): a company workspace app with no relay page that does not list this address is refused BEFORE Slack is opened (preset-unlisted — the other way named), wayOf over its digest inputs says `none` for the dialog; listed ⇒ this instance\'s own address', { refused, listed: new URL(okl.url).searchParams.get('redirect_uri'), way: wsl });
+    // r2 (law C): a begin that is REFUSED leaves the earlier sign-in of its kind running — nothing replaced it
+    const keep = await s1.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: POD });
+    let refused2 = null; try { await s1.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin: 'http://pod-road.example.test:3456' }); } catch (er) { refused2 = er.detail && er.detail.why; }
+    ok(refused2 === 'no-https' && s1.e.oauthStatus(keep.flowId).running === true, 'r2 LAW C: a press whose begin is refused (an http page under a Slack company app) leaves the earlier sign-in RUNNING — its landing still finishes it, never «replaced» by nothing', { refused2, running: s1.e.oauthStatus(keep.flowId).running });
+  } finally { await s0.close(); await s1.close(); }
+  // ── r2 (the acceptance of 4c73941e6) ──
+  // LAW A: ONE sign-in per kind when two starts OVERLAP — the place is taken before anything is awaited
+  const wo = await world('wall-overlap', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT });
+  try {
+    const [x, y] = await Promise.all([wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD }), wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD })]);
+    const run2 = [x, y].filter((f) => wo.e.oauthStatus(f.flowId).running).length;
+    ok(run2 === 1 && wo.e.oauthStatus(y.flowId).running === true && y.superseded === 1 && /superseded/.test(String(wo.e.oauthStatus(x.flowId).error || '')), 'r2 LAW A: two OVERLAPPING Gmail starts (any port) ⇒ ONE runs — the second ends the first by name (superseded 1), never two on two ports', { running: run2, superseded: [x.superseded || 0, y.superseded || 0] });
+    const [f1, f2] = await Promise.all([wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' }), wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' })]);
+    const s2 = wo.e.oauthStatus(f2.flowId);
+    ok(wo.e.oauthStatus(f1.flowId).running === false && s2.running === true && s2.flow.listening === true && !s2.flow.refusal && f2.superseded >= 1, 'r2 LAW A: two OVERLAPPING starts on the FIXED road ⇒ the second ends the first and LISTENS on the port (no «port-busy»)', { first: wo.e.oauthStatus(f1.flowId).running, listening: s2.flow.listening, refusal: s2.flow.refusal && s2.flow.refusal.code });
+    // LAW E4: an asked road that is not a known word is refused by name — the engine and the route
+    let bad = null; try { await wo.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixd' }); } catch (er) { bad = er.code; }
+    const postR = (p, body) => new Promise((resolve) => { const rq = http.request(`${wo.origin}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => { let s = ''; res.on('data', (q) => { s += q; }); res.on('end', () => { let j = null; try { j = JSON.parse(s); } catch {} resolve({ status: res.statusCode, json: j }); }); }); rq.end(JSON.stringify(body)); });
+    const rb = await postR('/api/channels/oauth/start', { kind: 'gmail', clientPreset: 'org1', road: 'bogus' });
+    ok(bad === 'bad-road' && rb.status === 400 && rb.json && (rb.json.code === 'bad-road' || /bad-road/.test(JSON.stringify(rb.json))), 'r2 LAW E4: an asked road that is not loopback / fixed is REFUSED by name (bad-road) — the engine and POST /api/channels/oauth/start — never silently the verdict\'s own', { engine: bad, route: rb.status });
+  } finally { await wo.close(); }
+  // LAW D: ONE verdict, two readers — wayOf over the digest's inputs + the page's origin = the road the start takes
+  const ORIGINS = [POD, 'http://pod-road.example.test:3456', 'https://other-name.example.test', 'http://192.168.7.20:3456', `http://127.0.0.1:${await freePort()}`];
+  const roadOfStart = (st) => (st.flow.mode === 'public' ? `${st.flow.road}:${st.flow.redirectUri}` : `loopback:${st.flow.mode === 'fixed' ? 'fixed' : 'any'}`);
+  const roadOfWay = (w) => (w.road === 'loopback' ? `loopback:${w.fixed ? 'fixed' : 'any'}` : `${w.road}:${w.uri}`);
+  const OWN_RELAY = 'https://relay.company.example.test/relay/';
+  const cells = [], off13 = [];
+  for (const [name, drive, lark] of [['silent', SILENT, { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }], ['own relay', { ...SILENT, relayUrl: OWN_RELAY }, { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', relayUrl: OWN_RELAY }], ['listed', { ...SILENT, instanceAddress: 'listed' }, { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' }], ['web', { ...SILENT, clientType: 'web' }, null]]) {
+    const wd = await world(`wall-d-${name.replace(/\s/g, '')}`, { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive, ...(lark ? { larkPreset: lark } : {}) });
+    try {
+      const kinds = wd.e.digest({ scope: 'accounts' }).kinds || [];
+      for (const [kind, key] of [['gmail', 'org1'], ...(lark ? [['lark', 'co']] : [])]) {
+        const inputs = kinds.find((k) => k.kind === kind).presets.find((p) => p.key === key).wayIn;
+        for (const origin of ORIGINS) {
+          const st = await wd.e.startOAuth({ kind, clientPreset: key, origin });
+          const a13 = roadOfWay(CR.wayOf({ kind, origin, inputs })), b13 = roadOfStart(st);
+          cells.push(1); if (a13 !== b13) off13.push({ name, kind, origin, stateA: a13, start: b13 });
+        }
+      }
+    } finally { await wd.close(); }
+  }
+  ok(cells.length >= 30 && !off13.length, `r2 LAW D: ${cells.length} cells (presets silent / own relay / listed / web × Gmail, Lark × pages at the instance's own address, a public http name, another https name, a LAN address, this machine): wayOf over the digest's inputs with the page's origin = the road the START takes, every cell`, off13);
+  // …and Slack's own road (no loopback): wayOf over its digest inputs = the start (a relay, its own https address when listed,
+  // `none` = the start is refused before Slack opens)
+  const offS = []; let cellsS = 0;
+  for (const [name, values] of [['silent', {}], ['own relay', { relayUrl: OWN_RELAY }], ['listed', { instanceAddress: 'listed' }]]) {
+    const sw = await slackWorld(`wall-d-slack-${name.replace(/\s/g, '')}`, values);
+    try {
+      const inputs = (sw.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'slack').presets.find((p) => p.key === 'ws').wayIn;
+      for (const origin of ORIGINS) {
+        let st = null; try { st = await sw.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin }); } catch { st = null; }
+        const w = CR.wayOf({ kind: 'slack', origin, inputs });
+        const a = w.road === 'none' ? 'none' : w.uri, b = st ? st.flow.redirectUri : 'none';
+        cellsS++; if (a !== b) offS.push({ name, origin, stateA: a, start: b });
+      }
+    } finally { await sw.close(); }
+  }
+  ok(cellsS === 15 && !offS.length, `r2 LAW D (Slack's own road): ${cellsS} cells — wayOf = the start (its relay, its own https address when listed, \`none\` ⇔ refused before Slack opens)`, offS);
+  // r3 (law D's admin-typo cell): a Slack company preset whose relay address is MALFORMED, on a fleet that has a relay page —
+  // the picture and the start ask ONE function (relayPick): both fall back to the fleet's page, on every origin
+  {
+    const sm = await slackWorld('wall-d-slack-typo', { relayUrl: 'http://relay.company.example.test/relay/' }, { VIBESPACE_OAUTH_RELAY_URL: ADMIN_RELAY });
+    try {
+      const inputs = (sm.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'slack').presets.find((p) => p.key === 'ws').wayIn;
+      const offT = [];
+      for (const origin of ORIGINS.slice(0, 4)) {
+        let st = null, why = null; try { st = await sm.e.startOAuth({ kind: 'slack', clientPreset: 'ws', origin }); } catch (er) { why = er.detail && er.detail.why; }
+        const w = CR.wayOf({ kind: 'slack', origin, inputs });
+        if (!(st && w.road === 'relay' && w.uri === ADMIN_RELAY && st.flow.redirectUri === ADMIN_RELAY)) offT.push({ origin, way: w.road, start: st ? st.flow.redirectUri : why });
+      }
+      ok(!offT.length, 'r3 LAW D (the admin-typo cell): a Slack company preset with a MALFORMED relay address on a fleet with a relay page — the picture and the start both ride the fleet\'s page (relayPick, one function), 4 of 4 origins', offT);
+    } finally { await sm.close(); }
+  }
+  // r3 (item 1b): the «it is a Desktop app client» CLAIM is a PURE decision (src/oauth-setup.js refusalKeys) — never for a company
+  // preset; and the guard is what keeps it out (a copy without it draws it)
+  const OS = require(path.join(REPO, 'src/oauth-setup.js'));
+  const OSsrc = fs.readFileSync(path.join(REPO, 'src/oauth-setup.js'), 'utf8');
+  const GUARD = 'clientTypes && https && !preset ?';
+  const OSm = MUT.load('src/oauth-setup.js', OSsrc.replace(GUARD, 'clientTypes && https ?'), 'noclaimguard13');
+  const kOwn = OS.refusalKeys({ clientTypes: true, https: true, preset: false }), kPre = OS.refusalKeys({ clientTypes: true, https: true, preset: true });
+  ok(kOwn.includes('refusal.desktop') && !kPre.includes('refusal.desktop') && kPre.includes('refusal') && /The client is a Desktop app client/.test(OS.WORDS['refusal.desktop']),
+    'r3 PIN (law 3): refusalKeys draws the «The client is a Desktop app client» claim for a person\'s OWN client on an https road, NEVER for a company preset (the refusal lines stay)', { own: kOwn, preset: kPre });
+  ok(OSsrc.split(GUARD).length === 2 && OSm.refusalKeys({ clientTypes: true, https: true, preset: true }).includes('refusal.desktop'), 'RED CONTROL (r3 PIN, law 3): without the preset guard the claim is drawn for a company preset — red on the leg above');
+  // r3 (item 5): NO START WAITS FOR EVER on another start — a begin that hangs past the bound: the next start goes ahead (said),
+  // the late one ends itself when it answers; still ONE sign-in. (A patched copy with a 300 ms bound — the real one is 20 s.)
+  {
+    const authSrcW = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+    const BOUND = 'const START_WAIT_MS = 20e3;';
+    const authW = MUT.write('src/server/channels-auth.js', authSrcW.replace(BOUND, 'const START_WAIT_MS = 300;'), 'startwait13');
+    const engSrcW = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const engW = MUT.load('src/server/channels-engine.js', engSrcW.replace("require('./channels-auth.js')", `require(${JSON.stringify(authW)})`), 'startwait13');
+    const ww = await world('wall-hung', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engW });
+    try {
+      const b0 = ww.oauth.begin; let first = true;
+      ww.oauth.begin = async (o) => { if (first) { first = false; await sleep(1500); } return b0(o); };   // the FIRST begin hangs 1.5 s
+      let lateDone = false;   // an ORDER, never a clock bound (test-ci-gate's ratchet): the next start answers BEFORE the hung one
+      const late = ww.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD }).then((x) => { lateDone = true; return { ok: x }; }, (er) => { lateDone = true; return { err: er }; });
+      await sleep(30);
+      const next = await ww.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+      const answeredFirst = !lateDone;
+      const lateR = await late;
+      await sleep(50);
+      const running = ww.e.oauthStatus(next.flowId).running;
+      ok(authSrcW.split(BOUND).length === 2 && answeredFirst && running === true && lateR.err && lateR.err.code === 'superseded',
+        'r3 item 5: a begin that HANGS past the bound — the next start goes ahead and ANSWERS FIRST (it waited the bound, not the hang), the late one ends itself when it answers (409 superseded): one sign-in, never a kind blocked for ever', { answeredFirst, running, late: lateR.err ? lateR.err.code : 'answered' });
+    } finally { await ww.close(); }
+  }
+  // …the shape the acceptance suspected, as r1 computed it (the instance's own origin for every page): it told a page opened
+  // under ANOTHER name «comes back by itself» while the start took the loopback — the reproduction r2 removes
+  const insOwn = CR.relayOf({ fleetRelayUrl: () => '' }, PRESET({ relayUrl: OWN_RELAY }));
+  const r1Said = CR.consentRoad({ kind: 'gmail', publicUrl: POD, origin: POD, relayUrl: insOwn.relayUrl, relayFleet: true, preset: true, listed: false, clientKinds: true });
+  const truth = CR.consentRoad({ kind: 'gmail', publicUrl: POD, origin: 'http://pod-road.example.test:3456', ...insOwn, clientKinds: true });
+  ok(r1Said.road === 'relay' && truth.road === 'loopback' && CR.wayOf({ kind: 'gmail', origin: 'http://pod-road.example.test:3456', inputs: { publicUrl: POD, ...insOwn, clientType: '', clientKinds: true, loopback: true } }).road === 'loopback', 'r2 LAW D, REPRODUCED then fixed: r1\'s state A (the instance\'s own origin for every page) said «relay» for a preset\'s own relay page on a page opened under a public http name, the start took the loopback; wayOf over the page\'s own origin says the loopback', { r1: r1Said.road, start: truth.road });
+  // LAW E3: only the exact string "listed" counts — an array (stringified by the reader) never puts a company app back on its own address
+  const PL13 = require(path.join(REPO, 'src/preset-layers.js'));
+  const ents = PL13.parseIntegrations([{ id: 'lark', key: 'a', values: { appId: 'x', appSecret: 'y', instanceAddress: ['listed'] } }, { id: 'lark', key: 'b', values: { appId: 'x', appSecret: 'y', instanceAddress: 'listed' } }, { id: 'slack', key: 'c', values: { clientId: 'x', clientSecret: 'y', instanceAddress: { v: 'listed' } } }]);
+  ok(ents[0].values.instanceAddress === '' && ents[1].values.instanceAddress === 'listed' && ents[2].values.instanceAddress === '' && !CR.listedOf(ents[0].values) && CR.listedOf(ents[1].values), 'r2 LAW E3: `instanceAddress: ["listed"]` (or an object) is NOT listed — the integrations reader keeps only the exact string', ents.map((e) => e.values.instanceAddress));
+  // RED CONTROL for LAW A: an engine without the per-kind place (its chain never set) lets two overlapping starts run side by side
+  {
+    const authSrcA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+    const SET = '      startChain.set(mod.kind, entry);';
+    const authMutA = MUT.write('src/server/channels-auth.js', authSrcA.replace(SET, ''), 'nochain13');
+    const engSrcA = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const engMutA = MUT.load('src/server/channels-engine.js', engSrcA.replace("require('./channels-auth.js')", `require(${JSON.stringify(authMutA)})`), 'nochain13');
+    const wm2 = await world('wall-nochain', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engMutA });
+    try {
+      const [x, y] = await Promise.all([wm2.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD }), wm2.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD })]);
+      const both = [x, y].filter((f) => wm2.e.oauthStatus(f.flowId).running).length;
+      ok(authSrcA.split(SET).length === 2 && both === 2, 'RED CONTROL (r2 LAW A): without the per-kind place two overlapping starts both run (superseded 0) — the acceptance\'s reproduction, red on the overlap leg', { running: both });
+    } finally { await wm2.close(); }
+  }
+  // (d) RED CONTROLS (mutant copies): the base verdict (no preset gate) and the base engine (no one-pending rule)
+  const crSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
+  const GATE = "  if (!routeAllowed({ preset, listed })) return loop('preset-loopback');\n";
+  const noGate = MUT.load('src/consent-road.js', crSrc.replace(GATE, ''), 'nogate13');
+  const was = noGate.consentRoad({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, ...P({}) });
+  ok(crSrc.split(GATE).length === 2 && was.road === 'route' && was.redirectUri === ROUTE_GMAIL, 'RED CONTROL = f5e087bb5\'s verdict: without the preset gate a silent company preset rides the instance\'s own https address — the owner\'s redirect_uri_mismatch — red on ⑬\'s first table row', { road: was.road, redirect: was.redirectUri });
+  const authSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+  const ONE = "    const earlier = target ? [] :";   // r2: the earlier sign-ins of the kind, found after the per-kind place
+  const authMut = MUT.write('src/server/channels-auth.js', authSrc.replace(ONE, '    const earlier = true ? [] :'), 'nosupersede13');
+  const engSrc13 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const engMut = MUT.load('src/server/channels-engine.js', engSrc13.replace("require('./channels-auth.js')", `require(${JSON.stringify(authMut)})`), 'nosupersede13');
+  const wm = await world('wall-mut', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engMut });
+  try {
+    const a = await wm.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
+    const b = await wm.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });
+    const sa = wm.e.oauthStatus(a.flowId);
+    ok(authSrc.split(ONE).length === 2 && sa.running === true && !b.superseded && (b.flow.listening === false || !!b.flow.refusal), 'RED CONTROL: an engine without the one-pending rule leaves the earlier sign-in running and its held fixed port refuses the new one (port busy) — red on ⑬\'s supersede legs', { aRunning: sa.running, bListening: b.flow.listening, refusal: b.flow.refusal && b.flow.refusal.code });
+  } finally { await wm.close(); }
+}
+
+// ── ⑭ lane gmail-connect-wall r4 (acceptance r3, THE LAW: after any await a handler draws and keeps nothing unless it is still
+// the latest act — and closing the dialog is an act; what a superseded or closed act started on the hub, if it cannot finish
+// without this dialog, is ended). THE CLASS, pinned: the REAL Connect dialog (src/lib/channel-account-dialogs.js
+// showConnectAccountDialog + src/lib/mounts-dialog.js wireOAuthConnect, bundled by esbuild — only the page edge stubbed at its
+// import line: utils' modal / toast / fetchJson, i18n) over a fake page, in front of the REAL engine, routes, store and
+// loopback (`world`). A SEEDED scheduler holds every request the dialog sends and every answer it gets, and releases them in
+// a random order between random acts — press, the other road, Cancel, close, reopen (only a control a person could press:
+// shown and not busy). At rest (everything delivered, the poll ticked twice) THE INVARIANT: what the dialog shows IS what the
+// hub runs for the kind — a block with its Cancel ⇔ one sign-in running, the one the block follows; none running ⇔ no such
+// block; no listener without a shown sign-in; no sign-in that needs the dialog running behind a closed one; no consent page
+// opened after its dialog closed. Two worlds: a silent company Google preset from another computer (the owner's: a loopback
+// that needs the dialog's paste box, its other road the fixed address) and a listed one (the route — it comes back by itself;
+// its other road a loopback). A failing seed prints its whole sequence. RED: the two r4 guards removed (mutant bundles), and
+// the leg itself run on e4cc4acee (the report).
+console.log('\n⑭ THE LAW (r4): the live Connect dialog over the real engine — seeded interleavings of press / other road / Cancel / close / reopen');
+{
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const net = await import('node:net');
+  const { pathToFileURL } = await import('node:url');
+  // ── the fake page: what the dialog code touches; isConnected = reachable from the page's root ──
+  let ROOT_EL = null;
+  const asNode = (n) => (typeof n === 'string' ? Object.assign(new El('#text'), { _text: n }) : n);
+  class El {
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parentElement = null; this.dataset = {}; this.style = {}; this._text = ''; this._cls = []; this.attrs = {}; this._value = undefined; this.disabled = false; this.hidden = false; this.open = false; this._ls = null; }
+    get className() { return this._cls.join(' '); }
+    set className(v) { this._cls = String(v).split(/\s+/).filter(Boolean); }
+    get classList() { const c = this._cls; return { add: (...a) => { for (const x of a) if (!c.includes(x)) c.push(x); }, remove: (...a) => { for (const x of a) { const i = c.indexOf(x); if (i >= 0) c.splice(i, 1); } }, contains: (x) => c.includes(x), toggle: (x, on) => { const has = c.includes(x); const want = on === undefined ? !has : !!on; if (want && !has) c.push(x); if (!want && has) c.splice(c.indexOf(x), 1); return want; } }; }
+    get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join('') : this._text; }
+    set textContent(v) { for (const c of this.children) c.parentElement = null; this.children = []; this._text = v == null ? '' : String(v); }
+    get innerHTML() { return ''; }
+    set innerHTML(v) { this.textContent = ''; }
+    get value() { if (this.tagName === 'SELECT' && this._value === undefined) { const o = this.children.find((c) => c.tagName === 'OPTION'); return o ? o.value : ''; } return this._value === undefined ? '' : this._value; }
+    set value(v) { this._value = v == null ? '' : String(v); }
+    get options() { return this.children.filter((c) => c.tagName === 'OPTION'); }
+    get isConnected() { let n = this; while (n.parentElement) n = n.parentElement; return n === ROOT_EL; }
+    get offsetParent() { return this.isConnected ? ROOT_EL : null; }
+    get parentNode() { return this.parentElement; }
+    get firstChild() { return this.children[0] || null; }
+    get lastChild() { return this.children[this.children.length - 1] || null; }
+    get nextSibling() { const p = this.parentElement; return p ? p.children[p.children.indexOf(this) + 1] || null : null; }
+    get nextElementSibling() { return this.nextSibling; }
+    get childNodes() { return this.children; }
+    get childElementCount() { return this.children.length; }
+    _out() { if (this.parentElement) { const s = this.parentElement.children; s.splice(s.indexOf(this), 1); } this.parentElement = null; }
+    appendChild(n) { n._out(); n.parentElement = this; this.children.push(n); return n; }
+    append(...ns) { for (const n of ns) if (n != null) this.appendChild(asNode(n)); }
+    prepend(...ns) { for (const n of ns.reverse()) if (n != null) this.insertBefore(asNode(n), this.children[0] || null); }
+    insertBefore(n, ref) { n._out(); n.parentElement = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }
+    before(...ns) { const p = this.parentElement; if (p) for (const n of ns) if (n != null) p.insertBefore(asNode(n), this); }
+    after(...ns) { const p = this.parentElement; if (!p) return; let ref = this.nextSibling; for (const n of ns) { if (n == null) continue; const x = asNode(n); if (x === ref) { ref = x.nextSibling; continue; } p.insertBefore(x, ref); } }
+    remove() { this._out(); }
+    removeChild(n) { n._out(); return n; }
+    replaceChildren(...ns) { this.textContent = ''; this.append(...ns); }
+    replaceWith(...ns) { const p = this.parentElement; if (!p) return; for (const n of ns) if (n != null) p.insertBefore(asNode(n), this); this._out(); }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+    removeAttribute(k) { delete this.attrs[k]; }
+    hasAttribute(k) { return k in this.attrs; }
+    toggleAttribute(k, on) { if (on === undefined ? !(k in this.attrs) : on) this.attrs[k] = ''; else delete this.attrs[k]; }
+    addEventListener(ev, fn) { ((this._ls ||= {})[ev] ||= []).push(fn); }
+    removeEventListener(ev, fn) { if (this._ls && this._ls[ev]) this._ls[ev] = this._ls[ev].filter((f) => f !== fn); }
+    dispatchEvent(e) { for (const fn of (this._ls && this._ls[e.type]) || []) fn(e); const h = this['on' + e.type]; if (typeof h === 'function') h.call(this, e); return true; }
+    click() { if (this.disabled) return undefined; const e = { type: 'click', target: this, preventDefault() {}, stopPropagation() {} }; for (const fn of (this._ls && this._ls.click) || []) fn(e); return typeof this.onclick === 'function' ? this.onclick(e) : undefined; }
+    focus() {} blur() {} select() {} scrollIntoView() {} setSelectionRange() {}
+    getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
+    get all() { const out = []; const st = [...this.children].reverse(); while (st.length) { const n = st.pop(); out.push(n); for (let i = n.children.length - 1; i >= 0; i--) st.push(n.children[i]); } return out; }
+    _one(sel) {   // tag?.class.class[attr op "v"]? (:not(...) never matches)
+      if (/:not\(/.test(sel)) return false;
+      const m = /^([a-z0-9#-]*)((?:\.[\w-]+)*)(?:\[([\w-]+)(?:([*^$]?=)"?([^"\]]*)"?)?\])?$/i.exec(sel);
+      if (!m) return false;
+      if (m[1] && this.tagName !== m[1].toUpperCase()) return false;
+      if (m[2] && !m[2].slice(1).split('.').every((c) => this._cls.includes(c))) return false;
+      if (m[3]) { const key = m[3].startsWith('data-') ? null : m[3]; const v = key ? (key === 'id' ? this.id : this.attrs[key]) : this.dataset[m[3].slice(5).replace(/-([a-z])/g, (_, x) => x.toUpperCase())]; if (v == null) return false; if (m[4] === '=' && String(v) !== m[5]) return false; if (m[4] === '*=' && !String(v).includes(m[5])) return false; if (m[4] === '^=' && !String(v).startsWith(m[5])) return false; }
+      return true;
+    }
+    _match(sel) { const parts = sel.trim().split(/\s+(?![^[]*\])/); if (!this._one(parts[parts.length - 1])) return false; let n = this.parentElement; for (let i = parts.length - 2; i >= 0; i--) { while (n && !n._one(parts[i])) n = n.parentElement; if (!n) return false; n = n.parentElement; } return true; }
+    matches(sel) { return String(sel).split(',').some((s) => this._match(s)); }
+    closest(sel) { let n = this; while (n) { if (n.matches(sel)) return n; n = n.parentElement; } return null; }
+    querySelectorAll(sel) { const s = String(sel).trim(); const sc = /^:scope\s*>\s*(.+)$/.exec(s); if (sc) return this.children.filter((c) => c.matches(sc[1])); return this.all.filter((c) => c.matches(s)); }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  }
+  // ── the page edge the bundle reaches (esbuild `define`: fetch / timers / window.open are THIS page's, never the suite's) ──
+  const PAGE_ORIGIN = POD, PAGE_HOST = new URL(POD).hostname;
+  const P = globalThis.__cd = { dialogs: [], opens: [], toasts: [], cur: null, actor: null };
+  // the virtual clock: the dialog's poll (1.5 s) and its ten-minute end run on it — the driver ticks it at rest
+  const clock = { now: 0, seq: 0, timers: new Map() };
+  // every timer belongs to the tab that set it (P.actor) — when it fires, that tab acts
+  P.setTimeoutAs = (tab, fn, ms = 0, ...a) => { const id = ++clock.seq; clock.timers.set(id, { at: clock.now + Math.max(0, Number(ms) || 0), fn: () => { P.actor = tab; fn(...a); }, every: 0 }); return id; };
+  P.setIntervalAs = (tab, fn, ms = 0, ...a) => { const id = ++clock.seq; const every = Math.max(1, Number(ms) || 1); clock.timers.set(id, { at: clock.now + every, fn: () => { P.actor = tab; fn(...a); }, every }); return id; };
+  P.clearTimeout = P.clearInterval = (id) => { clock.timers.delete(id); };
+  P.raf = (fn) => P.setTimeout(() => fn(clock.now), 0);
+  const turn = () => new Promise((r) => setImmediate(r));
+  const settle = async () => { for (let i = 0; i < 6; i++) { await turn(); for (const [id, t] of [...clock.timers]) if (!t.every && t.at <= clock.now && clock.timers.has(id)) { clock.timers.delete(id); t.fn(); } } };
+  const advance = async (ms) => { const end = clock.now + ms; for (;;) { let nx = null; for (const [id, t] of clock.timers) if (t.at <= end && (!nx || t.at < nx[1].at)) nx = [id, t]; if (!nx) break; const [id, t] = nx; clock.now = t.at; if (t.every) t.at += t.every; else clock.timers.delete(id); t.fn(); await settle(); } clock.now = end; };
+  P.t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));
+  P.win = { open: (url) => { P.opens.push({ url: String(url), by: P.urlOwner.get(String(url)) || null, n: P.log ? P.log.length : 0 }); return {}; }, addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), innerWidth: 1280, innerHeight: 900, location: { origin: PAGE_ORIGIN, hostname: PAGE_HOST, href: PAGE_ORIGIN + '/', protocol: 'https:', host: PAGE_HOST } };
+  P.urlOwner = new Map();   // a consent URL → the dialog whose press started it (window.open's `by`)
+  P.showToast = (msg) => { P.toasts.push(String(msg)); };
+  P.showConfirmDialog = async () => true;
+  P.createModalShell = ({ onClose } = {}) => {
+    const overlay = new El('div'); overlay.className = 'modal-overlay'; const dialog = new El('div'); dialog.className = 'dialog'; const body = new El('div'); body.className = 'dialog-body'; dialog.append(body); overlay.append(dialog); ROOT_EL.append(overlay);
+    let done = false;
+    const close = () => { if (done) return; done = true; overlay.remove(); if (typeof onClose === 'function') onClose(); };
+    return { body, close, raised: false, overlay, dialog, asked: false, ready: Promise.resolve(null), live: () => !done };
+  };
+  // the dialog's requests: HELD by the scheduler (a request until released to the real routes, its answer until delivered),
+  // each tagged with its TAB (P.actor). A release may FAIL (a rejected fetch, «Failed to fetch»): a press's start (request or
+  // answer), the poll's answer, the Cancel button's own cancel — never a close's cancel, a superseded press's end or a kind read
+  // (nobody is left to retry those). `P.hubChanges` counts what changed the hub (a start, a cancel that ended something); a
+  // tab KNOWS the hub as of the newest answer it was given.
+  P.held = []; P.hubChanges = 0; P.tabs = []; P.inAct = null;
+  P.fetch = (url, opts = {}) => new Promise((resolve, reject) => {
+    const method = (opts && opts.method) || 'GET', body = (opts && opts.body) || null, tab = P.actor, d = P.tabs[tab] ? P.tabs[tab].d : null, u = String(url);
+    const kind = /\/oauth\/start$/.test(u) ? 'start' : /\/oauth\/status\?flowId=/.test(u) ? 'poll' : /\/oauth\/status\?kind=/.test(u) ? 'read' : /\/oauth\/cancel$/.test(u) ? 'cancel' : 'other';
+    const byButton = kind === 'cancel' && P.inAct === 'cancel' && !!d && d.ctx.body.isConnected;   // the Cancel button's own cancel
+    const actsAt = d ? d.acts : 0;   // the dialog's act count when it asked — an answer to an OLDER act's question is not news
+    // a CLOSED dialog's sweep (its close reading what its page started) asks in the tab's name after a reopen — never the open
+    // dialog's news (the bundle keeps its function names: the sweep's frame is on the stack when it asks)
+    const fromSweep = /\bsweep\b/.test(new Error().stack || '');
+    const mayFail = kind === 'start' || byButton;
+    const tag = `${P.tabs.length > 1 ? 'AB'[tab] || '?' : ''}${method === 'GET' ? 'get' : 'post'} ${u.replace(/^\/api\/channels\/(oauth\/)?/, '').replace(/flowId=([0-9a-f]{6})[0-9a-f]*/, 'flowId=$1').slice(0, 40)}`;
+    P.held.push({ tag: `→${tag}`, mayFail, go: async (fail) => {
+      if (fail) { P.actor = tab; reject(new TypeError('Failed to fetch')); return; }
+      const res = await fetch(P.base + url, { method, body, headers: { 'Content-Type': 'application/json', Origin: PAGE_ORIGIN } });
+      const txt = await res.text();
+      let j = {}; try { j = JSON.parse(txt || '{}'); } catch { j = {}; }
+      if (kind === 'start' && j && j.flowId) { P.seen.add(j.flowId); P.hubChanges++; if (j.url) P.urlOwner.set(String(j.url), d); }
+      if (kind === 'cancel' && j && j.cancelled) P.hubChanges++;
+      const seenAt = P.hubChanges;
+      const said = j && (j.error ? `!${String(j.code || j.error).slice(0, 18)}` : j.flowId && kind === 'start' ? `=${String(j.flowId).slice(0, 6)}` : 'running' in j ? (j.running ? '=run' : `=${j.done ? 'done' : 'stopped'}${j.flow && j.flow.cancelled ? '/' + j.flow.cancelled : ''}`) : 'cancelled' in j ? `=${j.cancelled}` : '');
+      // an answer fails only on its way to an OPEN dialog (a closed one never hears it either way — the hub's own end takes it)
+      P.held.push({ tag: `←${tag}${said}`, get mayFail() { return (mayFail || kind === 'poll') && !!d && d.ctx.body.isConnected; }, go: async (fail2) => {
+        P.actor = tab;
+        if (fail2) { reject(new TypeError('Failed to fetch')); return; }
+        // what the hub RUNS, as of its answer, is known to the DIALOG that asked (a read, the poll, a start, its Cancel button's own
+        // cancel — «yours ended» / «yours was not running» is news of the hub too) — never to a sibling
+        // (only while no newer act of that dialog came since it asked: the answer to a superseded question is rightly dropped)
+        if ((kind === 'read' || kind === 'poll' || kind === 'start' || byButton) && d && d.acts === actsAt) { if (!fromSweep) d.knows = Math.max(d.knows || 0, seenAt); else d.sweptAs = Math.max(d.sweptAs || 0, seenAt); }   // sweptAs: what a closed dialog's sweep answered in this dialog's name (the replay shows it)
+        resolve({ ok: res.ok, status: res.status, json: async () => j, text: async () => txt });
+      } });
+    } });
+  });
+  P.fetchAs = (tab, url, opts) => { P.actor = tab; return P.fetch(url, opts); };   // the shim's: the tab is its module instance's
+  P.fetchJson = async (url, opts = {}) => { try { const r = await fetch(P.base + url, { ...opts, headers: { 'Content-Type': 'application/json', Origin: PAGE_ORIGIN } }); return await r.json(); } catch (e) { return { error: String(e.message || e) }; } };
+  // ── the bundle: the dialog modules as they ship; utils / i18n / build-version stubbed at their import line ──
+  const lib = path.join(REPO, 'src/lib');
+  const namesOf = (src) => { const out = new Set(); for (const m of src.matchAll(/^export\s+(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/gm)) out.add(m[1]); for (const m of src.matchAll(/^export\s+(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)) out.add(m[1]); for (const m of src.matchAll(/^export\s*\{([^}]*)\}/gm)) for (const n of m[1].split(',')) { const x = n.trim().split(/\s+as\s+/).pop(); if (x) out.add(x); } return [...out]; };
+  const HOOK = { 'utils.js': ['fetchJson', 'showToast', 'showConfirmDialog', 'createModalShell'], 'i18n.js': ['t', 'tc'] };
+  const stubOf = (file) => {
+    const base = path.basename(file);
+    if (base === 'build-version.js') return 'export const BUILD_VERSION = "test";';
+    const names = namesOf(fs.readFileSync(file, 'utf8'));
+    return names.map((n) => (base === 'i18n.js' && (n === 't' || n === 'tc') ? `export const ${n} = (a, b, c) => globalThis.__cd.t(${n === 'tc' ? 'b, c' : 'a, b'});`
+      : HOOK[base] && HOOK[base].includes(n) ? `export const ${n} = (...a) => globalThis.__cd.${n}(...a);`
+        : /^[A-Z][A-Z0-9_]*$/.test(n) ? `export const ${n} = undefined;` : `export const ${n} = () => undefined;`)).join('\n');
+  };
+  const bundle = async (tag, mutate = null) => {
+    const plug = { name: 'page-edge', setup(b) {
+      b.onResolve({ filter: /^\.\/(utils|i18n|build-version)\.js$/ }, (a) => (a.importer.startsWith(lib + path.sep) ? { path: path.join(lib, a.path.slice(2)), namespace: 'edge' } : undefined));
+      b.onLoad({ filter: /.*/, namespace: 'edge' }, (a) => ({ contents: stubOf(a.path), loader: 'js' }));
+      if (mutate) b.onLoad({ filter: /src[\\/]lib[\\/]mounts-dialog\.js$/ }, (a) => ({ contents: mutate(fs.readFileSync(a.path, 'utf8')), loader: 'js' }));
+    } };
+    const out = path.join(ROOT, `dialog-${tag}.mjs`);
+    // the page edge is INJECTED (esbuild `inject`): fetch / timers / window / location are this page's, and each import of the
+    // bundle (`?tab=N`) is its own module instance — its own TAB, read off import.meta.url, on every request and timer it makes
+    const shim = path.join(ROOT, 'page-edge-shim.mjs');
+    if (!fs.existsSync(shim)) fs.writeFileSync(shim, [
+      "const TAB = (() => { try { return Number(new URL(import.meta.url).searchParams.get('tab') || 0); } catch { return 0; } })();",
+      'const P = () => globalThis.__cd;',
+      'export const fetch = (u, o) => P().fetchAs(TAB, u, o);',
+      'export const setTimeout = (f, ms, ...a) => P().setTimeoutAs(TAB, f, ms, ...a);',
+      'export const setInterval = (f, ms, ...a) => P().setIntervalAs(TAB, f, ms, ...a);',
+      'export const clearTimeout = (id) => P().clearTimeout(id);',
+      'export const clearInterval = (id) => P().clearInterval(id);',
+      'export const requestAnimationFrame = (f) => P().setTimeoutAs(TAB, () => f(0), 0);',
+      'export const window = new Proxy({}, { get: (_, k) => P().win[k] });',
+      'export const location = new Proxy({}, { get: (_, k) => P().win.location[k] });',
+    ].join('\n'));
+    await esbuild.build({ stdin: { contents: `export { showConnectAccountDialog } from ${JSON.stringify(path.join(lib, 'channel-account-dialogs.js'))};\nexport { reauthDialog } from ${JSON.stringify(path.join(lib, 'mounts-dialog.js'))};`, resolveDir: lib, loader: 'js' }, bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'], outfile: out, plugins: [plug], logLevel: 'silent', legalComments: 'none', inject: [shim] });
+    return [await import(pathToFileURL(out).href + `?tab=0&v=${tag}`), await import(pathToFileURL(out).href + `?tab=1&v=${tag}`)];
+  };
+  // the page globals the bundle reads bare (set for this section only; the suite's own code is done with the DOM-free part)
+  ROOT_EL = new El('html');
+  globalThis.document = { createElement: (t) => new El(t), createElementNS: (ns, t) => new El(t), createTextNode: (s) => asNode(String(s)), createDocumentFragment: () => new El('#fragment'), body: ROOT_EL, documentElement: ROOT_EL, addEventListener() {}, removeEventListener() {}, querySelector: (s) => ROOT_EL.querySelector(s), querySelectorAll: (s) => ROOT_EL.querySelectorAll(s), getElementById: () => null, activeElement: null, hidden: false };
+  globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.sessionStorage = globalThis.sessionStorage || globalThis.localStorage;
+  globalThis.MutationObserver = class { constructor() {} observe() {} disconnect() {} };
+  globalThis.Event = globalThis.Event || class { constructor(type) { this.type = type; } };
+  globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
+  let D = null;
+  try { D = await bundle('real'); } catch (e) { ok(false, '⑭ the Connect dialog bundles (esbuild, the page edge stubbed)', String((e && e.errors && e.errors.map((x) => x.text).join(' | ')) || (e && e.message) || e)); }
+  if (D) {
+    // ── one seed: the world's hub, one dialog open; random acts and releases; then the invariant at rest ──
+    const rngOf = (seed) => { let x = (seed * 2654435761) >>> 0 || 1; return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; }; };
+    const pickOf = (rnd, a) => a[Math.floor(rnd() * a.length)];
+    // the Gmail type's consent block: the wrap wireOAuthConnect put right before its token field (`flow.gmail`)
+    const blockOf = (d) => { if (!d || !d.ctx.body.isConnected) return null; const tok = d.ctx.inputs && d.ctx.inputs['flow.gmail']; const par = tok && tok.parentElement; const wrap = par ? par.children[par.children.indexOf(tok) - 1] : null; if (!wrap || !wrap._cls.includes('mounts-drive-connect')) return null; const st = wrap.children.find((c) => c._cls.includes('mounts-field-hint')); return { wrap, btn: wrap.querySelector('button.mounts-btn-primary'), other: wrap.querySelector('.mounts-oauth-other'), cancel: wrap.querySelector('.mounts-oauth-cancel'), status: st ? st.textContent : '' }; };
+    // a listener THIS process holds on the port (Linux: its socket inodes in /proc/self/fd, LISTEN rows of /proc/net/tcp[6]) — a TCP
+    // connect alone also answers for ANOTHER process that took the recycled port on a busy box (sweep 3's one red, base 271828);
+    // where /proc cannot be read, the connect is the witness
+    const ownListenPorts = () => { try { const ino = new Set(); for (const f of fs.readdirSync('/proc/self/fd')) { try { const m = /^socket:\[(\d+)\]$/.exec(fs.readlinkSync(`/proc/self/fd/${f}`)); if (m) ino.add(m[1]); } catch { /* closed meanwhile */ } } const ports = new Set(); for (const t of ['/proc/net/tcp', '/proc/net/tcp6']) { let txt = ''; try { txt = fs.readFileSync(t, 'utf8'); } catch { continue; } for (const line of txt.split('\n').slice(1)) { const c = line.trim().split(/\s+/); if (c.length > 9 && c[3] === '0A' && ino.has(c[9])) ports.add(parseInt(c[1].split(':')[1], 16)); } } return ports; } catch { return null; } };
+    const listens = async (port, own = ownListenPorts()) => { if (!port) return false; if (own) return own.has(port); return new Promise((r) => { const s = net.connect({ port, host: '127.0.0.1' }, () => { s.destroy(); r(true); }); s.on('error', () => r(false)); }); };
+    // the dialog on the Gmail type alone (the other types' blocks would only add their own status reads to the interleavings), in
+    // TAB `t` (a seed may open two: the second client — another browser tab on the same hub)
+    // the record exists BEFORE the dialog opens: its attach asks while showConnectAccountDialog is still being awaited
+    const openDialog = async (kinds, t) => { P.actor = t; const d = { no: ++P.dno, tab: t, ctx: { body: { isConnected: false } }, closedAt: null, knows: 0, acts: 0 }; P.tabs[t].d = d; P.dialogs.push(d); d.ctx = await D[t].showConnectAccountDialog({}, kinds.filter((k) => k.kind === 'gmail'), { kind: 'gmail' }); await settle(); return d; };
+    const W = { press: 3, cancel: 3, other: 2, close: 1, reopen: 1, tick: 1 };
+    const FULL = { tabs: 0.35, fail: 0.2, tick: true }, PLAIN = { tabs: 0, fail: 0, tick: false };
+    // `script` (a named leg): {tabs, steps: [[op, tab|tag, fail?]…]} — the steps instead of the seed's choices (op: press / other /
+    // cancel / close / reopen / tick, or ['rel', <a tag fragment>, fail] = release the first held item whose tag holds it)
+    const runSeed = async (w, kinds, seed, cfg = FULL, script = null) => {
+      const rnd = rngOf(seed); const log = []; P.log = log;
+      P.dialogs = []; P.dno = 0; P.opens = []; P.toasts = []; P.held = []; P.seen = new Set(); P.urlOwner = new Map(); P.hubChanges = 0; clock.timers.clear();
+      const nTabs = script ? script.tabs : (rnd() < cfg.tabs ? 2 : 1);
+      P.tabs = Array.from({ length: nTabs }, () => ({ d: null }));
+      for (let t = 0; t < nTabs; t++) await openDialog(kinds, t);
+      let acts = 4 + Math.floor(rnd() * 6) + (nTabs - 1) * 3;
+      const actOdds = 0.3 + rnd() * 0.5;   // each seed its own temper: some act in bursts (Cancel then a press at once), some wait
+      const failOdds = rnd() < (cfg.failSeeds == null ? 0.5 : cfg.failSeeds) ? cfg.fail : 0;   // half the seeds (by default) meet a network failure now and then
+      for (let step = 0; step < 60; step++) {
+        if (script) {
+          const st = script.steps.shift(); if (!st) break;
+          const [op, a1, a2] = st;
+          if (op === 'rel') { const i = P.held.findIndex((h) => h.tag.includes(a1)); if (i < 0) log.push(`(nothing held «${a1}»)`); else { const h = P.held.splice(i, 1)[0]; log.push(h.tag + (a2 ? ' ✗net' : '')); await h.go(!!a2); } }
+          else if (op === 'tick') { log.push('TICK'); await advance(1600); }
+          else {
+            const t = a1 || 0, d = P.tabs[t].d, b = blockOf(d);
+            log.push(`${nTabs > 1 ? 'AB'[t] : ''}${op.toUpperCase()}`);
+            P.actor = t; P.inAct = op; if (op !== 'reopen') d.acts++;
+            if (op === 'press' && b) b.btn.click(); else if (op === 'cancel' && b && b.cancel) b.cancel.click(); else if (op === 'other' && b && b.other) b.other.click(); else if (op === 'close') { d.closedAt = log.length; d.ctx.close(); }
+            P.inAct = null;
+            if (op === 'reopen') await openDialog(kinds, t);
+          }
+          await settle(); continue;
+        }
+        const can = [];
+        if (acts > 0) {
+          for (let t = 0; t < nTabs; t++) {
+            const d = P.tabs[t].d, b = blockOf(d);
+            if (b && b.btn && !b.btn.disabled) can.push([t, 'press']);
+            if (b && b.other && !b.other.disabled) can.push([t, 'other']);
+            if (b && b.cancel && !b.cancel.disabled) can.push([t, 'cancel']);
+            can.push([t, d.ctx.body.isConnected ? 'close' : 'reopen']);
+          }
+          if (cfg.tick) can.push([null, 'tick']);   // the poll ticks DURING the walk (virtual time moves 1.6 s)
+        }
+        if (!can.length && !P.held.length) break;
+        // weighted acts: a press, Cancel and the other road are what race; a close / reopen ends the story, so rarer
+        const weighted = (arr) => { let tot = 0; for (const x of arr) tot += W[x[1]]; let r = rnd() * tot; for (const x of arr) { r -= W[x[1]]; if (r < 0) return x; } return arr[arr.length - 1]; };
+        // a release: the NEWEST held item half the time (a later request or answer overtaking an earlier one is the race), else any
+        if (can.length && (!P.held.length || rnd() < actOdds)) {
+          const [t, a] = weighted(can); acts--;
+          log.push(`${t != null && nTabs > 1 ? 'AB'[t] : ''}${a.toUpperCase()}`);
+          if (a === 'tick') await advance(1600);
+          else {
+            const d = P.tabs[t].d, b = blockOf(d);
+            P.actor = t; P.inAct = a; d.acts++;
+            if (a === 'press') b.btn.click();
+            else if (a === 'other') b.other.click();
+            else if (a === 'cancel') b.cancel.click();
+            else if (a === 'close') { d.closedAt = log.length; d.ctx.close(); }   // closedAt: the log position (opens after it are late)
+            P.inAct = null;
+            if (a === 'reopen') await openDialog(kinds, t);
+          }
+        } else {
+          const h = P.held.splice(rnd() < 0.5 ? P.held.length - 1 : Math.floor(rnd() * P.held.length), 1)[0];
+          const fail = !!h.mayFail && rnd() < failOdds;
+          log.push(h.tag + (fail ? ' ✗net' : ''));
+          await h.go(fail);
+        }
+        await settle();
+      }
+      // AT REST: everything delivered (no failure now), the poll ticked twice
+      const drain = async () => { for (let g = 0; g < 300 && P.held.length; g++) { const h = P.held.splice(rnd() < 0.5 ? P.held.length - 1 : Math.floor(rnd() * P.held.length), 1)[0]; log.push(h.tag); await h.go(false); await settle(); } };
+      await drain();
+      for (let k = 0; k < 2; k++) { await advance(1600); await drain(); }
+      // THE INVARIANT at rest
+      const ids = [...P.seen];
+      const stOf = (id) => { try { return w.e.oauthStatus(id); } catch { return null; } };   // the engine's own record (the route's)
+      const running = ids.filter((id) => (stOf(id) || {}).running);
+      const R = running.length === 1 ? running[0] : null;
+      const portOf = (id) => ((stOf(id) || {}).flow || {}).port || null;
+      const own = ownListenPorts();   // once per seed
+      const live = []; for (const p of [...new Set(ids.map(portOf).filter(Boolean))]) if (await listens(p, own)) live.push(p);
+      const why = [];
+      if (running.length > 1) why.push(`${running.length} sign-ins of the kind run`);
+      const open = P.tabs.map((tb) => tb.d).filter((d) => d.ctx.body.isConnected);
+      const shownBy = [];
+      for (const d of open) {
+        const b = blockOf(d), shows = !!(b && b.cancel), who = nTabs > 1 ? `tab ${'AB'[d.tab]}: ` : '';
+        if (shows && (!R || b.wrap.dataset.flow !== R)) why.push(`${who}the dialog shows a sign-in (its Cancel) the hub does not run`);
+        if (shows && R && b.wrap.dataset.flow === R) shownBy.push(d);
+        // a tab TOLD of the hub after its last change (its newest answer) shows what runs — «cancelled» is said only when nothing does
+        if (!shows && R && d.knows >= P.hubChanges) why.push(`${who}the hub runs a sign-in the dialog was told of and does not show («${b ? b.status.slice(0, 40) : 'no block'}»)`);
+        if (b && ((b.btn && b.btn.disabled) || (b.other && b.other.disabled) || (b.cancel && b.cancel.disabled))) why.push(`${who}a control is still busy at rest`);
+      }
+      if (R && !shownBy.length && ((stOf(R) || {}).flow || {}).mode !== 'public') why.push(open.length ? 'a sign-in that needs the dialog runs with no open dialog showing it' : 'a sign-in that needs the dialog runs behind a closed one');
+      if (live.some((p) => p !== portOf(R))) why.push('a listener runs without its sign-in running');
+      if (live.length && !shownBy.length) why.push(open.length ? 'a listener runs with no sign-in shown' : 'a listener runs behind a closed dialog');
+      if (P.opens.some((o) => o.by && o.by.closedAt != null && o.n >= o.by.closedAt)) why.push('a consent page opened after its dialog closed');
+      const rest = { running, hubChanges: P.hubChanges, tabs: P.tabs.map((tb) => { const b = blockOf(tb.d); return { open: tb.d.ctx.body.isConnected, knows: tb.d.knows, sweptAs: tb.d.sweptAs || 0, flow: b ? b.wrap.dataset.flow || null : null, cancel: !!(b && b.cancel), status: b ? b.status.slice(0, 120) : null }; }) };
+      // clean: every dialog closed, every sign-in of the seed ended, nothing held
+      for (const x of P.dialogs) x.ctx.close();
+      await drain();
+      for (const id of ids) { try { w.e.oauthCancel(id); } catch { /* ended */ } }
+      return { ok: !why.length, why, log, nTabs, rest };
+    };
+    const SILENT14 = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' };
+    const LISTED14 = { ...SILENT14, instanceAddress: 'listed' };
+    const worlds = [];
+    for (const [name, drive, nd] of [['silent preset · a loopback that needs the dialog', SILENT14, true], ['listed preset · the route (comes back by itself)', LISTED14, false]]) {
+      const w = await world(`ilv-${worlds.length}`, { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive, larkPreset: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } });
+      P.base = w.origin; RT.setup({ getEngine: () => w.e });
+      const dg = await (await fetch(`${w.origin}/api/channels?scope=accounts`, { headers: { Origin: PAGE_ORIGIN } })).json();
+      worlds.push({ name, w, kinds: (dg && dg.kinds) || [], nd, drive, gen: 0 });
+    }
+    // a FRESH hub every 100 seeds: one hub over thousands of seeds keeps every ended sign-in it ever had (each start scans them —
+    // the sweep went quadratic); a new world of the same shape keeps a seed's cost flat
+    const fresh = async (wo) => { try { await wo.w.close(); } catch { /* gone */ } wo.w = await world(`ilv-${worlds.indexOf(wo)}-${++wo.gen}`, { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: wo.drive, larkPreset: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }); P.base = wo.w.origin; RT.setup({ getEngine: () => wo.w.e }); };
+    // CR_SEEDS = seeds per world (default 100 — the fast tier's time), CR_SEED0 = an offset (another reader's own seeds)
+    const SEEDS = Number(process.env.CR_SEEDS || 100), SEED0 = Number(process.env.CR_SEED0 || 0);
+    // the routes module holds ONE engine (RT.setup) — a world in use is the one the routes ask
+    const useWorld = (wo) => { P.base = wo.w.origin; RT.setup({ getEngine: () => wo.w.e }); };
+    try {
+      ok(worlds.every((x) => x.kinds.some((k) => k.kind === 'gmail')), '⑭ the digest names the Gmail type with its company preset (the dialog\'s own types)', worlds.map((x) => x.kinds.map((k) => k.kind)));
+      const runOne = async (wo) => { useWorld(wo); return runSeed(wo.w, wo.kinds, 1); };
+      if (process.env.CR_SEED_ONLY) {   // a reader's replay: CR_SEED_ONLY=<seed> [CR_WORLD=0|1] — the whole sequence and the state at rest
+        const wo = worlds[Number(process.env.CR_WORLD || 0)]; useWorld(wo);
+        const r = await runSeed(wo.w, wo.kinds, Number(process.env.CR_SEED_ONLY));
+        console.log(`      replay [${wo.name}] seed ${process.env.CR_SEED_ONLY} (${r.nTabs} tab(s)): ${r.ok ? 'holds' : r.why.join('; ')}\n      ${r.log.join(' ')}\n      at rest: ${JSON.stringify(r.rest)}`);
+      }
+      const first = await runOne(worlds[0]);
+      ok(first.log.length > 0, '⑭ the driver drives the dialog (a seed acts, its requests and answers are released)', first.log.join(' '));
+      // every control's bundle builds WHILE the law walks (esbuild works in its own process) — the fast tier's time
+      const muts = MUTS();
+      const mutBuilt = muts.map(([, , edits], i) => bundle(`mut${i}`, (x) => edits.reduce((acc, [from, to]) => acc.replace(from, to), x)));
+      const RB_FROM = "      if (live) busy(false);   // r4 (the tidy): every exit of a press ends its busy for every control it took (the other road too)\n";
+      const rbBuilt = bundle('mut-rb', (x) => x.replace(RB_FROM, ''));
+      mutBuilt.forEach((pr) => pr.catch(() => {})); rbBuilt.catch(() => {});
+      const bad = [], tLaw = Date.now();
+      for (const wo of worlds) { useWorld(wo); for (let s = 1; s <= SEEDS; s++) { if (s % 100 === 0) await fresh(wo); const seed = SEED0 + s * 7919 + worlds.indexOf(wo); const r = await runSeed(wo.w, wo.kinds, seed); if (!r.ok) bad.push({ world: wo.name, seed, why: r.why, seq: r.log.join(' ') }); } }
+      // a red run names every shape it found (how many seeds each), then the first seed of each with its whole sequence
+      const shapes = new Map(); for (const x of bad) for (const y of x.why) { const k = y.replace(/«([^»]{0,26})[^»]*»/, '«$1…»').replace(/runs \d+$/, 'runs N'); if (!shapes.has(k)) shapes.set(k, { n: 0, first: x }); shapes.get(k).n++; }
+      ok(!bad.length, `⑭ THE LAW over ${SEEDS} seeds × ${worlds.length} worlds (press / other road / Cancel / close / reopen, every request and answer held and reordered): at rest the dialog shows exactly what the hub runs — a block with its Cancel ⇔ the one sign-in running; no listener without a shown sign-in; nothing that needs the dialog behind a closed one; no consent page after the close`, `${bad.length} of ${SEEDS * worlds.length} seeds — ${[...shapes].map(([k, v]) => `${v.n}× ${k}`).join(' · ')}`);
+      // (ok() cuts its detail) every shape on its own lines: how many seeds, the first one's whole sequence
+      console.log(`      (the law: ${SEEDS * worlds.length} seeds in ${Date.now() - tLaw} ms)`);
+      // every red seed with its replay line (a reader re-runs exactly it)
+      for (const x of bad) console.log(`      red: CR_SEED_ONLY=${x.seed} CR_WORLD=${worlds.findIndex((w) => w.name === x.world)} — ${x.why.join('; ')}`);
+      if (bad.length) for (const [k, v] of shapes) console.log(`      ${v.n}× ${k}\n        first: [${v.first.world}] seed ${v.first.seed}: ${v.first.seq}`);
+      // RED CONTROLS: each r4 guard removed (a mutant bundle) — the same driver finds it by itself
+      // each mutant = [from, to] edits of the tip's mounts-dialog.js; EVERY `from` must be there exactly once (a moved anchor is red
+      // here, never a control that silently mutates less)
+      function MUTS() { return [
+        // instance 1 as round 3 had it: Cancel's tail draws «cancelled» with no latest-act check and no hub read, the presses free
+        ['Cancel draws «cancelled» over a newer act (round 3\'s Cancel: no latest-act check, no hub read, the presses not busy)', PLAIN, [
+          ["        if (mine !== gen || closed) return;   // r4 (THE LAW): a newer act draws its own state — «cancelled» is never said over it\n", ''], ["        const mine = ++gen; stopPoll(); busy(true);\n        // r4: a Cancel whose own request failed", "        const mine = ++gen; stopPoll();\n        // r4: a Cancel whose own request failed"], ["        await adoptOrEnd(mine, prov, ours ? tr('The sign-in was cancelled.') : tr('The sign-in this dialog showed had already ended.'), tr('The sign-in was cancelled. Press the button to start again.'));", "        ended(tr('The sign-in was cancelled. Press the button to start again.'));"]]],
+        // instance 2 as round 3 had it: no close hook
+        ['a close is not an act (no close hook: a press in flight at the close draws on the closed block, opens its page, keeps its sign-in)', PLAIN, [
+          ["  return { close: () => { if (closed) return; closed = true; ++gen; stopPoll(); sweepLater(); } };", "  return { close: () => {} };"]]],
+        // the tidy's item 3: Cancel says «cancelled» without reading what the hub runs (two tabs find it)
+        ['Cancel says «cancelled» without reading what the hub runs (a sign-in another tab started stays unshown)', { ...PLAIN, tabs: 1 }, [
+          ["        await adoptOrEnd(mine, prov, ours ? tr('The sign-in was cancelled.') : tr('The sign-in this dialog showed had already ended.'), tr('The sign-in was cancelled. Press the button to start again.'));", "        ended(tr('The sign-in was cancelled. Press the button to start again.'));"]]],
+        // the tidy's item 2 (the Connect half): a failed Cancel leaves the presses busy
+        ['a Cancel whose own request failed leaves the presses busy (no busy(false) on its failure)', { ...FULL, tabs: 0, fail: 0.6, failSeeds: 1 }, [
+          ["if (mine === gen && !closed) { busy(false); watchShown(prov); } throw e; }", "if (mine === gen && !closed) { watchShown(prov); } throw e; }"]]],
+      ]; }
+      for (const [i, [what, ccfg, edits]] of (process.env.CR_LAW_ONLY ? [] : muts.entries())) {   // CR_LAW_ONLY=1: a seed sweep, the law alone
+        const t0 = Date.now();
+        const src = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf8');
+        const changed = edits.every(([from]) => src.split(from).length === 2);
+        const Dm = await mutBuilt[i];
+        const keep = D; D = Dm;
+        const found = [];
+        // the control stops at its first find (up to three times the law's seeds — a guard's race can be rarer than the class)
+        let tried = 0;
+        for (let s = 1; s <= SEEDS * 3 && !found.length; s++) for (const wo of worlds) { if (found.length) break; if (s % 100 === 0) await fresh(wo); useWorld(wo); tried++; const seed = SEED0 + s * 7919 + worlds.indexOf(wo); const r = await runSeed(wo.w, wo.kinds, seed, ccfg); if (!r.ok) found.push({ world: wo.name, seed, why: r.why }); }
+        D = keep;
+        ok(changed && found.length > 0, `⑭ RED CONTROL: ${what} — the seeded driver finds it by itself`, found.length ? `found after ${tried} seeds: [${found[0].world}] seed ${found[0].seed}: ${found[0].why.join('; ')}` : `not found in ${tried} seeds`);
+        if (found.length) console.log(`      (found after ${tried} seeds in ${Date.now() - t0} ms: [${found[0].world}] seed ${found[0].seed} — ${found[0].why.join('; ')})`);
+      }
+      // ⑭d THE CLOSE ENDS WHAT THIS PAGE STARTED (主开发's base 104729, seed 1443040): a press whose start answer never came, a
+      // Cancel that made the read of what runs moot, a close → reopen → close — the sign-in the second press started (its id never
+      // seen) ran on behind the closed dialog with its listener. Now every close (and a press failing after it) reads the kind
+      // and ends what runs if THIS PAGE started it (its `ref`) and it needs the dialog. Named: the seed, the class as a script,
+      // and its guard — another tab's sign-in is never ended by this page's close.
+      useWorld(worlds[0]);
+      const s1443 = await runSeed(worlds[0].w, worlds[0].kinds, 1443040);
+      ok(s1443.ok, '⑭d the seed 1443040 (主开发\'s base 104729, the loopback world) holds: nothing that needs the dialog runs behind it', s1443.ok ? undefined : `${s1443.why.join('; ')}\n      ${s1443.log.join(' ')}`);
+      const lost = await runSeed(worlds[0].w, worlds[0].kinds, 1, FULL, { tabs: 1, steps: [['press'], ['rel', '→get status?kind'], ['rel', '→post start'], ['rel', '←post start'], ['press'], ['rel', '→post start'], ['rel', '←get status?kind'], ['rel', '←post start', true], ['cancel'], ['rel', '→get status?kind'], ['rel', '←get status?kind'], ['close'], ['reopen'], ['close']] });
+      ok(lost.ok && lost.rest.running.length === 0, '⑭d the class as a script: a second press whose start answer is LOST (the hub ran it), a Cancel, close → reopen → close — the close ends the sign-in this page started though it never learned its id (nothing runs, no listener)', lost.ok && !lost.rest.running.length ? undefined : `${lost.why.join('; ')} running=${lost.rest.running.length}\n      ${lost.log.join(' ')}`);
+      const other = await runSeed(worlds[0].w, worlds[0].kinds, 1, FULL, { tabs: 2, steps: [['press', 1], ['rel', '→Bpost start'], ['rel', '←Bpost start'], ['press', 0], ['rel', '→Apost start', true], ['close', 0]] });
+      ok(other.ok && other.rest.running.length === 1 && other.rest.tabs[1].flow === other.rest.running[0], '⑭d its guard: tab A\'s close (its own press refused on the way) reads the kind and leaves tab B\'s sign-in alone — another page\'s `ref`', other.ok ? JSON.stringify(other.rest) : `${other.why.join('; ')}\n      ${other.log.join(' ')}`);
+      // ⑭c the tidy's item 4 (the REAL routes): a cancel that names its sign-in names it by a string — a number, an object or an
+      // empty string is refused by name (400 bad-flow), never read as «none named»; an absent flowId keeps the old client's meaning
+      useWorld(worlds[0]);
+      const cancelAs = async (b) => { const r = await fetch(`${worlds[0].w.origin}/api/channels/adapters/no-such-account/auth/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: PAGE_ORIGIN }, body: JSON.stringify(b) }); let j = {}; try { j = await r.json(); } catch { j = {}; } return { status: r.status, code: j.code || null }; };
+      const c4 = { num: await cancelAs({ flowId: 12345 }), obj: await cancelAs({ flowId: { id: 'x' } }), empty: await cancelAs({ flowId: '' }), none: await cancelAs({}), nul: await cancelAs({ flowId: null }), named: await cancelAs({ flowId: 'abc' }) };
+      ok(['num', 'obj', 'empty'].every((k) => c4[k].status === 400 && c4[k].code === 'bad-flow') && ['none', 'nul', 'named'].every((k) => c4[k].status !== 400),
+        '⑭c the account cancel route: a flowId that is not a non-empty string is refused by name (400 bad-flow); absent / null keeps the old meaning (the engine is asked — here an unknown account)', c4);
+      // ⑭b THE RE-AUTHORIZE HALF of «a busy control always comes back» (the tidy's item 2): the REAL reauthDialog (live), its
+      // start / cancel faked — every exit of a press, the other road or Cancel (an answer, an {error} answer, a rejected fetch)
+      // ends its busy state for EVERY control it took: the button and the shown sign-in's other road usable again
+      const reauthBusy = async (Dx) => {
+        const bad = []; let n = 0, mode = 'ok';
+        const flow = (id) => ({ flowId: id, url: `https://consent.example.test/o?f=${id}`, live: true, pasteTitle: 'paste', pasteOpen: true, roadLine: 'the road', otherRoad: { label: 'Another road', hint: 'why', run: () => start() } });
+        const start = async () => { if (mode === 'reject') throw new TypeError('Failed to fetch'); if (mode === 'error') return { error: 'the hub said no (a test answer)' }; return flow(`F${++n}`); };
+        P.actor = 0;
+        const d = Dx[0].reauthDialog({ title: 'Re-authorize', hint: 'h', signinLabel: 'Sign in with Google', provider: 'Google', live: true, start: () => start(), status: async () => ({}),
+          cancel: async () => { if (mode === 'cancelfail') throw new TypeError('Failed to fetch'); return { ok: true, cancelled: true }; }, callback: async () => ({ token: 't' }), finish: async () => {} });
+        const els = () => ({ btn: d.button, other: d.body.querySelector('.mounts-oauth-other'), cancel: d.body.querySelector('.mounts-oauth-cancel') });
+        const usable = (why) => { const e = els(); const busy = [e.btn && e.btn.disabled ? 'the button' : null, e.other && e.other.disabled ? 'the other road' : null].filter(Boolean); if (busy.length) bad.push(`${why}: ${busy.join(' + ')} still busy`); };
+        d.button.click(); await settle();
+        if (!els().other) bad.push('the press drew no block with its other road');
+        for (const m of ['reject', 'error']) { mode = m; d.button.click(); await settle(); usable(`a failed press (${m === 'reject' ? 'a rejected fetch' : 'an {error} answer'})`); }
+        mode = 'reject'; if (els().other) { els().other.click(); await settle(); usable('a failed other road'); }
+        mode = 'cancelfail'; if (els().cancel) { els().cancel.click(); await settle(); usable('a failed Cancel'); }
+        mode = 'ok'; d.close(); await settle(); clock.timers.clear();
+        return bad;
+      };
+      const rb = await reauthBusy(D);
+      ok(!rb.length, '⑭b the Re-authorize dialog (live): every failed exit — a press answered {error}, a rejected fetch, a failed other road, a failed Cancel — gives the button AND the other road back', rb);
+      const reauthSrc = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf8');
+      const Drb = await rbBuilt;
+      const rbm = await reauthBusy(Drb);
+      ok(reauthSrc.split(RB_FROM).length === 2 && rbm.length > 0, '⑭b RED CONTROL: without busy(false) on a failed press the other road stays busy — e4cc4acee\'s reauth gave it back, c6be196d2\'s did not (the tidy\'s item 2)', rbm);
+    } finally { for (const x of worlds) await x.w.close(); }
+  }
+}
+
+await new Promise((r) => vendor.close(r));   // lane gmail-connect-wall: ⑬'s exchanges ride the fake too — closed last
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

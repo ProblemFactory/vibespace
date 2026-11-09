@@ -3804,12 +3804,29 @@ function create(deps = {}) {
    *  its sign-in names; null = the preset has none yet: the route / the loopback), never the instance's setting. */
   function presetsView(m, row) {
     const list = presetsOf(m);
-    if (!list.length || !ridesRelays(m, row)) return list;
+    if (!list.length) return list;
+    const relays = ridesRelays(m, row);
     return list.map((p) => {
-      let own = '';
-      try { const r = integrations.resolveIntegration(m.integration, { credentialKey: CLUSTER_PREFIX + p.key }); own = r && r.source === 'cluster' && r.values && typeof r.values.relayUrl === 'string' ? r.values.relayUrl : ''; } catch { own = ''; }
-      return { ...p, relayPage: ROAD.relayPick({ fleet: fleetRelayUrl(), preset: own }).url || null };
+      const v = presetValuesOf(m, p.key);
+      const wayIn = presetWayIn(m, row, v);   // lane gmail-connect-wall: the dialog says the road BEFORE the press (r2: from the start's own inputs)
+      if (!relays) return wayIn ? { ...p, wayIn } : p;
+      return { ...p, relayPage: ROAD.relayPick({ fleet: fleetRelayUrl(), preset: typeof v.relayUrl === 'string' ? v.relayUrl : '' }).url || null, ...(wayIn ? { wayIn } : {}) };
     });
+  }
+  /** A company preset's values as the account resolves them (`{}` when it does not resolve to the cluster). */
+  function presetValuesOf(m, key) {
+    try { const r = integrations.resolveIntegration(m.integration, { credentialKey: CLUSTER_PREFIX + key }); return r && r.source === 'cluster' && r.values ? r.values : {}; } catch { return {}; }
+  }
+  /** lane gmail-connect-wall (the owner 2026-11-09: the dialog walked a company preset into Google's wall and said so only
+   *  after) — r2 (law D, the acceptance: a road computed here for the instance's own address told a page opened under another
+   *  name the wrong thing): the INPUTS a start of this preset reads — the same relayOf the adapter calls (over the engine's
+   *  own fleet page) and the client's kind as the adapter reads it under a preset (the preset's fact, R4) — for
+   *  src/consent-road.js `wayOf` in the page, with the page's own origin: ONE verdict, two readers. */
+  function presetWayIn(m, row, values) {
+    const cr = consentRowOf(m.kind);
+    if (!cr || !cr.landing) return null;
+    const r = ROAD.relayOf({ fleetRelayUrl: () => fleetRelayUrl() }, { source: 'cluster', values });
+    return { publicUrl: instanceAddress() || '', relayUrl: r.relayUrl, relayFleet: r.relayFleet, preset: true, listed: r.listed, clientType: ROAD.CLIENT_TYPES.includes(values.clientType) ? values.clientType : '', clientKinds: !!(row && row.redirect && row.redirect.clientTypes), loopback: (cr.mode || []).some((x) => x === 'ephemeral' || x === 'fixed'), fixedOnly: (cr.mode || []).includes('fixed') && !(cr.mode || []).includes('ephemeral') };
   }
   /** lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster with their own vendor app met the redirect URIs only
    *  after a refusal): THE SETUP CARD'S FACTS for a type whose registry row declares `redirect` — src/oauth-setup.js (PURE)
@@ -3823,11 +3840,19 @@ function create(deps = {}) {
     const pages = [];
     if (cr && cr.relayUrlSetting) for (const [url, who] of [[ROAD.relayPageOf(fleetRelayUrl()), 'fleet'], [ROAD.relayPageOf(relayUrlOf(cr)), 'page']]) if (url && !pages.some((x) => x.url === url)) pages.push({ url, who });
     const presets = (presetsOf(m) || []).map((p) => {
-      let v = {};
-      try { const r = integrations.resolveIntegration(m.integration, { credentialKey: CLUSTER_PREFIX + p.key }); v = r && r.source === 'cluster' && r.values ? r.values : {}; } catch { v = {}; }
-      return { key: p.key, relayPage: ROAD.relayPick({ fleet: fleetRelayUrl(), preset: typeof v.relayUrl === 'string' ? v.relayUrl : '' }).url || null, clientType: ROAD.CLIENT_TYPES.includes(v.clientType) ? v.clientType : null };
+      const v = presetValuesOf(m, p.key);
+      const relayPage = ROAD.relayPick({ fleet: fleetRelayUrl(), preset: typeof v.relayUrl === 'string' ? v.relayUrl : '' }).url || null;
+      const clientType = ROAD.CLIENT_TYPES.includes(v.clientType) ? v.clientType : null;
+      const listed = ROAD.listedOf(v);
+      // lane gmail-connect-wall (law 5, the admin's door named): what the preset does not say — the client's kind (a vendor
+      // with two) and a way back from another computer (a relay page, or its app listing this instance's own address; a
+      // Desktop client never needs one) — src/oauth-setup.js LACK_KEYS
+      const lacks = [...(row.redirect.clientTypes && !clientType ? ['clientType'] : []), ...(clientType !== 'desktop' && !relayPage && !listed ? ['road'] : [])];
+      return { key: p.key, relayPage, clientType, listed, lacks };
     });
-    return { base: ROAD.httpsBaseOf(instanceAddress() || ''), relayPages: pages, presets };
+    // …and WHERE the presets are stated: the presets directory (watched — an edit takes effect without a restart) or the env
+    const source = integrations && typeof integrations.presetSourceOf === 'function' ? integrations.presetSourceOf(m.integration) : null;
+    return { base: ROAD.httpsBaseOf(instanceAddress() || ''), relayPages: pages, presets, ...(source ? { presetSource: source } : {}) };
   }
   function kindView(m) {
     const row = rowOf(m);
@@ -3844,7 +3869,7 @@ function create(deps = {}) {
       oauthSetup: oauthSetupOf(m, row),   // lane oauth-setup-instructions: the setup card's facts (src/oauth-setup.js)
       // lane channel-row-notices: the push lane's setup steps (the setup card's «Real-time push (optional)», Diagnostics)
       pushSetup: m.pushSetup && Array.isArray(m.pushSetup.steps) ? { steps: m.pushSetup.steps.map((s) => ({ words: s.words, code: s.code || null })), after: m.pushSetup.after || null } : null,
-      optionsSchema: (m.OPTIONS || []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in
+      optionsSchema: (m.OPTIONS || []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}), ...(o.presetFact === true ? { presetFact: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in; lane gmail-connect-wall: `presetFact` = a preset's admin states it
       receive: m.caps.receive, sendAs: m.caps.sendAs, pushOptIn: !!m.caps.pushOptIn,
     };
   }
@@ -4000,7 +4025,7 @@ function create(deps = {}) {
       senderHonestyLine: c.sendAs.length && c.honestyLine !== 'never' ? { record: rec.senderHonestyLine === true ? true : rec.senderHonestyLine === false ? false : null, effective: honestyLineFor(rec) } : null,
       rawApi: !!(mod && mod.api),   // lane channel-vendor-one-file: the account menu's "API access…" row reads this, never a kind
       options: viewOptions(mod, rec),
-      optionsSchema: (mod && mod.OPTIONS ? mod.OPTIONS : []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in
+      optionsSchema: (mod && mod.OPTIONS ? mod.OPTIONS : []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}), ...(o.presetFact === true ? { presetFact: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in; lane gmail-connect-wall: `presetFact` = a preset's admin states it
     };
   }
 
@@ -8424,7 +8449,7 @@ function create(deps = {}) {
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
-    newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
+    newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, oauthCancel, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
     recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
@@ -8831,7 +8856,7 @@ function create(deps = {}) {
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
-    clientFor, startOAuth, oauthStatus, oauthCallback, oauthLanding, consentLandingOf, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
+    clientFor, startOAuth, oauthStatus, oauthCancel, oauthCallback, oauthLanding, consentLandingOf, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
     inlineLegacyClient, inlineLegacyClients, DUPLICATE_FIELDS, DUPLICATE_NEVER,
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),

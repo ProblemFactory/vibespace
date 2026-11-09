@@ -2450,7 +2450,9 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS + 1; i++) capFlows.push(await eCap.startOAuth({ kind: 'gmail', fromMount: P }));
   const capFirst = eCap.oauthStatus(capFlows[0].flowId), capLast = eCap.oauthStatus(capFlows[capFlows.length - 1].flowId);
   const capRunning = capFlows.filter((f) => eCap.oauthStatus(f.flowId).running).length;
-  ok(capFirst.running === false && /ended to keep the number of open sign-ins at 32/.test(capFirst.error || '') && capLast.running === true && capRunning === OLMOD.MAX_RUNNING_FLOWS, `verify r3 (bounds): ${OLMOD.MAX_RUNNING_FLOWS + 1} pending fromMount begins ⇒ the first is ended by name (r4: the cap's own words — "${capFirst.error}"), ${capRunning} running`);
+  // lane gmail-connect-wall (主开发's R5: at most ONE pending sign-in per kind): pending begins no longer pile up to the
+  // loopback's cap — each supersedes the one before it BY NAME; the cap itself is the leg below and test-oauth-loopback's
+  ok(capFirst.running === false && /superseded/.test(capFirst.error || '') && capLast.running === true && capRunning === 1, `verify r3 (bounds) + lane gmail-connect-wall: ${OLMOD.MAX_RUNNING_FLOWS + 1} pending fromMount begins ⇒ ONE runs (the newest), every earlier one ended by name ("${capFirst.error}"), ${capRunning} running`);
   // (11) CONTROL: an engine copy whose answers omit the copied client (the pre-r3 shape)
   const SAID = '  const withMount = (answer, choice) => { const m = mountNamed(choice); return m ? { ...answer, fromMount: m } : answer; };';
   ok(esrc.split(SAID).length === 2, 'CONTROL setup: the said-back helper is present once');
@@ -2476,7 +2478,9 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   await sleep(40);
   const raS = await eSaid.reauthorize(kS, {});
   const baseAt = recOf(path.join(ROOT, 'cfm-said'), kS).lastAuthAt; const fr0 = frames.length;
-  for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS; i++) await eSaid.startOAuth({ kind: 'gmail', fromMount: D });
+  // lane gmail-connect-wall: pending Gmail begins supersede each other now (one per kind) — the cap is reached with other
+  // running flows on the engine's own consent machine (distinct ids, nothing listens), as many as the cap holds
+  for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS; i++) await eSaid.oauth.begin({ id: `cap-filler-${i}`, mode: 'paste', label: 'filler', buildConsentUrl: () => 'https://consent.example.test/', exchange: async () => ({ ok: true }) });
   await sleep(40);
   const recS = recOf(path.join(ROOT, 'cfm-said'), kS); const cardS = eSaid.digest().adapters.find((a) => a.id === kS);
   ok(eSaid.oauth.status(raS.flow.flowId).cancelled === OLMOD.CAUSE_OVER_LIMIT && /ended to keep the number of open sign-ins/.test(recS.lastAuthError || '') && recS.lastAuthAt !== baseAt && cardS.flow === null && frames.length > fr0 && !!(recS.auth && recS.auth.tokenEnc), `verify r4: a re-authorize ended by the cap is SAID on the account (lastAuthError "${recS.lastAuthError}", lastAuthAt moved, ${frames.length - fr0} frame(s)), its token kept`);
@@ -2542,11 +2546,12 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   await R14.close();
   // CONTROL (r5): a routes copy without the account-verb courtesy answers the agent's cancel 200 (and its status poll)
   const ACCT = "if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;";
-  const CANCEL = "if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id));";
+  // lane gmail-connect-wall r4: the cancel names its sign-in (`flowIdOf(req.body)`) — the anchor follows the route's line
+  const CANCEL = "if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id, { flowId: flowIdOf(req.body) }));";
   const STATUS = "    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r5: the consent URL (its state) is the owner's\n";
   ok(rsrc.split(ACCT).length === 5 && rsrc.split(CANCEL).length === 2 && rsrc.split(STATUS).length === 2, 'CONTROL setup: the r5 courtesy is present on the four account verbs, cancel and status');
   const p15 = patchPath('src/routes', 'channels');
-  writeCopy(p15, rsrc.split(ACCT).join('').replace(CANCEL, 'res.json(await engine().cancelAuth(req.params.id));').replace(STATUS, ''));
+  writeCopy(p15, rsrc.split(ACCT).join('').replace(CANCEL, 'res.json(await engine().cancelAuth(req.params.id, { flowId: flowIdOf(req.body) }));').replace(STATUS, ''));
   const R15 = await serveWith(require(p15), eng);
   const a15 = await R15.call('POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/auth/cancel`, {}, AG);
   const a15s = await R15.call('GET', '/api/channels/oauth/status', undefined, AG);

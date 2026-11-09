@@ -47,7 +47,9 @@ function parseIntegrations(arr) {
   const out = [];
   for (const e of arr) {
     if (!e || typeof e !== 'object' || !e.id || !e.values || typeof e.values !== 'object') continue;
-    out.push({ id: String(e.id), key: e.key ? String(e.key) : 'default', label: e.label ? String(e.label) : null, values: Object.fromEntries(Object.entries(e.values).map(([k, v]) => [k, String(v)])) });
+    // lane gmail-connect-wall r2 (law E3): `instanceAddress` is a FACT read as typed — only the exact string "listed" counts
+    // (an array or an object stringifies to a word: a typo must not put a company app back on an address it does not list)
+    out.push({ id: String(e.id), key: e.key ? String(e.key) : 'default', label: e.label ? String(e.label) : null, values: Object.fromEntries(Object.entries(e.values).map(([k, v]) => [k, k === 'instanceAddress' ? (v === 'listed' ? 'listed' : '') : String(v)])) });
   }
   return out;
 }
@@ -61,7 +63,8 @@ function parseDriveClients(arr) {
   const out = [];
   for (const c of arr) {
     // lane oauth-setup-instructions: + `clientType` (web | desktop) — which kind of Google client the entry is
-    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret), ...(typeof c.relayUrl === 'string' && c.relayUrl.trim() ? { relayUrl: c.relayUrl.trim() } : {}), ...(c.clientType === 'web' || c.clientType === 'desktop' ? { clientType: c.clientType } : {}) });
+    // lane gmail-connect-wall: + `instanceAddress: "listed"` — the app lists each instance's own https address (absent = not)
+    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret), ...(typeof c.relayUrl === 'string' && c.relayUrl.trim() ? { relayUrl: c.relayUrl.trim() } : {}), ...(c.clientType === 'web' || c.clientType === 'desktop' ? { clientType: c.clientType } : {}), ...(c.instanceAddress === 'listed' ? { instanceAddress: 'listed' } : {}) });
   }
   return out;
 }

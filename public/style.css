@@ -7979,6 +7979,14 @@ label.chan-cap-row { cursor: default; }
 .mounts-oauth-paste > summary { cursor: pointer; }
 .mounts-oauth-paste[open] > summary { margin-bottom: 4px; }
 .mounts-oauth-paste .mounts-oauth-other { margin-top: 6px; }
+/* lane gmail-connect-wall r2 — the channel account dialogs' LIVE consent block: a long address (the road line, an unbroken
+   300-character host) breaks inside the dialog, never past its edge; on a finger device its own buttons and box meet the
+   owner's rule (44 px targets, 16 px text). A storage dialog's block carries none of these classes. */
+.mounts-oauth-live-block, .mounts-oauth-live { overflow-wrap: anywhere; min-width: 0; }
+@media (pointer: coarse) {
+  .mounts-oauth-live-btn, .mounts-oauth-live .mounts-btn { min-height: 44px; font-size: 16px; }
+  .mounts-oauth-live > input, .mounts-oauth-live .mounts-oauth-paste input { min-height: 44px; font-size: 16px; }
+}
 .chat-channel-touch .cct-glyph { flex-shrink: 0; align-self: center; display: inline-flex; }
 .chat-channel-touch .cct-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); unicode-bidi: isolate; } /* isolate: a hostile title's RTL override stays inside the name */
 .chat-channel-touch:hover .cct-name { color: var(--accent); }

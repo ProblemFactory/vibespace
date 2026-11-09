@@ -140,7 +140,22 @@ function requestOrigin(req) {
 }
 /** lane pod-oauth-callback: `road: 'loopback'` = the person asked for the copy-the-address way (the dialog's last resort);
  *  anything else = the road src/consent-road.js decides. */
-const roadOf = (b) => (b && b.road === 'loopback' ? 'loopback' : null);
+// lane gmail-connect-wall: + 'fixed' — the dialog's other road for a company preset that does not say its Google client's kind
+// lane gmail-connect-wall r4 (the tidy): a cancel that names its sign-in names it by its id, a string; an ABSENT `flowId` keeps
+// the old client's meaning (the account's running one) — anything else is refused by name (400 bad-flow), never read as «none»
+const flowIdOf = (b) => {
+  const f = b ? b.flowId : undefined;
+  if (f === undefined || f === null) return null;
+  if (typeof f !== 'string' || !f || f.length > 100) throw Object.assign(new Error('flowId names a sign-in by its id (a string) — leave it out for the account\'s running sign-in'), { status: 400, code: 'bad-flow' });
+  return f;
+};
+// r2 (law E4): any OTHER said road is refused by name (400 bad-road) — never silently the verdict's own
+const roadOf = (b) => {
+  const r = b ? b.road : null;
+  if (r == null || r === '') return null;
+  if (r === 'loopback' || r === 'fixed') return r;
+  throw Object.assign(new Error(`there is no sign-in road «${String(r).slice(0, 20)}» — ask loopback or fixed, or nothing`), { status: 400, code: 'bad-road' });
+};
 function choiceOf(b) {
   const out = {};
   // 2.369.195: a storage mount's own client, copied SERVER-SIDE (never a secret in this body)
@@ -197,7 +212,7 @@ router.post('/api/channels/oauth/start', async (req, res) => {
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     if (refuseMalformedMount(req, res)) return;
     const b = req.body || {};
-    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options, origin: requestOrigin(req), road: roadOf(b) })) });
+    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options, origin: requestOrigin(req), road: roadOf(b), ref: typeof b.ref === 'string' ? b.ref.slice(0, 80) : null })) });
   } catch (e) { fail(res, e); }
 });
 /** THE STORAGE MOUNTS WHOSE OWN OAUTH CLIENT AN ACCOUNT OF `kind` MAY
@@ -219,7 +234,19 @@ router.get('/api/channels/oauth/status', (req, res) => {
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r5: the consent URL (its state) is the owner's
-    res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null));
+    // lane gmail-connect-wall: `?kind=` — the latest sign-in of THAT kind (a reopened account dialog shows its own, never another's)
+    res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null, { kind: typeof req.query.kind === 'string' ? req.query.kind.slice(0, 20) : null }));
+  } catch (e) { fail(res, e); }
+});
+/** lane gmail-connect-wall (the owner 2026-11-09: after the press the dialog had no way on): CANCEL a sign-in that runs before
+ *  its account exists — `{flowId}` → `{ok, flowId, cancelled}` (`cancelled: false` = it had already ended); `404 no-flow`,
+ *  `400 no-flow` without an id. The dialog's one-press Cancel, and its close for a road that needs the dialog (a loopback). */
+router.post('/api/channels/oauth/cancel', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
+    const b = req.body || {};
+    res.json({ ok: true, ...engine().oauthCancel(typeof b.flowId === 'string' ? b.flowId : null) });
   } catch (e) { fail(res, e); }
 });
 /** THE ONE NARROWING RETRY of a sign-in that runs before its account exists (owner ruling 2026-09-28): `{flowId}` →
@@ -392,7 +419,7 @@ router.post('/api/channels/adapters/:id/auth/narrow', (req, res) => {
   try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json({ ok: true, ...engine().narrowAuth(req.params.id) }); } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/adapters/:id/auth/cancel', async (req, res) => {
-  try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
+  try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id, { flowId: flowIdOf(req.body) })); } catch (e) { fail(res, e); }   // verify r5; lane gmail-connect-wall r4: by its id
 });
 router.post('/api/channels/adapters/:id/disconnect', async (req, res) => {
   try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().disconnect(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
