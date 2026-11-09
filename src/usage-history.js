@@ -90,7 +90,14 @@ const DEFAULT_PRICING = {
   '3-opus':      { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
   sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // Sonnet 4.x
   'sonnet-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },  // Sonnet 5: the $2/$10 launch price became the standard price (the 2026-09-01 increase was cancelled)
+  // Sonnet 5.5 / Haiku 5.5 (lane fable-52-cli-321 r2, the public table read 2026-11-09 = CLI 2.1.321's catalog tiers
+  // `tier_2_10_cache_read_0_10` / `haiku_55`): without these keys 'claude-sonnet-5-5' landed on `sonnet-5` (cache hits 2×) and
+  // 'claude-haiku-5-5' on `haiku` = Haiku 4.5 (10× on everything). Haiku 5.5 is priced by PROMPT LENGTH: a request whose whole
+  // prompt (uncached + cache reads + cache writes) is over 100 000 tokens pays the `long` rates for all its tokens — the same
+  // `long` block (priceAt) the gpt-* rows use. scripts/fixtures/anthropic-pricing.json is the dated table §4 holds every row to.
+  'sonnet-5-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.1 },
   haiku:  { input: 1,  output: 5,  cacheWrite5m: 1.25, cacheWrite1h: 2,  cacheRead: 0.1 },
+  'haiku-5-5': { input: 0.1, output: 0.5, cacheWrite5m: 0.125, cacheWrite1h: 0.2, cacheRead: 0.01, long: { above: 100000, input: 0.5, output: 2.5, cacheWrite5m: 0.625, cacheWrite1h: 1, cacheRead: 0.05 } },
   // Haiku 3.5 = the catalog's haiku_35; Haiku 3 per anthropic.com/news/claude-3-family
   // + the prompt-caching post (its 1h write = the 2× rule). 'haiku' is Haiku 4.5.
   '3-5-haiku': { input: 0.8,  output: 4,    cacheWrite5m: 1,   cacheWrite1h: 1.6, cacheRead: 0.08 },

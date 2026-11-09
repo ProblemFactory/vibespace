@@ -215,19 +215,26 @@ try {
     // (1) the person edits the `opus` FAMILY row: Opus 4.8 (which falls on it) stays on theirs — no longer key slides under it
     const a = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, opus: row(4, 20) }, accounts: {} }, L321, opt);
     ok(tierOf(a.pricing, 'claude-opus-4-8') === 'opus' && !('opus-4-8' in a.pricing.tiers) && a.disagreements.some((d) => d.id === 'claude-opus-4-8' && d.used === 'you' && d.fellOn === 'opus'), "a person's `opus` row (4 / 20): claude-opus-4-8 stays on it — the catalog's 5 / 25 adds no key under it, and the disagreement names the person's row as the one in force", JSON.stringify(a.disagreements.filter((d) => /opus-4-8/.test(d.id))));
-    // (2) the person edits `haiku`: Haiku 4.5 and Haiku 5.5 stay on their 0.5
+    // (2) the person edits `haiku`: Haiku 4.5 stays on their 0.5. Haiku 5.5 has its OWN shipped row since 2.369.391 (lane
+    //     fable-52-cli-321 typed the two rows the .390 catalog moved), so the own-row rule (B1 below) holds it: a FAMILY row never prices it
     const b = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, haiku: row(0.5, 2.5) }, accounts: {} }, L321, opt);
-    ok(tierOf(b.pricing, 'claude-haiku-4-5-20251001') === 'haiku' && tierOf(b.pricing, 'claude-haiku-5-5') === 'haiku' && !('haiku-4-5' in b.pricing.tiers) && !('haiku-5-5' in b.pricing.tiers), "a person's `haiku` row (0.5): Haiku 4.5 is not put back at the shipped $1, Haiku 5.5 not moved — their row stands for both");
-    // (3) a CUSTOM key the person added
-    const c = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, 'haiku-5': row(0.3, 1.5) }, accounts: {} }, L321, opt);
-    ok(tierOf(c.pricing, 'claude-haiku-5-5') === 'haiku-5' && c.pricing.sources['haiku-5'].from === 'you', "a custom key the person added (`haiku-5`): claude-haiku-5-5 stays on it");
+    ok(tierOf(b.pricing, 'claude-haiku-4-5-20251001') === 'haiku' && !('haiku-4-5' in b.pricing.tiers) && b.disagreements.some((d) => d.id === 'claude-haiku-4-5' && d.fellOn === 'haiku' && d.used === 'you') && tierOf(b.pricing, 'claude-haiku-5-5') === 'haiku-5-5' && b.pricing.sources['haiku-5-5'].from === 'shipped' && b.pricing.tiers['haiku-5-5'].input === 0.1 && b.disagreements.some((d) => d.id === 'claude-haiku-5-5' && d.fellOn === 'haiku' && d.used === 'shipped' && d.outranked === true), "a person's `haiku` row (0.5): Haiku 4.5 is not put back at the shipped $1 — their row stands for it; Haiku 5.5 is on its OWN shipped row ($0.10, the catalog's price), never their family row (the own-row rule, as B1) — and the disagreement NAMES their row (round 9, 主开发's ruling: never silently)", JSON.stringify({ h55: tierOf(b.pricing, 'claude-haiku-5-5'), src: b.pricing.sources['haiku-5-5'] }));
+    // (3) a CUSTOM key the person added: an id that falls on it stays on it (the catalog adds no key under it)…
+    const c = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, 'haiku-4': row(0.3, 1.5) }, accounts: {} }, L321, opt);
+    ok(tierOf(c.pricing, 'claude-haiku-4-5-20251001') === 'haiku-4' && !('haiku-4-5' in c.pricing.tiers) && c.pricing.sources['haiku-4'].from === 'you' && c.disagreements.some((d) => d.id === 'claude-haiku-4-5' && d.fellOn === 'haiku-4' && d.used === 'you'), "a custom key the person added (`haiku-4`): claude-haiku-4-5 stays on it — the catalog's $1 adds no `haiku-4-5` key under it, and the disagreement names their row", JSON.stringify(c.disagreements.map((d) => [d.id, d.fellOn, d.used])));
+    // …while a model with its OWN shipped row keeps that row, the longer key (2.369.391's `haiku-5-5` under a person's `haiku-5`)
+    const c2 = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, 'haiku-5': row(0.3, 1.5) }, accounts: {} }, L321, opt);
+    const c3 = CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING, 'haiku-5': row(0.3, 1.5) }, accounts: {} }, null, opt);   // no catalog read at all
+    const named = (r) => r.disagreements.find((d) => d.id === 'claude-haiku-5-5' && d.fellOn === 'haiku-5' && d.key === 'haiku-5-5' && d.used === 'shipped' && d.outranked === true);
+    ok(tierOf(c2.pricing, 'claude-haiku-5-5') === 'haiku-5-5' && c2.pricing.sources['haiku-5-5'].from === 'shipped' && c2.pricing.sources['haiku-5'].from === 'you' && !!named(c2) && !!named(c3), "a custom key SHORTER than a model's own shipped row (`haiku-5` against `haiku-5-5`): Haiku 5.5 is priced on its own row (the own-row rule stands — 主开发's ruling) but NEVER SILENTLY: the disagreement names the person's key, the own row now in force and where to change it — with the catalog read and without it (the r8 tree: an empty line)", JSON.stringify({ c2: named(c2) || c2.disagreements, c3: named(c3) || c3.disagreements }));
     // (4) two accounts: one account's override shields THAT account only
     fs.mkdirSync(path.join(dir, 'uh2', 'usage-history'), { recursive: true });
     const uh2 = new UHM.UsageHistory({ dataDir: path.join(dir, 'uh2'), homeDir: path.join(dir, 'uh2') });
     uh2.setPricing({ accounts: { acctA: { tiers: { haiku: row(9, 9) } } } });
-    const e = (acct) => ({ model: 'claude-haiku-5-5', acct, i: 50000, o: 0, cw5: 0, cw1: 0, cr: 0, ts: Date.now() });
-    const ca = uh2._cost(e('acctA')), cb = uh2._cost(e('acctB'));
-    ok(Math.abs(ca - 0.45) < 1e-9 && Math.abs(cb - 0.005) < 1e-9, `two accounts: account A's own \`haiku\` override prices A's Haiku 5.5 ($${ca.toFixed(4)}), every other account gets the catalog's $0.10 ($${cb.toFixed(4)})`);
+    const e = (acct, model) => ({ model, acct, i: 50000, o: 0, cw5: 0, cw1: 0, cr: 0, ts: Date.now() });
+    const ca = uh2._cost(e('acctA', 'claude-haiku-4-5-20251001')), cb = uh2._cost(e('acctB', 'claude-haiku-4-5-20251001'));
+    const ha = uh2._cost(e('acctA', 'claude-haiku-5-5')), hb = uh2._cost(e('acctB', 'claude-haiku-5-5'));
+    ok(Math.abs(ca - 0.45) < 1e-9 && Math.abs(cb - 0.05) < 1e-9 && Math.abs(ha - 0.005) < 1e-9 && Math.abs(hb - 0.005) < 1e-9, `two accounts: account A's own \`haiku\` override prices A's Haiku 4.5 ($${ca.toFixed(4)}), every other account pays the shipped $1 ($${cb.toFixed(4)}); Haiku 5.5 is on its own row for both ($0.10: $${ha.toFixed(4)} / $${hb.toFixed(4)}) — a family override never reaches it`);
     // B1 (acceptance r2): a NEWER catalog that replaces a model's OWN shipped row never hands it to an account's FAMILY override
     const later = structuredClone(BASE);
     later.pricing_tiers.tier_7_35 = { input: 7, output: 35, cache_write_5m: 8.75, cache_write_1h: 14, cache_read: 0.7, web_search: 0.01 };
@@ -252,6 +259,18 @@ try {
     uh.setPricing({ tiers: { opus: row(4, 20) } });
     ok(saidB2.length >= 1 && events.slice(nB2).filter((x) => /your «opus» row/.test(x.d)).length === saidB2.length, `the person saves \`opus\` 4 / 20 after the read: ${saidB2.length} Opus id(s) on their row against the catalog are said at the save, once each (a second save says nothing)`, JSON.stringify(events.slice(nB2).map((x) => x.d)));
     uh.setPricing({ tiers: { opus: { ...UHM.DEFAULT_PRICING.opus } } });
+    // ROUND 9 (主开发's ruling on the price key — never silently, and the sentence whole): a key the person typed that a model's own row
+    // now outranks is SAID, by the model's name, with where to change it — within the 200-character bound every said line has
+    const nB4 = events.length;
+    uh.setPricing({ tiers: { 'haiku-5': row(0.3, 1.5) } });
+    const outLine = events.slice(nB4).map((x) => x.d).find((d) => /your «haiku-5» row/.test(d));
+    ok(!!outLine && /^Haiku 5\.5: your «haiku-5» row \$0\.3\/\$1\.5/.test(outLine) && /edit «haiku-5-5» to change it$/.test(outLine) && outLine.length < 200, `a key the person typed that an own row outranks is said WHOLE (${outLine ? outLine.length : 0} characters), by the model's name and with where to change it: «${outLine}»`);
+    // …and with NO catalog label (a model the CLI's catalog does not list) it is named by the model's name read off its id, never the id
+    const nB5 = events.length;
+    CAT._sayPrices([{ id: 'claude-haiku-5-5', label: null, key: 'haiku-5-5', fellOn: 'haiku-5', ours: row(0.4, 2), shipped: row(0.1, 0.5), catalog: null, used: 'shipped', outranked: true }], { save: false });
+    const noLabel = events.slice(nB5).map((x) => x.d).find((d) => /your «haiku-5» row \$0\.4\/\$2/.test(d));
+    ok(!!noLabel && /^Haiku 5\.5: /.test(noLabel) && !/claude-haiku-5-5/.test(noLabel) && /edit «haiku-5-5» to change it$/.test(noLabel) && noLabel.length < 200, `…with no catalog label the line names the model read off its id («Haiku 5.5»), whole: «${noLabel}»`);
+    uh.setPricing({ tiers: { 'haiku-5': undefined, opus: { ...UHM.DEFAULT_PRICING.opus } } });
     // B3: the export carries what a person entered, nothing else; an import never adopts a catalog row
     const exp = JSON.parse(JSON.stringify(uh.pricingTable()));
     ok(!('fable-6' in exp.tiers) && !('quill-1' in exp.tiers) && !exp.sources, 'the config export (pricingTable) holds the disk rows only: no catalog key, no `sources`');
@@ -263,7 +282,10 @@ try {
     const disk6 = JSON.parse(fs.readFileSync(uh6.pricingFile, 'utf8'));
     UHM.setCatalogPricing(layerKeep);
     ok(!('fable-6' in disk6.tiers) && !('quill-1' in disk6.tiers), "importing r2's merged export on a hub without the catalog writes NO catalog row as the person's (the exporter's `sources` said catalog)");
-    red(CP.mergePricing({ version: 2, tiers: { ...UHM.DEFAULT_PRICING }, accounts: {} }, null, opt).pricing.tiers['haiku-5-5'] === undefined, 'the shipped table alone prices Haiku 5.5 on the Haiku 4.5 row (×10) for every account');
+    // the .390 shipped table = this one without the two rows 2.369.391 typed by hand (lane fable-52-cli-321 r2: the public table, read 2026-11-09)
+    const t390 = { ...UHM.DEFAULT_PRICING }; delete t390['haiku-5-5']; delete t390['sonnet-5-5'];
+    const opt390 = { ...opt, shipped: t390 };
+    red(CP.mergePricing({ version: 2, tiers: t390, accounts: {} }, null, opt390).pricing.tiers['haiku-5-5'] === undefined && tierOf({ tiers: t390 }, 'claude-haiku-5-5') === 'haiku', 'the .390 shipped table alone (no own Haiku 5.5 row) prices Haiku 5.5 on the Haiku 4.5 row (×10) for every account');
     // the own-row date rule (R3) and this release's two moves, as before
     const own = { version: 2, tiers: { ...UHM.DEFAULT_PRICING }, accounts: {} };
     const L = (builtAt) => ({ rows: { 'fable-5-2': { id: 'claude-fable-5-2', label: 'Fable 5.2', row: { input: 7, output: 35, cacheWrite5m: 8.75, cacheWrite1h: 14, cacheRead: 0.2 }, cli: '2.1.999', builtAt } } });
@@ -271,7 +293,11 @@ try {
     ok(newer.pricing.tiers['fable-5-2'].input === 7 && newer.disagreements[0].used === 'catalog' && tie.pricing.tiers['fable-5-2'].input === 8 && tie.disagreements[0].used === 'shipped', `an own shipped row vs the catalog: a CLI built after ${UHM.SHIPPED_PRICES_CHECKED} wins; one built that day ties to the shipped row — both said`);
     const moved = CP.mergePricing(own, L321, opt);
     const keys = Object.entries(moved.pricing.sources).filter(([, x]) => x.from === 'catalog').map(([k]) => k).sort();
-    ok(keys.join() === 'haiku-5-5,sonnet-5-5', "on this release's table 2.1.321's catalog moves exactly Haiku 5.5 and Sonnet 5.5's cache hit", keys.join());
+    ok(!keys.length && !moved.disagreements.length, "on this release's table (Haiku 5.5 and Sonnet 5.5 typed as their own rows, 2.369.391) 2.1.321's catalog moves nothing — every price it names is the shipped one", keys.join() + ' ' + JSON.stringify(moved.disagreements));
+    const moved390 = CP.mergePricing({ version: 2, tiers: t390, accounts: {} }, L321, opt390);
+    const keys390 = Object.entries(moved390.pricing.sources).filter(([, x]) => x.from === 'catalog').map(([k]) => k).sort();
+    const same = (k) => JSON.stringify(moved390.pricing.tiers[k]) === JSON.stringify(UHM.DEFAULT_PRICING[k]);
+    ok(keys390.join() === 'haiku-5-5,sonnet-5-5' && same('haiku-5-5') && same('sonnet-5-5'), "…on the .390 table it moved exactly Haiku 5.5 and Sonnet 5.5's cache hit — to the very rows this release ships, byte for byte", keys390.join() + ' ' + JSON.stringify(keys390.map((k) => [moved390.pricing.tiers[k], UHM.DEFAULT_PRICING[k]])));
     const fileTable = { version: 2, tiers: { ...UHM.DEFAULT_PRICING, 'fable-6': row(1, 2) }, accounts: {} };
     const yours = CP.mergePricing(fileTable, CMC.priceLayerOf([{ state: 'read', ...CAT.view() }]), opt);
     ok(yours.pricing.tiers['fable-6'].input === 1 && yours.pricing.sources['fable-6'].from === 'you', "a row the person typed for the new model's own key wins over the catalog's, said as theirs");

@@ -503,6 +503,21 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return true;
   };
 
+  // lane fable-52-cli-321 round 9 (law 2): ONE conversation's saved config patched from the server — a typed /model the CLI
+  // acknowledged (src/server/model-ask.js confirmTyped) lands where the bar's own pick lands on master (`sessionConfigs`, what a
+  // resume reads), through the same store + broadcast; an unchanged config writes nothing
+  router.setSessionConfig = (key, patch) => {
+    const k = String(key || '');
+    if (!k || !k.includes(':') || !patch || typeof patch !== 'object') return false;
+    const cur = readUserState();
+    const configs = { ...(cur.sessionConfigs || {}) };
+    const next = { ...(configs[k] || {}), ...patch };
+    if (JSON.stringify(next) === JSON.stringify(configs[k] || {})) return false;
+    configs[k] = next;
+    writeUserState({ ...cur, sessionConfigs: configs });
+    return true;
+  };
+
   // lane conversations-archive-verb: ONE archive from the server (the automation verb conversations.archive) through the same
   // store + broadcast the sidebar's own 归档 PATCHes — `archivedSessions` holds `<backend>:<conversation id>` keys (older
   // entries a bare id); a key already there writes nothing and says so

@@ -190,6 +190,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Unknown backend "${backend}".` })); // the request named (r4 N2)
             break;
           }
+          // THE SAME DOOR as set-model (lane fable-52-cli-321 r6, model-providers namedModel): a create / resume naming a model or a
+          // lock target that is no model id is refused WHOLE, said, and nothing spawns — never a resume on the model a door refused
+          { const MP = require('./model-providers.js'); const bad = ['model', 'lockModel'].find((k) => data[k] != null && data[k] !== '' && !MP.namedModel(data[k]));
+            if (bad) { ws.send(JSON.stringify({ type: 'error', code: 'model-refused', reason: 'create-not-a-model-id', field: bad, reqId: data.reqId, message: `Not started: its ${bad === 'model' ? 'model' : 'lock target'} is not a model id.` })); break; }
+            for (const k of ['model', 'lockModel']) if (typeof data[k] === 'string' && data[k]) data[k] = MP.namedModel(data[k]); }
           // An ACP harness whose executable is not on this machine (S8) is refused by THE ONE verdict below
           // (cliCmds.forSpawn's cli-missing, lane cli-shell-truth) — one road for every harness, before any spawn.
           // Writer-sweep options per backend (P1 codex double-writer, see

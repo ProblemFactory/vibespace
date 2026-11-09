@@ -967,6 +967,7 @@ class MessageManager extends MessageWindow {
       case 'tombstone': return this._processTombstone(raw, emit);
       // the WRAPPER's own records (2.369.354 — the CLI never writes these): its mid-turn queue
       case 'queued_input': return this._processQueuedInput(raw, emit);
+      case 'model_across_reconnect': return this._processModelAcrossReconnect(raw, emit);   // lane fable-52-cli-321 round 9, law 3 — the wrapper's record
       case 'queue_changed': return this._processQueueChanged(raw, emit);
       case 'queue_op_result': return this._processQueueOpResult(raw, emit);
       case 'queue_dropped': return this._processQueueDropped(raw, emit); // Stop's put-back (the base's one method)
@@ -1890,6 +1891,21 @@ class MessageManager extends MessageWindow {
   }
 
   /** `queued_input` — the chip on the bubble IS the notice; the card is the fallback for a held frame with no bubble. */
+  /** A /model ACROSS A RECONNECT (lane fable-52-cli-321 round 9, law 3): the wrapper recorded that a /model the person typed reached the
+   *  remote CLI across a reconnect — the hub cannot tell when it was taken and does not follow it. A line IN the conversation (the
+   *  record is in the buffer: a person who re-attaches later still reads it), once per frame; the client localizes it on noticeKind. */
+  _processModelAcrossReconnect(raw, emit) {
+    const model = typeof raw.model === 'string' ? raw.model.slice(0, 128) : '';
+    const id = typeof raw.msg_id === 'string' ? raw.msg_id : '';
+    if (!model) return;
+    const seen = this._acrossSeen || (this._acrossSeen = new Set());
+    if (id && seen.has(id)) return;
+    if (id) seen.add(id);
+    const words = '/model ' + model + ' reached Claude Code across a reconnect to the remote machine — VibeSpace cannot tell when it was taken, so this conversation\'s model setting does not follow it. Pick the model in the model menu to make it this conversation\'s model.';
+    const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'model-across-reconnect', content: [{ type: 'text', text: words, acrossModel: model }] });
+    if (emit) this._emit({ op: 'create', message: msg });
+  }
+
   _processQueuedInput(raw, emit) {
     if (this._queuePublished && this._stampQueueChip(raw.msg_id || raw.msgId, 'queued', emit)) return;
     const msg = this._create({ role: 'system', content: [{ type: 'system_info', text: 'Queued — runs after the current turn' }], noticeKind: 'notice' });
@@ -2183,10 +2199,7 @@ class MessageManager extends MessageWindow {
       msgId: raw.message?.id || null,
       stopReason: raw.message?.stop_reason || null,
     };
-    if (servedModel && servedModel !== '<synthetic>' && emit && servedModel !== this._lastServedModel) {
-      this._lastServedModel = servedModel;
-      this._emit({ op: 'meta', subtype: 'served-model', data: { model: servedModel } });
-    }
+    // (the served model reaches the chip as the SERVER's numbered fact — src/server/model-ask.js; no op from here: lane fable-52-cli-321 r4)
 
     for (const block of content) {
       // Explicit fallback marker the CLI writes when it auto-switches models:
@@ -2675,6 +2688,8 @@ function unknownRecordJson(raw) {
 // Anything NOT here and not in _processMessage's switch is an unknown-record
 // card — adding a type here is a DECISION that it deserves no card.
 const KNOWN_IGNORED_RECORD_TYPES = new Set([
+  // the wrapper's mark that a person's frame reached the CLI (src/server/model-ask.js noteForwarded — lane fable-52-cli-321 r7)
+  'input_forwarded',
   // live stream, consumed by the server consumer
   'tool_progress', 'set_in_progress_tool_use_ids', 'rate_limit_event', 'compact_progress', 'command_lifecycle', 'stream_event', 'keep_alive',
   '_stdin_ack', '_stdin_nack', '_remote_state',   // _stdin_nack: a torn stdin line's receipt (lane human-cli r2) — its warning is a system/informational record
@@ -2726,10 +2741,10 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'permission_check_status', // {tool_use_id, agent_id?, status: checking|done} — a tool call's permission check has waited ~4 s / that wait is over: a pulse with no words, BEFORE any ask exists (the permission card is the control_request); the tool card already shows the call running — card-less
   'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* reach a LOCAL stream-json session whenever a plugin drives the UI host (the gate — 2.1.288 zi(), read again on 2.1.307–2.1.314 as Yd() — asks for an attached client only on a REMOTE transport); card-less: plugin UI the chat does not host
   // 2026-10-30 (CLI 2.1.314, lane cli-2-1-314-records — read off the 2.1.314 zod union, scripts/fixtures/claude-cli/2.1.314.json):
+  'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
   // 2026-11-09 (CLI 2.1.321, lane fable-52-cli-321 — read off the 2.1.321 zod union, scripts/fixtures/claude-cli/2.1.321.json):
   'ui_notify',              // the plugin UI host: a PLUGIN's notification {plugin, source, title, text, key?, delay_ms? | at?, until_back?, rewritten} — sent through the same gate as ui_toast; card-less: VibeSpace hosts no plugin UI, and a plugin's words must never pass for the app's own
   'ui_notify_cancel',       // the plugin UI host: take back a ui_notify by source + key (no key: the engine dropped the plugin) — card-less with it
-  'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
 module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

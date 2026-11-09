@@ -978,7 +978,7 @@ class SessionMessages {
     for (const m of msgs) { if (m.type === 'result' && m.total_cost_usd) totalCost += m.total_cost_usd; }
     if (!lastUsage && !model) return null;
     return {
-      model, lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode,
+      model, servedModel: assistantModel, lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode, // servedModel: the newest assistant record's model in the history's own order — the chip's served fact on a page with no live session (lane fable-52-cli-321 r4)
       initFrame, // the widened claude init facts (§2.6): terminal-bound commands, memory dirs, health — null on every other harness / older CLI
       permissionModes: this._permissionModes,
       subagentMetas: getSubagentMetas(getHistorySessionId(this._session), this._session.cwd),

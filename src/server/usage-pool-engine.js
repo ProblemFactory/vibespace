@@ -37,6 +37,8 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
   // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
   resetCreditHelper = null}) {
+  // the model facts' broadcaster (lane fable-52-cli-321 round 8): a typed /model's verdict reached on either feed is told at once
+  try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); MA.useNotice((s, models) => broadcastToSession(s, s._webuiId, { type: 'msg', sessionId: s._webuiId, op: 'meta', subtype: 'model-across-reconnect', data: { models } })); } catch { }
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
   const accounts = mk(getAccounts);
@@ -775,7 +777,7 @@ function persistFallbackStamp(session) {
 }
 
 /** A main-thread assistant record named the model that ANSWERED. */
-function noteServedModel(session, model) {
+function noteServedModel(session, model, rec = null, feed = 'parse') {
   if (!session || !model) return;
   session._servedModel = model;
   session._servedModelAt = Date.now();
@@ -786,6 +788,12 @@ function noteServedModel(session, model) {
   // the fallback target, a recovered turn).
   const fb = session._servedViaFallback;
   if (fb && fb.to && !modelsMatch(model, fb.to)) { session._servedViaFallback = null; persistFallbackStamp(session); }
+  // THE SERVED FACT, numbered in the server's own order (lane fable-52-cli-321 r4) — here, at both feeds' one consumer: a typed
+  // /model it confirms becomes the ask first; a changed fact reaches every client of the conversation (src/server/model-ask.js)
+  try {
+    const MA = require('./model-ask.js');
+    if (MA.noteServed(session, model, { modelsMatch, now: Date.now(), recId: (rec && (rec.message?.id || rec.uuid)) || null, feed, readSessionMeta: (k) => sessionMetaStore.readSessionMeta?.(k), writeSessionMeta: (k, v) => sessionMetaStore.writeSessionMeta?.(k, v) })) MA.broadcastFacts(session, session._webuiId, broadcastToSession);
+  } catch { }
 }
 
 /** A `fallback` content block / a `model_refusal_fallback` system record said
@@ -888,7 +896,7 @@ function sessionModelFor(s) {
   //
   // It sits ABOVE the pick because the two cannot disagree on the path that
   // exists: picking a model while locked RE-TARGETS the lock on both sides
-  // (chat-status-bar sends `lockModel` with the pick; ws-handler's set-model
+  // (chat-status-bar re-targets its drawn lock with the pick; ws-handler's set-model
   // rewrites `_lockedModel`), and the lock is the only one of the two the
   // server keeps re-asserting to the CLI. And because the lock IS persisted and
   // restored (boot-restore, meta `modelLocked`/`lockedModel`), a locked
@@ -900,9 +908,10 @@ function sessionModelFor(s) {
   // `_lockedModel`: the parse's target-less latch (now gated on
   // `servedDefinesModel` — this rung is its belt, because a rung that decides
   // money may not depend on every writer of a field being careful) and
-  // ws-handler's `set-model {lock:true}` with no `lockModel`, which adopts
-  // `_servedModel` because the UI row it serves says "Lock to this model" about
-  // the model on screen. Whatever wrote it, a target that is the model we are
+  // ws-handler's `set-model {lock:true}` on a conversation that asks nothing
+  // (the CLI's default), which locks the served fact — the model its chip names
+  // (lane fable-52-cli-321 r5: otherwise a lock targets the server's own ask and
+  // a frame's `lockModel` is never read). Whatever wrote it, a target that is the model we are
   // being rerouted TO cannot be the model we are asking FOR.
   //
   // Falling through costs nothing and invents nothing: `servedDefinesModel`
@@ -2565,6 +2574,11 @@ function noteSessionProduced(session, rec = null) {
 /** The turn ended (claude `result` record / codex task_complete|task_failed).
  *  ALL wall-state transitions happen here and only here. */
 function noteTurnEnd(session, rec = null) {
+  // a typed /model thought HELD that the wrapper never queued went straight to the CLI (lane fable-52-cli-321 r5): judged from here
+  try {
+    const MA = require('./model-ask.js');
+    if (MA.noteTurnEnd(session, { modelsMatch, now: Date.now(), readSessionMeta: (k) => sessionMetaStore.readSessionMeta?.(k), writeSessionMeta: (k, v) => sessionMetaStore.writeSessionMeta?.(k, v) })) MA.broadcastFacts(session, session._webuiId, broadcastToSession);
+  } catch { }
   // A BACKLOG'S TURN END (lane-hot-switch) settles nothing: its walls and
   // readings were not taken (gateLiveFact), and "a turn completed normally"
   // hours ago proves nothing about now — no pool evaluation, no disarm, no
@@ -7704,7 +7718,17 @@ function modelsMatch(a, b) {
 function maybeRepinLockedModel(session) {
   try {
     if (!session._modelLocked || !session._lockedModel || !session.pty || session.mode !== 'chat') return;
-    if (modelsMatch(session._servedModel, session._lockedModel)) return;
+    // ONE rule for «is this the model that was asked» (lane fable-52-cli-321 r6, model-providers modelHeld): the chip, this repin
+    // and the typed-/model confirm agree — a full-id lock served its shorter cousin IS re-pinned (the lock's whole purpose)
+    // a /model the person TYPED is armed: it is their newer word, and the lock follows it once the CLI serves it — a repin now would
+    // undo the command before it could be confirmed (r7)
+    if (session._typedModel) return;
+    // nothing served since the ask moved (round 8 — 主开发's refused-model scene): there is no drift to re-pin, and a model the API
+    // refuses (every request fails, nothing is ever served) must not be re-sent at every turn end
+    { const aS = Number(session._askSeq) || 0; if (aS > 0 && (Number(session._servedSeq) || 0) <= aS) return; }
+    // the SERVED FACT (model-ask's numbered one, judged once per record across both feeds — r7), else the engine's own latch
+    const served = session._servedFactModel || session._servedModel;
+    if (!served || require('../model-providers.js').modelHeld(session._lockedModel, served)) return;
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatSetModel) return;
     session.pty.write(adapter.formatSetModel(session._lockedModel) + '\n');

@@ -342,16 +342,20 @@ const CLAUDE_KNOWN_MODELS = [
   { id: 'claude-fable-5', label: 'Fable 5' },
   { id: 'claude-fable-5-1', label: 'Fable 5.1' },
   // Fable 5.2 (2026-11-09): the `fable` alias names it only from CLI 2.1.321 on (2.1.319 resolves `fable` to 5.1, measured);
-  // this full id reaches the API from any CLI (2.1.319 sends it as given). test-pricing-tiers §4 = the census of the
-  // Fable family across the model-id tables (this list, the price rows, the family / cap lane, the lock, the echo).
+  // this full id reaches the API from any CLI (2.1.319 sends it as given). test-pricing-tiers §4 = the census of EVERY
+  // family across the model-id tables (this list, the price rows against the public table, the family / cap lane, the lock,
+  // the echo): a point release the price table names by its own key is a row here too (r2: Opus 5.5, Sonnet 5.5, Haiku 5.5).
   { id: 'claude-fable-5-2', label: 'Fable 5.2' },
   // …and its [1m] form as its OWN row: 2.1.319 does not know 5.2, so the bare id runs there with the CLI's unknown-model defaults (a
   // 200k window, 32k output — measured on a loopback mock); `claude-fable-5-2[1m]` gets the 1M window. Without this row the provider's
   // resolveModel matched the bare row and dropped the suffix (src/model-providers.js sameModel ignores [1m]).
   { id: 'claude-fable-5-2[1m]', label: 'Fable 5.2 [1m]' },
   { id: 'claude-opus-5', label: 'Opus 5' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
 ];
 // Served-model passive discovery: EVERY session's assistant records name the
 // model that actually served — feed the same __models__.json the statusline

@@ -249,6 +249,7 @@ const WS_CTX_CONTRACT = [
   'sendUserInput', // THE typing path (src/server/user-input.js) — the chat-input case and the For-you reply route share it
   'getDesign', // the Design window's hub (src/server/design-engine.js): design-watch / design-unwatch, a socket's close unwatches
   'setCustomName', // lane peer-card-sender: rename-session writes user-state customNames (src/routes/persistence.js — the sidebar rename's store)
+  'setSessionConfig', // lane fable-52-cli-321 round 9 (law 2): a typed /model the CLI acknowledged is saved where a pick's resume config lives (user-state sessionConfigs)
 ];
 
 function registerWsHandler(wss, ctx) {
@@ -263,9 +264,11 @@ function registerWsHandler(wss, ctx) {
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
-    USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
+    USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry, setSessionConfig = null,
     sendUserInput, getExitProxy = () => null, getDesign = () => null, setCustomName = null,
   } = ctx;
+  // the ONE more writer of what a resume reads (round 9, law 2): model-ask saves an acknowledged typed /model through persistence's own store
+  if (typeof setSessionConfig === 'function') { try { require('./server/model-ask.js').useConfigWriter(setSessionConfig); } catch { } }
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
   // connections; resets on server restart — clients reset their counter on WS
@@ -672,12 +675,28 @@ function registerWsHandler(wss, ctx) {
           break;
         }
         case 'set-model': {
-          { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }); } catch { } } }
+          // THE DOOR (lane fable-52-cli-321 r5): a model a frame names is a string, trimmed, bounded, id-shaped — anything else and
+          // the frame is refused WHOLE (nothing changes, nothing reaches the CLI) and its sender is told. A frame that names no model
+          // (a lock set or lifted) changes no model (law D); a lock's TARGET is the server's own ask as it stands — the frame names
+          // none, and a `lockModel` it carries is never read (src/server/model-ask.js lockTarget; round 9 keeps it: the ONE difference
+          // from master — an alias stays an alias).
+          const MA = require('./server/model-ask.js');
+          const door = MA.setModelDoor(data);
+          // the refusal names its press (reqId) and its REASON (a code the client turns into the person's language — r7)
+          const refuse = (reason, why) => { try { ws.send(JSON.stringify({ type: 'error', code: 'model-refused', reason, scope: 'action', sessionId: data.sessionId, reqId: data.reqId ?? null, error: `Model not changed: ${why}`, message: `Model not changed: ${why}` })); } catch { } };
+          if (!door.ok) { refuse('not-a-model-id', door.why); break; }
+          const model = door.model;
+          // a lock with NOTHING to lock (no pick in this frame, nothing asked, nothing served yet) is refused with words (r6)
+          if (data.lock === true && !model) { const sL = activeSessions.get(data.sessionId); if (sL && !MA.lockTarget(sL)) { refuse('nothing-to-lock', 'nothing to lock yet — this conversation has no model to hold until it has answered once'); break; } }
+          const ask0 = (() => { const s0 = activeSessions.get(data.sessionId); return s0 ? require('./server/stream-wall.js').ownModelOf(s0) : null; })();
+          { const s2 = activeSessions.get(data.sessionId); if (s2 && model) { s2._pickedModel = model; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }); } catch { } } }
           const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat' && (data.model || 'lock' in data)) {
+          if (session?.pty && session.mode === 'chat' && (model || 'lock' in data)) {
             const adapter = adapterRegistry.get(session.backend);
             try {
-              if (data.model && adapter?.formatSetModel) session.pty.write(adapter.formatSetModel(data.model) + '\n');
+              // the pick's set_model, and its request id: the CLI answers it in ITS order among the typed /model commands it runs —
+              // model-ask judges a typed /model's acknowledgment against it (round 8: the later of the two in the CLI is the ask)
+              if (model && adapter?.formatSetModel) { const line = adapter.formatSetModel(model); session.pty.write(line + '\n'); try { MA.notePickSent(session, JSON.parse(line).request_id); } catch { } }
               // Model LOCK v2 (#6, user-corrected semantics): fallback stays
               // ALLOWED — the lock records the TARGET model, and the server
               // re-pins it via set_model at every turn end where the served
@@ -685,19 +704,24 @@ function registerWsHandler(wss, ctx) {
               // safety-reroute completes the flagged turn on the fallback,
               // but every subsequent turn re-attempts the original model.
               if ('lock' in data) {
+                const target = data.lock ? MA.lockTarget(session) : null;   // the server's own ask as it stands (after a pick this frame made)
                 session._modelLocked = !!data.lock;
-                session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
-                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked, lockedModel: session._lockedModel }); }
+                session._lockedModel = target;
                 broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                 broadcastActiveSessions();
-              } else if (data.model && session._modelLocked) {
+              } else if (model && session._modelLocked) {
                 // changing the model while locked re-targets the lock
-                session._lockedModel = data.model;
-                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, lockedModel: session._lockedModel }); }
+                session._lockedModel = model;
                 broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
               }
             } catch {}
           }
+          // the ask moved only if its VALUE moved (a pick; a lock set or lifted keeps it); the lock is persisted either way, and EVERY
+          // client of a harness that declares these facts is told (src/server/model-ask.js — lane fable-52-cli-321 r4, r5)
+          { const s3 = activeSessions.get(data.sessionId); if (s3 && (model || 'lock' in data)) { MA.askAfter(s3, ask0, { readSessionMeta, writeSessionMeta }, { picked: !!model }); MA.broadcastFacts(s3, data.sessionId, broadcastToSession); } }
+          // EVERY frame that passed the door is ANSWERED to its sender (r6) — the facts as they stand, even when nothing moved — so the
+          // pressing client's pending mark always ends; it never invents a fact or a number of its own
+          { const s4 = activeSessions.get(data.sessionId); if (s4) { try { ws.send(JSON.stringify(MA.answerFrame(s4, data.sessionId, data.reqId))); } catch { } } }
           break;
         }
 
@@ -821,7 +845,12 @@ function registerWsHandler(wss, ctx) {
           // refusal, never an attach failure: inc-mt2arppw); no live session / not a
           // chat session stay a silent no-op, exactly as before the extraction.
           // `steer` = the person's door (.361): hand it to the running turn — only `true` counts
+          const typedInTurn = (() => { const s0 = activeSessions.get(data.sessionId); return !!s0 && require('./account-pool-auto.js').conversationInTurn({ isStreaming: s0._isStreaming, turnState: s0._turnState }); })();   // before the send: was a turn running?
           const r = sendUserInput(data.sessionId, data.text, { msgId: data.msgId, origin: 'ws', steer: data.steer === true });
+          // a `/model <x>` the person typed is ARMED by its origin (their own input through a client — r4), on a harness whose
+          // capability row declares the model facts: judged only by what the CLI serves AFTER the command reached it — typed in a
+          // turn, the wrapper holds it until the turn ends (r5; src/server/model-ask.js noteTypedModel / noteQueueRecord / noteServed)
+          if (r.ok) { const sT = activeSessions.get(data.sessionId); if (sT) require('./server/model-ask.js').noteTypedModel(sT, data.text, { msgId: r.msgId || data.msgId, inTurn: typedInTurn, readSessionMeta, writeSessionMeta }); }   // (only the engine's served-model consumer ever confirms one)
           if (!r.ok && (r.code === 'input_rejected' || r.code === 'too_large')) {
             try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: r.error, message: r.error })); } catch { }
           }
@@ -967,6 +996,7 @@ function registerWsHandler(wss, ctx) {
             break;
           }
           session.pty.write(payload + '\n');
+          if (data.op === 'edit') { try { require('./server/model-ask.js').noteQueueEdit(session, data.id, data.text); } catch { } }   // an edited held /model follows its text (round 9)
           break;
         }
 
@@ -1380,6 +1410,10 @@ function registerWsHandler(wss, ctx) {
               // reconnecting second client showing LOCKED forever after an unlock
               chatStatus.modelLocked = !!session._modelLocked;
               chatStatus.lockedModel = session._lockedModel || null;
+              session._transcriptModel = chatStatus.model || null;   // the model the conversation would continue with, as this attach names it — a Lock's target when nothing else is known (round 9)
+              // THE MODEL FACTS (lane fable-52-cli-321 r4): the ask (the lock, else the pick, else the spawn model), the lock and the
+              // served model, each numbered from the conversation's one counter — the chip shows these and nothing a client draws
+              { const MA = require('./server/model-ask.js'); if (MA.declares(session)) Object.assign(chatStatus, MA.modelFacts(session)); }   // DECLARED on the harness's capability row (r5) — never inferred from a key
               // ONE sidecar read for BOTH wrapper adverts below: resolveWrapperFiles
               // walks /proc when the sidecar is missing (collision sessions), and
               // doing that twice inside the ws attach handler is the 2.369.16 law

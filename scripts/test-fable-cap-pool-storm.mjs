@@ -34,7 +34,12 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// ok(NAME, condition): a name that is not a string is a SWAPPED call (lane fable-52-cli-321 r6 — a non-empty string as the condition
+// is always true, so such a leg can never fail); it fails, named
+const ok = (n, c, e) => {
+  if (typeof n !== 'string') { fail++; console.error(`  ✗ ok() was handed a ${typeof n} as its NAME (arguments swapped?): ${String(c).slice(0, 160)}`); return; }
+  if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); }
+};
 
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
@@ -1184,10 +1189,11 @@ const R3R2_BELT_PATCH = [
       w.eng.sessionModelFor(d) === 'fable[1m]', String(w.eng.sessionModelFor(d)));
     const srv = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
     ok('§7b …and that is a PROPERTY of set-model, not an assumption: a pick while locked rewrites `_lockedModel`',
-      /else if \(data\.model && session\._modelLocked\)[\s\S]{0,220}session\._lockedModel = data\.model;/.test(srv));
+      /else if \(model && session\._modelLocked\)[\s\S]{0,220}session\._lockedModel = model;/.test(srv) && /const model = door\.model;/.test(srv));
     const bar = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
-    ok('§7b …on the client side too (it sends `lockModel` with the pick)',
-      /if \(this\._modelLocked\) this\._lockedModel = model;/.test(bar) && /lockModel: model/.test(bar));
+    const wcText = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+    ok('§7b …on the client side the lock\'s target comes back as the SERVER\'s fact (the bar never sets it), and what a resume reads is the saved config written where master writes it — at the press (round 9 law 2: no server store, ws-create\'s resume reads the client\'s frame)',
+      !/this\._lockedModel = model;/.test(bar) && /this\._onConfigChange\?\.\(\{ modelLock: nowLock, lockModel: nowLock \? target : undefined/.test(bar) && !/askRecordOf|askStoreReady/.test(wcText) && /_lockedModel: data\.modelLock \? \(data\.lockModel \|\| data\.model \|\| null\) : null/.test(wcText));
     // an UNNAMEABLE served model under a lock fails CLOSED, like every other unknown here
     const e = w.mkSession('u5', 'personal', { _spawnModel: 'fable[1m]', _modelLocked: true, _lockedModel: 'fable[1m]' });
     w.eng.noteServedModel(e, 'some-internal-model');
@@ -1996,8 +2002,9 @@ function playLatch({ stdoutModule = null, engineModule = engMod, restored = fals
 
 // ═══ §12 (r3-r2) A LOCK TARGET THAT *IS* THE STANDING REROUTE IS NOT A REQUEST
 // The belt, and it is not decoration: §11 closed the latch, but ws-handler's
-// `set-model {lock:true}` with no `lockModel` ALSO adopts `session._servedModel`
-// (the UI row it serves says "Lock to this model" about the model on screen),
+// `set-model {lock:true}` on a conversation that asks NOTHING (the CLI's default)
+// locks its served fact (r5: a lock otherwise targets the server's own ask —
+// model-ask lockTarget; the UI row says "Lock to this model" about the model on screen),
 // and a session-meta written by any build with an ungated latch carries the
 // substitute forever. A rung that decides money may not depend on every writer
 // of a field being careful — so the rung itself refuses a target that is the
@@ -2068,17 +2075,18 @@ console.log('— §12 (r3-r2) the lock rung refuses a target that is the reroute
 // sites from the source and classifies each one, printed. An unclassified
 // writer goes red, and so does a row that describes a site nobody has.
 {
-  const FILES = ['src/ws-create.js', 'src/ws-handler.js', 'src/server/boot-restore.js',
-    'src/server/stdout/claude-stream-json.js', 'src/server/usage-pool-engine.js', 'src/session-schema.js'];
-  // (src/lib/ is the CLIENT's own mirror — a different object in a different
-  //  process; it can never define this server's placement.)
+  // THE FILES ARE DERIVED (lane fable-52-cli-321 r5 — a fixed list of seven let a writer planted in src/server/user-input.js stay
+  // green): every server-side .js under src/ (src/lib/ is the CLIENT's own mirror — a different object in a different process;
+  // it can never define this server's placement).
+  const walkJs = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (dir + '/' + e.name === 'src/lib' ? [] : walkJs(dir + '/' + e.name)) : (e.name.endsWith('.js') ? [dir + '/' + e.name] : []));
+  const FILES = walkJs('src');
   const ALLOW = [
     { file: 'src/ws-create.js', has: 'data.modelLock ?', why: 'the REQUEST: the spawn asks for it (lockModel, else the spawn model, else target-less)' },
-    { file: 'src/ws-handler.js', has: 'data.lock ?', why: 'ADOPTS _servedModel when the client sends no lockModel — covered by §12\'s belt, which refuses a target that is the standing reroute' },
-    { file: 'src/ws-handler.js', has: '= data.model;', why: 'the REQUEST: a pick while locked re-targets the lock (§7b pins it)' },
+    { file: 'src/ws-handler.js', has: '= target;', why: 'the LOCK: its target is the server\'s OWN ask as it stands (model-ask lockTarget — a lock frame names no model; an ask-less conversation locks its served fact, which §12\'s belt still refuses when it is the standing reroute) — lane fable-52-cli-321 r5' },
+    { file: 'src/ws-handler.js', has: '= model;', why: 'the REQUEST: a pick while locked re-targets the lock (§7b pins it) — a pick that passed the door (model-ask setModelDoor)' },
     { file: 'src/server/boot-restore.js', has: 'meta.lockedModel', why: 'restores what one of the writers above wrote' },
     { file: 'src/server/stdout/claude-stream-json.js', has: '= session._servedModel;', why: 'the target-less latch — GATED on servedDefinesModel (§11)' },
-    { file: 'src/server/stdout/claude-stream-json.js', has: '= echo.id;', why: 'refines the SAME model to its full id (the resolved id from src/model-echo.js), gated on modelsMatch — never another model' },
+    { file: 'src/server/model-ask.js', has: '= typed;', why: 'the REQUEST: a `/model` the person typed (their own chat-input), confirmed by the model the CLI then served — the lock follows it as a pick re-targets it (lane fable-52-cli-321 r4; the echo-text refinement A5 is gone)' },
     { file: 'src/session-schema.js', has: 'owner:', why: 'the schema ROW, not a write' },
   ];
   const sites = [];
@@ -2105,6 +2113,13 @@ console.log('— §12 (r3-r2) the lock rung refuses a target that is the reroute
     dead.length === 0, JSON.stringify(dead.map((d) => d.file + ' ' + d.has)));
   ok('§12b NEGATIVE CONTROL: a new adoption site matches no row',
     !ALLOW.some((a) => 'session._lockedModel = someNewFact;'.includes(a.has)));
+  ok('§12b …the file set is DERIVED (every server-side src file, src/lib excluded) — it holds user-input.js, which no fixed list named', FILES.includes('src/server/user-input.js') && FILES.length > 50 && !FILES.some((f) => f.startsWith('src/lib/')), String(FILES.length));
+  {
+    // CONTROL: a writer planted in user-input.js (a file the r4 list of seven never read) is found and is unclassified
+    const plantedLines = (fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8') + '\n  session._lockedModel = data.text;\n').split('\n');
+    const hits = plantedLines.map((l) => l.replace(/^(\s*)\/\/.*$/, '$1')).filter((c) => /_lockedModel\s*[=:]/.test(c) && !/_lockedModel\s*[=!]==/.test(c));
+    ok('§12b CONTROL: a `_lockedModel` writer planted in src/server/user-input.js is found by the derived census and matches no row', hits.length === 1 && !ALLOW.some((a) => a.file === 'src/server/user-input.js' && hits[0].includes(a.has)), JSON.stringify(hits));
+  }
 }
 
 // ═══ §13 (r3-r2) WHAT A STALE REROUTE STAMP ACTUALLY COSTS ══════════════════
@@ -3668,6 +3683,535 @@ console.log('\n§21 the last model request is the stream\'s own request record')
       ok('§21 CW WIRING: each feed calls the compaction writer once, beside the stamp writer — no inline twin (neither feed writes `_compactedAt` or `_cacheFact`)',
         one(parseSrc) === 1 && one(brainSrc) === 1 && !/\._compactedAt\s*=[^=]|\._cacheFact\s*=[^=]/.test(parseSrc + brainSrc));
     }
+  }
+}
+
+// ── §alias THE ALIAS MOVED (lane fable-52-cli-321 r2, the owner 2026-11-09 13:55 PT) ──
+// The owner's CLI went 2.1.319 → 2.1.321 and `fable[1m]` now resolves to claude-fable-5-2. A conversation LOCKED on `fable[1m]`
+// (eight on this instance, all spelled so) served by 5.2 is served exactly what it asked for: the re-pin must not fire, no
+// fallback notice is drawn, and the attach status carries the server's model facts (the ask, the lock and the served model, numbered
+// from one counter — r4; no record time) so every client holds the served model to the ask. A REAL fallback (asked fable, served
+// opus) still re-pins and still warns.
+console.log('\n§alias a locked alias the CLI now resolves to a newer model: never re-pinned, never a fallback; a real fallback still is');
+{
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  const fnOf = (head) => { const at = engSrc.indexOf(head); const end = at < 0 ? -1 : engSrc.indexOf('\n}\n', at); return at < 0 || end < 0 ? '' : engSrc.slice(at, end + 2); };
+  const writes = [], events = [];
+  const E = new Function('adapterRegistry', 'global', 'require', fnOf('function modelsMatch(a, b) {') + '\n' + fnOf('function maybeRepinLockedModel(session) {') + '\nreturn { modelsMatch, maybeRepinLockedModel };')(
+    { get: () => ({ formatSetModel: (m) => JSON.stringify({ type: 'control_request', request: { subtype: 'set_model', model: m } }) }) },
+    { __vsEvent: (n, d) => events.push([n, d]) }, createRequire(path.join(REPO, 'src/server/usage-pool-engine.js')));
+  const sess = (lockedModel, served) => ({ _modelLocked: true, _lockedModel: lockedModel, _servedModel: served, mode: 'chat', backend: 'claude', pty: { write: (x) => writes.push(x) } });
+  E.maybeRepinLockedModel(sess('fable[1m]', 'claude-fable-5-2'));
+  E.maybeRepinLockedModel(sess('fable[1m]', 'claude-fable-5-2[1m]'));
+  ok('§alias a lock on fable[1m] served by claude-fable-5-2 (with or without [1m]) is NEVER re-pinned — no set_model written, no model-lock-repin event (the real modelsMatch + maybeRepinLockedModel, read from the engine)', writes.length === 0 && events.length === 0 && E.modelsMatch('fable[1m]', 'claude-fable-5-2'), JSON.stringify({ writes, events }));
+  E.maybeRepinLockedModel(sess('fable[1m]', 'claude-opus-5-5'));
+  ok('§alias …a REAL fallback (served claude-opus-5-5) IS re-pinned to the ask: one set_model fable[1m], one event', writes.length === 1 && /"model":"fable\[1m\]"/.test(writes[0]) && events.length === 1 && events[0][1] === 'claude-opus-5-5->fable[1m]', JSON.stringify({ writes, events }));
+  writes.length = 0; events.length = 0;
+  E.maybeRepinLockedModel(sess('claude-fable-5-1', 'claude-fable-5-2'));
+  ok('§alias …and a lock on a FULL id (claude-fable-5-1) is held exactly: served 5.2 ⇒ re-pinned to 5.1 (a point release pinned is not an alias)', writes.length === 1 && /claude-fable-5-1/.test(writes[0]), JSON.stringify(writes));
+  // the fallback notice: drawn only from the CLI's own `fallback` block — a record served by the moved alias draws none
+  const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
+  const notices = (recs) => { const mm = new MessageManager('alias-' + Math.random()); const ops = []; mm.listeners.push((o) => ops.push(o)); for (const r of recs) mm.processLive(r); return ops.filter((o) => o.op === 'create' && o.message.noticeKind === 'model-fallback').length; };
+  const asst = (model, extra = []) => ({ type: 'assistant', session_id: 's', uuid: 'u-' + Math.random(), message: { id: 'm-' + Math.random(), role: 'assistant', model, content: [...extra, { type: 'text', text: 'ok' }] } });
+  const moved = notices([asst('claude-fable-5-1'), asst('claude-fable-5-2'), asst('claude-fable-5-2')]);
+  const real = notices([asst('claude-fable-5-2', [{ type: 'fallback', from: { model: 'claude-fable-5-2' }, to: { model: 'claude-opus-5-5' } }])]);
+  ok('§alias the real normalizer: records served 5.1 then 5.2 (the alias moved) draw NO fallback notice; a record carrying the CLI\'s fallback block (5.2 → opus) draws one', moved === 0 && real === 1, JSON.stringify({ moved, real }));
+  // the attach status: the server's model facts (r4)
+  const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), ssSrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
+  const { ownModelOf } = require(path.join(REPO, 'src/server/stream-wall.js'));
+  ok('§alias the attach status carries the model facts (model-ask.js modelFacts: the ask = stream-wall\'s ownModelOf — the lock, else the pick, else the spawn — the lock, the served model, each numbered)', wsSrc.includes("{ const MA = require('./server/model-ask.js'); if (MA.declares(session)) Object.assign(chatStatus, MA.modelFacts(session)); }") && ownModelOf({ _modelLocked: true, _lockedModel: 'fable[1m]', _pickedModel: 'opus', _spawnModel: 'sonnet' }) === 'fable[1m]' && ownModelOf({ _pickedModel: 'opus', _spawnModel: 'sonnet' }) === 'opus' && ownModelOf({ _spawnModel: 'fable[1m]' }) === 'fable[1m]');
+  ok('§alias …and session-store\'s chatStatus names the newest served model in the history\'s own order (`servedModel` — a stopped conversation\'s read-only page)', /model, servedModel: assistantModel, lastUsage/.test(ssSrc) && !/modelAt/.test(ssSrc));
+}
+
+// ── §ask THE MODEL FACTS: SERVER FACTS, ONE COUNTER, ORIGIN NOT TEXT (lane fable-52-cli-321 r4, r5) ──
+// r5: every set-model leg runs ws-handler's REAL `case 'set-model'` text over a fake session (no replay of its steps); the typed
+// /model legs run model-ask.js with the wrapper's own queue records; the counter's persistence runs boot-restore's own statements.
+console.log('\n§ask the model facts: the ask moves by a pick or a typed /model the CLI served AFTER it reached it; a lock targets the server\'s own ask and never moves it; one door; one counter, persisted; no record text, no clock');
+{
+  const MA = require(path.join(REPO, 'src/server/model-ask.js'));
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  const fnOf = (head) => { const at = engSrc.indexOf(head); const end = at < 0 ? -1 : engSrc.indexOf('\n}\n', at); return at < 0 || end < 0 ? '' : engSrc.slice(at, end + 2); };
+  const modelsMatch = new Function(fnOf('function modelsMatch(a, b) {') + '\nreturn modelsMatch;')();
+  const metas = {}; let metaWrites = 0;
+  const io = { modelsMatch, now: 1000, readSessionMeta: (k) => metas[k] || {}, writeSessionMeta: (k, v) => { metaWrites++; metas[k] = v; } };
+  // user-state sessionConfigs (round 9 law 2): the server's ONE writer — a typed /model the CLI acknowledged — patches it, as persistence.js does
+  const sessionConfigs = {}; const cfgOf = (k) => sessionConfigs[k] || null;
+  MA.useConfigWriter((k, patch) => { sessionConfigs[k] = { ...(sessionConfigs[k] || {}), ...patch }; return true; });
+  const sess = (o = {}) => ({ sockName: 'cw-ask', _webuiId: 'web-1', backend: 'claude', mode: 'chat', _spawnModel: 'fable[1m]', ...o });
+  // ws-handler's REAL set-model case, its own text
+  const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  const caseAt = wsSrc.indexOf("        case 'set-model': {"), caseEnd = wsSrc.indexOf("        case 'set-effort': {", caseAt);
+  const CASE = caseAt > 0 && caseEnd > caseAt ? wsSrc.slice(caseAt, caseEnd) : '';
+  const wsRequire = createRequire(path.join(REPO, 'src/ws-handler.js'));
+  const handlerOf = (caseText) => new Function('data', 'activeSessions', 'adapterRegistry', 'readSessionMeta', 'writeSessionMeta', 'broadcastActiveSessions', 'broadcastToSession', 'ws', 'require', `switch (data.type) {\n${caseText}\n}`);
+  const hub = (caseText = CASE) => {
+    const run = handlerOf(caseText), sessions = new Map(), pty = [], replies = [], frames = [], meta = {};
+    const h = { sessions, pty, replies, frames, meta };
+    h.add = (id, o = {}) => { const s = sess({ sockName: 'cw-' + id, _webuiId: id, pty: { write: (l) => pty.push([id, l]) }, ...o }); sessions.set(id, s); return s; };
+    h.send = (id, data, from = 'A') => run({ type: 'set-model', sessionId: id, ...data }, sessions, { get: () => ({ formatSetModel: (m) => JSON.stringify({ type: 'control_request', request: { subtype: 'set_model', model: m } }) }) }, (k) => meta[k] || {}, (k, v) => { meta[k] = v; }, () => {}, (s, sid, frame) => frames.push([sid, frame]), { send: (x) => replies.push([from, JSON.parse(x)]) }, wsRequire);
+    return h;
+  };
+  ok('§ask the REAL set-model case is read from ws-handler (its own text runs below)', CASE.length > 1000 && /setModelDoor/.test(CASE) && /MA\.lockTarget\(session\)/.test(CASE), String(CASE.length));
+  // LAW D on the real case: pick opus[1m] → lock (a frame naming no model) → unlock — the ask is the pick at every step and a
+  // lock change takes NO new number (the ask's value did not move)
+  {
+    const h = hub(), d = h.add('d');
+    h.send('d', { model: 'opus[1m]' }); const a1 = MA.modelFacts(d);
+    h.send('d', { lock: true }); const a2 = MA.modelFacts(d);
+    h.send('d', { lock: false }); const a3 = MA.modelFacts(d);
+    ok('§ask LAW D (the real case): pick opus[1m] → lock → unlock ⇒ the ask is opus[1m] at every step, the lock\'s target is that ask, and the lock set / lifted takes no number (pick 1, lock 1, unlock 1); meta keeps the lock',
+      a1.askedModel === 'opus[1m]' && a2.askedModel === 'opus[1m]' && a2.modelLocked && a2.lockedModel === 'opus[1m]' && a3.askedModel === 'opus[1m]' && !a3.modelLocked && a1.askSeq === 1 && a2.askSeq === 1 && a3.askSeq === 1 && h.meta['cw-d']?.modelLocked === false && h.meta['cw-d']?.pickedModel === 'opus[1m]' && h.frames.filter(([, f]) => f.subtype === 'model-facts').length === 3 && h.frames.filter(([, f]) => f.subtype === 'model-lock').length === 2, JSON.stringify({ a1, a2, a3 }));
+  }
+  // MUST 1: THE LOCK'S TARGET IS A SERVER FACT — the person typed /model opus, opus served; the Lock press (whatever a stale bar
+  // carried in `lockModel`) locks the server's ask: opus. Nothing moves the ask to fable.
+  const lockScene = (caseText) => {
+    const h = hub(caseText), s = h.add('t', { _servedModel: 'claude-fable-5-2' });
+    MA.noteServed(s, 'claude-fable-5-2', io);
+    MA.noteTypedModel(s, '/model opus', { msgId: 'm-t' }); MA.noteForwarded(s, { type: 'input_forwarded', msg_id: 'm-t' }, 'parse', io); MA.noteFeedResult(s, 'parse', io, { type: 'result', num_turns: 0, uuid: 'ack-t' }); MA.noteServed(s, 'claude-opus-5-5', io); s._servedModel = 'claude-opus-5-5';   // its mark, the CLI's acknowledgment (round 8), then opus
+    const before = MA.modelFacts(s);
+    h.send('t', { lock: true, lockModel: 'claude-fable-5-2' });
+    return { before, after: MA.modelFacts(s), lockedModel: s._lockedModel };
+  };
+  {
+    const r5 = lockScene(CASE);
+    ok('§ask MUST 1 (the real case): typed /model opus, opus served, then Lock — a frame carrying a stale `lockModel` (claude-fable-5-2) — locks the SERVER\'s ask: opus; the ask does not move, takes no number', r5.lockedModel === 'opus' && r5.after.askedModel === 'opus' && r5.after.askSeq === r5.before.askSeq && r5.after.modelLocked, JSON.stringify(r5));
+    const R4_LINE = 'const target = data.lock ? MA.lockTarget(session) : null;';
+    const r4 = lockScene(CASE.replace(R4_LINE, 'const target = data.lock ? (data.lockModel || session._servedModel || null) : null;'));
+    ok('§ask CONTROL: r4\'s lock line (the frame\'s lockModel, else the served model) over the same scene locks claude-fable-5-2 and MOVES the ask to it (the confirmed major)', CASE.includes(R4_LINE) && r4.lockedModel === 'claude-fable-5-2' && r4.after.askedModel === 'claude-fable-5-2', JSON.stringify(r4));
+  }
+  {
+    // two clients: a pick on A, the Lock on B — B's frame names no model; the server locks A's pick; both clients are told
+    const h = hub(), s = h.add('two');
+    h.send('two', { model: 'opus[1m]' }, 'A'); h.send('two', { lock: true }, 'B');
+    const fx = h.frames.filter(([, x]) => x.subtype === 'model-facts'), f = MA.modelFacts(s), last = fx.length ? fx[fx.length - 1][1].data : {};
+    ok('§ask MUST 1 across two clients: a pick on A, then Lock on B (a frame naming no model) ⇒ locked opus[1m], the ask opus[1m]; every client told (one model-facts op per frame, the last one locked)', f.lockedModel === 'opus[1m]' && f.askedModel === 'opus[1m]' && fx.length === 2 && h.frames.filter(([, x]) => x.subtype === 'model-lock').length === 1 && last.modelLocked === true && last.lockedModel === 'opus[1m]' && last.modelFacts === true, JSON.stringify(last));
+    // a standing fallback: asked fable[1m], opus serving — the Lock locks the ASK, never the served model
+    const h2 = hub(), fb = h2.add('fb', { _servedModel: 'claude-opus-5-5' }); MA.noteServed(fb, 'claude-opus-5-5', io);
+    h2.send('fb', { lock: true });
+    const h3 = hub(), dflt = h3.add('df', { _spawnModel: null }); MA.noteServed(dflt, 'claude-fable-5-2', io);
+    h3.send('df', { lock: true });
+    ok('§ask …a standing fallback (asked fable[1m], opus serving) locks the ASK fable[1m], not the served opus; a conversation asking nothing (the CLI default) locks the model its chip names (the served fact, claude-fable-5-2)', fb._lockedModel === 'fable[1m]' && MA.modelFacts(fb).askedModel === 'fable[1m]' && dflt._lockedModel === 'claude-fable-5-2', JSON.stringify({ fb: fb._lockedModel, df: dflt._lockedModel }));
+    // ROUND 9 DEFECT FIX (the major): RESUMED and never picked — no ask, no init, nothing served; the attach named the transcript's model
+    // (ws-handler keeps it as `_transcriptModel`) — the Lock locks THAT, as master does; 6abc439f3 locked nothing (lockTarget had no ask)
+    const h5 = hub(), rv = h5.add('rv', { _spawnModel: null, _transcriptModel: 'claude-opus-5-5' }); h5.send('rv', { lock: true });
+    const h6 = hub(), rn = h6.add('rn', { _spawnModel: null }); h6.send('rn', { lock: true });
+    ok('§ask (defect fix) a conversation RESUMED and never picked (no ask, no init, nothing served) ⇒ the Lock locks the model it would continue with — the transcript\'s, named by its attach status (claude-opus-5-5) — as master locks it; with not even that, nothing is locked', rv._modelLocked === true && rv._lockedModel === 'claude-opus-5-5' && MA.lockTarget(rv) === 'claude-opus-5-5' && !rn._lockedModel && /session\._transcriptModel = chatStatus\.model \|\| null;/.test(wsSrc), JSON.stringify({ rv: [rv._modelLocked, rv._lockedModel], rn: [rn._modelLocked, rn._lockedModel] }));
+    const h4 = hub(), pl = h4.add('pl'); h4.send('pl', { model: 'sonnet', lock: true });
+    ok('§ask …a pick and a lock in ONE frame: the pick first, then the lock targets it (ask sonnet, locked sonnet)', MA.modelFacts(pl).askedModel === 'sonnet' && pl._lockedModel === 'sonnet' && pl._modelLocked, JSON.stringify(MA.modelFacts(pl)));
+  }
+  // MUST 5: THE DOOR — one check for a pick and for a lock re-target; a refused frame changes nothing and is answered
+  {
+    const bad = [['whitespace', '   '], ['10 000 characters', 'x'.repeat(10000)], ['not an id', 'not a model id; rm -rf'], ['an object', { id: 'x' }], ['a number', 42], ['a list', ['opus']]];
+    const rows = [];
+    for (const locked of [false, true]) for (const [what, model] of bad) {
+      const h = hub(), s = h.add('door', locked ? { _modelLocked: true, _lockedModel: 'fable[1m]', _pickedModel: 'fable[1m]' } : {});
+      const snap = JSON.stringify({ p: s._pickedModel, l: s._lockedModel, k: s._modelLocked, a: s._askSeq });
+      h.send('door', { model });
+      rows.push({ locked, what, same: JSON.stringify({ p: s._pickedModel, l: s._lockedModel, k: s._modelLocked, a: s._askSeq }) === snap, pty: h.pty.length, meta: Object.keys(h.meta).length, frames: h.frames.length, reply: h.replies.length === 1 && h.replies[0][1].type === 'error' && h.replies[0][1].code === 'model-refused' && h.replies[0][1].scope === 'action' });
+    }
+    ok('§ask MUST 5 THE DOOR (the real case): whitespace, 10 000 characters, a non-id string, an object, a number, a list — unlocked AND locked — change nothing (no pick, no lock, no meta, nothing to the CLI, no broadcast) and are answered refused (code model-refused)', rows.every((r) => r.same && !r.pty && !r.meta && !r.frames && r.reply), JSON.stringify(rows.filter((r) => !(r.same && !r.pty && !r.meta && !r.frames && r.reply))));
+    const h = hub(), s = h.add('ok'); h.send('ok', { model: ' opus ' });
+    const h2 = hub(), n = h2.add('none'); h2.send('none', { model: '' }); h2.send('none', { model: null });
+    const refusals = (hh) => hh.replies.filter(([, f]) => f.type === 'error').length;
+    ok('§ask …a named model passes the door trimmed (« opus » ⇒ opus, sent to the CLI); a frame naming NO model (\'\' / null) changes nothing and is no refusal (law D) — each frame is ANSWERED (r6)', s._pickedModel === 'opus' && h.pty.length === 1 && JSON.parse(h.pty[0][1]).request.model === 'opus' && !refusals(h) && h.replies.length === 1 && h.replies[0][1].subtype === 'model-answer' && !n._pickedModel && !refusals(h2) && !h2.pty.length, JSON.stringify({ pick: s._pickedModel, pty: h.pty.length, replies: h.replies.map(([, f]) => f.subtype || f.type) }));
+    ok('§ask …the door\'s grammar: aliases, full ids, a [1m] mark, provider paths pass; a space, a quote, a semicolon, an over-long id do not', ['opus', 'fable[1m]', 'claude-fable-5-2', 'claude-opus-5-5-20261101', 'us.anthropic.claude-opus-5-5-v1:0', 'openrouter/anthropic/claude-sonnet-5-5', 'gpt-5.1-codex-max'].every((m) => MA.namedModel(m) === m) && ['opus fable', '"opus"', 'opus;', '[1m]', 'x'.repeat(MA.MODEL_ID_MAX + 1), ''].every((m) => MA.namedModel(m) === null));
+  }
+  // ONE COUNTER, PERSISTED (MUST 4a): the served fact is written down with its number — only when it takes a new one — and a
+  // restart (boot-restore's own statements) gives back the same facts: a standing fallback is still one
+  {
+    const s1 = sess({ sockName: 'cw-one', _askSeq: 3, _modelSeq: 3 });
+    const w0 = metaWrites;
+    const n1 = MA.noteServed(s1, 'claude-fable-5-2', io), n2 = MA.noteServed(s1, 'claude-fable-5-2', io), n3 = MA.noteServed(s1, 'claude-opus-5-5', io);
+    ok('§ask the served fact: numbered when it changes (or is the first served since the ask moved), not on every record — and written down only then (2 numbers, 2 meta writes for 3 records)', n1 && !n2 && n3 && s1._servedSeq === 5 && s1._askSeq === 3 && metaWrites - w0 === 2 && metas['cw-one']?.factServedModel === 'claude-opus-5-5' && metas['cw-one']?.factServedSeq === 5 && metas['cw-one']?.modelSeq === 5, JSON.stringify({ n1, n2, n3, writes: metaWrites - w0, meta: metas['cw-one'] }));
+    const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+    const STMT = "Object.assign(session, require('./model-ask.js').hydratedFacts(meta));";
+    const OBJ = "...require('./model-ask.js').hydratedFacts(meta),";
+    if (typeof MA.hydratedFacts !== 'function') ok('§ask MUST 4a/6: boot-restore hydrates through model-ask hydratedFacts (absent here)', false);
+    else {
+    const live = sess({ sockName: 'cw-fb', _modelLocked: true, _lockedModel: 'fable[1m]' });
+    MA.askMoved(live, io); MA.noteServed(live, 'claude-opus-5-5', io);   // locked fable[1m], opus serving after it: a real fallback
+    const restarted = { _modelLocked: true, _lockedModel: 'fable[1m]', _spawnModel: 'fable[1m]', backend: 'claude' };
+    new Function('session', 'meta', 'require', STMT)(restarted, metas['cw-fb'], createRequire(path.join(REPO, 'src/server/boot-restore.js')));
+    const fa = MA.modelFacts(live), fr = MA.modelFacts(restarted);
+    ok('§ask MUST 4a: a standing REAL fallback (locked fable[1m], opus served after the ask) survives a restart — boot-restore\'s own statements (2 statement sites + 1 object site) give back the same facts, servedSeq > askSeq', brSrc.split(STMT).length - 1 === 2 && brSrc.split(OBJ).length - 1 === 1 && JSON.stringify(fa) === JSON.stringify(fr) && fr.servedSeq > fr.askSeq && fr.servedModel === 'claude-opus-5-5', JSON.stringify({ fa, fr }));
+    }
+  }
+  // MUST 2: A TYPED /model SURVIVES THE TURN IT WAS TYPED IN — and (round 8) it is judged by the CLI's OWN ACKNOWLEDGMENT: 2.1.321, as
+  // measured (probe/typed-model-v321.jsonl), answers a typed «/model X» with an init (the old model), an assistant record of model
+  // «<synthetic>» «Set model to `X` for this session only» and a result with num_turns 0 — for ANY id; on a marking wrapper the first
+  // num_turns-0 result after the frame's mark, on that feed, is the CLI taking it. No served record judges an arm.
+  const typedScene = (M, { locked = false, typed = '/model opus', after = 'claude-opus-5-5', inTurn = true } = {}) => {
+    const s = sess({ sockName: 'cw-mid' + (locked ? 'L' : ''), _pickedModel: 'fable[1m]', ...(locked ? { _modelLocked: true, _lockedModel: 'fable[1m]' } : {}) });
+    let u = 0; const res = (n) => ({ type: 'result', num_turns: n, uuid: 'rs' + (++u) });
+    M.noteForwarded(s, { type: 'input_forwarded', msg_id: 'm-earlier' }, 'parse', io);   // a marking wrapper (an earlier frame's mark)
+    M.noteServed(s, 'claude-fable-5-2', io);                         // the running turn
+    M.noteTypedModel(s, typed, { msgId: 'm-mid', inTurn });           // typed while it runs
+    M.noteQueueRecord(s, { type: 'queued_input', msg_id: 'm-mid' }, io, 'parse');   // the wrapper holds it
+    M.noteServed(s, 'claude-fable-5-2', io); M.noteServed(s, 'claude-fable-5-2', io);   // the running turn's own records (old model)
+    const heldThrough = !!s._typedModel;
+    M.noteFeedResult(s, 'parse', io, res(1));                        // the turn ends
+    M.noteQueueRecord(s, { type: 'queue_changed', items: [] }, io, 'parse');   // the held command leaves the queue …
+    M.noteForwarded(s, { type: 'input_forwarded', msg_id: 'm-mid' }, 'parse', io);   // … its mark: it reached the CLI
+    M.noteFeedResult(s, 'parse', io, res(0));                        // the CLI's acknowledgment
+    if (after) M.noteServed(s, after, io);                           // the next turn: what the CLI serves now
+    return { heldThrough, f: M.modelFacts(s), locked: s._lockedModel, typed: s._typedModel };
+  };
+  {
+    const u = typedScene(MA), l = typedScene(MA, { locked: true }), r = typedScene(MA, { typed: '/model nope-model', after: null });
+    ok('§ask MUST 2: /model opus typed MID-TURN survives the running turn\'s own old-model records (held by the wrapper), then the CLI acknowledges it ⇒ the ask is opus, served after it — plain', u.heldThrough && u.f.askedModel === 'opus' && u.f.servedSeq > u.f.askSeq && u.f.servedModel === 'claude-opus-5-5' && !u.typed, JSON.stringify(u));
+    ok('§ask MUST 2 …locked on fable[1m]: the lock FOLLOWS the person\'s command (locked opus — the repin no longer undoes it)', l.heldThrough && l.locked === 'opus' && l.f.askedModel === 'opus' && l.f.modelLocked, JSON.stringify(l));
+    ok('§ask MUST 2 …an UNKNOWN id is TAKEN by the CLI (measured: «Set model to `nope-model-xyz` … doesn\'t recognize», and its next requests carry it) — the ask is what the CLI took, never a refusal invented here', r.heldThrough && r.f.askedModel === 'nope-model' && !r.typed, JSON.stringify(r));
+    const q = typedScene(MA, { inTurn: false });
+    ok('§ask MUST 2 …typed when the server saw no turn running but the wrapper held it: its `queued_input` (the wrapper writes it the moment it holds the frame) holds it the same way', q.heldThrough && q.f.askedModel === 'opus', JSON.stringify(q));
+    // the turn was ending as it was sent: the server thought a turn ran, the wrapper forwarded it at once — its mark, then the ack
+    const e = sess({ sockName: 'cw-end' }); MA.noteForwarded(e, { type: 'input_forwarded', msg_id: 'm-e0' }, 'parse', io); MA.noteServed(e, 'claude-fable-5-2', io);
+    MA.noteTypedModel(e, '/model opus', { msgId: 'm-e', inTurn: true }); MA.noteServed(e, 'claude-fable-5-2', io);
+    const beforeAck = MA.modelFacts(e).askedModel;
+    MA.noteForwarded(e, { type: 'input_forwarded', msg_id: 'm-e' }, 'parse', io); const moved = MA.noteFeedResult(e, 'parse', io, { type: 'result', num_turns: 0, uuid: 'e-ack' });
+    ok('§ask MUST 2 …thought held but forwarded at once (the turn was ending as it was sent): its mark and the CLI\'s acknowledgment confirm it — never a served record', beforeAck === 'fable[1m]' && moved && MA.modelFacts(e).askedModel === 'opus', JSON.stringify(MA.modelFacts(e)));
+    // CONTROL — THE MARK IGNORED (round 8's named mutant): an acknowledgment that does not wait for the arm's own mark takes an EARLIER
+    // local command's answer (still in flight, written before the frame) for this arm; the person then ✕s the held frame — it never
+    // reached the CLI, yet the mutant moved the ask to it
+    const src = fs.readFileSync(path.join(REPO, 'src/server/model-ask.js'), 'utf8'), MARK = '(session._wrapperMarks ? !!(a.reached && a.reached[feed]) : !(a.held && a.held[feed]))';
+    const mkMod = (text) => { const mod = { exports: {} }; new Function('require', 'module', 'exports', text)(createRequire(path.join(REPO, 'src/server/model-ask.js')), mod, mod.exports); return mod.exports; };
+    const markScene = (M) => {
+      const s = sess({ sockName: 'cw-mk' }); M.noteForwarded(s, { type: 'input_forwarded', msg_id: 'm-prev' }, 'parse', io); M.noteServed(s, 'claude-fable-5-2', io);
+      M.noteTypedModel(s, '/model opus', { msgId: 'm-k', inTurn: true }); M.noteQueueRecord(s, { type: 'queued_input', msg_id: 'm-k' }, io, 'parse');
+      M.noteFeedResult(s, 'parse', io, { type: 'result', num_turns: 0, uuid: 'earlier-local-command' });   // an earlier /cost's answer, in flight
+      M.noteQueueRecord(s, { type: 'queue_op_result', op: 'remove', id: 'q1', ok: true, msg_id: 'm-k' }, io, 'parse');   // ✕ on the held row
+      return { ask: M.modelFacts(s).askedModel, arm: s._typedModel };
+    };
+    const real = markScene(MA), mutant = markScene(mkMod(src.replace(MARK, 'true')));
+    ok('§ask CONTROL — the mark ignored (round 8\'s mutant): an acknowledgment taken without the arm\'s own mark confirms /model opus from an EARLIER command\'s answer, and the ✕ that followed cannot undo it — the ask is opus, a model the CLI never took; the real code waits for the mark: the ask stays fable[1m] and the ✕ ends the arm', src.includes(MARK) && real.ask === 'fable[1m]' && !real.arm && mutant.ask === 'opus', JSON.stringify({ real, mutant }));
+  }
+  // ONE VERDICT PER RECORD, AT THE MOMENT IT MATTERS (round 8 — the verifier reverted `seenOnce` ⇒ true with every suite green): the
+  // device feed runs ahead — an older fable record, then a NEWER opus one; the lagging parse then hands over its copy of the OLDER one:
+  // it is not judged again, the served fact never goes back to an older model (checked right after the copy, not at rest)
+  {
+    const s1 = sess({ sockName: 'cw-once' });
+    MA.noteServed(s1, 'claude-fable-5-2', { ...io, recId: 'msg_old', feed: 'device' });
+    MA.noteServed(s1, 'claude-opus-5', { ...io, recId: 'msg_new', feed: 'device' });
+    const before = MA.modelFacts(s1);
+    MA.noteServed(s1, 'claude-fable-5-2', { ...io, recId: 'msg_old', feed: 'parse' });   // the lagging feed's copy of the older record
+    const after = MA.modelFacts(s1);
+    ok('§ask ONE VERDICT PER RECORD (round 8, transient): a lagging feed\'s copy of an OLDER record, handed over after a newer one was served, is not judged again — the served fact stays claude-opus-5, its number unmoved', after.servedModel === 'claude-opus-5' && after.servedSeq === before.servedSeq, JSON.stringify({ before, after }));
+  }
+  // ── THE MODEL THE API REFUSES (round 8 — 主开发's scene, measured on 2.1.321 behind a loopback mock: probe/typed-model-v321-refused*.jsonl)
+  // (1) refused at the CLI's own check (the API 404s the id when /model runs): «Model 'x' not found» — the CLI KEEPS its model, the arm
+  // is void. (2) taken (the check passed) and refused at use: «Set model to `x` …», then every turn ends with the API's 404 «There's an
+  // issue with the selected model (x)» and serves nothing — the ask is x, and the server NAMES the refusal (askRefused); a lock follows
+  // it and the repin stays silent (nothing served since the ask moved — it never re-sends a refused model); a resume spawns what the
+  // server asks; a pick (or a model served after all) clears the refusal — the way out the chip names.
+  {
+    const MP2 = require(path.join(REPO, 'src/model-providers.js'));
+    const tr = (M, s, id, answer, n = 0) => { M.noteForwarded(s, { type: 'input_forwarded', msg_id: id }, 'parse', io); return M.noteFeedResult(s, 'parse', io, { type: 'result', subtype: 'success', num_turns: 0, result: answer, uuid: 'ack-' + id + n }); };
+    const c1 = sess({ sockName: 'cw-ref1' }); MA.noteServed(c1, 'claude-fable-5-2', io); MA.noteTypedModel(c1, '/model nope-model-xyz', { msgId: 'mr1' });
+    const moved1 = tr(MA, c1, 'mr1', "Model 'nope-model-xyz' not found");
+    ok('§ask REFUSED AT THE CHECK (measured «Model \'nope-model-xyz\' not found»): the CLI kept its model — the arm is VOID, the ask stays fable[1m], nothing is refused', !moved1 && !c1._typedModel && MA.modelFacts(c1).askedModel === 'fable[1m]' && MA.modelFacts(c1).askRefused === null, JSON.stringify(MA.modelFacts(c1)));
+    const engSrc3 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), fn3 = (h) => { const a = engSrc3.indexOf(h), e = a < 0 ? -1 : engSrc3.indexOf('\n}\n', a); return a < 0 || e < 0 ? '' : engSrc3.slice(a, e + 2); };
+    const writes = [], repin = new Function('adapterRegistry', 'global', 'require', fn3('function modelsMatch(a, b) {') + '\n' + fn3('function maybeRepinLockedModel(session) {') + '\nreturn maybeRepinLockedModel;')({ get: () => ({ formatSetModel: (m) => m }) }, { __vsEvent: () => {} }, createRequire(path.join(REPO, 'src/server/usage-pool-engine.js')));
+    const c2 = sess({ sockName: 'cw-ref2', backendSessionId: 'conv-ref2', _modelLocked: true, _lockedModel: 'fable[1m]', pty: { write: (x) => writes.push(x) } });
+    MA.noteServed(c2, 'claude-fable-5-2', io); c2._servedModel = 'claude-fable-5-2';
+    MA.noteTypedModel(c2, '/model nope-model-xyz', { msgId: 'mr2' });
+    const moved2 = tr(MA, c2, 'mr2', "Set model to `nope-model-xyz` for this session only\n\nClaude Code doesn't recognize the model \"nope-model-xyz\", so it assumes a context window of 200k tokens.");
+    const told = MA.noteFeedResult(c2, 'parse', io, { type: 'result', subtype: 'success', is_error: true, api_error_status: 404, num_turns: 1, result: "There's an issue with the selected model (nope-model-xyz). It may not exist or you may not have access to it. Run --model to pick a different model.", uuid: 'fail-1' });
+    const f2 = MA.modelFacts(c2); repin(c2);
+    const rec2 = cfgOf('claude:conv-ref2');   // what a resume reads: the saved config the server's one writer patched at the acknowledgment (round 9 law 2)
+    ok('§ask TAKEN, THEN REFUSED AT USE: the ask is nope-model-xyz (the CLI took it), the lock FOLLOWS the person, the first failing turn names the refusal (askRefused, told to every client), and the repin stays SILENT — nothing was served since the ask moved, a refused model is never re-sent', moved2 && told && f2.askedModel === 'nope-model-xyz' && f2.modelLocked && f2.lockedModel === 'nope-model-xyz' && f2.askRefused === 'nope-model-xyz' && writes.length === 0, JSON.stringify({ f2, writes }));
+    ok('§ask …a resume spawns what the CLI took — the SAVED CONFIG (user-state sessionConfigs) the server wrote at the acknowledgment: nope-model-xyz, and the lock\'s new target — the chip names the refusal again at its first failing turn', !!rec2 && rec2.model === 'nope-model-xyz' && rec2.lockModel === 'nope-model-xyz', JSON.stringify(rec2));
+    const h = hub(); const c3 = h.add('ref3', { _pickedModel: 'nope-model-xyz', _askRefused: 'nope-model-xyz', _askSeq: 2, _modelSeq: 2 });
+    h.send('ref3', { model: 'opus' });
+    const c4 = sess({ sockName: 'cw-ref4', _pickedModel: 'nope-model-xyz', _askRefused: 'nope-model-xyz', _askSeq: 2, _modelSeq: 2 }); MA.noteServed(c4, 'claude-nope-5', io);
+    ok('§ask …THE WAY OUT: a pick moves the ask and clears the refusal; a model served after all clears it too', MA.modelFacts(c3).askedModel === 'opus' && MA.modelFacts(c3).askRefused === null && MA.modelFacts(c4).askRefused === null, JSON.stringify({ c3: MA.modelFacts(c3), c4: MA.modelFacts(c4) }));
+  }
+  // (b) the origin half (r4, unchanged): only the person's own `/model <x>` arms; no text arms — and (round 8) a frame that never
+  // reaches the CLI ends its arm
+  {
+    const r = sess({ _pickedModel: 'fable[1m]', _askSeq: 1, _modelSeq: 1 });
+    MA.noteTypedModel(r, '/model bogus-model', { msgId: 'm-b', inTurn: true }); MA.noteQueueRecord(r, { type: 'queued_input', msg_id: 'm-b' }, io, 'parse');
+    MA.noteQueueRecord(r, { type: 'queue_op_result', op: 'remove', id: 'q1', ok: true, msg_id: 'm-b', reason: 'stopped' }, io, 'parse');
+    MA.noteServed(r, 'claude-fable-5-2', io);
+    ok('§ask a typed /model whose frame never reaches the CLI (Stop dropped it from the wrapper\'s queue) is VOID: no arm stands, the ask stays fable[1m]', MA.modelFacts(r).askedModel === 'fable[1m]' && !r._typedModel);
+    ok('§ask …and only a `/model <x>` command arms: a sentence that merely contains the words, or the CLI\'s echo text typed as a message, arms nothing', !MA.noteTypedModel(sess(), 'please /model opus') && !MA.noteTypedModel(sess(), '<local-command-stdout>Set model to opus</local-command-stdout>'));
+  }
+  // ── ROUND 9 (the r8 verdict's smaller items and law 3) ──
+  {
+    const engR9 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), fnR9 = (h) => { const a = engR9.indexOf(h), e = a < 0 ? -1 : engR9.indexOf('\n}\n', a); return a < 0 || e < 0 ? '' : engR9.slice(a, e + 2); };
+    const repinOf = (writes) => new Function('adapterRegistry', 'global', 'require', fnR9('function modelsMatch(a, b) {') + '\n' + fnR9('function maybeRepinLockedModel(session) {') + '\nreturn maybeRepinLockedModel;')({ get: () => ({ formatSetModel: (m) => { writes.push(m); return m; } }) }, { __vsEvent: () => {} }, createRequire(path.join(REPO, 'src/server/usage-pool-engine.js')));
+    const res = (s, uuid, o = {}) => MA.noteFeedResult(s, 'parse', io, { type: 'result', subtype: 'success', num_turns: 1, result: 'ok', uuid, ...o });
+    // the verifier's M6: an unanswered arm that reached the CLI ends at the bound
+    const b = sess({ sockName: 'cw-bound' }); MA.noteTypedModel(b, '/model opus', { msgId: 'mb', inTurn: false, ...io }); MA.noteForwarded(b, { type: 'input_forwarded', msg_id: 'mb' }, 'parse', io);
+    res(b, 'bnd-1'); res(b, 'bnd-2'); res(b, 'bnd-3'); const at3 = b._typedModel === 'opus'; res(b, 'bnd-4');
+    ok('§ask BOUNDED (round 9 pin — the r8 verifier\'s M6): a /model that reached the CLI and is never answered stands through ARM_BOUND (3) results, and the next one ends it', at3 && !b._typedModel, JSON.stringify({ at3, after: b._typedModel || null }));
+    // the verifier's M7: a void is written down — a restart brings no arm back
+    const v = sess({ sockName: 'cw-void' }); MA.noteTypedModel(v, '/model opus', { msgId: 'mv', inTurn: true, ...io }); MA.noteQueueRecord(v, { type: 'queued_input', msg_id: 'mv' }, io, 'parse');
+    const persisted = (metas['cw-void'] || {}).typedModel;
+    MA.noteQueueRecord(v, { type: 'queue_op_result', op: 'remove', id: 'q-mv', ok: true, msg_id: 'mv' }, io, 'parse');
+    const back = MA.hydratedFacts(metas['cw-void'] || {});
+    ok('§ask A VOID IS WRITTEN DOWN (round 9 pin — the r8 verifier\'s M7): ✕ on a held /model clears the PERSISTED arm too — a hub restart brings no arm back', persisted === 'opus' && !(metas['cw-void'] || {}).typedModel && !back._typedModel, JSON.stringify({ persisted, after: (metas['cw-void'] || {}).typedModel || null, hydrated: back._typedModel || null }));
+    // the bound holds for an OLDER wrapper (no mark ever seen — every conversation alive at the upgrade), and the repin resumes there
+    for (const marking of [true, false]) {
+      const writes = [], repin = repinOf(writes);
+      const o = sess({ sockName: 'cw-old-' + marking, _modelLocked: true, _lockedModel: 'fable[1m]', _askSeq: 1, _modelSeq: 1, pty: { write: () => {} } });
+      MA.noteTypedModel(o, '/model opus', { msgId: 'mo', inTurn: false, ...io });
+      if (marking) MA.noteForwarded(o, { type: 'input_forwarded', msg_id: 'mo' }, 'parse', io);
+      const pattern = [];
+      for (let k = 1; k <= 5; k++) { o._servedModel = 'claude-opus-5'; MA.noteServed(o, 'claude-opus-5', { recId: `old-${marking}-${k}`, feed: 'parse', ...io }); res(o, `oldr-${marking}-${k}`); const n0 = writes.length; repin(o); pattern.push(writes.length > n0 ? 1 : 0); }
+      ok(`§ask THE BOUND HOLDS FOR ${marking ? 'A MARKING' : 'AN OLDER (non-marking)'} WRAPPER (round 9): a /model handed to the CLI and never answered holds the lock's repin for ARM_BOUND turn ends, then the repin resumes — ${pattern.join('')} (the r8 tree: ${marking ? '00011' : '00000 — for good'}; master 11111, it never follows a typed /model)`, pattern.join('') === '00011' && !o._typedModel, pattern.join(''));
+    }
+    // the acknowledgment is the /model command's OWN result (measured: `local_command: 'model'`)
+    const lc = sess({ sockName: 'cw-lc' }); MA.noteTypedModel(lc, '/model opus', { msgId: 'ml', inTurn: false, ...io }); MA.noteForwarded(lc, { type: 'input_forwarded', msg_id: 'ml' }, 'parse', io);
+    res(lc, 'lc-1', { num_turns: 0, local_command: 'compact', result: 'Compacted' }); const stands = lc._typedModel === 'opus';
+    res(lc, 'lc-2', { num_turns: 0, local_command: 'model', result: 'Set model to `Opus 5.5` for this session only' });
+    ok('§ask THE ACKNOWLEDGMENT IS THE /model COMMAND\'S OWN RESULT (round 9): another local command\'s num_turns-0 result (`local_command: compact`) is not read as it — the arm stands; the one stamped `local_command: model` moves the ask', stands && MA.modelFacts(lc).askedModel === 'opus' && !lc._typedModel, JSON.stringify({ stands, facts: MA.modelFacts(lc) }));
+    // an EDITED held /model is the edited command; an edit into a plain message voids it
+    const e = sess({ sockName: 'cw-edit', backendSessionId: 'conv-edit', _modelLocked: true, _lockedModel: 'fable[1m]', _askSeq: 1, _modelSeq: 1 });
+    MA.noteTypedModel(e, '/model opus', { msgId: 'me', inTurn: true, ...io }); MA.noteQueueRecord(e, { type: 'queued_input', msg_id: 'me' }, io, 'parse');
+    MA.noteQueueEdit(e, 'q-me', '/model sonnet'); MA.noteQueueRecord(e, { type: 'queue_op_result', op: 'edit', id: 'q-me', ok: true, msg_id: 'me' }, io, 'parse');
+    const rearmed = e._typedModel;
+    MA.noteQueueRecord(e, { type: 'queue_changed', items: [] }, io, 'parse'); MA.noteForwarded(e, { type: 'input_forwarded', msg_id: 'me' }, 'parse', io);
+    res(e, 'ed-1', { num_turns: 0, local_command: 'model', result: 'Set model to `Sonnet 5.5` for this session only' });
+    const e2 = sess({ sockName: 'cw-edit2' }); MA.noteTypedModel(e2, '/model opus', { msgId: 'me2', inTurn: true, ...io }); MA.noteQueueRecord(e2, { type: 'queued_input', msg_id: 'me2' }, io, 'parse');
+    MA.noteQueueEdit(e2, 'q-me2', 'never mind, keep going'); MA.noteQueueRecord(e2, { type: 'queue_op_result', op: 'edit', id: 'q-me2', ok: true, msg_id: 'me2' }, io, 'parse');
+    ok('§ask AN EDITED HELD /model IS THE EDITED COMMAND (round 9 — the r8 verifier\'s c2e): «/model opus» edited into «/model sonnet» is re-armed with sonnet; the CLI\'s «Set model to `Sonnet 5.5`» moves the ask there, the lock follows (nothing sends fable[1m] back), the saved config says sonnet; an edit into a plain message voids the arm', rearmed === 'sonnet' && MA.modelFacts(e).askedModel === 'sonnet' && e._lockedModel === 'sonnet' && (cfgOf('claude:conv-edit') || {}).model === 'sonnet' && !e2._typedModel, JSON.stringify({ rearmed, facts: MA.modelFacts(e), cfg: cfgOf('claude:conv-edit'), e2: e2._typedModel || null }));
+    // SMALL 2 (round 9 defect fix): ONE VERDICT PER RECORD — a conversation fed by BOTH feeds hands the same «edit ok» record over
+    // twice; the second copy is the same record (its text already taken), never a second edit that voids the re-armed arm
+    const e3 = sess({ sockName: 'cw-edit3' }); MA.noteTypedModel(e3, '/model opus', { msgId: 'me3', inTurn: true, ...io });
+    MA.noteQueueRecord(e3, { type: 'queued_input', msg_id: 'me3' }, io, 'parse'); MA.noteQueueRecord(e3, { type: 'queued_input', msg_id: 'me3' }, io, 'device');
+    MA.noteQueueEdit(e3, 'q-me3', '/model sonnet');
+    const okRec = { type: 'queue_op_result', op: 'edit', id: 'q-me3', ok: true, msg_id: 'me3' };
+    MA.noteQueueRecord(e3, { ...okRec }, io, 'parse'); const afterFirst = e3._typedModel;
+    MA.noteQueueRecord(e3, { ...okRec }, io, 'device'); const afterCopy = e3._typedModel;
+    // …and a SECOND real edit of the same frame (a new id) is still judged — the key is the record, not the frame
+    MA.noteQueueEdit(e3, 'q-me3b', '/model haiku'); MA.noteQueueRecord(e3, { ...okRec, id: 'q-me3b' }, io, 'device'); const afterSecond = e3._typedModel;
+    MA.noteQueueRecord(e3, { ...okRec, id: 'q-me3b' }, io, 'parse');
+    ok('§ask ONE VERDICT PER RECORD (round 9 defect fix, small 2): an edited held /model on a conversation fed by BOTH feeds — the second feed\'s copy of the same «edit ok» record is the same record: the re-armed arm stands (sonnet), never voided; a second edit (its own record) re-arms again (haiku) and ITS copy changes nothing', afterFirst === 'sonnet' && afterCopy === 'sonnet' && afterSecond === 'haiku' && e3._typedModel === 'haiku', JSON.stringify({ afterFirst, afterCopy, afterSecond, now: e3._typedModel }));
+  }
+  // ── ROUND 9: a conversation that asks for NOTHING (a bare resume: the CLI's default) is held to the model the CLI says it runs ──
+  {
+    const h = hub(); const n = h.add('noask', { _spawnModel: null, _modelOrigin: null });
+    MA.noteCliModel(n, 'claude-opus-5-5', io); MA.noteServed(n, 'claude-haiku-4-5', { recId: 'na-1', feed: 'parse', ...io });   // a fallback served under it
+    const before = MA.modelFacts(n);
+    h.send('noask', { lock: true });
+    const after = MA.modelFacts(n);
+    ok('§ask NOTHING ASKED (round 9): the Lock targets the model the CLI says it runs (`cliModel`, each live init — what master locks there), never the fallback that served last; and that lock moves no yardstick, so it takes NO number — the standing fallback is still one (servedSeq > askSeq)', after.modelLocked && after.lockedModel === 'claude-opus-5-5' && after.askSeq === before.askSeq && after.servedSeq > after.askSeq && before.cliModel === 'claude-opus-5-5', JSON.stringify({ before, after }));
+    h.send('noask', { lock: false });
+    const unl = MA.modelFacts(n);
+    ok('§ask …and the Unlock back to nothing takes none either (the yardstick is the CLI\'s model before and after)', !unl.modelLocked && unl.askSeq === before.askSeq && unl.askedModel === null, JSON.stringify(unl));
+  }
+  // ── ROUND 9 LAW 3: a typed /model on a REMOTE conversation is never followed wrongly — the REAL wrapper in OFFSET mode ──
+  // data/bin/chat-wrapper.js with VIBESPACE_REMOTE_SID over a stub keeper (the vibespace-remote-keeper protocol: the wrapper reads the
+  // remote buffer from __VS_OFFSET__). «/model sonnet» reaches the remote CLI and the ssh pipe drops before its answer comes back
+  // (the CLI meanwhile answers it and runs FOUR turns on its own); «/model opus» is sent during the reconnect (queued, flushed at the
+  // reconnect); the keeper replays, then answers opus. The wrapper's records feed model-ask as the parse does; its BUFFER is replayed
+  // through a fresh normalizer as a re-attach does.
+  {
+    const { spawn } = require('node:child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-fablestorm-offset-')); cleanup.push(dir);
+    const keeper = path.join(dir, 'keeper.cjs');
+    fs.writeFileSync(keeper, `const fs = require('fs'); const off = Number(process.argv[2]) || 0; const BUF = process.env.STUB_BUF;
+const rec = (o) => JSON.stringify(o) + '\\n';
+const ack = (k, label) => { const ans = 'Set model to \\u0060' + label + '\\u0060 for this session only'; return rec({ type: 'system', subtype: 'init', model: 'claude-fable-5-2', session_id: 'rs' }) + rec({ type: 'assistant', uuid: 's' + k, message: { id: 'syn' + k, model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: ans }] } }) + rec({ type: 'result', subtype: 'success', num_turns: 0, local_command: 'model', uuid: 'ra' + k, result: ans }); };
+const turn = (k, model) => rec({ type: 'system', subtype: 'init', model, session_id: 'rs' }) + rec({ type: 'assistant', uuid: 'a' + k, message: { id: 'msg_' + k, model, role: 'assistant', content: [{ type: 'text', text: 't' + k }] } }) + rec({ type: 'result', subtype: 'success', num_turns: 1, uuid: 'r' + k, result: 'ok' });
+const textOf = (o) => { const c = o.message && o.message.content; return typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => b.text || '').join('') : ''; };
+let lb = ''; const lines = (fn) => process.stdin.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); let o; try { o = JSON.parse(l); } catch { continue; } if (o.type === 'user') fn(textOf(o).trim()); } });
+if (off === 0) { const first = turn(1, 'claude-fable-5-2'); fs.writeFileSync(BUF, first); process.stdout.write(first);
+  lines((t) => { if (t === '/model sonnet') { let own = ack(2, 'Sonnet 5.5'); for (let k = 3; k < 7; k++) own += turn(k, 'claude-fable-5-2'); fs.appendFileSync(BUF, own); setTimeout(() => process.exit(255), 50); } }); }
+else { process.stdout.write(Buffer.from(fs.readFileSync(BUF)).subarray(off)); lines((t) => { if (t === '/model opus') { const a = ack(9, 'Opus 5.5'); fs.appendFileSync(BUF, a); process.stdout.write(a); } }); }
+`);
+    const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, keeper, '__VS_OFFSET__'], { cwd: dir, env: { PATH: '/usr/bin:/bin', HOME: dir, VIBESPACE_REMOTE_SID: 'rs1', VIBESPACE_SKIP_AGENT_HOOKS: '1', STUB_BUF: path.join(dir, 'remote.buf') }, stdio: ['pipe', 'pipe', 'ignore'] });
+    const recs = []; let lb = '', sentS = false, sentO = false;
+    const frame = (text, id) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, webui_msg_id: id }) + '\n';
+    await new Promise((resolve) => { const t = setTimeout(resolve, 9000); w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); let r; try { r = JSON.parse(l); } catch { continue; } recs.push(r);
+      if (!sentS && r.type === 'result' && Number(r.num_turns) === 1) { sentS = true; w.stdin.write(frame('/model sonnet', 'm2')); }
+      if (!sentO && r.type === '_remote_state' && r.state === 'reconnecting') { sentO = true; w.stdin.write(frame('/model opus', 'm3')); }
+      if (r.type === 'result' && Number(r.num_turns) === 0 && recs.filter((x) => x.type === 'result' && Number(x.num_turns) === 0).length >= 2) { clearTimeout(t); setTimeout(resolve, 50); } } }); });
+    await new Promise((resolve) => { w.on('exit', resolve); try { w.kill('SIGTERM'); } catch { resolve(); } setTimeout(resolve, 3000); });
+    const order = recs.map((r) => (r.type === '_remote_state' ? 'remote:' + r.state : r.type === 'input_forwarded' ? 'MARK ' + r.msg_id : r.type === 'model_across_reconnect' ? 'ACROSS ' + r.msg_id + ' ' + r.model : r.type === 'result' ? 'result' + r.num_turns : null)).filter(Boolean);
+    const at = (x, from = 0) => order.indexOf(x, from);
+    const iS = at('ACROSS m2 sonnet'), iRe = at('remote:reconnecting'), iO = at('ACROSS m3 opus'), iM3 = at('MARK m3'), iConn = at('remote:connected', iRe), iOld = at('result1', iConn);
+    const bufLines = (() => { try { return fs.readFileSync(path.join(dir, 's.buf'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } })();
+    const inBuf = bufLines.filter((r) => r.type === 'model_across_reconnect').map((r) => `${r.msg_id} ${r.model}`);
+    ok('§ask LAW 3 (round 9): the REAL wrapper in OFFSET mode RECORDS a /model it cannot vouch for — «/model sonnet» still unanswered when the pipe dropped (before `_remote_state: reconnecting`); «/model opus», typed while the pipe was down and held behind sonnet\'s turn, before its own mark — written INTO the replay of the four turns the CLI ran before it — into its BUFFER, so the conversation keeps both', iS >= 0 && iS < iRe && iRe < iConn && iConn < iO && iO < iM3 && iM3 < iOld && inBuf.join() === 'm2 sonnet,m3 opus', order.join(' · ') + ' | buffer: ' + inBuf.join());
+    const judge = (mode) => {
+      const ms = {}, io2 = { readSessionMeta: (k) => ms[k] || {}, writeSessionMeta: (k, x) => { ms[k] = x; } }, said = [];
+      MA.useNotice((s, models) => said.push(...models));
+      const S = sess({ sockName: 'cw-offset', backendSessionId: 'rs' });
+      for (const r of recs) {
+        if (r.type === 'model_across_reconnect' && mode === 'tree') MA.noteAcrossReconnect(S, r, io2);
+        if (r.type === '_remote_state' && mode !== 'r8') MA.noteRemoteState(S, r.state, io2);
+        // the hub arms a typed /model at the person's SEND: sonnet just before its mark (sent idle), opus when the pipe was down
+        if (r.type === '_remote_state' && r.state === 'reconnecting' && !S.__m3) { S.__m3 = 1; MA.noteTypedModel(S, '/model opus', { msgId: 'm3', inTurn: true, ...io2 }); }
+        if (r.type === 'input_forwarded') { if (r.msg_id === 'm2' && !S.__m2) { S.__m2 = 1; MA.noteTypedModel(S, '/model sonnet', { msgId: 'm2', inTurn: false, ...io2 }); } MA.noteForwarded(S, r, 'parse', io2); }
+        if (r.type === 'assistant' && r.message.model !== '<synthetic>') { S._servedModel = r.message.model; MA.noteServed(S, r.message.model, { recId: r.message.id, feed: 'parse', ...io2 }); }
+        if (r.type === 'result') MA.noteFeedResult(S, 'parse', io2, r);
+      }
+      MA.useNotice(null);
+      return { ask: MA.modelFacts(S).askedModel, arm: S._typedModel || null, said };
+    };
+    const cur = judge('tree'), older = judge('older'), r8 = judge('r8');
+    const MMR = require(path.join(REPO, 'src/normalizers.js')), mm = MMR.createMessageManager('claude', 'w-offset'); const notes = [];
+    mm.onOp?.((op) => { if (op.op === 'create' && op.message && op.message.noticeKind === 'model-across-reconnect') notes.push(op.message.content[0].acrossModel); });
+    for (const r of bufLines) { try { mm.processLive(r); } catch { } }
+    const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8'), cvw = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), zhS = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaS = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const KEY = "/model {model} reached Claude Code across a reconnect to the remote machine";
+    // …and the parse hands both records to model-ask (the judge above calls it the same way): its own lines, pinned
+    const ps3 = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8');
+    const wired3 = /if \(msg\.type === 'model_across_reconnect'\) \{ try \{ require\('\.\.\/model-ask\.js'\)\.noteAcrossReconnect\(session, msg, /.test(ps3) && /require\('\.\.\/model-ask\.js'\)\.noteRemoteState\(session, msg\.state, /.test(ps3);
+    ok('§ask LAW 3 …neither command is judged by records older than itself: both arms are VOID at the wrapper\'s record and the hub says nothing of its own — the ask stays fable[1m] (the parse hands `model_across_reconnect` and `_remote_state` to model-ask: its lines pinned)', cur.ask === 'fable[1m]' && !cur.arm && cur.said.length === 0 && wired3, JSON.stringify({ cur, wired3 }));
+    ok('§ask LAW 3 …the line is IN the conversation: the buffer, replayed through a fresh normalizer as a re-attach does, gives one notice per command (sonnet, opus) — rendered in the person\'s language (chat-renderers on noticeKind, zh and ja entries)', notes.join() === 'sonnet,opus' && /noticeKind === 'model-across-reconnect'/.test(cr) && zhS.includes(KEY) && jaS.includes(KEY), JSON.stringify(notes));
+    ok('§ask LAW 3 …a wrapper that records none (older) is still never followed wrongly: the gap rule voids both, and every attached client SAYS it in its language (chat-view\'s model-across-reconnect line)', older.ask === 'fable[1m]' && !older.arm && older.said.join() === 'sonnet,opus' && /op\.subtype === 'model-across-reconnect'/.test(cvw), JSON.stringify(older));
+    ok('§ask LAW 3 CONTROL — the r8 code (no record, no gap rule): the same records lose opus SILENTLY — the bound ends its arm on the replayed turns before the CLI\'s own acknowledgment, nothing is said', r8.ask !== 'opus' && !r8.arm && r8.said.length === 0, JSON.stringify(r8));
+    fs.rmSync(dir, { recursive: true, force: true });   // the wrapper and its keeper are gone: the scratch dir with them
+  }
+  // MUST 3: DECLARED, never inferred — the capability row says whether a harness's server states these facts
+  {
+    const caps = require(path.join(REPO, 'src/backend-caps.js'));
+    const rows = Object.fromEntries(Object.keys(caps.BACKEND_CAPS).map((id) => [id, caps.BACKEND_CAPS[id].modelFacts]));
+    const sentCodex = []; MA.broadcastFacts(sess({ backend: 'codex' }), 'web-cx', (x, id, fr) => sentCodex.push(fr));
+    ok('§ask MUST 3: every harness row DECLARES `modelFacts` (claude true; codex, opencode, antigravity, shell false; a contributed row false) — model-ask reads that row and nothing else', rows.claude === true && Object.entries(rows).every(([id, v]) => typeof v === 'boolean' && (id === 'claude') === v) && caps.capsOf('nope-contributed').modelFacts === false && MA.declares(sess()) && !MA.declares(sess({ backend: 'codex' })) && !MA.declares(sess({ backend: 'opencode' })), JSON.stringify(rows));
+    ok('§ask MUST 3 …a harness that declares none is told no facts and arms nothing: no model-facts op for codex, a /model typed in codex is not armed (codex keeps the model its live init names)', !sentCodex.length && !MA.noteTypedModel(sess({ backend: 'codex' }), '/model gpt-5.1-codex') && !MA.noteTypedModel(sess({ backend: 'opencode' }), '/model x'));
+  }
+  // LAW C + no clock (MUST 6: the text leg made TRUE, with its control)
+  const csj = fs.readFileSync(path.join(REPO, 'src/server/stdout/claude-stream-json.js'), 'utf8'), maSrc = fs.readFileSync(path.join(REPO, 'src/server/model-ask.js'), 'utf8');
+  ok('§ask LAW C: the stdout consumer reads no `/model` echo — no parser, no noteEchoAsk, no echo-text lock upgrade (A5 deleted)', !/parseSetModelEcho|noteEchoAsk|_lockedModel = echo\.id/.test(csj));
+  const readsClock = (src) => /\bDate\b|performance\.now|process\.hrtime|\.timestamp\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''));
+  ok('§ask LAW B: model-ask.js reads NO clock at all — no Date, no performance.now, no hrtime, no record timestamp (the pick\'s time is handed in by its caller)', !readsClock(maSrc) && /const bump = /.test(maSrc));
+  ok('§ask CONTROL: the same predicate over a copy with `Date.now()` planted in noteServed names it', readsClock(maSrc.replace('session._servedSeq = bump(session);', 'session._servedSeq = bump(session); session._t = Date.now();')));
+  // the wiring
+  {
+    const s1 = sess({ _askSeq: 3, _modelSeq: 5, _servedFactModel: 'claude-opus-5-5', _servedSeq: 5 });
+    const sent = []; MA.broadcastFacts(s1, 'web-1', (x, id, frame) => sent.push([id, frame]));
+    ok('§ask broadcastFacts: ONE `model-facts` meta op — the facts, saying they are declared — to every client of the conversation', sent.length === 1 && sent[0][0] === 'web-1' && JSON.stringify(sent[0][1]) === JSON.stringify({ type: 'msg', sessionId: 'web-1', op: 'meta', subtype: 'model-facts', data: { modelFacts: true, askedModel: 'fable[1m]', askSeq: 3, modelLocked: false, lockedModel: null, servedModel: 'claude-opus-5-5', servedSeq: 5, askRefused: null, cliModel: null, askPicked: false } }), JSON.stringify(sent));
+    const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8'), sbSrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
+    const W = {
+      setModel: wsSrc.includes('MA.askAfter(s3, ask0, { readSessionMeta, writeSessionMeta }, { picked: !!model }); MA.broadcastFacts(s3, data.sessionId, broadcastToSession);'),
+      arm: wsSrc.includes("if (sT) require('./server/model-ask.js').noteTypedModel(sT, data.text, { msgId: r.msgId || data.msgId, inTurn: typedInTurn, readSessionMeta, writeSessionMeta });") && /const typedInTurn = [^\n]*conversationInTurn\(/.test(wsSrc),
+      served: engSrc.includes('if (MA.noteServed(session, model, { modelsMatch, now: Date.now(), recId: (rec && (rec.message?.id || rec.uuid)) || null, feed,'),
+      turnEnd: /function noteTurnEnd\(session, rec = null\) \{\n[^\n]*\n  try \{\n    const MA = require\('\.\/model-ask\.js'\);\n    if \(MA\.noteTurnEnd\(session,/.test(engSrc),
+      queueParse: csj.includes("if (msg.type === 'queued_input' || msg.type === 'queue_changed' || msg.type === 'queue_op_result') { try { require('../model-ask.js').noteQueueRecord(session, msg, { readSessionMeta, writeSessionMeta }, 'parse'); } catch { } }") && csj.includes("require('../model-ask.js').noteControlResponse(session, msg, 'parse',") && csj.includes("noteServedModel(session, msg.message.model, msg, 'parse');") && csj.includes("require('../model-ask.js').noteForwarded(session, msg, 'parse',") && csj.includes("require('../model-ask.js').noteFeedResult(session, 'parse',"),
+      queueDevice: sbSrc.includes("noteServedModel(session, msg.message.model, msg, 'device');") && fs.readFileSync(path.join(REPO, 'server.js'), 'utf8').includes("sbPreGate(sess, rec); if (sbSeenFirst(sess, rec)) claudeSideEffects(") && sbSrc.includes("if (rec.type === 'result') MA.noteFeedResult(session, 'device', io, rec); else if (rec.type === 'control_response') MA.noteControlResponse(session, rec, 'device', io); else MA.noteForwarded(session, rec, 'device', io);") && sbSrc.includes("if (msg.type === 'queued_input' || msg.type === 'queue_changed' || msg.type === 'queue_op_result') { try { require('./model-ask.js').noteQueueRecord(session, msg, {") && /function sbSeenFirst\(session, rec\) \{\n[^\n]*\n[^\n]*\n  if \(rec && \(rec\.type === 'queued_input' \|\| rec\.type === 'queue_changed'[^\n]*\)\) return true;/.test(sbSrc),
+      restore: brSrc.split('hydratedFacts(meta)').length - 1 === 3,
+    };
+    ok('§ask the WIRING: ws-handler set-model moves + tells the ask, chat-input arms a typed /model with its message id and whether a turn ran, the engine\'s noteServedModel (both feeds\' one consumer) numbers the served fact, BOTH feeds hand the wrapper\'s queue records, the CLI\'s acknowledgments and the picks\' control responses to model-ask (round 8: the ack judges an arm), boot-restore hydrates at its three sites', Object.values(W).every(Boolean), JSON.stringify(W));
+  }
+  // ── r7 MUST 2: BOTH FEEDS, ONE VERDICT ON THE ARM — the verdict's own turn, every lag 0…10, device ahead AND parse ahead, with and
+  // without duplicates; the real model-ask + session-brain's own first-seen gate, each feed handled as claude-stream-json / server.js do
+  {
+    const okc = (c, n, e) => ok(n, c, e);
+    const sbSrc2 = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8'), a2 = sbSrc2.indexOf('function sbSeenFirst(session, rec) {'), e2 = sbSrc2.indexOf('\n}\n', a2);
+    const seenFirst = new Function('SB_SEEN_MAX', sbSrc2.slice(a2, e2 + 2) + '\nreturn sbSeenFirst;')(5000);
+    const MP = require(path.join(REPO, 'src/model-providers.js'));
+    let n = 0;
+    const ast = (model) => ({ type: 'assistant', uuid: 'u' + (++n), message: { id: 'msg' + n, model, role: 'assistant' } });
+    const scene = (k, deviceAhead, dup) => {
+      n = 0;
+      // 2.1.321 AS MEASURED (round 8, probe/typed-model-v321.jsonl): the command's answer is a «<synthetic>» record and a result with
+      // num_turns 0 — every result carries the CLI's own uuid
+      const recs = [{ type: 'queued_input', msg_id: 'mm' }, { type: 'queue_changed', items: [{ msgId: 'mm' }] }, ...Array.from({ length: 6 }, () => ast('claude-fable-5-2')), { type: 'result', num_turns: 1, uuid: 'res-1' },
+        { type: 'queue_changed', items: [] }, { type: 'input_forwarded', msg_id: 'mm' }, { type: 'assistant', uuid: 'syn', message: { id: 'syn', model: '<synthetic>', role: 'assistant' } }, { type: 'result', num_turns: 0, uuid: 'res-ack' }, ...Array.from({ length: 4 }, () => ast('claude-opus-5-5')), { type: 'result', num_turns: 1, uuid: 'res-2' }];
+      const s = sess({ sockName: 'cw-lag' }); MA.noteServed(s, 'claude-fable-5-2', { ...io, recId: 'pre' });
+      MA.noteTypedModel(s, '/model opus', { msgId: 'mm', inTurn: true, ...io });
+      const parseQ = recs.flatMap((r) => (dup && r.type === 'assistant' ? [r, r] : [r])), devQ = recs.slice();
+      const parse = (r) => { seenFirst(s, r); if (r.type === 'input_forwarded' && MA.noteForwarded) MA.noteForwarded(s, r, 'parse', io); if (r.type === 'queued_input' || r.type === 'queue_changed') MA.noteQueueRecord(s, r, io, 'parse'); if (r.type === 'assistant' && r.message.model !== '<synthetic>') MA.noteServed(s, r.message.model, { ...io, recId: r.message.id, feed: 'parse' }); if (r.type === 'result') { if (MA.noteFeedResult) MA.noteFeedResult?.(s, 'parse', io, r); MA.noteTurnEnd(s, io); } };
+      const device = (r) => { if (r.type === 'result' && MA.noteFeedResult) MA.noteFeedResult?.(s, 'device', io, r); if (r.type === 'input_forwarded' && MA.noteForwarded) MA.noteForwarded(s, r, 'device', io); if (!seenFirst(s, r)) return; if (r.type === 'queued_input' || r.type === 'queue_changed') MA.noteQueueRecord(s, r, io, 'device'); if (r.type === 'assistant' && r.message.model !== '<synthetic>') MA.noteServed(s, r.message.model, { ...io, recId: r.message.id, feed: 'device' }); };
+      const [lead, lag, leadQ, lagQ] = deviceAhead ? [device, parse, devQ, parseQ] : [parse, device, parseQ, devQ];
+      for (let i = 0; i < k && leadQ.length; i++) lead(leadQ.shift());
+      while (leadQ.length || lagQ.length) { if (lagQ.length) lag(lagQ.shift()); if (leadQ.length) lead(leadQ.shift()); }
+      const f = MA.modelFacts(s);
+      return { ask: f.askedModel, amber: f.servedSeq > f.askSeq && !MP.modelHeld(f.askedModel, f.servedModel) };
+    };
+    const bad = [];
+    for (const deviceAhead of [true, false]) for (const dup of [false, true]) for (let k = 0; k <= 10; k++) { const r = scene(k, deviceAhead, dup); if (r.ask !== 'opus' || r.amber) bad.push(`${deviceAhead ? 'device' : 'parse'} ahead by ${k}${dup ? ' (duplicates)' : ''}: ask ${r.ask}${r.amber ? ', AMBER' : ''}`); }
+    okc(bad.length === 0, '§ask r7 MUST 2: /model typed mid-turn, both feeds, EVERY lag 0…10 with the device ahead AND the parse ahead, with and without duplicate records — the ask is opus, plain, in all 44 orders (one verdict per record: a copy the other feed hands over later is not judged again, and only the CLI\'s acknowledgment after the frame reached the CLI judges the arm)', bad.join(' | '));
+  }
+  // ── r6 ── the r5 verdict's items, each against the real code (condition FIRST here: okc)
+  {
+    const okc = (c, n, e) => ok(n, c, e);
+    try {
+    const MP = require(path.join(REPO, 'src/model-providers.js'));
+    // MUST 3: a typed /model survives a hub restart — the arm is persisted with what it needs and hydrated at the three sites
+    {
+      const s = sess({ sockName: 'cw-arm' }); MA.noteServed(s, 'claude-fable-5-2', io);
+      MA.noteTypedModel(s, '/model opus', { msgId: 'm-arm', inTurn: false, ...io });
+      const meta = metas['cw-arm'];
+      const back = { backend: 'claude', _spawnModel: 'fable[1m]', ...MA.hydratedFacts(meta) };
+      MA.noteForwarded(back, { type: 'input_forwarded', msg_id: 'm-arm' }, 'parse', io); MA.noteFeedResult(back, 'parse', io, { type: 'result', num_turns: 0, uuid: 'ack-arm' }); MA.noteServed(back, 'claude-opus-5-5', io);   // after the restart: its mark, the CLI's acknowledgment, then opus
+      const r5back = { backend: 'claude', _spawnModel: 'fable[1m]', _askSeq: Number(meta.askSeq) || 0, _modelSeq: Number(meta.modelSeq) || 0, _servedFactModel: meta.factServedModel || null, _servedSeq: Number(meta.factServedSeq) || 0 };
+      MA.noteServed(r5back, 'claude-opus-5-5', io);
+      okc(meta.typedModel === 'opus' && meta.typedMsgId === 'm-arm' && back._typedModel === null && MA.modelFacts(back).askedModel === 'opus' && MA.modelFacts(r5back).askedModel === 'fable[1m]' && MA.modelFacts(r5back).servedSeq > MA.modelFacts(r5back).askSeq,
+        '§ask MUST 3 (r6): a /model typed while idle, then a hub RESTART (boot-restore\'s hydratedFacts over the meta), then the CLI acknowledges it (opus served after) ⇒ confirmed: the ask is opus; CONTROL: r5\'s hydration (no arm) ⇒ the ask stays fable[1m] while opus serves after it (a false fallback for ever)', JSON.stringify({ meta, back: MA.modelFacts(back), r5: MA.modelFacts(r5back) }));
+    }
+    // MUST 4: the device feed hands over EVERY queue record (they carry no id: the first-seen key collided)
+    {
+      const sbSrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8'), at = sbSrc.indexOf('function sbSeenFirst(session, rec) {'), end = sbSrc.indexOf('\n}\n', at);
+      const seenFirst = new Function('SB_SEEN_MAX', sbSrc.slice(at, end + 2) + '\nreturn sbSeenFirst;')(5000);
+      const r6 = {}, pass6 = [{ type: 'queued_input', msg_id: 'm1' }, { type: 'queue_changed', items: [{ msgId: 'm1' }] }, { type: 'queue_changed', items: [] }, { type: 'queue_changed', items: [] }].map((r) => seenFirst(r6, r));
+      const ctrl = new Function('SB_SEEN_MAX', sbSrc.slice(at, end + 2).replace(/\n  \/\/ the wrapper's QUEUE records[^\n]*\n[^\n]*\n  if \(rec && \(rec\.type === 'queued_input' \|\| rec\.type === 'queue_changed'[^\n]*\)\) return true;/, '') + '\nreturn sbSeenFirst;')(5000);
+      const r5 = {}, pass5 = [{ type: 'queue_changed', items: [{ msgId: 'm1' }] }, { type: 'queue_changed', items: [] }].map((r) => ctrl(r5, r));
+      okc(pass6.every(Boolean) && pass5.join() === 'true,false' && seenFirst({}, { uuid: 'u1', type: 'assistant' }) === true,
+        '§ask MUST 4 (r6): the device feed\'s first-seen gate passes EVERY queue record (four in a row) — CONTROL: without the rule the second queue_changed (the release) is dropped, its key collides', JSON.stringify({ pass6, pass5 }));
+    }
+    // MUST 5: ONE rule for «is this the model that was asked» — the chip, the repin and the typed confirm; placement keeps its own
+    {
+      const engSrc2 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+      const fn2 = (head) => { const a = engSrc2.indexOf(head); const e = a < 0 ? -1 : engSrc2.indexOf('\n}\n', a); return a < 0 || e < 0 ? '' : engSrc2.slice(a, e + 2); };
+      const writes = [];
+      const R = new Function('adapterRegistry', 'global', 'require', fn2('function modelsMatch(a, b) {') + '\n' + fn2('function maybeRepinLockedModel(session) {') + '\nreturn { maybeRepinLockedModel };')({ get: () => ({ formatSetModel: (m) => m }) }, { __vsEvent: () => {} }, createRequire(path.join(REPO, 'src/server/usage-pool-engine.js')));
+      R.maybeRepinLockedModel({ _modelLocked: true, _lockedModel: 'claude-opus-5-5', _servedModel: 'claude-opus-5', mode: 'chat', backend: 'claude', pty: { write: (x) => writes.push(x) } });
+      R.maybeRepinLockedModel({ _modelLocked: true, _lockedModel: 'fable[1m]', _servedModel: 'claude-fable-5-2', mode: 'chat', backend: 'claude', pty: { write: (x) => writes.push(x) } });
+      const t = sess({ sockName: 'cw-full' }); MA.noteServed(t, 'claude-fable-5-2', io); MA.noteTypedModel(t, '/model claude-opus-5-5', { msgId: 'm-f' }); MA.noteForwarded(t, { type: 'input_forwarded', msg_id: 'm-f' }, 'parse', io); MA.noteFeedResult(t, 'parse', io, { type: 'result', num_turns: 0, uuid: 'ack-f' }); MA.noteServed(t, 'claude-opus-5', io);
+      okc(writes.length === 1 && writes[0].startsWith('claude-opus-5-5') && MA.modelFacts(t).askedModel === 'claude-opus-5-5' && !t._typedModel && MA.modelFacts(t).servedSeq > MA.modelFacts(t).askSeq && !MP.modelHeld(MA.modelFacts(t).askedModel, MA.modelFacts(t).servedModel) && MP.modelHeld('fable[1m]', 'claude-fable-5-2') && !MP.modelHeld('claude-opus-5-5', 'claude-opus-5'),
+        '§ask MUST 5 (r6): ONE rule (model-providers modelHeld) — a lock on claude-opus-5-5 served claude-opus-5 IS re-pinned (an alias lock served its family is not); a typed full id the CLI took is the ask, and its shorter cousin served after it is a FALLBACK (the chip, the repin and the ask agree)', JSON.stringify({ writes, ask: MA.modelFacts(t).askedModel }));
+      const placement = ["if (fb && fb.to && !modelsMatch(model, fb.to))", "return !modelsMatch(s._servedModel, fb.to);", "modelsMatch(s._lockedModel, s._servedViaFallback.to)"];
+      okc(placement.every((x) => engSrc2.includes(x)), '§ask MUST 5 …pool placement keeps the rule it reads — usage-pool-engine modelsMatch (the prefix rule) for the reroute stamp\'s retirement, servedDefinesModel and the lock-vs-reroute belt; nothing measured asks to change it');
+    }
+    // MUST 6: numbers never go backwards after a restart — the counter is the maximum of every persisted number, garbage is zero
+    {
+      const H = (m) => MA.hydratedFacts(m);
+      const table = [H({ askSeq: 7 })._modelSeq, H({ modelSeq: 3, factServedSeq: 9 })._modelSeq, H({ askSeq: 'x', modelSeq: -4, factServedSeq: Infinity })._modelSeq, H({ askSeq: 2.7 })._askSeq, H(null)._modelSeq];
+      const after = { backend: 'claude', _spawnModel: 'fable[1m]', ...H({ askSeq: 7, factServedSeq: 9, factServedModel: 'claude-opus-5-5' }) }; MA.askMoved(after, {});
+      okc(table.join() === '7,9,0,2,0' && after._askSeq === 10, '§ask MUST 6 (r6): a restart hydrates the counter as the MAXIMUM of every persisted number (an ask number without the counter ⇒ 7; a served number above it ⇒ 9), garbage as 0 — so the next move is numbered above everything a bar has seen (10)', JSON.stringify({ table, next: after._askSeq }));
+    }
+    // MUST 8 + THE LAW on the server: a bare lock with nothing to lock is refused with words; an ask-less conversation's lock moves
+    // the ask from nothing to its served model (and so takes a number — said); EVERY passed frame is answered to its sender
+    {
+      const h = hub(), bare = h.add('bare', { _spawnModel: null });
+      h.send('bare', { lock: true });
+      const refused = h.replies.length === 1 && h.replies[0][1].code === 'model-refused' && /nothing to lock yet/.test(h.replies[0][1].message) && !bare._modelLocked && !h.frames.length;
+      const h2 = hub(), dl = h2.add('dl', { _spawnModel: null }); MA.noteServed(dl, 'claude-fable-5-2', io); const n0 = dl._askSeq || 0;
+      h2.send('dl', { lock: true });
+      okc(refused && dl._lockedModel === 'claude-fable-5-2' && MA.modelFacts(dl).askedModel === 'claude-fable-5-2' && dl._askSeq > n0,
+        '§ask MUST 8 (r6): a bare lock frame with NOTHING served yet is refused with words («nothing to lock yet»), nothing changes; a conversation that asks nothing locks its served model — the ask moves from nothing to it and TAKES a number (the one lock that does)', JSON.stringify({ replies: h.replies, dl: MA.modelFacts(dl) }));
+      const h3 = hub(), rp = h3.add('rp'); h3.send('rp', { model: 'fable[1m]' }, 'A'); const seqAfterFirst = MA.modelFacts(rp).askSeq; h3.send('rp', { model: 'fable[1m]' }, 'A');
+      const answers = h3.replies.filter(([, f]) => f.subtype === 'model-answer');
+      okc(answers.length === 2 && answers.every(([from, f]) => from === 'A' && f.data.ok === true && f.data.facts && f.data.facts.modelFacts === true) && answers[1][1].data.facts.askSeq === seqAfterFirst && MA.modelFacts(rp).askSeq === seqAfterFirst,
+        '§ask THE LAW (r6): EVERY set-model frame that passed the door is ANSWERED to its sender — the facts as they stand, even a re-pick of the model already asked (its number does not move): a client\'s pending mark always ends', JSON.stringify(answers.map(([, f]) => f.data)));
+      const h4 = hub(), cx = h4.add('cx', { backend: 'codex' }); h4.send('cx', { model: 'gpt-5.1-codex' });
+      okc(h4.replies.length === 1 && h4.replies[0][1].subtype === 'model-answer' && h4.replies[0][1].data.facts === null && !h4.frames.length, '§ask …a harness that declares no facts is answered too (no facts: the frame was taken) and is told no facts');
+    }
+    // the create / resume road passes the SAME door; the client sends no saved model the door would refuse
+    {
+      const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+      okc(/const bad = \['model', 'lockModel'\]\.find\(\(k\) => data\[k\] != null && data\[k\] !== '' && !MP\.namedModel\(data\[k\]\)\);/.test(wc) && /code: 'model-refused', reason: 'create-not-a-model-id', field: bad, reqId: data\.reqId/.test(wc) && /const sessionModel = \(modelPick\.value && !namedModel\(modelPick\.value\)\) \? undefined : modelPick\.value;/.test(sl) && MP.namedModel('opus 5') === null,
+        '§ask (c) the create / resume road passes the SAME door (ws-create: a model or lock target that is no model id refuses the create, said, with its request named); the client sends no saved model that door would refuse');
+    }
+    // the panel's two suspicions, each pinned
+    {
+      // (i) an OLD wrapper (before the mid-turn queue, .354: no queue records) — a text message queued, then /model, in one turn
+      const o = sess({ sockName: 'cw-old' }); MA.noteServed(o, 'claude-fable-5-2', io);
+      MA.noteTypedModel(o, '/model opus', { msgId: 'm-old', inTurn: true });
+      MA.noteServed(o, 'claude-fable-5-2', io); MA.noteFeedResult?.(o, 'parse', io); MA.noteTurnEnd(o, io);   // the running turn ends: no queued_input ever came
+      MA.noteServed(o, 'claude-fable-5-2', io); MA.noteFeedResult?.(o, 'parse', io);   // the queued TEXT runs first (the CLI's own queue), old model, its result
+      MA.noteServed(o, 'claude-opus-5-5', io);                         // then the /model, then opus
+      const of = MA.modelFacts(o);
+      okc(of.askedModel === 'fable[1m]' && of.servedModel === 'claude-opus-5-5' && of.servedSeq > of.askSeq,
+        '§ask SUSPICION (i), PINNED as a residual: an OLD wrapper (no queue records — pre-.354) with a text message queued before the /model drops the arm on the text turn, and opus then reads as a fallback; a wrapper that writes queue records (every one since .354) holds it — the report says so', JSON.stringify(of));
+      // (ii) a frame carrying no message id: the arm takes the id the hub minted for the frame it sent
+      okc(wsSrc.includes('msgId: r.msgId || data.msgId') && /const msgId = givenMsgId \|\| /.test(fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8')),
+        '§ask SUSPICION (ii), closed: a chat-input with no msgId is armed with the id sendUserInput MINTED for the frame it wrote (r.msgId) — the id the wrapper\'s queue records name');
+    }
+    } catch (e) { okc(false, '§ask r6: the round-6 roads (hydratedFacts, the persisted arm, the answer, the one rule…) are present — threw: ' + (e && e.message)); }
   }
 }
 

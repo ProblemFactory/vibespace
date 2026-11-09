@@ -240,12 +240,26 @@ let child = null;
 let childDead = true;
 let childExit = null;        // {code, signal} of the LAST child exit (the wrapper-signal record says what it knew)
 
-function sendChild(line) { // line WITHOUT trailing \n
+// A /model ACROSS A RECONNECT (lane fable-52-cli-321 round 9, law 3): on a remote conversation the CLI's records written before a frame
+// flushed at the reconnect are replayed AFTER it — no record says which came first, so the hub cannot tell when the CLI took the
+// model. The wrapper is the one that knows: a /model frame it handed over and the CLI has not answered yet (its num_turns-0 result)
+// when the pipe drops, or one it flushes at the reconnect, is RECORDED — into the buffer, so the conversation keeps the line
+// (`model_across_reconnect {msg_id, model}`: the hub voids that command's arm, the chat says it was not followed).
+const unansweredModels = [];   // [{ msgId, model }] — oldest first; one leaves at each num_turns-0 result
+let reconnectEpoch = 0;          // one per pipe drop: a frame HELD across one is written after the replay began — the same uncertainty
+const typedModelOf = (line) => { try { const o = JSON.parse(line); const m = o && o.type === 'user' ? /^\/model\s+(\S+)\s*$/.exec(frameText(o).trim()) : null; return m ? m[1] : null; } catch { return null; } };
+function acrossReconnect(msgId, model) { if (msgId && model) record('model_across_reconnect', { msg_id: msgId, model }); }
+function sendChild(line, mark = '') { // line WITHOUT trailing \n; `mark` = the person's frame id (input_forwarded, below)
   if (child && !childDead && child.stdin && child.stdin.writable) {
+    if (OFFSET_MODE && mark) { const m = typedModelOf(line); if (m) { unansweredModels.push({ msgId: mark, model: m }); if (unansweredModels.length > 8) unansweredModels.shift(); } }
+    // THE MARK GOES WITH THE WRITE (lane fable-52-cli-321 round 8): written the moment the frame reaches the CLI's stdin, so on stdout
+    // it precedes everything the CLI does with it — never at queue time, when a remote CLI's records written before the frame are
+    // still to be replayed after the reconnect
+    if (mark) record('input_forwarded', { msg_id: mark });
     try { child.stdin.write(line + '\n'); return; } catch {}
   }
-  if (OFFSET_MODE) { // queue while the pipe is down — flushed after reconnect
-    inputQueue.push(line);
+  if (OFFSET_MODE) { // queue while the pipe is down — flushed after reconnect (the frame's mark rides with it)
+    inputQueue.push(mark ? { line, mark } : line);
     if (inputQueue.length > 200) inputQueue.shift();
     log(`queued input while disconnected (${inputQueue.length} pending)`);
   } else {
@@ -472,7 +486,9 @@ function forwardUser(line, o, buffered) {
   if (opensTurn(o)) { turnBusy = true; awaitingStart = true; }
   const mid = o && typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
   if (mid && copies.has(mid)) { noteWritten(mid); startingCopies.push(mid); } // its own turn's user record is its witness (the init)
-  sendChild(line);
+  // THE FRAME REACHED THE CLI (lane fable-52-cli-321 r7, round 8): its mark is written by sendChild AT the write, before the frame —
+  // the hub judges a typed /model only by the CLI's acknowledgment AFTER this mark (src/server/model-ask.js noteFeedResult)
+  sendChild(line, mid);
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
 }
 
@@ -711,7 +727,7 @@ function submitUser(line, o, { buffered = false } = {}) {
     if (recordPersonFrame(o, msgId, st.uuid)) buffered = false;
   }
   if (o.webui_steer === true && !origin && !isCommandFrame(o) && stateProven && !stopping) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
-  promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
+  promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), epoch: reconnectEpoch, down: OFFSET_MODE && childDead, line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
   publishQueue();
   record('queued_input', { msg_id: msgId, turn_id: null });
   if (settleSaid.startsWith('settling')) settleSaid = ''; // a new chip: the settle state is said again for it
@@ -725,6 +741,7 @@ function drainPromptQueue() {
   const next = promptQueue.shift();
   publishQueue();
   let o = null; try { o = JSON.parse(next.line); } catch {}
+  if (OFFSET_MODE && (next.down || next.epoch !== reconnectEpoch)) acrossReconnect(next.msgId, typedModelOf(next.line));   // law 3: held while the pipe was down, or across a reconnect — written into its replay
   forwardUser(next.line, o, next.buffered);
   log(`drained a held frame at the turn end (${promptQueue.length} still held)`);
 }
@@ -1037,6 +1054,7 @@ function processLine(line) {
       : (Array.isArray(msg.message?.content) ? msg.message.content.map(b => b.text || '').join('') : '');
     if (!/^<local-command-/.test(uText.trim())) { meta.streaming = true; scheduleMeta(); }
   }
+  if (msg.type === 'result' && Number(msg.num_turns) === 0 && unansweredModels.length) unansweredModels.shift();   // the CLI answered a /model (law 3)
   if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
     meta.streaming = false;
     for (const [id, t] of Object.entries(meta.tasks)) {
@@ -1180,7 +1198,7 @@ function startChild() {
   if (inputQueue.length) {
     log(`flushing ${inputQueue.length} queued input line(s)`);
     const q = inputQueue.splice(0, inputQueue.length);
-    for (const l of q) sendChild(l);
+    for (const l of q) { if (l && typeof l === 'object') { acrossReconnect(l.mark, typedModelOf(l.line)); sendChild(l.line, l.mark); } else sendChild(l); }   // law 3: a /model queued while the pipe was down is said before it goes
   }
 }
 
@@ -1188,6 +1206,8 @@ function scheduleReconnect() {
   if (reconnectTimer || shuttingDown) return;
   reconnectAttempts++;
   const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, reconnectAttempts - 1)];
+  reconnectEpoch++;
+  for (const u of unansweredModels.splice(0, unansweredModels.length)) acrossReconnect(u.msgId, u.model);   // law 3: not answered when the pipe dropped
   log(`reconnect #${reconnectAttempts} in ${delay}ms (offset=${remoteOffset})`);
   try { process.stdout.write(JSON.stringify({ type: '_remote_state', state: 'reconnecting', attempts: reconnectAttempts, lastError: lastChildError || null }) + '\n'); } catch {}
   reconnectTimer = setTimeout(startChild, delay);

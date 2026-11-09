@@ -63,6 +63,17 @@ function mergePricing(file, layer, { shipped = {}, checked = null } = {}) {
       if (!moved) break;
     }
   }
+  // A ROW OF ITS OWN OUTRANKS A KEY THE PERSON TYPED — NEVER SILENTLY (round 9, 主开发's ruling on the price key): a model with its own
+  // shipped row (Haiku 5.5's `haiku-5-5`, Fable 5.2's `fable-5-2`) is priced by it, never by the person's family row or a shorter key
+  // they typed (`haiku`, `haiku-5`) — and where that key would have priced it otherwise, the disagreement NAMES it, catalog or not
+  for (const k of keysOf(tiers)) {
+    if (!sources[k] || sources[k].from !== 'shipped' || !/\d/.test(k)) continue;
+    const c = rows && rows[k] ? rows[k] : null, id = (c && c.id) || 'claude-' + k;
+    if (disagreements.has(id)) continue;
+    const f = tierIn(keysOf(tiers).filter((x) => x !== k), id);
+    if (f === '_default' || !sources[f] || sources[f].from !== 'you' || sameRates(tiers[f], tiers[k])) continue;
+    disagreements.set(id, { id, label: (c && c.label) || null, key: k, fellOn: f, ours: tiers[f], shipped: tiers[k], catalog: c ? c.row : null, used: 'shipped', outranked: true, cli: c ? c.cli : null, builtAt: c ? c.builtAt : null });
+  }
   // fileKeys = the keys of the table WITHOUT the catalog (shipped + the person's): what a model falls on without it (law B1)
   return { pricing: { ...base, tiers, sources, fileKeys: Object.keys(base.tiers || {}) }, disagreements: [...disagreements.values()] };
 }

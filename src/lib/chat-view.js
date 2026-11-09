@@ -1,5 +1,4 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
-import { parseSetModelEcho } from '../model-echo.js'; // the ONE /model echo parser (shared with the server's lock repin)
 import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
 import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
@@ -4112,6 +4111,7 @@ class ChatView {
         this._onCreateMessage(op.message, op.before ? op : null);
         this._noteRecordKind(op.message);
         if (op.message?.noticeKind === 'artifact') this._onArtifactCard(op.message, true); // lane artifacts-model: the LIVE birth (auto-open + the chip)
+        this._liveInitModel(op.message);   // a harness with no server model facts: its LIVE init names the model (never a drawn record)
       } else if (op.op === 'edit') {
         this._onEditMessage(op.id, op.fields);
         // AFTER the assign: a coalescing collab edit carries the grown rows
@@ -4130,23 +4130,21 @@ class ChatView {
     if (typeof op.seq === 'number' && !this._seqPoisoned) { this._lastSeq = op.seq; this._seqEpoch = this._normEpoch; }
   }
 
+  /** A conversation whose server states no model facts (another harness's): a LIVE init — an op, never a record a history draw
+   *  renders — names the model it runs. A bar holding the server's model facts (src/server/model-ask.js) reads those only. */
+  _liveInitModel(msg) {
+    const m = msg && msg.role === 'system' && msg.content?.[0]?.initData?.model;
+    if (!m || !this._statusBar || this._statusBar.hasServerModelFacts()) return;
+    this._statusBar.setModel(String(m).replace(/\[.*$/, ''));
+  }
+
   // Create a new normalized message → render and append to DOM — or, THE DELIVERY ORDER (lane midturn-order), insert it
   // ABOVE the person's messages the agent has not read yet: `place` = the live op's {before, at} (the server's
   // src/message-window.js says where; a slab is already in order and passes none)
   _onCreateMessage(msg, place = null) {
     if (this._renderedMsgIds.has(msg.id)) return;
-    // set_model confirmation: the CLI echoes "Set model to X (resolved-id)" as a
-    // user record — the RESOLVED id is the authoritative model for the status
-    // bar (the control_response reports success even for bogus names). Parsed
-    // before the defer check so it applies even while viewing history. The
-    // ONE parser (src/model-echo.js) — the CLI backticks the token since
-    // 2.1.257 and the inline regex here stopped matching, leaving the bar on
-    // the old model after every /model (noticed on 2.1.280).
-    if (msg.role === 'user' && this._statusBar) {
-      const txt = (msg.content || []).map(b => b.text || '').join('');
-      const echo = parseSetModelEcho(txt, { envelope: 'required' });
-      if (echo) this._statusBar.setModel(echo.id || echo.alias);
-    }
+    // (the model chip reads no record it draws — not a `/model` echo, not an init: its facts are the SERVER's, the attach status and
+    //  the `model-facts` broadcast — lane fable-52-cli-321 r4)
     if (!this._loadingHistory && msg.backendMeta?.reviewThreadId && msg.backendMeta?.delivery === 'detached') {
       if (!this._openedDetachedReviews) this._openedDetachedReviews = new Set();
       const reviewThreadId = msg.backendMeta.reviewThreadId;
@@ -4231,7 +4229,6 @@ class ChatView {
         const result = this._renderers.renderSystemMsg(msg);
         if (result?.sideEffect) {
           const se = result.sideEffect;
-          if (se.model) this._statusBar.setModel(se.model);
           if (se.permMode) this._statusBar.setPermMode(se.permMode);
           if (se.slashCommands && this._chatInput) this._chatInput.setSlashCommands(se.slashCommands, { terminal: se.terminalSlashCommands || null });
           if (se.memoryPaths) noteMemoryPaths(se.memoryPaths);
@@ -4906,6 +4903,22 @@ class ChatView {
     // the attach status's two fields, through the bar's attach door, so no client holds a stale lock target until a reload
     if (op.subtype === 'model-lock') {
       this._statusBar.applyStatus({ modelLocked: !!op.data?.modelLocked, lockedModel: op.data?.lockedModel || null, lockMoved: true });
+      return;
+    }
+    // THE MODEL FACTS moved (lane fable-52-cli-321 r4) — a pick on any client, a lock set or lifted, a typed /model the CLI then
+    // served, a newly served model: the SERVER's facts, numbered, told to every client (src/server/model-ask.js)
+    if (op.subtype === 'model-facts') {
+      this._statusBar.applyStatus({ ...(op.data || {}) });
+      return;
+    }
+    // THE ANSWER to this client's set-model frame (r6 — the server sends it to the sender only): it ends the bar's pending mark
+    // a /model ACROSS A RECONNECT the hub voided for a wrapper that records none (round 9, law 3): the same line, in this person's language
+    if (op.subtype === 'model-across-reconnect') {
+      for (const m of (Array.isArray(op.data?.models) ? op.data.models : []).slice(0, 4)) this._renderers.appendSystem(t('/model {model} reached Claude Code across a reconnect to the remote machine — VibeSpace cannot tell when it was taken, so this conversation\'s model setting does not follow it. Pick the model in the model menu to make it this conversation\'s model.', { model: String(m).slice(0, 128) }));
+      return;
+    }
+    if (op.subtype === 'model-answer') {
+      this._statusBar.answerModel({ ...(op.data || {}) });
       return;
     }
     // Live effort (2.369.62): the running turn's value AND the pending pick.
@@ -6819,6 +6832,8 @@ class ChatView {
       // choice (2.369.58). 'style-not-live' covers transient/other reasons (a
       // sidecar not written yet, a dead session) and must change no belief.
       if (msg.code === 'style-wrapper-old') this._statusBar?.setResponseStyleLive?.(false);
+      // a set-model the door refused is ANSWERED (r6): the bar's pending mark ends; nothing was taken, nothing is saved
+      if (msg.code === 'model-refused') this._statusBar?.answerModel?.({ ok: false, answer: msg.reqId ?? null });   // r7: matched to ITS press
       // A QUEUE-OP refusal from the ws layer never becomes a `queue-result`
       // meta op (the wrapper never saw the frame), so the row the strip marked
       // pending had no way back — it spun forever (round-2 verifier). The
@@ -6826,7 +6841,9 @@ class ChatView {
       // batch verb ends every pending row, which is what setQueueOpResult('')
       // already means.
       if (msg.code === 'queue-op-unsupported') { try { this._chatInput?.setQueueOpResult(msg.id || '', false, msg.message || msg.error || ''); } catch { } }
-      this._renderers.appendSystem('✗ ' + (msg.message || msg.error || t('Message rejected.')));
+      // the model door's refusals are words a person reads — in their language (r7: by the hub's reason code)
+      const modelWords = msg.code === 'model-refused' ? ({ 'not-a-model-id': t('Model not changed: that is not a model id.'), 'nothing-to-lock': t('Model not changed: nothing to lock yet — this conversation has no model to hold until it has answered once.') })[msg.reason] : null;
+      this._renderers.appendSystem('✗ ' + (modelWords || msg.message || msg.error || t('Message rejected.')));
       try { track('event', msg.code === 'input-rejected' ? 'chat-input-rejected' : 'chat-action-refused', this._telemDetail(`${msg.code || 'action'}: ${msg.message || msg.error || ''}`)); } catch {}
       return;
     }

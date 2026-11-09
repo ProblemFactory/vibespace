@@ -40,7 +40,7 @@
    "road": "CLAUDE_KNOWN_MODELS is the SEED: the installed CLI's catalog rows come first (cli-model-catalog onView → menuRows)",
    "suite": "test-claude-update-needs-nothing",
    "match": "model-id-literal",
-   "sites": 7
+   "sites": 10
   },
   {
    "id": "picker-v1-models",
@@ -384,7 +384,7 @@
    "road": "DEFAULT_PRICING (the shipped price table) is the SEED: the installed CLI's catalog prices first by ruling R3 (src/catalog-pricing.js), the person's rows above both",
    "suite": "test-claude-update-needs-nothing",
    "match": "family-key",
-   "sites": 15
+   "sites": 17
   }
  ]
 }

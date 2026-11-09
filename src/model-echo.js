@@ -85,4 +85,9 @@ function stripSetModelBackticks(label) {
   return label.replace(/^(\s*Set model to )`([^`]*)`/, '$1$2');
 }
 
-module.exports = { parseSetModelEcho, stripSetModelBackticks };
+/** The CLI's ANSWER to a typed /model (lane fable-52-cli-321 round 8 — measured on 2.1.321): its num_turns-0 result reads «Set model to `X`
+ *  for this session only» when it took X, «Model 'X' not found» when the API refused X at the CLI's check and the CLI KEPT its model.
+ *  → true when the answer says the CLI took the model. Read only by model-ask, on the RESULT of the person's armed command. */
+function setModelTaken(text) { return /^Set model to\b/.test(String(text == null ? '' : text)); }
+
+module.exports = { parseSetModelEcho, stripSetModelBackticks, setModelTaken };

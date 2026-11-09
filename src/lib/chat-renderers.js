@@ -1965,6 +1965,13 @@ class ChatRenderers {
     // overload fallback below: the model's own safeguards flagged the message
     // and the harness RETRIED it elsewhere. Shows the CLI's own explanation
     // behind an expander so the badge change is never unexplained again.
+    // a /model ACROSS A RECONNECT (lane fable-52-cli-321 round 9, law 3): the wrapper's record, in the person's language
+    if (msg.noticeKind === 'model-across-reconnect' && msg.content?.[0]?.acrossModel) {
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(t('/model {model} reached Claude Code across a reconnect to the remote machine — VibeSpace cannot tell when it was taken, so this conversation\'s model setting does not follow it. Pick the model in the model menu to make it this conversation\'s model.', { model: msg.content[0].acrossModel }))}</span>`;
+      return { el };
+    }
     if (msg.noticeKind === 'model-refusal-fallback' && msg.content?.[0]?.fallbackTo) {
       const b = msg.content[0];
       const el = document.createElement('div');

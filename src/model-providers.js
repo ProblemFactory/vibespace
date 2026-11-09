@@ -244,6 +244,28 @@ function sameModel(a, b) {
   if (!x || !y) return false;
   return x === y || x.replace(DATED, '') === y || y.replace(DATED, '') === x;
 }
+/** THE ONE RULE FOR «IS THIS THE MODEL THAT WAS ASKED» (lane fable-52-cli-321 r6) — the chat's model chip, the server's lock repin
+ *  and its typed-/model confirm all read it (pool placement keeps its own prefix rule, usage-pool-engine modelsMatch): a FULL-ID
+ *  ask (`claude-…`) is held EXACTLY — case, its 1M mark and a dated snapshot aside (sameModel): asked claude-opus-5-5, served
+ *  claude-opus-5 is NOT it; an ALIAS ask (`fable[1m]`, `opus`) is held family-wide — what an alias resolves to moves with the
+ *  installed CLI. Nothing asked or nothing served ⇒ false. */
+const AT_DATED = /@(\d{8})$/;   // a provider's dated snapshot spelled with «@» (Vertex: claude-opus-5-5@20261101) — the same snapshot rule (r7)
+function modelHeld(ask, served) {
+  if (!ask || !served) return false;
+  const a = String(ask).replace(AT_DATED, ''), sv = String(served).replace(AT_DATED, '');
+  if (/^claude-/i.test(a.trim())) return sameModel(a, sv);
+  const x = core(a), y = core(sv);
+  return !!x && !!y && (x === y || x.startsWith(y) || y.startsWith(x));
+}
+/** THE DOOR for a model a frame names (lane fable-52-cli-321 r5–r6 — a set-model, a create / resume): a string, trimmed, at most
+ *  MODEL_NAME_MAX characters, id-shaped (an alias, a full id, a provider path, a `[1m]` mark). → the trimmed id, or null. */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*(\[[A-Za-z0-9]+\])?$/;
+const MODEL_NAME_MAX = 128;
+function namedModel(x) {
+  if (typeof x !== 'string') return null;
+  const t = x.trim();
+  return t && t.length <= MODEL_NAME_MAX && MODEL_NAME.test(t) ? t : null;
+}
 /** '' = the provider's default (its defaultModel; a harness-listed one leaves it to the harness → ''); an exact row; an
  *  ALIAS — which lands on a row of the table or NOWHERE (a dangling alias is never passed on); the same model spelled
  *  differently; and for a harness-listed provider any id of its family (that catalog is a menu, not a fence: the CLI runs
@@ -397,6 +419,6 @@ module.exports = {
   KINDS, KIND_IDS, AUTHS, MODELS_SOURCES, LISTED_BY, CAPS, CAP_WORDS, PROVIDER_FIELDS, MODEL_FIELDS, PRESETS, ACCOUNT_PRESETS,
   ID_PATTERNS, ID_MAX, LABEL_MAX, CONTEXT_MAX, MODELS_MAX, MODEL_ERRORS,
   kindOf, presetOf, accountProviderId, listerOf, parseContext, formatContext, validateModelRow, normalizeModelRow, validateModels,
-  normalizeProvider, validateProvider, listedRows, withListed, sameModel, resolveModel, servesModel, modelsOf, sourceOf,
+  normalizeProvider, validateProvider, listedRows, withListed, sameModel, modelHeld, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
 };

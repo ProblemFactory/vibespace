@@ -40,7 +40,6 @@ const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
-const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
 const { lockFrame } = require('../../server/stream-wall.js'); // (spelled from src/) lane fable-52-cli-321 F1: the lock's frame, told to every client when the parse moves its target
 const browserHelpers = require('../../server/browser-helpers.js'); // (spelled from src/ like every require here — suites rebase '../../') MULTIVIEW §4 (B-89d0): a helper's browser is named by WITNESS — the Task that opened it + its `vibespace-browser new-child`
 
@@ -523,6 +522,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (msg.type === '_remote_state') {
             const rs = { state: msg.state, attempts: msg.attempts || 0, at: Date.now(), lastError: msg.lastError || null };
             session._remoteState = msg.state === 'connected' ? null : rs;
+            try { require('../model-ask.js').noteRemoteState(session, msg.state, { readSessionMeta, writeSessionMeta }); } catch { }   // round 9, law 3: a typed /model across a reconnect is void, and said
             broadcastToSession(session, id, { type: 'remote-state', sessionId: id, ...rs });
             broadcastActiveSessions(); // card chip follows the transport state (2.219.1)
             continue;
@@ -746,7 +746,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             if (announced) noteModelFallback(session, announced.from, announced.to);
             // through the engine's granular consumer, which also retires a
             // standing fallback stamp when something else answers (2026-09-13)
-            noteServedModel(session, msg.message.model);
+            noteServedModel(session, msg.message.model, msg, 'parse');
             try { noteModelSeen(session._servedModel); } catch { }
             // Latch a target-less lock (locked before any model was known —
             // restored sessions, pre-first-reply locks): first main-thread
@@ -793,6 +793,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               session._lockedModel = session._servedModel;
               try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: session._lockedModel }); } catch {}
               try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the latched target, told to every client (F1)
+              // …and to a bar that holds the server's facts, in the facts' own frame (round 9 (c): a lock frame carries no numbers, so such a
+              // bar keeps the newer facts it has — the engine told them for this very record BEFORE the latch, with no target)
+              try { require('../model-ask.js').broadcastFacts(session, id, broadcastToSession); } catch { }
             }
           }
           // CLI error-class telemetry (2.207.0, names/enums only — no
@@ -872,6 +875,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // it so attach/chatStatus/resume never serve the spawn-time value
           // (the old stale _permissionMode is what made a successful
           // mid-session switch look reverted after a restart/reattach).
+          // the model the CLI says it runs (round 9): what a conversation that asks for nothing is held to (src/server/model-ask.js)
+          if (msg.type === 'system' && msg.subtype === 'init' && !msg.parent_tool_use_id && typeof msg.model === 'string' && msg.model) { try { const MA = require('../model-ask.js'); if (MA.noteCliModel(session, msg.model, { readSessionMeta, writeSessionMeta })) MA.broadcastFacts(session, id, broadcastToSession); } catch { } }
           if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.permissionMode === 'string' && msg.permissionMode
               && session._permissionMode !== msg.permissionMode) {
             session._permissionMode = msg.permissionMode;
@@ -1059,21 +1064,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               const uText = typeof msg.message?.content === 'string'
                 ? msg.message.content
                 : (Array.isArray(msg.message?.content) ? msg.message.content.map(b => b.text || '').join('') : '');
-              // A5 (review): "Set model to X (resolved-full-id)" echo is the
-              // CLI's authoritative resolution — upgrade a BARE-ALIAS lock
-              // target to the full id (alias targets false-match intra-family
-              // reroutes via the startsWith rule, e.g. 'opus' vs 'opus-4-8',
-              // and the repin never fires).
-              if (session._modelLocked && session._lockedModel && !/\d/.test(session._lockedModel)) {
-                // The ONE echo parser (src/model-echo.js): the resolved id in
-                // parentheses, the plain spelling and the backticked one (CLI ≥2.1.257) alike.
-                const echo = parseSetModelEcho(uText, { envelope: 'required' });
-                if (echo && echo.id && modelsMatch(session._lockedModel, echo.id)) {
-                  session._lockedModel = echo.id;
-                  try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: echo.id }); } catch {}
-                  try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the upgraded target, told to every client (F1)
-                }
-              }
+              // THE ECHO MOVES NOTHING (lane fable-52-cli-321 r4, law C): a «Set model to …» record is known by no field of its own (the
+              // CLI stamps it as it stamps other replayed user records), so neither the ask nor a lock follows its TEXT. The ask moves on
+              // a pick / a lock change (ws-handler) and on a typed /model confirmed by the model the CLI serves (the engine's
+              // noteServedModel → src/server/model-ask.js). The echo-text upgrade of an alias lock to a resolved id (A5) went with it:
+              // an alias lock is held family-wide, so the alias moving to a newer model is never «a reroute».
               if (sendsRequest(msg)) {
                 if (!authoritative) session._isStreaming = true;
                 (recordIsLate?.(session, msg) ? noteTurnFlight : noteRequestSent)(session, Date.now()); // the prompt's echo or a TOOL RESULT: a request goes out NOW — a backlog's record proves nothing about now (lane cache-warmth-tiles r4 — the device feed's twin)
@@ -1259,6 +1254,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
+          if (msg.type === 'model_across_reconnect') { try { require('../model-ask.js').noteAcrossReconnect(session, msg, { readSessionMeta, writeSessionMeta }); } catch { } }   // law 3 (round 9): that command's arm is void — the line itself is the normalizer's
+          if (msg.type === 'input_forwarded') { try { require('../model-ask.js').noteForwarded(session, msg, 'parse', { readSessionMeta, writeSessionMeta }); } catch { } }   // the wrapper's mark: a frame reached the CLI (r7)
+          if (msg.type === 'queued_input' || msg.type === 'queue_changed' || msg.type === 'queue_op_result') { try { require('../model-ask.js').noteQueueRecord(session, msg, { readSessionMeta, writeSessionMeta }, 'parse'); } catch { } }   // WHEN a typed /model reached the CLI (r5), or never will (round 8: removed — ✕, an edit, or Stop's per-item remove) — the twin is in session-brain
+          if (msg.type === 'control_response') { try { require('../model-ask.js').noteControlResponse(session, msg, 'parse', { readSessionMeta, writeSessionMeta }); } catch { } }   // a pick's set_model answered: its place in the CLI's order (round 8)
+          if (msg.type === 'result') { try { require('../model-ask.js').noteFeedResult(session, 'parse', { readSessionMeta, writeSessionMeta }, msg); } catch { } }   // the CLI's acknowledgment of a typed /model (num_turns 0, round 8) and the arm's bound — before the turn end
           if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
           // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI no longer DIES not-logged-in —
           // it answers each turn with a synthetic «Not logged in · Please run /login» record and waits, so the death

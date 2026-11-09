@@ -1,0 +1,260 @@
+{
+ "about": "The official Anthropic model price table that every Claude row of DEFAULT_PRICING (src/usage-history.js) is judged against by scripts/test-pricing-tiers.mjs §4. USD per 1M tokens, the API's standard rates. Read from platform.claude.com/docs/en/about-claude/pricing (the model pricing table, with its 1h column) and claude.com/pricing, 2026-11-09; it equals CLI 2.1.321's baked catalog tiers. `long` = a request whose WHOLE prompt (uncached + cache reads + cache writes) is over `above` tokens pays these rates for all its tokens (Haiku 5.5, «for prompts over 100,000 tokens»). `retired` = gone from the first-party API but still billed elsewhere (Bedrock / Google Cloud): its row stays priced. Not modelled here: fast mode (2× on Fable 5.2 / Opus 5.5 — the ledger keeps no usage.speed), US-only inference (1.1×), batch (50 %). When Anthropic changes a price: re-read the page, update this file AND the row together.",
+ "fetchedAt": "2026-11-09",
+ "pricingPage": [
+  "https://platform.claude.com/docs/en/about-claude/pricing",
+  "https://claude.com/pricing"
+ ],
+ "models": [
+  {
+   "name": "Claude Fable 5.2",
+   "ids": [
+    "claude-fable-5-2"
+   ],
+   "input": 8,
+   "cacheWrite5m": 10,
+   "cacheWrite1h": 16,
+   "cacheRead": 0.2,
+   "output": 40
+  },
+  {
+   "name": "Claude Mythos 5.2",
+   "ids": [
+    "claude-mythos-5-2"
+   ],
+   "input": 8,
+   "cacheWrite5m": 10,
+   "cacheWrite1h": 16,
+   "cacheRead": 0.2,
+   "output": 40,
+   "availability": "limited"
+  },
+  {
+   "name": "Claude Fable 5.1",
+   "ids": [
+    "claude-fable-5-1"
+   ],
+   "input": 10,
+   "cacheWrite5m": 12.5,
+   "cacheWrite1h": 20,
+   "cacheRead": 0.25,
+   "output": 50
+  },
+  {
+   "name": "Claude Mythos 5.1",
+   "ids": [
+    "claude-mythos-5-1"
+   ],
+   "input": 10,
+   "cacheWrite5m": 12.5,
+   "cacheWrite1h": 20,
+   "cacheRead": 0.25,
+   "output": 50,
+   "availability": "limited"
+  },
+  {
+   "name": "Claude Fable 5",
+   "ids": [
+    "claude-fable-5"
+   ],
+   "input": 10,
+   "cacheWrite5m": 12.5,
+   "cacheWrite1h": 20,
+   "cacheRead": 1,
+   "output": 50
+  },
+  {
+   "name": "Claude Mythos 5",
+   "ids": [
+    "claude-mythos-5"
+   ],
+   "input": 10,
+   "cacheWrite5m": 12.5,
+   "cacheWrite1h": 20,
+   "cacheRead": 1,
+   "output": 50,
+   "availability": "limited"
+  },
+  {
+   "name": "Claude Opus 5.5",
+   "ids": [
+    "claude-opus-5-5"
+   ],
+   "input": 4,
+   "cacheWrite5m": 5,
+   "cacheWrite1h": 8,
+   "cacheRead": 0.2,
+   "output": 20
+  },
+  {
+   "name": "Claude Opus 5",
+   "ids": [
+    "claude-opus-5"
+   ],
+   "input": 5,
+   "cacheWrite5m": 6.25,
+   "cacheWrite1h": 10,
+   "cacheRead": 0.5,
+   "output": 25
+  },
+  {
+   "name": "Claude Opus 4.8",
+   "ids": [
+    "claude-opus-4-8"
+   ],
+   "input": 5,
+   "cacheWrite5m": 6.25,
+   "cacheWrite1h": 10,
+   "cacheRead": 0.5,
+   "output": 25
+  },
+  {
+   "name": "Claude Opus 4.7",
+   "ids": [
+    "claude-opus-4-7"
+   ],
+   "input": 5,
+   "cacheWrite5m": 6.25,
+   "cacheWrite1h": 10,
+   "cacheRead": 0.5,
+   "output": 25
+  },
+  {
+   "name": "Claude Opus 4.6",
+   "ids": [
+    "claude-opus-4-6"
+   ],
+   "input": 5,
+   "cacheWrite5m": 6.25,
+   "cacheWrite1h": 10,
+   "cacheRead": 0.5,
+   "output": 25
+  },
+  {
+   "name": "Claude Opus 4.5",
+   "ids": [
+    "claude-opus-4-5",
+    "claude-opus-4-5-20251101"
+   ],
+   "input": 5,
+   "cacheWrite5m": 6.25,
+   "cacheWrite1h": 10,
+   "cacheRead": 0.5,
+   "output": 25
+  },
+  {
+   "name": "Claude Opus 4.1",
+   "ids": [
+    "claude-opus-4-1",
+    "claude-opus-4-1-20250805"
+   ],
+   "input": 15,
+   "cacheWrite5m": 18.75,
+   "cacheWrite1h": 30,
+   "cacheRead": 1.5,
+   "output": 75,
+   "retired": true
+  },
+  {
+   "name": "Claude Opus 4",
+   "ids": [
+    "claude-opus-4-0",
+    "claude-opus-4-20250514"
+   ],
+   "input": 15,
+   "cacheWrite5m": 18.75,
+   "cacheWrite1h": 30,
+   "cacheRead": 1.5,
+   "output": 75,
+   "retired": true
+  },
+  {
+   "name": "Claude Sonnet 5.5",
+   "ids": [
+    "claude-sonnet-5-5"
+   ],
+   "input": 2,
+   "cacheWrite5m": 2.5,
+   "cacheWrite1h": 4,
+   "cacheRead": 0.1,
+   "output": 10
+  },
+  {
+   "name": "Claude Sonnet 5",
+   "ids": [
+    "claude-sonnet-5"
+   ],
+   "input": 2,
+   "cacheWrite5m": 2.5,
+   "cacheWrite1h": 4,
+   "cacheRead": 0.2,
+   "output": 10
+  },
+  {
+   "name": "Claude Sonnet 4.6",
+   "ids": [
+    "claude-sonnet-4-6"
+   ],
+   "input": 3,
+   "cacheWrite5m": 3.75,
+   "cacheWrite1h": 6,
+   "cacheRead": 0.3,
+   "output": 15
+  },
+  {
+   "name": "Claude Sonnet 4.5",
+   "ids": [
+    "claude-sonnet-4-5"
+   ],
+   "input": 3,
+   "cacheWrite5m": 3.75,
+   "cacheWrite1h": 6,
+   "cacheRead": 0.3,
+   "output": 15
+  },
+  {
+   "name": "Claude Sonnet 4",
+   "ids": [
+    "claude-sonnet-4-0",
+    "claude-sonnet-4-20250514"
+   ],
+   "input": 3,
+   "cacheWrite5m": 3.75,
+   "cacheWrite1h": 6,
+   "cacheRead": 0.3,
+   "output": 15,
+   "retired": true
+  },
+  {
+   "name": "Claude Haiku 5.5",
+   "ids": [
+    "claude-haiku-5-5"
+   ],
+   "input": 0.1,
+   "cacheWrite5m": 0.125,
+   "cacheWrite1h": 0.2,
+   "cacheRead": 0.01,
+   "output": 0.5,
+   "long": {
+    "above": 100000,
+    "input": 0.5,
+    "cacheWrite5m": 0.625,
+    "cacheWrite1h": 1,
+    "cacheRead": 0.05,
+    "output": 2.5
+   }
+  },
+  {
+   "name": "Claude Haiku 4.5",
+   "ids": [
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001"
+   ],
+   "input": 1,
+   "cacheWrite5m": 1.25,
+   "cacheWrite1h": 2,
+   "cacheRead": 0.1,
+   "output": 5
+  }
+ ]
+}

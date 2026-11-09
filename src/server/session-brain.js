@@ -166,7 +166,20 @@ function sbCompare(hostId, sid, r) {
 // coordination. The NORMALIZER/msg-broadcast path deliberately stays
 // server-owned until R6 (the client protocol is untouched by this step).
 const SB_SEEN_MAX = 600;
+/** THE DEVICE FEED'S ORDER MARKS, before the first-seen filter (lane fable-52-cli-321 r7): its results and the wrapper's
+ *  `input_forwarded` marks reach model-ask whether or not the parse saw them first — each feed keeps the CLI's order, so a mark this
+ *  feed handed over says what FOLLOWS it on this feed was written after. */
+function sbPreGate(session, rec) {
+  if (!session || !rec || (rec.type !== 'result' && rec.type !== 'input_forwarded' && rec.type !== 'control_response')) return;
+  try {
+    const MA = require('./model-ask.js'), io = { readSessionMeta: (k) => metaStore.readSessionMeta?.(k), writeSessionMeta: (k, v) => metaStore.writeSessionMeta?.(k, v) };
+    if (rec.type === 'result') MA.noteFeedResult(session, 'device', io, rec); else if (rec.type === 'control_response') MA.noteControlResponse(session, rec, 'device', io); else MA.noteForwarded(session, rec, 'device', io);
+  } catch { }
+}
 function sbSeenFirst(session, rec) {
+  // the wrapper's QUEUE records carry no id (their key collides: every queue_changed is ':queue_changed:'), and their one consumer
+  // (model-ask noteQueueRecord) is idempotent — so every one passes, on both feeds (lane fable-52-cli-321 r6)
+  if (rec && (rec.type === 'queued_input' || rec.type === 'queue_changed' || rec.type === 'queue_op_result')) return true;
   const key = rec.uuid || ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || ''));
   if (!key || key === '::') return true; // unidentifiable records: let both run (idempotent families only)
   const seen = session._sbSeen || (session._sbSeen = new Set());
@@ -184,6 +197,7 @@ function claudeSideEffects(session, sid, msg) {
     // the device stream fills the parse's gaps, and a gap is exactly where a
     // stalled bridge's backlog comes from
     try { noteStreamRecord?.(session, msg); } catch { }
+    if (msg.type === 'queued_input' || msg.type === 'queue_changed' || msg.type === 'queue_op_result') { try { require('./model-ask.js').noteQueueRecord(session, msg, { readSessionMeta: (k) => metaStore.readSessionMeta?.(k), writeSessionMeta: (k, v) => metaStore.writeSessionMeta?.(k, v) }, 'device'); } catch { } }   // the parse's twin (lane fable-52-cli-321 r5, r6: every record passes sbSeenFirst)
     if (msg.type === 'assistant' && msg.message?.model && msg.message.model !== '<synthetic>' && !msg.parent_tool_use_id && !msg.isSidechain) {
       // THE FACT BEFORE ITS READERS, at BOTH feeds (2026-09-13 r4): the reroute
       // this record announces is stamped before the served model is read, so
@@ -195,7 +209,7 @@ function claudeSideEffects(session, sid, msg) {
       // changes nothing observable in §14e's own leg and only that census sees it.
       const announced = rerouteAnnouncedBy(msg);
       if (announced) noteModelFallback(session, announced.from, announced.to);
-      noteServedModel(session, msg.message.model); // the engine's granular consumer — same fallback rule as the parse (2026-09-13)
+      noteServedModel(session, msg.message.model, msg, 'device'); // the engine's granular consumer — same fallback rule as the parse (2026-09-13); the record rides along: one verdict per record (r7)
     }
     try { noteModelRequest?.(session, msg); } catch { } // the conversation's LAST MODEL REQUEST (lane cache-warmth-tiles) — the parse's twin call
     try { noteCompacted?.(session, msg); } catch { } // a compaction's END resets the cache fact (lane cache-warmth-compact) — the parse's twin call
@@ -258,6 +272,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
+  return { sbNoteServerOp, sbCompare, sbSeenFirst, sbPreGate, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
 }
 module.exports = { create };

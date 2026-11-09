@@ -336,7 +336,7 @@ const CLAUDE_STREAM_TYPES = new Set([
   'assistant', 'user', 'system', 'result', 'attachment', 'control_request',
   'control_response', 'control_cancel_request', 'tool_progress', 'stream_event', 'summary', // control_cancel_request: the normalizer settles the card it withdraws (a helper stopped mid-ask, lane S1) — listed so the breadcrumb stops crying 'unhandled' (the naive-study log line)
   'rate_limit_event', // handled since 2.289.0 — the set lagged the handler, so the breadcrumb cried 'unhandled' for a handled type (misled the inc-msozeyw2 read)
-  'command_lifecycle', 'queued_input', 'queue_changed', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', // command_lifecycle: handled since 2.369.112 — the turn-start carrier of a harness-delivered peer message (inc-mu6bfv1t-4drq); the four queue records are the WRAPPER's (2.369.354, data/bin/chat-wrapper.js holds a mid-turn frame) — the normalizer reads them, the put-back door reads queue_dropped at its gate; input_handover (2.369.361) = what became of a frame handed to the running turn
+  'command_lifecycle', 'queued_input', 'queue_changed', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', 'input_forwarded', // command_lifecycle: handled since 2.369.112 — the turn-start carrier of a harness-delivered peer message (inc-mu6bfv1t-4drq); the four queue records are the WRAPPER's (2.369.354, data/bin/chat-wrapper.js holds a mid-turn frame) — the normalizer reads them, the put-back door reads queue_dropped at its gate; input_handover (2.369.361) = what became of a frame handed to the running turn
   'set_in_progress_tool_use_ids', 'compact_progress', 'tombstone', '_stdin_ack', '_stdin_nack', '_remote_state', '_remote_exit', // B3 §2.5/§2.10/§2.11: the run set + compaction stage have readers in claude-stream-json.js, tombstone in the normalizer — listed here or the breadcrumb cries 'unhandled' for handled records (the 2.289.0 mistake). Round 4: the first two have never been observed on our stdout (host callbacks swallow them; the live compaction lane is system/status) and tombstone is unverified — the rows stay because the READER exists, which is what this set is about
 ]);
 const _seenStreamTypes = new Set();
@@ -1207,7 +1207,7 @@ const sessionBrain = require('./src/server/session-brain.js').create({
   broadcastAll: (msg) => { const json = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(json); } catch {} } }, // session-vcs must reach an explorer-only client, not just the session's attached ones
   getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), getSessionStatus: () => { try { return sessionStatus; } catch { return null; } }, sessionStatusKey,
 });
-const { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing,
+const { sbNoteServerOp, sbCompare, sbSeenFirst, sbPreGate, claudeSideEffects, _sbRing,
   _sbMidCore, SB_RING_MAX,
 } = sessionBrain;
 hosts.onSessionEvents = (hostId, m) => {
@@ -1222,7 +1222,7 @@ hosts.onSessionEvents = (hostId, m) => {
       if (sess) {
         for (const line of m.raw) {
           let rec = null; try { rec = JSON.parse(line); } catch { continue; }
-          if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);
+          sbPreGate(sess, rec); if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);   // sbPreGate: the typed-/model order marks, before the first-seen filter (r7)
         }
       }
     }
@@ -1524,7 +1524,7 @@ const wsApi = registerWsHandler(wss, {
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
-  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
+  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), setSessionConfig: (k, p) => persistenceRouter.setSessionConfig(k, p), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
 const inboxReopen = require('./src/server/inbox-reopen.js').create({ getOpenConversation: () => wsApi && wsApi.convOps && wsApi.convOps.openConversation, activeSessions, readUserState: () => persistenceRouter.readUserState(), discover: async (key) => (((await require('./src/routes/sessions').warmSessions()) || {}).sessions || []).find((s) => s && s.sessionKey === key) || null, locate: (b, id, cwd) => { const h = require('./src/harnesses').get(b); return h && h.store && typeof h.store.locate === 'function' ? h.store.locate(id, cwd) : null; }, defaultsFor: (b) => ({ permission: harnessDeclares(b, 'defaultPermissionMode') ? String(harnessSetting(b, 'defaultPermissionMode') ?? '') : '', extraArgs: harnessDeclares(b, 'defaultExtraArgs') ? String(harnessSetting(b, 'defaultExtraArgs') ?? '') : '' }), taskFor: (key) => (tasks.list().find((g) => (g.sessions || []).includes(key)) || {}).id || null }); // a For-you reply to an ENDED conversation reopens it by the resume road (the ws create case, a headless creator) — lane inbox-reply-dead-session
 

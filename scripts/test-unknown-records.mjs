@@ -57,8 +57,12 @@ console.log('§2 history renders the same cards (the fall-back is a renderer, no
   ok(`no card for any handled (${MM.HANDLED_SYSTEM_SUBTYPES.size}) / known-ignored subtype (${MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.size}) / known-ignored top-level type (${MM.KNOWN_IGNORED_RECORD_TYPES.size})`, cards(mm).length === 0, cards(mm).map((m) => m.content[0].name));
   const consumer = read('src/server/stdout/claude-stream-json.js');
   const consumerTypes = [...consumer.matchAll(/msg\.type === '([a-z_]+)'/g)].map((m) => m[1]).filter((t) => !['system', 'assistant', 'user', 'result', 'control_response', 'attachment'].includes(t));
-  const missing = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t));
-  ok(`every top-level type the SERVER consumer handles is on the normalizer's known-ignored list (${consumerTypes.length} checked)`, missing.length === 0, missing);
+  // a type the normalizer HANDLES itself (its own `case '<type>': return this._process…` — the wrapper's queue records, which the
+  // server also reads for the model facts: lane fable-52-cli-321 r5) draws no unknown card either — derived, never listed by hand
+  const normalizerHandles = new Set([...read('src/message-manager.js').matchAll(/^\s+case '([a-z_-]+)': return this\._process/gm)].map((m) => m[1]));
+  const missing = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t) && !normalizerHandles.has(t));
+  ok(`every top-level type the SERVER consumer handles is on the normalizer's known-ignored list or handled by the normalizer itself (${consumerTypes.length} checked)`, missing.length === 0, missing);
+  ok('…CONTROL: the normalizer\'s own cases are read from its source (queued_input / queue_changed among them), and a type it neither handles nor ignores is still missing', normalizerHandles.has('queued_input') && normalizerHandles.has('queue_changed') && !normalizerHandles.has('brand_new_record') && !MM.KNOWN_IGNORED_RECORD_TYPES.has('brand_new_record'));
   const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
     // the request-replay rows + tools-used (lane claude-steer-inject r5: MEASURED in every 2.1.308 / 2.1.312 transcript — counted as
     // an unknown kind on every restart until declared)

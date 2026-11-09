@@ -373,7 +373,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on321('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.321' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319, 2.1.321' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.321' && now.spawn, 'the hub\'s CLI = 2.1.321 (measured 2026-11-09) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.319, the spawn reads the file — as on 2.1.314', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.321' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319, 2.1.321' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.321' && now.spawn, 'the hub\'s CLI = 2.1.321 (measured 2026-11-09) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.321, the spawn reads the file — as on 2.1.319', now);
   const { '2.1.321': measured321, ...seven } = COMMITTED.versions;
   const sevenF = path.join(tmp, 'fx-2.1.296-to-2.1.319.json'); fs.writeFileSync(sevenF, JSON.stringify({ versions: seven }, null, 1) + '\n');
   const base = await on321('base', sevenF);

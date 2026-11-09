@@ -188,6 +188,8 @@ function viewOf(e) {
   return e && e.state === 'read' ? { cli: e.cli, builtAt: e.builtAt, models: e.models, aliases: e.aliases, latestPerFamily: e.latestPerFamily, best: e.best } : null;
 }
 const usd = (r) => (r ? `$${r.input}/$${r.output}, cache hit $${r.cacheRead}` : '?');
+/** A model's name read off its id when no catalog label is at hand: claude-haiku-5-5 → «Haiku 5.5», claude-3-5-haiku → «Haiku 3.5» (a dated snapshot's date dropped). */
+const modelName = (id) => { const t = String(id || '').replace(/^claude-/, '').split('-').filter((x) => !/^\d{8}$/.test(x)); const fam = t.find((x) => /^[a-z]+$/.test(x)); const ver = t.filter((x) => /^\d+$/.test(x)).join('.'); return fam ? `${fam[0].toUpperCase()}${fam.slice(1)}${ver ? ' ' + ver : ''}` : String(id || '?'); };
 /** B2 (acceptance r2): a price disagreement is said ONCE when it comes to exist — at the read, at boot (an instance built
  *  after it), at the person's save: usage-history hands every recomputation's list here (onPriceDisagreements). */
 const priceTag = (d) => `${d.id}|${JSON.stringify(d.catalog)}|${JSON.stringify(d.ours)}|${d.used}`;
@@ -198,6 +200,9 @@ function sayPrices(dis, { save = true, by = null } = {}) {
   if (!st.ledger) return;
   let said = false;
   for (const d of dis) {
+    // a row of its own outranks a key the person typed (round 9) — said by name, with where to change it
+    // (whole within the 200-character bound every said line has; named by the model's name — the catalog's label, else read off its id)
+    if (d.outranked) { said = once('cli-unknown-model-price', `${d.label || modelName(d.id)}: your «${d.fellOn}» row ${usd(d.ours)} no longer prices it — its own «${d.key}» row ${usd(d.shipped)} does; edit «${d.key}» to change it`, priceTag(d)) || said; continue; }
     const ours = d.used === 'you' ? `your «${d.fellOn}» row ${usd(d.ours)} is the one in force` : `VibeSpace's ${d.fellOn === '_default' ? 'default' : '«' + d.fellOn + '»'} row ${usd(d.ours)}`;
     said = once('cli-unknown-model-price', `${d.label || d.id}: Claude Code ${d.cli || '?'} (built ${String(d.builtAt || '?').slice(0, 10)}) prices it ${usd(d.catalog)}; ${ours} — using ${d.used === 'catalog' ? 'Claude Code\'s' : d.used === 'you' ? 'yours' : 'VibeSpace\'s'}`, priceTag(d)) || said;
   }
@@ -303,4 +308,4 @@ function _reset() { st.dataDir = null; st.ledger = null; st.key = null; st.readi
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }
 function _saveNow() { saveLedger(); }
-module.exports = { boot, noteBinary, readBinary, onView, view, status, apply, LEDGER, READ_TIMEOUT_MS, _reset, _load, _saveNow };
+module.exports = { boot, noteBinary, readBinary, onView, view, status, apply, LEDGER, READ_TIMEOUT_MS, _reset, _load, _saveNow, _sayPrices: sayPrices };

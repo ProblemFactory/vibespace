@@ -68,7 +68,7 @@ module.exports = {
   id: '${ID}',
   label: '${L}',
   kind: 'terminal',
-  caps: BACKEND_CAPS['${ID}'] || { ...capsOf('${ID}') }, // TODO: the caps row in src/backend-caps.js (the census names it); until then the all-false row, so the contract suite LISTS what is missing
+  caps: BACKEND_CAPS['${ID}'] || { ...capsOf('${ID}') }, // TODO: the caps row in src/backend-caps.js (the census names it — and its 'modelFacts': does this harness's SERVER state the chat's model facts, the ask / lock / served counter of src/server/model-ask.js? false unless it does: the chip then takes the model its LIVE init names, and no Lock row is offered); until then the all-false row, so the contract suite LISTS what is missing
   Adapter: ${C}Adapter,
   adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }),
   wrapper: null,
@@ -105,7 +105,7 @@ module.exports = {
   id: '${ID}',
   label: '${L}',
   kind: 'chat',
-  caps: BACKEND_CAPS['${ID}'] || { ...capsOf('${ID}') }, // TODO: the caps row in src/backend-caps.js (streamProtocol names the JOURNAL its wrapper writes); until then the all-false row, so the contract suite LISTS what is missing
+  caps: BACKEND_CAPS['${ID}'] || { ...capsOf('${ID}') }, // TODO: the caps row in src/backend-caps.js (streamProtocol names the JOURNAL its wrapper writes; 'modelFacts' — false unless its server states the model facts of src/server/model-ask.js); until then the all-false row, so the contract suite LISTS what is missing
   Adapter: ${C}Adapter,
   adapterConfig: (cfg) => ({                  // cli-env hands the resolved executable + the shared wrapper paths
     harnessId: '${ID}',

@@ -133,6 +133,21 @@ try {
     ok(neg52._tier('claude-fable-5-2') === 'fable' && neg52._tier('claude-mythos-5-2') === 'mythos' && c52 > hand52 * 1.2, `control: without the rows (f5e087bb5) claude-fable-5-2 lands on \`fable\` (Fable 5) and the same event costs $${c52.toFixed(6)} (+${(((c52 / hand52) - 1) * 100).toFixed(1)} % over list) — cache hits 5×`, neg52._tier('claude-fable-5-2'));
   }
   ok(uh2._pricing.tiers['fable-5-2']?.cacheRead === 0.2 && uh2._pricing.tiers['mythos-5-2']?.input === 8 && uh2._tier('claude-fable-5-2') === 'fable-5-2', 'an old on-disk pricing.json gains both 5-2 rows on load, and Fable 5.2 routes to its row');
+  // ── §2e Sonnet 5.5 / Haiku 5.5 (r2) ─────────────────────────────────────────
+  console.log('§2e Sonnet 5.5 / Haiku 5.5 — their own rows; Haiku 5.5 priced by prompt length');
+  ok(tier('claude-sonnet-5-5') === 'sonnet-5-5' && tier('claude-sonnet-5-5[1m]') === 'sonnet-5-5' && tier('claude-sonnet-5') === 'sonnet-5', 'claude-sonnet-5-5 (and [1m]) → sonnet-5-5; claude-sonnet-5 keeps sonnet-5', tier('claude-sonnet-5-5'));
+  ok(tier('claude-haiku-5-5') === 'haiku-5-5' && tier('claude-haiku-4-5-20251001') === 'haiku', 'claude-haiku-5-5 → haiku-5-5; Haiku 4.5 keeps `haiku`', tier('claude-haiku-5-5'));
+  {
+    const short = { model: 'claude-haiku-5-5', acct: null, i: 20000, o: 3000, cw5: 10000, cw1: 0, cr: 60000 };          // prompt 90 000 ⇒ the base rates
+    const long = { ...short, i: 30000 };                                                                                  // prompt 100 000… plus one:
+    const longer = { ...short, i: 30001 };                                                                                // 100 001 ⇒ the long rates, for ALL tokens
+    const at = (e, r) => (e.i * r.input + e.o * r.output + e.cw5 * r.cacheWrite5m + e.cw1 * r.cacheWrite1h + e.cr * r.cacheRead) / 1e6;
+    const base = { input: 0.1, output: 0.5, cacheWrite5m: 0.125, cacheWrite1h: 0.2, cacheRead: 0.01 }, over = { input: 0.5, output: 2.5, cacheWrite5m: 0.625, cacheWrite1h: 1, cacheRead: 0.05 };
+    ok(Math.abs(uh._cost(short) - at(short, base)) < 1e-12 && Math.abs(uh._cost(long) - at(long, base)) < 1e-12 && Math.abs(uh._cost(longer) - at(longer, over)) < 1e-12, 'Haiku 5.5: a prompt of 90 000 and of exactly 100 000 tokens at $0.10 / $0.50; 100 001 at $0.50 / $2.50 for every token (the public «over 100,000»)', [uh._cost(short), uh._cost(long), uh._cost(longer)]);
+    const neg = mk(); const tiersNo = { ...neg._pricing.tiers }; delete tiersNo['haiku-5-5']; delete tiersNo['sonnet-5-5']; neg._pricing = { ...neg._pricing, tiers: tiersNo };
+    ok(neg._tier('claude-haiku-5-5') === 'haiku' && neg._cost(short) > uh._cost(short) * 9 && neg._tier('claude-sonnet-5-5') === 'sonnet-5' && tiersNo['sonnet-5'].cacheRead === 2 * t['sonnet-5-5'].cacheRead, 'CONTROL: without the rows (.387) Haiku 5.5 lands on Haiku 4.5 (×' + (neg._cost(short) / uh._cost(short)).toFixed(1) + ' on this event) and Sonnet 5.5 on Sonnet 5 (cache hits 2×)', neg._tier('claude-haiku-5-5'));
+  }
+  ok(uh2._pricing.tiers['haiku-5-5']?.long?.above === 100000 && uh2._pricing.tiers['sonnet-5-5']?.cacheRead === 0.1 && uh2._tier('claude-haiku-5-5') === 'haiku-5-5', 'an old on-disk pricing.json gains both rows on load (the long block whole)');
   // ── §2c retired generations get their own rows ──────────────────────────────
   console.log('§2c retired ids never borrow a newer generation\'s price');
   const RETIRED = {
@@ -178,29 +193,41 @@ try {
       if (!m || (next > 0 && m.index > next)) return null;
       const d = buf.indexOf(Buffer.from(m[1] + ':{'));
       if (d < 0) return null;
-      const body = buf.subarray(d, d + 400).toString('latin1').match(/:\{([^}]*)\}/);
-      if (!body) return null;
-      const r = {}; for (const kv of body[1].split(',')) { const [k, v] = kv.split(':'); r[k] = Number(v); }
-      return { name: m[1], input: r.input, output: r.output, cacheWrite5m: r.cache_write_5m, cacheWrite1h: r.cache_write_1h, cacheRead: r.cache_read };
+      // r2: a tier may nest its long-prompt block (haiku_55: `long_prompt:{above_prompt_tokens:1e5,…}`) — read the top level and
+      // the nested block apart (the old flat split let the nested rates overwrite the top-level ones)
+      const txt = buf.subarray(d, d + 600).toString('latin1'), open = txt.indexOf('{');
+      let depth = 0, end = -1; for (let i = open; i < txt.length; i++) { if (txt[i] === '{') depth++; else if (txt[i] === '}' && --depth === 0) { end = i; break; } }
+      if (open < 0 || end < 0) return null;
+      let inner = txt.slice(open + 1, end), nested = null;
+      const lp = /long_prompt:\{([^}]*)\}/.exec(inner);
+      if (lp) { nested = {}; for (const kv of lp[1].split(',')) { const [k, v] = kv.split(':'); nested[k] = Number(v); } inner = inner.replace(lp[0], ''); }
+      const r = {}; for (const kv of inner.split(',')) { const [k, v] = kv.split(':'); if (k) r[k] = Number(v); }
+      const long = nested ? { above: nested.above_prompt_tokens, input: nested.input, output: nested.output, cacheWrite5m: nested.cache_write_5m, cacheWrite1h: nested.cache_write_1h, cacheRead: nested.cache_read } : undefined;
+      return { name: m[1], input: r.input, output: r.output, cacheWrite5m: r.cache_write_5m, cacheWrite1h: r.cache_write_1h, cacheRead: r.cache_read, ...(long ? { long } : {}) };
     };
     console.log(`  installed binary ${path.basename(bin)} (${lenient ? 'mirror: informational' : 'STRICT'})`);
     let seen = 0;
-    for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-5', 'claude-fable-5-2', 'claude-mythos-5-2', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1', 'claude-mythos-5', 'claude-sonnet-5', 'claude-opus-4-1', 'claude-opus-4-0', 'claude-3-5-haiku']) {
+    for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-5', 'claude-fable-5-2', 'claude-mythos-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1', 'claude-mythos-5', 'claude-sonnet-5', 'claude-opus-4-1', 'claude-opus-4-0', 'claude-3-5-haiku']) {
       const cat = tierOf(id);
       if (!cat) { console.log(`  - ${id}: not in this build's catalog (skipped)`); continue; }
       seen++;
       const ours = t[uh._tier(id)];
-      const same = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => ours[k] === cat[k]);
+      const same = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'].every((k) => ours[k] === cat[k]) && JSON.stringify(ours.long || null) === JSON.stringify(cat.long || null);
       check(same, `${id} → our \`${uh._tier(id)}\` row = the catalog's ${cat.name}`, JSON.stringify({ ours, catalog: cat }));
     }
     check(seen >= 5, 'the oracle read the catalog (non-vacuous: ≥ 5 of the named ids found)', String(seen));
   }
 
-  // ── §4 THE MODEL-ID CENSUS — the Fable family across every table that names a model by id ──
-  console.log('§4 the model-id census — every Fable member any table names is in EVERY table (a new model is a row, not a branch)');
+  // ── §4 THE MODEL-ID CENSUS — every family, every table that names a model by id, held to the PUBLIC table ──
+  // r2 (lane fable-52-cli-321 follow-up): the Fable-only census widened to every family. The authority is
+  // scripts/fixtures/anthropic-pricing.json (the dated public table, 2026-11-09 — as scripts/fixtures/openai-pricing.json is for
+  // gpt-*). A MEMBER is a current id of that table that some id table names by its OWN entry (a price key that is the point
+  // release — `sonnet-5-5`, or a family key standing for exactly one id: `fable` = Fable 5, `mythos` = Mythos 5 — or a picker row).
+  console.log('§4 the model-id census — every family: each table carries every member any of them names, each priced at the public table');
   const rd = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  const { familyOfModel, projectCacheForFamily } = require(path.join(ROOT, 'src/model-family.js'));
+  const { familyOfModel, familyOfScopedBucket, projectCacheForFamily } = require(path.join(ROOT, 'src/model-family.js'));
   const { parseSetModelEcho } = require(path.join(ROOT, 'src/model-echo.js'));
+  const PUB = JSON.parse(rd('scripts/fixtures/anthropic-pricing.json'));
   // the picker's full ids: the CLAUDE_KNOWN_MODELS literal (cli-env is a factory over the whole hub — read, never booted)
   const knownBlock = (/const CLAUDE_KNOWN_MODELS = \[([\s\S]*?)\n\];/.exec(rd('src/server/cli-env.js')) || [])[1] || '';
   const labelIds = [...knownBlock.matchAll(/\{ id: '([^']+)', label: '([^']+)' \}/g)].map((m) => ({ id: m[1], label: m[2] }));
@@ -211,48 +238,76 @@ try {
   const sbSrc = rd('src/lib/chat-status-bar.js');
   const sbLines = sbSrc.split('\n').filter((l) => l.startsWith('const modelCore = ') || l.startsWith('const sameModel = '));
   const barMatch = sbLines.length === 2 ? new Function(sbLines.join('\n') + '\nreturn sameModel;')() : null;
-  ok(labelIds.length >= 4 && !!lockMatch && !!barMatch, 'the census reads its tables: the picker list (' + labelIds.length + ' ids), the lock\'s modelsMatch, the status bar\'s sameModel', JSON.stringify({ labels: labelIds.length, lock: !!lockMatch, bar: !!barMatch }));
-  const FABLE_ID = /^claude-fable-\d+(-\d+)*$/;
-  // a price key names a member when it IS one (`fable-5-2`); the bare family key is Fable 5's own row
-  const memberOfKey = (k) => (k === 'fable' ? 'claude-fable-5' : /^fable-\d+(-\d+)*$/.test(k) ? 'claude-' + k : null);
-  const ownKey = (id) => (id === 'claude-fable-5' ? 'fable' : id.replace(/^claude-/, ''));
+  ok(labelIds.length >= 8 && !!lockMatch && !!barMatch && PUB.fetchedAt === '2026-11-09' && PUB.models.length >= 20, 'the census reads its tables: the picker list (' + labelIds.length + ' ids), the lock\'s modelsMatch, the status bar\'s sameModel, the public table (' + PUB.models.length + ' rows, read ' + PUB.fetchedAt + ')', JSON.stringify({ labels: labelIds.length, lock: !!lockMatch, bar: !!barMatch, pub: PUB.models.length }));
+  const RATES = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'];
+  const familyOfId = (id) => (/^claude-(fable|mythos|opus|sonnet|haiku)-/.exec(id) || [])[1] || null;
+  const CAP_FAMILY = { fable: 'fable', mythos: 'fable', opus: 'opus', sonnet: 'sonnet', haiku: 'haiku' };   // model-family.js: Mythos rides the Fable cap
+  const ONE_ID_KEY = { fable: 'claude-fable-5', mythos: 'claude-mythos-5' };   // a family key that stands for exactly one id
   /** THE CENSUS: tables in, the gaps out ([] = every table carries every member). PURE over its inputs, so the controls feed it copies. */
-  function fableCensus({ tiers, labels, lock, bar, family = familyOfModel, echo = parseSetModelEcho }) {
-    const fromPrice = Object.keys(tiers).map(memberOfKey).filter(Boolean), fromLabels = labels.map((l) => l.id).filter((id) => FABLE_ID.test(id));
-    const members = [...new Set([...fromPrice, ...fromLabels])].sort();
+  function modelCensus({ tiers, labels, pub = PUB, lock = lockMatch, bar = barMatch, family = familyOfModel, echo = parseSetModelEcho }) {
     const uhx = mk(); uhx._pricing = { ...uhx._pricing, tiers };
     const gaps = [];
+    const pubRow = new Map(); for (const r of pub.models) for (const id of r.ids) pubRow.set(id, r);
+    const current = new Set(pub.models.filter((r) => !r.retired).flatMap((r) => r.ids));
+    // (a) the PRICE table: every public id (current AND retired) resolves to a row equal to the public one, [1m] too; the long tier too
+    for (const r of pub.models) for (const id of r.ids) for (const v of [id, id + '[1m]']) {
+      const k = uhx._tier(v), row = tiers[k] || {};
+      const same = RATES.every((f) => row[f] === r[f]) && JSON.stringify(row.long ? { above: row.long.above, ...Object.fromEntries(RATES.map((f) => [f, row.long[f]])) } : null) === JSON.stringify(r.long ? { above: r.long.above, ...Object.fromEntries(RATES.map((f) => [f, r.long[f]])) } : null);
+      if (!same) gaps.push(`price: ${v} → \`${k}\` is not the public ${r.name} (${r.input}/${r.output}, hit ${r.cacheRead}${r.long ? ', over ' + r.long.above + ' tokens ' + r.long.input + '/' + r.long.output : ''})`);
+    }
+    // (b) the MEMBERS: the current ids some table names by its OWN entry
+    const fromPrice = Object.keys(tiers).map((k) => (ONE_ID_KEY[k] || 'claude-' + k)).filter((id) => current.has(id));
+    const fromLabels = labels.map((l) => l.id).filter((id) => current.has(id));
+    const members = [...new Set([...fromPrice, ...fromLabels])].sort();
+    // a picker row names a model the public table does not list ⇒ nothing to price it by
+    for (const l of labels) if (familyOfId(l.id) && !pubRow.has(l.id.replace(/\[1m\]$/, ''))) gaps.push(`picker: ${l.id} is in no public row`);
+    // (c) the PICKER carries every member of every family it names
+    const pickerFams = new Set(labels.map((l) => familyOfId(l.id)).filter(Boolean));
+    for (const id of members) if (pickerFams.has(familyOfId(id)) && !labels.some((l) => l.id === id)) gaps.push(`picker: no full id ${id}`);
+    // (d) family / cap lane / lock / status bar / echo, per member
+    const BUCKETS = [{ name: 'Fable', pct: 40 }, { name: 'Opus', pct: 90 }, { name: 'Sonnet', pct: 70 }];
     for (const id of members) {
-      for (const v of [id, id + '[1m]']) if (uhx._tier(v) !== ownKey(id)) gaps.push(`price: ${v} → \`${uhx._tier(v)}\`, not its own row \`${ownKey(id)}\``);
-      if (!labels.some((l) => l.id === id)) gaps.push(`picker: no full id ${id}`);
-      if (family(id) !== 'fable' || family(id + '[1m]') !== 'fable') gaps.push(`family: ${id} → ${family(id)}`);
-      const proj = projectCacheForFamily({ fiveHour: 1, sevenDay: 2, scopedWeekly: [{ name: 'Fable', pct: 40 }, { name: 'Opus', pct: 90 }] }, family(id));
-      if (!(proj.scopedWeekly.length === 1 && proj.scopedWeekly[0].name === 'Fable')) gaps.push(`cap lane: ${id} does not see the Fable cap alone`);
+      const F = familyOfId(id), cap = CAP_FAMILY[F];
+      if (family(id) !== cap || family(id + '[1m]') !== cap) gaps.push(`family: ${id} → ${family(id)} (want ${cap})`);
+      const proj = projectCacheForFamily({ fiveHour: 1, sevenDay: 2, scopedWeekly: BUCKETS }, family(id));
+      const want = BUCKETS.filter((b) => familyOfScopedBucket(b.name) === cap).map((b) => b.name).join();
+      if (proj.scopedWeekly.map((b) => b.name).join() !== want) gaps.push(`cap lane: ${id} sees ${proj.scopedWeekly.map((b) => b.name).join() || 'none'} (want ${want || 'none'})`);
       for (const [name, f] of [['lock', lock], ['status bar', bar]]) {
-        if (!(f(id, id) && f(id, id + '[1m]') && f('fable', id) && f('fable[1m]', id + '[1m]'))) gaps.push(`${name}: ${id} is not itself / its [1m] / the fable alias`);
-        for (const other of members) if (other !== id && other.split('-').length === id.split('-').length && f(id, other)) gaps.push(`${name}: ${id} matches ${other}`);
+        if (!(f(id, id) && f(id, id + '[1m]') && f(F, id) && f(F + '[1m]', id + '[1m]'))) gaps.push(`${name}: ${id} is not itself / its [1m] / the ${F} alias`);
+        for (const other of members) if (other !== id && familyOfId(other) === F && other.split('-').length === id.split('-').length && f(id, other)) gaps.push(`${name}: ${id} matches ${other}`);
       }
-      const e = echo('<local-command-stdout>Set model to `fable[1m] (' + id + ')`</local-command-stdout>', { envelope: 'required' }), e2 = echo('Set model to ' + id);
+      const e = echo('<local-command-stdout>Set model to `' + F + '[1m] (' + id + ')`</local-command-stdout>', { envelope: 'required' }), e2 = echo('Set model to ' + id);
       if (!(e && e.id === id && e2 && e2.alias === id)) gaps.push(`echo: ${id} not read back`);
     }
     return { members, gaps };
   }
-  const real = fableCensus({ tiers: t, labels: labelIds, lock: lockMatch, bar: barMatch });
-  ok(real.members.join() === 'claude-fable-5,claude-fable-5-1,claude-fable-5-2', 'the Fable members the tables name are claude-fable-5, -5-1, -5-2 (computed from the tables, never listed here)', real.members.join());
-  ok(real.gaps.length === 0, 'EVERY model-id table carries EVERY Fable member, and its [1m] form: own price row, a picker full id, the Fable family + cap lane, the lock and the status bar (itself, [1m], the alias — never a sibling), the /model echo', real.gaps.join(' · '));
-  ok(labelIds.find((l) => l.id === 'claude-fable-5-2')?.label === 'Fable 5.2' && labelIds.find((l) => l.id === 'claude-fable-5-1')?.label === 'Fable 5.1', 'the picker labels them «Fable 5.1» / «Fable 5.2» (the CLI catalog\'s display_name)');
+  const real = modelCensus({ tiers: t, labels: labelIds });
+  ok(real.members.join() === 'claude-fable-5,claude-fable-5-1,claude-fable-5-2,claude-haiku-4-5-20251001,claude-haiku-5-5,claude-mythos-5,claude-mythos-5-1,claude-mythos-5-2,claude-opus-5,claude-opus-5-5,claude-sonnet-5,claude-sonnet-5-5', 'the members the tables name (computed from the tables, never listed here): Fable 5 / 5.1 / 5.2, Mythos 5 / 5.1 / 5.2, Opus 5 / 5.5, Sonnet 5 / 5.5, Haiku 4.5 / 5.5', real.members.join());
+  ok(real.gaps.length === 0, 'EVERY public id (current and retired, [1m] too) is priced at its public row, long tier included; the picker carries every member of every family it names; each member: the right family + cap lane, the lock and the status bar (itself, [1m], its alias — never a sibling), the /model echo', real.gaps.join(' · '));
+  ok(labelIds.find((l) => l.id === 'claude-fable-5-2')?.label === 'Fable 5.2' && labelIds.find((l) => l.id === 'claude-fable-5-1')?.label === 'Fable 5.1' && labelIds.find((l) => l.id === 'claude-sonnet-5-5')?.label === 'Sonnet 5.5' && labelIds.find((l) => l.id === 'claude-haiku-5-5')?.label === 'Haiku 5.5' && labelIds.find((l) => l.id === 'claude-opus-5-5')?.label === 'Opus 5.5', 'the picker labels them as the CLI catalog\'s display_name («Fable 5.1», «Fable 5.2», «Opus 5.5», «Sonnet 5.5», «Haiku 5.5»)');
   // CONTROLS: the census FAILS by table and id
-  const noLabel = fableCensus({ tiers: t, labels: labelIds.filter((l) => l.id !== 'claude-fable-5-2'), lock: lockMatch, bar: barMatch });
+  const noLabel = modelCensus({ tiers: t, labels: labelIds.filter((l) => l.id !== 'claude-fable-5-2') });
   ok(noLabel.gaps.join() === 'picker: no full id claude-fable-5-2', 'CONTROL: the picker list without Fable 5.2 ⇒ exactly «picker: no full id claude-fable-5-2»', noLabel.gaps.join(' · '));
   const noRow = { ...t }; delete noRow['fable-5-2'];
-  const noPrice = fableCensus({ tiers: noRow, labels: labelIds, lock: lockMatch, bar: barMatch });
-  ok(noPrice.gaps.length === 2 && noPrice.gaps.every((g) => g.startsWith('price: claude-fable-5-2') && g.includes('`fable`')), 'CONTROL: the price table without fable-5-2 ⇒ both spellings named, landing on `fable` (Fable 5)', noPrice.gaps.join(' · '));
-  const planted = fableCensus({ tiers: { ...t, 'fable-5-3': { ...t['fable-5-2'] } }, labels: labelIds, lock: lockMatch, bar: barMatch });
-  ok(planted.members.includes('claude-fable-5-3') && planted.gaps.join() === 'picker: no full id claude-fable-5-3', 'CONTROL: a member planted in ONE table (a fable-5-3 price row) ⇒ the picker that lacks it FAILS — «one table lacks a family member the others have»', planted.gaps.join(' · '));
-  const base = fableCensus({ tiers: noRow, labels: labelIds.filter((l) => l.id === 'claude-fable-5' || !FABLE_ID.test(l.id)), lock: lockMatch, bar: barMatch });
-  ok(base.members.join() === 'claude-fable-5,claude-fable-5-1' && base.gaps.join() === 'picker: no full id claude-fable-5-1', 'CONTROL: the f5e087bb5 tables (no 5-2 row, the picker with Fable 5 alone) ⇒ red on the 5.1 gap they already had — and 5.2 is in no table at all', base.gaps.join(' · '));
-  const wrongFam = fableCensus({ tiers: t, labels: labelIds, lock: lockMatch, bar: barMatch, family: (m) => (String(m).includes('fable-5-2') ? null : familyOfModel(m)) });
+  const noPrice = modelCensus({ tiers: noRow, labels: labelIds });
+  ok(noPrice.gaps.length === 2 && noPrice.gaps.every((g) => g.startsWith('price: claude-fable-5-2') && g.includes('`fable`')), 'CONTROL: the price table without fable-5-2 ⇒ both spellings named, landing on `fable` (Fable 5), not the public Fable 5.2 — and 5.2 stops being a member the picker must carry (the table names it no more)', noPrice.gaps.join(' · '));
+  const pub53 = { ...PUB, models: [...PUB.models, { name: 'Claude Fable 5.3', ids: ['claude-fable-5-3'], input: 8, cacheWrite5m: 10, cacheWrite1h: 16, cacheRead: 0.2, output: 40 }] };
+  const planted = modelCensus({ tiers: { ...t, 'fable-5-3': { ...t['fable-5-2'] } }, labels: labelIds, pub: pub53 });
+  ok(planted.members.includes('claude-fable-5-3') && planted.gaps.join() === 'picker: no full id claude-fable-5-3', 'CONTROL: a new point release published and priced by its own key, but no picker row ⇒ the picker FAILS — «one table lacks a family member the others have»', planted.gaps.join(' · '));
+  const pubOnly = modelCensus({ tiers: t, labels: labelIds, pub: pub53 });
+  ok(pubOnly.gaps.length === 2 && pubOnly.gaps.every((g) => g.startsWith('price: claude-fable-5-3')), 'CONTROL: the same release published with NO row anywhere ⇒ the price table fails it (Fable 5\'s family row is not its public price)', pubOnly.gaps.join(' · '));
+  const wrongFam = modelCensus({ tiers: t, labels: labelIds, family: (m) => (String(m).includes('fable-5-2') ? null : familyOfModel(m)) });
   ok(wrongFam.gaps.some((g) => g.startsWith('family: claude-fable-5-2')) && wrongFam.gaps.some((g) => g.startsWith('cap lane: claude-fable-5-2')), 'CONTROL: a family rule keyed on point releases (5-2 unknown) ⇒ the family AND the cap lane gaps named', wrongFam.gaps.join(' · '));
+  {
+    // the f5e087bb5 tables (before the hotfix) and the .387 hotfix's (Fable rows only): red BY NAME on what each lacked
+    const hot = { ...t }; delete hot['sonnet-5-5']; delete hot['haiku-5-5'];
+    const hotLabels = labelIds.filter((l) => !['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].includes(l.id));
+    const g387 = modelCensus({ tiers: hot, labels: hotLabels }).gaps;
+    ok(g387.some((g) => g.startsWith('price: claude-sonnet-5-5 → `sonnet-5`')) && g387.some((g) => g.startsWith('price: claude-haiku-5-5 → `haiku`')) && g387.includes('picker: no full id claude-opus-5-5') && !g387.some((g) => /fable/.test(g)), 'CONTROL (the .387 hotfix tables): Sonnet 5.5 priced as Sonnet 5, Haiku 5.5 as Haiku 4.5, no Opus 5.5 picker row — the Fable family already whole', g387.join(' · '));
+    const base = { ...hot }; delete base['fable-5-2']; delete base['mythos-5-2'];
+    const g386 = modelCensus({ tiers: base, labels: hotLabels.filter((l) => !/^claude-fable-5-[12]/.test(l.id)) }).gaps;
+    ok(g386.some((g) => g.startsWith('price: claude-fable-5-2 → `fable`')) && g386.includes('picker: no full id claude-fable-5-1'), 'CONTROL (the f5e087bb5 tables): …and Fable 5.2 priced as Fable 5, no Fable 5.1 picker row', g386.filter((g) => /fable/.test(g)).join(' · '));
+  }
 
   // ── §5 THE UNKNOWN-ID ROAD (law 4) ──────────────────────────────────────────
   // What an id NO table names gets — f5e087bb5's lot for claude-fable-5-2, and the next point release's on this tree. Every reader survives
