@@ -979,7 +979,7 @@ Gates: scripts/test-paced-wake-retry.mjs (fast; a stub target that stays idle ov
 
 **Pins.** test-path-linkify ⑩: the REAL delegation over each card kind's door — the Outbox card's ⤓ (its icon, the anchor), the name, a download-only name and the conversation link; the API card; the file card; the code-change card — then a right-click, a touch tap, and the static census of the 14 modules that draw cards into the chat; CONTROLS: the chat's path span, a bare markdown anchor, a linkify span inside a card, conversation://. RED 10 on c6ddc30e6. test-channel-outbox card-door-in-chat: THE verdict over every element of the real card; the pre-lane rule takes 14 doors; RED 4 on the base. test-chat-proposal-card ⑧ in chrome: the ⤓ downloads the file's bytes (size + sha256), the name opens the viewer, the conversation link opens it, a right-click keeps the browser's menu; CONTROL the agent's path copies, «已复制！». 75 ✓ on the lane; RED 6 by name on the base.
 
-## A MESSAGE THE AGENT NEVER READ WAS DRAWN ABOVE THE STOP THAT CAME AFTER IT (the owner, 2026-11-07 ~13:00 PT, his own chat; lane midturn-order, .387)
+## A MESSAGE THE AGENT NEVER READ WAS DRAWN ABOVE THE STOP THAT CAME AFTER IT (the owner, 2026-11-07 ~13:00 PT, his own chat; lane midturn-order, .388)
 
 **Symptom.** Top to bottom: his message «不能光删除名字，auditor又不傻…» wearing «留在已停止的回合中», then «[Request interrupted by user for tool use]» · Interrupted, then «[Request interrupted by user]» · Interrupted. «你能不能确保chatview里的顺序就是事件的实际顺序。你这interrupt在下正常人都会以为先读到了上面那句然后才interrupt？» — the picture says «the agent read it, then I interrupted».
 
