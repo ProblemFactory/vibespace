@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a chat, the ⤓ on a card's file downloads it instead of copying a link, and the file's name opens it.
 - An agent message held back by the wake limit now goes out by itself when the wait ends, so an unattended chain no longer stalls until you type.
 - In Channels, a group's unread count now counts only messages, never lines such as a rename or a new member.
+- A sign-in link an agent sends you stays whole and opens; only a real secret inside a link is hidden, and such a link says so instead of looking clickable.
 
 ## 2.369.387 — 2026-11-09
 
