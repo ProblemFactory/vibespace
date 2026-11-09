@@ -1637,7 +1637,7 @@ await leg(113, async () => { // P17
   }
   const src = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf-8');
   const body = src.slice(src.indexOf('  redrawItem(pred'), src.indexOf('  _save() {'));
-  ok(/it\.text = (clipText|clip)\(text\.trim\(\), TEXT_MAX\);/.test(body) && !/it\.text = [^;]*\.slice\(/.test(body), 'P17: …through the file\'s own cut, not a new slice (`clipText` here; at the .387 cut, with artifacts-by-intent, `clip`: the one-clip law wins)');
+  ok(/it\.text = (clipText|clip)\(text\.trim\(\), TEXT_MAX\);/.test(body) && !/it\.text = [^;]*\.slice\(/.test(body), 'P17: …through the file\'s own cut, not a new slice (`clipText` here; when artifacts-by-intent lands, its `clip`: the one-clip law wins)');
   R.close();
 });
 const liveNoLane = async (name, setup, words) => {

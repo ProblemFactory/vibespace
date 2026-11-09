@@ -467,7 +467,7 @@ src/server/groups-engine.js reachFor + sendersRide + unreceivedFor (lane paced-w
 src/server/channels-outbound.js receiptPaceFor + receiptNow + noteReceiptWakeFell (lane paced-wake-retry) — a decider's paced wake: the gate asked before a promise, parked beside the stashed receipt (stash-wake), its fall said by cause.
 src/channel-policy.js blockedText + receiptPacedText + receiptFateOf wakePaced/wakeFell (lane paced-wake-retry) — the toast and the card for a paced receipt wake: «sends it in N s» only on the park's fact; a blocked drafter by its cause, the same words both.
 src/channel-groups.js AWAIT_FELL + LIVE_FALLS + FALL_WHY + owedOutcome (lane paced-wake-retry) — the ONE list of fall causes, the one way a fall is named, the one table of what each cause means (zh/ja).
-src/user-todos.js redrawItem({text}) (lane paced-wake-retry) — an open item's title redrawn in place through the file's own cut (at .387, with artifacts-by-intent: `clip`).
+src/user-todos.js redrawItem({text}) (lane paced-wake-retry) — an open item's title redrawn in place through the file's own cut (when artifacts-by-intent lands: its `clip`).
 src/agent-routes.js renderMsgStash whole rows + heldCause + msgRefusals (lane paced-wake-retry) — an owed frame's rows whole; a paced or fallen wake's notice under the «held» heading; the answer's parked fields.
 src/stash-summary.js HELD_WHY.paced + src/park-step.js (lane paced-wake-retry) — a parked wake's frame says why it waited; park-step's cells are the transient's (a comment names the owed entry).
 src/lib/channel-words.js awaitLineText + the owner's echo (lane paced-wake-retry) — the await line per fall cause (never «wake cap» for a fall); «{n} wake(s) held by the wake pace — sent when the window ends».
