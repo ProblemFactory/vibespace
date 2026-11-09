@@ -892,7 +892,12 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     // landing's held ops replayed once each and its failure said by nobody (the acceptance's two mutants)
     console.log('⑩d THE TAIL r4 — the proof travels with the landing and is the filing\'s; a road that fails moves nothing; the law both ways; a stale page\'s total is not applied; the slot moves only for a show that lands');
     const REAL4 = { _fetchMessagePage: method('  async _fetchMessagePage(', '  // ── History-load transition'), _onOp: method('  _onOp(op) {', '  // Create a new normalized message') };
-    const DEFER = /if \(!this\._loadingHistory && \(this\._teleported \|\| \(!this\._pinned && this\._windowEnd < this\._total\)\)\) \{\n\s+this\._total\+\+;/.test(CVS);
+    // THE LAW this pin holds (.388, the train's seam — first made on the .387 train — test-only): a live create the view places INSIDE its drawn window is
+    // inserted in place (midturn-order: the agent's delivery order — a create carrying {before, at} goes before that card); ONLY a
+    // create OUTSIDE the drawn window, while the view is teleported or off the tail, is deferred: counted (`_total++`), not drawn.
+    // The legs below mirror that outside-window deferral, whose behaviour midturn-order left unchanged; the in-window insert is
+    // pinned from the other side by test-midturn-order §8 (the client replays create.before into the server's order).
+    const DEFER = /if \(!insideWindow && !this\._loadingHistory && \(this\._teleported \|\| \(!this\._pinned && this\._windowEnd < this\._total\)\)\) \{\n\s+if \(insertAt >= 0 && !this\._teleported\) this\._chatMinimap\?\.shiftFrom\?\.\(insertAt\);\n\s+this\._total\+\+;/.test(CVS);
     ok(Object.values(REAL4).every((f) => typeof f === 'function') && DEFER, 'the REAL _fetchMessagePage and _onOp are read out of src/lib/chat-view.js (and _onCreateMessage\'s deferral — a live create while the view reads history counts `_total++` — is the line the legs below mirror)', { real: Object.keys(REAL4).filter((k) => typeof REAL4[k] !== 'function'), DEFER });
     const rejecting = () => { let fail; const p = new Promise((_, r) => { fail = r; }); p.catch(() => { }); return { p, open: () => fail(new Error('the tail page failed')) }; };
     const until = async (v, re) => { for (let i = 0; i < 80 && !v.log.some((l) => re.test(l)); i++) await tick(2); };
