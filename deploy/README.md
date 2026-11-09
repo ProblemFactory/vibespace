@@ -194,7 +194,7 @@ the same JSON the chart always took:
 
 | Secret key | File shape | Read by |
 |---|---|---|
-| `gdriveClients` | `[{key, label, clientId, clientSecret}, …]` — Google OAuth clients (Drive mounts, Gmail mounts and Gmail channel accounts). Name the one channels should default to `channels` when you provide more than one | `src/mounts.js` (`drivePresets`) |
+| `gdriveClients` | `[{key, label, clientId, clientSecret, clientType?, relayUrl?, instanceAddress?}, …]` — Google OAuth clients (Drive mounts, Gmail mounts and Gmail channel accounts). Name the one channels should default to `channels` when you provide more than one. Optional facts a Gmail sign-in reads: `"clientType": "web"` or `"desktop"` (which kind of Google client it is), `"relayUrl"` (its relay page), `"instanceAddress": "listed"` (the client lists every instance's own `https://<host>/api/channels/oauth/cb/gmail`) | `src/mounts.js` (`drivePresets`) |
 | `integrations` | `[{id, key?, label?, values: {…}}, …]` — one entry per registry row id (`src/integration-registry.js`); `values` keys are that row's field keys | `src/server/integration-store.js` |
 | `fleet` | `{"relayUrl": "https://admin.<domain>/relay/"}` — the fleet's sign-in relay page (below, "One sign-in redirect per vendor app") | `src/server/integration-store.js` (`fleetRelayUrl`) |
 
@@ -376,9 +376,23 @@ minute — no helm upgrade, no restart.** The server logs
 - The public page (`https://problemfactory.github.io/vibespace/slack/`, the
   default of Settings → Channels → relay page) is only for a person's OWN app
   on a VibeSpace with no https address; a company app's setup never shows it.
-- Neither set = the preset has no relay page (its setup says so): each pod's
-  sign-in comes back to its own `https://<pod>/api/channels/oauth/cb/<kind>`,
-  which the app must then list; a local hub keeps its loopback.
+- Neither set = the preset has no relay page (its setup says so). A sign-in
+  then comes back to the instance's own `https://<pod>/api/channels/oauth/cb/<kind>`
+  ONLY when the entry says the app lists it — `"instanceAddress": "listed"`
+  (in a `gdrive-clients.json` entry, or an `integrations.json` Lark / Slack
+  entry's `values`). Otherwise Lark and Gmail come back to their loopback and a
+  person on another computer pastes the last page's address back into the
+  Connect dialog (the dialog says so before the vendor opens); Slack, which has
+  no loopback, says before it opens that the company app cannot bring the
+  sign-in back. A Google entry that does not say its `"clientType"` signs in
+  first at `http://127.0.0.1:<any port>` (the form Google documents for a
+  Desktop app client); the dialog offers Gmail's fixed 127.0.0.1 address (the
+  one a Web application client lists — see «Register the redirect URIs»
+  below) as a visible second button. Say the type — and a relay page or
+  `instanceAddress` — to take the guess away. An edit in the presets directory
+  takes effect without a restart; the env `VIBESPACE_GDRIVE_CLIENTS` /
+  `VIBESPACE_INTEGRATIONS` is read at boot. ⚙ → Integrations names, per company
+  preset, what it does not say and which of the two states it.
 - The page sends back a private origin — Tailscale's `100.64.0.0/10` and
   `*.ts.net` included — or an https host under its `data-allow`; it shows the
   code anywhere else.

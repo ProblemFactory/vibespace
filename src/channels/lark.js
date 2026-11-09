@@ -2256,6 +2256,7 @@ function create(record = {}, deps = {}) {
         return oauth.begin({
           id: adapterId, label: 'Lark',
           ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor, road: way.road } : { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl }),
+          other: way.other || null,   // lane gmail-connect-wall: the dialog's visible second road (a company preset with no relay and no listed address has none: its fixed loopback IS the road)
           successText: 'VibeSpace: Lark connected — you can close this tab.',
           chain: here, scopeSource,
           // lane lark-consent-chain: a page whose authorize URL passes CONSENT_URL_MAX_BYTES is REFUSED by name, never sent

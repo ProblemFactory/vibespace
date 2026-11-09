@@ -120,7 +120,7 @@ function drawConsentLinks(status, r, provider) {
 // instance (`public`) the address an admin adds to the vendor's app (`r.askAdmin`) and the other road (`r.otherRoad` — the
 // copy-the-address way). A pasted TOKEN (Slack's per-person app: `pasteSecret`) IS the road and stays open; a caller that
 // names no line (the storage dialogs — test-mounts-dialog-extract holds them to their baseline) keeps the open box.
-function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = false, onPaste, onOtherRoad = null }) {
+function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = false, onPaste, onOtherRoad = null, onCancel = null }) {
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
   hint.textContent = r.pasteHint || pasteHint || tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:");
@@ -129,6 +129,7 @@ function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = f
   if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }   // design 012: a pasted TOKEN is a secret — never drawn in the clear
   inp.onchange = () => onPaste(inp.value);
   if (pasteSecret || !r.pasteTitle) { const box = document.createElement('div'); box.append(hint, inp); return box; }
+  if (r.live) return liveBack({ r, hint, inp, onOtherRoad, onCancel });
   const box = document.createElement('details');
   box.className = 'mounts-oauth-paste';
   const sum = document.createElement('summary');
@@ -154,6 +155,76 @@ function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = f
     b.type = 'button'; b.className = 'mounts-btn mounts-oauth-other'; b.textContent = r.otherRoad.label;
     b.onclick = async () => { b.disabled = true; try { await onOtherRoad(await r.otherRoad.run()); } catch (e) { b.disabled = false; hint.textContent = (e && e.message) || tr('Failed'); } };
     box.append(b);
+  }
+  return box;
+}
+// lane gmail-connect-wall (the owner 2026-11-09: «打不开授权页然后就没法继续操作任何东西了» — after the press the dialog was a
+// greyed button and a fold): THE LIVE LAYOUT of a channel account dialog's consent (`r.live`, src/lib/channel-account-dialogs.js
+// routeTrouble). The box the road needs is OPEN when the road needs it (`r.pasteOpen`: a loopback from another computer — its
+// last page never loads), else folded under its line; the OTHER road and Cancel are visible buttons; only the ADMIN's part
+// (the address to list, the console path, what the preset does not say) sits in a fold titled for the admin.
+function liveBack({ r, hint, inp, onOtherRoad, onCancel }) {
+  const box = document.createElement('div');
+  box.className = 'mounts-oauth-live';
+  if (r.pasteOpen) {
+    box.dataset.paste = 'open';
+    if (r.pasteHint) box.append(hint);
+    box.append(inp);
+  } else {
+    const fold = document.createElement('details');
+    fold.className = 'mounts-oauth-paste';
+    const sum = document.createElement('summary');
+    sum.className = 'mounts-field-hint';
+    sum.textContent = r.pasteTitle;
+    fold.append(sum, hint, inp);
+    box.append(fold);
+  }
+  const why = document.createElement('div');
+  why.className = 'mounts-field-hint mounts-oauth-error';
+  const actions = document.createElement('div');
+  actions.className = 'mounts-oauth-actions';
+  actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;';
+  if (r.otherRoad && typeof r.otherRoad.run === 'function' && onOtherRoad) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mounts-btn mounts-oauth-other'; b.textContent = r.otherRoad.label;
+    b.onclick = async () => { b.disabled = true; try { await onOtherRoad(await r.otherRoad.run()); } catch (e) { b.disabled = false; why.textContent = (e && e.message) || tr('Failed'); } };
+    actions.append(b);
+  }
+  if (typeof onCancel === 'function') {
+    const c = document.createElement('button');
+    c.type = 'button'; c.className = 'mounts-btn mounts-oauth-cancel'; c.textContent = tr('Cancel the sign-in');
+    c.onclick = async () => { c.disabled = true; try { await onCancel(); } catch (e) { c.disabled = false; why.textContent = (e && e.message) || tr('Failed'); } };
+    actions.append(c);
+  }
+  if (actions.childElementCount) box.append(actions);
+  if (r.otherRoad && r.otherRoad.hint) {
+    const h = document.createElement('div');
+    h.className = 'mounts-field-hint mounts-oauth-other-why';
+    h.textContent = r.otherRoad.hint;
+    box.append(h);
+  }
+  box.append(why);
+  const admin = r.askAdmin || null;
+  if (admin && (admin.value || (Array.isArray(admin.notes) && admin.notes.length))) {
+    const f = document.createElement('details');
+    f.className = 'mounts-oauth-admin-fold';
+    const s = document.createElement('summary');
+    s.className = 'mounts-field-hint';
+    s.textContent = admin.title || admin.text;
+    f.append(s);
+    if (admin.value) {
+      const a = document.createElement('div');
+      a.className = 'mounts-field-hint mounts-oauth-admin';
+      a.textContent = admin.text;
+      f.append(a, copyLine(admin.value));
+    }
+    for (const n of Array.isArray(admin.notes) ? admin.notes : []) {
+      const d = document.createElement('div');
+      d.className = 'mounts-field-hint mounts-oauth-admin-note';
+      d.textContent = n;
+      f.append(d);
+    }
+    box.append(f);
   }
   return box;
 }
@@ -360,7 +431,12 @@ export function renderFields(body, fields) {
 // 2.369.214): the consent may have landed in another browser profile, so a
 // stranger's account is visible BEFORE Connect makes the record.
 export const connectedLine = (user) => (user ? tr('✓ Connected as {user} — finish with the “Connect” button below.', { user: String(user).slice(0, 200) }) : tr('✓ Connected — finish with the “Connect” button below.'));
-export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false, signins = {} } = {}) {
+// lane gmail-connect-wall: `live` (the channel account dialogs only — a storage dialog passes none and keeps its block byte for
+// byte, test-mounts-dialog-extract): {again (the button's words once a sign-in runs — it opens the sign-in AGAIN, the server
+// replacing the earlier one), cancel() (the visible one-press Cancel), attach() → a block for a sign-in still running when the
+// dialog opens (shown, never opened again), onFlow(r) (the caller hears every block it shows)}. The button is never greyed
+// beside a hint: it is busy only while its own request runs.
+export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey, endpoints = MOUNT_OAUTH_ENDPOINTS, extra = null, provider = null, pastePlaceholder = null, finishText = null, pasteHint = null, pasteSecret = false, signins = {}, live = null } = {}) {
   // `signins`: rclone backend → the sign-in provider's name (the storage rows' client.signins cells; a caller may name `provider`)
   const tokenInput = ctx.inputs[tokenKey];
   if (!tokenInput) return;
@@ -372,40 +448,146 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
   btn.type = 'button'; btn.className = 'mounts-btn mounts-btn-primary'; btn.textContent = label;
   const status = document.createElement('div'); status.className = 'mounts-field-hint';
   wrap.append(btn, status);
+  // lane gmail-connect-wall r2 (law E2 + the phone): a live block wraps a long address inside the dialog, and on a finger device
+  // its buttons and box meet the 44 px / 16 px rule (public/style.css) — a storage block gets neither class
+  if (live) { wrap.classList.add('mounts-oauth-live-block'); btn.classList.add('mounts-oauth-live-btn'); }
   tokenInput.before(wrap);
   const sync = () => { wrap.style.display = tokenInput.style.display; };
   new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
   sync();
   let pasteBox = null, poll = null;
+  // lane gmail-connect-wall r2 (law B): the live block follows ONE sign-in — every press (the button, the other road, Cancel)
+  // ends the earlier watch BEFORE it starts, and an answer that belongs to an older press changes nothing on screen
+  let gen = 0;
+  // r3 (the acceptance: «Cancel ends what the hub is running»): the sign-in ON SCREEN (`shownId`) and the press IN FLIGHT
+  // (its start not answered yet) — Cancel ends both; the dialog says «cancelled» only once neither runs
+  let shownId = null, inflight = null;
+  // r4 (acceptance r3, THE LAW: after any await a handler draws and keeps nothing unless it is still the latest act — and
+  // closing the dialog is an act): `closed` = the dialog that holds this block closed (the caller's `close()` below)
+  let closed = false;
   const stopPoll = () => { clearInterval(poll); poll = null; };
-  const finish = (token, user = null) => { stopPoll(); tokenInput.value = token; status.textContent = typeof finishText === 'function' ? finishText(user) : (finishText || connectedLine(user)); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
+  // r4 (the smaller point): while a press or a Cancel runs, BOTH press controls (the button and the other road) are busy — one
+  // act at a time; Cancel stays usable during a press (it ends what that press starts)
+  const busy = (on) => { if (!live) return; btn.disabled = !!on; const o = pasteBox && pasteBox.querySelector('.mounts-oauth-other'); if (o) o.disabled = !!on; };
+  // r4: a press whose answer lands when it is no longer the latest act (a newer press, Cancel) or after the close: its sign-in
+  // is never shown and no page opens for it — nobody can finish it, whatever its road — so it is ended (by its id; the shown
+  // one is never touched). A sign-in that needed this dialog's paste box is said once (as the close says it for a shown one).
+  // R5 is about a SHOWN sign-in: one whose page is open and comes back by itself keeps running at the close.
+  // r4 (the tidy's last word): what this page started of the kind and the dialog was needed for, read off the hub (its `ref`)
+  const sweepLater = () => { if (live && typeof live.sweep === 'function') Promise.resolve().then(() => live.sweep()).catch(() => {}); };
+  const strayEnd = (r, prov) => {
+    if (!live || !r || !r.flowId || r.flowId === shownId || typeof live.cancel !== 'function') return null;
+    return Promise.resolve().then(() => live.cancel(r.flowId)).then((x) => { if (closed && r.needsDialog && x && x.cancelled) showToast(tr('The {provider} sign-in was ended: it needed this dialog to finish.', { provider: prov })); return x; }).catch(() => null);
+  };
+  const finish = (token, user = null) => { stopPoll(); tokenInput.value = token; status.textContent = typeof finishText === 'function' ? finishText(user) : (finishText || connectedLine(user)); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; if (live) delete wrap.dataset.flow; };
+  // lane gmail-connect-wall (live): a sign-in that ended without landing — the block back to its first state, its line said
+  const ended = (line) => { stopPoll(); status.textContent = line; btn.textContent = label; btn.disabled = false; pasteBox?.remove(); pasteBox = null; delete wrap.dataset.flow; wrap.querySelectorAll('.mounts-oauth-link, .mounts-oauth-narrow').forEach((e) => e.remove()); };
   // ONE consent shown in the block: its page opened, its links, the folded paste-back, its poll (lane pod-oauth-callback:
   // the other road re-shows the block for the consent it started)
-  const show = (r, prov) => {
-    const _w = window.open(r.url, '_blank');
+  // r2 (law C): a press that failed says what is true — the sign-in that still runs (shown again, its watch back) or none
+  const afterFail = async (e, prov, press) => {
+    if (press !== gen) return;
+    const why = tr('This press did not start a sign-in: {error}', { error: (e && e.message) || tr('Failed') });
+    let still = null;
+    try { still = typeof live.afterFail === 'function' ? await live.afterFail() : null; } catch { still = null; }
+    // r4 (the tidy): closed while it read — a press whose answer was lost may have started the sign-in that runs; no page opened
+    // for it and no dialog is left to finish it, so it is ended (by its id, as strayEnd ends every late one)
+    if (press !== gen) { if (closed) sweepLater(); return; }
+    if (still && still.token) { finish(still.token, still.user || null); return; }
+    if (still) { show(still, prov, { open: false, press, failed: why }); return; }
+    ended(`${why} ${tr('No sign-in is running — press the button to start again.')}`);
+  };
+  // r4 (the tidy, «cancelled» is said only when the hub runs nothing): an act that learns ITS sign-in is not the one running (a
+  // Cancel that ended it or found it ended, the poll that hears it ended) reads what the hub runs for the kind and SHOWS that —
+  // a sign-in another dialog started, with its Cancel — or, when nothing runs, says its end
+  const adoptOrEnd = async (mine, prov, failedLine, endLine) => {
+    let still = null;
+    try { still = typeof live.afterFail === 'function' ? await live.afterFail() : null; } catch { still = null; }
+    if (mine !== gen || closed) return;
+    if (still && still.token) { finish(still.token, still.user || null); return; }
+    if (still && still.flowId) { show(still, prov, { open: false, press: mine, failed: failedLine }); return; }
+    ended(endLine);
+  };
+  // r2 (law B): the other road is a press too — it ends the earlier watch first and its answer is shown only if still the newest
+  const pressed = (r, prov) => (!(live && r && r.otherRoad && typeof r.otherRoad.run === 'function') ? r : { ...r, otherRoad: { ...r.otherRoad, run: async () => {
+    const press = ++gen; stopPoll(); busy(true);
+    try {
+      const promise = r.otherRoad.run(); inflight = { press, promise }; const x = await promise;
+      if (press !== gen || closed) { strayEnd(x, prov); return { press: -1 }; }   // r4: not the latest act any more
+      return x && typeof x === 'object' ? { ...x, press } : x;
+    } catch (e) { if (closed) { sweepLater(); return { press: -1 }; } await afterFail(e, prov, press); return { press: -1 }; }
+  } } });
+  const show = (r, prov, { open = true, press = gen, failed = null } = {}) => {
+    if (live && (press !== gen || closed)) return;   // r2 (law B): an older press's answer changes nothing (r4: nor one after the close)
+    const _w = open ? window.open(r.url, '_blank') : true;
     drawConsentLinks(status, r, prov);
     status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: prov });
     if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
+    // lane gmail-connect-wall (live): WHICH road is in play, in the person's words, while they are at the vendor; a sign-in
+    // this one replaced is said once; a reopened dialog says the sign-in is the one still running
+    if (live && r.roadLine) status.textContent = [failed, r.superseded ? tr('The earlier sign-in was ended — this is a new one.') : null, open ? (_w ? tr('A {provider} sign-in page opened.', { provider: prov }) : tr('Popup blocked — copy the link below and open it in a browser yourself.')) : tr('The {provider} sign-in you started earlier is still waiting.', { provider: prov }), r.roadLine].filter(Boolean).join(' ');
     if (r.notice) status.textContent = r.notice;
     pasteBox?.remove();
-    pasteBox = pasteBack({ r, pasteHint, pastePlaceholder: pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…', pasteSecret,
-      onPaste: async (v) => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: v }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token, fr.user || null); } catch (e) { status.textContent = e.message || tr('Failed'); } },
-      onOtherRoad: (r2) => { if (r2 && r2.error) throw new Error(r2.error); show(r2, prov); } });
-    wrap.appendChild(pasteBox);
-    stopPoll();
-    poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token, st.user || null); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+    pasteBox = pasteBack({ r: pressed(r, prov), pasteHint, pastePlaceholder: pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…', pasteSecret,
+      onPaste: async (v) => { const at = gen; try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: v }); if (live && (at !== gen || closed)) return; if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token, fr.user || null); } catch (e) { if (live && (at !== gen || closed)) return; status.textContent = e.message || tr('Failed'); } },
+      onOtherRoad: (r2) => { if (r2 && r2.error) throw new Error(r2.error); if (live && r2 && r2.press !== undefined) { if (r2.press !== gen) return; show(r2, prov, { press: r2.press }); return; } show(r2, prov); },
+      ...(live && typeof live.cancel === 'function' ? { onCancel: async () => {
+        const pend = inflight && inflight.press === gen ? inflight.promise : null;   // r3: a press still in flight starts a sign-in too
+        const mine = ++gen; stopPoll(); busy(true);
+        // r4: a Cancel whose own request failed leaves the sign-in on screen running — its controls and its watch back
+        let x = null;
+        try { x = await live.cancel(shownId); } catch (e) { if (mine === gen && !closed) { busy(false); watchShown(prov); } throw e; }
+        let ours = !!(x && x.cancelled);
+        if (pend) { const r2 = await pend.catch(() => null); if (r2 && r2.flowId && r2.flowId !== shownId) { try { const y = await live.cancel(r2.flowId); if (y && y.cancelled) ours = true; } catch { /* it ended either way */ } } }
+        if (mine !== gen || closed) return;   // r4 (THE LAW): a newer act draws its own state — «cancelled» is never said over it
+        await adoptOrEnd(mine, prov, ours ? tr('The sign-in was cancelled.') : tr('The sign-in this dialog showed had already ended.'), tr('The sign-in was cancelled. Press the button to start again.'));
+      } } : {}) });
+    if (live) { shownId = r.flowId || null; wrap.dataset.flow = shownId || ''; status.after(pasteBox); btn.textContent = live.again || label; btn.disabled = false; if (typeof live.onFlow === 'function') live.onFlow(r); }
+    else wrap.appendChild(pasteBox);
+    watchShown(prov);
   };
+  // the watch of the sign-in on screen (its 1.5 s poll), owned by the act that drew it
+  function watchShown(prov) {
+    stopPoll();
+    const mine = gen;
+    const watching = shownId;   // r3: the poll asks about the sign-in ON SCREEN, never «the latest answer's»
+    poll = setInterval(async () => { try { const st = await (live && typeof endpoints.status === 'function' ? endpoints.status(watching) : get(endpoints.status)); if (live && (mine !== gen || closed)) return; if (st.token) finish(st.token, st.user || null); else if (st.error) { if (live) { stopPoll(); adoptOrEnd(mine, prov, st.error, `${st.error} ${tr('No sign-in is running — press the button to start again.')}`); } else { stopPoll(); status.textContent = st.error; btn.disabled = false; } } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+  }
   btn.onclick = async () => {
+    if (live && closed) return;
+    const press = live ? ++gen : gen;   // r2 (law B): this press is the one followed; the earlier watch ends now
+    if (live) { stopPoll(); busy(true); }
     btn.disabled = true; status.textContent = tr('Preparing authorization…');
+    let prov = provider || '';
     try {
       const body = { backend: typeof backend === 'function' ? backend() : backend };
       if (clientIdKey && ctx.inputs[clientIdKey]?.value) { body.clientId = ctx.inputs[clientIdKey].value; body.clientSecret = ctx.inputs[clientSecretKey]?.value || ''; }
       if (extra) Object.assign(body, extra() || {});
-      const r = await post(endpoints.start, body);
+      prov = provider || signins[body.backend] || body.backend;
+      const promise = post(endpoints.start, body);
+      if (live) inflight = { press, promise };
+      const r = await promise;
+      if (live && (press !== gen || closed)) { if (r && !r.error) strayEnd(r, prov); return; }   // r4 (THE LAW): not the latest act any more
       if (r.error) throw new Error(r.error);
-      show(r, provider || signins[body.backend] || body.backend);
-    } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
+      show(r, prov, live ? { press } : {});
+    } catch (e) {
+      if (live) { if (closed) { sweepLater(); return; } await afterFail(e, prov, press); return; }   // r4: a press that failed after the close — what it may have started is swept
+      status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false;
+    }
   };
+  // lane gmail-connect-wall (live): a sign-in that comes back by itself and is still running when the dialog opens is SHOWN
+  // (state B), never started a second time; one that already landed is the connected line
+  if (live && typeof live.attach === 'function') {
+    const at = gen;   // r4 (THE LAW): the attach is the block's first act — a press or a close meanwhile is newer
+    Promise.resolve().then(() => live.attach()).then((r) => {
+      if (!r || tokenInput.value || poll || at !== gen || closed) return;
+      if (r.token) { finish(r.token, r.user || null); return; }
+      show(r, provider || signins[typeof backend === 'function' ? backend() : backend] || '', { open: false, press: gen });
+    }).catch(() => { /* nothing to show */ });
+  }
+  // r4 (THE LAW: closing the dialog is an act): the caller's close hook — every later answer of this block draws nothing, opens
+  // no page, registers nothing; what a press in flight started is ended by strayEnd when it lands (R5's rule for its road)
+  return { close: () => { if (closed) return; closed = true; ++gen; stopPoll(); sweepLater(); } };
 }
 
 // NUMBERED PASTE STEPS (design 017 — Slack's two pastes; the channel account dialogs hand in the words, the endpoints
@@ -541,7 +723,7 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // → `{token}`, and `finish(token, {close})` applies the new sign-in. `fields`
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
-export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, cancel = null, askFirst = null, onClose = null, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, cancel = null, askFirst = null, onClose = null, savingText = null, live = false, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
   // lane lark-refresh-stall r2 (the dialog-yield seam): Escape on a sign-in that is RUNNING asks «Cancel the sign-in?» (the
   // caller's `askFirst` — the decision dialog) before it ends it, and cancels the consent when told yes — nothing running, or
   // no `askFirst` handed in: the shell's own door
@@ -559,9 +741,24 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
   // poll and hands the caller's `onClose` its teardown (a running sign-in's watcher listens to the socket until it is told).
   // r4 (acceptance r3, the dialog-yield seam): `poll` / `stopPoll` are declared BEFORE the shell that is handed `closed` — a
   // shell that runs it early (a raised form's end) never meets an uninitialised const
-  let pasteBox = null, poll = null;
+  let pasteBox = null, poll = null, shown = null;
+  // lane gmail-connect-wall (live): a press that opened the sign-in again outdates the earlier press's end timer. r4
+  // (acceptance r3, THE LAW: after any await a handler draws and keeps nothing unless it is still the latest act — and closing
+  // the dialog is an act): `gen` is every act's number (a press, the other road, Cancel, the close), `isClosed` the close,
+  // `inflight` the press whose start has not answered (Cancel ends what it starts) — declared before the shell, whose close
+  // may run early
+  let gen = 0, isClosed = false, inflight = null;
   const stopPoll = () => { clearInterval(poll); poll = null; };
-  const closed = () => { stopPoll(); if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } } };
+  // lane gmail-connect-wall (live, R5): closing ends ONLY a sign-in that cannot finish without this dialog (a loopback from
+  // another computer — its paste box is here), said once; a sign-in that comes back by itself keeps running. r4: by its id
+  // (`cancel(flowId)`) — a later sign-in of the account is never ended by this dialog's close
+  const closed = () => {
+    const running = !!poll;
+    stopPoll();
+    if (live) { isClosed = true; ++gen; }
+    if (live && running && shown && shown.needsDialog && typeof cancel === 'function') { Promise.resolve().then(() => cancel(shown.flowId)).then(() => showToast(tr('The {provider} sign-in was ended: it needed this dialog to finish.', { provider: provider || title }))).catch(() => {}); }
+    if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } }
+  };
   // not the subject: fields — the caller's key names them (the mount / the account its OAuth-client select belongs to)
   // not the subject: start — the caller's sign-in call; the consent link it answers is this form's work after a press (the caller's key names whom it signs in)
   const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', kind: 'form', onClose: closed, escapeToClose: true, onEscape: () => escapeAsk() });   // key = the mount / the account re-authorized (lane dialog-yield r3); kind 'form' + lark-refresh-stall's onClose / Escape-asks (int361: 主开发's option order)
@@ -574,6 +771,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
   btn.textContent = signinLabel;
   const status = document.createElement('div');
   status.className = 'mounts-field-hint';
+  if (live) { status.classList.add('mounts-oauth-live-block'); btn.classList.add('mounts-oauth-live-btn'); }   // lane gmail-connect-wall r2: wrap + the phone rule
   let form = null;
   if (fields && fields.length) { body.append(hint); form = renderFields(body, fields); body.append(btn, status); }
   else body.append(hint, btn, status);
@@ -584,14 +782,62 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
       await apply(token, { close, status });
     } catch (e) { status.textContent = e.message || 'Failed'; btn.disabled = false; }
   };
+  // r4 (the smaller point): while a press or a Cancel runs, BOTH press controls are busy — one act at a time (the account's
+  // sign-ins are ended by id, but one at a time keeps the account's single running sign-in the one on screen)
+  const gone = () => !status.isConnected || (live && isClosed);
+  const busy = (on) => { if (!live) return; btn.disabled = !!on; const o = pasteBox && pasteBox.querySelector('.mounts-oauth-other'); if (o) o.disabled = !!on; };
+  // the watch of a press's sign-in: the 1.5 s poll and the ten-minute end, both belonging to that press
+  const watch = (press) => {
+    stopPoll();   // lane gmail-connect-wall (live): a press that opened the sign-in again keeps ONE watch
+    poll = setInterval(async () => {
+      if (!status.isConnected) { stopPoll(); return; } // dialog closed
+      try {
+        const st = await statusOf();
+        if (live && (press !== gen || isClosed)) return;   // r2 (law B): an older press's answer changes nothing
+        if (st.token) finish(st.token);
+        else if (st.fail) { stopPoll(); status.textContent = st.fail; btn.disabled = false; if (live) { shown = null; btn.textContent = signinLabel; pasteBox?.remove(); pasteBox = null; } }
+      } catch {}
+    }, 1500);
+    // client-from-mount verify r5: the consent machine ends a sign-in 10 min after it began and SAYS so on the record
+    // (the watcher's `fail`), but this stop used to fire at the same instant and only clear the interval — the last
+    // 1.5 s tick had run before the frame landed, so the dialog kept "A … sign-in page opened" and a disabled button
+    // for ever. The stop now waits past the machine's own end, reads the watcher once more, and says what it found.
+    setTimeout(async () => {
+      if (press !== gen) return;
+      stopPoll();
+      if (!status.isConnected || (!btn.disabled && !live)) return;
+      let st = {}; try { st = await statusOf(); } catch {}
+      if (press !== gen || gone()) return;
+      if (st.token) return finish(st.token);
+      status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');
+      btn.disabled = false;
+    }, 10 * 60 * 1000 + 5000);
+  };
+  // r4: the other road is a press too — it ends the earlier watch, is busy like the button, and its answer is shown only while
+  // it is the latest act; one that lands after the close ends the sign-in it started (no page opens for it)
+  const pressedRe = (x) => (!(live && x && x.otherRoad && typeof x.otherRoad.run === 'function') ? x : { ...x, otherRoad: { ...x.otherRoad, run: async () => {
+    const p = ++gen; stopPoll(); busy(true);
+    try {
+      const promise = x.otherRoad.run(); inflight = { press: p, promise }; const y = await promise;
+      if (gone()) { if (typeof cancel === 'function' && y && y.flowId) { try { await cancel(y.flowId); } catch { /* it ends at its own time */ } } return { press: -1 }; }
+      if (p !== gen) return { press: -1 };   // Cancel (the newer act) ends what this press started
+      return y && typeof y === 'object' ? { ...y, press: p } : y;
+    } catch (e) { if (p !== gen || gone()) return { press: -1 }; btn.disabled = false; if (shown) watch(p); throw e; }   // the sign-in on screen still runs: its watch back
+  } } });
   btn.onclick = async () => {
+    if (live && isClosed) return;
+    const press = ++gen;
     btn.disabled = true;
+    if (live) busy(true);
     status.textContent = tr('Preparing authorization…');
     try {
-      const r = await start(form ? form.readValues() : {});
+      const promise = start(form ? form.readValues() : {});
+      if (live) inflight = { press, promise };
+      const r = await promise;
       // r4 (acceptance r3): closed while «Preparing authorization…» — no consent page and no poll for a dialog that is gone; the
-      // consent it started has no page to finish on, so it is cancelled (as Escape's «yes» cancels one)
-      if (!status.isConnected) { if (typeof cancel === 'function') { try { await cancel(); } catch { /* the consent machine ends it at its own time */ } } return; }
+      // consent it started has no page to finish on, so it is cancelled (as Escape's «yes» cancels one) — by its id (live)
+      if (gone()) { if (typeof cancel === 'function') { try { await cancel(live && r ? r.flowId : undefined); } catch { /* the consent machine ends it at its own time */ } } return; }
+      if (live && press !== gen) return;   // r4 (THE LAW): Cancel (the newer act) ends what this press started
       if (r.error) throw new Error(r.error);
       // lane pod-oauth-callback: the other road re-shows the block for the consent it started (the folded paste-back)
       const show = (x) => {
@@ -599,37 +845,36 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
         drawConsentLinks(status, x, provider);
         status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider });
         if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
+        // lane gmail-connect-wall (live): which road, in the person's words; the button opens the sign-in AGAIN (the account's
+        // earlier one is replaced); Cancel is a visible button
+        if (live && x.roadLine) status.textContent = [_w ? tr('A {provider} sign-in page opened.', { provider }) : tr('Popup blocked — copy the link below and open it in a browser yourself.'), x.roadLine].join(' ');
         if (x.notice) status.textContent = x.notice;
         pasteBox?.remove();
-        pasteBox = pasteBack({ r: x, pasteHint, pastePlaceholder, pasteSecret,
-          onPaste: async (v) => { try { status.textContent = tr('Completing…'); const fr = await callback(v); finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } },
-          onOtherRoad: (x2) => { if (x2 && x2.error) throw new Error(x2.error); show(x2); } });
-        body.appendChild(pasteBox);
+        pasteBox = pasteBack({ r: pressedRe(x), pasteHint, pastePlaceholder, pasteSecret,
+          onPaste: async (v) => { const at = gen; try { status.textContent = tr('Completing…'); const fr = await callback(v); if (live && (at !== gen || isClosed)) return; finish(fr.token); } catch (e) { if (live && (at !== gen || isClosed)) return; status.textContent = e.message || tr('Failed'); } },
+          onOtherRoad: (x2) => { if (x2 && x2.error) throw new Error(x2.error); if (live && x2 && x2.press !== undefined) { if (x2.press !== gen || gone()) return; show(x2); watch(x2.press); return; } show(x2); },
+          ...(live && typeof cancel === 'function' ? { onCancel: async () => {
+            // r4 (THE LAW): Cancel ends the sign-in on screen AND what a press in flight starts (each by its id), and says
+            // «cancelled» only while it is still the latest act
+            const pend = inflight && inflight.press === gen ? inflight.promise : null;
+            const mine = ++gen; stopPoll(); busy(true);
+            const sid = shown && shown.flowId;
+            try { await cancel(sid); } catch (e) { if (mine === gen && !gone()) { busy(false); watch(mine); } throw e; }   // a failed Cancel: the sign-in on screen still runs
+            if (pend) { const y = await pend.catch(() => null); if (y && y.flowId && y.flowId !== sid) { try { await cancel(y.flowId); } catch { /* it ended either way */ } } }
+            if (mine !== gen || gone()) return;
+            shown = null; pasteBox?.remove(); pasteBox = null; body.querySelectorAll('.mounts-oauth-link, .mounts-oauth-narrow').forEach((e) => e.remove()); status.textContent = tr('The sign-in was cancelled. Press the button to start again.'); btn.textContent = signinLabel; btn.disabled = false;
+          } } : {}) });
+        if (live) { shown = x; status.after(pasteBox); btn.textContent = tr('Open the {provider} sign-in again', { provider }); btn.disabled = false; }
+        else body.appendChild(pasteBox);
       };
       show(r);
-      poll = setInterval(async () => {
-        if (!status.isConnected) { stopPoll(); return; } // dialog closed
-        try {
-          const st = await statusOf();
-          if (st.token) finish(st.token);
-          else if (st.fail) { stopPoll(); status.textContent = st.fail; btn.disabled = false; }
-        } catch {}
-      }, 1500);
-      // client-from-mount verify r5: the consent machine ends a sign-in 10 min after it began and SAYS so on the record
-      // (the watcher's `fail`), but this stop used to fire at the same instant and only clear the interval — the last
-      // 1.5 s tick had run before the frame landed, so the dialog kept "A … sign-in page opened" and a disabled button
-      // for ever. The stop now waits past the machine's own end, reads the watcher once more, and says what it found.
-      setTimeout(async () => {
-        stopPoll();
-        if (!status.isConnected || !btn.disabled) return;
-        let st = {}; try { st = await statusOf(); } catch {}
-        if (st.token) return finish(st.token);
-        status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');
-        btn.disabled = false;
-      }, 10 * 60 * 1000 + 5000);
+      watch(press);
     } catch (e) {
+      if (live && (press !== gen || gone())) return;
       status.textContent = e.message || tr('Failed to start authorization');
       btn.disabled = false;
+      if (live) busy(false);   // r4 (the tidy): every exit of a press ends its busy for every control it took (the other road too)
+      if (live && shown) watch(press);   // r4: a refused press leaves the sign-in on screen running — its watch back
     }
   };
   const ctx = { close, body, inputs: form ? form.inputs : {}, button: btn, status };

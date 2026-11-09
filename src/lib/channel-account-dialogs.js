@@ -54,7 +54,7 @@ import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
 // PURE, bundled: the row's `signinName` (the brand of the sign-in page — Gmail signs in with Google)
 import * as R from '../integration-registry.js';
-import { setupFold, refusalNotes } from './oauth-setup-card.js';   // lane oauth-setup-instructions: the setup card (the client type, the exact addresses, the console)
+import { setupFold, refusalNotes, lacksLines } from './oauth-setup-card.js';   // lane oauth-setup-instructions: the setup card (the client type, the exact addresses, the console)
 import * as CR from '../consent-road.js';   // lane oauth-relay-road (PURE): does a relay page send THIS page's browser back (the custom app's setup rows)
 
 /** The channel side's consent routes — the storage `/api/mounts/gdrive-auth/*`
@@ -66,6 +66,7 @@ export const CHANNEL_OAUTH_ENDPOINTS = Object.freeze({
   status: '/api/channels/oauth/status',
   callback: '/api/channels/oauth/callback',
   narrow: '/api/channels/oauth/narrow',   // owner ruling 2026-09-28: the one retry without the optional scopes
+  cancel: '/api/channels/oauth/cancel',   // lane gmail-connect-wall: the one-press Cancel (and a close that ends a sign-in needing the dialog)
 });
 const enc = encodeURIComponent;
 const PASTE_PLACEHOLDER = 'http://127.0.0.1:…/?state=…&code=…';
@@ -148,32 +149,73 @@ const publicPasteHint = (flow, x) => {
   return P && P.notes && P.notes.landed ? tr(P.notes.landed) : tr('The sign-in’s last page says it is done and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:');
 };
 
-/** lane pod-oauth-callback (study 2 B2): a consent that lands on THIS instance (`public`) — its folded paste-back says
- *  when it is needed, names the address an admin adds to the vendor's app (a vendor refuses a redirect it does not list
- *  on its OWN page — this dialog never hears it) and offers the other road: the same sign-in the copy-the-address way
- *  (`rerun` = the start again with `road: 'loopback'`). A paste row (Slack) keeps its own words and has no other road. */
+/** lane pod-oauth-callback (study 2 B2): a consent that lands on THIS instance (`public`) — its paste-back says when it is
+ *  needed, names the address an admin adds to the vendor's app (a vendor refuses a redirect it does not list on its OWN
+ *  page — this dialog never hears it) and offers the other road. A paste row (Slack's per-person steps) keeps its own words.
+ *  lane gmail-connect-wall (the owner 2026-11-09: «打不开授权页然后就没法继续操作任何东西了» — a greyed button and a fold): THE
+ *  LIVE BLOCK's words (src/lib/mounts-dialog.js liveBack): `roadLine` says WHICH road is in play while the person is at the
+ *  vendor; a loopback from ANOTHER computer opens its paste box at once (its last page never loads — `needsDialog`: closing
+ *  the dialog ends it, said once); the other road (`flow.other`, the consent road's verdict) is a visible button; the
+ *  admin's part (the address to list, the console path, what a company preset does not say and where) is a fold titled for
+ *  the admin. `rerun(road)` = the same start asking `road` ('loopback' | 'fixed'). */
 const routeTrouble = (flow, x, rerun, preset = null) => {
-  // a loopback consent (a local hub, or the other road): the box's line and why, in a person's words
-  // lane oauth-setup-instructions: a FIXED loopback (Lark's, a Google Web client's) is an address the app must list too —
-  // the fold names it, the vendor's refusal words and the console path, as for a route
-  if (!(flow && flow.mode === 'public')) return isPasteSpec(x) || !flow ? {} : { pasteTitle: tr('The sign-in page ended on an address that would not load?'), pasteHint: tr('That happens when VibeSpace runs on another computer: the sign-in sends your browser to that computer’s own address (it starts with 127.0.0.1), which your browser cannot open. Copy the whole address from the address bar and paste it here — VibeSpace finishes the sign-in with it:'), ...(flow.mode === 'fixed' && flow.redirectUri ? { askAdmin: { text: tr('{provider} said this address is not allowed? Add it to the app’s redirect URLs — for a company app your admin does this:', { provider: signinOf(x) }), value: flow.redirectUri, notes: refusalNotes(x) } } : {}) };
-  const pasteTitle = tr('The sign-in did not come back here by itself?');
-  if (isPasteSpec(x)) return { pasteTitle };
+  if (!flow || (isPasteSpec(x) && flow.mode !== 'public')) return {};
+  if (isPasteSpec(x) && !flow.road) return { pasteTitle: tr('The sign-in did not come back here by itself?') };
+  const provider = signinOf(x);
+  const here = onThisMachine();
+  const other = flow.other === 'loopback' || flow.other === 'fixed' ? flow.other : null;
+  const fixedUri = fixedLoopbackOf(x);
+  const otherRoad = other ? {
+    label: flow.mode === 'public' ? tr('Sign in the other way: copy the last page’s address back here') : other === 'fixed' ? tr('{provider} refused this address? Sign in again at the fixed address', { provider }) : tr('{provider} refused this address? Sign in again at 127.0.0.1 on any port', { provider }),
+    // law 3: a preset that does not say its client's kind — the sentence names both kinds and claims neither
+    hint: flow.mode !== 'public' && fixedUri ? tr('This company app’s kind of client is not stated by your admin. A Desktop app client takes 127.0.0.1 on any port; a Web application client takes only the addresses it lists — for this, usually {uri}.', { uri: fixedUri }) : null,
+    run: () => rerun(other),
+  } : null;
+  const admin = (extra) => ({ title: tr('For your admin: {provider} says this address is not allowed?', { provider }), ...extra, notes: [...(preset ? lacksLines(x, preset) : []), ...(extra.notes || [])] });
+  if (flow.mode !== 'public') {
+    return {
+      live: true, needsDialog: !here,
+      roadLine: here ? tr('Approve access: the sign-in comes back here by itself.') : tr('After you approve, {provider}’s last page will not load — it points to 127.0.0.1, an address only the VibeSpace machine opens. Copy that page’s whole address from the address bar and paste it here:', { provider }),
+      pasteOpen: !here,
+      pasteTitle: tr('The sign-in page ended on an address that would not load?'),
+      ...(here ? { pasteHint: tr('That happens when VibeSpace runs on another computer: the sign-in sends your browser to that computer’s own address (it starts with 127.0.0.1), which your browser cannot open. Copy the whole address from the address bar and paste it here — VibeSpace finishes the sign-in with it:') } : {}),
+      askAdmin: admin(flow.mode === 'fixed' && flow.redirectUri ? { text: tr('Add it to the app’s redirect URLs — for a company app your admin does this:'), value: flow.redirectUri, notes: refusalNotes(x, { preset: !!preset }) } : {}),
+      ...(otherRoad ? { otherRoad } : {}),
+    };
+  }
   // lane oauth-relay-road: WHICH road and WHY, in the person's words — the relay page (one address registered once on the
-  // app serves every VibeSpace) or this instance's own address (no relay page can bring a browser back to it)
+  // app serves every VibeSpace) or this instance's own address (a person's own app, or a preset that says its app lists it)
   const relay = flow.road === 'relay';
   const host = hostOf(flow.redirectUri);
-  // addendum 1: a company preset with no relay page yet (the digest's `relayPage: null`) says so — the reason it came here
-  const bare = !relay && !!preset && preset.relayPage === null;
   return {
-    pasteTitle,
-    ...(relay
-      ? { pasteHint: tr('This sign-in comes back through the relay page {host}: one address, registered once on the app, serves every VibeSpace — the page sends your browser back here and keeps nothing. If it shows a code instead, paste the code here:', { host }) }
-      : flow.road === 'route' ? { pasteHint: bare ? tr('This company app has no relay page yet, so this sign-in comes back to this VibeSpace’s own address ({host}) — the app must list it, or your admin gives the app one relay page that serves every VibeSpace. If the last page does not come back here by itself, paste its address here:', { host }) : tr('This sign-in comes back to this VibeSpace’s own address ({host}) — no relay page can bring a browser back to it, so the app must list this address itself. If the last page does not come back here by itself, paste its address here:', { host }) } : {}),
-    ...(flow.redirectUri ? { askAdmin: { text: relay ? tr('{provider} said this address is not allowed? It is the relay page — add it ONCE to the app’s redirect URLs (for a company app your admin does this), and every VibeSpace signs in through it:', { provider: signinOf(x) }) : tr('{provider} said this address is not allowed? Add it to the app’s redirect URLs — for a company app your admin does this:', { provider: signinOf(x) }), value: flow.redirectUri, notes: refusalNotes(x, { https: /^https:/.test(String(flow.redirectUri)) }) } } : {}),
-    otherRoad: { label: tr('Sign in the other way: copy the last page’s address back here'), run: rerun },
+    live: true, needsDialog: false,
+    roadLine: relay ? tr('It comes back through the relay page {host} and finishes by itself — approve access, then come back to this dialog.', { host }) : tr('It comes back to this VibeSpace’s own address ({host}) and finishes by itself — approve access, then come back to this dialog.', { host }),
+    pasteTitle: tr('The sign-in did not come back here by itself?'),
+    ...(flow.redirectUri ? { askAdmin: admin({ text: relay ? tr('It is the relay page — add it ONCE to the app’s redirect URLs (for a company app your admin does this), and every VibeSpace signs in through it:') : tr('Add it to the app’s redirect URLs — for a company app your admin does this:'), value: flow.redirectUri, notes: refusalNotes(x, { https: /^https:/.test(String(flow.redirectUri)), preset: !!preset }) }) } : {}),
+    ...(otherRoad ? { otherRoad } : {}),
   };
 };
+/** The kind's FIXED loopback address (the registry row's `redirect.loopback` — Gmail's for a Web client, Lark's), or null. */
+const fixedLoopbackOf = (x) => { const row = x && x.integration ? R.rowById(x.integration) : null; return (row && row.redirect && row.redirect.loopback) || null; };
+/** lane gmail-connect-wall: BEFORE the press, what a company preset's sign-in will do from this page: a listed address or a
+ *  relay page come back by themselves (nothing about pasting is said); a loopback from ANOTHER computer says its last page is
+ *  pasted back; a vendor with no loopback and no way back (`none`) says so and names the other way. r2 (law D): the road is
+ *  src/consent-road.js `wayOf` over the START's own inputs (the digest's `presets[].wayIn`) and THIS page's origin — the
+ *  very verdict the press will take, never one computed for another address. */
+const presetWay = (kind, p) => { try { return p && p.wayIn ? CR.wayOf({ kind, origin: location.origin, inputs: p.wayIn }) : null; } catch { return null; } };
+function presetWayNotes(presets, { kind = '', sfx = '', on = () => true, provider = '', paste = false } = {}) {
+  const here = onThisMachine();
+  const out = [];
+  presets.forEach((p, i) => {
+    const w = presetWay(kind, p);
+    if (!w) return;
+    const isThis = (vals) => on(vals) && vals[`client${sfx}`] === p.key;
+    if (w.road === 'route') out.push({ key: `pwr${i}${sfx}`, type: 'note', value: tr('This company app lists this VibeSpace’s own address: the sign-in comes back here and finishes by itself.'), when: isThis });
+    else if (w.road === 'loopback' && !here) out.push({ key: `pwl${i}${sfx}`, type: 'note', value: tr('With this company app the sign-in’s last page will not load — it points to 127.0.0.1. When it stops there, copy that page’s whole address and paste it back into this dialog: the box opens under the button once you press it.'), when: isThis });
+    else if (w.road === 'none') out.push({ key: `pwn${i}${sfx}`, type: 'note', value: paste ? tr('This company app has no relay page and does not list this VibeSpace’s address, so its sign-in cannot come back here — your admin can state one in the company preset. Until then, choose “Another way: make your own app”.') : tr('This company app has no relay page and does not list this VibeSpace’s address, so its sign-in cannot come back here — your admin can state one in the company preset.'), when: isThis });
+  });
+  return out;
+}
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return ''; } };
 /** The company preset a dialog's client choice names (its digest entry: `relayPage` etc.), or null. */
 const presetIn = (spec, key) => ((spec && spec.presets) || []).find((p) => p.key === key) || null;
@@ -182,6 +224,9 @@ const presetIn = (spec, key) => ((spec && spec.presets) || []).find((p) => p.key
 const presetFacts = (p) => (p && p.facts && typeof p.facts === 'object' ? p.facts : {});
 /** …and the address a custom app registers: this instance's route when the consent lands here (an https address and a
  *  browser elsewhere — the kinds digest's `consentRoute`), else the type's registered loopback callback. */
+// lane gmail-connect-wall r4 (the tidy's last word): THIS PAGE's id, on every start it sends — the hub keeps it on the sign-in and
+// a status answer carries it, so a closing dialog ends what its PAGE started (and needs the dialog) even when an answer never came
+const PAGE_REF = (() => { try { const a = new Uint8Array(12); crypto.getRandomValues(a); return [...a].map((x) => x.toString(16).padStart(2, '0')).join(''); } catch { return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`; } })();
 const onThisMachine = () => { try { return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(location.hostname) || /\.localhost$/i.test(location.hostname); } catch { return false; } };
 const callbackOf = (spec) => (spec.consentRoute && !onThisMachine() ? spec.consentRoute : spec.setup.callbackUrl);
 
@@ -193,6 +238,17 @@ async function capi(url, init = {}) {
   catch (e) { const err = new Error(routeErrorText({ code: e.code, error: e.message })); err.code = e.code; throw err; }
 }
 const post = (url, body) => capi(url, { method: 'POST', body: JSON.stringify(body || {}) });
+/** lane gmail-connect-wall r4 (the tidy): a sign-in the hub ENDED, worded HERE by the answer's code (en / zh / ja) — never the
+ *  hub's English sentence; a code this client does not know gets the neutral line; a vendor's own refusal stays its words. */
+export function endedLine(b) {
+  const why = (b && b.flow && b.flow.cancelled) || (b && b.code === 'no-flow' ? 'gone' : null);
+  if (why === 'superseded') return tr('A newer sign-in replaced this one.');
+  if (why === 'cancelled') return tr('The sign-in was cancelled.');
+  if (why === 'timeout') return tr('The sign-in was not finished in time.');
+  if (why === 'gone') return tr('This sign-in is no longer running.');
+  if (b && b.done && b.ok === false && b.error) return routeErrorText({ code: b.code, error: b.error });
+  return tr('The sign-in ended.');
+}
 
 // ── names ────────────────────────────────────────────────────────────────
 /** The PRODUCT's name: the TYPE's label before its ` / ` twin ("Lark /
@@ -307,12 +363,12 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   // names only ITS relay page (its own relayUrl › the fleet's — the digest's `relayPage`) or says it has none yet;
   // the public page is never offered for it
   presets.forEach((p, i) => {
-    if (p.relayPage === undefined) return;
+    if (!p.relayPage) return;
     const isThis = (vals) => on(vals) && vals[`client${sfx}`] === p.key;
-    out.push(p.relayPage
-      ? { key: `prp${i}${sfx}`, label: tr('This company app’s redirect URL — its relay page, registered once by your admin'), type: 'copy', value: p.relayPage, when: isThis }
-      : { key: `prn${i}${sfx}`, type: 'note', value: tr('This company app has no relay page yet: a sign-in comes back to this VibeSpace’s own address. Your admin can give the app one relay page that serves every VibeSpace.'), when: isThis });
+    out.push({ key: `prp${i}${sfx}`, label: tr('This company app’s redirect URL — its relay page, registered once by your admin'), type: 'copy', value: p.relayPage, when: isThis });
   });
+  // lane gmail-connect-wall: what the preset's sign-in will do from THIS page, said before the press (presetWayNotes)
+  out.push(...presetWayNotes(presets, { kind: spec.kind, sfx, on, provider: signinOf(spec) }));
   // lane oauth-relay-road (the owner 2026-10-22: one registered address per app, never one per instance): the RELAY PAGES
   // the app registers ONCE — the fleet's and the public page — in place of an address per instance; the type's own
   // callback only where no relay page serves it
@@ -378,7 +434,10 @@ function workspaceClientSpecs(spec, { sfx = '', when = null, value, custom = nul
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
   if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: cf.secret.help ? tr(cf.secret.help) : undefined });
   out.push({ key: `wnote${sfx}`, type: 'note', value: tr(P.notes.custom), when: isCustom });
-  if (presets.length) out.push({ key: `wpnote${sfx}`, type: 'note', value: tr(P.notes.preset), when: (vals) => isApp(vals) && !isCustom(vals) });
+  // r2 (law E1): a company app with no way back here (its road `none`) is not told «press Connect, then Allow» — one truth per state
+  const noWay = new Set(presets.filter((p) => (presetWay(spec.kind, p) || {}).road === 'none').map((p) => p.key));
+  if (presets.length) out.push({ key: `wpnote${sfx}`, type: 'note', value: tr(P.notes.preset), when: (vals) => isApp(vals) && !isCustom(vals) && !noWay.has(vals[`client${sfx}`]) });
+  out.push(...presetWayNotes(presets, { kind: spec.kind, sfx, on, provider: signinOf(spec), paste: true }));   // lane gmail-connect-wall (R3): a company app with no way back says so before the press
   if (value === PASTE_CHOICE) out.push({ key: `swnote${sfx}`, type: 'note', value: tr(P.notes.switchBack), when: isApp });
   if (!stepped) out.push(...pasteSteps(spec).map((s, i) => ({ key: `pnote${i}${sfx}`, type: 'note', value: s, when: isPaste })));
   out.push(...setupFolds(spec, { sfx, on, isOwn: isCustom }));   // lane oauth-setup-instructions: a workspace app's setup card
@@ -424,15 +483,33 @@ function sliceOptions(schema, only) {
 /** The type's DECLARED options as fields (`only` = the first N: the filter).
  *  A `choices` option's words are its declared `choiceLabels` (keys, worded
  *  here — 2026-09-26: Gmail's mailbox scope), never the raw value. */
-function optionFieldSpecs(schema, { sfx = '', when = null, values = {}, only = null } = {}) {
-  return sliceOptions(schema, only).map((o) => ({
+function optionFieldSpecs(schema, { sfx = '', when = null, values = {}, only = null, presets = [] } = {}) {
+  // lane gmail-connect-wall (law 3): an option a company preset's ADMIN states (`presetFact` — Gmail's OAuth client type) is
+  // not asked while the client is a company preset; a value the preset states is one read-only line instead
+  const presetOn = (vals) => presets.some((p) => p && p.key === vals[`client${sfx}`]);
+  const out = [];
+  for (const o of sliceOptions(schema, only)) {
+    const f = optionFieldSpec(o, { sfx, when, values });
+    if (!o.presetFact) { out.push(f); continue; }
+    const base = f.when;
+    out.push({ ...f, when: (vals) => (!base || base(vals)) && !presetOn(vals) });
+    presets.forEach((p, i) => {
+      const said = presetFacts(p)[o.key];
+      if (!said || !(Array.isArray(o.choices) && o.choices.includes(said))) return;
+      out.push({ key: `pf${i}${sfx}:${o.key}`, type: 'note', value: tr('{label}: {value} — your admin states it in the company preset.', { label: o.label ? tr(o.label) : o.key, value: o.choiceLabels && o.choiceLabels[said] ? tr(o.choiceLabels[said]) : said }), when: (vals) => (!when || when(vals)) && vals[`client${sfx}`] === p.key });
+    });
+  }
+  return out;
+}
+function optionFieldSpec(o, { sfx = '', when = null, values = {} } = {}) {
+  return {
     key: `opt${sfx}:${o.key}`, label: o.label ? tr(o.label) : o.key,
     type: Array.isArray(o.choices) && o.choices.length ? 'select' : 'text',
     options: Array.isArray(o.choices) ? o.choices.map((c) => [c, o.choiceLabels && o.choiceLabels[c] ? tr(o.choiceLabels[c]) : c]) : undefined,
     placeholder: o.placeholder || String(o.default || ''),
     value: values && values[o.key] !== undefined ? String(values[o.key]) : String(o.default || ''),
     when: (when || o.usedWhen) ? ((vals) => (!when || when(vals)) && optionInUse(o, vals, sfx)) : undefined, hint: o.help ? tr(o.help) : undefined,
-  }));
+  };
 }
 function optionValues(vals, schema, sfx = '', only = null) {
   const out = {};
@@ -536,9 +613,24 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
     const viaPaste = (v) => isPasteSpec(k) && v[`client${sfx}`] === PASTE_CHOICE;   // design 018: the per-person steps own `pflow`
     fields.push({ key: `flow${sfx}`, label: tr('{provider} authorization', { provider: signinOf(k) }), type: 'hidden', when: (v) => is(k.kind)(v) && !viaPaste(v) });
     if (isPasteSpec(k)) fields.push({ key: `pflow${sfx}`, label: tr('{provider} authorization', { provider: signinOf(k) }), type: 'hidden', when: (v) => is(k.kind)(v) && viaPaste(v) });
-    fields.push(...optionFieldSpecs(k.optionsSchema, { sfx, when: is(k.kind), only: 1, values: presetFacts((k.presets || [])[0]) }));
+    fields.push(...optionFieldSpecs(k.optionsSchema, { sfx, when: is(k.kind), only: 1, values: presetFacts((k.presets || [])[0]), presets: k.presets || [] }));
   }
   const steppers = new Map();   // kind -> the paste type's numbered steps (design 017)
+  // lane gmail-connect-wall (R5): the sign-in each type's block shows — a close ends ONLY one that cannot finish without this
+  // dialog (a loopback from another computer: its paste box is here), said once; one that comes back by itself keeps
+  // running, and the next dialog shows it
+  const shownFlows = new Map();   // kind -> {flowId, needsDialog, provider}
+  // r4 (acceptance r3, THE LAW: closing the dialog is an act): each type's consent block's close hook — closed FIRST, so no
+  // answer that lands later opens a page or is registered here (a press in flight: wireOAuthConnect's strayEnd)
+  const blocks = [];
+  const endNeedingDialog = () => {
+    for (const b of blocks) b.close();
+    for (const s of shownFlows.values()) {
+      if (!s.needsDialog || !s.flowId) continue;
+      post(CHANNEL_OAUTH_ENDPOINTS.cancel, { flowId: s.flowId }).then((x) => { if (x && x.cancelled) showToast(tr('The {provider} sign-in was ended: it needed this dialog to finish.', { provider: s.provider })); }).catch(() => { /* already ended */ });
+    }
+    shownFlows.clear();
+  };
   // one subject: one account being connected
   const ctx = mountsDialog(tr('Connect an account'), fields, tr('Connect'), async (v, { close }) => {
     const k = list.find((x) => x.kind === v.type) || list[0];
@@ -550,7 +642,7 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
     if (steps) steps.connected();
     close();
     showToast(tr('{name} connected', { name: r && r.adapter ? accountName(r.adapter) : (v.name || k.label) }));
-  }, { id: 'chan-account-connect' });
+  }, { id: 'chan-account-connect', onClose: () => endNeedingDialog() });
   ctx.body.dataset.chanDialog = 'connect';
   // lane pod-oauth-callback: choosing a company preset that names an option's value (the Lark app's brand) sets it
   for (const k of list) {
@@ -561,22 +653,66 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
     const sfx = `.${k.kind}`;
     if (isPasteSpec(k)) { const s = wirePasteSteps(ctx, { tokenKey: `pflow${sfx}`, kind: k.kind, paste: pasteOf(k) }); if (s) steppers.set(k.kind, s); }   // design 017; design 018: the workspace app's Connect is wired below too
     let flowId = null;
-    wireOAuthConnect(ctx, {
+    // lane pod-oauth-callback: a consent landing here carries its other road — the same start, asking that road (lane
+    // gmail-connect-wall: `flow.other` — the copy-the-address way, or a company preset's other loopback)
+    const block = (r, body) => ({ flowId: r.flowId || (r.flow && r.flow.flowId) || null, url: r.url || (r.flow && r.flow.consentUrl), notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, k), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })), superseded: r.superseded || 0,
+      ...routeTrouble(r.flow, k, async (road) => { const r2 = await post(CHANNEL_OAUTH_ENDPOINTS.start, { ...body, road }); return block(r2, body); }, presetIn(k, body.clientPreset)) });   // r3: the flow id follows the press ON SCREEN (onFlow)
+    // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
+    const extraOf0 = () => (!ctx.inputs[`client${sfx}`] ? { options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, x]) => [key, x.value])), k.optionsSchema, sfx, 1) } : { ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) });
+    const extraOf = () => ({ ...(extraOf0() || {}), ref: PAGE_REF });   // r4: every start names this page
+    // the body a press sends (wireOAuthConnect's own spelling): a custom app's id + secret, else the chosen client
+    const bodyNow = () => { const b = { backend: k.kind }; const cid = ctx.inputs[`cid${sfx}`]; if (cid && cid.value) { b.clientId = cid.value; b.clientSecret = (ctx.inputs[`csec${sfx}`] || {}).value || ''; } return Object.assign(b, extraOf() || {}); };
+    const hook = wireOAuthConnect(ctx, {
       tokenKey: `flow${sfx}`, backend: k.kind, label: tr('Connect {label}', { label: signinOf(k) }),
       clientIdKey: `cid${sfx}`, clientSecretKey: `csec${sfx}`, provider: signinOf(k), ...pasteOpts(k),
-      // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
-      extra: () => (!ctx.inputs[`client${sfx}`] ? { options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, x]) => [key, x.value])), k.optionsSchema, sfx, 1) } : { ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
+      extra: extraOf,
+      // lane gmail-connect-wall (law 2): never a dead end — the button opens the sign-in AGAIN (the hub replaces the earlier
+      // one, said once), Cancel is one press, a sign-in that comes back by itself is SHOWN by a reopened dialog
+      live: {
+        again: tr('Open the {provider} sign-in again', { provider: signinOf(k) }),
+        cancel: (id) => post(CHANNEL_OAUTH_ENDPOINTS.cancel, { flowId: id || flowId }),
+        onFlow: (r) => { flowId = r.flowId || flowId; shownFlows.set(k.kind, { flowId, needsDialog: !!r.needsDialog, provider: signinOf(k) }); },
+        // r4 (the tidy's last word): at the close (and when a press fails after it) — the sign-in of this kind that runs, if THIS
+        // PAGE started it (its `ref`) and it needs the dialog (a loopback from another computer), is ended: whichever act started
+        // it, whether or not its answer ever came. Another tab's sign-in is never touched.
+        sweep: async () => {
+          let st = null;
+          try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?kind=${enc(k.kind)}`); } catch { return; }
+          if (!st || !st.running || st.ref !== PAGE_REF || !st.flow || st.flow.mode === 'public' || onThisMachine()) return;
+          try { const x = await post(CHANNEL_OAUTH_ENDPOINTS.cancel, { flowId: st.flowId }); if (x && x.cancelled) showToast(tr('The {provider} sign-in was ended: it needed this dialog to finish.', { provider: signinOf(k) })); } catch { /* it ends at its own time */ }
+        },
+        // r2 (law C): after a press that failed — the sign-in of this kind that still runs (any road), or null
+        afterFail: async () => {
+          let st = null;
+          try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?kind=${enc(k.kind)}`); } catch { return null; }
+          if (!st || !st.flow || !st.running) return null;
+          return block({ flowId: st.flowId, flow: st.flow }, bodyNow());
+        },
+        attach: async () => {
+          let st = null;
+          try { st = await capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?kind=${enc(k.kind)}`); } catch { return null; }
+          // r4 (the tidy): a reopened dialog shows WHAT THE HUB RUNS for the kind — a sign-in that comes back by itself (R5) or one
+          // another open dialog of this browser started (its paste box works here too); a close ends a loopback before this reads
+          if (!st || !st.flow || !(st.running || (st.done && st.ok))) return null;
+          const sel = ctx.inputs[`client${sfx}`];
+          const key = String(st.credentialKey || '').startsWith('cluster:') ? String(st.credentialKey).slice('cluster:'.length) : null;
+          if (sel && key && [...sel.options].some((o) => o.value === key)) { sel.value = key; sel.dispatchEvent(new Event('change')); }
+          if (st.done && st.ok) { flowId = st.flowId; return { token: st.token, user: st.user || null }; }
+          return block({ flowId: st.flowId, flow: st.flow }, bodyNow());
+        },
+      },
       endpoints: {
         start: async (body) => {
-          // lane pod-oauth-callback: a consent landing here carries its other road — the same start, the copy-the-address way
-          const block = (r) => ({ url: r.url, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, k), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })),
-            ...routeTrouble(r.flow, k, async () => { const r2 = await post(CHANNEL_OAUTH_ENDPOINTS.start, { ...body, road: 'loopback' }); flowId = r2.flowId; return block(r2); }, presetIn(k, body.clientPreset)) });
-          const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return block(r);
+          const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); return block(r, body);
         },
-        status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
+        // r4 (found by test-consent-road ⑭'s seeded driver): a sign-in the hub ENDED (replaced by a press in another dialog,
+        // cancelled elsewhere, past its time) answers with its error — the poll must READ it (the block ends, its line said),
+        // never have it thrown and swallowed (the block kept a dead sign-in with its Cancel for ever); a network failure still throws
+        status: (id) => mountsApi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(id || flowId || '')}`).catch((e) => { if (e && e.body && typeof e.body === 'object' && e.body.error) return { ...e.body, running: false, error: endedLine(e.body) }; throw e; }),
         callback: (b) => post(CHANNEL_OAUTH_ENDPOINTS.callback, { url: b.url, flowId }),
       },
     });
+    if (hook) blocks.push(hook);
   }
   return ctx;
 }
@@ -608,6 +744,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
     provider: signin,
     fields: clientFieldSpecs(spec, { value: preselect ? preselect.client : clientValueOf(a, spec.presets), custom, hint: tr('The account’s own client by default; pick another and the new token is minted under it.') }),
     savingText: tr('Signed in — reconnecting…'),
+    live: true,   // lane gmail-connect-wall (law 2): the button opens the sign-in again, Cancel is a visible button, a close ends only a sign-in that needs this dialog
     ...pasteOpts(spec),
     start: async (vals) => {
       // lane pod-oauth-callback: a consent landing here carries its other road (the copy-the-address way, `road: 'loopback'`)
@@ -618,12 +755,12 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
         // r4 (acceptance r3: ✕ while «Preparing authorization…» — the POST, up to 8 s for Lark's scope read — closed with no
         // watcher yet; this one then listened for the page's life): a dialog closed meanwhile takes it at once
         if (closed) { watcher.off(); watcher = null; }
-        return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, a), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})), ...routeTrouble(r.flow, spec, () => go('loopback'), presetIn(spec, vals.client)) };
+        return { flowId: (r.flow && r.flow.flowId) || null, url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, a), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})), ...routeTrouble(r.flow, spec, (road) => go(road), presetIn(spec, vals.client)) };
       };
       return go(null);
     },
     status: async () => (watcher ? watcher.state() : {}),
-    cancel: () => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, {}), askFirst: showConfirmDialog,   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
+    cancel: (id) => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, id ? { flowId: id } : {}), askFirst: showConfirmDialog,   // r4: by its id (the dialog ends only what it started)   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
     onClose: () => { closed = true; if (watcher) { watcher.off(); watcher = null; } },   // r3: a dialog that closes takes its watcher's listeners with it (r4: and one its start makes after the close)
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
     finish: async (_token, { close }) => {
@@ -672,7 +809,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
       hint: tr('This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.'),
       secretHint: tr('Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.') }),
     { key: 'authfact', label: tr('Sign-in'), type: 'note', value: authFactText(a) },
-    ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {} }),
+    ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, presets: spec.presets || [] }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
     ...(a.senderHonestyLine ? [{ key: 'honesty', label: tr('Sender line'), type: 'select', value: honesty, options: [['default', tr('Instance default')], ['on', tr('on')], ['off', tr('off')]],
       hint: tr('When on, a message an AGENT drafted goes out with one trailing line naming the agent. Your own drafts never get one. The approval card says who the recipient will see either way.') }] : []),
@@ -733,7 +870,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     { key: 'name', label: tr('Name'), value: copyName },
     { key: 'kindLabel', label: tr('Type'), value: spec.label, readonly: true },
     ...clientFieldSpecs({ ...spec, presets }, { value: cur, custom, hint: tr('Copied from the original; you can change it.') }),
-    ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, only: 1 }),
+    ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, only: 1, presets: spec.presets || [] }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
     { key: 'copied', type: 'note', value: tr('Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, access grants and notifications, reach grants, the message log — the copy signs in on its own.') },
     { key: 'flow', label: tr('{provider} authorization', { provider: signin }), type: 'hidden', hint: tr('This copy needs its own sign-in — another account, or the same one authorized again.') },
@@ -741,7 +878,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
   // THE COPY EXISTS FROM ITS FIRST SIGN-IN ATTEMPT (the server's duplicate =
   // an unauthorized record whose own consent follows); a dialog dismissed
   // before that consent landed removes it again — nothing half-made stays.
-  let dupId = null, watcher = null, committed = false, signedIn = false, createdName = null;
+  let dupId = null, watcher = null, committed = false, signedIn = false, createdName = null, dupBlock = null;
   const readVals = () => Object.fromEntries(Object.entries(ctx.inputs).map(([k, e]) => [k, e.value.trim()]));
   const ensure = async (vals) => {
     if (dupId) return dupId;
@@ -769,14 +906,17 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     showToast(tr('{name} created and connected', { name: v.name || copyName }));
   }, { id: 'chan-account-duplicate', key: a.id,
     onClose: () => {
+      if (dupBlock) dupBlock.close();   // r4 (THE LAW: closing is an act): no answer after this draws or opens a page
       if (watcher) watcher.off();
       if (committed || signedIn || !dupId) return;
       fetchJson(`/api/channels/adapters/${enc(dupId)}`, { method: 'DELETE' }).catch(() => {});
     },
   });
   ctx.body.dataset.chanDialog = 'duplicate';
-  wireOAuthConnect(ctx, {
+  dupBlock = wireOAuthConnect(ctx, {
     tokenKey: 'flow', backend: a.kind, label: tr('Connect {label}', { label: signin }), provider: signin, ...pasteOpts(spec),
+    // lane gmail-connect-wall (law 2): the copy's sign-in opens again (its account's earlier one is replaced) and cancels in one press
+    live: { again: tr('Open the {provider} sign-in again', { provider: signin }), cancel: (fid) => (dupId ? post(`/api/channels/adapters/${enc(dupId)}/auth/cancel`, fid ? { flowId: fid } : {}) : null) },   // r4: by its id
     finishText: (user) => (user ? tr('✓ Connected as {user} — finish with the “Create & connect” button below.', { user: String(user).slice(0, 200) }) : tr('✓ Connected — finish with the “Create & connect” button below.')),
     endpoints: {
       start: async () => {
@@ -788,7 +928,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
           const rr = await post(`/api/channels/adapters/${enc(id)}/reauthorize`, road ? { ...body, road } : body);
           if (watcher) watcher.off();
           watcher = authWatcher(app, id, (rr.adapter && rr.adapter.lastAuthAt) || null);
-          return { url: rr.flow && rr.flow.consentUrl, notice: flowNotice(rr.flow), pasteHint: publicPasteHint(rr.flow, spec), narrow: narrowOf(rr.flow, () => post(`/api/channels/adapters/${enc(id)}/auth/narrow`, {})), ...routeTrouble(rr.flow, spec, () => go('loopback'), presetIn(spec, vals.client)) };
+          return { flowId: (rr.flow && rr.flow.flowId) || null, url: rr.flow && rr.flow.consentUrl, notice: flowNotice(rr.flow), pasteHint: publicPasteHint(rr.flow, spec), narrow: narrowOf(rr.flow, () => post(`/api/channels/adapters/${enc(id)}/auth/narrow`, {})), ...routeTrouble(rr.flow, spec, (road) => go(road), presetIn(spec, vals.client)) };
         };
         return go(null);
       },

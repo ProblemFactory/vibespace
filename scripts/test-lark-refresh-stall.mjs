@@ -800,7 +800,7 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
   // r4 (acceptance r3): a watcher its start makes AFTER the close (✕ while the reauthorize POST waits) is taken at once, and
   // the dialog shows no consent page for a close during its start; `poll` / `stopPoll` stand BEFORE the shell handed `closed`
   // (the dialog-yield seam: a raised form's end runs it early)
-  ok(/watcher = authWatcher\(app, a\.id, [^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(closed\) \{ watcher\.off\(\); watcher = null; \}/.test(dlg) && /const r = await start\([^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(!status\.isConnected\) \{ if \(typeof cancel === 'function'\)/.test(md),
+  ok(/watcher = authWatcher\(app, a\.id, [^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(closed\) \{ watcher\.off\(\); watcher = null; \}/.test(dlg) && /const promise = start\(/.test(md) && /const r = await promise;[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(gone\(\)\) \{ if \(typeof cancel === 'function'\)/.test(md) && /const gone = \(\) => !status\.isConnected/.test(md),   // lane gmail-connect-wall r4: the start's answer is awaited as `promise` (the press in flight is recorded first) and the close check is `gone()` (disconnected, or — live — closed); the same law
     'r4: a close while «Preparing authorization…» takes the watcher made after it, opens no consent page and cancels the consent — the chrome count in test-integrations-ui (r)');
   const rd = md.slice(md.indexOf('export function reauthDialog('), md.indexOf('\nexport ', md.indexOf('export function reauthDialog(') + 1));
   const iStop = rd.indexOf('const stopPoll = () =>'), iShell = rd.indexOf('createModalShell(');

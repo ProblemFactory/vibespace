@@ -810,10 +810,22 @@ question about another machine is the failure the rule exists to stop.
       person's last resort (the adapter's loopback + the paste-back). A new account under a preset that names an
       option (`presets[].facts`, Lark's `brand`) takes it unless `options` names it. Re-authorize
       (`POST /api/channels/adapters/:id/reauthorize`) carries `road` the same way.
-    - `GET /api/channels/oauth/status?flowId=` (omitted = the latest) →
+    - `GET /api/channels/oauth/status?flowId=` (omitted = the latest; lane gmail-connect-wall: `?kind=` = the latest
+      of THAT kind — a reopened account dialog finds its own) →
       `{flowId, kind, credentialKey, running, done, ok, error, user, flow,
       token}` — `token` is the FLOW ID once signed in (the handle the shared
-      block writes into its field; never a credential); `404 no-flow`.
+      block writes into its field; never a credential); `404 no-flow`. `flow.other` = the road the dialog offers as
+      its visible second button (`'loopback'` | `'fixed'` | null — the consent road's verdict).
+    - `POST /api/channels/oauth/cancel` `{flowId}` (lane gmail-connect-wall) — ends a sign-in that runs before its
+      account exists: the dialog's one-press Cancel, and its close for a road that cannot finish without it (a loopback
+      from another computer) → `{ok, flowId, cancelled}` (`false` = it had already ended); `400 no-flow` without an id,
+      `404 no-flow` for an unknown one. Owner-only (an agent bearer is refused like its siblings). AT MOST ONE pending
+      sign-in per kind, its place taken before anything is awaited (overlapping starts: the second replaces the first);
+      the earlier one ends ONCE the new one exists (where the new one needs its fixed port, the earlier ends and the
+      port is bound again) and the answer says `superseded: n`; `road` may ask `'loopback'` or `'fixed'` (a silent
+      Google preset's other road) — any other said road is `400 bad-road` (start and reauthorize). A start waits at
+      most 20 s on another start of its kind (then it goes ahead, said in the journal; the late one answers `409
+      superseded`).
     - `POST /api/channels/oauth/callback` `{url, flowId?}` — the paste-back →
       `{ok, flowId, user, token}`; a foreign `state` is `400`.
     - `POST /api/channels/oauth/narrow` `{flowId?}` — owner ruling 2026-09-28: THE ONE NARROWING RETRY of a running
@@ -878,7 +890,15 @@ question about another machine is the failure the rule exists to stop.
     redirect URL the user's browser landed on; `400 auth-failed` with the
     reason (a `state` mismatch says "restart the flow"); `501 no-flow` when
     nothing is running.
-  - `POST /api/channels/adapters/:id/auth/cancel` — `{ok, cancelled}`.
+  - `POST /api/channels/adapters/:id/auth/cancel` `[{flowId}]` — `{ok, cancelled}`. Lane gmail-connect-wall r4: with
+    `flowId` it ends ONLY that sign-in — another one of the account (a later press, another dialog) is left running and
+    `cancelled` is `false`; without it, the account's running one (the Escape ask). The live dialogs always name theirs.
+    A `flowId` that is not a non-empty string (a number, an object, `""`) is refused by name: `400 bad-flow` — never read as
+    «none named»; an absent (or null) one keeps the old client's meaning.
+  - (lane gmail-connect-wall r4) `POST /api/channels/oauth/start` takes an optional `ref` — the starting PAGE's opaque id
+    (`[A-Za-z0-9_-]{8,64}`, anything else ignored); the pending sign-in keeps it and `GET /api/channels/oauth/status` answers
+    it (`ref`), so a closing account dialog ends what ITS page started and the dialog was needed for, even when a start's
+    answer never arrived — another page's sign-in carries another `ref` and is never touched.
   - `POST /api/channels/adapters/:id/auth/narrow` — the same narrowing retry for the account's RUNNING re-authorize →
     `{ok, flow}`; `404 no-flow` when none runs. The consent that lands records what it dropped on the account
     (`auth.refusedScopes`; a refresh keeps it, the next consent replaces it) and the adapter view's `reactionsGrant`
@@ -1208,6 +1228,17 @@ and restored at boot.
   `'web'` ⇒ relay › route › the FIXED loopback (`fixed: true`; Gmail's consent row `mode: ['ephemeral','fixed','public']`,
   `callbackUrl` = the registry row's `redirect.loopback`). The registry rows' `redirect` block = `{console {path,
   links}, refusal, create, clientTypes, loopback, also, selfRegisters, vendor}` (checkRow).
+  Lane gmail-connect-wall (2026-11-09): a NEW preset fact `instanceAddress: "listed"` (a gdrive-clients.json /
+  `VIBESPACE_GDRIVE_CLIENTS` entry; a Lark / Slack `integrations.json` entry's `values` — `clusterEnv.extras`) says the
+  company app lists every instance's own `https://<host>/api/channels/oauth/cb/<kind>`; absent = not listed, and a
+  company preset then NEVER rides the route (`consentRoad({…, preset, listed, clientKinds})`: its loopback,
+  `why: 'preset-loopback'`; a silent Google preset = any port, no path, `other: 'fixed'`; Slack's workspace app is refused
+  `preset-unlisted` before it opens). The kinds digest adds `presets[].wayIn` (r2) = the START's own inputs `{publicUrl,
+  relayUrl, relayFleet, preset, listed, clientType, clientKinds, loopback, fixedOnly}` — the page reads them with consent-road
+  `wayOf` and its own origin (one verdict, two readers; Slack with no way back = `road: 'none'`) — and `oauthSetup.presets[].{listed, lacks}`
+  (`lacks` ⊆ `clientType` | `road`) + `oauthSetup.presetSource` = `{from: 'dir' | 'env', dir, file, env}` (names only).
+  An account option declared `presetFact: true` (Gmail's `clientType`) is not asked under a company preset and the
+  adapter does not read it for one (a stored value is kept).
   The fleet admin (vibespace-admin ≥ 2.11.0) serves the same static page at `GET /relay/` (+ `/relay/relay.js`; `/relay`
   → 308 `/relay/` with the query byte for byte), `data-allow` = its `VIBE_DOMAIN`; it reads, logs and calls nothing.
 - The account view adds `policyModes` (`['review']` for Slack), `retention` (`purge-on-remove`) and `setup {probes, at}`.

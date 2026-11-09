@@ -463,11 +463,15 @@ console.log('⑨ the workspace app through the engine');
     const after = JSON.parse(fs.readFileSync(filesUnder(Wp.root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.filter((a) => a.kind === 'slack');
     ok(shown.act === 'show-code' && fx.ok === false && /must be the same account/.test(fx.error || '') && after.length === 1 && after[0].credentialKey == null, 'the same re-point through the dialog\'s paste-back (the relay showed the code): refused by name, the paste binding kept', JSON.stringify({ shown: shown.act, fx }));
   }
-  // no preset → the paste steps; a preset without a relay: http refused `no-https`, https → its own callback; custom → the default relay page
+  // no preset → the paste steps; a preset without a relay: http refused `no-https`; https → refused `preset-unlisted` BEFORE
+  // Slack opens (lane gmail-connect-wall R3: a company app comes back to the instance's own address only when its preset
+  // says `instanceAddress: "listed"`), its own callback when it does; custom → the default relay page
   const np = await (await mkEngine('no-preset')).eng.startOAuth({ kind: 'slack' });
   const W11 = await mkEngine('no-relay', { storeEnv: preset({ relayUrl: '' }) });
   const nh = await threw(() => W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN }));
-  const sh = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' });
+  const nl = await threw(() => W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' }));
+  const W11L = await mkEngine('no-relay-listed', { storeEnv: preset({ relayUrl: '', instanceAddress: 'listed' }) });
+  const sh = await W11L.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' });
   const cu = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
   {
     const FLEET_RELAY = 'https://admin.fleet.example.test/relay/';
@@ -487,6 +491,7 @@ console.log('⑨ the workspace app through the engine');
     ok(rOf(fh) === FLEET_RELAY && rOf(fp) === FLEET_RELAY && rOf(fo) === RELAY_URL && rOf(fc) === SM.RELAY_DEFAULT && back.act === 'redirect' && back.to.startsWith('https://pod-7.fleet.example.test/api/channels/oauth/cb/slack?'),
       'addendum 1: a preset naming no relay page rides the FLEET\'s on a fleet pod (an http hub too — no more no-https), the cluster\'s copy sends the pod back; a preset\'s own page outranks the fleet\'s; the custom rung keeps the setting\'s page', JSON.stringify({ fh: rOf(fh), fp: rOf(fp), fo: rOf(fo), fc: rOf(fc), back: back.act }));
   }
+  ok(nl && nl.detail && nl.detail.why === 'preset-unlisted' && /make your own app/.test(nl.message || ''), `lane gmail-connect-wall (R3): a preset with no relay page that does not list this address is refused on an https origin BEFORE Slack opens — never a redirect its app does not list (${JSON.stringify(nl && nl.detail)})`);
   ok(np.flow.mode === 'paste' && np.credentialKey === null && nh && nh.detail && nh.detail.why === 'no-https' && new URL(sh.url).searchParams.get('redirect_uri') === 'https://pod-7.example.test/api/channels/oauth/cb/slack' && cu.credentialKey === 'custom' && new URL(cu.url).searchParams.get('redirect_uri') === 'https://problemfactory.github.io/vibespace/slack/', 'no preset → the paste steps; a preset without a relay: an http instance refused by name (no-https), an https one uses its own callback; a custom client → the relay page setting\'s default', JSON.stringify({ np: np.flow.mode, nh: nh && nh.detail, sh: sh.url && new URL(sh.url).searchParams.get('redirect_uri'), cu: cu.url && new URL(cu.url).searchParams.get('redirect_uri') }));
 }
 

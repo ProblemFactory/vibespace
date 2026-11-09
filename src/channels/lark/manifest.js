@@ -94,7 +94,7 @@ function integrationRow({ V, okV, bad }) {
     // lane pod-oauth-callback (study 2 B2: the form defaulted to feishu while the company's app lives on Lark
     // international): a company preset NAMES its app's brand (`brand`: feishu | lark — a JSON entry's value, or
     // VIBESPACE_INTEGRATION_LARK_BRAND), and the account dialog reads it (`facts`) — the brand option's default under that preset
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_', extras: ['brand'], facts: ['brand'] },
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_', extras: ['brand', 'instanceAddress'], facts: ['brand'] },   // lane gmail-connect-wall: + instanceAddress ("listed" = the app lists each instance's own https address)
     setup: {
       callbackUrl: LARK_CALLBACK_URL,
       callbackNote: i18nKey('Developer Console → Security Settings → Redirect URLs. It must match byte for byte.'),

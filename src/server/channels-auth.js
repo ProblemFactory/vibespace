@@ -15,6 +15,10 @@ const { cancelledSentence, identityOf, namelessSentence, heldIdentity, identityM
 const caps = require('../channel-caps.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');
 const R = require('../integration-registry.js');
+const { ASKED_ROADS: ROADS_ASKED } = require('../consent-road.js');   // lane gmail-connect-wall (PURE): the roads a dialog may ask
+/** lane gmail-connect-wall r3: the longest a sign-in start waits on an earlier start of its kind (a begin that never answers
+ *  must not block that kind for the life of the process); past it this one goes ahead and the earlier ends itself. */
+const START_WAIT_MS = 20e3;
 const F = require('../channel-filter.js');
 const P = require('../channel-policy.js');
 const ACL = require('../channel-acl.js');
@@ -440,6 +444,7 @@ function create(engineCtx) {
   // both are replaced in ONE write — never a record bound to a client its
   // token was not issued under.
   const pendingFlows = new Map();   // flowId -> pending
+  const startChain = new Map();     // lane gmail-connect-wall r2: kind -> {link, me} the last start of that kind — one sign-in per kind
   function sweepPending() {
     const t = now();
     for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); }
@@ -459,10 +464,36 @@ function create(engineCtx) {
     }
     return out;
   }
-  const latestPending = () => { let best = null; for (const p of pendingFlows.values()) if (!p.targetId && (!best || p.startedAt >= best.startedAt)) best = p; return best; };
+  // lane gmail-connect-wall: `kind` = the latest of THAT kind (a reopened dialog finds its own kind's sign-in)
+  const latestPending = (kind = null) => { let best = null; for (const p of pendingFlows.values()) if (!p.targetId && (!kind || p.kind === kind) && (!best || p.startedAt >= best.startedAt)) best = p; return best; };
   /** verify r8: does the pending flow's TARGET hold a sign-in right now (the refusal's tail says so). */
   const targetHolds = (p) => { const t = p.targetId ? adapterRecords().adapters.find((x) => x.id === p.targetId) : null; return !!(t && t.auth && t.auth.tokenEnc); };
-  async function beginPending(mod, choice, { target = null, options = null, origin = null, road = null } = {}) {
+  async function beginPending(mod, choice, { target = null, options = null, origin = null, road = null, ref = null } = {}) {
+    // lane gmail-connect-wall r2 (law A, the acceptance's overlap): THE ONE SIGN-IN OF A KIND takes its place BEFORE anything
+    // is awaited — a start that overlaps another start of its kind waits for that one's begin (`startChain`), so it SEES it
+    // and replaces it; never two running side by side, never a fixed port held by the one that lost
+    // r3 (the acceptance: «no start waits for ever on another start»): the wait is BOUNDED (START_WAIT_MS) — past it this
+    // start goes ahead and says so, and the earlier one, when its begin finally answers, ends itself (`overtaken`): still one
+    if (!target) {
+      const prev = startChain.get(mod.kind) || null;
+      let release = null;
+      const mine = new Promise((r) => { release = r; });
+      const me = { overtaken: false };
+      const entry = { link: mine, me };   // this start begins only after the earlier one answered (or the bound passed): the next waits on THIS one alone
+      startChain.set(mod.kind, entry);
+      try {
+        if (prev) {
+          let timer = null;
+          const waited = await Promise.race([prev.link.then(() => true), new Promise((r) => { timer = setTimeout(() => r(false), START_WAIT_MS); })]);
+          clearTimeout(timer);
+          if (!waited) { prev.me.overtaken = true; log.warn(`[channels] ${mod.kind}: an earlier sign-in start has not answered in ${Math.round(START_WAIT_MS / 1000)} s — this one goes ahead; the earlier one ends itself when it answers`); }
+        }
+        return await beginPendingNow(mod, choice, { options, origin, road, me, ref });
+      } finally { release(); if (startChain.get(mod.kind) === entry) startChain.delete(mod.kind); }
+    }
+    return beginPendingNow(mod, choice, { target, options, origin, road, ref });
+  }
+  async function beginPendingNow(mod, choice, { target = null, options = null, origin = null, road = null, me = null, ref = null } = {}) {
     sweepPending();
     const id = target ? target.id : `pending:${crypto.randomBytes(6).toString('hex')}`;
     const rec = newRecord(mod, { id, credentialKey: choice.credentialKey });
@@ -473,7 +504,14 @@ function create(engineCtx) {
     if (!target) for (const [k, v] of Object.entries(presetOptionsOf(mod, choice))) if (!(options && typeof options === 'object' && typeof options[k] === 'string' && options[k].trim())) rec.options[k] = v;
     if (target) rec.label = target.label;
     assertResolvable(mod, rec);
-    const p = { flowId: null, kind: mod.kind, choice, rec, targetId: target ? target.id : null, tokenEnc: null, tokenMeta: null, done: false, ok: null, error: null, user: null, startedAt: now(), adapter: null };
+    // lane gmail-connect-wall: AT MOST ONE pending sign-in per kind — a new press (the dialog's «open it again», its other
+    // road, a second dialog) supersedes the earlier one: its landing then says «replaced». r2 (law C): the earlier ends only
+    // ONCE THE NEW ONE EXISTS — a begin that is refused leaves it running (the dialog says so) — except where the new one
+    // needs what the earlier holds, its fixed loopback port: then the earlier ends and the new one binds the port.
+    // The answer counts it (`superseded`) so the dialog says it once.
+    let superseded = 0;
+    const earlier = target ? [] : [...pendingFlows].filter(([id, q]) => !q.targetId && q.kind === mod.kind && !q.done && (flows.status(id) || {}).running).map(([id]) => id);
+    const p = { flowId: null, kind: mod.kind, choice, rec, targetId: target ? target.id : null, tokenEnc: null, tokenMeta: null, done: false, ok: null, error: null, user: null, startedAt: now(), adapter: null, ref: ref || null };
     const memTokens = {
       read() {
         if (!p.tokenEnc) return { token: null, why: 'never-authenticated' };
@@ -504,11 +542,24 @@ function create(engineCtx) {
     };
     const memState = { read: () => ({}), write: async () => {} };
     p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, consent: consentDepsOf(mod.kind), onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
-    const flow = await p.adapter.auth.begin({ origin, road });   // design 018: the browser's own origin rides the Slack state (the relay's way back); lane pod-oauth-callback: it decides the route vs the loopback, `road` = the person's last resort
+    let flow = await p.adapter.auth.begin({ origin, road });   // design 018: the browser's own origin rides the Slack state (the relay's way back); lane pod-oauth-callback: it decides the route vs the loopback, `road` = the person's last resort
+    // r3 (item 5): a newer start went ahead while this begin hung — this one ends itself now, said; the newer one stands
+    if (me && me.overtaken) {
+      try { flows.cancel(flow.flowId, 'superseded'); } catch { /* ended either way */ }
+      log.warn(`[channels] ${mod.kind}: a sign-in start answered after a newer one went ahead — it ended itself (superseded)`);
+      throw httpErr(409, 'superseded', 'a newer sign-in of this kind started while this one waited — that one stands');
+    }
+    // r2 (law C): the new sign-in needs the fixed port an earlier one of its kind holds — that one ends, this one binds it
+    if (flow && flow.refusal && flow.refusal.code === 'port-busy') {
+      const holder = earlier.find((id) => { const s = flows.status(id); return s && s.running && s.mode === 'fixed' && s.listening && s.port === flow.port; });
+      if (holder) { flows.cancel(holder, 'superseded'); superseded++; if (await flows.relisten(flow.flowId)) flow = { ...flow, ...flows.status(flow.flowId) }; }
+    }
     p.flowId = flow.flowId;
     pendingFlows.set(p.flowId, p);
+    for (const id of earlier) { const s = flows.status(id); if (s && s.running) { try { flows.cancel(id, 'superseded'); superseded++; } catch { /* the consent machine ends it at its own time */ } } }
+    if (superseded) log.log(`[channels] ${mod.kind}: a new sign-in replaced ${superseded} earlier one${superseded > 1 ? 's' : ''} that had not finished`);
     noteChain(flow, origin, road);   // lane lark-consent-chain: a first page of a chain — its next pages ride this road
-    return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow) };
+    return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow), ...(superseded ? { superseded } : {}) };
   }
   async function onPendingDone(p, r) {
     // verify r8: NOTHING is written after stop — the pending's durable write (applyRebind / Connect) is dropped
@@ -649,6 +700,10 @@ function create(engineCtx) {
     if (!engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});
     return rec;   // lane lark-consent-chain: the rebind landed (its next page rides the account)
   }
+  /** lane gmail-connect-wall: the road a dialog may ASK — 'loopback' (the copy-the-address way) or 'fixed' (a silent Google
+   *  preset's other loopback) — src/consent-road.js ASKED_ROADS; anything else = the verdict's own. */
+  // r2 (law E4): anything else that is SAID is refused by name — never silently the verdict's own
+  const askedRoad = (r) => { if (r == null || r === '') return null; if (ROADS_ASKED.includes(r)) return r; throw httpErr(400, 'bad-road', `there is no sign-in road «${String(r).slice(0, 20)}» — ask ${ROADS_ASKED.join(' or ')}, or nothing`); };
   /** START a consent for an account that does not exist yet:
    *  `{kind, clientPreset | credentialKey | clientId + clientSecret |
    *  credential, options?}` → `{flowId, url, flow}`. */
@@ -656,21 +711,24 @@ function create(engineCtx) {
     const mod = connectableFor(String(input.kind || input.backend || ''));
     normalizeOptions(mod, input.options, {});   // verify r2: a body refused on its options never opens a mount's secret (judged again, on the record, in beginPending)
     const choice = clientChoice(mod, input);
-    const r = await beginPending(mod, choice, { options: input.options, origin: typeof input.origin === 'string' ? input.origin : null, road: input.road === 'loopback' ? 'loopback' : null });
+    // lane gmail-connect-wall r4 (the tidy's last word): `ref` = the PAGE that started it (an opaque random id the dialog's page
+    // makes once) — a status answer carries it, so a closing dialog ends what ITS page started even when an answer never came
+    const ref = typeof input.ref === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(input.ref) ? input.ref : null;
+    const r = await beginPending(mod, choice, { options: input.options, origin: typeof input.origin === 'string' ? input.origin : null, road: askedRoad(input.road), ref });
     auditMountCopy(choice, mod);
     return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);   // verify r3: the answer names the client copied
   }
-  function pendingOrThrow(flowId) {
+  function pendingOrThrow(flowId, kind = null) {
     sweepPending();
-    const p = flowId ? pendingFlows.get(String(flowId)) : latestPending();
+    const p = flowId ? pendingFlows.get(String(flowId)) : latestPending(kind);
     if (!p || p.targetId) throw httpErr(404, 'no-flow', 'no sign-in in progress — start one with the account dialog\'s sign-in button');
     return p;
   }
   /** STATUS: `token` is the FLOW ID once the sign-in succeeded — the handle
    *  the shared consent block writes into its field and the dialog submits
    *  with Connect (the storage block's contract); never a credential. */
-  function oauthStatus(flowId = null) {
-    const p = pendingOrThrow(flowId);
+  function oauthStatus(flowId = null, { kind = null } = {}) {
+    const p = pendingOrThrow(flowId, typeof kind === 'string' && kind ? kind : null);   // lane gmail-connect-wall: `?kind=` — a reopened dialog's own
     const st = flows.status(p.flowId);
     const cancelled = st && st.cancelled ? st.cancelled : null;
     return {
@@ -679,8 +737,19 @@ function create(engineCtx) {
       // verify r4: an end that is the consent machine's own act (the timeout, the cap) carries ITS sentence on the flow;
       // a flow the machine no longer knows (retired under this record) is SAID too, never a wordless stop
       error: p.error || (cancelled && !p.done ? ((st && st.error) || `the sign-in was ${cancelled === 'timeout' ? 'not finished in time' : cancelled}`) : (!p.done && !st ? 'the sign-in is no longer running — sign in again' : null)),
-      user: p.user, flow: safeFlow(st), token: p.done && p.ok ? p.flowId : null,
+      user: p.user, flow: safeFlow(st), token: p.done && p.ok ? p.flowId : null, ref: p.ref || null,
     };
+  }
+  /** lane gmail-connect-wall: CANCEL a sign-in that runs before its account exists — the dialog's one-press Cancel, and its
+   *  close for a road that cannot finish without it (a loopback: the paste box is in the dialog). `{flowId}` (required) →
+   *  `{flowId, cancelled}` (false = it had already ended: nothing to do). The landing of a cancelled one says «cancelled». */
+  function oauthCancel(flowId = null) {
+    if (!flowId || typeof flowId !== 'string') throw httpErr(400, 'no-flow', 'name the sign-in to cancel (its flowId)');
+    const p = pendingOrThrow(flowId);
+    const st = flows.status(p.flowId);
+    const was = !!(st && st.running);
+    if (was) { flows.cancel(p.flowId, 'cancelled'); log.log(`[channels] ${p.kind}: a sign-in that had not finished was cancelled from its dialog`); }
+    return { flowId: p.flowId, cancelled: was };
   }
   /** lane dc-channels-consent: the landing PAGE of `kind` — its consent row's `landing.landingHtml(r)`, or null (an
    *  account type whose consent never lands here: the route answers 404 by name). */
@@ -835,7 +904,7 @@ function create(engineCtx) {
     const mod = connectableFor(rec.kind);
     const choice = clientChoice(mod, input, { allowDefault: false });
     const origin = typeof input.origin === 'string' ? input.origin : null;
-    const road = input.road === 'loopback' ? 'loopback' : null;   // lane pod-oauth-callback: the person's last resort
+    const road = askedRoad(input.road);   // lane pod-oauth-callback: the person's last resort (lane gmail-connect-wall: or a preset's fixed address)
     if (!choice && !rec.credentialKey && !(rowOf(mod) && rowOf(mod).signin === 'paste')) {   // design 018: a key-less Slack account IS the paste rung — never stamped with a preset
       const ev = credentialKeyEvidence(rec, mod);
       if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
@@ -869,7 +938,7 @@ function create(engineCtx) {
    *  secret, never the exchange result. */
   function safeFlow(st) {
     if (!st) return null;
-    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null,
+    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, other: st.other || null, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null,
       // lane lark-consent-chain: this page's place in a chain; ADDENDUM 1: where its scopes came from (the narrowing row's verdict)
       chain: st.chain && typeof st.chain === 'object' ? { page: st.chain.page, total: st.chain.total } : null, scopesFrom: st.scopesFrom || null, scopesWhy: st.scopesWhy || null, lacking: Array.isArray(st.lacking) ? st.lacking.slice() : [] };
   }
@@ -907,9 +976,14 @@ function create(engineCtx) {
     try { return flows.narrow(flowId); }
     catch (e) { throw httpErr(e && e.code === 'no-flow' ? 404 : 409, (e && e.code) || 'bad-request', String((e && e.message) || e)); }
   }
-  async function cancelAuth(adapterId) {
+  // lane gmail-connect-wall r4 (acceptance r3, THE LAW: a dialog ends only what IT started): `flowId` names the sign-in to end —
+  // another one of the account (a later press, another dialog) is left running and `cancelled` is false; none named = the
+  // account's running one, as before (the Escape ask)
+  async function cancelAuth(adapterId, { flowId = null } = {}) {
     const rec = recordOrThrow(adapterId);
-    const running = flows.runningFor(rec.id);
+    const now = flows.runningFor(rec.id);
+    if (flowId && (!now || now.flowId !== String(flowId))) return { ok: true, cancelled: false };
+    const running = now;
     const cancelled = running ? flows.cancel(running.flowId, 'cancelled') : false;
     if (running) pendingFlows.delete(running.flowId);
     cancelChainOf(rec.id);   // lane lark-consent-chain
@@ -1369,7 +1443,7 @@ function create(engineCtx) {
 
   return {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
-    newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
+    newRecord, mountClientsFor, viewOptions, startOAuth, oauthStatus, oauthCancel, consentLandingOf, oauthLanding, oauthCallback, connect, reauthorize,
     recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,

@@ -39,11 +39,37 @@
  *     route can serve it: the loopback (`desktop-client`), on any port. 'web' — a Web application client takes only
  *     addresses registered EXACTLY, so its loopback is the kind's FIXED one (`fixed: true` on the loopback verdict; the
  *     adapter binds its registered callback). '' — not said: as before (the relay, the route, the adapter's own loopback).
+ *   lane gmail-connect-wall (the owner 2026-11-09, on the owner's own hub: a Gmail connect under a company preset walked into Google's
+ *   «Error 400: redirect_uri_mismatch» and the dialog offered no way on): NO DEFAULT ROAD INTO A WALL THE PRODUCT CAN
+ *   PREDICT. A company preset's person cannot register an address, so the instance's own https address (the route) is a
+ *   preset's road ONLY when the preset says its app lists it (`preset`, `listed` — the preset fact `instanceAddress:
+ *   "listed"`, LISTED below; absent = not listed); else its loopback (`preset-loopback`). A person's own client keeps the
+ *   route (they register what the setup card tells them). `clientKinds` = the vendor's client comes in two kinds (Google:
+ *   Web application | Desktop app): a preset that does NOT say which (`clientType` '') signs in at the kind Google
+ *   DOCUMENTS for a Desktop client — `http://127.0.0.1:<port>`, any port, no path (developers.google.com/identity/
+ *   protocols/oauth2/native-app: nothing is registered for it) — and its OTHER road is the kind's FIXED address (the one
+ *   a Web client lists; Google's pages say nothing of a path after a Desktop loopback port, so no one address is
+ *   documented to serve both). `road` (asked by the dialog's other-road button): 'loopback' | 'fixed'. Every verdict
+ *   carries `other` — the road the dialog offers as a VISIBLE second button ('loopback' | 'fixed' | null).
+ *   routeAllowed({preset, listed}) — may a consent come back to this instance's own https address? (a person's own client,
+ *                  or a preset that says its app lists it). Slack's workspace app asks it too (src/channels/slack.js —
+ *                  its own road, the same law).
+ *   listedOf(values) — does a preset's values say its app lists this instance's address (`instanceAddress: "listed"`)?
+ *   wayOf({kind, origin, inputs}) (lane gmail-connect-wall r2, law D — the acceptance measured state A saying «comes back by
+ *                  itself» for a page opened under another name while the start took the loopback): THE ROAD A START WILL
+ *                  TAKE, for the dialog BEFORE the press — ONE verdict, two readers: `inputs` are the start's own (the kinds
+ *                  digest's presets[].wayIn: publicUrl, relayOf's relayUrl / relayFleet / preset / listed, the client's
+ *                  kind, clientKinds, loopback, fixedOnly — Lark binds only its registered loopback), `origin` = the
+ *                  page's own (the start's Origin). A kind with a loopback =
+ *                  consentRoad itself; one without (Slack's workspace app) = its relay › this origin when routeAllowed and
+ *                  https › `none`. → {road, why, fixed, other, uri}.
  *   relayPick({fleet, preset, setting}) → {url, fleet, who} — the relay a consent rides. `preset` = a company preset
  *                  account's own relayUrl ('' when it names none), null for any other client: a preset rides its own ›
  *                  the fleet's, NEVER the setting; any other client the fleet's › the setting's (the first that is a
  *                  relay page address). `fleet` = the cluster's own page; `who` ∈ preset | fleet | page | null.
- *   relayOf(consent, cred) → {relayUrl, relayFleet} — relayPick over the engine's consent deps and the account's client.
+ *   relayOf(consent, cred) → {relayUrl, relayFleet, preset, listed} — relayPick over the engine's consent deps and the
+ *                  account's client; lane gmail-connect-wall: + whether the client is a company preset and whether it says
+ *                  its app lists this instance's address (consentRoad's `preset` / `listed`).
  *   stateOf({origin, flowId, issuedAt, kind}, sign) / stateVerdict(s, {sign, now, ttlMs, kind}) — the state a route
  *                  consent carries: `v1.<b64url {u, f, t, k}>.<this boot's HMAC>` (the shape src/server/dropline-oauth.js
  *                  and the relay page docs/slack-relay/relay.js already read; `k` = the account kind). `sign` is the
@@ -82,8 +108,12 @@ const CALLBACK_BASE = '/api/channels/oauth/cb/';
  *  only a person's own app rides (addendum 1: a company preset never does). */
 const RELAY_DEFAULT = SM.RELAY_DEFAULT;
 const ROADS = Object.freeze(['relay', 'route', 'loopback']);
-const WHYS = Object.freeze(['relay-page', 'https-address', 'asked', 'local-browser', 'no-address', 'not-https', 'bad-kind', 'desktop-client']);
+const WHYS = Object.freeze(['relay-page', 'https-address', 'asked', 'local-browser', 'no-address', 'not-https', 'bad-kind', 'desktop-client', 'preset-loopback']);
 const CLIENT_TYPES = Object.freeze(['web', 'desktop']);   // lane oauth-setup-instructions: a Google client's two kinds
+/** lane gmail-connect-wall: the preset fact that says a company app lists this instance's own https address
+ *  (`"instanceAddress": "listed"` in its gdrive-clients / integrations entry); the dialog's other roads. */
+const LISTED = 'listed';
+const ASKED_ROADS = Object.freeze(['loopback', 'fixed']);
 const KIND_RE = /^[a-z][a-z0-9-]{1,19}$/;
 const STATE_MAX = 1200;
 const STATE_TTL_MS = 30 * 60e3;
@@ -168,15 +198,29 @@ function relayOf(consent, cred) {
   const call = (f) => { try { return consent && typeof consent[f] === 'function' ? String(consent[f]() || '') : ''; } catch { return ''; } };
   const preset = cred && cred.source === 'cluster' ? (cred.values && typeof cred.values.relayUrl === 'string' ? cred.values.relayUrl : '') : null;
   const p = relayPick({ fleet: call('fleetRelayUrl'), preset, setting: preset === null ? call('relayUrl') : '' });
-  return { relayUrl: p.url, relayFleet: p.fleet };
+  // lane gmail-connect-wall: a company preset's route is its admin's fact (listedOf), never a default
+  return { relayUrl: p.url, relayFleet: p.fleet, preset: preset !== null, listed: preset !== null && listedOf(cred.values) };
 }
+/** lane gmail-connect-wall: does a company preset's values say its app lists this instance's own https address? */
+function listedOf(values) { return !!values && typeof values === 'object' && values.instanceAddress === LISTED; }
+/** lane gmail-connect-wall: may a consent come back to this instance's own https address — a person's own client
+ *  (they register it), or a company preset that says its app lists it. The ONE rule consentRoad and Slack's road ask. */
+function routeAllowed({ preset = false, listed = false } = {}) { return !preset || !!listed; }
 
 /** THE VERDICT: the relay page when one is known and it sends this browser back; else the route on the instance when
  *  it has an https address and the browser is elsewhere; else the loopback. */
-function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUrl = '', relayFleet = false, clientType = '' } = {}) {
-  // lane oauth-setup-instructions: a Web application client's loopback is the kind's FIXED registered one
-  const loop = (why) => ({ road: 'loopback', redirectUri: null, base: null, u: null, why, ...(clientType === 'web' && why !== 'bad-kind' ? { fixed: true } : {}) });
+function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUrl = '', relayFleet = false, clientType = '', preset = false, listed = false, clientKinds = false } = {}) {
+  // lane gmail-connect-wall: a company preset that does not say which kind its client is (a vendor with two kinds)
+  const silent = !!preset && !!clientKinds && !CLIENT_TYPES.includes(clientType);
+  // lane oauth-setup-instructions: a Web application client's loopback is the kind's FIXED registered one; lane
+  // gmail-connect-wall: a silent preset's FIRST loopback is Google's documented Desktop form (any port) and its OTHER
+  // road the fixed address (and back) — the dialog's visible second button
+  const loop = (why, fixedAsked = false) => {
+    const fixed = why !== 'bad-kind' && (fixedAsked || clientType === 'web');
+    return { road: 'loopback', redirectUri: null, base: null, u: null, why, ...(fixed ? { fixed: true } : {}), other: why !== 'bad-kind' && silent ? (fixed ? 'loopback' : 'fixed') : null };
+  };
   if (typeof kind !== 'string' || !KIND_RE.test(kind)) return loop('bad-kind');
+  if (road === 'fixed') return loop('asked', true);
   if (road === 'loopback') return loop('asked');
   if (clientType === 'desktop') return loop('desktop-client');   // a Desktop client takes no https address: no relay, no route
   const base = httpsBaseOf(publicUrl);
@@ -184,10 +228,29 @@ function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUr
   // judges it by the ONE table (a private address; the fleet's relay also this instance's own https host)
   const page = relayPageOf(relayUrl), u = originOf(origin);
   const allow = relayFleet && base ? [new URL(base).hostname] : [];
-  if (page && u && SM.relayTargetVerdict(u, { allow }) === 'redirect') return { road: 'relay', redirectUri: page, base: null, u, why: 'relay-page' };
+  if (page && u && SM.relayTargetVerdict(u, { allow }) === 'redirect') return { road: 'relay', redirectUri: page, base: null, u, why: 'relay-page', other: 'loopback' };
   if (!base) return loop(typeof publicUrl === 'string' && publicUrl.trim() ? 'not-https' : 'no-address');
   if (loopbackOrigin(origin)) return loop('local-browser');
-  return { road: 'route', redirectUri: `${base}${CALLBACK_BASE}${kind}`, base, u: originOf(base), why: 'https-address' };
+  // lane gmail-connect-wall: a company preset's person cannot add this address to the app — the route only when the preset
+  // says its app lists it; else the preset's loopback (the dialog says, BEFORE Google opens, that its last page is pasted back)
+  if (!routeAllowed({ preset, listed })) return loop('preset-loopback');
+  return { road: 'route', redirectUri: `${base}${CALLBACK_BASE}${kind}`, base, u: originOf(base), why: 'https-address', other: 'loopback' };
+}
+
+/** lane gmail-connect-wall r2 (law D): the road a start of `kind` will take from a page at `origin`, over the start's OWN
+ *  inputs — the same consentRoad call the adapter makes (a kind with a loopback), or Slack's own road (one without). */
+function wayOf({ kind, origin = null, inputs = {} } = {}) {
+  const i = inputs && typeof inputs === 'object' ? inputs : {};
+  if (i.loopback === false) {
+    const page = relayPageOf(i.relayUrl);
+    if (page) return { road: 'relay', why: 'relay-page', fixed: false, other: null, uri: page };
+    const o = originOf(origin);
+    if (!routeAllowed({ preset: !!i.preset, listed: !!i.listed })) return { road: 'none', why: 'preset-unlisted', fixed: false, other: null, uri: null };
+    return o && o.startsWith('https://') ? { road: 'route', why: 'https-address', fixed: false, other: null, uri: `${o}${CALLBACK_BASE}${kind}` } : { road: 'none', why: 'not-https', fixed: false, other: null, uri: null };
+  }
+  const v = consentRoad({ kind, publicUrl: typeof i.publicUrl === 'string' ? i.publicUrl : '', origin, relayUrl: i.relayUrl || '', relayFleet: !!i.relayFleet, clientType: typeof i.clientType === 'string' ? i.clientType : '', preset: !!i.preset, listed: !!i.listed, clientKinds: !!i.clientKinds });
+  // a kind whose loopback is ONLY its registered one (Lark: consent mode fixed, no ephemeral) binds it whatever the verdict says
+  return { road: v.road, why: v.why, fixed: !!v.fixed || (v.road === 'loopback' && !!i.fixedOnly), other: v.other || null, uri: v.redirectUri || null };
 }
 
 const b64u = (s) => Buffer.from(String(s), 'utf8').toString('base64url');
@@ -307,4 +370,4 @@ function landingHtml(r = {}, { name = 'the account', lang = 'en' } = {}) {
   return `<!doctype html><html lang="${l}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer">${next ? `<meta http-equiv="refresh" content="1;url=${go}">` : ''}<title>VibeSpace · ${nm}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}</style></head><body data-landing="${kind}"${next ? ` data-chain="${next.page}/${next.total}"` : ''}><p>${fill(LANDING[kind][l])}</p>${next ? `<p><a href="${go}" rel="noreferrer">${fill(LANDING['chain-go'][l])}</a></p>` : ''}${kind === 'ok' ? `<script>${CLOSE_SCRIPT}</script>` : ''}</body></html>`;
 }
 
-module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, CLIENT_TYPES, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, LANGS, CHAIN_PAGES_MAX, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingLang, landingUser, landingHtml, chainOf, nextOf };
+module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, CLIENT_TYPES, LISTED, ASKED_ROADS, routeAllowed, listedOf, wayOf, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, LANGS, CHAIN_PAGES_MAX, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingLang, landingUser, landingHtml, chainOf, nextOf };

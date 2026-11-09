@@ -148,7 +148,7 @@ function integrationRow({ V, okV, bad }) {
       },
       whysWithCode: { 'app-create-refused': i18nKey('Slack did not create the app ({code}).') },
     },
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_SLACK_' },
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_SLACK_', extras: ['instanceAddress'] },   // lane gmail-connect-wall: "listed" = the app lists each instance's own https address
     setup: {
       callbackNote: i18nKey('Slack → your app → OAuth & Permissions → Redirect URLs: add the relay page (or this instance’s https address + /api/channels/oauth/cb/slack). It must match exactly or be a sub-path.'),
       prerequisites: [

@@ -703,6 +703,9 @@ function validateVendor(kind, mod) {
       // lane oauth-setup-instructions: `signIn: true` = the option is read at each sign-in (Gmail's clientType decides the
       // address Google is asked for) — the Connect / Re-authorize forms show it beside the type's first option
       if (o.signIn !== undefined && o.signIn !== true) bad(`${at}: signIn is true (read at each sign-in) or absent`);
+      // lane gmail-connect-wall: `presetFact: true` = a company preset's ADMIN states it (Gmail's clientType) — the dialogs
+      // never ask the person while the account's client is a company preset, and the adapter never reads it for one
+      if (o.presetFact !== undefined && o.presetFact !== true) bad(`${at}: presetFact is true (a company preset states it) or absent`);
     }
   }
   if (mod.manifest !== undefined && !(mod.manifest && typeof mod.manifest === 'object' && mod.manifest.kind === kind)) bad('manifest must be its own vendor manifest (manifest.kind === kind)');

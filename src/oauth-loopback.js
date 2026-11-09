@@ -330,7 +330,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null, road = null, chain = null, scopeSource = null } = {}) {
+  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null, road = null, chain = null, scopeSource = null, other = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
@@ -355,6 +355,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       flowId, id, mode, label: label || id, state, exchange, onDone, build: buildConsentUrl,
       ...groupsOf(optionalScopes), narrowed: null, narrowedGroups: 0,
       consentUrl: null, redirectUri: null, port: null, pathname: null,
+      other: other === 'loopback' || other === 'fixed' ? other : null,   // lane gmail-connect-wall: the road the dialog offers as its visible second button
       server: null, listening: false, refusal: null,
       result: null, error: null, why: null, done: false, exchanging: false, cancelled: null, step: null, stepFacts: null,
       startedAt: now(), finishedAt: null, expiresAt: now() + timeoutMs, timer: null,
@@ -424,6 +425,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       } catch (e) {
         try { srv.close(); } catch {}
         if (e && e.code === 'EADDRINUSE') {
+          // lane gmail-connect-wall r2 (law C): the caller may end the port's holder (its own earlier sign-in) and bind again
+          st.rebind = async () => { await listen(srv, target.port); bound(); };
           // THE NAMED REFUSAL + the paste-back fallback (§12.4). Not a failure
           // of the flow: the consent URL is still built with the registered
           // redirect_uri, and the code comes back through forwardCallback.
@@ -560,7 +563,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       flowId: st.flowId, id: st.id, mode: st.mode, label: st.label,
       running: !st.done && !st.cancelled, done: st.done, ok: st.done ? !st.error : null,
       error: st.error, why: st.why || null, cancelled: st.cancelled, step: st.step || null, stepFacts: st.stepFacts ? { ...st.stepFacts } : null,
-      consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port,
+      consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port, other: st.other || null,
       listening: st.listening, refusal: st.refusal,
       optional: st.optional.slice(), narrowed: st.narrowed ? st.narrowed.slice() : null,
       groups: st.groups.map((g) => g.slice()), nextNarrow: st.narrowedGroups < st.groups.length ? st.groups[st.narrowedGroups].slice() : null,
@@ -596,7 +599,19 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   function stopAll() { for (const id of [...flows.keys()]) cancel(id, 'shutdown'); }
   const runningFor = (id) => (byId.has(id) ? status(byId.get(id)) : null);
 
-  return { begin, status, forwardCallback, finishByState, take, cancel, stopAll, runningFor, narrow, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
+  /** lane gmail-connect-wall r2 (law C): a FIXED flow that was refused its port (port-busy) binds it AGAIN — the caller ended
+   *  the holder (its own earlier sign-in of the kind). A few short tries (a closed listener frees the port a tick later);
+   *  true = listening now, the refusal cleared; false = still held (the refusal and the paste-back stand). */
+  async function relisten(flowId) {
+    const st = flows.get(flowId);
+    if (!st || typeof st.rebind !== 'function' || st.done || st.cancelled) return false;
+    for (let i = 0; i < 6; i++) {
+      try { await st.rebind(); st.rebind = null; st.refusal = null; return !!st.listening; }
+      catch (e) { if (!(e && e.code === 'EADDRINUSE')) return false; await new Promise((r) => setTimeout(r, 40)); }
+    }
+    return false;
+  }
+  return { begin, status, forwardCallback, finishByState, take, cancel, stopAll, runningFor, narrow, relisten, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
 }
 
 module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, stepFactsOf, STEP_FACTS_MAX, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES, VENDOR_ERROR_MAX, OPTIONAL_SCOPES_MAX };

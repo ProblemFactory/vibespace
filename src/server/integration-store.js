@@ -303,7 +303,8 @@ function create(deps = {}) {
     if (row.delegate) {
       // lane oauth-relay-road: + the client's relay page, when the entry names one (the Gmail row's `relayUrl` field)
       // lane oauth-setup-instructions: + the client's kind (web | desktop), when the entry says (the Gmail row's `clientType`)
-      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || ''), ...(typeof p.relayUrl === 'string' && p.relayUrl ? { relayUrl: p.relayUrl } : {}), ...(p.clientType === 'web' || p.clientType === 'desktop' ? { clientType: p.clientType } : {}) } }));
+      // lane gmail-connect-wall: + `instanceAddress: "listed"` (the app lists this instance's own https address)
+      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || ''), ...(typeof p.relayUrl === 'string' && p.relayUrl ? { relayUrl: p.relayUrl } : {}), ...(p.clientType === 'web' || p.clientType === 'desktop' ? { clientType: p.clientType } : {}), ...(p.instanceAddress === 'listed' ? { instanceAddress: 'listed' } : {}) } }));
     }
     const src = clusterJsonEntries();
     let json = src.entries.filter((e) => e.id === row.id);
@@ -321,6 +322,21 @@ function create(deps = {}) {
     return json.length
       ? json.map((e) => ({ key: e.key, label: e.label || row.label, values: e.values }))
       : (fromPrefix ? [{ key: 'default', label: row.label, values: fromPrefix }] : []);
+  }
+  /** lane gmail-connect-wall (law 5, the admin's door named): WHERE this row's company presets are stated — the presets
+   *  DIRECTORY (`from: 'dir'`, watched: an edit takes effect without a restart) or the ENVIRONMENT (`from: 'env'`, read at
+   *  boot: a restart) — `{from, dir, file, env}` (the file name in the directory, the env's name). Names only, never a value. */
+  function presetSourceOf(id) {
+    const row = R.rowById(id);
+    if (!row || !(row.delegate || row.clusterEnv)) return null;
+    // the directory and its file names are the READER's (src/server/cluster-presets.js `dir` / `FILES` — the one place that names them)
+    const dir = presets && typeof presets.dir === 'string' && presets.dir ? presets.dir : null;
+    const fileOf = (k) => (presets && presets.FILES && typeof presets.FILES[k] === 'string' ? presets.FILES[k] : null);
+    if (row.delegate) {
+      const f = presets && typeof presets.entries === 'function' ? presets.entries('gdrive') : null;
+      return { from: f ? 'dir' : 'env', dir, file: fileOf('gdrive'), env: 'VIBESPACE_GDRIVE_CLIENTS' };
+    }
+    return { from: clusterJsonEntries().rung === 'file' ? 'dir' : 'env', dir, file: fileOf('integrations'), env: (row.clusterEnv && row.clusterEnv.json) || 'VIBESPACE_INTEGRATIONS' };
   }
   /** What the environment offers this row RIGHT NOW: `{key,label,values}` or null. */
   function clusterDefaultFor(row) {
@@ -886,7 +902,7 @@ function create(deps = {}) {
   }
 
   return {
-    resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
+    resolveIntegration, offeredCredentials, presetsFor, presetSourceOf, legacyOwnValues, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues, plainOf, renameRecord,
     resolveMachine, machineView, setMachineValues, clearMachineValues, // lane remoteapp-r1b: the per-machine rows' only doors
     vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
