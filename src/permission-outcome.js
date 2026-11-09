@@ -98,8 +98,9 @@ const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'st
  *  sentence + « Correction to the text above: this call was stopped while running, not refused before it ran. …» — the row `m9t`
  *  (outcome `stopped`), the first sentence that EXTENDS another row's: the lookup takes the LONGEST matching row.
  *  2.1.314 → 2.1.319 (lane cli-2-1-319-records): the 2.1.319 dump's `sentences` — the 15 (names Su/Hm/ni, m9t is `aan` now) and ONE more, `OU`
- *  «[Agent call interrupted: …», on both lists — an Agent call the process died under, retired on the resume (outcome `stopped`). */
-const PERMISSION_OUTCOME_CLI_VERSION = '2.1.319';
+ *  «[Agent call interrupted: …», on both lists — an Agent call the process died under, retired on the resume (outcome `stopped`).
+ *  2.1.319 → 2.1.321 (lane fable-52-cli-321): the 2.1.321 dump's `sentences` — the SAME 16 texts on the same lists (names Hu/Cf/si), no `until`. */
+const PERMISSION_OUTCOME_CLI_VERSION = '2.1.321';
 
 const row = (id, outcome, match, text, since, binary, evidence) => Object.freeze({ id, outcome, match, text, since, binary, evidence });
 

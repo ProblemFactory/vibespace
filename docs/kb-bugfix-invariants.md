@@ -899,6 +899,7 @@
 - (2026-11-07) A ROW THAT NAMED THE MESSAGE OPENED THE WHOLE OUTBOX (userW inc-mw5r944f-60vt, .382's chip) — 不变量 = a door inside a conversation shows that conversation's outbox, pending first, the pressed row in view; the name the person reads is the door they press ⇒ kb-bugfix-invariants
 - (2026-11-07) THE THIRD CLI UPDATE TO SHRINK THE POOL (.312, .314, .319; cli-2-1-319-records). 不变量 = a CLI update on the hub is measured and classified the same day; the treadmill's notice is the signal, the lane the response; the oracle pinned per version (kb-bugfix-invariants)
 - (2026-11-06) THE PHONE'S TITLE BAR SHOWED EVERY CHIP AND TWO CHARACTERS OF THE TITLE (owner 2026-11-06) — 不变量 = on a phone the title owns the bar: chips fold in a fixed order by measure until the WHOLE title fits, any slack the title's; a ⋯ never holds one chip it needn't (kb-bugfix-invariants)
+- (2026-11-09) A NEW MODEL SHIPPED BEFORE THE BOX'S CLI KNEW IT (Fable 5.2 on 2.1.319; fable-52-cli-321). 不变量 = a new model is a ROW in every model-id table (price, picker with its [1m] form, family, lock, echo), held by ONE census; a new CLI is measured before the box runs it (kb-bugfix-invariants)
 
 ## A ROW THAT NAMED THE MESSAGE OPENED THE WHOLE OUTBOX (userW inc-mw5r944f-60vt, 2026-11-07 01:59Z, 8 minutes after updating to .382; lane outbox-chip-door)
 
@@ -9066,3 +9067,18 @@ Gates:
 **The tests.** test-record-shape §4e (the 2.1.319 pin; three oracles, one suite), test-cli-caps ⑥, test-account-pool + test-oat-materialize (unmeasured ⇒ kept and unplaced; measured ⇒ placed), test-helper-ask ⑱e (the real renderer) + ⑱f (the warning after a rebuild from the JSONL), test-stdout-registry 3a' (the dumped shapes through the real consumer), test-cli-registration ②b (the line stops).
 
 **Not closed.** The measurement still ships with a release, so a CLI update still leaves the pool short for as long as the lane and the cut take. Pinning the box's CLI, or holding an update until it is measured, would close that window; it is the owner's call and is not built here. A hub that exits while the disk still has no room, or is killed outright inside the retry (SIGKILL or the OOM killer, where no code runs), loses the warning: its file could not be written either, and only the journal lines are left. Freeing the space and restarting keeps it (shutdownNow and the uncaughtException belt write what is held).
+
+
+## A NEW MODEL SHIPPED BEFORE THE BOX'S CLI KNEW IT (lane fable-52-cli-321, 2026-11-09)
+
+**What happened.** Anthropic shipped Claude Fable 5.2 (`claude-fable-5-2`) and Claude Code 2.1.321 on the same day. The owner asked whether 5.2 works now or needs a CLI update. The box ran 2.1.319, which knows Fable up to 5.1: its `fable` alias means 5.1. The owner installed 2.1.321 at 12:54 PT, 26 minutes after the lane measured it, and .386 then held every long-lived-token member as cli-unmeasured within its 15-minute `--version` tick. That made the lane a hotfix.
+
+**What the owner could do on f5e087bb5 (measured on a loopback mock).** 2.1.319 passes `claude-fable-5-2` through as typed, but treats it as an unknown model: a 200k window (it compacts there), 32 000 output tokens, and its own cost line at $4 / $20. `claude-fable-5-2[1m]` gets the 1M window. VibeSpace's side: the Usage window priced 5.2 on the `fable` row (Fable 5's rates, cache hits 5×). The picker had no 5.2 row: a typed bare id went through, and a typed `[1m]` id was refused by name, because the subscription provider's id pattern has no suffix. So the only 5.2 a conversation could pick was the 200k one.
+
+**The rows.** A model is a row, not a branch: a price row, the picker's full ids (bare and `[1m]`), and nothing else. The family, the Fable cap lane, the model lock and the `/model` echo already keyed on the `fable` word. 2.1.321 makes `fable` = 5.2 with 1M native, so after the owner's update the alias is enough.
+
+**不变量 = every table that names a model by id carries every member of its family that any of them names, `[1m]` form included, held by ONE census computed from the tables themselves (test-pricing-tiers §4); an id no table names survives every reader (§5); a new CLI is measured and classified before the box runs it, on the npm package's binary in a lane prefix.**
+
+**The tests.** test-pricing-tiers §2d (the rows, a control on the table without them), §4 (the census + four controls), §5 (the unknown-id road); test-record-shape's 2.1.321 pin; test-cli-caps ⑥, test-account-pool, test-oat-materialize (the 2.1.321 record); test-cli-registration ②c.
+
+**Not closed.** Fast mode is unpriced: the ledger keeps no `usage.speed`, so a fast turn would show at half its list cost (none on this box yet). The census covers the Fable family only: today Opus, Sonnet and Haiku disagree across tables (no `claude-opus-5-5` picker row; Haiku 5.5 priced as Haiku 4.5; Sonnet 5.5's cache hit at $0.20 against $0.10), and making them agree is its own lane.

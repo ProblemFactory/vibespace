@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.387 — 2026-11-09
+
+### Added
+- Fable 5.2 is in a chat's model list; on Claude Code 2.1.319, pick "Fable 5.2 [1m]" to get its full context.
+
+### Fixed
+- Fable 5.2 usage is priced at its own rates instead of Fable 5's, so its cost is no longer overstated.
+- Accounts with a long-lived token are back in the pool after Claude Code updated to 2.1.321.
+- With Claude Code 2.1.321, chats show no red "New fields on a known record" cards for its records: VibeSpace now knows that version.
+
 ## 2.369.386 — 2026-11-07
 
 ### Changed

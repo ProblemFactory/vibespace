@@ -46,6 +46,13 @@ const DEFAULT_PRICING = {
   // instance the stale $1 cache-read rate overstated seven days of Fable by 38 %
   // (the main session is cache-heavy) — the owner asked "is Opus really cheaper".
   'fable-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
+  // Fable 5.2 / Mythos 5.2 (2026-11-09, lane fable-52-cli-321): $8/$40, cache write 5m $10 / 1h $16, cache hit $0.20
+  // (0.025× base) — claude.com/pricing and platform.claude.com/docs/en/about-claude/pricing read 2026-11-09, the
+  // same as CLI 2.1.321's catalog tier `tier_8_40_cache_read_0_20`. Without these keys 'claude-fable-5-2' matched
+  // only `fable` (Fable 5: +25 % on input / output / cache writes, 5× on cache hits) and 'claude-mythos-5-2' only
+  // `mythos`. Longest key wins: '…-5-2' and '…-5-2[1m]' land here, 5-1 and 5 keep theirs. Fast mode (2×, $16/$80)
+  // is NOT priced: the ledger keeps no `usage.speed` (the CLI writes it on every transcript usage block).
+  'fable-5-2': { input: 8, output: 40, cacheWrite5m: 10, cacheWrite1h: 16, cacheRead: 0.2 },
   // Mythos 5 / Mythos 5.1 (2026-09-22): the installed CLI 2.1.280's catalog prices
   // `claude-mythos-5` at `tier_10_50` and `claude-mythos-5-1` at
   // `tier_10_50_cache_read_0_25` — the SAME two tiers as Fable 5 / Fable 5.1 ($10/$50,
@@ -59,6 +66,7 @@ const DEFAULT_PRICING = {
   // rates are the general 1.25× / 2× / 0.1× multipliers. 'mythos' alone priced it at $10/$50.
   'mythos-preview': { input: 25, output: 125, cacheWrite5m: 31.25, cacheWrite1h: 50, cacheRead: 2.5 },
   'mythos-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
+  'mythos-5-2': { input: 8, output: 40, cacheWrite5m: 10, cacheWrite1h: 16, cacheRead: 0.2 },   // Fable 5.2's tier (above)
   // Opus 5.5 (2026-09-22): the installed CLI 2.1.280's model catalog prices
   // `claude-opus-5-5` at its tier `tier_4_20_cache_read_0_20` = $4/$20, cache
   // write 5m $5 / 1h $8, cache hit $0.20 — and 2.1.280 resolves the `opus` /
