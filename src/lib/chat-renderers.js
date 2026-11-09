@@ -22,8 +22,8 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
-import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, fileUrlPath, hrefPath, CJK_PUNCT, SEG, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
-import { linkMask, pathMask, maskedLinkNote, fwGroupsSrc, fwFloor, URL_STOP } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside is WORDS + the note (one rule with For you); r5: THE full-width pairs a URL token holds
+import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, isTrailing, fileUrlPath, hrefPath, CJK_PUNCT, SEG, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
+import { linkMask, pathMask, maskedLinkNote, fwGroupsSrc, fwFloor, URL_STOP, URL_LETTER_RE } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside is WORDS + the note (one rule with For you); r5: THE full-width pairs a URL token holds
 // lane mask-value-shape r3 (D, F, I): a PATH token for the masked-path pass — anchored on its `/` (never mid-word, never inside a scheme's
 // `//`), ending at a blank, a quote, `<>`, a backtick or a CJK punctuation mark (path-linkify CJK_PUNCT, the one set): linear
 const CJK_STOP_RE = new RegExp('[' + CJK_PUNCT + ']');
@@ -59,8 +59,7 @@ export function notesAfterBlocks(html) {
       : body + notes.map((w) => ` <span class="chat-link-note masked-link-note">${w}</span>`).join('');
   });
 }
-// r4 (M4): path-linkify's TRAILING set as ONE character — a token's tail is shed by a backward walk, never cleanPath (`[…]+$`) over a run
-const TRAIL_CH_RE = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']');
+// r4 (M4) → r9: a token's tail is shed by a backward walk over path-linkify's ONE trailing set (isTrailing); cleanPath is that walk too
 import { mcpParts } from './chat-run-summary.js';
 import { chatLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
@@ -2829,14 +2828,14 @@ class ChatRenderers {
     // r4 (M4): the tail shed by a backward character walk (a vault mark's closing `]` stays) — linear, never cleanPath over the run
     let floor = 0; const k = raw.lastIndexOf('[vault:'); if (k >= 0) { const c = raw.indexOf(']', k); if (c >= 0) floor = c + 1; }
     floor = Math.max(floor, fwFloor(raw));   // r5 (M1): a balanced full-width pair's closer is the token's own
-    let end = raw.length; while (end > floor && TRAIL_CH_RE.test(raw[end - 1])) end--;
+    let end = raw.length; while (end > floor && isTrailing(raw[end - 1]) && !URL_LETTER_RE.test(raw[end - 1])) end--;   // r8 (a): a letter stays
     return this._maskedWords(raw.slice(0, end), mask) + raw.slice(end);
   }
   /** r5 (M1): an unmasked URL run's end once its trailing punctuation is shed — cleanPath's set, by a backward walk (linear), a balanced
    *  full-width pair's closer kept (`…/wiki/東京（都）`; cleanPath sheds every trailing CJK mark). */
   _urlEnd(raw) {
     const floor = fwFloor(raw);
-    let end = raw.length; while (end > floor && TRAIL_CH_RE.test(raw[end - 1])) end--;
+    let end = raw.length; while (end > floor && isTrailing(raw[end - 1]) && !URL_LETTER_RE.test(raw[end - 1])) end--;   // r8 (a): a letter (々 〆 〇) stays
     return end;
   }
   /** An <a>…</a> whose HREF holds a belt's mark → its words + the note; else null (the anchor's own rules run). */
@@ -2866,7 +2865,7 @@ class ChatRenderers {
     const runs = [], gaps = []; let at = 0;
     for (;;) {
       CJK_CUT_AT.lastIndex = at; CJK_CUT_AT.exec(words); const cut = CJK_CUT_AT.lastIndex;
-      let end = cut; while (end > at && TRAIL_ONLY_RE.test(words[end - 1])) end--;   // r7 (M8): a non-stop mark at the END is shed, never cut inside
+      let end = cut; while (end > at && TRAIL_ONLY_RE.test(words[end - 1]) && !URL_LETTER_RE.test(words[end - 1])) end--;   // r8 (a): never a letter   // r7 (M8): a non-stop mark at the END is shed, never cut inside
       if (!runs.length && end >= words.length) return null;
       runs.push(words.slice(at, end));
       SCHEME_AT.lastIndex = cut; const n = SCHEME_AT.exec(words), next = n ? n.index : words.length;

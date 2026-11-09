@@ -11,7 +11,7 @@
 // `[vault:<entry>]`) points at a mangled target — it is WORDS with a note (maskedLinkNote), never a link that looks whole.
 // The marks are the belt's own (src/secret-shapes.js maskedLink); every surface that draws an agent's words asks here.
 import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';
-import { CJK_PUNCT, SEG } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
+import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
 import { maskedLink } from '../secret-shapes.js'; // PURE: THE belt's marks — «redacted» / [vault:<entry>], raw or in an href
 
 export const ASK_ARTIFACT_KINDS = Object.freeze(['file', 'design', 'page']);
@@ -46,6 +46,10 @@ export function fwFloor(tok) {
 // rule), never a cut inside it. path-linkify's CJK_PUNCT keeps its own meaning for PATHS (SEG, TRAILING): a path still ends at any of them.
 export const URL_STOP = '\\u3001\\u3002\\uFF0C\\uFF1A\\uFF1B\\uFF01\\uFF1F' + FW_PAIRS.join('');   // a regex character-class body
 const URL_CH = '[^\\s<>"\'`' + URL_STOP + ']';
+// r8 (a): a LETTER never leaves a URL — path-linkify's CJK_PUNCT ranges also hold letters, numbers and marks (々 U+3005, 〆 U+3006, 〇 U+3007,
+// 〱–〵, 〻, 〼, the Hangzhou numerals 〡–〩 〸–〺, the combining 〪–〯): `…/wiki/人々`, `…/二〇〇〇` end in one. The shed from a URL token's END
+// (tailEnd here; the chat's _urlEnd / _maskedToken / _cjkAutolink) skips them — the base's cleanPath shed them on For-you and the text road
+export const URL_LETTER_RE = /[\p{L}\p{N}\p{M}]/u;
 const URL_RE = new RegExp('\\b(?:https?:\\/\\/|mailto:)(?:' + URL_CH + '|' + fwGroupsSrc(URL_CH) + ')+', 'g');
 const MAIL_RE = /(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 const PAGE_RE = /(?<![="'\w/])\/p\/pg[a-z0-9]{10}(?![A-Za-z0-9_-])/g;
@@ -74,7 +78,7 @@ function proseHits(s) {
   for (const m of s.matchAll(PAGE_RE)) hits.push({ start: m.index, end: m.index + m[0].length, kind: 'page', ref: m[0] });
   let scannedTo = 0;
   for (const m of s.matchAll(pathRe())) {
-    const ref = cleanPath(m[1]); if (ref.length < 4) continue;
+    const ref = cleanPath(m[1]); if (ref.length < 4) continue;   // r9: cleanPath is the linear walk itself
     // lane mask-value-shape r2 (m4) / r4: a PATH a belt masked inside is words + the note — its token read ONCE (a run starting inside a
     // token already read is that token's)
     const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;
@@ -92,7 +96,8 @@ function proseHits(s) {
 const MARK_HINT_RE = /«redacted»|%C2%ABredacted|\[vault:|%5Bvault/i;
 const BARE_MARK_RE = /\[vault:[^\]\[\s]{1,440}\]/g;
 const CJK_CH_RE = new RegExp('[' + CJK_PUNCT + ']');
-const TRAIL_CH_RE = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']');
+// r8 (b) → r9: a path / mail / prose token's end = path-linkify cleanPath, itself the backward walk over THE trailing set (linear, one
+// definition — isTrailing); a URL token's end = tailEnd below (the same set + the vault / full-width-pair floors + the letter guard)
 const TOKEN_RUN_RE = new RegExp('[^\\s<>"\'`' + CJK_PUNCT + ']*', 'y');
 const PATH_RUN_RE = new RegExp('(?:\\[vault:[^\\]\\[\\s<>"\']{1,440}\\]|' + SEG + ')*', 'y');
 const isStop = (s, i) => { const c = s.charCodeAt(i); return c <= 32 || c === 34 || c === 39 || c === 60 || c === 62 || c === 96 || CJK_CH_RE.test(s[i]); };
@@ -102,7 +107,7 @@ function tailEnd(s, start, end) {
   const tok = s.slice(start, end), k = tok.lastIndexOf('[vault:');
   if (k >= 0) { const c = tok.indexOf(']', k); if (c >= 0) floor = start + c + 1; }
   floor = Math.max(floor, start + fwFloor(tok));   // r5 (M1): a balanced full-width pair's closer is the token's own
-  while (end > floor && TRAIL_CH_RE.test(s[end - 1])) end--;
+  while (end > floor && isTrailing(s[end - 1]) && !URL_LETTER_RE.test(s[end - 1])) end--;   // r8 (a): a letter (々 〆 〇) stays
   return end;
 }
 /** r3 (E): the BARE vault marks — no `/` before the mark in its token — as `vault` text spans; one forward pass (linear). */
@@ -132,7 +137,7 @@ function relHits(s, base) {
   let at = 0;
   for (const tok of s.split(/(\s+)/)) {
     const lead = (LEAD.exec(tok) || [''])[0];
-    const core = cleanPath(tok.slice(lead.length));
+    const core = cleanPath(tok.slice(lead.length));   // r9: cleanPath is the linear walk itself (a blank-free run of 16 384 dashes before `，` was quadratic)
     const tail = core.replace(/\/+$/, '').split('/').pop();
     const mk = marked && core.includes('/') ? maskedRun(s, at + lead.length) : null;   // lane mask-value-shape r2 (m4): a masked relative path
     if (mk) out.push({ start: base + at + lead.length, end: base + mk.end, kind: 'masked', mask: mk.mask });

@@ -358,6 +358,12 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
     const M8 = { '…/wiki/Mexican–American_War (an en dash inside)': ['see https://en.wikipedia.org/wiki/Mexican–American_War', 'https://en.wikipedia.org/wiki/Mexican–American_War'], '…/a〜b/c (a wave dash inside)': ['https://ja.example/a〜b/c ok', 'https://ja.example/a〜b/c'], '…/a…b (an ellipsis inside)': ['https://x.example/a…b ok', 'https://x.example/a…b'], '…/2024—report/index.html (an em dash in the path)': ['see https://x.example/2024—report/index.html ok', 'https://x.example/2024—report/index.html'], '“…/a” 的 (a closing curly quote shed, nothing else)': ['“https://x.example/a” 的', 'https://x.example/a'], '…/it’s-here (a curly apostrophe inside)': ['see https://x.example/it’s-here ok', 'https://x.example/it’s-here'], '…/a～b (a full-width tilde inside)': ['https://x.example/a～b ok', 'https://x.example/a～b'] };
     for (const [n, [t, want]] of Object.entries(M8)) { const got = FY.segmentText(t).filter((x) => x.t === 'link').map((x) => x.ref).join('|'); ok(got === want, `r7 (M8) For you (segmentText): ${n} — ONE link to ${want}`, got); }
   }
+  // r8 (a): a LETTER never leaves a URL — 々 〆 〇 〻 (letters / numbers inside path-linkify's CJK_PUNCT ranges) at a URL's END stay in it; a
+  // CJK comma after one still stops the token (the base's For-you shed them: `…/wiki/人々` linked `…/wiki/人`)
+  {
+    const L8 = { '…/wiki/人々 (々 U+3005 ends it)': ['see https://ja.wikipedia.org/wiki/人々', 'https://ja.wikipedia.org/wiki/人々'], '…/二〇〇〇 (〇 U+3007)': ['see https://ja.example/二〇〇〇', 'https://ja.example/二〇〇〇'], '…/締〆 (〆 U+3006)': ['see https://ja.example/締〆', 'https://ja.example/締〆'], '…/a〻 (〻 U+303B)': ['see https://ja.example/a〻', 'https://ja.example/a〻'], '…/人々，然后 (the letter kept, the comma stops)': ['https://ja.wikipedia.org/wiki/人々，然后', 'https://ja.wikipedia.org/wiki/人々'] };
+    for (const [n, [t, want]] of Object.entries(L8)) { const got = FY.segmentText(t).filter((x) => x.t === 'link').map((x) => x.ref).join('|'); ok(got === want, `r8 (a) For you (segmentText): ${n} — ONE link to ${want}`, got); }
+  }
   // r5 (m4): a code span holding a belt's mark is never a rel link (a press would open a file that does not exist) — the chat's rule
   {
     const segs = (t) => FY.segmentText(t).filter((x) => x.t !== 'text');

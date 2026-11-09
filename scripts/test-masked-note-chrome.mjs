@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-masked-note-chrome — lane mask-value-shape (the owner 2026-11-07): THE MASKED ROADS' COST (r4 M4 + r5 M1's full-width pairs + r7 M8's dash storms, by the count) + r6 (m7) THE WINDOW'S VERBATIM COMMAND (the note after its <pre>) + A MASKED LINK'S NOTE IS SEEN WHOLE on the surfaces that draw an
+// test-masked-note-chrome — lane mask-value-shape (the owner 2026-11-07): THE MASKED ROADS' COST (r4 M4 + r5 M1's full-width pairs + r7 M8's dash storms + r8's trailing runs before a stop + r9's chat path / file-URL passes, by the count) + r6 (m7) THE WINDOW'S VERBATIM COMMAND (the note after its <pre>) + A MASKED LINK'S NOTE IS SEEN WHOLE on the surfaces that draw an
 // agent's words as text — the session properties «Now» row (r4 m6: an owner-length URL is one unbreakable word; r3's `overflow: visible`
 // let the flex value take its width — the note 55–85 % visible and «Change…» pushed out of the pane at 360 / 440 px), the progress note
 // (task-log), the stash line, the IM group message — at 360 / 440 / 900 px.
@@ -71,6 +71,22 @@ export const mkEl2 = mkEl;`);
     ['chat text — `https://a.example/` + `–x`×n (dashes inside)', chat, '(M, x) => M.text(x)', `(n) => 'https://a.example/' + '–x'.repeat(n / 2)`, 300, 'r7 (M8)'],
     ['For-you segmentText — `https://a.example/x` + `–`×n + ` ok` (a dash run shed from the end)', fy, '(M, x) => M.segmentText(x)', `(n) => 'https://a.example/x' + '–'.repeat(n) + ' ok'`, 420, 'r7 (M8)'],
     ['the For-you row (renderRow) — `https://a.example/` + `x–`×n', row, '(M, x) => M.row(x)', `(n) => 'https://a.example/' + 'x–'.repeat(n / 2)`, 400, 'r7 (M8)'],
+    // r8 (b): EXACTLY the verifier's shape — a blank-free run of trailing-set characters directly before a stop (cleanPath's `[…]+$` over the
+    // token: ×15.7, 4 380 steps a character on the base and on 5c56b367e), and a path whose dots a letter ends
+    ['For-you segmentText — `see ` + `–`×n + `，然后` (a dash run directly before a stop)', fy, '(M, x) => M.segmentText(x)', `(n) => 'see ' + '–'.repeat(n) + '，然后'`, 420, 'r8 (b)'],
+    ['the For-you row (renderRow) — `see ` + `–`×n + `，然后`', row, '(M, x) => M.row(x)', `(n) => 'see ' + '–'.repeat(n) + '，然后'`, 400, 'r8 (b)'],
+    ['For-you segmentText — `see /a` + `.`×n + `b` (a path\'s dots, a letter after)', fy, '(M, x) => M.segmentText(x)', `(n) => 'see /a' + '.'.repeat(n) + 'b'`, 420, 'r8 (b)'],
+    // r9: EXACTLY the r8 verifier's three shapes, on every road — the chat's path pass and file-URL pass ran cleanPath's `[…]+$` (×15.3–15.9 on the
+    // base and on 7c9b4e7a5); cleanPath is the backward walk now (one implementation, path-linkify)
+    ["chat text — `see /a/b` + `.`×n + `c` (a path's dots, a letter after)", chat, '(M, x) => M.text(x)', `(n) => 'see /a/b' + '.'.repeat(n) + 'c'`, 300, 'r9'],
+    ['chat text — `see /a/b` + `,`×n + `c`', chat, '(M, x) => M.text(x)', `(n) => 'see /a/b' + ','.repeat(n) + 'c'`, 300, 'r9'],
+    ['chat text — `see file:///a` + `–`×n + `x` (a file URL)', chat, '(M, x) => M.text(x)', `(n) => 'see file:///a' + '–'.repeat(n) + 'x'`, 300, 'r9'],
+    ["chat markdown — `see /a/b` + `.`×n + `c` (a path's dots, a letter after)", chat, '(M, x) => M.md(x)', `(n) => 'see /a/b' + '.'.repeat(n) + 'c'`, 1100, 'r9'],
+    ['chat markdown — `see /a/b` + `,`×n + `c`', chat, '(M, x) => M.md(x)', `(n) => 'see /a/b' + ','.repeat(n) + 'c'`, 1100, 'r9'],
+    ['chat markdown — `see file:///a` + `–`×n + `x` (a file URL)', chat, '(M, x) => M.md(x)', `(n) => 'see file:///a' + '–'.repeat(n) + 'x'`, 1100, 'r9'],
+    ["For-you segmentText — `see /a/b` + `.`×n + `c` (a path's dots, a letter after)", fy, '(M, x) => M.segmentText(x)', `(n) => 'see /a/b' + '.'.repeat(n) + 'c'`, 420, 'r9'],
+    ['For-you segmentText — `see /a/b` + `,`×n + `c`', fy, '(M, x) => M.segmentText(x)', `(n) => 'see /a/b' + ','.repeat(n) + 'c'`, 420, 'r9'],
+    ['For-you segmentText — `see file:///a` + `–`×n + `x` (a file URL)', fy, '(M, x) => M.segmentText(x)', `(n) => 'see file:///a' + '–'.repeat(n) + 'x'`, 420, 'r9'],
   ];
   for (const [k, mod, run, mk, bound, tag = 'r4 (M4)'] of LEGS) {
     const v = judgeInChild({ module: mod, run, mk: `(n) => n === 0 ? '' : (${mk})(n)`, n: 4096, kind: 'linear', backtracks: true, opts: { factor: 4 } }, { timeout: 300000 });

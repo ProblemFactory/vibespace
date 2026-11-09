@@ -2606,6 +2606,12 @@ console.log('lane mask-value-shape (the owner 2026-11-07, «URL被替换和redac
       const got = ['see https://en.wikipedia.org/wiki/Mexican–American_War', 'https://ja.example/a〜b/c ok', 'https://x.example/a…b ok', 'see https://x.example/2024—report/index.html ok', '“https://x.example/a” 的', 'see https://x.example/it’s-here ok'].map((x) => refs8(R.renderRow({ item: filed(x) }, ctx).innerHTML));
       ok(JSON.stringify(got) === JSON.stringify(['https://en.wikipedia.org/wiki/Mexican–American_War', 'https://ja.example/a〜b/c', 'https://x.example/a…b', 'https://x.example/2024—report/index.html', 'https://x.example/a', 'https://x.example/it’s-here']), 'r7 (M8): the card links …/Mexican–American_War, …/a〜b/c, …/a…b, …/2024—report/…, …/it’s-here WHOLE and sheds only the closing ” of “…/a”', got);
     }
+    // r8 (a): the card keeps a letter (々 〆 〇) at a URL's end — the base's card linked …/wiki/人
+    {
+      const refs9 = (h) => [...h.matchAll(/data-ref="([^"]*)"/g)].map((m) => m[1]).join('|');
+      const got = ['see https://ja.wikipedia.org/wiki/人々', 'see https://ja.example/二〇〇〇', 'see https://ja.example/締〆'].map((x) => refs9(R.renderRow({ item: filed(x) }, ctx).innerHTML));
+      ok(JSON.stringify(got) === JSON.stringify(['https://ja.wikipedia.org/wiki/人々', 'https://ja.example/二〇〇〇', 'https://ja.example/締〆']), 'r8 (a): the card links …/wiki/人々, …/二〇〇〇 and …/締〆 WHOLE (a letter never leaves a URL)', got);
+    }
     // r5 (m4): a code span holding a mark is never a link on the card (the chat draws it as words) — a plain filename stays one
     {
       const hr = R.renderRow({ item: filed('see `a«redacted».txt` now') }, ctx).innerHTML, hv = R.renderRow({ item: filed('see `x[vault:k].md` now') }, ctx).innerHTML, hp = R.renderRow({ item: filed('see `a.txt` now') }, ctx).innerHTML;

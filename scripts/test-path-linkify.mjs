@@ -45,6 +45,32 @@ eq(links(pathRe(), 'see /a/b/c.js:12:3) and (/a/b/d.md).'), ['/a/b/c.js:12:3', '
 // ④ runs the real renderer.
 eq(cleanPath('https://x.y/z）。'), 'https://x.y/z', 'cleanPath strips CJK trailing punctuation from URLs too');
 eq(cleanPath('/home/u/项目'), '/home/u/项目', 'cleanPath never strips a CJK LETTER');
+// lane mask-value-shape r9: ONE trailing walk — cleanPath IS the backward walk over THE set (isTrailing), linear. PARITY with the regex it
+// replaced (`[…]+$`, the base's definition rebuilt here from the same CJK_PUNCT): (1) isTrailing ≡ the old class on every UTF-16 unit;
+// (2) the old regex and the new walk give the SAME string on every string literal of the lane's suites (and each blank-split token of one)
+// and on a seeded random corpus over the set, letters, slashes, CJK and a surrogate pair. The cost is pinned by the count in test-masked-note-chrome
+{
+  const PL = require(path.join(ROOT, 'src/path-linkify.js'));
+  const OLD_CLASS = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']'), OLD = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']+$');
+  const oldClean = (p) => String(p).replace(OLD, '');
+  const isT = typeof PL.isTrailing === 'function' ? PL.isTrailing : null;
+  let classDiff = isT ? 0 : -1;
+  if (isT) for (let c = 0; c < 0x10000; c++) { const ch = String.fromCharCode(c); if (isT(ch) !== OLD_CLASS.test(ch)) classDiff++; }
+  ok(classDiff === 0, `r9: isTrailing (path-linkify, exported) is the old trailing class on all 65 536 UTF-16 units${classDiff < 0 ? ' — no isTrailing export (a tree before r9)' : classDiff ? ' — ' + classDiff + ' differ' : ''}`);
+  const corpus = new Set();
+  for (const f of ['test-path-linkify', 'test-secret-shapes', 'test-user-todos-layout', 'test-foryou-links', 'test-masked-note-chrome', 'test-user-todos-honest', 'test-stash-strip']) {
+    const src = fs.readFileSync(path.join(ROOT, 'scripts', f + '.mjs'), 'utf8');
+    for (const m of src.matchAll(/'((?:[^'\\\n]|\\.){0,2000})'|"((?:[^"\\\n]|\\.){0,2000})"|`((?:[^`\\$]|\\.){0,2000})`/g)) { const s = m[1] ?? m[2] ?? m[3]; corpus.add(s); for (const t of s.split(/\s+/)) corpus.add(t); }
+  }
+  const lits = corpus.size;
+  const AL = ['.', ',', ';', ':', '!', '?', ')', '}', ']', '`', "'", '"', '–', '—', '。', '，', '）', '」', '々', '〜', '…', '“', '”', '～', 'a', 'Z', '0', '/', '人', '_', '-', '(', '[', ' ', '\u{1F600}', '%'];
+  let seed = 0x2369388;
+  const rnd = (n) => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return (seed >>> 8) % n; };   // 32-bit LCG (Math.imul: no float rounding), its high bits
+  for (let i = 0; i < 20000; i++) { let s = ''; const len = rnd(49); for (let j = 0; j < len; j++) s += AL[rnd(AL.length)]; corpus.add(s); }
+  const diff = [...corpus].filter((s) => cleanPath(s) !== oldClean(s));
+  ok(diff.length === 0, `r9: cleanPath (the backward walk) gives the old regex's verdict on every one of ${corpus.size} strings (${lits} string literals + tokens of the lane's suites, the rest a seeded random corpus)${diff.length ? ' — differ: ' + JSON.stringify(diff.slice(0, 5)) : ''}`);
+  ok(!/\.replace\(TRAILING/.test(fs.readFileSync(path.join(ROOT, 'src/path-linkify.js'), 'utf8')) && !/const TRAIL_CH_RE = new RegExp/.test(fs.readFileSync(path.join(ROOT, 'src/lib/foryou-links.js'), 'utf8') + fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8')), 'r9: ONE definition of the trailing set — path-linkify cleanPath walks it (no `[…]+$` replace), For-you and the chat import isTrailing (no copy of their own)');
+}
 ok(/\\u3000-\\u303F/.test(CJK_PUNCT) && /\\uFF01-\\uFF0F/.test(CJK_PUNCT), 'the class covers CJK symbols + fullwidth ASCII punctuation, and skips fullwidth digits/letters (FF10-FF19, FF21-FF3A, FF41-FF5A)');
 ok(!/\\uFF10|\\uFF21|\\uFF41/.test(CJK_PUNCT), '…the fullwidth digit/letter ranges are NOT in the class (a filename spelled with them stays linkable)');
 eq(links(pathRe(), '/home/u/ＡＢＣ１２.txt。'), ['/home/u/ＡＢＣ１２.txt'], 'a fullwidth-letter filename still links');
@@ -529,6 +555,12 @@ console.log('⑨ lane mask-value-shape (the owner 2026-11-07): A MASKED LINK NEV
     const hrefs7 = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
     const M8 = { '…/wiki/Mexican–American_War (an en dash inside)': ['see https://en.wikipedia.org/wiki/Mexican–American_War', 'https://en.wikipedia.org/wiki/Mexican–American_War'], '…/a〜b/c (a wave dash inside)': ['https://ja.example/a〜b/c ok', 'https://ja.example/a〜b/c'], '…/a…b (an ellipsis inside)': ['https://x.example/a…b ok', 'https://x.example/a…b'], '…/2024—report/index.html (an em dash in the path)': ['see https://x.example/2024—report/index.html ok', 'https://x.example/2024—report/index.html'], '“…/a” 的 (a closing curly quote shed, nothing else)': ['“https://x.example/a” 的', 'https://x.example/a'], '…/it’s-here (a curly apostrophe inside)': ['see https://x.example/it’s-here ok', 'https://x.example/it’s-here'], '…/a～b (a full-width tilde inside)': ['https://x.example/a～b ok', 'https://x.example/a～b'], '…/a–b，然后 (the dash kept, the comma still stops)': ['https://x.example/a–b，然后', 'https://x.example/a–b'] };
     for (const [n, [x, want]] of Object.entries(M8)) for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) { const got = hrefs7(fn(head, x)); ok(got === want, `r7 (M8) ${entry}: ${n} — ONE link to ${want}`, got); }
+  }
+  // r8 (a): both chat roads — a letter (々 〆 〇 〻) at a URL's END never leaves it (r7's markdown shed it; the base's text road shed it)
+  {
+    const hrefs8 = (h) => [...h.matchAll(/(?:data-href|href)="([^"]*)"/g)].map((m) => { const v = m[1].replace(/&amp;/g, '&'); try { return decodeURIComponent(v); } catch { return v; } }).join('|');
+    const L8 = { '…/wiki/人々 (々 U+3005 ends it)': ['see https://ja.wikipedia.org/wiki/人々', 'https://ja.wikipedia.org/wiki/人々'], '…/二〇〇〇 (〇 U+3007)': ['see https://ja.example/二〇〇〇', 'https://ja.example/二〇〇〇'], '…/締〆 (〆 U+3006)': ['see https://ja.example/締〆', 'https://ja.example/締〆'], '…/a〻 (〻 U+303B)': ['see https://ja.example/a〻', 'https://ja.example/a〻'], '…/人々，然后 (the letter kept, the comma stops)': ['https://ja.wikipedia.org/wiki/人々，然后', 'https://ja.wikipedia.org/wiki/人々'] };
+    for (const [n, [x, want]] of Object.entries(L8)) for (const [entry, fn] of Object.entries({ 'tool output': (r, y) => r.linkifyText(y), 'a peer card': (r, y) => r.renderMarkdown(y) })) { const got = hrefs8(fn(head, x)); ok(got === want, `r8 (a) ${entry}: ${n} — ONE link to ${want}`, got); }
   }
   // r5 (m4), the chat road: a code span holding a mark with no `/` before it is words on both chat roads — never a rel link (For-you's pins:
   // test-secret-shapes segmentText + test-user-todos-layout renderRow)

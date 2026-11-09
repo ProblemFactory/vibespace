@@ -28,9 +28,20 @@ const PATH_SRC = '(?<![="\'\\w/])((?:~|\\.\\.?)?\\/' + SEG + SEG + '*(?:\\/' + S
 /** A fresh global regex each call (a shared `g` regex carries lastIndex state). */
 function pathRe() { return new RegExp(PATH_SRC, 'g'); }
 
-const TRAILING = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']+$');
-/** Strip trailing punctuation from a matched path or URL — ASCII and CJK alike. */
-function cleanPath(p) { return String(p).replace(TRAILING, ''); }
+// THE TRAILING SET — one definition (lane mask-value-shape r9): what a matched path's or URL's END is shed of, ASCII closers and CJK
+// punctuation alike. isTrailing judges ONE character (a UTF-16 unit); For-you (src/lib/foryou-links.js) and the chat
+// (src/lib/chat-renderers.js) walk a token's tail with it — no second copy of the set anywhere
+const TRAILING_CH = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']');
+function isTrailing(ch) { return TRAILING_CH.test(ch); }
+/** Strip trailing punctuation from a matched path or URL — ASCII and CJK alike. r9: a BACKWARD WALK over the set — linear. The
+ *  `[…]+$` regex it replaces gave the same verdict but re-scanned a run of the set that one other character ends from every start
+ *  (quadratic: the chat's path pass on `see /a/b` + 32 768 dots + `c` 660 ms, its file-URL pass on 32 768 dashes 4 s). */
+function cleanPath(p) {
+  const s = String(p);
+  let e = s.length;
+  while (e > 0 && TRAILING_CH.test(s[e - 1])) e--;
+  return e === s.length ? s : s.slice(0, e);
+}
 
 /** A RELATIVE reference (kb-features 2.75.0 — moved here from the chat renderer, lane foryou-attachments, so the For-you
  *  links read the SAME rule): a code span that IS a relative path or a bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`,
@@ -92,4 +103,4 @@ function hrefPath(href) {
   return CONTROL.test(p) ? null : p;
 }
 
-module.exports = { pathRe, cleanPath, looksRelPath, relCandidates, fileUrlPath, hrefPath, PATH_SRC, CJK_PUNCT, SEG };
+module.exports = { pathRe, cleanPath, isTrailing, looksRelPath, relCandidates, fileUrlPath, hrefPath, PATH_SRC, CJK_PUNCT, SEG };
