@@ -21,6 +21,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A vault request card's words now show links as the rest of For you does, and say when a secret inside a link is hidden.
 - Haiku 5.5 and Sonnet 5.5 usage is priced at their own rates (Haiku 5.5 was shown at ten times its price).
+- Group messages, Task Group updates and job or status notices now count as seen only once the agent's turn has really received them.
+- A turn that began while VibeSpace was too busy, or that you stopped, used to lose them; now the next turn brings them, marked "sent again".
+- An agent waiting for a reply that has arrived but not reached it yet is told "1 reply waiting" the next time it uses vibespace-msg.
 
 ## 2.369.389 — 2026-11-10
 
