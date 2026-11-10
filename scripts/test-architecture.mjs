@@ -5595,6 +5595,7 @@ function makeFlow93(acorn) {
   const RENDER93 = /^(?:render[A-Z][\w$]*|[\w$]*[a-z](?:Line|Row|Rows))$/;
   const RENDERERS93 = [
     ['src/job-model.js', 'renderJobsDigest', 'the injected digest — its rows are digestFor\'s ({id, kind, state, ageHint, label}), never a record'],
+    ['src/job-model.js', 'renderOwnDigest', 'the digest\'s OWN rows, rendered first (lane jobs-addressed-push r2, law A: the others\' line only whole on top) — digestFor\'s rows, never a record'],
     ['src/job-model.js', 'jobLine', 'reads the row\'s `label` (labelOf\'s, belted WHOLE — then cut to 24: the cut never precedes the mask)'],
     ['src/job-model.js', 'renderOwnerNotify', 'the owner message — the engine hands it `name` = labelOf(job); with none it says the id'],
     ['src/artifacts.js', 'serviceRows', 'the Artifacts list — every row is serviceRow\'s'],
@@ -5636,7 +5637,8 @@ function makeFlow93(acorn) {
   ok(!nameRed93.length, `§93 THE NAME CENSUS (by data flow — ${nameFiles93.length} server-side files, ${flowBase93.parsed.size} a record reaches; ${flowBase93.hits.length} reads, each judged on its own columns): a job record's name is read only by its writers, the ONE accessor, the author's copy and the store-belted FIELDS (${NAME_READERS93.length} rows) and never by a renderer (${RENDERERS93.length} rows: ${RENDERERS93.map(([, n]) => n).join(', ')}) — blind spots, named: ${BLIND93.map((b, i) => `(${i + 1}) ${b}`).join('; ')}${nameRed93.length ? ' — ' + nameRed93.join(' | ') : ''}`);
   const nameIsRed93 = (plants, re) => nameBad93(flowWith93(plants)).some((p) => re.test(p));
   const pf93 = read('src/port-forward.js'), af93 = read('src/artifacts.js'), bjp93 = read('src/browser-job-principal.js'), jm93 = read('src/job-model.js'), jw93wire = read('src/server/jobs-wiring.js');
-  const DIGEST93 = 'const rows = vis.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j) }));\n    return M.fitDigest(existingBytes, M.renderJobsDigest(rows), { count: vis.length });';
+  // lane jobs-addressed-push: the rows are the ADDRESSED jobs' (`mine`; a subscriber's row carries `sub`), the others a count
+  const DIGEST93 = "const rows = mine.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j), ...(role.get(j) === 'subscriber' ? { sub: true } : {}) }));\n    const plain = M.renderJobsDigest(rows), told = others.length ? M.renderJobsDigest(rows, { others: others.length, othersFailed: others.filter((j) => j.state === 'failed' || j.state === 'missed').length }) : plain;";
   const LINE93 = '${agentPiece(j.label != null ? j.label : j.id, 24)}';
   const ghost93 = (code) => ({ 'src/server/ghost-name.js': code });
   const cn93 = [
@@ -5655,7 +5657,7 @@ function makeFlow93(acorn) {
     ['a record handed to a helper in another module', !nameIsRed93({ ...ghost93("const H = require('./ghost-help.js');\nmodule.exports = (jm, id) => H.say(jm.jobs.get(id));\n"), 'src/server/ghost-help.js': "function say(it) {\n  return 'job ' + it.name;\n}\nmodule.exports = { say };\n" }, /^src\/server\/ghost-help\.js:2 reads/)],
     ['the engine\'s deps road (`this.d.onService(job)` → the wiring\'s `onService:`)', !nameIsRed93({ 'src/server/jobs-wiring.js': jw93wire.replace("onService: (job) => require('./artifact-registry.js').noteService(job),", "onService: (rec) => log('[jobs] service ' + rec.name),") }, /^src\/server\/jobs-wiring\.js:\d+ reads/)],
     // …and THE RENDERER ROWS (accept-r5 confirmed 0 — names-digest.cjs): the record into the renderer, a renderer's raw read
-    ['the digest spreading the record into its renderer, jobLine cutting `j.name` (140205ee)', !nameIsRed93({ 'src/jobs.js': jb93.replace(DIGEST93, 'const withAge = vis.map((j) => ({ ...j, ageHint: this._ageHint(j) }));\n    return M.fitDigest(existingBytes, M.renderJobsDigest(withAge), { count: vis.length });'), 'src/job-model.js': jm93.replace(LINE93, '${agentPiece(j.name, 24)}') }, /^src\/job-model\.js:\d+ jobLine — a RENDERER — reads/)],
+    ['the digest spreading the record into its renderer, jobLine cutting `j.name` (140205ee)', !nameIsRed93({ 'src/jobs.js': jb93.replace(DIGEST93, 'const withAge = mine.map((j) => ({ ...j, ageHint: this._ageHint(j) }));\n    const plain = M.renderJobsDigest(withAge), told = plain;'), 'src/job-model.js': jm93.replace(LINE93, '${agentPiece(j.name, 24)}') }, /^src\/job-model\.js:\d+ jobLine — a RENDERER — reads/)],
     ['a renderer reading `.name` off the rows it is handed', !nameIsRed93({ 'src/job-model.js': jm93.replace(LINE93, '${agentPiece(j.name || j.label, 24)}') }, /^src\/job-model\.js:\d+ jobLine — a RENDERER — reads/)],
     ['a renderer a record reaches that is no row', !nameIsRed93(ghost93("function ghostRow(j) {\n  return '- ' + j.id;\n}\nmodule.exports = (jm) => [...jm.jobs.values()].map(ghostRow);\n"), /^src\/server\/ghost-name\.js ghostRow takes a job record and is no row of RENDERERS93/)],
     ['a stale renderer row', !nameBad93(flowBase93, [...RENDERERS93, ['src/job-model.js', 'renderGhostRows', 'x']]).some((p) => /RENDERERS93 lists src\/job-model\.js renderGhostRows, which no job record reaches/.test(p))],
@@ -5681,7 +5683,7 @@ function makeFlow93(acorn) {
   const full93 = nameBad93(flow93({ ...flowOpts93, files: [...nameFiles93, ...Object.keys(FULL93)], read: (f) => (f in FULL93 ? FULL93[f] : read(f)) }));
   ok(['src/routes/ghost-r.js:4 reads', 'src/server/ghost-d.js:4 reads'].every((k) => full93.some((p) => p.startsWith(k))), `§93 NAME CENSUS CONTROL, a FULL run: a caller of a sibling module's lookup helper and a destructured Map are read and RED by name (no incremental start)${full93.length ? ' — ' + full93.slice(0, 3).join(' | ') : ''}`);
   // …and the digest's rows are BUILT (accept-r5 confirmed 0): digestFor hands the renderer the accessor's label, never a record
-  ok(jb93.includes(DIGEST93) && jm93.includes(LINE93) && !jb93.split('\n').some((l) => !/^\s*(\/\/|\*)/.test(l) && /\bwithAge\b|\.\.\.j, ageHint/.test(l)), '§93 the digest: digestFor builds each row ({id, kind, state, ageHint, label: this.labelOf(j)}) — jobLine cuts the BELTED label (the cut never precedes the mask)');
+  ok(jb93.includes(DIGEST93) && jm93.includes(LINE93) && !jb93.split('\n').some((l) => !/^\s*(\/\/|\*)/.test(l) && /\bwithAge\b|\.\.\.j, ageHint/.test(l)), '§93 the digest: digestFor builds each row ({id, kind, state, ageHint, label: this.labelOf(j), sub?}) of the jobs ADDRESSED to the caller — jobLine cuts the BELTED label (the cut never precedes the mask)');
   const c93 = [
     ['a caller with its belt stripped', /\.maskForSink\s*\(/.test(read('src/user-todos.js').replace(/belt\.maskForSink\(([^,]+),[^)]*\)/g, '$1'))],
     ['a seventh, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],

@@ -585,7 +585,35 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // view used to list it, the hand-over claimed + took it, posted its own frame carrying it, and the retry's post landed
   // too: the same notice twice, TWO billed turns. An in-flight entry is invisible to every taker (it is back in the
   // view if its post fails), and the claim / take doors refuse it by construction
+  // lane jobs-addressed-push r4 — A PRODUCER RE-ASKS BEFORE ITS PARKED COPY IS DELIVERED (the retry park's twin of the stash
+  // gates above): every road that delivers a parked entry reads the park through `retryEntries` (the prompt drain's view, the
+  // stash hand-over) or `attemptRetry` (the turn end, the backoff timer) — each asks the entry's PRODUCER's judge first.
+  // `false` ⇒ the entry is DROPPED: no post, no wake, no stash (its held authorization given back), said in the log and to the
+  // producer ('dropped'). A judge that throws withholds (fail closed, like a stash gate). A producer that registered no judge
+  // is owed exactly as before; an in-flight or claimed entry is never judged (its post / hand-over tracks it).
+  const retryJudges = new Map();   // producer → (cid, entry) => boolean
+  function registerRetryJudge(producer, fn) { if (!producer || typeof fn !== 'function') return () => {}; retryJudges.set(producer, fn); return () => { if (retryJudges.get(producer) === fn) retryJudges.delete(producer); }; }
+  function judgeRetries(cid) {
+    const q = retry[cid];
+    if (!q || !q.length || !retryJudges.size) return;
+    const dropped = [];
+    for (const e of q.slice()) {
+      if (!e || e.inflight || e.ho) continue;
+      const fn = retryJudges.get(e.producer);
+      if (!fn) continue;
+      let owed = false, threw = false;
+      try { owed = fn(cid, e) !== false; } catch (err) { log(`[deliver] ${cid}: the ${e.producer} retry judge threw — ${e.id} is withheld:`, err && err.message); owed = false; threw = true; }
+      if (owed) continue;
+      releaseHoldOf(e); removeRetry(e); dropped.push(threw ? Object.assign(e, { _judgeThrew: true }) : e);
+    }
+    if (!dropped.length) return;
+    writeRetryNow();
+    log(`[deliver] ${cid}: ${dropped.length} parked entr${dropped.length === 1 ? 'y is' : 'ies are'} no longer owed (its producer's judge) — dropped: no post, no wake, no stash (${dropped.map((e) => `${e.producer} ${e.id}`).join('; ')})`);
+    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }); }   // r5: a judge that threw is said as such
+    stashChanged(cid);
+  }
   function retryEntries(cid) {
+    judgeRetries(cid);
     return (retry[cid] || []).filter((e) => e && !e.inflight && !e.maybeDelivered && !isOwed(e)).map((e) => ({ source: 'retry', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'retrying', nextAt: e.nextAt, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, producer: e.producer || null, meta: e.meta || null }, ho: e.ho || undefined, _retry: e }));
   }
   function releaseHoldOf(e) {
@@ -928,6 +956,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  fresh verdict for the frame — a refusal falls the frame's entries as a first attempt's would), then the post. */
   async function attemptRetry(cid, why) {
     if (retryClosed) return;   // shutting down: no new post leaves (the ones in flight are waited for)
+    judgeRetries(cid);   // lane jobs-addressed-push r4: the turn end's and the timer's attempt ask each entry's producer first
     // a producer that never came up in a whole hour of this process: nothing here can send it — said, like every owed entry's end (D4)
     for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && unready(x) && clock.now() - Math.max(Number(x.firstAt || 0), parkBootAt) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
     for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
@@ -1662,7 +1691,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,   // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
-    onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
+    onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,
     // exposed for the stash-drain sites: a drained message enters the agent's
     // context invisibly — the drain site emits the same card the live lanes do

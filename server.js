@@ -1128,6 +1128,7 @@ const jobsWiring = require('./src/server/jobs-wiring.js').create({
   broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
   userTodos, log: (...a) => console.log(...a), getTelemetry: () => { try { return telemetry; } catch { return null; } }, // jobs-archive-write-failed rides telemetry
   serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
+  sessionStatusKey: (...a) => sessionStatusKey(...a), // lane jobs-addressed-push r2: a subscriber's groups NOW (viewerOf — push ⊆ view)
   onStash: () => { try { stashView.changed(); } catch { } }, // 2026-09-27: a job notification stashed / drained ⇒ the session's `stash` fact is re-published
   onRunEnded: (job) => { try { browserKeeper?.releaseJob?.(job.id, 'the job run ended'); } catch { } }, // lane jobs-browser: a run's end releases its browser lease + window
 });

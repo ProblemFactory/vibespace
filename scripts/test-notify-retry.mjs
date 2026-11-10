@@ -1782,5 +1782,108 @@ console.log('\n§W wiring pins');
   ok(/this\._stashNotif\(cid, target/.test(fellBody) && !/deliverToConversation|_notifyOwner\(/.test(fellBody), 'the jobs engine\'s fell listener stashes in its own store and posts nothing');
 }
 
+{
+  // (r4, lane jobs-addressed-push) A PRODUCER RE-ASKS BEFORE ITS PARKED COPY IS DELIVERED: the turn end, the backoff timer and the
+  // stash hand-over each ask the entry's producer's judge (registerRetryJudge — the jobs engine registers jm.retryOwed: a
+  // subscriber's copy is owed only while the subscriber may view the job NOW). Not owed ⇒ DROPPED: no post, no wake (nothing
+  // billed, the parked hold given back), no stash, the producer hears «dropped». Owed ⇒ delivered (each road's control). A
+  // producer with no judge is owed exactly as before.
+  const SHj = require(path.join(REPO, 'src/server/stash-handover.js')), ARj = require(path.join(REPO, 'src/agent-routes.js'));
+  for (const road of ['turn-end', 'timer', 'hand-over']) {
+    for (const owed of [false, true]) {
+      const R = rig(`judge-${road}-${owed}`);
+      let asked = 0;
+      R.deliver.registerRetryJudge('test', () => { asked++; return owed; });
+      const r = await NOTIFY(R);
+      R.setAnswer(async () => ({ ok: true, phase: 'written', elapsedMs: 10 }));
+      R.session._isStreaming = false;
+      let ho = null;
+      if (road === 'turn-end') await R.deliver.noteTurnEnd(R.session);
+      else if (road === 'timer') await R.advance(31_000);
+      else { const view = SHj.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => null, broadcastSessions: () => { }, renderMsgStash: ARj.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } } }); ho = await view.handOver('w1', { pressed: PRESS }); }
+      await sleep(5);
+      const said = { parked: r.parked, posts: R.posts.length, park: R.deliver.retryCount(R.cid), stash: R.deliver.stashCount(R.cid), ledger: R.ledger.length, releases: R.releases.length, asked, ev: R.events.map((e) => e.ev), ho: ho && (ho.code || ho.ok) };
+      if (owed) ok(r.parked === true && R.posts.length === 1 && asked >= 1 && R.deliver.retryCount(R.cid) === 0, `(r4) ${road}: the producer's judge says OWED ⇒ the parked copy is delivered (the control)`, JSON.stringify(said));
+      else ok(r.parked === true && asked >= 1 && R.posts.length === 0 && R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 0 && R.ledger.length === 0 && R.releases.length === 1 && R.events.some((e) => e.ev === 'dropped'),
+        `(r4) ${road}: the producer's judge says NOT OWED ⇒ dropped — no post, no wake (nothing billed, the hold given back), no stash; the producer hears «dropped»`, JSON.stringify(said));
+    }
+  }
+  const R = rig('judge-other-producer');
+  R.deliver.registerRetryJudge('jobs', () => false);   // a judge for ANOTHER producer refuses everything
+  await NOTIFY(R);   // producer 'test' registered none
+  R.setAnswer(async () => ({ ok: true, phase: 'written' })); R.session._isStreaming = false;
+  await R.deliver.noteTurnEnd(R.session);
+  ok(R.posts.length === 1 && !R.events.some((e) => e.ev === 'dropped'), '(r4) a producer that registered no judge is delivered exactly as before (another producer\'s judge never touches it)');
+  const RT = rig('judge-throws');
+  RT.deliver.registerRetryJudge('test', () => { throw new Error('boom'); });
+  await NOTIFY(RT); RT.setAnswer(async () => ({ ok: true, phase: 'written' })); RT.session._isStreaming = false;
+  await RT.deliver.noteTurnEnd(RT.session);
+  ok(RT.posts.length === 0 && RT.deliver.retryCount(RT.cid) === 0 && RT.deliver.stashCount(RT.cid) === 0, '(r4) a judge that THROWS withholds (fail closed, like a stash gate) — nothing posted, nothing stashed');
+}
+
+{
+  // (r5, lane jobs-addressed-push) THE RETRY ASKS THE SAME QUESTION AS THE PUSH, WITH THE SAME ANSWER — the real ladder + the REAL
+  // jobs engine (its retry judge and its event listener wired as jobs-wiring wires them) + a scripted view source (a live record,
+  // or the group store's membership by key): proven ⇒ delivered · refused (a live record that may not view) ⇒ dropped · unknown
+  // (no live record, no membership by key) ⇒ no post, no wake: HELD — the drain judges it at the turn that would print it
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const OWN_CID = 'c0ffee00-0000-4000-8000-0000000000aa';
+  const setup = async (name) => {
+    const R = rig(name);
+    const view = { live: null, byKey: new Set(['T-g']) };   // the subscriber (R.cid): no live record per the view source, a member by key
+    const dir = path.join(R.dir, 'jobs'); fs.mkdirSync(dir, { recursive: true });
+    const jm = new JobManager({ dataDir: dir, broadcast() { }, log() { }, notifyUser() { return { ok: true }; }, deliverToConversation: (cid, text, opts) => R.deliver.deliverToConversation(cid, text, opts), onRetry: (fn) => R.deliver.onRetry(fn), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true,
+      viewerOf: (cid) => (cid !== R.cid ? null : view.live ? { live: true, conversationId: cid, sessionId: 'w1', sessionCreatedAt: 1, groups: view.live } : { live: false, conversationId: cid, groups: view.byKey }) });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t);
+    jm._spawn = (job) => { job.runs = [{ startedAt: Date.now() }]; job.state = 'up'; };
+    R.deliver.registerRetryJudge('jobs', (cid, e) => jm.retryOwed(cid, e));
+    const owner = { conversation: { id: OWN_CID }, sessionId: 's-own', sessionCreatedAt: 1, groupsSnapshot: ['T-g'] };
+    const j = jm.jobs.get(jm.create({ kind: 'task', name: 'watched', cmd: { argv: ['true'] }, owner, access: { view: 'group', control: 'session' } }, { conversationId: OWN_CID, sessionId: 's-own', sessionCreatedAt: 1, groups: new Set(['T-g']) }).job.id);
+    j.subscribers = [{ conversationId: R.cid, sessionId: 'w1', ts: Date.now(), filter: null }];
+    jm.announce(j, 'found news'); await sleep(30);   // the PUSH: proven by key ⇒ posted ⇒ a transient miss on the live pid ⇒ PARKED
+    return { R, jm, j, view, parked: R.deliver.retryCount(R.cid), charged0: R.ledger.length };
+  };
+  const turnEnd = async (R) => { R.setAnswer(async () => ({ ok: true, phase: 'written' })); R.session._isStreaming = false; await R.deliver.noteTurnEnd(R.session); await sleep(10); };
+  const heldOf = (jm, cid) => (jm.pendingNotifs.get(cid) || []);
+  { // THE MEASURED CASE: a member by key, parked, then removed from the group (still no live record)
+    const { R, jm, j, view, parked, charged0 } = await setup('r5-removed');
+    view.byKey = new Set();
+    await turnEnd(R);
+    const held = heldOf(jm, R.cid);
+    ok(parked === 1 && R.posts.length === 0 && R.ledger.length === charged0 && R.deliver.retryCount(R.cid) === 0 && R.deliver.stashCount(R.cid) === 0 && held.length === 1 && held[0].sub === true,
+      '(r5) a member by key, parked, then REMOVED (no live record): the retry posts nothing and bills nothing; the copy waits as a HELD line (the push\'s road for that viewer)', JSON.stringify({ parked, posts: R.posts.length, held: held.length }));
+    view.live = new Set();   // its next turn: a live record that may not view
+    ok(jm.peekNotifs(R.cid).length === 0 && !heldOf(jm, R.cid).length, '(r5) …and at its next turn (it may not view) nothing is printed: the drain drops the held line');
+    const line = (j.notifyLog || []).find((l) => l && l.parked);
+    ok(line && line.dropped === true && /held for its next turn/.test(line.reason || ''), '(r5) the Delivery log says what happened — held for its next turn, judged there', JSON.stringify(line));
+  }
+  { // ITS CONTROL: still a member by key ⇒ delivered
+    const { R, jm, parked } = await setup('r5-member');
+    await turnEnd(R);
+    ok(parked === 1 && R.posts.length === 1 && /you subscribed/.test(R.posts[0]) && !heldOf(jm, R.cid).length, '(r5) CONTROL: still a member by key ⇒ the retry delivers the subscriber\'s copy (marked)', JSON.stringify({ posts: R.posts.map((t) => t.slice(0, 80)) }));
+  }
+  { // REFUSED: a live record that may not view ⇒ dropped, nothing held
+    const { R, jm, view, parked } = await setup('r5-refused');
+    view.live = new Set();
+    await turnEnd(R);
+    ok(parked === 1 && R.posts.length === 0 && !heldOf(jm, R.cid).length && R.deliver.stashCount(R.cid) === 0, '(r5) a LIVE record that may not view ⇒ dropped: no post, no wake, no held line');
+  }
+  { // UNKNOWN, then it returns and CAN view (a folder member the store could not show) ⇒ printed
+    const { R, jm, view } = await setup('r5-unknown-can');
+    view.byKey = new Set();
+    await turnEnd(R);
+    view.live = new Set(['T-g']);
+    const shown = jm.peekNotifs(R.cid);
+    ok(R.posts.length === 0 && shown.length === 1 && shown[0].sub === true, '(r5) UNKNOWN at the retry, then it returns able to view ⇒ the held line is printed (marked) at its turn');
+  }
+  { // a judge that THROWS: the log says the check failed (never a reason untrue for a member)
+    const { R, jm, j } = await setup('r5-threw');
+    jm.retryOwed = () => { throw new Error('view source down'); };
+    await turnEnd(R);
+    const line = (j.notifyLog || []).find((l) => l && l.parked);
+    ok(R.posts.length === 0 && line && /the delivery check failed/.test(line.reason || '') && !/can no longer view/.test(line.reason || ''), '(r5) a check that THREW is journalled as such — «the delivery check failed», never «can no longer view»', JSON.stringify(line));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

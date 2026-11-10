@@ -7,7 +7,7 @@ const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
 
-function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {} }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {}, sessionStatusKey = null }) {
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
   // the store names it by its frame, and the key it hands here rides every filing (a caller with no frame needs it)
   let forYouKey = null;
@@ -112,6 +112,25 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // we never bypass a hold. Any miss (no registry entry, dead pid, socket
     // error) reports {ok:false} so the engine stashes for resume injection.
     peerReachable: (cid) => { try { return deliver.peerReachable(cid); } catch { return false; } },
+    // lane jobs-addressed-push r2/r3 (law C — PUSH ⊆ VIEW on every road): a conversation as a jobs caller NOW, judged by what
+    // the server knows of it NOW. A LIVE record (the one claude-lock-capture addressableId names as its own) ⇒ its Task Groups
+    // by THE membership function (the hook routes' jobsCaller reads the same) — `live: true`. No live record ⇒ what the group
+    // store holds for the conversation's KEY (`<backend>:<cid>` — explicit membership; a folder's auto-join needs a cwd only a
+    // live record has) — `live: false`: the engine tells it when that view is proven, else holds the line for the drain.
+    viewerOf: (cid) => {
+      try {
+        if (!cid) return null;
+        const { addressableId } = require('../claude-lock-capture.js');
+        if (activeSessions) for (const [id, s] of activeSessions) {
+          if (addressableId(s) !== cid) continue;
+          const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
+          return { live: true, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)) };
+        }
+        const byKey = taskGroups && typeof taskGroups.list === 'function' ? taskGroups.list().filter((g) => !g.archived && (g.sessions || []).some((k) => typeof k === 'string' && k.endsWith(':' + cid))) : [];
+        return { live: false, conversationId: cid, groups: new Set(byKey.map((g) => g.id)) };
+      } catch { }
+      return null;
+    },
     // ONE delivery ladder for every conversation-bound message (2.362.0):
     // channel-socket → local CLI inbox → owning machine's daemon (peer-post
     // op) → the caller stashes on a miss. Shared with agent-to-agent
@@ -131,6 +150,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // "Clear content…" (verify r4): every entry the ladder stashes is judged by the jobs store at its write — a frame a
   // wrapper hands back after the clear names a cleared job by id and is held as the sentence (jobs.js judgeHeldEntry)
   if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge((e) => jm.judgeHeldEntry(e));
+  // lane jobs-addressed-push r4: the ladder asks the engine before ANY road delivers a parked jobs copy (turn end, timer, prompt
+  // drain, hand-over) — a subscriber's copy is owed only while that subscriber may view the job NOW (jm.retryOwed)
+  if (deliver && typeof deliver.registerRetryJudge === 'function') deliver.registerRetryJudge('jobs', (cid, e) => jm.retryOwed(cid, e));
 
   const USER = { isUser: true, groups: new Set() };
   const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryAskedMb: r.memoryAskedMb ?? null, memoryCap: r.memoryCap || null, memoryBound: r.memoryBound || null }));

@@ -249,7 +249,7 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   const piece = (h) => leaks(h, SHAPEMAT.slice(0, 12)) || leaks(h, KVMAT.slice(0, 12));
   const TEXT = 'deploy ' + MARKER + ' ' + SHAPE + ' ' + KV;
   const nc = E.jobs.get(E.create({ kind: 'cron', name: 'road-nc', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: TEXT }, notifyUser: true, owner }, caller).job.id);
-  nc.subscribers = [{ conversationId: 'conv-sub' }];
+  nc.subscribers = [{ conversationId: 'conv-sub' }]; nc.access = { ...(nc.access || {}), view: 'all' };   // lane jobs-addressed-push r3: a subscriber the PULL admits (the engine tells one only while it can view the job)
   nc.nextFireAt = Date.now() - 1000;
   await E._cronTick(); await new Promise((res) => setTimeout(res, 30));
   const tk = E.jobs.get(E.create({ kind: 'task', name: 'road ' + SHAPE, cmd: { argv: ['true'] }, notifyUser: true, owner }, caller).job.id);

@@ -357,7 +357,9 @@ const snapOf = (E, n) => { const j = jobOf(E, n); return j ? E.jm.snapshot(j) : 
 const endRun = (E, job) => { const run = job.runs[job.runs.length - 1]; E.jm._finalizeRun(job, run, { code: 0, endedAt: Date.now() }, 'sweep'); };
 const FIRES = [[REAL, ['nc1', 'nc0', 'at1', 'at0', 'ev1']], [NOHAND, ['ctl']], [OLD, ['old1', 'oldm']], [WIRED, ['mask', 'urg', 'full', 'urgu']], [NOBELT, ['nobelt']]];
 for (const [E, names] of FIRES) for (const n of names) { const j = jobOf(E, n); if (j) j.nextFireAt = Date.now() - 1000; }
-for (const [E, n] of [[WIRED, 'mask'], [NOBELT, 'nobelt']]) { const j = jobOf(E, n); if (j) j.subscribers = [{ conversationId: cidOf('sub') }]; }   // ANOTHER conversation subscribed (r3)
+// ANOTHER conversation subscribed (r3). lane jobs-addressed-push r3: a subscriber the PULL admits — the job's view opened to
+// everyone (the route would refuse `subscribe` on a job its caller cannot view; the engine tells a subscriber only while it can)
+for (const [E, n] of [[WIRED, 'mask'], [NOBELT, 'nobelt']]) { const j = jobOf(E, n); if (j) { j.subscribers = [{ conversationId: cidOf('sub') }]; j.access = { ...(j.access || {}), view: 'all' }; } }
 for (const [E] of FIRES) await E.jm._cronTick();
 await new Promise((r) => setTimeout(r, 30));   // the owner lane's delivery settles on its promise
 const lanes = (j) => (j && j.notifyLog || []).filter((e) => e.ok).map((e) => e.lane).sort().join(',');

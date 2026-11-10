@@ -1067,14 +1067,19 @@ setInterval(() => { }, 1000);
       const nokey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa55', jobFact: 'ask', i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
       const withKey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa56', jobFact: 'ask', filerKey: key, i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
       ok(key && typeof key === 'object' && Object.isFrozen(key) && /needs a caller the store can name/.test(nokey || '') && withKey === null, 'r5 the wiring files with the store\'s filer key (taken at create); a frameless filing is refused without it and files with it', JSON.stringify({ key: !!key, nokey, withKey }));
-      // (11) r6 THE DIGEST (accept-r5 confirmed 0 — names-digest.cjs): every conversation that can view a job reads labelOf's label
-      // in its injected «Background jobs visible to this session» rows — belted WHOLE, then cut (140205ee cut the raw name to 24)
+      // (11) r6 THE DIGEST (accept-r5 confirmed 0 — names-digest.cjs): another conversation that reads a job's row reads labelOf's
+      // label in its injected «Background jobs visible to this session» rows — belted WHOLE, then cut (140205ee cut the raw name to
+      // 24). lane jobs-addressed-push: a row reaches another conversation only as its SUBSCRIBER's («(subscribed)») — the belt leg
+      // moved onto one; a conversation that may merely VIEW the job reads no row of it at all
       const txt = (d) => String((d && (d.text || d)) || '');   // MAT: the token-shaped name of (8)
       const dj = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'deploy ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who).job.id);
       const other = { conversationId: 'c0ffee00-0000-4000-8000-0000000000b6', sessionId: 's-other', sessionCreatedAt: 2, groups: new Set() };
+      const dView = txt(X.jm.digestFor(other, 0));
+      X.jm.subscribe(dj, other, {});
       const dOther = txt(X.jm.digestFor(other, 0)), dOwn = txt(X.jm.digestFor(who, 0)), dLine = dOther.split('\n').find((l) => l.includes(dj.id)) || '';
-      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && !raw(dj.name),
-        'r6 THE DIGEST: another conversation (and the owner) reads labelOf\'s label in the injected digest — no head of the token survives the cut; r7: the record keeps the belted name', dLine);
+      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' (subscribed) — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && !raw(dj.name),
+        'r6 THE DIGEST: another conversation — its SUBSCRIBER (lane jobs-addressed-push) — and the owner read labelOf\'s label in the injected digest — no head of the token survives the cut; r7: the record keeps the belted name', dLine);
+      ok(!dView.includes(dj.id) && !dView.includes(MAT.slice(4, 12)), 'lane jobs-addressed-push: a conversation that may merely VIEW the job (not subscribed) reads no row of it', dView.split('\n').slice(-1));
       // (12) r6 a hand-built copy handed to the stray kind (accept-r5 confirmed 1 — stray-launder-files.cjs): refused BY NAME,
       // journaled `stray`, logged with its caller, nothing filed (140205ee filed it as a real «parked» copy, no log line)
       const n12 = X.items().length, l12 = X.logs.length;
@@ -1118,6 +1123,7 @@ setInterval(() => { }, 1000);
       // (16) r7 THE RECORD'S NAME (accept-r6, the second reviewer — hyg-name-cut64.cjs): the belt on the WHOLE name, then the cut —
       // ff3c8a20f cut to 64 first and a token the cut split showed up to 19 of its 36 characters to every viewer
       { const body16 = MAT.slice(4), cj = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'nightly build of the whole staging stack ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who).job.id);
+        X.jm.subscribe(cj, other, {});   // lane jobs-addressed-push: a row reaches another conversation as its subscriber's
         const seen16 = [cj.name, X.jm.labelOf(cj), X.jm.snapshot(cj).name, X.jm.snapshot(cj, { author: true }).name, txt(X.jm.digestFor(other, 0))].join('\n');
         let leak16 = 0; for (let i = 0; i + 8 <= body16.length; i++) if (seen16.includes(body16.slice(i, i + 8))) leak16++;
         ok(cj.name === 'nightly-build-of-the-whole-staging-stack-ghp_«redacted»' && !leak16, 'r7 THE RECORD\'S NAME: belted WHOLE, then cut — no piece of a token the 64-char cut would split reaches the record, the author\'s echo, a viewer\'s snapshot or digest', JSON.stringify({ name: cj.name, leak16 })); }

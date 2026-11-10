@@ -224,15 +224,27 @@ Schedules jittered with floors (§3); `catchUp:"once"` make-up runs are marked
 no silent skip exists anywhere.
 
 ### 6.3b Passive context injection (replaces wake; owner decision)
-Job events for jobs owned by (or visible to) a conversation — finished, failed,
-parked, awaiting-user — queue per conversation and are delivered ONLY at
-natural injection points, through the existing prompt-context path (the
-pendingNotice / task-context channel agent-routes already budgets):
-- **SessionStart / first prompt**: the jobs digest — one line per visible job,
-  failed and awaiting-user first: `jb-3f9a task done 2h ago — collect-x —
-  vibespace-job poll jb-3f9a`.
-- **Next user turn** (UserPromptSubmit): only NEW events since last delivery,
-  one line each.
+
+Job events reach a conversation only when they are ADDRESSED to it (2.369.389; the owner's yes of 2026-11-10 replaced
+2.348.0's «viewers may see announces passively»): the conversation can VIEW the job AND is its owner lineage or a subscriber
+of it or of its cron parent — ONE pure predicate, `job-model.js addressedTo` (a lineage-less job's creator is its owner through
+the subscription its own session made). Those events — finished, failed, parked, awaiting-user — queue per conversation and
+are delivered ONLY at natural injection points, through the existing prompt-context path (the pendingNotice / task-context
+channel agent-routes already budgets). Another conversation's job reaches a turn only as a COUNT with no id and no verb but
+`list`, «not yours». View is a right to PULL (`list` / `show` / `poll` / `logs` / `subscribe`): a pulled job of another
+lineage arrives with its text and brief ENCLOSED by the product's frame on both sides, the owner's brackets made inert, the
+brief masked like the text. A subscription follows view: a subscriber is told only while THE predicate the pull uses says it may
+view the job, judged by what the server knows NOW (a live record's groups; with none, the group store's membership of its key) —
+a closed conversation the store does not show a member costs no wake: its line waits and the drain judges view at the turn that
+would print it. A job created before its conversation had an id belongs to the creating session (its later sessions: only
+through that session's subscription).
+- **SessionStart / first prompt**: the jobs digest — one line per job addressed to the conversation (a subscribed one marked
+  «(subscribed)»), failed and awaiting-user first: `jb-3f9a task done 2h ago — collect-x — vibespace-job poll jb-3f9a`; then,
+  only when it fits WHOLE in the budget and there is one to count, ONE total line for other conversations' visible jobs.
+- **Next user turn** (UserPromptSubmit): only NEW events of addressed jobs since last delivery, one line each; then, only when
+  it fits WHOLE, the count of other conversations' failures (a failed end, a park, a refused run, a missed time, a boot
+  out-of-memory end — stamped `alarm` by their producers) since the marker AND since the session began, a cron family once.
+  Under budget the count is the FIRST thing to go: the own lines are the same with or without it.
 - **Budget management (owner concern; PROTOTYPE-VALIDATED 2026-08-17)**: the
   jobs section is byte-capped (default 600 B) with tail-first truncation to a
   `…+N more — vibespace-job list` pointer and a degenerate one-line floor

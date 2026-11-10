@@ -184,7 +184,7 @@ class JobManager {
     this.jobs = new Map();
     this.readOnly = false;
     this.ready = false;
-    this.events = [];            // ring of {ts, jobId, name, what, verb} for injection
+    this.events = [];            // ring of {ts, jobId, name, what, verb, alarm?} for injection — read ADDRESSED (updatesFor)
     this.pendingNotifs = new Map(); // conversationId → [{jobId, jobName, text, ts, urgency}] — OFFLINE stash, drained at resume injection
     this.waiters = new Map();    // jobId → [{resolve, timer}] (poll --wait)
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
@@ -632,18 +632,40 @@ class JobManager {
       // (`agentWhat`) returns to its AUTHOR whole — the owner conversation wrote it, and the belt protects a person and
       // other agents, never the author from itself (r2 belted it: «Renew the auth token: run the refresh script» arrived
       // as «Renew the auth token: «redacted»») — while a SUBSCRIBER (another conversation) gets it belted, and the
-      // context the owner attached too. A subscriber's --filter matches the words it will receive (the belted copy).
+      // context the owner attached too. A subscriber's --filter matches the belted words it receives — UNMARKED (lane
+      // jobs-addressed-push L4: the copy it is handed says it is a subscription — «another conversation's job; you subscribed»,
+      // «Context its owner attached», «Its words are addressed to its owner» — and a /conversation|owner/ filter must not start
+      // taking every event because of those words: the filter reads the copy without them, the subscriber gets the copy with them).
       const name = this.labelOf(job);
       const notifText = M.renderOwnerNotify(job, ev, { name });
       const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;
       const ctx0 = !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
-      const subText = M.renderOwnerNotify(job, subEv, { name, context: ctx0 ? this._agentWords(ctx0) : '' });
+      const subCtx = ctx0 ? this._agentWords(ctx0) : '';
+      const subPlain = M.renderOwnerNotify(job, subEv, { name, context: subCtx });
+      const subText = M.renderOwnerNotify(job, subEv, { name, context: subCtx, subscriber: true });
+      // r2/r3 (the acceptance's laws B + C — final): a subscriber is told IF AND ONLY IF, at the moment of the push, THE predicate
+      // the pull uses (canView inside addressedTo) says it may view the job — judged by what the server knows of that conversation
+      // NOW (`viewerOf`: a live record's groups; with no live record, the group store's membership of its key). Never the job's own
+      // groups, never a proof kept from subscribe time. 'owner' ⇒ the OWNER's copy (the base's bytes); 'subscriber' ⇒ the marked
+      // copy; '' with a live record ⇒ not told (no message, no wake, no stash — its poll answers 404 too); '' with NO live record
+      // ⇒ the server cannot know (a folder's auto-join needs a cwd only a live record has): no wake is spent — the line waits in
+      // the stash and the DRAIN judges view at the turn that would print it (peekNotifs). An engine wired with no view source
+      // (`viewerOf` absent — a test's) delivers as before this lane; the product's wiring always has one (test-jobs-addressed §6).
       const seenSubs = new Set();
       for (const sub of [...(job.subscribers || []), ...((parent && parent.subscribers) || [])]) {
         if (!sub.conversationId || sub.conversationId === cid || seenSubs.has(sub.conversationId)) continue;
         seenSubs.add(sub.conversationId);
-        if (!M.filterMatches(sub.filter, subText)) continue;
-        this._deliverTo(sub.conversationId, job, subEv, { subscriber: true, text: subText });
+        // r6: THE PUSH READS THE ONE VERDICT (viewVerdict — the drain and the ladder's retry read the same function)
+        const as = { conversationId: sub.conversationId, sessionId: sub.sessionId || null, sessionCreatedAt: sub.sessionCreatedAt, groups: new Set() };
+        const verdict = this.viewVerdict(sub.conversationId, job, { fallback: as, parent });   // r7: the job IN HAND (a record that left the store is still judged — never a lookup's «owner»)
+        if (!M.filterMatches(sub.filter, subPlain)) continue;
+        if (verdict === 'refused' || verdict === 'gone') { this.d.log(`[jobs] ${job.id}: subscriber ${sub.conversationId} can no longer view it — not told (no message, no wake, no stash)`); continue; }
+        if (verdict === 'unknown') {
+          this._stashNotif(sub.conversationId, job, subEv, 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: 'not-running' }, mark: !M.ownerLineage(job, as) });
+          this.d.log(`[jobs] ${job.id}: subscriber ${sub.conversationId} has no live record and the group store does not show it a member — held for the drain (no wake)`);
+          continue;
+        }
+        this._deliverTo(sub.conversationId, job, subEv, { subscriber: true, mark: verdict === 'subscriber', text: verdict === 'subscriber' ? subText : subPlain });
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
       // THE OWNER'S OWN FILTER (lane job-notice-dedupe, fb-a001be4917): the owner conversation subscribed to its own job with a
@@ -659,7 +681,7 @@ class JobManager {
   /** one delivery attempt to ONE conversation (owner or subscriber): flood
    *  floor → socket post → stash fallback. Subscriber deliveries never stamp
    *  the job's lastNotify (that field narrates the OWNER lane). */
-  _deliverTo(cid, job, ev, { subscriber, text: preText } = {}) {
+  _deliverTo(cid, job, ev, { subscriber, mark = false, text: preText } = {}) {
     const text = preText || M.renderOwnerNotify(job, ev, { name: this.labelOf(job) });
     // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
     // between SOCKET posts per conversation, identical text 10min. A floored
@@ -688,7 +710,7 @@ class JobManager {
       return;
     }
     if (rate.ts && now() - rate.ts < 30_000) {
-      this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber, held: { kind: 'rate-floor' } });
+      this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber, held: { kind: 'rate-floor' }, mark });
       this._dirty = true;
       return;
     }
@@ -709,7 +731,7 @@ class JobManager {
     // THE RETRY PARK (lane notify-retry): a transient miss on a LIVE pid is parked by the ladder for this producer —
     // the meta is what this engine needs to book the outcome later (the job, the event, the raw text's digest for
     // the floor), with or without the job record still in the registry
-    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this.labelOf(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };   // the NAME belted (lane job-notify-user r3)
+    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this.labelOf(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber, ...(mark ? { sub: true } : {}) } };   // the NAME belted (lane job-notify-user r3)
     const deliver = this.d.deliverToConversation
       ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + this.labelOf(job), kind: 'notification', spendReason: 'job-notification', retry })
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
@@ -724,12 +746,12 @@ class JobManager {
         this._notifyLogPush(job, { lane: 'message', ok: false, parked: true, id: r.id || null, reason: r.reason || 'timeout', phase: r.phase || null, busy: r.busy === true || r.busy === false ? r.busy : null, ...(Number(r.late) > 0 ? { late: Number(r.late) } : {}), retryAt: r.retryAt || null, retries: 0, to: String(cid).slice(0, 8), ...(subscriber ? { sub: true } : {}) });
         this.d.log(`[jobs] notify → parked for retry for ${cid} (${r.reason || 'timeout'}; phase ${r.phase || '?'}; target mid-turn: ${r.busy === true ? 'yes' : r.busy === false ? 'no' : 'unknown'}${Number(r.late) > 0 ? `; our loop was ${Number(r.late)} ms late` : ''}; next attempt ${r.retryAt ? new Date(r.retryAt).toISOString() : '?'} or at the turn end)`);
       } else {
-        this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable') });
+        this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
       }
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
     }).catch((e) => {
-      this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber, held: { kind: 'not-reachable' } }); // degrade path logs verbatim inside
+      this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber, held: { kind: 'not-reachable' }, mark }); // degrade path logs verbatim inside
       this._dirty = true;
     });
   }
@@ -746,6 +768,7 @@ class JobManager {
    *  job record that is gone (archived, removed) is still booked by the meta the park kept. */
   _onRetryEvent(ev, cid, entry, extra = {}) {
     if (!entry || entry.producer !== 'jobs' || !entry.meta || !entry.meta.jobId) return false;
+    if ((ev === 'delivered' || ev === 'fell') && this._retryVerdicts) this._retryVerdicts.delete(entry.id);   // r6: the memo ends with its entry
     const meta = entry.meta;
     const job = this.jobs.get(meta.jobId) || null;
     const subscriber = !!meta.subscriber;
@@ -770,6 +793,16 @@ class JobManager {
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
       return false;
     }
+    if (ev === 'dropped') {   // r4/r5: the ladder dropped a subscriber's parked copy — the parked line closes, saying what happened
+      const verdict = this._retryVerdicts && this._retryVerdicts.get(entry.id);
+      if (this._retryVerdicts) this._retryVerdicts.delete(entry.id);
+      const why = extra.threw ? 'the delivery check failed — not delivered (withheld)'
+        : verdict === 'unknown' ? 'no live record proves its view — held for its next turn, judged there'
+          : verdict === 'gone' ? 'nothing of the job remains — not delivered'
+            : 'the subscriber can no longer view the job — not delivered';
+      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; line.dropped = true; line.reason = why; } this._dirty = true; }
+      return true;
+    }
     if (ev === 'fell') {
       // verify r4 (T1 S4/S22, reproduced): `expired` was the one detail this listener dropped — the digest's tail
       // ("The hour of retries passed…", job-model NOTIF_TAIL_DETAIL) could never fire for a jobs notification, and the
@@ -778,7 +811,7 @@ class JobManager {
       const held = { kind: extra.kind || 'not-reachable', ...(extra.why ? { why: String(extra.why) } : {}), ...(extra.maybeDelivered === true ? { maybeDelivered: true } : {}), ...(extra.evicted === true ? { evicted: true } : {}), ...(extra.expired === true ? { expired: true } : {}), ...(extra.identity ? { identity: String(extra.identity) } : {}), ...(Number.isFinite(Number(extra.cap)) && extra.cap != null ? { cap: Number(extra.cap) } : {}), ...(Number(extra.retryAfter) > 0 ? { retryAfter: Number(extra.retryAfter) } : {}), attempts: Number(extra.attempts) || entry.attempts.length, ...(extra.phase ? { phase: String(extra.phase) } : {}), ...(extra.busy === true || extra.busy === false ? { busy: extra.busy } : {}) };
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
       const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
-      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held });
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub });
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
       return true;
@@ -796,12 +829,12 @@ class JobManager {
    *  {kind: spend-cap|rate-floor|not-reachable|off, why?, identity?, cap?,
    *  retryAfter?} — the panel summary, the rail tooltip and the affected
    *  conversation's status-bar chip render it in the device's own words. */
-  _stashNotif(cid, job, ev, reason, { stampLast = true, held = null } = {}) {
+  _stashNotif(cid, job, ev, reason, { stampLast = true, held = null, mark = false } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
     // captured before the clear (verify r3): an event born before the clear is held as the sentence
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
-    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
+    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason), ...(mark ? { sub: true } : {}) });   // `sub`: a subscriber's held copy — its stash line says so (lane jobs-addressed-push L4; an older item reads unmarked)
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
     const n = dropped.length;
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
@@ -847,7 +880,7 @@ class JobManager {
       return { ok: true, already: !changed, updated: changed, filter: vf.filter, count: job.subscribers.length, ownerLane: this._ownsJob(job, caller) };
     }
     if (job.subscribers.length >= 10) return { error: 'subscriber cap (10) reached for this job' };
-    job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ts: now(), filter: vf.filter });
+    job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ...(caller.sessionCreatedAt ? { sessionCreatedAt: caller.sessionCreatedAt } : {}), ts: now(), filter: vf.filter });   // r3: ownerLineage compares the session's creation time, as isOwner does
     this._touch(job); this._save();
     return { ok: true, count: job.subscribers.length, filter: vf.filter, ownerLane: this._ownsJob(job, caller) };
   }
@@ -885,7 +918,7 @@ class JobManager {
       // ONE LINE per notification (verify r3): a multi-line text (an announce with newlines) is folded onto its
       // line, so a later clear — which rewrites the spill LINE BY LINE — takes all of it
       const oneLine = (t) => String(t == null ? '' : t).replace(/\s*\r?\n\s*/g, ' ⏎ ');
-      const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${oneLine(n.jobName)}: ${oneLine(n.text)}`).join('\n') + '\n';
+      const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${oneLine(n.jobName)}${n.sub ? M.SUB_MARK : ''}: ${oneLine(n.text)}`).join('\n') + '\n';
       let prev = '';
       try { prev = fs.readFileSync(file, 'utf-8'); } catch { }
       let out = prev + block;
@@ -921,7 +954,75 @@ class JobManager {
     };
   }
   /** The notifications waiting for a conversation (the SAME objects — `drainNotifs(cid, new Set(these))` takes them). */
-  peekNotifs(cid) { return cid ? (this.pendingNotifs.get(cid) || []).slice() : []; }
+  peekNotifs(cid) { if (!cid) return []; this._judgeHeldView(cid); return (this.pendingNotifs.get(cid) || []).slice(); }
+  /** r3 (law C at the DRAIN): a held line is judged at the turn that would print it — every drain (the prompt's, the session
+   *  start's, the user's hand-over) reads through peekNotifs. With a LIVE record of the conversation (the drain runs for one),
+   *  an item of a job it can no longer view (THE predicate) is dropped, never printed; a claimed item (a hand-over in flight) and
+   *  a removed job's item keep their road. */
+  _judgeHeldView(cid) {
+    const q = this.pendingNotifs.get(cid);
+    if (!q || !q.length) return;
+    const v = typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : null;
+    const viewer = v && v.live ? v : null;   // r4/r5: a live record judges view; with none the verdict is 'unknown' (kept) — but a SUBSCRIBER's line of a job of which nothing remains is 'gone' (dropped)
+    const gone = q.filter((n) => n && !n.ho && !this.addressedNow(cid, n.jobId, viewer, { sub: n.sub === true }));
+    if (!gone.length) return;
+    const keep = q.filter((n) => !gone.includes(n));
+    if (keep.length) this.pendingNotifs.set(cid, keep); else this.pendingNotifs.delete(cid);
+    this._saveNotifs(); this._dirty = true;
+    this.d.log(`[jobs] ${cid}: ${gone.length} held notification(s) of job(s) it can no longer view — dropped at the drain, never printed (${[...new Set(gone.map((n) => n.jobId))].join(', ')})`);
+    try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
+  }
+  /** r5 — THE VIEW VERDICT: the ONE answer the push, the drain and the ladder's retry share to «may this conversation be told of
+   *  this job NOW», judged by what the server knows of it now (the wiring's `viewerOf`):
+   *   'owner' / 'subscriber'   OWED, with the copy it is owed: view PROVEN — a live record that may view, membership by key with
+   *             no live record, the owner lineage — or no view source wired at all (a test's engine: the one road that does not
+   *             ask; `fallback` = the caller as the subscription knows it decides the role there)
+   *   'refused' a LIVE record that may not view the job
+   *   'unknown' no live record and nothing proves view — the line is HELD; the drain judges it at the turn that would print it
+   *   'gone'    a SUBSCRIBER's marked copy of a job of which nothing remains (no live record, no archive record — the archive
+   *             record proves view as the pull reads it); an unmarked copy (the owner's, a lineage creator's) of such a job is owed
+   *  `viewer` given (the drain's): that caller, or null for «no live record». The PUSH (`_notifyOwner`), the DRAIN
+   *  (`addressedNow` → `_judgeHeldView`, the parked drain) and the LADDER's retry (`retryOwed`) all read THIS function — none
+   *  decides by anything else (test-jobs-addressed §7 r6 pins it). r7: `job` is the RECORD the caller holds (the push passes its
+   *  object and its cron `parent` — no lookup can miss a job that left the store while its event was on the way) or an id (the
+   *  drain and the retry hold only the stash / park entry's id: the store, else the archive). A job of which nothing remains is
+   *  'gone' for a subscriber's copy and never 'owner' for one (`sub`); only an unmarked copy (the owner's) of it is owed. */
+  viewVerdict(cid, job, { viewer = undefined, sub = false, fallback = null, parent = undefined } = {}) {
+    const rec = job && typeof job === 'object' ? job : this.jobs.get(job) || this.archivedById(job);
+    if (!rec) return sub ? 'gone' : 'owner';
+    const v = viewer !== undefined ? viewer : typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
+    if (v === undefined) return fallback && M.ownerLineage(rec, fallback) ? 'owner' : 'subscriber';
+    if (!v) return 'unknown';
+    const role = M.addressedTo(rec, v, parent !== undefined ? parent : this._cronParentOf(rec));
+    if (role) return role;
+    return v.live ? 'refused' : 'unknown';
+  }
+  /** an owed verdict (either role) */
+  static owed(verdict) { return verdict === 'owner' || verdict === 'subscriber'; }
+  /** r3–r5: owed now or still undecided (not refused, not gone) — the drain's per-item judge and the hook routes' parked drain */
+  addressedNow(cid, jobId, viewer = undefined, { sub = false } = {}) {
+    const r = this.viewVerdict(cid, jobId, { viewer, sub });
+    return r !== 'refused' && r !== 'gone';
+  }
+  /** r4/r5 (THE LADDER'S OWN RETRY ASKS — THE SAME QUESTION AS THE PUSH, THE SAME ANSWER): the delivery ladder asks this before
+   *  ANY road delivers a parked jobs copy — the turn end, the backoff timer, the prompt drain's view, the stash hand-over
+   *  (src/server/conversation-deliver.js registerRetryJudge, wired in jobs-wiring). A subscriber's copy (`meta.subscriber`):
+   *  owed ('owner' / 'subscriber') ⇒ delivered; 'refused' / 'gone' ⇒ the ladder drops it (no post, no wake, no stash); 'unknown' ⇒ no post and no
+   *  wake: the copy becomes a HELD line here, and the drain judges it at the turn that would print it — exactly the push's road
+   *  for that viewer. The marked copy is judged as a subscriber's, an owner-role copy (a lineage creator's) as the owner's — the
+   *  same rule as its held line. The owner lane's copy is owed as before. */
+  retryOwed(cid, entry) {
+    const meta = (entry && entry.meta) || {};
+    if (!meta.subscriber) return true;
+    const verdict = this.viewVerdict(cid, meta.jobId, { sub: !!meta.sub });
+    if (JobManager.owed(verdict)) return true;   // r6: an owed copy leaves no memo (the ladder delivers or fells it — the memo is for a drop's journal line)
+    (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry && entry.id, verdict);
+    if (verdict === 'unknown') {
+      const target = this.jobs.get(meta.jobId) || this.archivedById(meta.jobId) || { id: meta.jobId, name: meta.jobName || meta.jobId };
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: 'not-running' }, mark: !!meta.sub });
+    }
+    return false;
+  }
   /** A CLAIM on entries a hand-over is about to deliver (channel-jump verify, 2026-09-27; the ladder's stash has the
    *  same door — conversation-deliver `claimStash`): a full drain leaves a claimed entry in place; the returned
    *  release gives it back. verify r2: the claim is the entry's own `ho` stamp (the hand-over's id), written to the
@@ -998,7 +1099,7 @@ class JobManager {
   }
   _touch(job, ev) {
     this._dirty = true;
-    if (ev) this._event(job, ev.what, ev.verb);
+    if (ev) this._event(job, ev.what, ev.verb, ev.alarm);
     try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
     const ws = this.waiters.get(job.id);
     if (ws && (M.isTerminal(job) || job.state === 'awaiting-user' || job.kind === 'service')) {
@@ -1006,11 +1107,13 @@ class JobManager {
       for (const w of ws) { clearTimeout(w.timer); try { w.resolve(); } catch { } }
     }
   }
-  _event(job, what, verb) {
-    // Viewers see events PASSIVELY at their next injection only (owner call
-    // 2.348.0: acceptable because it never wakes anyone and the renderer
-    // coalesces per-job announce floods — see renderJobsUpdate).
-    this.events.push({ ts: now(), jobId: job.id, name: this.labelOf(job), what, verb });   // r4: the NAME belted (the update lines — another conversation reads it)
+  _event(job, what, verb, alarm = false) {
+    // The ring is read ADDRESSED (lane jobs-addressed-push, 2026-11-10 — the owner replaced his 2.348.0 call «viewers may see
+    // announces passively»): updatesFor gives a conversation the lines of its OWN jobs and of jobs it subscribed to; another
+    // conversation's job reaches it only as a count of `alarm` entries — stamped HERE by the producers that end a job in failure
+    // (a failed end, a park, a refused run, a missed time, a boot out-of-memory end), never inferred from the job's state at event
+    // time (a «memory bound set» on a parked job is no new failure; «cron fired: notify» rides a running cron).
+    this.events.push({ ts: now(), jobId: job.id, name: this.labelOf(job), what, verb, ...(alarm ? { alarm: true } : {}) });   // r4: the NAME belted
     if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
   }
 
@@ -1466,7 +1569,7 @@ class JobManager {
       j.state = 'failed'; j.desiredUp = false;
       if (j.kind === 'cron') j.nextFireAt = null;
       if (j.kind === 'service') this._teardownPublish(j);
-      this._touch(j, { what: `refused to run (${trigger}): ${vet.error}` });
+      this._touch(j, { what: `refused to run (${trigger}): ${vet.error}`, alarm: true });
     }
     this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — ${vet.code || 'vendor/credential pattern'}`);   // lane job-secrets-retire: a refusal with a name (envfrom_retired) journals it
     this._save();
@@ -1517,7 +1620,7 @@ class JobManager {
       j.state = 'failed'; j.desiredUp = false; delete j.waitFor;
       if (j.kind === 'cron') j.nextFireAt = null;
       if (j.kind === 'service') this._teardownPublish(j);
-      this._touch(j, { what: `refused to run (${trigger}): ${words}` });
+      this._touch(j, { what: `refused to run (${trigger}): ${words}`, alarm: true });
     }
     this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — its vault values (${v.code})`);
     this._save();
@@ -1932,9 +2035,9 @@ class JobManager {
       const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobAnonMb)} of the instance's ${M.memoryWords(v.anonMb)} of anon memory (limit ${M.memoryWords(v.limitMb)})`;
       this.d.log(`[jobs] ${job.id} died with the instance out of memory — judged at boot, counted ${mp.count} of ${M.MEMORY.parkAfter}`);
       if (mp.park) { this._parkForMemory(job, run); return; }
-      if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}` }); return; }
+      if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}`, alarm: true }); return; }
       job.state = 'failed';
-      this._touch(job, { what: `failed: ${said}` });
+      this._touch(job, { what: `failed: ${said}`, alarm: true });
       this._notifyOwner(job, { what: `failed: ${said}` });
       return;
     }
@@ -2004,7 +2107,7 @@ class JobManager {
       if (j.kind === 'cron') { j.desiredUp = false; j.nextFireAt = null; }
       if (j !== job) j.supervise = { ...(j.supervise || {}), parkedAt: now(), parkedFor: 'memory' };
       if (j.kind === 'service') this._teardownPublish(j);
-      this._touch(j, { what });
+      this._touch(j, { what, alarm: true });
     }
     this.d.log(`[jobs] ${job.id} ${M.MEMORY_PARK_TEXT} (${run.cause}; bound ${M.memoryWords(run.memoryMb)}${run.memoryBound ? ' · ' + run.memoryBound.by : ''})`);
     this._forYou(job, M.forYouCopy(job, 'parked-memory'));
@@ -2070,7 +2173,7 @@ class JobManager {
       if (dec.park) {
         job.state = 'failed';
         this._teardownPublish(job);
-        this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})` });
+        this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})`, alarm: true });
         this._forYou(job, M.forYouCopy(job, 'parked'));
         this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed` });
       } else if (dec.restartInMs) {
@@ -2097,7 +2200,7 @@ class JobManager {
         : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
           : memCause ? `${job.state}: ${M.memoryEndWhat(run)} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`
             : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)${endWords ? ` — ${endWords}` : ''}`;
-      this._touch(job, routineCronOk ? null : { what: evText });
+      this._touch(job, routineCronOk ? null : { what: evText, alarm: job.state === 'failed' });
       if (M.notifyUserOf(job) && !windowEnd) this._forYou(job, M.forYouCopy(job, 'end', { cause: run.cause }));
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
@@ -2269,7 +2372,7 @@ class JobManager {
             // branch forever (2.344.1 review catch — nextFireAt stayed in the
             // past, so the owner notify re-fired every dedupe window)
             job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
-            this._touch(job, { what: 'missed its {at} time while the server was down' });
+            this._touch(job, { what: 'missed its {at} time while the server was down', alarm: true });
             this._forYou(job, M.forYouCopy(job, 'missed'));
             this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' });
             continue;
@@ -2589,7 +2692,7 @@ class JobManager {
       publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
       publishCause: (job.publishDown && job.publishDown.cause) || null, publishWhy: JN.whyOf(job.publishDown), publishSince: (job.publishDown && job.publishDown.sinceAt) || null, publishAttempts: (job.publishDown && job.publishDown.attempts) || 0,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
-      schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
+      schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: this._contextFor(job, author),
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
       notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length,
@@ -2660,19 +2763,45 @@ class JobManager {
       return M.lastLineOf(buf.toString('utf-8'), 200);
     } catch { return ''; }
   }
-  // injection surfaces (agent-routes): caller-filtered, budgeted in the model
+  // injection surfaces (agent-routes): ADDRESSED, budgeted in the model. lane jobs-addressed-push (2026-11-10): the hook routes'
+  // two calls into this engine — a job's digest row and its event lines reach a conversation only when M.addressedTo names it
+  // (its owner lineage or a subscriber, inside what it may view); every other visible job is a COUNT with no id. View stays a
+  // PULL right (the agent routes' list / show / poll). scripts/test-jobs-addressed.mjs reads these bodies.
+  _cronParentOf(j) { return j && j.cronParent ? this.jobs.get(j.cronParent) || null : null; }
   digestFor(caller, existingBytes) {
     const vis = M.visibleJobs([...this.jobs.values()], caller).filter((j) => j.state !== 'done' || now() - ((j.runs || [])[j.runs?.length - 1]?.endedAt || 0) < 86400e3);
+    const role = new Map(vis.map((j) => [j, M.addressedTo(j, caller, this._cronParentOf(j))]));
+    const mine = vis.filter((j) => role.get(j)), others = vis.filter((j) => !role.get(j) && M.ownerConversationOf(j));   // r3: a lineage-less job is no «other conversation's»
     // r6 (accept-r5 confirmed 0): a RECORD never crosses into the renderer — each ROW is built here, its name the ONE accessor's
     // (labelOf belts the WHOLE name; the renderer cuts the label — the cut never precedes the mask). r5 spread the record
     // (`{ ...j, ageHint }`) and jobLine cut `j.name` to 24: another conversation's SessionStart context read a token's head raw
-    const rows = vis.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j) }));
-    return M.fitDigest(existingBytes, M.renderJobsDigest(rows), { count: vis.length });
+    const rows = mine.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j), ...(role.get(j) === 'subscriber' ? { sub: true } : {}) }));
+    const plain = M.renderJobsDigest(rows), told = others.length ? M.renderJobsDigest(rows, { others: others.length, othersFailed: others.filter((j) => j.state === 'failed' || j.state === 'missed').length }) : plain;
+    // r2 (law A): the others' line rides only WHOLE inside the room left — never an own row (else the base's own digest, folded as before)
+    return told !== plain && M.fitDigest(existingBytes, told, { count: rows.length }) === told ? told : M.fitDigest(existingBytes, plain, { count: rows.length });
   }
   updatesFor(caller, sinceTs) {
-    const visIds = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.id));
-    const evs = this.events.filter((e) => e.ts > sinceTs && visIds.has(e.jobId)).map((e) => ({ id: e.jobId, name: e.name, what: e.what, verb: e.verb }));
-    return { text: M.renderJobsUpdate(evs), lastTs: this.events.length ? this.events[this.events.length - 1].ts : sinceTs };
+    const role = new Map(), others = new Map();
+    for (const j of M.visibleJobs([...this.jobs.values()], caller)) { const r = M.addressedTo(j, caller, this._cronParentOf(j)); if (r) role.set(j.id, r); else if (M.ownerConversationOf(j)) others.set(j.id, j); }   // r3: a job no conversation owns by id is no «other conversation's» (its creator may be the reader)
+    const evs = this.events.filter((e) => e.ts > sinceTs && role.has(e.jobId)).map((e) => ({ id: e.jobId, name: e.name, what: e.what, verb: e.verb, ...(role.get(e.jobId) === 'subscriber' ? { sub: true } : {}) }));
+    // the count: other conversations' jobs that FAILED since this turn's marker AND since this session began (a new session's
+    // marker is 0 — the ring's 400 entries are not its news); a cron family counts once (a refused child parks its parent too)
+    const floor = Math.max(Number(sinceTs) || 0, Number(caller && caller.sessionCreatedAt) || 0);
+    const failed = new Set(this.events.filter((e) => e.alarm && e.ts > floor && others.has(e.jobId)).map((e) => others.get(e.jobId).cronParent || e.jobId));
+    // r3 (law A on the route): `plain` = the own lines alone — the hook route falls back to it when the block with the count does
+    // not fit the room left (the own lines never wait for the count)
+    const text = M.renderJobsUpdate(evs, { othersFailed: failed.size });
+    return { text, plain: failed.size ? M.renderJobsUpdate(evs) : text, lastTs: this.events.length ? this.events[this.events.length - 1].ts : sinceTs };
+  }
+  /** r2 (the acceptance's law D2): the job's --context as a reader gets it — whole for its AUTHOR (the owner lineage), and for
+   *  every other reader through THE SAME mask as its --text (`_agentWords`: the vault's values + the secret shapes); the record
+   *  keeps it raw. The base handed another conversation the brief with a token in it raw (the text beside it was masked). */
+  _contextFor(job, author) {
+    const c = job.context;
+    if (!c) return null;
+    if (author) return c;
+    if (typeof c === 'string') return this._agentWords(c);
+    return typeof c.payload === 'string' ? { ...c, payload: this._agentWords(c.payload) } : c;
   }
   _ageHint(j) {
     const run = j.runs && j.runs[j.runs.length - 1];

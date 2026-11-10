@@ -304,8 +304,10 @@ function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
   if (!jm || !cid) return '';
   const stashed = typeof jm.peekNotifs === 'function' ? jm.peekNotifs(cid).filter((n) => n && !n.ho) : [];
   // the jobs engine's PARKED notifications (the ladder's retry park) ride this digest too, in the store's own shape
-  const parked = deliver ? parkedOf(deliver, cid, true) : [];
-  const parkedItems = parked.map((e) => { const m = e._retry.meta || {}; return { jobId: m.jobId || null, jobName: m.jobName || m.jobId || null, text: (m.ev && m.ev.what) || '', ts: Number(e._retry.firstAt) || Number(e.ts) || 0, urgency: m.urgency || 'low', held: { kind: 'retrying', attempts: (e._retry.attempts || []).length } }; });
+  // lane jobs-addressed-push r3: a parked copy is judged at the drain like a stashed one (THE predicate, jm.addressedNow) and a
+  // subscriber's says so (`sub` — its line «(subscribed)», the owner's brackets inert: renderNotifStash)
+  const parked = (deliver ? parkedOf(deliver, cid, true) : []).filter((e) => typeof jm.addressedNow !== 'function' || jm.addressedNow(cid, ((e._retry && e._retry.meta) || {}).jobId));
+  const parkedItems = parked.map((e) => { const m = e._retry.meta || {}; return { jobId: m.jobId || null, jobName: m.jobName || m.jobId || null, text: (m.ev && m.ev.what) || '', ts: Number(e._retry.firstAt) || Number(e.ts) || 0, urgency: m.urgency || 'low', held: { kind: 'retrying', attempts: (e._retry.attempts || []).length }, ...(m.sub ? { sub: true } : {}) }; });
   const waiting = [...stashed, ...parkedItems].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
   if (!waiting.length) return '';
   const room = roomUnderCap(ahead);
@@ -968,6 +970,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       if (jm && jm.ready) {
         caller = jobsCaller(s, id);
         const u = jm.updatesFor(caller, s._jobsEventsSeenTs || 0);
+        if (u.text && typeof u.plain === 'string' && !fits(u.text)) u.text = u.plain;   // lane jobs-addressed-push r3: the own lines never wait for the count
         if (!u.text) s._jobsEventsSeenTs = u.lastTs;   // nothing to say: the marker moves as it always did
         else if (fits(u.text)) { jobsUpdate = u.text; tailHeld += B(u.text) + 2; s._jobsEventsSeenTs = u.lastTs; }
         else console.log(`[jobs] ${caller.conversationId || key}: the jobs update (${B(u.text)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
