@@ -11,7 +11,7 @@ import { t } from './i18n.js';
 import { showWindowContextMenu, sessionForWin, closeKeepsWord, sayClosedKeepsRunning } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
-import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
+import { createAgentKindIcon, getAgentKindMeta, windowListMark, followListMarks } from './agent-meta.js';
 import { HIDE_REASONS, hiddenReasons, windowMarks, revealDesktop } from './view-visibility.js';
 import { placementNote, billingAuthKey } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE); 2026-09-30 THE ONE billing re-render key
 import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
@@ -2303,14 +2303,10 @@ class WindowManager {
     win.agentKind = agentKind;
     win.backendIconSlot.innerHTML = '';
     win.agentKindSlot.innerHTML = '';
-    if (backend && (win.type === 'chat' || win.type === 'terminal')) {
-      // Show composite backend+mode icon, hide generic type emoji
-      const mode = win.type; // 'chat' or 'terminal'
-      win.backendIconSlot.appendChild(createModeBackendIcon(backend, mode, { className: 'window-backend-icon' }));
-      win.backendIconSlot.style.display = '';
-      win.iconSpan.style.display = 'none';
-    } else if (backend) {
-      win.backendIconSlot.appendChild(createBackendIcon(backend, { className: 'window-backend-icon' }));
+    if (backend) {
+      // the harness's mark (a chat / terminal: the composite backend+mode icon), the type glyph hidden — THE ONE mark
+      // every pick list draws too (agent-meta windowListMark, lane phone-take-photo)
+      win.backendIconSlot.appendChild(windowListMark(win, { className: 'window-backend-icon', listed: false }));
       win.backendIconSlot.style.display = '';
       win.iconSpan.style.display = 'none';
     } else {
@@ -2331,6 +2327,7 @@ class WindowManager {
     }
     if (backend) win.element.dataset.backend = backend;
     else delete win.element.dataset.backend;
+    followListMarks(win); // a list open while the harness became known (a restored row) wears it now
   }
 
   setTitleMeta(id, meta = {}) {
@@ -2428,7 +2425,7 @@ class WindowManager {
       const tabIds = w._tabChain ? w._tabChain.tabs : [w.id];
       if (tabIds.some(tid => this.windows.get(tid)?.element.classList.contains('window-waiting'))) item.classList.add('waiting');
       const icon = document.createElement('span');
-      icon.innerHTML = w._typeIcon || '';
+      icon.appendChild(windowListMark(w, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       const label = document.createElement('span');
       label.textContent = w.title;

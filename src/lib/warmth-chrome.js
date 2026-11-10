@@ -97,7 +97,7 @@ function heldOf(app, byId, chains) {
     if (out.has(id) || (ws.type !== 'chat' && ws.type !== 'terminal')) continue;
     const spec = ws.openSpec || {};
     if (spec.agentKind === 'subagent' || spec.sourceKind === 'subagent') continue;
-    out.set(id, { ...webuiIdOfRecord(ws, byConv, byId), deskId, title: ws.title || '', type: ws.type });
+    out.set(id, { ...webuiIdOfRecord(ws, byConv, byId), deskId, title: ws.title || '', type: ws.type, backend: ws.backend || (ws.openSpec && ws.openSpec.backend) || null });
   }
   return out;
 }
@@ -283,13 +283,14 @@ export function warmthRows(app) {
     const key = webuiIdOfWin(app, win), w = key && st.byId.get(key);
     if (!isKnown(w) || seen.has(key)) continue;
     seen.add(key);
-    rows.push({ id: win.id, deskId: win._desktopId || active || null, built: true, title: win.title || '', icon: win._typeIcon || '', key });
+    // `mark` = what the row's mark is drawn from (taskbar.js renderEveryDesktop → agent-meta windowListMark, lane phone-take-photo)
+    rows.push({ id: win.id, deskId: win._desktopId || active || null, built: true, title: win.title || '', mark: { id: win.id, type: win.type, titleMeta: { backend: (win.titleMeta && win.titleMeta.backend) || null }, _typeIcon: win._typeIcon || '' }, key });
   }
   for (const [id, h] of st.held) {
     const w = h.id && st.byId.get(h.id);
     if (!isKnown(w) || seen.has(h.id)) continue;
     seen.add(h.id);
-    rows.push({ id, deskId: h.deskId, built: false, title: h.title, icon: windowTypeIcon(h.type), key: h.id });
+    rows.push({ id, deskId: h.deskId, built: false, title: h.title, mark: { type: h.type, titleMeta: { backend: h.backend || null }, _typeIcon: windowTypeIcon(h.type) }, key: h.id });
   }
   return rows;
 }

@@ -1036,6 +1036,36 @@ export function createModeBackendIcon(backend, mode, { title, className = '' } =
   return icon;
 }
 
+/** THE MARK A WINDOW WEARS (lane phone-take-photo, the owner 2026-11-09 «手机上对话列表的图标也match一下harness»): its title
+ *  bar's slot (window.js _applyTitleMeta, `listed: false`) and EVERY list a person picks a window from — the phone's window
+ *  list, the desk's ⧉ list, its «+N» list, the warmth list, the overlap switcher — draw it here, so an agent conversation
+ *  wears ITS HARNESS'S mark wherever it is picked: a chat / terminal = the mode mark, any other window with a harness = the
+ *  plain one, a harness with no mark of its own = the generic one (getBackendMeta — never an empty box); a window that is
+ *  not an agent conversation keeps its type glyph. A listed mark carries its window's id (`data-list-mark`): a harness
+ *  known late (a restored row) is re-drawn in every open list by followListMarks. The contrast helper reaches it as it
+ *  reaches every `.backend-icon[data-backend]` (on insertion, on theme-colors-changed). */
+export function windowListMark(win, { className = '', listed = true } = {}) {
+  // the harness by OWN key (the acceptance, 2026-11-10): an inherited name (__proto__, constructor, toString) or a non-string
+  // id draws the generic mark — never an empty box, never a throw that takes a whole list down; a plain unknown name keeps its
+  // own label on the generic mark
+  const raw = win && win.titleMeta && win.titleMeta.backend, type = win && win.type;
+  const backend = !raw ? null : typeof raw === 'string' && (Object.prototype.hasOwnProperty.call(BACKEND_META, raw) || !(raw in Object.prototype)) ? raw : 'unknown';
+  let el;
+  if (backend) el = type === 'chat' || type === 'terminal' ? createModeBackendIcon(backend, type, { className }) : createBackendIcon(backend, { className });
+  // the type glyph keeps its own size: `className` sizes a HARNESS mark (the desk lists pass the title bar's 14-px class,
+  // whose font-size 8px would shrink a glyph drawn at 1em)
+  else { el = document.createElement('span'); el.className = 'window-type-mark'; el.innerHTML = (win && win._typeIcon) || ''; }
+  if (listed && win && win.id != null) { el.dataset.listMark = String(win.id); el.dataset.listMarkClass = className; }
+  return el;
+}
+/** …and every OPEN list follows its window: a harness known late, a harness changed (window.js _applyTitleMeta calls it). */
+export function followListMarks(win) {
+  if (!win || win.id == null || typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+  for (const old of document.querySelectorAll('[data-list-mark]')) {
+    if (old && old.dataset && old.dataset.listMark === String(win.id)) old.replaceWith(windowListMark(win, { className: old.dataset.listMarkClass || '' }));
+  }
+}
+
 export function getAgentRoleLabel(role) {
   if (!role) return null;
   return String(role).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').trim();

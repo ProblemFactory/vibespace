@@ -1528,6 +1528,7 @@ src/job-model.js nextFire + src/jobs.js (lane int361, .367) — PURE: the cron s
 src/lib/user-todos-row.js runFactsHtml `strip` + public/chat.css .cad-rows / .ut-dock-fold + chat-needs-card.js _dockPass (lane foryou-dock-layout) — the dock is ONE column; its run card reads top-down by explicit flex orders; the hour's long words in the one fold ⇒ kb-file-structure.md
 src/lib/chat-needs-card.js _dockStrip / _dockFold + style.css html[data-vc] .chat-attn-dock + chat.css .cad-num / .cad-look / .cad-clock (lane phone-dock-restore) — a phone dock is ONE row until tapped; the row answers nothing, keeps its clock; an open arms every button ⇒ kb-file-structure.md
 src/lib/setup-flows.js _showLayoutHistory `busy` + app.js `_layoutRestoring` (lane phone-dock-restore) — the history dialog says what it reads and a failed read; a restore press says «Restoring…»; the asking page knows its own broadcast by its `rid` ⇒ kb-file-structure.md
+src/lib/agent-meta.js windowListMark / followListMarks (lane phone-take-photo) — ONE mark for the title bar's slot and every pick list (phone window list, ⧉, «+N», warmth, overlap): a harness ⇒ its mark (unknown ⇒ generic), else the type glyph; open lists follow a late harness
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

@@ -13,6 +13,7 @@ import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the
 import { openDesktopSheet, untilGone } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
 import { doorState, followDesktops } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
+import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -692,9 +693,12 @@ export class MobileNav {
       showWindowContextMenu(this.app, win.id, e.clientX, e.clientY, { onAction: () => setTimeout(() => rerender?.(), 50) });
     });
 
+    // the window's mark (lane phone-take-photo, the owner 2026-11-09 «手机上对话列表的图标也match一下harness»): an agent
+    // conversation wears ITS HARNESS'S mark — the one the desk's title bar, taskbar and lists show (agent-meta
+    // windowListMark); any other window its type glyph. The row's press target and words keep their size.
     const icon = document.createElement('span');
     icon.style.cssText = 'flex-shrink:0;font-size:16px';
-    icon.innerHTML = win._typeIcon || '';
+    icon.appendChild(windowListMark(win));
 
     const label = document.createElement('span');
     label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)';

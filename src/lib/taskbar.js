@@ -4,7 +4,7 @@ import { stripHidden, wheelScroll } from './taskbar-fit.js'; // PURE (lane deskt
 import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the «+N» list beside its chip (lane desktop-small r2 ②)
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
-import { terminalOnly } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
+import { terminalOnly, windowListMark } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
 import { otherDesktopWindows } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
@@ -241,7 +241,7 @@ function showHiddenTiles(app, chip) {
     item.className = 'overlap-switcher-item' + (tl.id === app.wm.activeWindowId && !win.isMinimized ? ' active' : '');
     item.dataset.winId = tl.id;
     const icon = document.createElement('span');
-    icon.innerHTML = win._typeIcon || '';
+    icon.appendChild(windowListMark(win, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
     icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
     const label = document.createElement('span');
     label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
@@ -857,7 +857,7 @@ function renderEveryDesktop(app, pop, place) {
       item.className = 'overlap-switcher-item';
       item.dataset.winId = r.id; item.dataset.desktopId = r.deskId || '';
       const icon = document.createElement('span');
-      icon.innerHTML = r.icon;
+      icon.appendChild(windowListMark(r.mark, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       const label = document.createElement('span'); label.className = 'wl-name'; label.textContent = r.title;
       const dk = document.createElement('span'); dk.className = 'dk'; dk.textContent = deskName(r.deskId);
@@ -917,7 +917,7 @@ export function showWindowList(app, anchor, opts = {}) {
       if (tabIds.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting'))) item.classList.add('waiting');
 
       const icon = document.createElement('span');
-      icon.innerHTML = win._typeIcon || '';
+      icon.appendChild(windowListMark(win, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
       if (win.isMinimized) icon.style.opacity = '0.4';
       const label = document.createElement('span');

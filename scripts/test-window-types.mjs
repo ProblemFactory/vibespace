@@ -346,6 +346,82 @@ ok(/'test-window-types'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries th
     'channel-window.js and jobs-panel.js set their titles through the manager');
 }
 
+// ── THE HARNESS MARK IN EVERY PICK LIST (lane phone-take-photo, the owner 2026-11-09, phone: «手机上对话列表的图标也match一下harness»)
+// Every list a person picks a window from draws its row's mark through ONE call — agent-meta windowListMark, the call the
+// title bar's slot makes — so an agent conversation wears its harness's mark there; the type glyph is drawn raw only where a
+// window has no harness mark (the taskbar tile's and the tab's fallbacks behind `backendIconSlot?.children.length`).
+console.log('the harness mark in every pick list (lane phone-take-photo)');
+{
+  const bodyOf = (s, head) => { const i = s.indexOf(head); if (i < 0) return ''; const j = s.indexOf('\n}\n', i); const k = s.indexOf('\n  }\n', i); return s.slice(i, head.startsWith('  ') ? k : j); };
+  const judgeMarks = (S) => {
+    const am = S['agent-meta.js'], wj = S['window.js'], tb = S['taskbar.js'], mn = S['mobile-nav.js'], wc = S['warmth-chrome.js'];
+    const lm = bodyOf(am, 'export function windowListMark(');
+    const overlap = (() => { const i = wj.indexOf("pop.className = 'overlap-switcher';"); return i < 0 ? '' : wj.slice(i, wj.indexOf('document.body.appendChild(pop);', i)); })();
+    const lists = {
+      'mobile-nav.js _buildWindowItem (the phone list)': bodyOf(mn, '  _buildWindowItem(win, wm, close, rerender) {'),
+      'taskbar.js showHiddenTiles (the «+N» list)': bodyOf(tb, 'function showHiddenTiles(app, chip) {'),
+      'taskbar.js showWindowList (the ⧉ list)': bodyOf(tb, 'export function showWindowList(app, anchor, opts = {}) {'),
+      'taskbar.js renderEveryDesktop (the warmth list)': bodyOf(tb, 'function renderEveryDesktop(app, pop, place) {'),
+      'window.js overlap switcher': overlap,
+    };
+    // ONE builder per listed site (the acceptance): windowListMark, and no second builder call beside it
+    const listed = Object.fromEntries(Object.entries(lists).map(([k, b]) => [k, !!b && /windowListMark\(/.test(b) && !/_typeIcon|\.icon\b/.test(b) && !/create(?:Mode)?BackendIcon(?:Html)?\(/.test(b)]));
+    const raw = Object.entries(S).flatMap(([f, s]) => [...s.matchAll(/innerHTML = (\w+)\._typeIcon/g)].map((m) => ({ f, at: m.index, guarded: /backendIconSlot\?\.children\.length/.test(s.slice(Math.max(0, m.index - 420), m.index)) })));
+    return {
+      builder: /if \(backend\) el = type === 'chat' \|\| type === 'terminal' \? createModeBackendIcon\(backend, type, \{ className \}\) : createBackendIcon\(backend, \{ className \}\);/.test(lm)
+        && /el\.innerHTML = \(win && win\._typeIcon\) \|\| '';/.test(lm) && /el\.dataset\.listMark = String\(win\.id\)/.test(lm),
+      titleBar: /win\.backendIconSlot\.appendChild\(windowListMark\(win, \{ className: 'window-backend-icon', listed: false \}\)\);/.test(wj) && !/createModeBackendIcon\(|createBackendIcon\(/.test(wj),
+      follows: /followListMarks\(win\);/.test(bodyOf(wj, '  _applyTitleMeta(win) {')) && /old\.replaceWith\(windowListMark\(win, /.test(bodyOf(am, 'export function followListMarks(')),
+      warmth: /mark: \{ id: win\.id, type: win\.type, titleMeta: \{ backend:/.test(wc) && /mark: \{ type: h\.type, titleMeta: \{ backend: h\.backend \|\| null \}/.test(wc)
+        // …and a HELD row's harness is its record's (heldOf captures it), by OWN key of the record
+        && /type: ws\.type, backend: ws\.backend \|\| \(ws\.openSpec && ws\.openSpec\.backend\) \|\| null \}\);/.test(wc),
+      ownKey: /Object\.prototype\.hasOwnProperty\.call\(BACKEND_META, raw\)/.test(lm) && /: 'unknown';/.test(lm),
+      listed, raw,
+    };
+  };
+  const jm = judgeMarks(src);
+  ok(jm.builder, 'agent-meta windowListMark: a chat / terminal = the mode mark, another window with a harness = the plain one, else the type glyph; a listed mark carries its window id');
+  ok(jm.titleBar, "window.js: the title bar's slot is drawn by the SAME call (listed: false) — no second builder call in window.js");
+  ok(jm.follows, '_applyTitleMeta → followListMarks: an open list re-draws a mark whose harness became known');
+  for (const [k, v] of Object.entries(jm.listed)) ok(v, `${k} draws its rows' marks through windowListMark (no raw type glyph)`);
+  ok(jm.warmth, 'the warmth rows carry what their mark is drawn from — a built row its window\'s facts, a held row its record\'s harness');
+  ok(jm.raw.length === 3 && jm.raw.every((r) => r.guarded), `a raw type glyph is drawn only behind a harness check (the tile, the tab stack, the tab bar): ${jm.raw.map((r) => r.f + (r.guarded ? '' : ' UNGUARDED')).join(', ')}`);
+  // RED controls (planted copies): each list site and each half of the law, reverted alone
+  const plant = (f, from, to) => { const c = { ...src }; if (!c[f].includes(from)) return null; c[f] = c[f].replace(from, to); return judgeMarks(c); };
+  const pPhone = plant('mobile-nav.js', 'icon.appendChild(windowListMark(win));', "icon.innerHTML = win._typeIcon || '';");
+  ok(pPhone && !pPhone.listed['mobile-nav.js _buildWindowItem (the phone list)'] && !(pPhone.raw.length === 3 && pPhone.raw.every((r) => r.guarded)), 'RED: the phone list back on the type glyph');
+  const pList = plant('taskbar.js', "export function showWindowList(app, anchor, opts = {}) {", "export function showWindowList(app, anchor, opts = {}) { const _r = (w) => w._typeIcon;");
+  ok(pList && !pList.listed['taskbar.js showWindowList (the ⧉ list)'], 'RED: the ⧉ list reading the type glyph');
+  const pFollow = plant('window.js', '    followListMarks(win); // a list open', '    // a list open');
+  ok(pFollow && !pFollow.follows, 'RED: a late harness not followed in an open list');
+  const pTitle = plant('window.js', "windowListMark(win, { className: 'window-backend-icon', listed: false })", "createModeBackendIcon(backend, win.type, { className: 'window-backend-icon' })");
+  ok(pTitle && !pTitle.titleBar, 'RED: the title bar drawing its own mark (a second builder call)');
+  const pSecond = plant('mobile-nav.js', 'icon.appendChild(windowListMark(win));', "icon.appendChild(windowListMark(win)); icon.appendChild(createBackendIcon('claude'));");
+  ok(pSecond && !pSecond.listed['mobile-nav.js _buildWindowItem (the phone list)'], 'RED: a listed site calling a SECOND builder beside windowListMark (the acceptance)');
+  const pHeld = plant('warmth-chrome.js', "type: ws.type, backend: ws.backend || (ws.openSpec && ws.openSpec.backend) || null });", 'type: ws.type });');
+  ok(pHeld && !pHeld.warmth, 'RED: a held warmth row that forgets its record\'s harness');
+  ok(jm.ownKey, 'windowListMark looks the harness up by OWN key; anything else draws the generic mark (the acceptance)');
+  // BEHAVIOUR over the ids that broke the old lookup: the real module in Node over a minimal DOM (createElement only)
+  {
+    const fakeEl = () => { const e = { className: '', dataset: {}, title: '', textContent: '', innerHTML: '', children: [], attrs: {}, style: { setProperty() {} },
+      setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { this.children.push(c); return c; } };
+      e.classList = { add: (...c) => { e.className = (e.className + ' ' + c.join(' ')).trim(); } }; return e; };
+    const had = { document: globalThis.document, raf: globalThis.requestAnimationFrame };
+    globalThis.document = { createElement: fakeEl }; globalThis.requestAnimationFrame = () => 0;
+    try {
+      const AM = await import(new URL('../src/lib/agent-meta.js', import.meta.url).href);
+      const odd = ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 5, { x: 1 }, ['claude'], true];
+      const drawn = odd.map((id) => { try { const el = AM.windowListMark({ id: 'w-odd', type: 'chat', titleMeta: { backend: id } }); return { id: String(id), cls: el.className, text: el.textContent, kids: el.children.length }; } catch (e) { return { id: String(id), threw: e.message }; } });
+      ok(drawn.every((d) => !d.threw && /\bbackend-icon-generic\b/.test(d.cls) && !/undefined/.test(d.cls) && (d.text || d.kids)), `an inherited name or a non-string harness id draws the GENERIC mark — no throw, no empty box (${drawn.map((d) => d.id + ':' + (d.threw ? 'THREW' : d.cls.includes('generic') ? 'generic' : d.cls)).join(' ')})`, JSON.stringify(drawn));
+      const real = AM.windowListMark({ id: 'w-c', type: 'chat', titleMeta: { backend: 'claude' } }), plain = AM.windowListMark({ id: 'w-m', type: 'chat', titleMeta: { backend: 'mystery-cli' } });
+      ok(/\bbackend-icon-claude\b/.test(real.className) && /\bmode-backend-icon\b/.test(real.className) && /\bbackend-icon-generic\b/.test(plain.className) && plain.title === 'mystery-cli Chat', 'a registered harness keeps its own mark; a plain unknown name keeps its label on the generic mark', [real.className, plain.className, plain.title]);
+      // RED control: the unguarded road (getBackendMeta straight) on the same ids — an empty box and a throw
+      let threw = false; try { AM.getBackendMeta(5); } catch { threw = true; }
+      ok(AM.getBackendMeta('constructor').iconClass === undefined && threw, 'RED control: getBackendMeta straight draws «backend-icon undefined» for an inherited name and THROWS on a number — what the own-key lookup keeps out of every list');
+    } finally { globalThis.document = had.document; globalThis.requestAnimationFrame = had.raf; }
+  }
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 // telemetry-client armed a 15s flush timer on the unknown-action event — exit explicitly
 process.exit(fail ? 1 : 0);

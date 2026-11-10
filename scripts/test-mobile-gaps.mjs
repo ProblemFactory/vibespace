@@ -813,6 +813,72 @@ try {
   check(`a fold saved for this device still shows every category on the phone (services folded=${foldedPhone.folded}, ${foldedPhone.visible}/${foldedPhone.items} visible)`, foldedPhone.folded === true && foldedPhone.items > 0 && foldedPhone.visible === foldedPhone.items, foldedPhone);
   await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); true`);
 
+  // ── #H THE HARNESS MARK IN THE PICK LISTS (lane phone-take-photo commit 2; the owner 2026-11-09, phone: «手机上对话列表的图标也
+  // match一下harness»). The phone's window list: a claude / codex / opencode / antigravity conversation, an unknown harness, a
+  // plain shell and a Design window, each row's mark by class; a harness known LATE follows in the open list; a theme flip keeps
+  // the marks legible; the rows keep their press target and words. Then the desk's ⧉ list by the same call. PNGs: MARKS_PNG_DIR.
+  console.log('#H the harness mark in the pick lists (the phone window list, the desk ⧉ list)');
+  {
+    const PNG = process.env.MARKS_PNG_DIR || SHOTS, TAG = process.env.MARKS_TAG || 'after';
+    const toRows = () => evalJs(`([...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')].find((r) => (r.children[1]?.textContent || '').startsWith('Mark · '))?.scrollIntoView({ block: 'start' }), true)`); // the shot shows the rows judged
+    const snap = async (client, name) => { try { await client.front(); if (client === phone) await toRows(); const r = await client.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); console.log(`    (PNG ${path.join(PNG, TAG + '-' + name + '.png')})`); } catch (e) { console.log('    (no PNG: ' + e.message + ')'); } };
+    const ROWS = [['claude', 'chat', 'claude'], ['codex', 'chat', 'codex'], ['opencode', 'chat', 'opencode'], ['antigravity', 'chat', 'antigravity'], ['mystery-cli', 'chat', 'an unknown harness'], ['shell', 'terminal', 'a plain shell'], [null, 'design', 'Design'], [null, 'chat', 'late']];
+    // every harness row of the table above (the registry's ids — test-harness-add-census: a list keyed by harness carries them all)
+    const HARNESS = ROWS.filter(([id]) => id && id !== 'mystery-cli');
+    const make = (prefix) => `(() => { const ids = {}; for (const [b, type, name] of ${JSON.stringify(ROWS)}) { const w = app.wm.createWindow({ title: ${JSON.stringify(prefix)} + name, type, width: 480, height: 360 }); if (b) app.wm.setTitleMeta(w.id, { backend: b }); ids[name] = w.id; } return ids; })()`;
+    const errs0 = pageErrors.length, deskErrs0 = desk.pageErrors.length;
+    const ids = await evalJs(make('Mark · '));
+    await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); document.getElementById('mobile-nav-title').click(); true`); await sleep(400);
+    const READ = `[...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')].map((r) => { const icon = r.children[0], lab = r.children[1], m = icon && icon.firstElementChild; return { t: (lab && lab.textContent) || '', cls: m ? String(m.getAttribute('class') || '') : '', text: m ? m.textContent.trim() : '', svg: !!(icon && icon.querySelector('svg')), h: Math.round(r.getBoundingClientRect().height), fs: lab ? getComputedStyle(lab).fontSize : '', iw: icon ? Math.round(icon.getBoundingClientRect().width) : 0, gw: icon && icon.querySelector('svg') ? Math.round(icon.querySelector('svg').getBoundingClientRect().width) : 0 }; }).filter((x) => x.t.startsWith('Mark · '))`;
+    const rows = await evalJs(READ), by = Object.fromEntries(rows.map((r) => [r.t.slice('Mark · '.length), r]));
+    for (const [b, type, name] of HARNESS) {
+      const r = by[name] || {};
+      check(`phone list: the ${b} ${type === 'chat' ? 'conversation' : 'terminal'} wears the ${b} mark (backend-icon-${b}, the ${type} mode mark)`, /\bbackend-icon\b/.test(r.cls || '') && new RegExp('\\bbackend-icon-' + b + '\\b').test(r.cls || '') && /\bmode-backend-icon\b/.test(r.cls || ''), r);
+    }
+    check('phone list: an unknown harness wears the generic mark — never an empty box', /\bbackend-icon-generic\b/.test(by['an unknown harness']?.cls || '') && !!by['an unknown harness']?.text, by['an unknown harness']);
+    check('phone list: a plain shell terminal wears the shell mark', /\bbackend-icon-shell\b/.test(by['a plain shell']?.cls || ''), by['a plain shell']);
+    check(`phone list: a Design window keeps its type glyph at its size (${by['Design']?.gw} px)`, !/backend-icon/.test(by['Design']?.cls || '') && !!by['Design']?.svg && by['Design']?.gw >= 15, by['Design']);
+    check('phone list: a conversation whose harness is not known yet shows the chat glyph', !/backend-icon/.test(by['late']?.cls || '') && !!by['late']?.svg, by['late']);
+    const dz = by['Design'] || {};
+    check(`phone list: every row keeps its press target and words (${rows.map((r) => r.h + 'px/' + r.fs).join(' ')})`, rows.length === ROWS.length && rows.every((r) => r.h >= 44 && Math.abs(r.h - dz.h) <= 1 && r.fs === '13px'), rows);
+    await snap(phone, 'phone-list-dark');
+    // a harness known LATE (a restored row): the open list follows, no re-open
+    await evalJs(`app.wm.setTitleMeta(${JSON.stringify(ids['late'])}, { backend: 'codex' }); true`); await sleep(400);
+    const late = (await evalJs(READ)).find((r) => r.t === 'Mark · late') || {};
+    check('phone list: the harness known late — the OPEN list\'s row now wears the codex mark', /\bbackend-icon-codex\b/.test(late.cls || ''), late);
+    // a theme flip keeps the marks legible (the contrast helper, theme-colors-changed)
+    const LEGIBLE = `(() => { const lum = (c) => { const v = (c.match(/[\\d.]+/g) || ['0', '0', '0']).slice(0, 3).map(Number).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; }; const bgOf = (el) => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor, a = c.match(/[\\d.]+/g); if (a && (a.length < 4 || Number(a[3]) > 0.5)) return c; } return 'rgb(0, 0, 0)'; }; return [...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')].filter((r) => /^Mark · (claude|codex|opencode|antigravity|late)$/.test(r.children[1]?.textContent || '')).map((r) => { const m = r.querySelector('.backend-icon'); if (!m) return { t: r.children[1].textContent, ratio: 0 }; const a = lum(getComputedStyle(m).color), b = lum(bgOf(r)); return { t: r.children[1].textContent, ratio: +((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2), color: getComputedStyle(m).color, bg: bgOf(r) }; }); })()`;
+    const theme0 = await evalJs(`app.themeManager.current || 'dark'`);
+    const legDark = await evalJs(LEGIBLE);
+    await evalJs(`app.themeManager.apply('light'); true`); await sleep(500);
+    const legLight = await evalJs(LEGIBLE);
+    await snap(phone, 'phone-list-light');
+    await evalJs(`app.themeManager.apply('dark'); true`); await sleep(500);
+    const legBack = await evalJs(LEGIBLE);
+    await evalJs(`app.themeManager.apply(${JSON.stringify(theme0)}); true`); await sleep(300);
+    const fmt = (l) => l.map((x) => x.t.slice(7) + ' ' + x.ratio).join(', ');
+    check(`phone list: the brand marks stay legible on the dark theme (≥ 3:1 — ${fmt(legDark)})`, legDark.length === 5 && legDark.every((x) => x.ratio >= 3), legDark);
+    check(`phone list: …and after a flip to the light theme (${fmt(legLight)})`, legLight.length === 5 && legLight.every((x) => x.ratio >= 3), legLight);
+    check(`phone list: …and back to dark (${fmt(legBack)})`, legBack.length === 5 && legBack.every((x) => x.ratio >= 3), legBack);
+    await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); for (const id of ${JSON.stringify(Object.values(ids))}) { try { app.wm.closeWindow(id); } catch {} } true`); await sleep(300);
+    // the desk's ⧉ list (the taskbar's window-count chip): the same call, the title bar's 14-px size — the rows keep their height
+    const dIds = await desk.evalJs(make('Desk mark · '));
+    await sleep(300);
+    await desk.evalJs(`document.querySelectorAll('.overlap-switcher').forEach((p) => p.remove()); document.getElementById('taskbar-status').click(); true`); await sleep(400);
+    const dRows = await desk.evalJs(`[...document.querySelectorAll('.overlap-switcher .overlap-switcher-item')].map((r) => { const icon = r.children[0], m = icon && icon.firstElementChild, lab = r.children[1]; return { t: (lab && lab.textContent) || '', cls: m ? String(m.getAttribute('class') || '') : '', svg: !!(icon && icon.querySelector('svg')), h: Math.round(r.getBoundingClientRect().height), mw: m ? Math.round(m.getBoundingClientRect().width) : 0, gw: icon && icon.querySelector('svg') ? Math.round(icon.querySelector('svg').getBoundingClientRect().width) : 0 }; }).filter((x) => x.t.startsWith('Desk mark · '))`);
+    const dBy = Object.fromEntries(dRows.map((r) => [r.t.slice('Desk mark · '.length), r]));
+    check(`desk ⧉ list: every harness wears its mark (${HARNESS.map(([b, , name]) => b + ':' + (dBy[name]?.cls || '-')).join(' | ')})`,
+      HARNESS.every(([b, , name]) => new RegExp('\\bbackend-icon-' + b + '\\b').test(dBy[name]?.cls || '') && /\bwindow-backend-icon\b/.test(dBy[name]?.cls || '')), dRows);
+    check(`desk ⧉ list: an unknown harness = the generic mark; a plain shell = the shell mark; Design keeps its glyph at the list's 11 px (${dBy['Design']?.gw} px)`,
+      /\bbackend-icon-generic\b/.test(dBy['an unknown harness']?.cls || '') && /\bbackend-icon-shell\b/.test(dBy['a plain shell']?.cls || '') && !/backend-icon/.test(dBy['Design']?.cls || '') && !!dBy['Design']?.svg && dBy['Design']?.gw >= 10, dRows);
+    check(`desk ⧉ list: the rows keep their height — a mark row is the Design row's (${dRows.map((r) => r.h).join('/')} px), the mark the title bar's 14 px`,
+      dRows.length === ROWS.length && dRows.every((r) => Math.abs(r.h - (dBy['Design']?.h || 0)) <= 1) && dRows.filter((r) => /backend-icon/.test(r.cls)).every((r) => r.mw === 14), dRows);
+    await snap(desk, 'desk-list');
+    await desk.evalJs(`document.querySelectorAll('.overlap-switcher').forEach((p) => p.remove()); for (const id of ${JSON.stringify(Object.values(dIds))}) { try { app.wm.closeWindow(id); } catch {} } true`); await sleep(300);
+    await phone.front();
+    check('#H drew no uncaught page exception on either client', pageErrors.length === errs0 && desk.pageErrors.length === deskErrs0, [...pageErrors.slice(errs0), ...desk.pageErrors.slice(deskErrs0)].slice(0, 3));
+  }
+
   check('no uncaught page exceptions during the battery', pageErrors.length === 0, pageErrors.slice(0, 3));
   check('no uncaught page exceptions on the desktop client either', desk.pageErrors.length === 0, desk.pageErrors.slice(0, 3));
   try { desk.sock.close(); } catch {}
