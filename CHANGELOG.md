@@ -5,13 +5,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.390 — 2026-11-10
 
 ### Added
+- Antigravity chats can pick Gemini 4 Carbon (medium, high or low), and the low level of Gemini 4 Argon and Gemini 3.8 Flash.
 - On a phone, the chat's + menu has a Take photo row that opens the camera; the other rows now read Photos, File and Folder.
 - An agent can ask you for a website login: its card in For you has the fields of Vault ▸ Add ▸ Website login…, with the site fixed by the ask.
 - What you type is saved as a website login only that site is ever filled with. The card's first line names the site; a non-Latin address shows both spellings.
 - The card's tick lets that conversation sign in with it until you remove it in Vault ▸ Web logins ▸ Use for…; «Two-step code…» adds its code there.
 - After a Claude Code update, its new models are in a chat's model list, 1M form included, priced at Claude Code's own rates — no VibeSpace update needed.
 - The price editor in Usage shows where each price comes from: VibeSpace's table, your Claude Code, or you.
-- Antigravity chats can pick Gemini 4 Carbon (medium, high or low), and the low level of Gemini 4 Argon and Gemini 3.8 Flash.
 
 ### Changed
 - An agent no longer mistakes another conversation's scheduled reminder for its own: it is told only of its own background jobs and ones it subscribed to.
@@ -20,13 +20,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The model list says what each alias means on your Claude Code, for example "fable · Fable 5.2 · 1M".
 
 ### Fixed
+- In a conversation locked to a model, the model in the status bar no longer turns amber or names an older model when you scroll up; it shows the one answering.
+- Locking, unlocking or changing the locked model on one device now shows at once on your other open devices.
 - A vault request card's words now show links as the rest of For you does, and say when a secret inside a link is hidden.
 - Haiku 5.5 and Sonnet 5.5 usage is priced at their own rates (Haiku 5.5 was shown at ten times its price).
 - Group messages, Task Group updates and job or status notices now count as seen only once the agent's turn has really received them.
 - A turn that began while VibeSpace was too busy, or that you stopped, used to lose them; now the next turn brings them, marked "sent again".
 - An agent waiting for a reply that has arrived but not reached it yet is told "1 reply waiting" the next time it uses vibespace-msg.
-- In a conversation locked to a model, the model in the status bar no longer turns amber or names an older model when you scroll up; it shows the one answering.
-- Locking, unlocking or changing the locked model on one device now shows at once on your other open devices.
 
 ## 2.369.389 — 2026-11-10
 
