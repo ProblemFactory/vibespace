@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.389 — 2026-11-10
+
+### Fixed
+- A link that ends in a letter such as a Japanese repetition mark is now linked whole; its last character used to be left outside the link.
+- A For-you item with a very long run of dashes or punctuation no longer makes the list stall while it is drawn.
+
 ## 2.369.388 — 2026-11-09
 
 ### Fixed
