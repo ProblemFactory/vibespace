@@ -16,7 +16,7 @@
 import { t } from './i18n.js';
 import { escHtml, showContextMenu, uiScale } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { desktopRows, switchVerdict, sheetItems, followDesktops } from '../desktop-switch.js';
+import { desktopRows, switchVerdict, sheetItems, followDesktops, windowWaits, waitingElsewhere } from '../desktop-switch.js';
 
 /** The model's input from the live page: the manager's desktops, the windows this page built on each (with their stacking),
  *  the entries each held record lists that the page has not built. `drawn` = the rows an open list showed, redrawn on a
@@ -29,7 +29,8 @@ export function sheetRows(app, drawn = null) {
   const windowsByDesktop = {}, heldByDesktop = {};
   for (const w of wm.windows.values()) {
     if (!w._desktopId || w._isStagePlaceholder) continue;
-    (windowsByDesktop[w._desktopId] ||= []).push({ title: w.title || '', z: zOf(w) });
+    // THE waiting fact (desktopRows rolls it up): a conversation that waits for the person — never the one ON SHOW, it says it itself
+    (windowsByDesktop[w._desktopId] ||= []).push({ id: w.id, title: w.title || '', z: zOf(w), waiting: windowWaits(w) && w.id !== wm.activeWindowId });
   }
   for (const d of desktops) {
     const held = (dm._savedStates?.get(d.id)?.windows || []).filter((ws) => { const id = ws && (ws.winId || ws.id); return id && !wm.windows.has(id); });
@@ -38,7 +39,39 @@ export function sheetRows(app, drawn = null) {
   return desktopRows({ desktops, activeId: dm.activeDesktopId, windowsByDesktop, heldByDesktop });
 }
 
+/** THE CLOSED DOOR'S COUNT (MobileNav.updateDesktopsDoor; r2 (主开发 ⑤) — a function so its half of «never the one on show» is
+ *  pinned on its own): what waits for the person anywhere but ON SHOW — PURE waitingElsewhere over THE fact (windowWaits). «On
+ *  show» = the active window: measured on the regular class too (820×1180 and 951×585 coarse) — one window is visible at a time. */
+export function doorWaiting(app) {
+  const wm = app && app.wm;
+  return wm ? waitingElsewhere({ windows: [...wm.windows.values()].map((w) => ({ id: w.id, waiting: windowWaits(w) })), shownId: wm.activeWindowId }) : 0;
+}
+
 let openCtl = null;
+let openSheet = null; // { menu, drawn } — the sheet on screen, PATCHED in place by patchDesktopSheet (lane phone-take-photo)
+
+const waitHtml = (words) => `<span class="mdesk-wait"><span class="mnav-wait-dot" aria-hidden="true"></span>${escHtml(words)}</span>`;
+
+/** THE WAITING ROLL-UP, LIVE (lane phone-take-photo, the owner 2026-11-10): the open sheet follows every waiting toggle — it rides
+ *  the taskbar's funnel (app.updateTaskbar → desktopManager._renderSwitcher → MobileNav.updateDesktopsDoor → here), and each
+ *  row is PATCHED in place (its mark, its words, its titles line) — never rebuilt under a finger. → how many rows changed */
+export function patchDesktopSheet(app) {
+  const o = openSheet;
+  if (!o || !o.menu.isConnected) return 0;
+  const rows = sheetRows(app, o.drawn), items = sheetItems(rows, { t });
+  let n = 0;
+  for (const el of o.menu.querySelectorAll(':scope > .context-menu-item[data-desktop-id]')) {
+    const i = rows.findIndex((r) => r.id === el.dataset.desktopId);
+    if (i < 0) continue;
+    const s = items[i], on = !!rows[i].waiting, chip = el.querySelector('.mdesk-wait'), sub = el.querySelector('.mdesk-titles');
+    if (el.classList.contains('mdesk-waiting') !== on) { el.classList.toggle('mdesk-waiting', on); n++; }
+    if (s.waiting && !chip) el.querySelector('.mdesk-count')?.insertAdjacentHTML('beforebegin', waitHtml(s.waiting));
+    else if (s.waiting && chip.lastChild && chip.lastChild.textContent !== s.waiting) chip.lastChild.textContent = s.waiting;
+    else if (!s.waiting && chip) chip.remove();
+    if (sub && s.sub && sub.textContent !== s.sub) sub.textContent = s.sub;
+  }
+  return n;
+}
 
 /** A surface's listeners live while it is IN THE PAGE (r3 ①, the listener lifecycle law): `ctl` is aborted the moment `el`
  *  leaves it — by ANY road: its own closers, an outside press, Esc's blind `[data-popover]` remove, a row's tap, the next
@@ -84,20 +117,24 @@ export function openDesktopSheet(app, anchor, { onSwitch, drawn = null } = {}) {
   const items = sheetItems(rows, { t }).map((s) => (s.door === 'new'
     ? { labelHtml: `${mark(UI_ICONS.plus)}<span class="mdesk-text"><span class="mdesk-name">${escHtml(s.label)}</span></span>`, action: () => { ctl.abort(); onSwitch(dm.createDesktop()); } }
     : {
-      labelHtml: `${mark(s.active ? UI_ICONS.check : '')}<span class="mdesk-text"><span class="mdesk-line"><span class="mdesk-name">${escHtml(s.name)}</span><span class="mdesk-count">${escHtml(s.count)}</span></span>${s.sub ? `<span class="mdesk-titles">${escHtml(s.sub)}</span>` : ''}</span>`,
+      labelHtml: `${mark(s.active ? UI_ICONS.check : '')}<span class="mdesk-text"><span class="mdesk-line"><span class="mdesk-name">${escHtml(s.name)}</span>${s.waiting ? waitHtml(s.waiting) : ''}<span class="mdesk-count">${escHtml(s.count)}</span></span>${s.sub ? `<span class="mdesk-titles">${escHtml(s.sub)}</span>` : ''}</span>`,
       title: s.title,
       action: () => { ctl.abort(); go(rows.find((x) => x.id === s.id)); },
     }));
   const go = (r) => {
     const v = switchVerdict({ from: dm.activeDesktopId, to: r.id, name: r.name, rows: sheetRows(app) });
     if (v.act === 'refused') return void dm._doorRefused({ id: r.id, name: v.name }, 'switch'); // the switch door's why — THE table's words (r3 ④: a literal of its own here)
-    onSwitch(r.id); // 'none' too: the desktop on show keeps its window on show (the phone re-shows it)
+    // a row that says a conversation waits LANDS on it (lane phone-take-photo) — r2 (主开发 ③): read from the SAME live facts the
+    // patch drew (a row that started waiting after the open lands on it too), the conversation the row NAMES first (ONE order)
+    const live = sheetRows(app).find((x) => x.id === r.id), show = live && live.waiting ? (live.waitingIds || [])[0] || null : null;
+    onSwitch(r.id, show ? { show } : undefined); // 'none' too: the desktop on show keeps its window on show (the phone re-shows it)
   };
   const regular = app.viewportClass?.() === 'regular';
   const ar = anchor?.getBoundingClientRect?.() || { left: 0, top: 0, right: 0, bottom: 0 };
   const menu = showContextMenu(regular ? ar.left : 0, regular ? ar.top : 0, items);
   menu.classList.add('mdesk-menu');
   untilGone(menu, ctl); // every road that takes the sheet out of the page aborts its listeners (r3 ①: its dismiss left one)
+  openSheet = { menu, drawn: rows }; // the sheet on screen — patchDesktopSheet keeps its waiting roll-up live (lane phone-take-photo)
   if (!regular) menu.classList.add('mobile-sheet'); // the phone's sheet under the bar as it stands (style.css --phone-sheet-top — mobile-nav.js _publishUnder)
   else placeOverColumn(menu, ar);
   menu.querySelectorAll('.context-menu-item').forEach((el, i) => {
@@ -106,6 +143,7 @@ export function openDesktopSheet(app, anchor, { onSwitch, drawn = null } = {}) {
     el.dataset.desktopId = r.id;
     el.classList.toggle('active', r.active);
     el.classList.toggle('mdesk-gone', !!r.gone); // deleted on another screen while the sheet was open: greyed, its why on its second line
+    el.classList.toggle('mdesk-waiting', !!r.waiting); // a conversation waits there (THE roll-up — patchDesktopSheet keeps it live)
     // a long press (touch: the synthesized contextmenu) / a right-click = the desktop's DOORS — the manager's ONE builder on
     // the phone tier (every door of THE table, a shut one greyed with its why; its handlers, its done/after guard: a
     // cancelled Rename… brings nothing back). Once an act is done: after a delete the desktop on show re-shows its window

@@ -736,6 +736,130 @@ try {
   check(`a long-press on a window row opens the 'window' menu incl. Move to Desktop and Close (${winMenu.join(' / ')})`, winMenu.some((x) => /Move to Desktop/.test(x)) && winMenu.some((x) => /Close/.test(x)), winMenu);
   await escape(); await evalJs(`document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); document.querySelector('.mobile-win-switcher')?.remove(); true`);
 
+  // ── #W THE WAITING DOORS (lane phone-take-photo; the owner 2026-11-10 17:10Z, phone: «在手机上那个闪烁功能不能 reflect 到 desktop 跟对话的
+  // 那个下拉选单里，所以我并不能看出来现在有消息在等我。»): a conversation that WAITS for the person is said at every door that lists it — the
+  // closed Desktops door (and ⋯ when it folds), the title switcher's desktop tab + conversation row, the Desktops sheet's desktop row
+  // (rolled up) — LIVE, patched in place; the conversation on show is never shouted. r2 (主开发 00:43Z): a turn's start ends it with no
+  // focus; reaching it through a door that said «it waits» is seeing it; the tap lands where the row says (live); ⋯ says the words;
+  // under reduced motion a row / tab keeps a standing mark. PNGs: WAITING_PNG_DIR (default: the shots dir), <WAITING_TAG|after>-*.png
+  console.log('#W the waiting doors (a conversation waits on ANOTHER desktop, one on this one)');
+  {
+    const PNG = process.env.WAITING_PNG_DIR || SHOTS, TAG = process.env.WAITING_TAG || 'after';
+    // the Desktops sheet by the finger's route as the bar stands: the door on the bar, or ⋯ → Desktops when it is folded
+    const openDesks = async () => { const onBar = await evalJs(`(() => { const r = document.getElementById('mobile-nav-desktops')?.getBoundingClientRect(); return !!(r && r.width > 0 && r.height > 0); })()`);
+      if (onBar) return tap('#mobile-nav-desktops');
+      await tap('#mobile-nav-overflow'); await sleep(300); return tap('.mnav-more-menu .context-menu-item[data-key="desktops"]'); };
+    const snap = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); console.log('    (PNG ' + path.join(PNG, `${TAG}-${name}.png`) + ')'); } catch { } };
+    const errs0 = pageErrors.length;
+    const WAITW = /\b2 waiting for input\b|2 个等待输入|2 件が入力待ち/, WAIT1 = /\b1 waiting for input\b|1 个等待输入|1 件が入力待ち/;
+    await evalJs(`document.querySelectorAll('.mobile-win-switcher, .mdesk-menu, .context-menu').forEach((m) => m.remove()); true`);
+    const S = await evalJs(`(async () => {
+      const dm = app.desktopManager, wm = app.wm, here = dm.activeDesktopId, other = dm.desktops.find((d) => d.id !== here)?.id;
+      const shown = wm.activeWindowId, cand = [...wm.windows.values()].filter((w) => w._desktopId === here && w.id !== shown && !w._tabChain && typeof w._notifyChanged === 'function');
+      const a = cand.find((w) => w.type === 'chat' && app.sessions && app.sessions.get(w.id)) || cand[0], b = cand.find((w) => w !== a && app.sessions && app.sessions.get(w.id)) || cand.find((w) => w !== a);
+      if (!other || !a || !b) return { other, a: !!a, b: !!b };
+      dm.moveWindowToDesktop(a.id, other);
+      await new Promise((r) => setTimeout(r, 500));
+      // a window ON SHOW on this desktop, neither of the two (the #7 leg can leave none active); the legs land on B and come back to
+      // it — its short title keeps the Desktops door on the bar (the folded door is ⋯'s own leg below)
+      const keep = (shown && wm.windows.get(shown)?._desktopId === here ? shown : null) || [...wm.windows.values()].find((w) => w._desktopId === here && !w._tabChain && w.id !== a.id && w.id !== b.id)?.id || null;
+      const title0 = keep ? wm.windows.get(keep).title : null;
+      if (keep) { wm.setTitle(keep, 'Here'); if (wm.activeWindowId !== keep) wm.revealWindow(keep); await new Promise((r) => setTimeout(r, 400)); }
+      return { here, other, a: a.id, aTitle: a.title, aView: !!(app.sessions && app.sessions.get(a.id) && app.sessions.get(a.id)._turnStarted), b: b.id, bView: !!(app.sessions && app.sessions.get(b.id)), shown: wm.activeWindowId, keep, title0 };
+    })()`);
+    // a turn ENDS by the conversation's own road (the same marks chat-view's turn_complete makes)
+    const waitOn = (id) => evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(id)}); w.element.classList.remove('window-active'); w.element.classList.add('window-waiting'); (w._waitWhy ||= new Set()).add('turn'); w._notifyChanged(); return true; })()`);
+    const waitOff = (id) => evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(id)}); w.element.classList.remove('window-waiting'); w._waitWhy?.clear(); w._notifyChanged(); return true; })()`);
+    const waits = (id) => evalJs(`app.wm.windows.get(${JSON.stringify(id)}).element.classList.contains('window-waiting')`);
+    check('setup: two desktops, a conversation moved to the other one and one more on this one (real conversations, their views live); a third window on show', !!(S.other && S.a && S.b && S.aView && S.keep && S.shown === S.keep), S);
+    await waitOn(S.a); await waitOn(S.b); await sleep(400);
+    const DOOR = `(() => { const b = document.getElementById('mobile-nav-desktops'), d = b && b.querySelector(':scope > .mnav-wait-dot'), r = d && d.getBoundingClientRect(); return { on: !!b && b.classList.contains('mnav-waiting'), dot: !!(r && r.width > 0), label: b ? b.getAttribute('aria-label') || '' : '' }; })()`;
+    const d0 = await evalJs(DOOR);
+    check(`THE CLOSED DOOR: the Desktops button wears the yellow dot and says it («${d0.label}»)`, d0.on && d0.dot && WAITW.test(d0.label), d0);
+    await snap('waiting-door');
+    // the title switcher: the tabs roll it up, the waiting row says it (a blink + a standing dot); the row on show does not
+    await evalJs(`document.getElementById('mobile-nav-title').click(); true`); await sleep(400);
+    const SW = `(() => { const p = document.querySelector('.mobile-win-switcher'); if (!p) return null; const tab = (id) => p.querySelector('.mobile-desk-tab[data-desktop-id="' + id + '"]'), row = (id) => p.querySelector('.mobile-win-row[data-win-id="' + id + '"]'), dot = (e) => !!e && !!e.querySelector(':scope > .mnav-wait-dot');
+      return { tabOther: !!tab(${JSON.stringify(S.other)})?.classList.contains('waiting'), tabHere: !!tab(${JSON.stringify(S.here)})?.classList.contains('waiting'), rowB: !!row(${JSON.stringify(S.b)})?.classList.contains('waiting'), rowShown: !!row(${JSON.stringify(S.shown)})?.classList.contains('waiting'), dots: [dot(tab(${JSON.stringify(S.other)})), dot(row(${JSON.stringify(S.b)}))] }; })()`;
+    const sw0 = await evalJs(SW);
+    check('THE TITLE SWITCHER: both tabs roll it up; the waiting conversation\'s row says it (blink + standing dot); the row on show does not', sw0 && sw0.tabOther && sw0.tabHere && sw0.rowB && !sw0.rowShown && sw0.dots.every(Boolean), sw0);
+    await snap('waiting-switcher');
+    // r2 smaller: REDUCED MOTION — the overlay's one cycle ends at opacity 0; the standing dot stays
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }, { name: 'prefers-reduced-motion', value: 'reduce' }] }); await sleep(500);
+    const rm = await evalJs(`(() => { const r = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'), d = r && r.querySelector(':scope > .mnav-wait-dot'), t = document.querySelector('.mobile-desk-tab[data-desktop-id="${S.other}"] > .mnav-wait-dot'); const op = (e) => e ? Number(getComputedStyle(e).opacity) : -1, w = (e) => e ? Math.round(e.getBoundingClientRect().width) : 0; return { row: op(d), tab: op(t), rw: w(d), tw: w(t), rm: matchMedia('(prefers-reduced-motion: reduce)').matches }; })()`);
+    check(`REDUCED MOTION keeps a standing mark on the waiting row and tab (dot opacity ${rm.row} / ${rm.tab})`, rm.rm && rm.row >= 0.99 && rm.tab >= 0.99 && rm.rw > 0 && rm.tw > 0, rm);
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); await sleep(200);
+    // LIVE in place: B's waiting ends while the list is open
+    await evalJs(`window.__wdRow = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'); true`); await waitOff(S.b); await sleep(400);
+    const sw1 = await evalJs(`(() => { const r = document.querySelector('.mobile-win-row[data-win-id="${S.b}"]'); return { same: r === window.__wdRow, waiting: !!r?.classList.contains('waiting'), dot: !!r?.querySelector(':scope > .mnav-wait-dot'), tabHere: !!document.querySelector('.mobile-desk-tab[data-desktop-id="${S.here}"]')?.classList.contains('waiting') }; })()`);
+    check('…LIVE: its waiting ends while the list is open ⇒ the SAME row node drops the mark and its dot; this desktop\'s tab too', sw1.same && !sw1.waiting && !sw1.dot && !sw1.tabHere, sw1);
+    // r2 ②: a tap on a waiting ROW is seeing it — B waits again, its row is tapped: B on show, its waiting gone on this device
+    await waitOn(S.b); await sleep(400);
+    await tap(`.mobile-win-switcher .mobile-win-row[data-win-id="${S.b}"]`); await sleep(700);
+    const rowTap = await evalJs(`({ shown: app.wm.activeWindowId, waits: app.wm.windows.get(${JSON.stringify(S.b)}).element.classList.contains('window-waiting') })`);
+    check('…a tap on the waiting row lands on it and IS seeing it: on show, its waiting gone on this device (no press inside needed)', rowTap.shown === S.b && !rowTap.waits, rowTap);
+    await evalJs(`app.wm.revealWindow(${JSON.stringify(S.shown)}); true`); await sleep(500);
+    const away = await evalJs(`({ shown: app.wm.activeWindowId, waits: app.wm.windows.get(${JSON.stringify(S.b)}).element.classList.contains('window-waiting'), label: document.getElementById('mobile-nav-desktops').getAttribute('aria-label') || '' })`);
+    check(`…and switching away brings no dot back for it (it was seen): it waits no more; the door counts only the other desktop's («${away.label}»)`, away.shown === S.shown && !away.waits && WAIT1.test(away.label), away);
+    await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); true`);
+    // the Desktops sheet: A waits on the other desktop — the row rolls it up, names it first; live in place
+    const SH = `(() => { const m = document.querySelector('.mdesk-menu'); if (!m) return null; const row = (id) => m.querySelector(':scope > .context-menu-item[data-desktop-id="' + id + '"]'), o = row(${JSON.stringify(S.other)}), h = row(${JSON.stringify(S.here)});
+      return { other: !!o?.classList.contains('mdesk-waiting'), words: o?.querySelector('.mdesk-wait')?.textContent || '', titles: o?.querySelector('.mdesk-titles')?.textContent || '', here: !!h?.classList.contains('mdesk-waiting'), h: o ? Math.round(o.getBoundingClientRect().height) : 0 }; })()`;
+    await openDesks(); await sleep(400);
+    const sh0 = await evalJs(SH);
+    check(`THE DESKTOPS SHEET: the other desktop's row rolls it up — the mark, «${sh0 && sh0.words}», the waiting conversation named first; this desktop's row (nothing waits there now) says nothing`, !!sh0 && sh0.other && WAIT1.test(sh0.words) && sh0.titles.startsWith(S.aTitle || '\u0000') && !sh0.here && sh0.h >= 44, sh0);
+    await snap('waiting-sheet');
+    await evalJs(`window.__wdMenu = document.querySelector('.mdesk-menu'); window.__wdSheetRow = window.__wdMenu.querySelector(':scope > .context-menu-item[data-desktop-id="${S.other}"]'); true`); await waitOff(S.a); await sleep(400);
+    const sh1 = await evalJs(`(() => { const m = document.querySelector('.mdesk-menu'), r = m && m.querySelector(':scope > .context-menu-item[data-desktop-id="${S.other}"]'); return { sameMenu: m === window.__wdMenu, sameRow: r === window.__wdSheetRow, waiting: !!r?.classList.contains('mdesk-waiting'), words: !!r?.querySelector('.mdesk-wait'), door: document.getElementById('mobile-nav-desktops').classList.contains('mnav-waiting') }; })()`);
+    check('…LIVE: its waiting ends while the sheet is open ⇒ the SAME sheet and row drop the mark and the words; the closed door drops its dot', sh1.sameMenu && sh1.sameRow && !sh1.waiting && !sh1.words && !sh1.door, sh1);
+    // r2 ③a: it STARTS waiting while the sheet is open ⇒ patched to say so, and its tap lands on IT (the live facts, not the open's)
+    await waitOn(S.a); await sleep(400);
+    const sh2 = await evalJs(SH);
+    check('…and it starts again while the sheet is open ⇒ the mark and the words come back in place', !!sh2 && sh2.other && WAIT1.test(sh2.words), sh2);
+    await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${S.other}"]`); await sleep(1200);
+    const land = await evalJs(`({ desk: app.desktopManager.activeDesktopId, shown: app.wm.activeWindowId, door: document.getElementById('mobile-nav-desktops').classList.contains('mnav-waiting'), title: document.getElementById('mobile-nav-title').textContent, waits: app.wm.windows.get(${JSON.stringify(S.a)}).element.classList.contains('window-waiting') })`);
+    check(`a tap on the row that STARTED waiting after the open LANDS on that conversation («${land.title}») — read from the live facts`, land.desk === S.other && land.shown === S.a, land);
+    check('…and the landing IS seeing it: its waiting is gone on this device (no press inside), no door shouts', !land.waits && !land.door, land);
+    await evalJs(`app._mobileNav.switchDesktop(${JSON.stringify(S.here)}); true`); await sleep(1200);
+    check('…switching away brings no dot back (it was seen)', !(await evalJs(DOOR)).on);
+    // r3 ① THE GAP: the turn completes (the real op) — a re-attach restates «streaming» (+ «thinking...»: the label every attach path
+    // applies), a background tail's label, the idle — it STILL waits; the next turn's record (a turn past the completed one) ends it
+    const STATE = `({ waits: app.wm.windows.get(${JSON.stringify(S.a)}).element.classList.contains('window-waiting'), door: document.getElementById('mobile-nav-desktops').classList.contains('mnav-waiting'), shown: app.wm.activeWindowId })`;
+    const onA = async (js) => { await evalJs(`(() => { const v = app.sessions.get(${JSON.stringify(S.a)}); ${js}; return true; })()`); await sleep(350); return evalJs(STATE); };
+    const g0 = await onA(`v._onOp({ op: 'meta', subtype: 'turn_complete', data: { cost: 0, modelUsage: null } })`);
+    const g1 = await onA(`v._onServerStreamLabel('thinking...', null)`);
+    const g2 = await onA(`v._onServerStreamLabel('Running a background agent…', null)`);
+    const g3 = await onA(`v._onServerStreamLabel('', null)`);
+    check('THE GAP: the turn completes, a re-attach restates «streaming» + «thinking...», a background tail, the idle ⇒ it STILL waits here and the closed door still says it', g0.waits && g1.waits && g2.waits && g3.waits && g3.door, { g0, g1, g2, g3 });
+    const g4 = await onA(`v._onOp({ op: 'create', message: { id: 'wd-next-' + Date.now(), role: 'user', status: 'complete', turnIndex: Math.max(v._turnSeqState?.max || 0, ...v._messages.map((m) => m.turnIndex || 0)) + 1, content: [{ type: 'text', text: 'the answer' }], ts: Date.now() } })`);
+    check('THE NEXT TURN STARTS (the person answered elsewhere: its record — a turn past the completed one — reaches this client) ⇒ the finished-turn mark ends HERE with no focus, and the door goes quiet', !g4.waits && g4.shown !== S.a && !g4.door, g4);
+    // r3 ②: THE SWITCHER'S DESKTOP TAB said it waits — its landing on the waiting conversation IS seeing it
+    await waitOn(S.a); await sleep(400);
+    await evalJs(`document.getElementById('mobile-nav-title').click(); true`); await sleep(400);
+    const tb0 = await evalJs(`(() => { const t = document.querySelector('.mobile-win-switcher .mobile-desk-tab[data-desktop-id="${S.other}"]'); return { waiting: !!t?.classList.contains('waiting'), dot: !!t?.querySelector(':scope > .mnav-wait-dot'), remembered: app._mobileNav._shown?.[${JSON.stringify(S.other)}] || null }; })()`);
+    await tap(`.mobile-win-switcher .mobile-desk-tab[data-desktop-id="${S.other}"]`); await sleep(1200);
+    const tb1 = await evalJs(`({ desk: app.desktopManager.activeDesktopId, shown: app.wm.activeWindowId, waits: app.wm.windows.get(${JSON.stringify(S.a)}).element.classList.contains('window-waiting') })`);
+    check('THE SWITCHER\'S TAB that wears the dot lands on its desktop\'s remembered window — the waiting conversation — and that landing IS seeing it', tb0.waiting && tb0.dot && tb0.remembered === S.a && tb1.desk === S.other && tb1.shown === S.a && !tb1.waits, { tb0, tb1 });
+    await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); app._mobileNav.switchDesktop(${JSON.stringify(S.here)}); true`); await sleep(1200);
+    check('…and switching away from it brings no dot back (it was seen)', !(await evalJs(DOOR)).on);
+    // ⋯ standing in for a folded Desktops door: the dot AND the words (its name; its menu's Desktops row)
+    await waitOn(S.a); await sleep(300);
+    const shownNow = await evalJs('app.wm.activeWindowId'), tTitle = await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w ? w.title : ''; })()`);
+    await evalJs(`app.wm.setTitle(app.wm.activeWindowId, 'A title long enough to fold every chip of this phone bar into the overflow — the waiting doors'); true`); await sleep(800);
+    const more = await evalJs(`(() => { const m = document.getElementById('mobile-nav-overflow'), d = m && m.querySelector(':scope > .mnav-wait-dot'), r = d && d.getBoundingClientRect(); return { folded: [...(app._mobileNav._folded || [])], on: !!m?.classList.contains('mnav-waiting'), dot: !!(r && r.width > 0), label: m ? m.getAttribute('aria-label') || '' : '' }; })()`);
+    check(`⋯ standing in for a FOLDED Desktops door wears the dot and SAYS it in its name («${more.label}»)`, more.folded.includes('desktops') && more.on && more.dot && WAIT1.test(more.label), more);
+    await tap('#mobile-nav-overflow'); await sleep(500);
+    const mrow = await evalJs(`(() => { const r = document.querySelector('.mnav-more-menu .context-menu-item[data-key="desktops"]'); return r ? { cls: r.className, text: r.textContent.replace(/\\s+/g, ' ').trim(), dot: !!r.querySelector(':scope > .mnav-wait-dot') } : null; })()`);
+    check(`…and inside ⋯ the Desktops row says what its door says («${mrow && mrow.text}»), marked`, !!mrow && /mnav-more-waiting/.test(mrow.cls) && WAIT1.test(mrow.text) && mrow.dot, mrow);
+    await snap('waiting-more');
+    await escape(); await evalJs(`document.querySelectorAll('.mnav-more-menu').forEach((m) => m.remove()); true`);
+    await evalJs(`app.wm.setTitle(${JSON.stringify(shownNow)}, ${JSON.stringify(tTitle)}); true`); await sleep(500);
+    // back as it was for the legs below: the conversation home again, nothing waiting
+    await evalJs(`(async () => { const wm = app.wm; for (const id of [${JSON.stringify(S.a)}, ${JSON.stringify(S.b)}]) { const w = wm.windows.get(id); if (w) { w.element.classList.remove('window-waiting'); w._waitWhy?.clear(); } } app.desktopManager.moveWindowToDesktop(${JSON.stringify(S.a)}, ${JSON.stringify(S.here)}); app.updateTaskbar(); return true; })()`); await sleep(600);
+    if (S.keep && S.title0 != null) { await evalJs(`app.wm.windows.get(${JSON.stringify(S.keep)}) && app.wm.setTitle(${JSON.stringify(S.keep)}, ${JSON.stringify(S.title0)}); true`); await sleep(300); }
+    check('#W drew no uncaught page exception', pageErrors.length === errs0, pageErrors.slice(errs0, errs0 + 3));
+  }
+
   // ── #10 terminal key row: every key inside the viewport, Copy screen present ──
   console.log('#10 terminal key row');
   await evalJs(`app.openShellTerminal(); true`);

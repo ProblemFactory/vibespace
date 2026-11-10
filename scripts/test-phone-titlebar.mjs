@@ -386,7 +386,7 @@ console.log('§5 the wiring');
     return a > 0 && b > a && /more\.classList\.toggle\('vault-locked', loud\);/.test(f) && /m\.className = 'vault-gear-mark'; m\.setAttribute\('aria-hidden', 'true'\); m\.innerHTML = UI_ICONS\.lock \|\| '';/.test(f) && /more\.title = loud \? t\('More — Vault locked'\) : t\('More'\);/.test(f); };
   { const f = fitOf(mn), a = f.indexOf('    const loud = navMoreLoud('), b = f.indexOf('    this._barMo?.takeRecords();');
     pin('F1: the fit puts ⚙\'s lock on the ⋯ (PURE navMoreLoud over the fold and ⚙\'s own lock class: drawGearMark\'s mark, the red, «More — Vault locked») before it drops its own records — an unlock\'s broadcast takes it off', moreMark, a > 0 && b > a ? mn.replace(f, f.slice(0, a) + f.slice(b)) : null); }
-  const deskWords = (src) => /b\._door = \{ k: s\.k, n: s\.n, name: s\.name \};/.test(src) && /const facts = \{ desktops: this\.desktopsBtn\?\._door \|\| null,/.test(src);
+  const deskWords = (src) => /b\._door = \{ k: s\.k, n: s\.n, name: s\.name, waiting, waitingWords: waiting \? t\('\{n\} waiting for input', \{ n: waiting \}\) : '' \};/.test(src) && /const facts = \{ desktops: this\.desktopsBtn\?\._door \|\| null,/.test(src);
   pin('F3: the desktops row\'s words come from the chip\'s own state (updateDesktopsDoor: the place, the total, the name — what its label says)', deskWords,
     put(mn, 'const facts = { desktops: this.desktopsBtn?._door || null,', "const facts = { desktops: document.querySelector('#mobile-nav-desktops .mnav-badge:not(.hidden)')?.textContent || '',"));
   const patched = (src) => { const f = fitOf(src); return f.includes('if (this._moreMenu?.isConnected) this._syncMore();') && !/this\._openMore\(\)/.test(f)

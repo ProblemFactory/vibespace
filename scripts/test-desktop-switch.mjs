@@ -132,9 +132,9 @@ ok(M.otherDesktopWindows({ desktops: D, activeId: 'd1' }).length === 0 && M.othe
 console.log('⑥ wiring pins');
 {
   const pure = read('src/desktop-switch.js');
-  ok(!/\brequire\(|^\s*import\s/m.test(pure) && /module\.exports = \{ TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops \};/.test(pure), 'src/desktop-switch.js is PURE (imports nothing) and CommonJS (a root src/ module)');
+  ok(!/\brequire\(|^\s*import\s/m.test(pure) && /module\.exports = \{ windowWaits, waitingElsewhere, turnWaitStep, turnSeq, TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops \};/.test(pure), 'src/desktop-switch.js is PURE (imports nothing) and CommonJS (a root src/ module)');
   const sh = read('src/lib/desktop-switch-sheet.js');
-  ok(/import \{ desktopRows, switchVerdict, sheetItems, followDesktops \} from '\.\.\/desktop-switch\.js';/.test(sh) && /const desktops = drawn \? followDesktops\(\{ drawn, desktops: dm\.desktops \}\) : dm\.desktops;/.test(sh) && /return desktopRows\(\{ desktops, activeId: dm\.activeDesktopId, windowsByDesktop, heldByDesktop \}\);/.test(sh) && /const items = sheetItems\(rows, \{ t \}\)\.map\(\(s\) => \(s\.door === 'new'/.test(sh) && !/rowWords/.test(sh),
+  ok(/import \{ desktopRows, switchVerdict, sheetItems, followDesktops, windowWaits, waitingElsewhere \} from '\.\.\/desktop-switch\.js';/.test(sh) && /const desktops = drawn \? followDesktops\(\{ drawn, desktops: dm\.desktops \}\) : dm\.desktops;/.test(sh) && /return desktopRows\(\{ desktops, activeId: dm\.activeDesktopId, windowsByDesktop, heldByDesktop \}\);/.test(sh) && /const items = sheetItems\(rows, \{ t \}\)\.map\(\(s\) => \(s\.door === 'new'/.test(sh) && !/rowWords/.test(sh),
     'the sheet reads the model — one count, one set of words (its rows are PURE sheetItems: rowWords + the table\'s doors)');
   ok(/const menu = showContextMenu\(/.test(sh) && /menu\.classList\.add\('mobile-sheet'\)/.test(sh) && !/createModalShell|document\.createElement\('dialog'\)/.test(sh),
     'the sheet is the product\'s own (showContextMenu + the phone\'s .mobile-sheet) — no new component');
@@ -145,7 +145,7 @@ console.log('⑥ wiring pins');
   ok(/const after = \(\) => \(dm\.desktops\.some\(\(d\) => d\.id === desk\.id\) \? setTimeout\(\(\) => \{ if \(anchor\?\.isConnected\) openDesktopSheet\(app, anchor, \{ onSwitch \}\); \}, 0\) : onSwitch\(dm\.activeDesktopId\)\);/.test(sh),
     'a long press = the desktop\'s doors (⑨: THE builder, phone tier); once an act is done a delete re-shows the desktop on show (its windows moved to the next desktop), any other brings the sheet back on its new state');
   const mn = read('src/lib/mobile-nav.js');
-  ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id\) => this\.switchDesktop\(id\) \}\)/.test(mn) && /const s = doorState\(/.test(mn), 'the nav\'s Desktops button opens THE sheet; its badge / label are doorState\'s');
+  ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id, o\) => this\.switchDesktop\(id, o\) \}\)/.test(mn) && /const s = doorState\(/.test(mn), 'the nav\'s Desktops button opens THE sheet; its badge / label are doorState\'s');
   const tb = read('src/lib/taskbar.js');
   ok(/return otherDesktopWindows\(\{ desktops: dm\.desktops, activeId: dm\.activeDesktopId, built, held \}\);/.test(tb) && /if \(r\.built\) \{ app\.wm\.revealWindow\(r\.id\); return; \}/.test(tb) && /dm\.revealHeld\(r\.id, r\.deskId, /.test(tb) && /\n    wm\.revealWindow\?\.\(id\);\n  \}/.test(read('src/lib/desktop-manager.js')),
     'the ⧉ list\'s «Other desktops» rows are the model\'s and go through THE door (wm.revealWindow switches the desktop first; a held row = the desktop\'s deferred reveal, desktop-manager revealHeld → _revealWhenBuilt → the door — r8 of userW inc-mw1ogdno-5jny)');
@@ -518,6 +518,210 @@ console.log('⑬ ROUND 5 — a scrolled list keeps its offset: its cap lifts onl
     const red = offsetCensus(P2);
     ok(P2 !== place && red.length === 3, `RED CONTROL: 5a98bf0f's _placeList fails the census (${red.length}: ${red.join(' · ')})`, red);
   }
+}
+
+console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 17:10Z, phone: «在手机上那个闪烁功能不能 reflect 到 desktop 跟对话的那个下拉选单里，所以我并不能看出来现在有消息在等我。»)');
+{
+  const el = (on) => ({ element: { classList: { contains: (c) => on && c === 'window-waiting' } } });
+  ok(M.windowWaits(el(true)) === true && M.windowWaits(el(false)) === false && M.windowWaits(null) === false && M.windowWaits({}) === false && M.windowWaits({ element: {} }) === false,
+    'windowWaits = the window wears `window-waiting` (THE fact the taskbar, the title bar, the tab and the preview draw); anything else waits for nothing');
+  const DW = [{ id: 'a', name: 'Desk A' }, { id: 'b', name: 'Desk B' }];
+  const WB = { a: [{ id: 'a1', title: 'on show', z: 9 }, { id: 'a2', title: 'quiet', z: 5 }], b: [{ id: 'b1', title: 'top', z: 9 }, { id: 'b2', title: 'mid', z: 7 }, { id: 'b3', title: 'waits', z: 1, waiting: true }, { id: 'b4', title: 'low', z: 0 }] };
+  const rollUp = (Mod) => { const r = Mod.desktopRows({ desktops: DW, activeId: 'a', windowsByDesktop: WB, heldByDesktop: {} }); return { ok: r[1].waiting === 1 && JSON.stringify(r[1].titles) === '["waits","top","mid"]' && JSON.stringify(r[1].waitingIds) === '["b3"]' && r[0].waiting === undefined && r[0].waitingIds === undefined && JSON.stringify(r[0].titles) === '["on show","quiet"]', r }; };
+  const real = rollUp(M);
+  ok(real.ok, 'THE ROLL-UP: a desktop that holds a waiting conversation counts it and NAMES it first (beyond the three a stack order would show); a quiet desktop\'s row is unchanged', real.r);
+  const w1 = M.rowWords(real.r[1], { t: tt }), w0 = M.rowWords(real.r[0], { t: tt });
+  ok(w1.waiting === '1 waiting for input' && w0.waiting === undefined, 'its words: «{n} waiting for input» (the product\'s own words for the blink); none for a quiet desktop', [w1, w0]);
+  const si = M.sheetItems(real.r, { t: tt });
+  ok(si[1].waiting === '1 waiting for input' && si[0].waiting === undefined && si[1].sub.startsWith('waits'), 'the sheet\'s rows carry it (PURE sheetItems) — the waiting title leads the row\'s second line', si);
+  ok(M.desktopRows({ desktops: [{ id: 'g', name: 'Gone', gone: true }], windowsByDesktop: { g: [{ title: 'x', waiting: true }] } })[0].waiting === undefined, 'a desktop gone meanwhile shouts nothing (its row is greyed with its why)');
+  const wins = [{ id: 'x', waiting: true }, { id: 'y', waiting: true }, { id: 'z', waiting: false }];
+  ok(M.waitingElsewhere({ windows: wins, shownId: 'x' }) === 1 && M.waitingElsewhere({ windows: wins, shownId: 'q' }) === 2 && M.waitingElsewhere({}) === 0,
+    'THE CLOSED DOORS count what waits anywhere but ON SHOW — the conversation on show says it itself, never shouted twice');
+  // ONE SEAM: every surface that lists windows reads the fact through windowWaits — none reads the class itself
+  const READERS = { 'src/lib/taskbar.js': 4, 'src/lib/desktop-switch-sheet.js': 2, 'src/lib/mobile-nav.js': 3 };
+  const seam = (srcOf) => Object.entries(READERS).map(([f, min]) => { const x = srcOf(f).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''); return { f, via: (x.match(/windowWaits\(/g) || []).length, min, raw: (x.match(/contains\(['"]window-waiting['"]\)/g) || []).length }; });
+  const seamOk = (c) => c.every((r) => r.via >= r.min && r.raw === 0);
+  ok(seamOk(seam(read)), 'ONE SEAM shared with the taskbar: the taskbar\'s tiles and lists, the Desktops sheet and the nav read «waiting» only through windowWaits — no second derivation', seam(read));
+  const mn = read('src/lib/mobile-nav.js'), sh = read('src/lib/desktop-switch-sheet.js'), dmSrc = read('src/lib/desktop-manager.js');
+  const door = mn.slice(mn.indexOf('  updateDesktopsDoor() {'), mn.indexOf('\n  }\n', mn.indexOf('  updateDesktopsDoor() {')));
+  ok(/_renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dmSrc) && /const waiting = doorWaiting\(this\.app\);/.test(door) && /patchDesktopSheet\(this\.app\);/.test(door) && /this\._patchSwitcherWaiting\(\);/.test(door) && /this\._waitDot\(b, waiting > 0\);/.test(door) && /this\._paintWaitingMore\(\);/.test(door),
+    'LIVE on the taskbar\'s own funnel (updateTaskbar → _renderSwitcher → updateDesktopsDoor): the closed door, the ⋯, the open sheet and the open switcher follow every waiting toggle — no second event plumbing');
+  const patch = sh.slice(sh.indexOf('export function patchDesktopSheet('), sh.indexOf('\n}\n', sh.indexOf('export function patchDesktopSheet(')));
+  ok(!!patch && !/openDesktopSheet\(|innerHTML\s*=|replaceChildren|\.remove\(\)\s*;\s*$/m.test(patch.replace(/chip\.remove\(\)/g, '')) && /el\.classList\.toggle\('mdesk-waiting', on\)/.test(patch),
+    'the open sheet is PATCHED in place (its rows\' mark, words and titles line) — never rebuilt under a finger');
+  ok(/const n = \(this\._folded \|\| \[\]\)\.includes\('desktops'\) \? \(this\.desktopsBtn\?\._door\?\.waiting \|\| 0\) : 0;/.test(mn) && /this\._paintWaitingMore\(\); \/\/ lane phone-take-photo[^\n]*\n    this\._barMo\?\.takeRecords\(\);/.test(mn),
+    '⋯ says it only while it stands in for a FOLDED Desktops door (after every fold pass too)');
+  ok(/const wantId = show \|\| this\._shown\[desk\]/.test(mn) && /onSwitch\(r\.id, show \? \{ show \} : undefined\);/.test(sh),
+    'a row that says a conversation waits LANDS on it (the switch shows that conversation — its waiting then ends by its own road)');
+
+  // ── ⑪ r2 (主开发 00:43Z) ──
+  // ① THE FINISHED TURN'S MARK, the same on every client: two clients on one conversation (the person away from both)
+  {
+    const S0 = { why: [], waiting: false }, step = M.turnWaitStep;
+    const A1 = step(S0, 'end'), B1 = step(S0, 'end');
+    const A2 = step(A1, 'start'), B2 = step(B1, 'start');
+    ok(A1.waiting && B1.waiting && JSON.stringify(A1.why) === '["turn"]' && !A2.waiting && !B2.waiting && A2.why.length === 0 && B2.why.length === 0,
+      'TWO CLIENTS: the turn ends on both ⇒ both wait; the next turn starts (the person answered — on either device) ⇒ NEITHER waits, with no focus on the second', { A1, B1, A2, B2 });
+    const act = step(S0, 'end', { active: true });
+    ok(!act.waiting && act.why.length === 0, 'a client on which the conversation is the ACTIVE window never starts waiting (its turn ended in front of the person)', act);
+    const ask = step(step({ why: ['ask'], waiting: true }, 'end'), 'start');
+    ok(ask.waiting && JSON.stringify(ask.why) === '["ask"]', 'an ASK outlives the next turn\'s start (it is answered on its own road) — only the finished turn\'s reason goes', ask);
+    const seenA = step(A1, 'seen');
+    ok(!seenA.waiting && B1.waiting, 'THE RULE, per device: the person LOOKED at it on one device (seen) — the other still waits for them until a turn starts', { seenA, B1 });
+    ok(step({ why: ['turn'], waiting: false }, 'start').why.length === 0, 'a reason outlives no blink');
+    // r3 (主开发's tidy ①): the start is the TURN SEQUENCE's — a record of a turn past the completed one — never a label
+    const cv = read('src/lib/chat-view.js'), lab = cv.slice(cv.indexOf('  _onServerStreamLabel(label, kind) {'), cv.indexOf('\n  }\n', cv.indexOf('  _onServerStreamLabel(label, kind) {')));
+    const ts = cv.slice(cv.indexOf('  _turnStarted() {'), cv.indexOf('\n  }\n', cv.indexOf('  _turnStarted() {')));
+    ok(!!lab && !/_turnStarted\(/.test(lab) && /turnWaitStep\(\{ why: \[\.\.\.\(w\._waitWhy \|\| \[\]\)\], waiting: cl\.contains\('window-waiting'\) \}, 'start'\)/.test(ts) && /import \{ turnWaitStep, turnSeq \} from '\.\.\/desktop-switch\.js';/.test(cv)
+      && /this\._channelTouches\?\.noteTurn\(msg\.ts\);\n(?:\s*\/\/[^\n]*\n)*\s*this\._turnSeqNote\(\{ record: msg \}\);/.test(cv) && /this\._statusBar\.addCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);\n\s*this\._turnSeqNote\(\{ done: true \}\);/.test(cv)
+      && /_turnSeqNote\(ev\) \{\n\s*const r = turnSeq\(this\._turnSeqState, \{ \.\.\.ev, epoch: this\._normEpoch \}\);\n\s*this\._turnSeqState = r\.s;\n\s*if \(r\.starts\) this\._turnStarted\(\);/.test(cv),
+      'chat-view: every record (above the deferral, every path) and every completion feed PURE turnSeq; a record of a LATER turn ends the finished turn\'s mark through turnWaitStep — the activity label ends nothing (r3)');
+  }
+  // ── ⑪ r3 (主开发's tidy, 2026-11-11 04:03Z) ① A RECONNECT BETWEEN THE RESULT AND THE IDLE ERASED THE MARK FOR GOOD: the session
+  // stays «streaming» from the CLI's result to its idle (a background agent, a workflow, a background shell); r2 read every
+  // restated «streaming» as the next turn's start. LAW: the mark ends only when a turn that started AFTER the completion is seen.
+  {
+    const T = M.turnSeq, feed = (s0, evs) => evs.reduce((a, ev) => { const r = T(a.s, ev); return { s: r.s, starts: a.starts.concat(r.starts) }; }, { s: s0, starts: [] });
+    const rec = (role, turnIndex, x = {}) => ({ record: { role, turnIndex, ...x }, epoch: 'e1' }), fin = { done: true, epoch: 'e1' };
+    const run = feed(null, [rec('user', 7), rec('assistant', 7), fin, rec('assistant', 7), rec('user', 7), rec('user', 8, { imageAttachment: true }), rec('user', 8)]);
+    ok(JSON.stringify(run.starts) === '[false,false,false,false,false,false,true]',
+      'THE TURN\'S OWN SEQUENCE (PURE turnSeq): after a completion only a person-side record of a LATER turn starts one — the completed turn\'s own records (a tail, a replay) and a page-image attachment never do', run);
+    const ep = feed(null, [rec('user', 7), fin, { record: { role: 'user', turnIndex: 8 }, epoch: 'e2' }]);
+    ok(ep.starts.every((x) => !x), 'another normalization epoch numbers turns afresh: the completion\'s place is unknown there, nothing starts (the mark stays, as on master)', ep);
+    const none = feed(null, [rec('user', 8), rec('user', 9)]), once = feed(null, [rec('user', 7), fin, rec('user', 8), rec('user', 9)]);
+    ok(none.starts.every((x) => !x) && JSON.stringify(once.starts) === '[false,false,true,false]', 'no completion ⇒ nothing to end; one completion is ended once', { none, once });
+    const back = feed(null, [rec('user', 40), rec('assistant', 40), rec('user', 3), fin, rec('user', 12), rec('user', 40)]);
+    ok(back.starts.every((x) => !x), 'a reader scrolled back (an older page told after the newest) moves nothing: the completion is the HIGHEST turn told', back);
+  }
+  // r3 ① THE GAP on the REAL ChatView prototype (test-reattach-stagger's harness shape), two clients, the person away from both:
+  // the turn completes → each re-attaches IN THE GAP with isStreaming + «thinking...» (one by the held rung, one by the same-epoch
+  // catch-up) → a background tail's label → the idle ⇒ STILL waits on both → the next turn's record (live on one, a held resume's
+  // replay on the other) ⇒ quiet on both, with no focus. RED: the r2 reading (46dee2822: the label is a start) and the record unfed.
+  {
+    globalThis.requestAnimationFrame ||= (fn) => setTimeout(fn, 0);
+    const { pathToFileURL } = await import('node:url');
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const SID = 'sid-gap';
+    const gapView = (Proto) => {
+      const handlers = [], cls = new Set();
+      const element = { classList: { contains: (c) => cls.has(c), add: (c) => { cls.add(c); }, remove: (c) => { cls.delete(c); }, toggle: (c, on) => { const x = on === undefined ? !cls.has(c) : !!on; if (x) cls.add(c); else cls.delete(c); return x; } } };
+      const v = Object.create(Proto);
+      Object.assign(v, {
+        sessionId: SID, app: {}, winInfo: { element, _waitWhy: new Set(), _notifyChanged() { } },
+        ws: { send() { }, onGlobal(h) { handlers.push(h); }, offGlobal(h) { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); }, attachesInFlight: () => 0 },
+        _readOnly: false, _disconnected: false, _disposed: false, _suspended: false, _normEpoch: 'e1', _seqEpoch: 'e1', _lastSeq: 10, _serverOpSeq: 10,
+        _chatInput: { setDisconnected() { } }, _statusBar: { addCost() { }, setModel() { } }, _trace() { }, _noteTurnBoundary() { }, _hideTyping() { }, _showTyping() { }, _startCollabTick() { },
+        _applyInitHealth() { }, _applyLiveMeta() { }, applyStatus() { }, _noteRecordKind() { }, _reattachCatchUp() { }, _attachSlabHint: () => 'floor',
+        _teleported: true, _total: 0, _newMsgCount: 0, _scrollBtn: { innerHTML: '', classList: { remove() { } } }, _messages: [], _renderedMsgIds: new Set(), _elements: new Map(),
+      });
+      v.handlers = handlers; v.waits = () => cls.has('window-waiting');
+      return v;
+    };
+    const deliver = (v, frame) => { for (const h of [...v.handlers]) h(frame); };
+    const rec = (seq, id, role, turnIndex) => ({ type: 'msg', sessionId: SID, op: 'create', seq, message: { id, role, status: 'complete', turnIndex, content: [{ type: 'text', text: id }], ts: 1 } });
+    const fin = (seq) => ({ type: 'msg', sessionId: SID, op: 'meta', subtype: 'turn_complete', seq, data: { cost: 0, modelUsage: null } });
+    const scene = (Proto) => {
+      const A = gapView(Proto), B = gapView(Proto), both = [A, B], w = () => both.map((v) => v.waits());
+      const out = {};
+      try {
+        for (const v of both) { v._onOp(rec(11, 'u7', 'user', 7)); v._onOp(rec(12, 'a7', 'assistant', 7)); v._onOp(fin(13)); }
+        out.done = w();
+        A._reattach(true); deliver(A, { type: 'attached', sessionId: SID, normEpoch: 'e1', opSeq: 13, slab: 'held', replay: [], isStreaming: true, streamingLabel: 'thinking...' });
+        B._reattach(true); deliver(B, { type: 'attached', sessionId: SID, normEpoch: 'e1', opSeq: 13, totalCount: 2, messages: [], isStreaming: true, streamingLabel: 'thinking...' });
+        out.reattach = w();
+        for (const v of both) v._onServerStreamLabel('Running a background agent…', null);
+        out.tail = w();
+        for (const v of both) v._onServerStreamLabel('', null);
+        out.idle = w();
+        A._onOp(rec(14, 'u8', 'user', 8));
+        B._reattach(true); deliver(B, { type: 'attached', sessionId: SID, normEpoch: 'e1', opSeq: 14, slab: 'held', replay: [rec(14, 'u8', 'user', 8)], isStreaming: true, streamingLabel: 'thinking...' });
+        out.next = w();
+      } catch (e) { out.err = String(e && e.stack || e).slice(0, 400); }
+      out.gapHolds = !out.err && out.done.every(Boolean) && out.reattach.every(Boolean) && out.tail.every(Boolean) && out.idle.every(Boolean);
+      out.nextEnds = !out.err && out.next.every((x) => !x);
+      return out;
+    };
+    const { ChatView } = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-view.js')).href);
+    const g = scene(ChatView.prototype);
+    ok(g.gapHolds, 'THE GAP (the real ChatView, two clients): the turn completes ⇒ both wait; a re-attach IN THE GAP restates «streaming» + «thinking...» (the held rung on one, the same-epoch catch-up on the other), a background tail\'s label, the idle ⇒ STILL waits on both', g);
+    ok(g.nextEnds, '…and the NEXT turn\'s record (a turn past the completed one — live on one client, a held resume\'s replay on the other) ⇒ quiet on BOTH, with no focus', g);
+    const MC = mutantCopies('desktop-switch-gap', REPO), cvSrc = read('src/lib/chat-view.js');
+    const labelNeedle = "      this._startCollabTick();\n", recNeedle = '    this._turnSeqNote({ record: msg });\n';
+    ok(cvSrc.split(labelNeedle).length === 2 && cvSrc.split(recNeedle).length === 2, 'the two RED patch sites exist');
+    const r2Shape = await import(pathToFileURL(MC.write('src/lib/chat-view.js', cvSrc.replace(labelNeedle, labelNeedle + '      this._turnStarted();\n'), 'label-is-a-start')).href);
+    const gR = scene(r2Shape.ChatView.prototype);
+    ok(!gR.gapHolds && gR.done.every(Boolean) && gR.reattach.every((x) => !x), 'RED (46dee2822\'s reading — the activity label is a start): the re-attach IN THE GAP erases the mark on both, and nothing brings it back ⇒ «THE GAP» red by name', gR);
+    const unfed = await import(pathToFileURL(MC.write('src/lib/chat-view.js', cvSrc.replace(recNeedle, ''), 'record-unfed')).href);
+    const gU = scene(unfed.ChatView.prototype);
+    ok(gU.gapHolds && !gU.nextEnds, 'RED (the record never fed to the turn sequence): the next turn\'s record no longer ends the mark ⇒ «…and the NEXT turn» red by name', gU);
+  }
+  // r3 ② THE SWITCHER'S DESKTOP TAB said it waits: its landing is seeing when it lands on the waiting conversation
+  {
+    const mn = read('src/lib/mobile-nav.js');
+    ok(/tab\.onclick = desk\.gone \? [^\n]*this\.switchDesktop\(desk\.id, \{ seeing: true \}\)\.then\(afterSwitch\);/.test(mn) && /switchDesktop\(id, \{ show = null, seeing = false \} = \{\}\)/.test(mn)
+      && /this\._showOnDesk\(id, show, seeing\), \(\) => this\._showOnDesk\(id, show, seeing\)/.test(mn) && /if \(show && wantId === show\) this\._seen\(show\); else if \(seeing && windowWaits\(want\)\) this\._seen\(wantId\);/.test(mn),
+      'THE SWITCHER\'S DESKTOP TAB (it wore the dot): its landing on the desktop\'s remembered window IS seeing it when that is the waiting conversation (r3 ②; the Chrome leg in test-mobile-gaps #W)');
+  }
+  // ⑤ PIN THE EXCLUSION — each half on its own: the sheet's rows (sheetRows) and the closed door's count (doorWaiting) never count the one on show
+  {
+    const cls = (on) => ({ contains: (c) => on && c === 'window-waiting' });
+    const mkApp = () => ({ desktopManager: { desktops: [{ id: 'd1', name: 'One' }, { id: 'd2', name: 'Two' }], activeDesktopId: 'd1', _savedStates: new Map() },
+      wm: { activeWindowId: 'shown', windows: new Map([
+        ['shown', { id: 'shown', _desktopId: 'd1', title: 'on show', element: { classList: cls(true), style: { zIndex: '9' } } }],
+        ['here', { id: 'here', _desktopId: 'd1', title: 'here waits', element: { classList: cls(true), style: { zIndex: '5' } } }],
+        ['host', { id: 'host', _desktopId: 'd2', title: 'host', element: { classList: cls(false), style: { zIndex: '50' } } }],
+        ['guest', { id: 'guest', _desktopId: 'd2', title: 'guest waits', _tabChain: { tabs: ['host', 'guest'] }, element: { classList: cls(true), style: { zIndex: '1' } } }],
+        ['other', { id: 'other', _desktopId: 'd2', title: 'other waits', element: { classList: cls(true), style: { zIndex: '20' } } }],
+      ]) } });
+    const sheetSrc = read('src/lib/desktop-switch-sheet.js');
+    const loadSheet = async (src) => { const d = fs.mkdtempSync(path.join((await import('node:os')).tmpdir(), 'vs-wd2-')), f = path.join(d, 'sheet.mjs');
+      const abs = (rel) => 'file://' + path.join(REPO, rel);
+      fs.writeFileSync(f, src.replace(/from '\.\/([^']+)'/g, (m, x) => `from '${abs('src/lib/' + x)}'`).replace(/from '\.\.\/([^']+)'/g, (m, x) => `from '${abs('src/' + x)}'`));
+      try { return await import('file://' + f + '?v=' + Math.random()); } finally { fs.rmSync(d, { recursive: true, force: true }); } };
+    const judge = (SH) => { const app = mkApp(), rows = SH.sheetRows(app); return { rowsOk: rows[0].waiting === 1 && rows[0].titles[0] === 'here waits' && rows[1].waiting === 2, doorOk: SH.doorWaiting(app) === 3, rows, door: SH.doorWaiting(app) }; };
+    const real = judge(await loadSheet(sheetSrc));
+    ok(real.rowsOk, 'THE SHEET\'S HALF: a desktop\'s roll-up never counts the conversation on show (this desktop: 1 — «here waits» — not 2)', real.rows.map((r) => [r.id, r.waiting, r.titles]));
+    ok(real.doorOk, 'THE DOOR\'S HALF: the closed door counts what waits anywhere but on show (3, not 4)', real.door);
+    const mSheet = judge(await loadSheet(sheetSrc.replace('waiting: windowWaits(w) && w.id !== wm.activeWindowId });', 'waiting: windowWaits(w) });')));
+    ok(!mSheet.rowsOk && mSheet.doorOk, 'RED: the sheet counting the one on show ⇒ the sheet\'s half red by name (the door\'s stands)', mSheet.rows.map((r) => [r.id, r.waiting]));
+    const mDoor = judge(await loadSheet(sheetSrc.replace('waiting: windowWaits(w) })), shownId: wm.activeWindowId }) : 0;', 'waiting: windowWaits(w) })), shownId: null }) : 0;')));
+    ok(!mDoor.doorOk && mDoor.rowsOk, 'RED: the door counting the one on show ⇒ the door\'s half red by name (the sheet\'s stands)', mDoor.door);
+    // ③ THE TAP LANDS WHERE THE ROW SAYS: ONE order (a tab-group guest ranks by its frame's z for the title AND the landing); live facts
+    const r2 = real.rows[1];
+    ok(r2.titles[0] === 'guest waits' && r2.waitingIds[0] === 'guest', 'ONE ORDER: the title the row names first IS the conversation its tap lands on (a guest ranked by its host\'s z, both ways)', { titles: r2.titles, ids: r2.waitingIds });
+    const go = sheetSrc.slice(sheetSrc.indexOf('  const go = (r) => {'), sheetSrc.indexOf('  };', sheetSrc.indexOf('  const go = (r) => {')));
+    ok(/const live = sheetRows\(app\)\.find\(\(x\) => x\.id === r\.id\), show = live && live\.waiting \? \(live\.waitingIds \|\| \[\]\)\[0\] \|\| null : null;/.test(go) && !/zIndex|sort\(/.test(go),
+      'the landing reads the SAME live rows the patch draws (a row that started waiting after the open lands on it) — no order of its own');
+  }
+  // ② a landing through a door that said «it waits» IS seeing it (on this device); ④ ⋯ says the words
+  {
+    const mn = read('src/lib/mobile-nav.js');
+    ok(/if \(show && wantId === show\) this\._seen\(show\);/.test(mn) && /item\.addEventListener\('click', \(\) => \{ if \(item\.classList\.contains\('waiting'\)\) this\._seen\(win\.id\); \}\);/.test(mn)
+      && /_seen\(id\) \{[\s\S]{0,260}v\._clearWaiting\(\);[\s\S]{0,120}v\._setWaiting\(false, \{ seen: true \}\);/.test(mn),
+      'REACHING IT THROUGH A DOOR THAT SAID «IT WAITS» IS SEEING IT: the sheet\'s landing and the switcher row\'s tap acknowledge it through the view\'s own road');
+    const TC = await import(new URL('../src/lib/title-chips.js', import.meta.url).href);
+    const rows = TC.navMoreRows(['desktops', 'gear'], { desktops: { k: 1, n: 2, name: 'One', waiting: 2, waitingWords: '2 waiting for input' } }), d = rows.find((r) => r.key === 'desktops');
+    const quiet = TC.navMoreRows(['desktops'], { desktops: { k: 1, n: 2, name: 'One', waiting: 0, waitingWords: '' } })[0];
+    ok(d && d.value === '1/2 · One · 2 waiting for input' && d.waiting === true && quiet.value === '1/2 · One' && quiet.waiting === undefined,
+      '⋯\'s Desktops row says what its door says — «1/2 · One · 2 waiting for input», marked; a quiet door\'s row unchanged', { d, quiet });
+    ok(/const base = more\._name \|\| t\('More'\), title = n \? base \+ ' · ' \+ t\('\{n\} waiting for input', \{ n \}\) : base;/.test(mn)
+      && /more\.title = loud \? t\('More — Vault locked'\) : t\('More'\); more\._name = more\.title;/.test(mn) && (mn.match(/t\('More — Vault locked'\)/g) || []).length === 1,
+      '⋯ standing in for the folded door SAYS it in its name (its dot is aria-hidden) — after the name the lock pass gave it (ONE site says «More — Vault locked»)');
+    ok(/tab\.textContent = desk\.gone \? [^\n]*\n[^\n]*tab\.classList\.add\('waiting'\); this\._waitDot\(tab, true\);/.test(mn)
+      && !/tab\.classList\.add\('waiting'\); this\._waitDot\(tab, true\);[\s\S]{0,600}tab\.textContent = desk\.gone/.test(mn),
+      'the switcher tab\'s standing dot is drawn AFTER its words (`textContent` wipes children — the first heavy run of #W r2 found the tab dot-less)');
+  }
+  // RED controls (planted copies): the roll-up dropped ⇒ the roll-up row red; a second derivation in the nav ⇒ the seam red
+  const os = await import('node:os'), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wd-')), mf = path.join(dir, 'desktop-switch.js');
+  try {
+    const pure = read('src/desktop-switch.js'), from = ', ...(waiting.length ? { waiting: waiting.length, waitingIds: [...waiting].sort(byZ).map((w) => w.id).filter((x) => x != null).map(String) } : {}) };';
+    fs.writeFileSync(mf, pure.replace(from, ' };'));
+    const mutant = pure.includes(from) ? rollUp(require(mf)) : { ok: true };
+    ok(!mutant.ok, 'RED: the roll-up dropped from desktopRows ⇒ «THE ROLL-UP» red by name', mutant.r ? mutant.r[1] : 'the line was not found');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const planted = seam((f) => (f === 'src/lib/mobile-nav.js' ? read(f).replace('if (win.id !== wm.activeWindowId && windowWaits(win)) { item.classList.add', "if (win.id !== wm.activeWindowId && win.element.classList.contains('window-waiting')) { item.classList.add") : read(f)));
+  ok(!seamOk(planted), 'RED: a second derivation of «waiting» in the nav (its own class read) ⇒ the seam red', planted);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

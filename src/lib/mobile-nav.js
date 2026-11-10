@@ -10,8 +10,8 @@ import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 import { installNavFilesDoor, filesDoorWindow, filesDoorName } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
-import { openDesktopSheet, untilGone } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
-import { doorState, followDesktops } from '../desktop-switch.js';
+import { openDesktopSheet, untilGone, patchDesktopSheet, doorWaiting } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
+import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
 
@@ -275,8 +275,9 @@ export class MobileNav {
       more.classList.toggle('vault-locked', loud);
       more.querySelector(':scope > .vault-gear-mark')?.remove();
       if (loud) { const m = document.createElement('span'); m.className = 'vault-gear-mark'; m.setAttribute('aria-hidden', 'true'); m.innerHTML = UI_ICONS.lock || ''; more.appendChild(m); }
-      more.title = loud ? t('More — Vault locked') : t('More'); more.setAttribute('aria-label', more.title);
+      more.title = loud ? t('More — Vault locked') : t('More'); more._name = more.title; more.setAttribute('aria-label', more.title);
     }
+    this._paintWaitingMore(); // lane phone-take-photo: ⋯ standing in for a folded Desktops door says what it would say
     this._barMo?.takeRecords(); // the pass's own writes are no change of the bar's inputs
     this._publishUnder(); // r4: every phone surface under the bar as it stands now
     if (this._moreMenu?.isConnected) this._syncMore(); // r3: an open ⋯ is PATCHED by key — never rebuilt under a finger
@@ -348,6 +349,7 @@ export class MobileNav {
       if (icon._glyph !== g) { icon.innerHTML = g; icon._glyph = g; }
       icon.classList.toggle('mnav-more-ring', r.key === 'usage');
       row.classList.toggle('vault-locked', r.loud);
+      row.classList.toggle('mnav-more-waiting', !!r.waiting); this._waitDot(row, !!r.waiting); // r2 (主开发 ④): the Desktops row says what its door says
       if (label.textContent !== r.label) label.textContent = r.label;
       if (val.textContent !== r.value) val.textContent = r.value;
     }
@@ -361,7 +363,7 @@ export class MobileNav {
     const el = document.getElementById(Object.keys(NAV_KEYS).find((id) => NAV_KEYS[id] === key) || '');
     if (!el) return {};
     const svg = () => el.querySelector('svg')?.outerHTML || '';
-    if (key === 'desktops') return { el, glyph: svg, label: t('Desktops'), run: () => openDesktopSheet(app, el, { onSwitch: (id) => this.switchDesktop(id) }) };
+    if (key === 'desktops') return { el, glyph: svg, label: t('Desktops'), run: () => openDesktopSheet(app, el, { onSwitch: (id, o) => this.switchDesktop(id, o) }) };
     if (key === 'usage') return { el, glyph: () => el.innerHTML, label: t('Usage'), run: () => el.click() };
     if (key === 'gear') return { el, glyph: () => el.innerHTML, label: t('Settings'), run: () => app._pressGlobalSettings(el) };
     if (key === 'vault') return { el, glyph: svg, label: t('Vault locked'), run: () => el.click() };
@@ -380,7 +382,7 @@ export class MobileNav {
     b.id = 'mobile-nav-desktops'; b.type = 'button'; b.className = 'mnav-dest mnav-desktops';
     b.innerHTML = UI_ICONS.desktops;
     const badge = document.createElement('span'); badge.className = 'mnav-badge hidden'; b.appendChild(badge);
-    b.onclick = (e) => { e.stopPropagation(); openDesktopSheet(this.app, b, { onSwitch: (id) => this.switchDesktop(id) }); };
+    b.onclick = (e) => { e.stopPropagation(); openDesktopSheet(this.app, b, { onSwitch: (id, o) => this.switchDesktop(id, o) }); };
     const usage = document.getElementById('mobile-nav-usage');
     if (usage && usage.parentNode === nav) nav.insertBefore(b, usage); else nav.appendChild(b);
     return b;
@@ -392,32 +394,82 @@ export class MobileNav {
     const b = this.desktopsBtn, dm = this.app.desktopManager;
     if (!b) return;
     const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: d.name, active: d.id === dm.activeDesktopId })));
-    const label = s.k ? t('Desktops — {name} ({k}/{n})', { name: s.name, k: s.k, n: s.n }) : t('Desktops');
-    b._door = { k: s.k, n: s.n, name: s.name }; // the ⋯ row's words (r3): the PLACE of the total and the name, as the label says them
+    // THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 17:10Z: «我并不能看出来现在有消息在等我»): something waits for
+    // the person somewhere they are not looking ⇒ the closed door says it — a yellow dot and its words — so they need not open
+    // the sheet to find out; the conversation ON SHOW is never counted (it says it itself). THE waiting fact (windowWaits).
+    const waiting = doorWaiting(this.app); // r2 (主开发 ⑤): THE door's count — its exclusion of the one on show pinned on its own
+    const label = (s.k ? t('Desktops — {name} ({k}/{n})', { name: s.name, k: s.k, n: s.n }) : t('Desktops')) + (waiting ? ' · ' + t('{n} waiting for input', { n: waiting }) : '');
+    b._door = { k: s.k, n: s.n, name: s.name, waiting, waitingWords: waiting ? t('{n} waiting for input', { n: waiting }) : '' }; // the ⋯ row's words (r3): the PLACE of the total and the name, as the label says them
+    this._waitDot(b, waiting > 0);
+    this._paintWaitingMore();
+    // …and every OPEN list that names a waiting conversation follows — patched in place, on the taskbar's own funnel
+    patchDesktopSheet(this.app);
+    this._patchSwitcherWaiting();
     if (b.title !== label) { b.title = label; b.setAttribute('aria-label', label); }
     const badge = b.querySelector('.mnav-badge');
     if (badge && badge.textContent !== s.badge) { badge.textContent = s.badge; badge.classList.toggle('hidden', !s.badge); }
   }
 
+  /** A door's waiting mark (lane phone-take-photo): the class and ONE yellow dot (aria-hidden — the door's label says it). */
+  _waitDot(el, on) {
+    if (!el) return;
+    el.classList.toggle('mnav-waiting', !!on);
+    const dot = el.querySelector(':scope > .mnav-wait-dot');
+    if (on && !dot) { const d = document.createElement('span'); d.className = 'mnav-wait-dot'; d.setAttribute('aria-hidden', 'true'); el.appendChild(d); }
+    else if (!on && dot) dot.remove();
+  }
+
+  /** ⋯ stands in for a FOLDED Desktops door ⇒ it says what that door would say (navMoreLoud's sibling): the dot while something
+   *  waits elsewhere; never while Desktops stands on the bar (it says it itself). */
+  _paintWaitingMore() {
+    const more = document.getElementById('mobile-nav-overflow');
+    if (!more) return;
+    const n = (this._folded || []).includes('desktops') ? (this.desktopsBtn?._door?.waiting || 0) : 0;
+    this._waitDot(more, n > 0);
+    // r2 (主开发 ④): the dot is aria-hidden — ⋯'s NAME says the words, after the name the lock pass gave it (`_name`: the ONE
+    // site that says «More — Vault locked»; never re-derived here)
+    const base = more._name || t('More'), title = n ? base + ' · ' + t('{n} waiting for input', { n }) : base;
+    if (more.title !== title) { more.title = title; more.setAttribute('aria-label', title); }
+    if (this._moreMenu?.isConnected) this._paintMore(); // an open ⋯ menu's Desktops row follows (patched by key)
+  }
+
+  /** REACHING A CONVERSATION THROUGH A DOOR THAT SAID «IT WAITS» IS SEEING IT (lane phone-take-photo r2 (主开发 ②)): the landing
+   *  acknowledges it on THIS device exactly as a press inside it does — through the view's own road (chat-view _clearWaiting,
+   *  terminal _setWaiting(false, { seen })). Another device keeps its own mark (the rule, per device). */
+  _seen(id) {
+    const v = this.app.sessions && typeof this.app.sessions.get === 'function' ? this.app.sessions.get(id) : null;
+    if (v && typeof v._clearWaiting === 'function') v._clearWaiting();
+    else if (v && typeof v._setWaiting === 'function') v._setWaiting(false, { seen: true });
+  }
+
+  /** The open title switcher follows the waiting fact IN PLACE (lane phone-take-photo): a conversation row, a desktop tab. */
+  _patchSwitcherWaiting() {
+    const p = document.querySelector('.mobile-win-switcher');
+    if (!p) return;
+    const wm = this.app.wm, shown = wm.activeWindowId, waits = (w) => !!w && w.id !== shown && windowWaits(w);
+    for (const row of p.querySelectorAll('.mobile-win-row[data-win-id]')) { const on = waits(wm.windows.get(row.dataset.winId)); row.classList.toggle('waiting', on); this._waitDot(row, on); }
+    for (const tab of p.querySelectorAll('.mobile-desk-tab[data-desktop-id]')) { const on = [...wm.windows.values()].some((w) => w._desktopId === tab.dataset.desktopId && waits(w)); tab.classList.toggle('waiting', on); this._waitDot(tab, on); }
+  }
+
   /** Switch this tab to desktop `id` by the manager's road (the Stage left first, as the taskbar's preview does), then show
    *  that desktop's window on show (§6b guard 10): the one this tab showed there, else its topmost — a lazy replay lands
    *  later, so it looks again for a few seconds unless the person picked a window meanwhile. */
-  switchDesktop(id) {
+  switchDesktop(id, { show = null, seeing = false } = {}) { // `show` (lane phone-take-photo): a waiting row's conversation — the switch lands on it; `seeing` (r3): a door that said «it waits» (the switcher's tab) — landing on a waiting one is seeing it
     const app = this.app, dm = app.desktopManager;
     if (!dm || !id) return Promise.resolve();
     const go = app.stage?.isActive ? app.stage.leave(id) : id === dm.activeDesktopId ? null : dm.switchTo(id);
-    return Promise.resolve(go).then(() => this._showOnDesk(id), () => this._showOnDesk(id));
+    return Promise.resolve(go).then(() => this._showOnDesk(id, show, seeing), () => this._showOnDesk(id, show, seeing));
   }
 
-  _showOnDesk(desk) {
+  _showOnDesk(desk, show = null, seeing = false) {
     const app = this.app, wm = app.wm, dm = app.desktopManager;
-    const wantId = this._shown[desk], since = app.layoutManager?._lastUserInputAt || 0;
+    const wantId = show || this._shown[desk], since = app.layoutManager?._lastUserInputAt || 0;
     const here = (w) => !!w && w._desktopId === desk && !w._hiddenByDesktop && !w._hiddenByStage;
     let tries = 0;
     const look = () => {
       if (dm.activeDesktopId !== desk) return; // another switch since
       const want = wantId && wm.windows.get(wantId);
-      if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); this.updateTitle(); return; }
+      if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); if (show && wantId === show) this._seen(show); else if (seeing && windowWaits(want)) this._seen(wantId); this.updateTitle(); return; } // r2 (主开发 ②): a landing on a waiting conversation is seeing it
       if (!here(wm.windows.get(wm.activeWindowId))) wm._focusMostRecent();
       this.updateTitle();
       if ((wantId || !here(wm.windows.get(wm.activeWindowId))) && ++tries < 16 && (app.layoutManager?._lastUserInputAt || 0) === since) setTimeout(look, 250);
@@ -610,12 +662,14 @@ export class MobileNav {
         for (const desk of tabsDrawn) {
           const tab = document.createElement('button');
           tab.className = 'mobile-desk-tab';
+          tab.dataset.desktopId = desk.id;
           const isActive = !desk.gone && desk.id === dm.activeDesktopId;
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
           tab.textContent = desk.gone ? desk.name : `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
+          if (!desk.gone && [...wm.windows.values()].some((w) => w._desktopId === desk.id && w.id !== wm.activeWindowId && windowWaits(w))) { tab.classList.add('waiting'); this._waitDot(tab, true); } // the roll-up (lane phone-take-photo) — r2: a standing dot too, drawn AFTER the words (textContent wipes children)
           tab.title = dm._doorLabel('switch', desk.id, desk.name); // the tab IS the switch door: the table's words (a gone one's: its why, by the name it showed)
           tab.style.cssText = tabCss(isActive) + (desk.gone ? ';opacity:0.5' : '');
-          tab.onclick = desk.gone ? () => dm._doorRefused(desk, 'switch') : () => { this.switchDesktop(desk.id).then(afterSwitch); }; // a gone one: the table's why (r3 ④); the window on show follows the desktop (§6b guard 10)
+          tab.onclick = desk.gone ? () => dm._doorRefused(desk, 'switch') : () => { this.switchDesktop(desk.id, { seeing: true }).then(afterSwitch); }; // a gone one: the table's why (r3 ④); the window on show follows the desktop (§6b guard 10)
           tab.addEventListener('contextmenu', (e) => {
             e.preventDefault(); e.stopPropagation();
             // once an act is done (never after a cancel): a delete re-shows the desktop on show, any other re-draws the tabs
@@ -681,6 +735,12 @@ export class MobileNav {
   _buildWindowItem(win, wm, close, rerender) {
     const item = document.createElement('div');
     item.className = 'mobile-win-row';
+    item.dataset.winId = win.id;
+    // the waiting fact (lane phone-take-photo): a conversation that waits for the person blinks here as on the desk's chooser —
+    // never the one on show; _patchSwitcherWaiting keeps it live while the list is open
+    if (win.id !== wm.activeWindowId && windowWaits(win)) { item.classList.add('waiting'); this._waitDot(item, true); } // r2: a standing dot too (reduced motion keeps it)
+    // r2 (主开发 ②): a tap on a row that SAID «it waits» is seeing it (the row's own tap stays the switcher's one close + reveal)
+    item.addEventListener('click', () => { if (item.classList.contains('waiting')) this._seen(win.id); });
     item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s';
     if (win.id === wm.activeWindowId) item.style.background = 'var(--accent-dim)';
     // Long-press → the window's own menu (design-mobile-gaps #7/#22): the

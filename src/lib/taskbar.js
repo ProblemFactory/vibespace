@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 import { terminalOnly, windowListMark } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
-import { otherDesktopWindows } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
+import { otherDesktopWindows, windowWaits } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
 import { warmthDrawn, warmthRows, paintTile, paintOverflowChip, paintListRow, byRowTimeLeft, tileIds } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the rings, the «+N» dot, the lists' bands
 
 /** The ⧉ list's «Other desktops» group: folded (the active desktop's windows stay the list's view) until opened; this page's. */
@@ -282,7 +282,7 @@ function _rebuildTaskbarItems(app, container, entries) {
     if (group) { _buildGroupItem(app, container, item, win, starPrefix, group); continue; }
     if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
     if (win.isMinimized) item.classList.add('minimized');
-    if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
+    if (windowWaits(win)) item.classList.add('waiting'); // THE waiting fact (desktop-switch.js windowWaits — the phone's doors read it too)
     if (win.element.classList.contains('window-arrived')) item.classList.add('arrived'); // an agent placed it (window.js markArrived)
     // Icon: clone the window's backend+mode icon if available, else use type emoji
     const icon = document.createElement('span');
@@ -468,7 +468,7 @@ function _applyTaskbarItemState(app, el) {
   const ids = el.dataset.groupTabs ? el.dataset.groupTabs.split(',') : [hostId];
   el.classList.toggle('active', ids.includes(app.wm.activeWindowId) && !win.isMinimized);
   el.classList.toggle('minimized', win.isMinimized);
-  el.classList.toggle('waiting', ids.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting')));
+  el.classList.toggle('waiting', ids.some(tid => windowWaits(app.wm.windows.get(tid))));
   el.classList.toggle('arrived', ids.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-arrived')));
 }
 
@@ -757,7 +757,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     if (tid === activeId) { item.classList.add('active'); item.setAttribute('aria-current', 'true'); }
     // carry the waiting blink into the list — the stacked icon only says "one
     // of these is waiting"; the row says WHICH
-    if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
+    if (windowWaits(win)) item.classList.add('waiting');
     const icon = document.createElement('span');
     icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
     icon.appendChild(_cloneTabIcon(win));
@@ -914,7 +914,7 @@ export function showWindowList(app, anchor, opts = {}) {
       // waiting blink — for a tab-group host, aggregate over ALL its tabs
       // (guests are skipped from this list, so the host row speaks for them)
       const tabIds = win._tabChain ? win._tabChain.tabs : [id];
-      if (tabIds.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting'))) item.classList.add('waiting');
+      if (tabIds.some(tid => windowWaits(app.wm.windows.get(tid)))) item.classList.add('waiting');
 
       const icon = document.createElement('span');
       icon.appendChild(windowListMark(win, { className: 'window-backend-icon' })); // its harness's mark (lane phone-take-photo)

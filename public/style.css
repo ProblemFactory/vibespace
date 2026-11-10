@@ -2404,6 +2404,26 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   0%,100% { opacity: 0; }
   50% { opacity: 1; }
 }
+/* THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10: «在手机上那个闪烁功能不能 reflect 到 desktop 跟对话的那个下拉选单里»):
+   the phone's lists blink like the desk's chooser rows — the title switcher's conversation row and desktop tab, the Desktops
+   sheet's desktop row — and none is state-coloured (a row's warmth tier is its band, never its fill), so each blinks yellow by
+   the strip's blink law (闪烁和颜色互不干扰). The closed doors (the Desktops button; ⋯ when Desktops is folded into it) wear
+   a yellow dot that blinks; under reduced motion the global rule runs one cycle and the dot stands still (its own opacity
+   is 1), and every door's words say it too. */
+.mobile-win-row.waiting, .mobile-desk-tab.waiting, .mdesk-menu .context-menu-item.mdesk-waiting { position: relative; }
+.mobile-win-row.waiting::after, .mobile-desk-tab.waiting::after, .mdesk-menu .context-menu-item.mdesk-waiting::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  animation: blink-fade 0.7s ease-in-out infinite; will-change: opacity; opacity: 0; background: rgba(250,180,40,0.4);
+}
+.mnav-waiting { position: relative; }
+.mnav-wait-dot { position: absolute; left: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow, #e5c07b); pointer-events: none; animation: blink-fade 0.7s ease-in-out infinite reverse; }
+.mdesk-wait { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; color: var(--yellow, #e5c07b); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.mdesk-wait .mnav-wait-dot { position: static; }
+/* r2 (主开发, smaller): a switcher row / tab carries a standing dot beside its blink — under reduced motion the overlay's one cycle
+   ends at opacity 0, the dot (opacity 1) stays; the ⋯ menu's Desktops row says the words in the dot's colour */
+.mobile-win-row > .mnav-wait-dot, .mobile-desk-tab > .mnav-wait-dot { left: 6px; top: 6px; z-index: 1; }
+.mnav-more-waiting > .mnav-wait-dot { left: 6px; top: 6px; }
+.mnav-more-waiting .mnav-more-value { color: var(--yellow); }
 
 /* ── Command Mode Indicator ── */
 #cmd-indicator { display: none; padding: 1px 8px; font-size: 10px; font-weight: 700; border-radius: var(--radius-sm); margin-right: 6px; }

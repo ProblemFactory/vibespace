@@ -693,6 +693,11 @@ console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiti
     ['.taskbar-item.waiting::after', 'a taskbar tile — the tier is a ring on its icon', 'yellow'],
     ['.tab-item.waiting::after', 'a tab — the tier is a child band', 'yellow'],
     ['.overlap-switcher-item.waiting::after', 'a chooser row — the tier is a ring', 'yellow'],
+    // lane phone-take-photo (the owner 2026-11-10: «闪烁功能不能 reflect 到 desktop 跟对话的那个下拉选单里»): the phone's doors
+    ['.mobile-win-row.waiting::after', 'a phone switcher row — the tier is its band', 'yellow'],
+    ['.mobile-desk-tab.waiting::after', 'a phone switcher desktop tab — no state colour', 'yellow'],
+    ['.mdesk-menu .context-menu-item.mdesk-waiting::after', 'a Desktops-sheet row — no state colour', 'yellow'],
+    ['.mnav-wait-dot', 'a closed door\'s dot (the Desktops button, ⋯) — no state colour', 'yellow'],
   ];
   /** an ::after blink's chain: [the pseudo-element (its host's classes, to match `.host::after`), the host, …, html] */
   const hostChain = (sel, tier, theme = 'dark') => {
@@ -702,8 +707,12 @@ console.log('— ⑫ the strip\'s blink law (lane desktop-blink-colour): a waiti
       '.taskbar-item.waiting::after': [node('div', ['taskbar-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', [], {}, { id: 'taskbar-items' })],
       '.tab-item.waiting::after': [node('div', ['tab-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', ['window-titlebar'], t), node('div', ['window'])],
       '.overlap-switcher-item.waiting::after': [node('div', ['overlap-switcher-item', 'waiting'], { 'data-win-id': 'w1' }), node('div', ['overlap-switcher'])],
+      '.mobile-win-row.waiting::after': [node('div', ['mobile-win-row', 'waiting'], { 'data-win-id': 'w1', ...t }), node('div', [], {}, { id: 'mobile-win-list' }), node('div', ['mobile-win-switcher'])],
+      '.mobile-desk-tab.waiting::after': [node('button', ['mobile-desk-tab', 'waiting'], { 'data-desktop-id': 'd1', ...t }), node('div', ['mobile-desk-tabs']), node('div', ['mobile-win-switcher'])],
+      '.mdesk-menu .context-menu-item.mdesk-waiting::after': [node('div', ['context-menu-item', 'mdesk-waiting'], { 'data-desktop-id': 'd1', ...t }), node('div', ['context-menu', 'mdesk-menu', 'mobile-sheet'])],
+      '.mnav-wait-dot': [node('span', ['mnav-wait-dot']), node('button', ['mnav-dest', 'mnav-desktops', 'mnav-waiting'], t, { id: 'mobile-nav-desktops' }), node('div', [], {}, { id: 'mobile-nav' })],
     }[sel];
-    return [{ ...up[0], pseudo: 'after' }, ...up, node('body', []), html(theme)];
+    return [...(sel.includes('::after') ? [{ ...up[0], pseudo: 'after' }] : []), ...up, node('body', []), html(theme)]; // a dot blinks itself — no pseudo
   };
   const TIERS = [['fresh', '--green', 'green blinks green'], ['critical', '--red', 'red blinks red'], ['mid', '--blue', 'blue blinks blue'], ['late', '--yellow', 'amber blinks amber'], ['expired', null, 'grey blinks grey']];
   /** THE LAW over one scanned sheet → a row by id ({ pass, detail }), each computed when first asked (a planted copy asks

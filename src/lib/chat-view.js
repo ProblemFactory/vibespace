@@ -3,6 +3,7 @@ import { parseSetModelEcho } from '../model-echo.js'; // the ONE /model echo par
 import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
 import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
+import { turnWaitStep, turnSeq } from '../desktop-switch.js'; // lane phone-take-photo r2/r3 (主开发 ①): the finished turn's mark, the same on every client, ended by the turn sequence (PURE)
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
@@ -4184,6 +4185,10 @@ class ChatView {
     // §26 (B-099e): a LIVE user message starts a turn — the channels chip keeps only what this turn touches (above
     // the deferral, like the init frame: the turn changed whether or not the reader is scrolled back)
     if (!this._loadingHistory && msg.role === 'user' && !msg.imageAttachment) this._channelTouches?.noteTurn(msg.ts);
+    // THE TURN'S OWN SEQUENCE (lane phone-take-photo r3): a record of a turn PAST the completed one ends that turn's mark — on
+    // every path that tells this view of a record (live, a held resume's replay, a reconnect's catch-up, a slab), above the
+    // deferral like §26; a restated «streaming» is no record and ends nothing
+    this._turnSeqNote({ record: msg });
 
     // Live message while viewing history: don't render, just track count.
     // Teleport mode is always "viewing history" \u2014 its window accounting is
@@ -4964,6 +4969,7 @@ class ChatView {
       this._noteTurnBoundary();
       this._hideTyping();
       this._statusBar.addCost(op.data?.cost, op.data?.modelUsage);
+      this._turnSeqNote({ done: true }); // the completion's place in the turn sequence (lane phone-take-photo r3)
       // Blink window
       if (!this.winInfo.element.classList.contains('window-active')) {
         this.winInfo.element.classList.add('window-waiting');
@@ -6765,6 +6771,30 @@ class ChatView {
       try { this._onOp(op); applied++; } catch (e) { failed++; console.error('[chat] an op held for the rebuild failed to apply', e); }
     }
     try { this._trace('reset:drain', { held: held.length, applied, inSlab, foreign, failed, opSeq: floor }); } catch { }
+  }
+
+  /** THE TURN SEQUENCE THIS VIEW WAS TOLD OF (lane phone-take-photo r3, PURE turnSeq): every record (_onCreateMessage, every path)
+   *  and every completion (turn_complete) is fed here; a record of a turn PAST the completed one starts a turn on this client. NOT
+   *  the activity label: «streaming» is restated by an attach, a reconnect, a held resume and a background tail after the
+   *  result (the session stays streaming until idle) — r2 read it as a start and a reconnect in that gap erased the mark for good. */
+  _turnSeqNote(ev) {
+    const r = turnSeq(this._turnSeqState, { ...ev, epoch: this._normEpoch });
+    this._turnSeqState = r.s;
+    if (r.starts) this._turnStarted();
+  }
+
+  /** THE FINISHED TURN'S MARK ENDS WHEN A LATER TURN STARTS — ON EVERY CLIENT (lane phone-take-photo r2 (主开发 ①): the person
+   *  answered on another device and the agent works on it; a door that still says «it waits» teaches them to ignore the door).
+   *  Every client is told of the new turn's record (_turnSeqNote); PURE turnWaitStep drops ONLY the finished turn's reason — an
+   *  ask still waits, and «they looked on another device and did not answer» stays per device. The terminal's
+   *  _setWaiting(false) is the same rule over its title. */
+  _turnStarted() {
+    const w = this.winInfo, cl = w && w.element && w.element.classList;
+    if (!cl) return;
+    const v = turnWaitStep({ why: [...(w._waitWhy || [])], waiting: cl.contains('window-waiting') }, 'start');
+    const why = w._waitWhy || (w._waitWhy = new Set());
+    why.clear(); for (const r of v.why) why.add(r);
+    if (cl.contains('window-waiting') !== v.waiting) { cl.toggle('window-waiting', v.waiting); if (w._notifyChanged) w._notifyChanged(); }
   }
 
   _clearWaiting() {

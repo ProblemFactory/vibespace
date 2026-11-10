@@ -21,6 +21,10 @@
 //     replaces is said).
 //   · followDesktops — an OPEN list (the compact list, the sheet, the window switcher's tabs) redrawn on a remote change: the
 //     live desktops in the live order, a drawn one deleted elsewhere kept at its place, greyed with its why.
+//   · windowWaits — THE WAITING FACT (lane phone-take-photo, the owner 2026-11-10: «在手机上那个闪烁功能不能 reflect 到 desktop 跟
+//     对话的那个下拉选单里»): the ONE reader of «this window waits for the person» for every surface that lists windows (the
+//     taskbar's tiles and lists, the phone's title switcher, its Desktops sheet, its closed doors); desktopRows rolls it up per
+//     desktop (`waiting` = how many, their titles named first) and waitingElsewhere counts what the closed doors say.
 // The sheet (src/lib/desktop-switch-sheet.js), the nav's door and window switcher (src/lib/mobile-nav.js), the taskbar's
 // previews and compact list (src/lib/desktop-manager.js) and the ⧉ list (src/lib/taskbar.js) ask it;
 // scripts/test-desktop-switch.mjs pins it (⑧ the table, ⑨ the census of every surface that draws it, ⑩ the open lists' follow).
@@ -44,8 +48,11 @@ function desktopRows({ desktops = [], activeId = null, windowsByDesktop = {}, he
     const heldRaw = heldByDesktop && heldByDesktop[d.id];
     const held = Array.isArray(heldRaw) ? list(heldRaw) : [];
     const heldN = Array.isArray(heldRaw) ? held.length : Math.max(0, Math.floor(Number(heldRaw) || 0));
-    const titles = [...built, ...held].sort(byZ).map(titleOf).filter(Boolean).slice(0, TITLES_MAX);
-    return { id: String(d.id), name: String(d.name || d.id), active: !d.gone && d.id === activeId, windows: built.length + heldN, titles, held: heldN, ...(d.gone ? { gone: true } : {}) };
+    // a conversation that waits for the person is NAMED in its desktop's row — its title first (the rest keep the stack order)
+    const waiting = d.gone ? [] : built.filter((w) => w.waiting === true);
+    const titles = [...[...waiting].sort(byZ), ...[...built.filter((w) => !waiting.includes(w)), ...held].sort(byZ)].map(titleOf).filter(Boolean).slice(0, TITLES_MAX);
+    // r2 (主开发 ③b): ONE order — the conversation a tap lands on is the one the row NAMES first (`waitingIds`, the same sort)
+    return { id: String(d.id), name: String(d.name || d.id), active: !d.gone && d.id === activeId, windows: built.length + heldN, titles, held: heldN, ...(d.gone ? { gone: true } : {}), ...(waiting.length ? { waiting: waiting.length, waitingIds: [...waiting].sort(byZ).map((w) => w.id).filter((x) => x != null).map(String) } : {}) };
   });
 }
 
@@ -66,6 +73,7 @@ function rowWords(row, { t = fill } = {}) {
     count: n === 1 ? t('1 window') : t('{n} windows', { n }),
     titles: titles.length ? titles.join(' · ') + (more > 0 ? ' · ' + t('+{n} more', { n: more }) : '') : '',
     held: held ? t('{n} not opened on this screen yet', { n: held }) : '',
+    ...(Number(row && row.waiting) > 0 ? { waiting: t('{n} waiting for input', { n: Math.floor(Number(row.waiting)) }) } : {}),
   };
 }
 
@@ -170,11 +178,63 @@ function sheetItems(rows, { t = fill } = {}) {
     const door = desktopDoors({ desk: row.id, name: row.name, desktops, tier: 'phone' }).find((d) => d.id === 'switch');
     if (!door.enabled) { const why = t(door.why, door.params); return { door: 'switch', id: String(row.id), name: String(row.name || ''), active: false, count: '', sub: why, title: why, gone: true }; }
     const w = rowWords(row, { t });
-    return { door: 'switch', id: String(row.id), name: String(row.name || row.id), active: !!row.active, count: w.count, sub: [w.titles, w.held].filter(Boolean).join(' — '), title: t(door.label, door.params) };
+    return { door: 'switch', id: String(row.id), name: String(row.name || row.id), active: !!row.active, count: w.count, ...(w.waiting ? { waiting: w.waiting } : {}), sub: [w.titles, w.held].filter(Boolean).join(' — '), title: t(door.label, door.params) };
   });
   const add = desktopDoors({ desktops, tier: 'phone' }).find((d) => d.id === 'new');
   out.push({ door: 'new', id: null, label: t(add.label, add.params) });
   return out;
+}
+
+/** THE WAITING FACT (lane phone-take-photo, the owner 2026-11-10 17:10Z, phone: «在手机上那个闪烁功能不能 reflect 到 desktop 跟对话的
+ *  那个下拉选单里，所以我并不能看出来现在有消息在等我»): a window WAITS for the person while it wears `window-waiting` — the blink
+ *  its title bar, taskbar tile, tab and preview square draw; its own turn / ask sets it, its focus or a click ends it
+ *  (winInfo._waitWhy), and the terminal honours terminal.waitingBlinkBehavior when it sets it. THE ONE reader for every
+ *  surface that lists windows: the taskbar's tiles and lists and the phone's title switcher, Desktops sheet and closed
+ *  doors read it here — none derives «waiting» a second way. */
+function windowWaits(win) {
+  const cl = win && win.element && win.element.classList;
+  return !!(cl && typeof cl.contains === 'function' && cl.contains('window-waiting'));
+}
+
+/** THE FINISHED TURN'S MARK, the same on every client (lane phone-take-photo r2 (主开发 ①): «once answered — from any device —
+ *  it no longer waits, on every device»). A window's waiting REASONS over the conversation's events: 'end' = a turn finished
+ *  while the window was not the active one ⇒ +'turn'; 'start' = a turn that started AFTER that completion is seen (turnSeq: the
+ *  person answered — here or on another device) ⇒ −'turn' on EVERY client that sees it, with no focus anywhere; 'seen' = the person reached it on THIS
+ *  device (a press, the view's focus, a door that said «it waits») ⇒ every reason acknowledged here. «They LOOKED at it on another
+ *  device and did not answer» moves nothing here — it still waits for them (the rule, per device). An 'ask' outlives a turn's
+ *  start (it is answered on its own road). A reason outlives no blink. → { why: [...], waiting } */
+function turnWaitStep({ why = [], waiting = false } = {}, ev = '', { active = false } = {}) {
+  const r = new Set(waiting && Array.isArray(why) ? why.filter((x) => typeof x === 'string') : []);
+  if (ev === 'end') { if (active) return { why: [...r], waiting: !!waiting }; r.add('turn'); return { why: [...r], waiting: true }; }
+  if (ev === 'start') { r.delete('turn'); return { why: [...r], waiting: !!waiting && r.size > 0 }; }
+  if (ev === 'seen') return { why: [], waiting: false };
+  return { why: [...r], waiting: !!waiting };
+}
+
+/** THE TURN'S OWN SEQUENCE (lane phone-take-photo r3 — 主开发's tidy ①: a reconnect between the result and the idle erased
+ *  the mark for good). A finished turn's mark ends only when a turn that STARTED AFTER that completion is seen. The view
+ *  feeds every record it is told of — live, replayed by a held resume, caught up after a reconnect, a slab — and every
+ *  completion, and the turn sequence (the normalizer's `turnIndex`, on every record) says which turn a record belongs to:
+ *    turnSeq(s, { record, epoch }) → { s, starts } — `starts`: a person-side record (role 'user'; never a page-image
+ *                                                     attachment) of a turn PAST the completed one, in the same epoch
+ *    turnSeq(s, { done: true, epoch }) → the completion: the highest turn the view was told of IS the one that finished
+ *  A restated «streaming» (an attach, a reconnect, a held resume, a background tail) carries no record of a later turn, so
+ *  it starts nothing. Another normalization epoch numbers the turns afresh: there the completion's place is unknown and
+ *  nothing starts (the mark stays, as on master, until a later completion or the person reaches it). → { s, starts } */
+function turnSeq(s, { record = null, done = false, epoch = null } = {}) {
+  const ep = epoch || null, same = !!s && s.ep === ep;
+  let max = same && Number.isFinite(s.max) ? s.max : 0, doneAt = same && Number.isFinite(s.doneAt) ? s.doneAt : null;
+  if (done) return { s: { ep, max, doneAt: max }, starts: false };
+  const i = record && Number.isFinite(record.turnIndex) ? record.turnIndex : null;
+  const starts = i != null && doneAt != null && i > doneAt && record.role === 'user' && !record.imageAttachment;
+  if (i != null && i > max) max = i;
+  return { s: { ep, max, doneAt: starts ? null : doneAt }, starts };
+}
+
+/** THE CLOSED DOORS' COUNT: the windows that wait for the person anywhere but ON SHOW — the conversation on show says it
+ *  itself and is never shouted twice. `windows` = [{ id, waiting }], `shownId` = the window on show. → the count */
+function waitingElsewhere({ windows = [], shownId = null } = {}) {
+  return list(windows).filter((w) => w.waiting === true && w.id !== shownId).length;
 }
 
 /** AN OPEN LIST FOLLOWS THE DESKTOPS (r2 ①: the compact list, the phone sheet and the window switcher's tabs are popovers
@@ -191,4 +251,4 @@ function followDesktops({ drawn = [], desktops = [] } = {}) {
   return out;
 }
 
-module.exports = { TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops };
+module.exports = { windowWaits, waitingElsewhere, turnWaitStep, turnSeq, TITLES_MAX, DOORS, DOOR_WHY, desktopRows, switchVerdict, rowWords, doorState, otherDesktopWindows, desktopDoors, doorItems, sheetItems, followDesktops };

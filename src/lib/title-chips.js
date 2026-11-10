@@ -281,7 +281,9 @@ export function navMoreRows(folded = [], { desktops = null, usage = '', vaultLoc
   const d = desktops && typeof desktops === 'object' ? desktops : {};
   const k = Math.floor(fin(d.k)), n = Math.floor(fin(d.n)), name = oneLine(d.name);
   const place = k >= 1 && n >= k ? `${k}/${n}${name ? ` · ${name}` : ''}` : '';
-  return NAV_FOLD_ORDER.filter((key) => f.has(key) && key !== 'todos').map((key) => ({ key, value: key === 'desktops' ? place : key === 'usage' && oneLine(usage) ? `${oneLine(usage)} %` : '', loud: key === 'gear' && !!vaultLocked }));
+  // r2 (主开发 ④, lane phone-take-photo): the Desktops row says what its door says — «N waiting for input» (the door's own words)
+  const waits = Math.floor(fin(d.waiting)) > 0 && oneLine(d.waitingWords) ? oneLine(d.waitingWords) : '';
+  return NAV_FOLD_ORDER.filter((key) => f.has(key) && key !== 'todos').map((key) => ({ key, ...(key === 'desktops' && waits ? { waiting: true } : {}), value: key === 'desktops' ? [place, waits].filter(Boolean).join(' · ') : key === 'usage' && oneLine(usage) ? `${oneLine(usage)} %` : '', loud: key === 'gear' && !!vaultLocked }));
 }
 
 /** THE LOCK STAYS LOUD ON A FOLDED BAR (r3 — lane vault-locked-loud's law: «the vault is locked» is said wherever Settings is
