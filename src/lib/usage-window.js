@@ -478,7 +478,9 @@ function renderPricingEditor(state, rerender, reload) {
   const tsec = document.createElement('div'); tsec.className = 'usage-section';
   tsec.innerHTML = `<div class="usage-section-title">${t('Default rates ($ / Mtok)')}</div>`;
   const tbl = document.createElement('table'); tbl.className = 'usage-price-tbl';
-  tbl.innerHTML = `<tr><th>${t('Model')}</th>${FIELDS.map(f => `<th>${f[1]}</th>`).join('')}</tr>`;
+  // every row says where its price came from (lane cli-update-needs-nothing, law 2): VibeSpace's table · the installed
+  // Claude Code's own catalog (never written to pricing.json until you edit it) · you
+  tbl.innerHTML = `<tr><th>${t('Model')}</th>${FIELDS.map(f => `<th>${f[1]}</th>`).join('')}<th>${t('Source')}</th></tr>`;
   for (const tier of TIERS) {
     const row = document.createElement('tr');
     row.innerHTML = `<td>${tier}</td>`;
@@ -489,9 +491,14 @@ function renderPricingEditor(state, rerender, reload) {
       inp.oninput = () => { (edited.tiers[tier] = edited.tiers[tier] || { ...(pricing.tiers?.[tier] || {}) })[fk] = parseFloat(inp.value) || 0; };
       td.appendChild(inp); row.appendChild(td);
     }
+    const src = pricing.sources?.[tier], std = document.createElement('td');
+    std.className = 'usage-price-src';
+    std.textContent = !src ? '' : src.from === 'catalog' ? t('From Claude Code {v}', { v: src.cli || '?' }) : src.from === 'you' ? t('Entered by you') : t("VibeSpace's table");
+    row.appendChild(std);
     tbl.appendChild(row);
   }
-  tsec.appendChild(tbl); wrap.appendChild(tsec);
+  const scroll = document.createElement('div'); scroll.className = 'usage-price-scroll'; scroll.appendChild(tbl); // the table scrolls sideways on a phone (390 px): every column reachable
+  tsec.appendChild(scroll); wrap.appendChild(tsec);
 
   // Per-account discount / override
   const asec = document.createElement('div'); asec.className = 'usage-section';

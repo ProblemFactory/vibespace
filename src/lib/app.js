@@ -136,7 +136,9 @@ const BACKEND_SESSION_OPTIONS = {
 };
 
 // Fetch available models from server (Claude from bootstrap/v1/models API, Codex from cache)
-fetchJson('/api/available-models').then(data => {
+// THE NOTIFY LAW (lane cli-update-needs-nothing, acceptance r1 smaller 2): the boot fetch and every
+// `available-models-dirty` broadcast (the hub read a new Claude Code's own model list) apply through ONE function
+const applyAvailableModels = (data) => {
   if (!data) return;
   const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || t('Default') }));
   // EVERY harness's offered models, one rule (lane dc-harness-tail): claude's from bootstrap/v1/models, codex's from
@@ -163,7 +165,9 @@ fetchJson('/api/available-models').then(data => {
       SETTINGS_SCHEMA['codex.defaultEffort'].options = efforts.map(e => ({ value: e.value, label: e.label }));
     }
   }
-});
+};
+const refreshAvailableModels = () => fetchJson('/api/available-models').then(applyAvailableModels);
+refreshAvailableModels();
 // Fetch claude's effort levels + permission modes from server (parsed from claude --help),
 // ASKED FOR claude (lane effort-menu-per-harness: the route answers each backend its own rows).
 // The pickers are the parsed levels + the declared extras (the server's gated
@@ -446,6 +450,7 @@ class App {
     // the instance's public address can flip while the tab is open (Ports
     // panel → This VibeSpace): every link helper reads it live, no reload
     this.ws.onGlobal((msg) => { if (msg.type === 'instance-url') setInstanceUrl(msg.status?.effectiveUrl || null); });
+    this.ws.onGlobal((msg) => { if (msg.type === 'available-models-dirty') refreshAvailableModels(); }); // one signal = one re-read
     // S9: a harness capability verified at runtime (opencode fork = the serve
     // OpenAPI evidence, probed lazily AFTER this client's /api/home) reaches
     // every open client — the sidebar's Fork row reads BACKEND_META caps
@@ -1791,7 +1796,8 @@ class App {
       const picked = rowShown ? acctSel.value : '';
       const id = picked === 'subscription' ? '' : (picked || (rowShown ? this._accounts?.[billingRow(be).defaultIdField] || '' : ''));
       const seq = (this._modelMenuSeq = (this._modelMenuSeq || 0) + 1);
-      const ans = await fetchJson(`/api/available-models?backend=${encodeURIComponent(be)}&account=${encodeURIComponent(id)}`);
+      const hostId = document.getElementById('input-host')?.value || ''; // another machine ⇒ its menu is the plain shipped rows (lane cli-update-needs-nothing)
+      const ans = await fetchJson(`/api/available-models?backend=${encodeURIComponent(be)}&account=${encodeURIComponent(id)}${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}`);
       if (seq !== this._modelMenuSeq || !ans || !Array.isArray(ans.models)) return; // a newer ask, or an older server: the harness's list stays
       if ((document.getElementById('input-backend')?.value || 'claude') !== ans.backend) return;
       this._drawModelMenu(be, ans);

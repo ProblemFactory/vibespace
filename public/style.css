@@ -414,6 +414,8 @@ html, body {
 .usage-price-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
 .usage-price-tbl th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 3px 6px; font-size: 10px; }
 .usage-price-tbl td { padding: 2px 6px; }
+.usage-price-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; } /* the price table scrolls sideways on a phone: every column, Source included, reachable */
+.usage-price-src { color: var(--text-dim); white-space: nowrap; font-size: 10px; }
 .usage-price-inp { width: 72px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); padding: 2px 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .usage-tile-v { font-size: 20px; font-weight: 650; line-height: 1.1; }
 .usage-tile-l { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }

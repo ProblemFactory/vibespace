@@ -26,6 +26,7 @@ const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js')
 const { Worker } = require('worker_threads');
 const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
+const CP = require('./catalog-pricing.js'); // PURE: the price table's three sources — shipped, the installed Claude Code's catalog, the person (lane cli-update-needs-nothing)
 const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asleep in a read is never joined (lane usage-fold-worker-exit-hook)
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
@@ -133,6 +134,30 @@ const DEFAULT_PRICING = {
   'gpt-5-codex':   { input: 1.25, output: 10,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.125 },
   _default: { input: 3, output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6, cacheRead: 0.3 },
 };
+
+// THE INSTALLED CLAUDE CODE'S OWN PRICES (lane cli-update-needs-nothing, ruling R3): src/server/cli-model-catalog.js reads
+// the binary's catalog and hands its rows here (setCatalogPricing); every live instance's effective table = the table on
+// disk ⊕ that layer (src/catalog-pricing.js: the person first; an own shipped row vs the catalog by the newer of the CLI's
+// BUILD_TIME and SHIPPED_PRICES_CHECKED, a tie to the shipped row; a family / default fallback yields to the catalog).
+// SHIPPED_PRICES_CHECKED = the day DEFAULT_PRICING was last checked against the public price page.
+const SHIPPED_PRICES_CHECKED = '2026-11-09';
+let CATALOG_PRICES = null;
+// B2 (acceptance r2): a disagreement is said when it comes to EXIST — at the read, at boot, at the person's save: every
+// recomputation hands its list to the hub's catalog module (said once each there; nothing here keeps a memory)
+let ON_DISAGREE = null, PRICE_IDS = 0;
+function onPriceDisagreements(fn) { ON_DISAGREE = typeof fn === 'function' ? fn : null; }
+const PRICED = new Set(); // WeakRefs of the live instances (a migration builds its own beside the server's)
+function setCatalogPricing(layer) {
+  CATALOG_PRICES = layer && layer.rows ? layer : null;
+  let said = null;
+  for (const ref of [...PRICED]) {
+    const h = ref.deref();
+    if (!h) { PRICED.delete(ref); continue; }
+    h._pricing = h._withCatalog(h._pricingFile || h._pricing);
+    if (said === null) said = h._priceDisagreements || [];
+  }
+  return said || [];
+}
 
 // codex ids already named by _warnUnpriced in this process
 const UNPRICED_WARNED = new Set();
@@ -285,6 +310,7 @@ class UsageHistory {
     // runLocalMigrations, exactly like reloadCursors.
     this.reloadEvents = () => { this._rebuildInWorker('a reload after a repair'); if (this._index) this._index.recover(); }; // …and the index re-checks its shard marks (B-748f: rebuilt in the worker, the old cache serving until the swap)
     this._pricing = this._loadPricing();
+    this._pricingFile = this._pricing; this._pricing = this._withCatalog(this._pricingFile); PRICED.add(new WeakRef(this)); // the effective table (lane cli-update-needs-nothing)
     this._scanning = false;
     this._lastScan = 0;
     // lane ledger-dedup-law: F1's per-shard rid index, F4's sampled shapes + paused shards (r4: host × month), the dedup jobs
@@ -888,9 +914,11 @@ class UsageHistory {
   // tiers and/or carry a flat discount (0..1) — the discount scales whichever
   // dated / long rate applies; an override row without `long` is flat.
   // Subscriptions/global have no override → default tiers (the API-equivalent reference).
-  _rateFor(acct, tier, ts, prompt) {
+  _rateFor(acct, tier, ts, prompt, model) {
     const ov = acct ? this._pricing.accounts?.[acct] : null;
-    const base = priceAt((ov?.tiers && ov.tiers[tier]) || this._pricing.tiers[tier] || this._pricing.tiers._default, ts, prompt);
+    // an account's override of the row the model falls on WITHOUT the catalog shields THAT account's model (law B, lane cli-update-needs-nothing)
+    const ovRow = ov?.tiers ? (ov.tiers[tier] || (model != null && this._pricing.sources?.[tier]?.from === 'catalog' ? ov.tiers[this._fileTier(model)] : undefined)) : undefined;
+    const base = priceAt(ovRow || this._pricing.tiers[tier] || this._pricing.tiers._default, ts, prompt);
     const disc = ov && typeof ov.discount === 'number' ? Math.max(0, Math.min(0.99, ov.discount)) : 0;
     if (!disc) return base;
     const f = 1 - disc;
@@ -903,7 +931,7 @@ class UsageHistory {
   _cost(ev, prompt) {
     const tier = this._tier(ev.model);
     if (tier === '_default' && ev.be === 'codex') this._warnUnpriced(ev.model);
-    const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0));
+    const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0), ev.model);
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
   }
   // A codex model id with no key is priced at `_default` — Anthropic Sonnet's
@@ -1786,22 +1814,43 @@ class UsageHistory {
 
   // Attach human names to account/session groups (server enriches with account
   // names + session names it knows).
-  pricingTable() { return this._pricing; }
+  // THE TABLE AS A PERSON KEEPS IT (B3, acceptance r2): the disk rows only — shipped + what a person entered — as before the
+  // catalog lane; the config export and its summary read this. The editor reads pricingView() (with the catalog + sources).
+  pricingTable() { return this._pricingFile || this._pricing; }
+  pricingView() { return this._pricing; }
+  lastCatalogSkips() { return (this._lastCatalogSkips || []).slice(); }
+  // the table on disk ⊕ the installed Claude Code's catalog layer (`sources` per key: shipped / catalog / you)
+  _withCatalog(file) {
+    const r = CP.mergePricing(file, CATALOG_PRICES, { shipped: DEFAULT_PRICING, checked: SHIPPED_PRICES_CHECKED });
+    this._priceDisagreements = r.disagreements;
+    // every recomputation reports, an EMPTY list too (a disagreement that ended leaves the hub's «said» set), by instance
+    if (ON_DISAGREE) { try { ON_DISAGREE(r.disagreements, this._priceId || (this._priceId = ++PRICE_IDS)); } catch { } }
+    return r.pricing;
+  }
+  priceDisagreements() { return (this._priceDisagreements || []).slice(); }
+  _fileTier(model) {
+    if (this._fileTierFor !== this._pricing) { this._fileTierFor = this._pricing; this._fileTierMemo = new Map(); }
+    const m = String(model || '').toLowerCase();
+    if (!this._fileTierMemo.has(m)) this._fileTierMemo.set(m, CP.fileTierOf(this._pricing, m));
+    return this._fileTierMemo.get(m);
+  }
   // Accept a full v2 object OR a partial patch ({tiers?, accounts?}). Merges so a
   // UI editor can PATCH just one account's discount without resending everything.
   setPricing(patch) {
     if (!patch || typeof patch !== 'object') return this._pricing;
-    const cur = this._pricing;
-    const next = { version: 2, tiers: { ...cur.tiers, ...(patch.tiers || {}) }, accounts: { ...cur.accounts } };
+    const cur = this._pricingFile || this._pricing; // the table on disk — a catalog row is never written to pricing.json
+    const next = { version: 2, tiers: { ...cur.tiers, ...CP.personTiers(patch.tiers, this._pricing, cur, patch.sources) }, accounts: { ...cur.accounts } };
+    this._lastCatalogSkips = CP.catalogSkips(patch.tiers, patch.sources); // said to the importer (persistence's summary)
     if (patch.accounts) {
       for (const [id, cfg] of Object.entries(patch.accounts)) {
         if (cfg == null) delete next.accounts[id];       // null clears an override
         else next.accounts[id] = cfg;
       }
     }
-    this._pricing = next;
+    this._pricingFile = next;
+    this._pricing = this._withCatalog(next);
     this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));
-    return next;
+    return this._pricing;
   }
 }
 
@@ -1823,5 +1872,8 @@ function holdRoadInstall() {
 
 
 module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES, ackOf };
+module.exports.setCatalogPricing = setCatalogPricing; // lane cli-update-needs-nothing: the installed Claude Code's price layer
+module.exports.onPriceDisagreements = onPriceDisagreements;
+module.exports.SHIPPED_PRICES_CHECKED = SHIPPED_PRICES_CHECKED;
 // the module-level names the hold road (src/usage-hold-road.js) reads — internal, for that file only
 module.exports.holdRoadScope = { timedSync, WARM_SLICE_BYTES, REMEDY_STATES, ackOf, LIVE };

@@ -909,6 +909,19 @@
 - (2026-11-09) A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (jobs-addressed-push) — 不变量 = push is addressed: a job's line or row reaches only its owner lineage and subscribers, inside view; others get an id-less «not yours» count ⇒ kb-bugfix-invariants
 - (2026-11-09) A PHONE COULD NOT TAKE A PHOTO FROM THE CHAT (owner, Android Chrome) — 不变量 = a sheet that offers pictures on a finger device offers the camera through its OWN capture input, never the gallery's; the shot rides the picked image's road ⇒ kb-bugfix-invariants
 - (2026-11-09) A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681) — 不变量 = an ask lands in the kind it is for, through that kind's ONE writer; the site the owner reads is the site the fill compares (kb-bugfix-invariants)
+- (2026-11-09) EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (Fable 5.2; Haiku 5.5 at ×10). 不变量 = what the installed CLI states about its models (ids, sizes, prices, families, aliases) is READ from the binary at runtime, never re-typed; the shipped tables are the seed (kb-bugfix-invariants)
+
+## EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (the owner, 2026-11-09; lane cli-update-needs-nothing, .389)
+
+**The requirement it broke.** The owner's founding requirement, 2026-03-22 item 7: «使用原生claude code，确保claude code更新不需要重新更新本项目代码（除非claude code有breaking change）». On 2026-11-09: «每次更新都要重新测量也太弱智了» · «现在 fable 5.2 可以更新后直接用了吗？userW 想要更新了» · «你准备以后怎么彻底解决这个问题？».
+
+**Symptom.** Claude Code 2.1.321 shipped Fable 5.2 (and made `fable` mean it). Until a release of ours typed it into three tables, the 1M form could not be picked (the provider refused a typed `…[1m]` no row named), the price fell on Fable 5's row (+44.5 % on a measured event, cache hits ×5) and the family words had to know it. The same day the census found Haiku 5.5 priced as Haiku 4.5 — ten times too high — for weeks, because no one had typed its row.
+
+**Cause.** VibeSpace re-typed by hand what the binary on the box already states: every Claude Code build carries ONE baked catalog literal (2.1.312–.321 measured) with every model's id, family, display name, window and 1M flags, max output, a pricing tier with every rate, the aliases and `latest_per_family`.
+
+**Fix.** The hub reads that literal from the binary the sessions spawn — never runs it, never evaluates it (a strict literal grammar; every field through the provider record's validators; out of bounds = refused by name) — once per binary, on the --version tick it already had, into `data/cli-model-catalog.json`. The picker, the price table (with its source shown) and the family rule read it first; the shipped tables are the seed and the fallback; the person's prices win; a disagreement with a shipped row is decided by date and said once in Diagnostics.
+
+**不变量.** A fact the installed CLI states about itself is read at runtime, never re-typed — a new hand row is a correction that competes by date, not the way a model becomes usable. Gated by test-claude-update-needs-nothing (every scene with its RED control: the shipped tables alone) and its census: a model-keyed site in src/ with no row in scripts/fixtures/cli-update-census.json is RED.
 
 ## A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (2026-11-09; the owner said yes to the fix 2026-11-10; lane jobs-addressed-push, .389)
 

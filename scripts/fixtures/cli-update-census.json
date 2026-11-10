@@ -1,0 +1,390 @@
+{
+ "//": "THE CENSUS of every place in src/ that keys behaviour or words on a Claude CLI version or a model id (lane cli-update-needs-nothing R7). One row per site: {id, file, keyedOn: version | model, needsReleaseOnOrdinaryUpdate: false, road, suite} (+ `match`: the grep kind the site is found by, and `sites`: how many lines of that kind the file holds — scripts/test-claude-update-needs-nothing.mjs §M re-runs it: a hit with no row is RED, a row with no hit is DEAD, a row whose count moved is RED (a new site in an already-rowed file is judged again)). Model rows here; cli-self-measure's version rows join this file at the train (an append union).",
+ "schema": 1,
+ "rows": [
+  {
+   "id": "catalog-reader-ids",
+   "file": "src/claude-model-catalog.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "KNOWN_CATALOG_IDS = the ids 2.1.321 named: an id outside it is SAID once (cli-unknown-model) — no behaviour keys on the list",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "model-id-literal",
+   "sites": 4
+  },
+  {
+   "id": "catalog-reader-1m",
+   "file": "src/claude-model-catalog.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the [1m] form offered when the installed CLI's own catalog says native_1m / the 1M beta",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 6
+  },
+  {
+   "id": "catalog-reader-window",
+   "file": "src/claude-model-catalog.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a row's size = the installed CLI's catalog window",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 4
+  },
+  {
+   "id": "picker-seed",
+   "file": "src/server/cli-env.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "CLAUDE_KNOWN_MODELS is the SEED: the installed CLI's catalog rows come first (cli-model-catalog onView → menuRows)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "model-id-literal",
+   "sites": 7
+  },
+  {
+   "id": "picker-v1-models",
+   "file": "src/server/cli-env.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the opt-in /v1/models list labels its own max_input_tokens (the API states it)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 1
+  },
+  {
+   "id": "listed-rows-size",
+   "file": "src/model-providers.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "listedRows takes the harness row's own context (claude: the binary's catalog) before the [1m]/«1M» spelling",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 2
+  },
+  {
+   "id": "listed-rows-1m",
+   "file": "src/model-providers.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a typed <id>[1m] on an open (harness-listed) provider resolves to itself; sameModel's suffix rule is spelling only",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 3
+  },
+  {
+   "id": "family-rule",
+   "file": "src/model-family.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "familyOfModel: the seed words, then the installed CLI's catalog family BY EXACT ID; projectCacheForFamily gives it a lane only on a reading that carries a bucket of its whole name (acceptance r2 law C final) — no release for a new family",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-of",
+   "sites": 5
+  },
+  {
+   "id": "family-words",
+   "file": "src/model-family.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the seed words (fable / mythos → the Fable lane, opus, sonnet, haiku)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-word",
+   "sites": 4
+  },
+  {
+   "id": "pool-family",
+   "file": "src/server/usage-pool-engine.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "reads model-family (catalog families included)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-of",
+   "sites": 7
+  },
+  {
+   "id": "pool-lock-alias",
+   "file": "src/server/usage-pool-engine.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "modelsMatch holds an alias by its word; the catalog alias guard (cli-unknown-model-alias) says a catalog that breaks the word rule",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 1
+  },
+  {
+   "id": "pool-auto-family",
+   "file": "src/account-pool-auto.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "familyOfScopedBucket reads model-family (catalog families included)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-of",
+   "sites": 1
+  },
+  {
+   "id": "status-bar-alias",
+   "file": "src/lib/chat-status-bar.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "sameModel holds an alias by its word — the same catalog alias guard",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 1
+  },
+  {
+   "id": "anchors-split",
+   "file": "src/usage-anchors.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a cost split into four fixed lanes + 'other': a new family lands in 'other' (no release); its Mythos→other differs from model-family (reported, not moved)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-word",
+   "sites": 1
+  },
+  {
+   "id": "estimator-split",
+   "file": "src/usage-estimator.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the same four-lane split as usage-anchors: a new family = 'other' (no release)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-word",
+   "sites": 1
+  },
+  {
+   "id": "session-store-1m-guess",
+   "file": "src/session-store.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a size guess from usage (> 190k ⇒ 1M); the status bar reads the CLI's own modelUsage.contextWindow",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 1
+  },
+  {
+   "id": "schema-examples",
+   "file": "src/session-schema.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "example ids in the field notes (words only)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "model-id-literal",
+   "sites": 2
+  },
+  {
+   "id": "account-models-example",
+   "file": "src/lib/account-models.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "an example id in the id hint (words only)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "model-id-literal",
+   "sites": 1
+  },
+  {
+   "id": "autocompact-help",
+   "file": "src/harness-settings.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the --autocompact help's token range (words; no model)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 1
+  },
+  {
+   "id": "codex-window",
+   "file": "src/harnesses/codex-models.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "codex's own models cache states each window (the codex CLI's catalog)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "context-claim",
+   "sites": 1
+  },
+  {
+   "id": "learn-tier",
+   "file": "src/plugins/llm.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the rule-learning tier NAME 'sonnet' (an OpenRouter route setting), not a Claude CLI model",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-word",
+   "sites": 1
+  },
+  {
+   "id": "lark-opus-audio",
+   "file": "src/channels/lark.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "not a model: the Opus AUDIO codec (a file extension)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-word",
+   "sites": 1
+  },
+  {
+   "id": "words-picker-labels",
+   "file": "src/claude-model-catalog.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the picker's alias labels say what the alias means ON THIS CLI («fable · Fable 5.2 · 1M»), never «wait for a release»",
+   "suite": "test-claude-update-needs-nothing"
+  },
+  {
+   "id": "words-price-source",
+   "file": "src/lib/usage-window.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "every price row says its source: «VibeSpace's table» · «From Claude Code {v}» · «Entered by you»",
+   "suite": "test-claude-update-needs-nothing"
+  },
+  {
+   "id": "words-diagnostics",
+   "file": "src/server/cli-model-catalog.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the Harness drift lines (cli-unknown-model / -price / -catalog / -alias) state what the CLI says and what is used — no line asks anyone to wait",
+   "suite": "test-claude-update-needs-nothing"
+  },
+  {
+   "id": "lark-opus-audio-key",
+   "file": "src/channels/lark.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "not a model: the Opus AUDIO codec (a file extension)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "file-type-opus-audio",
+   "file": "src/file-type-table.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "not a model: the .opus AUDIO file type",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "settings-default-model-seed",
+   "file": "src/harness-settings.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "claude.defaultModel's options are the seed: app.js replaces them with /api/available-models (the catalog's rows) at boot and on every available-models-dirty signal",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 7
+  },
+  {
+   "id": "offline-fallback-models",
+   "file": "src/lib/agent-meta.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the dropdown's OFFLINE fallback (only while /api/available-models cannot be read); the hub's list replaces it",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "session-options-seed",
+   "file": "src/lib/app.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "BACKEND_SESSION_OPTIONS.claude.models is the seed: replaced by /api/available-models at boot and on every available-models-dirty signal",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "family-words-seed",
+   "file": "src/model-family.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the seed family words (fable / mythos → the Fable lane, opus, sonnet, haiku); catalog families join by exact id, their lane decided per account's reading",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 5
+  },
+  {
+   "id": "family-id-core",
+   "file": "src/model-family.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the catalog-family lookup reads an id's core (no claude-, no [1m]) — spelling only, the same model",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 1
+  },
+  {
+   "id": "learn-tier-option",
+   "file": "src/plugin-settings.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the rule-learning tier option 'sonnet' (an OpenRouter route setting), not a Claude CLI model",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "learn-tier-key",
+   "file": "src/plugins/llm.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the rule-learning tier NAME 'sonnet', not a Claude CLI model",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "learn-tier-price",
+   "file": "src/rule-learning.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the rule-learning tier's routed OpenRouter row (anthropic/claude-sonnet-5.5, its own price), not a Claude CLI model",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "picker-aliases-seed",
+   "file": "src/server/cli-env.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "CLAUDE_MODEL_ALIASES are the seed: menuRows labels each by what it means on THIS CLI and adds the catalog's own alias names",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 7
+  },
+  {
+   "id": "anchors-split-key",
+   "file": "src/usage-anchors.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the anchors' four-lane cost split + 'other' (a new family = 'other', no release)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 2
+  },
+  {
+   "id": "estimator-buckets",
+   "file": "src/usage-estimator.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a fixed four-lane split of bucket names + 'other': a new family's bucket is 'other' (no release; it projects nothing)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 3
+  },
+  {
+   "id": "price-table-seed",
+   "file": "src/usage-history.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "DEFAULT_PRICING (the shipped price table) is the SEED: the installed CLI's catalog prices first by ruling R3 (src/catalog-pricing.js), the person's rows above both",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 15
+  }
+ ]
+}

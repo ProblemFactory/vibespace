@@ -1039,7 +1039,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d); });
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
     apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); });
-    apply('pricing', (d) => { if (d && typeof d === 'object') getUsageHistory?.()?.setPricing?.(d); });
+    let pricingSkipped = [];
+    apply('pricing', (d) => { if (d && typeof d === 'object') { const uh = getUsageHistory?.(); uh?.setPricing?.(d); pricingSkipped = uh?.lastCatalogSkips?.() || []; } });
+    // lane cli-update-needs-nothing: a row the export marked as Claude Code's own price is not imported as yours — said here, by key
+    if (pricingSkipped.length) { const i = applied.indexOf('pricing'); if (i >= 0) applied[i] = `pricing (not imported as yours — the export marked these as Claude Code's own prices: ${pricingSkipped.slice(0, 20).join(', ')}${pricingSkipped.length > 20 ? ` and ${pricingSkipped.length - 20} more` : ''}; type them in the price editor to keep them)`; }
     // clientPrefs are applied by the CLIENT (localStorage) — echo them back
     const clientPrefs = sections.includes('clientPrefs') ? file.sections.clientPrefs : undefined;
     if (clientPrefs) applied.push('clientPrefs');

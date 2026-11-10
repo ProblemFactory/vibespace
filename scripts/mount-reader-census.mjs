@@ -93,6 +93,7 @@ export const ROWS = [
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
   ['src/server/apps-ops-door.js', 'own-tree', 4, null, 'its own socket under ~/.vibespace/apps/operator (lane app-persist-layer1: lstat of that directory, of the socket path before listen + after it, and at close) — VibeSpace’s own state, never a path anyone names'],
   ['src/server/automation-engine.js', 'user-path', 5, 'realpathAsync\\(p\\), bound', `2.369.359 (userW's agent, fb-ac40a458d8): the folder judge's real path of a cwd / a key root is read OFF the main thread and BOUNDED (the wiring hands the SafeFs worker's realpath; fs.promises by default) before the PURE judge — a path that does not answer is the named refusal realpath_unreadable, never «does not exist»; the other 4 reads are ${DATA}`],
+  ['src/server/cli-model-catalog.js', 'own-tree', 5, null, CLI + ' (lane cli-update-needs-nothing: the installed claude binary the sessions spawn — its bytes read, never run — data/cli-model-catalog.json, and data/\'s listing for the ledger\'s own tmp files a kill left)'],
   ['src/server/cli-registration.js', 'own-tree', 2, null, DATA + ' (lane cli-2-1-308-records: data/cli-registration.json — the builds said once — and a record draft under data/claude-cli-dumps/)'],
   ['src/server/cli-unmeasured-notice.js', 'own-tree', 1, null, DATA],
   ['src/server/vault-totp.js', 'own-tree', 2, null, DATA], // design q-047 L1 (lane vault-totp): data/vault-grants.json — who may have a two-step CODE (read, and its tmp opened `wx`); never a seed

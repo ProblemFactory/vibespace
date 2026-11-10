@@ -246,9 +246,9 @@ app.get('/api/usage-stats/rid-info', async (req, res) => {
     res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName, be: ev.be || 'claude', model: ev.model || null, effort: ev.effort || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));
+app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() })); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
 app.post('/api/usage-stats/pricing', (req, res) => {
-  try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingTable() }); }
+  try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/accounts', (req, res) => {

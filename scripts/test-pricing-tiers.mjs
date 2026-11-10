@@ -271,9 +271,19 @@ try {
   const echoN = parseSetModelEcho('<local-command-stdout>Set model to `fable[1m] (' + NEXT + '[1m])`</local-command-stdout>', { envelope: 'required' });
   ok(!!echoN && echoN.alias === 'fable[1m]' && echoN.id === NEXT + '[1m]', '…the /model echo reads it back whole', echoN);
   const baseSub = MP.withListed(MP.presetOf('pv-anthropic-subscription'), CAT.harness.claude);   // the f5e087bb5 claude list (no Fable 5.1 / 5.2 rows)
-  ok(MP.resolveModel(sub, NEXT) === NEXT && MP.resolveModel(sub, NEXT + '[1m]') === null, '…the picker\'s Custom… on the subscription provider sends a bare id no row names as typed (any claude- id), and REFUSES its [1m] form by name (the kind\'s id pattern has no suffix; only a row carries one)', [MP.resolveModel(sub, NEXT), MP.resolveModel(sub, NEXT + '[1m]')]);
+  ok(MP.resolveModel(sub, NEXT) === NEXT && MP.resolveModel(sub, NEXT + '[1m]') === NEXT + '[1m]', '…the picker\'s Custom… on the subscription provider sends a bare id no row names as typed (any claude- id), and its [1m] form too (the harness runs `<id>[1m]` itself — lane cli-update-needs-nothing R4; until .389 the open branch tested the WHOLE typed id against the kind\'s pattern and refused it)', [MP.resolveModel(sub, NEXT), MP.resolveModel(sub, NEXT + '[1m]')]);
   ok(MP.resolveModel(sub, 'claude-fable-5-2[1m]') === 'claude-fable-5-2[1m]' && MP.resolveModel(sub, 'claude-fable-5-2') === 'claude-fable-5-2', '…on this tree claude-fable-5-2 AND claude-fable-5-2[1m] resolve to their own rows', [MP.resolveModel(sub, 'claude-fable-5-2'), MP.resolveModel(sub, 'claude-fable-5-2[1m]')]);
-  ok(MP.resolveModel(baseSub, 'claude-fable-5-2') === 'claude-fable-5-2' && MP.resolveModel(baseSub, 'claude-fable-5-2[1m]') === null, 'CONTROL (the f5e087bb5 list): the bare id went through as typed, the [1m] form was REFUSED — a conversation could pick Fable 5.2 only bare, which 2.1.319 runs at its unknown-model 200k window', [MP.resolveModel(baseSub, 'claude-fable-5-2'), MP.resolveModel(baseSub, 'claude-fable-5-2[1m]')]);
+  // THE CONTROL IS REAL (acceptance r2, small 5): the SAME forward predicate asked of a patched copy of model-providers whose
+  // open branch is the .388 line (the WHOLE typed id against the kind's pattern) — it must refuse the [1m] form there
+  {
+    const mpSrc = fs.readFileSync(path.join(ROOT, 'src/model-providers.js'), 'utf8');
+    const NEW_LINE = "return open && k && k.idPattern.test(want.replace(/\\[1m\\]$/i, '')) ? want : null;", OLD_LINE = 'return open && k && k.idPattern.test(want) ? want : null;';
+    const cdir = scratch('pricing-mp388'); fs.mkdirSync(cdir, { recursive: true });
+    fs.writeFileSync(path.join(cdir, 'model-providers.js'), mpSrc.replace(NEW_LINE, OLD_LINE));
+    const MP388 = require(path.join(cdir, 'model-providers.js'));
+    const sub388 = MP388.withListed(MP388.presetOf('pv-anthropic-subscription'), CAT.harness.claude);
+    ok(mpSrc.includes(NEW_LINE) && MP388.resolveModel(sub388, NEXT) === NEXT && MP388.resolveModel(sub388, NEXT + '[1m]') === null, 'CONTROL (a patched copy with the .388 open branch, the f5e087bb5 list): the forward predicate FAILS there — the bare id went through, the [1m] form was REFUSED (a conversation could pick a new model only bare, which an older CLI ran at its unknown-model 200k window)', [MP388.resolveModel(sub388, NEXT), MP388.resolveModel(sub388, NEXT + '[1m]')]);
+  }
   ok(sub.models.some((m) => m.id === 'claude-fable-5-2' && m.label === 'Fable 5.2') && sub.models.some((m) => m.id === 'claude-fable-5-2[1m]' && m.label === 'Fable 5.2 [1m]' && m.context === 1000000), '…and on this tree Fable 5.2 is a ROW of the claude list (src/server/cli-env.js), bare and [1m] — the [1m] row carries the 1M context', sub.models.filter((m) => /fable/.test(m.id)).map((m) => [m.id, m.context]));
   const subNo1m = MP.withListed(MP.presetOf('pv-anthropic-subscription'), [...CAT.harness.claude, ...labelIds.filter((l) => l.id !== 'claude-fable-5-2[1m]' && !CAT.harness.claude.some((c) => c.id === l.id))]);
   ok(MP.resolveModel(subNo1m, 'claude-fable-5-2[1m]') === 'claude-fable-5-2', 'CONTROL: the list with the bare 5.2 row and no [1m] row resolves a typed claude-fable-5-2[1m] to the bare id — the [1m] dropped, so on 2.1.319 the CLI would run 5.2 with its unknown-model 200k window — the reason the [1m] row exists', MP.resolveModel(subNo1m, 'claude-fable-5-2[1m]'));

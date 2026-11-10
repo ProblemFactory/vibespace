@@ -224,7 +224,8 @@ function listedRows(catalog) {
     if (!id || seen.has(id) || id.length > ID_MAX || /\s/.test(id)) continue;
     seen.add(id);
     const oneM = /\[1m\]$/i.test(id) || /\b1M\b/.test(String((m && m.label) || ''));
-    out.push({ id, label: String((m && m.label) || id).slice(0, LABEL_MAX), context: oneM ? 1000000 : null, caps: oneM ? ['1m'] : [] });
+    const own = m && Number.isInteger(m.context) && m.context >= 1 && m.context <= CONTEXT_MAX ? m.context : null; // the harness's own size (claude: its binary's catalog)
+    out.push({ id, label: String((m && m.label) || id).slice(0, LABEL_MAX), context: own || (oneM ? 1000000 : null), caps: oneM || (own && own >= 1000000) ? ['1m'] : [] });
   }
   return out;
 }
@@ -266,7 +267,8 @@ function resolveModel(p, model) {
   const hit = rows.find((r) => sameModel(r.id, want));
   if (hit) return hit.id;
   const k = kindOf(p.kind);
-  return open && k && k.idPattern.test(want) ? want : null;
+  // …and its 1M form: the harness runs `<id>[1m]` itself (claude: the context-1m road; lane cli-update-needs-nothing R4)
+  return open && k && k.idPattern.test(want.replace(/\[1m\]$/i, '')) ? want : null;
 }
 const servesModel = (p, model) => resolveModel(p, model) !== null;
 const modelsOf = (p) => (p && Array.isArray(p.models) ? p.models : []);

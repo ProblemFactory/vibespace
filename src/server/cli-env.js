@@ -371,8 +371,15 @@ function noteModelSeen(id) {
     }
   } catch { }
 }
+// THE INSTALLED CLAUDE CODE'S OWN CATALOG FIRST (lane cli-update-needs-nothing): src/server/cli-model-catalog.js reads the
+// binary the sessions spawn (never runs it) and hands its view here — per family the catalog's latest id + every id the list
+// above names, each with its [1m] form, labelled and sized by the CLI; the aliases labelled by what they mean on THIS CLI.
+// The two hand lists are the SEED: a binary whose catalog cannot be read keeps them as they are.
+const CMC = require('../claude-model-catalog.js');
+let claudeCatalogView = null;
+const claudeRows = () => CMC.menuRows(claudeCatalogView, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS);
 const AVAILABLE_MODELS = {
-  claude: [...CLAUDE_MODEL_ALIASES, ...CLAUDE_KNOWN_MODELS],
+  claude: claudeRows(),
   codex: [{ id: '', label: 'Default' }],
 };
 for (const id of Object.keys(ACP_COMMANDS)) AVAILABLE_MODELS[id] = [{ id: '', label: 'Default' }];
@@ -385,6 +392,23 @@ function noteHarnessModels(backend, models) {
   for (const m of models) if (m && m.id) cur.set(String(m.id), { id: String(m.id), label: m.label || String(m.id) });
   AVAILABLE_MODELS[backend] = [{ id: '', label: 'Default' }, ...cur.values()];
 }
+const CMCS = require('./cli-model-catalog.js');
+global.__vsCliBinary = (o) => CMCS.noteBinary(o); // oat-file-sync's --version tick tells it which binary the sessions spawn
+let claudeBaseIds = new Set(AVAILABLE_MODELS.claude.map((r) => r.id));
+CMCS.onView((view) => {
+  claudeCatalogView = view;
+  // the recomputed base + every row that came from elsewhere (the /v1/models fetch, the passive ingest of served models):
+  // a catalog read never drops them (acceptance r1, smaller 1)
+  const base = claudeRows(), prev = AVAILABLE_MODELS.claude || [];
+  const kept = prev.filter((r) => r && !claudeBaseIds.has(r.id) && !base.some((b) => b.id === r.id));
+  claudeBaseIds = new Set(base.map((r) => r.id));
+  AVAILABLE_MODELS.claude = [...base, ...kept];
+  // THE NOTIFY LAW (smaller 2): one dirty signal per recomputation — every client re-reads /api/available-models once
+  try { broadcast?.({ type: 'available-models-dirty', backend: 'claude' }); } catch { }
+});
+// LAW A (acceptance r1): what the hub read is in force from the first answer after a restart — the ledger is loaded here,
+// at create, before any --version tick (no re-read)
+try { CMCS.boot({ dataDir: path.join(rootDir, 'data') }); } catch { }
 function refreshAvailableModels() {
   // /v1/models accepts both auth schemes now (OAuth needs Bearer + the oauth
   // beta header — it used to 401, fixed server-side ~2026-06). The old
@@ -412,8 +436,8 @@ function refreshAvailableModels() {
               const ctx = m.max_input_tokens >= 1000000 ? '1M' : m.max_input_tokens >= 200000 ? '200k' : Math.round(m.max_input_tokens / 1000) + 'k';
               return { id: m.id, label: `${m.display_name || m.id} (${ctx})` };
             });
-            const known = CLAUDE_KNOWN_MODELS.filter((k) => !models.some((m) => m.id === k.id));
-            AVAILABLE_MODELS.claude = [...CLAUDE_MODEL_ALIASES, ...known, ...models];
+            const known = claudeRows().filter((k) => !models.some((m) => m.id === k.id));
+            AVAILABLE_MODELS.claude = [...known, ...models];
           } else if (res.statusCode !== 200) {
             console.warn(`[models] /v1/models failed: HTTP ${res.statusCode}`);
           }

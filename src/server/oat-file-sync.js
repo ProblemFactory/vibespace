@@ -41,6 +41,9 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
       if (!v) { caps = { ...accounts.oatFileCaps(), changed: false }; if (said !== 'probe-failed') { said = 'probe-failed'; log(`[oat-file] claude --version gave no answer — keeping CLI ${caps.cli || '(unknown)'}`); } await accounts.syncOatFiles(); return caps; }
       caps = accounts.noteCliVersion(v);      // a changed verdict re-syncs every row itself
       if (onCliVersion) { try { onCliVersion(caps.cli || v); } catch { } }
+      // lane cli-update-needs-nothing: the same read tells the model catalog which binary the sessions spawn (read once per
+      // binary, never run) — through a hook cli-env's create sets (this clock requires no module: test-oat-mint ⑥)
+      try { global.__vsCliBinary?.({ cmd: bin || 'claude', version: caps.cli || v, dataDir: accounts.dataDir || null, which: machineProbes.which }); } catch { }
       if (!caps.changed) await accounts.syncOatFiles(); // else: a login that died since the last tick
       else await accounts.oatFileSettled();
       const words = `${caps.cli || 'unknown'}:${caps.ok}`;

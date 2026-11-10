@@ -11944,6 +11944,8 @@ export default {
   // entry with a trailing comment is invisible to scripts/i18n-check.mjs (its ENTRY_RE ends at the value)
   "More — Vault locked": "その他 — 保管庫はロック中",
   "Back to {name}": "{name} に戻る",
+  "From Claude Code {v}": "Claude Code {v} より",
+  "VibeSpace's table": "VibeSpace の内蔵表",
   "Create or open…": "作成または開く…",
   // lane mask-value-shape: THE note of a link a belt masked inside (src/lib/foryou-links.js maskedLinkNote)
   "Part of this link was masked, so it will not open — ask the agent to send the link without the secret.": "このリンクの一部はマスクされているため開けません——秘密を含まないリンクを送るよう agent に頼んでください。",

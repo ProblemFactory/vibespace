@@ -18,6 +18,7 @@
  *         — A PERSON'S PRESS ONLY: the one caller of refreshListedModels (test-vendor-whitelist §13 pins it).
  */
 const MP = require('../model-providers.js');
+const CMC = require('../claude-model-catalog.js'); // PURE: remoteRows (another machine's menu)
 const { personVerdict } = require('./vault.js');
 
 const STATUS = Object.freeze({ human_only: 403, cross_site: 403, unknown: 404, 'not-listed': 409, 'in-flight': 409, 'key-unreadable': 409, vault_not_set_up: 409, vault_locked: 423, cooldown: 429, unreachable: 502, http: 502, 'too-large': 502, 'bad-answer': 502, invalid: 502 });
@@ -26,13 +27,13 @@ const brief = (p) => (p ? { id: p.id, kind: p.kind, label: p.label, preset: p.pr
 
 function registerProviderModelRoutes(app, { accounts, providers, activeSessions, catalogOf = () => null, refreshModels = () => { }, refresher }) {
   const acctGet = (id) => { try { return id && accounts && typeof accounts.get === 'function' ? accounts.get(id) : null; } catch { return null; } };
-  const menu = (backend, account) => {
+  const menu = (backend, account, host = null) => {
     const provider = account ? providers.forAccount(account) : providers.forAccount({ backend });
     const m = MP.menuOf(provider, catalogOf(backend));
     return {
       backend,
       account: account && account.id ? { id: account.id, name: account.name || account.id, type: account.type || 'api' } : null,
-      provider: brief(provider), models: m.models, empty: m.empty, open: m.open, defaultId: m.defaultId, refreshable: MP.refreshable(provider),
+      provider: brief(provider), models: host ? CMC.remoteRows(m.models) : m.models, empty: m.empty, open: m.open, defaultId: m.defaultId, refreshable: MP.refreshable(provider), // `host`: another machine — ONE parameter for every door
     };
   };
   // the account a running conversation bills NOW: its own, or — pooled — the member it holds (accounts.poolMemberOfSession)
@@ -52,14 +53,16 @@ function registerProviderModelRoutes(app, { accounts, providers, activeSessions,
       const s = activeSessions && typeof activeSessions.get === 'function' ? activeSessions.get(String(q.session)) : null;
       if (!s) return res.status(404).json({ error: 'no such running session', code: 'unknown' });
       const backend = String(s.backend || 'claude');
-      return res.json({ session: String(q.session), ...menu(backend, accountOfSession(s) || { backend }) });
+      // PAIRED MACHINES (lane cli-update-needs-nothing): the conversation's machine is the `host` parameter (not a branch)
+      return res.json({ session: String(q.session), ...menu(backend, accountOfSession(s) || { backend }, s.host || null) });
     }
     const backend = String(q.backend || 'claude');
     const id = String(q.account || '');
-    if (!id || id === 'subscription') return res.json(menu(backend, null));
+    const host = q.host ? String(q.host) : null; // the New Session dialog's machine when it is not this hub
+    if (!id || id === 'subscription') return res.json(menu(backend, null, host));
     const a = acctGet(id) || (/^pv-/.test(id) && providers.get(id) ? { id, backend, type: 'provider', name: providers.get(id).label } : null);
     if (!a) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
-    res.json(menu(backend, a));
+    res.json(menu(backend, a, host));
   });
   app.post('/api/providers/:id/models/refresh', async (req, res) => {
     const who = personVerdict(req);
