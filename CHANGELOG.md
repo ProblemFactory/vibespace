@@ -9,14 +9,18 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent can ask you for a website login: its card in For you has the fields of Vault ▸ Add ▸ Website login…, with the site fixed by the ask.
 - What you type is saved as a website login only that site is ever filled with. The card's first line names the site; a non-Latin address shows both spellings.
 - The card's tick lets that conversation sign in with it until you remove it in Vault ▸ Web logins ▸ Use for…; «Two-step code…» adds its code there.
+- After a Claude Code update, its new models are in a chat's model list, 1M form included, priced at Claude Code's own rates — no VibeSpace update needed.
+- The price editor in Usage shows where each price comes from: VibeSpace's table, your Claude Code, or you.
 
 ### Changed
 - An agent no longer mistakes another conversation's scheduled reminder for its own: it is told only of its own background jobs and ones it subscribed to.
 - When another conversation's background job fails, an agent sees one line saying it is not its own; looking up that job shows whose words it reads.
 - A phone's window list, and the desktop's window lists, show each conversation with the icon of what runs it: Claude Code, Codex, OpenCode or Antigravity.
+- The model list says what each alias means on your Claude Code, for example "fable · Fable 5.2 · 1M".
 
 ### Fixed
 - A vault request card's words now show links as the rest of For you does, and say when a secret inside a link is hidden.
+- Haiku 5.5 and Sonnet 5.5 usage is priced at their own rates (Haiku 5.5 was shown at ten times its price).
 
 ## 2.369.389 — 2026-11-10
 
