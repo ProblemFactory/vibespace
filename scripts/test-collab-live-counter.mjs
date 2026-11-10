@@ -234,7 +234,9 @@ console.log('— ④ wiring pins (a pure composer with an unstaged call site is 
     return body.length > 200 && !/_extendTop|_extendBottom|_trimTop|_trimBottom|_pinned =|scrollTop =/.test(body);
   })());
   check('op dispatch notes the record KIND after the message is applied (a coalescing edit carries the grown rows)',
-    /this\._onCreateMessage\(op\.message\);\s*\n\s*this\._noteRecordKind\(op\.message\);/.test(cv)
+    // THE LAW: the record's kind is noted right AFTER the message is applied. .388 (the train's seam): midturn-order's create
+    // carries its place ({before, at}) as a second argument — the order the law needs is unchanged
+    /this\._onCreateMessage\(op\.message(?:, op\.before \? op : null)?\);\s*\n\s*this\._noteRecordKind\(op\.message\);/.test(cv)
     && /this\._onEditMessage\(op\.id, op\.fields\);[\s\S]{0,140}this\._noteRecordKind\(this\._messages\.find\(\(m\) => m\.id === op\.id\)\);/.test(cv));
   check('the server stays the label authority: the override yields back ONLY what it took',
     /_onServerStreamLabel\(label, kind\) \{/.test(cv) && /this\._collabLabelShown = false; \/\/ the server is writing the line itself now/.test(cv)

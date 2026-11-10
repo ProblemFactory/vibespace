@@ -221,7 +221,10 @@ check('inc-mudv05ja WIRING: the runs observer classifies through foldPassMode; t
   && /for \(const c of RUN_CLASSES\) if \(oldEl\.classList\?\.contains\(c\)\) newEl\.classList\.add\(c\);/.test(cv)
   && /if \(i >= 0\) run\.members\[i\] = newEl;/.test(cv)
   && /const wasRendered = oldEl\.offsetParent != null;[\s\S]{0,120}oldEl\.replaceWith\(newEl\);[\s\S]{0,240}?if \(wasRendered\) this\._reserveFreshHeights\(\[newEl\], \{ live: true \}\);/.test(cv)   // int360: the needs-you focus hand-back (chat-needs-you-card) sits between the swap and the reserve — the ORDER stays pinned
-  && /if \(!this\._loadingHistory\) \{[\s\S]{0,700}this\._reserveFreshHeights\(\[el\], \{ live: true \}\);\n\s*this\._total\+\+;/.test(cv));
+  // THE LAW (.388, the train's seam): a LIVE append reserves the card's real height BEFORE the card is counted. midturn-order's
+  // delivery order (r2 F4) put the window's growth — `const tail = this._windowEnd >= this._total;` — between the reserve and
+  // the count, inside the same block; the order the law needs holds
+  && /if \(!this\._loadingHistory\) \{[\s\S]{0,700}this\._reserveFreshHeights\(\[el\], \{ live: true \}\);(?:\n\s*\/\/[^\n]*|\n\s*const tail = this\._windowEnd >= this\._total;)*\n\s*this\._total\+\+;/.test(cv));
 check('inc-mudv05ja WIRING: the pin writes only with somewhere to go and ends on convergence or an A-B-A height; a Workflow taskInfo edit schedules the in-place patch (no swap on the heartbeat)',
   /if \(sh - list\.scrollTop - list\.clientHeight > 1\) \{\n\s*this\._traceExpect\('fsb'\);\n\s*list\.scrollTop = sh;/.test(cv)
   && /if \(\+\+this\._fsbFrames < 10 && this\._fsbStable < 2 && !flicker\) requestAnimationFrame\(step\);/.test(cv)
