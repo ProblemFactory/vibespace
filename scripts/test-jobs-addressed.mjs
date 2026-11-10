@@ -159,10 +159,10 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     'list (r3): another conversation\'s brief is cut INSIDE its frame — the product\'s close is what the row ends with; the forged close (past the cut) never prints (r2 cut the frame at 60 characters)', bRow);
   // r3 item 3 — THE OWN LINES NEVER WAIT FOR THE COUNT: the update block with the count does not fit the room left, its own lines do
   const real = jm.updatesFor.bind(jm), OWN_ONLY = '<vibespace-jobs-update>\n- jb-0000eeee own-job: done exit=0 ok (1m) — vibespace-job poll jb-0000eeee\n</vibespace-jobs-update>';
-  jm.updatesFor = () => ({ text: OWN_ONLY.replace('\n</vibespace-jobs-update>', '\n' + 'z'.repeat(12000) + '\n</vibespace-jobs-update>'), plain: OWN_ONLY, lastTs: 4242 });
+  jm.updatesFor = () => ({ text: OWN_ONLY.replace('\n</vibespace-jobs-update>', '\n' + 'z'.repeat(12000) + '\n</vibespace-jobs-update>'), plain: OWN_ONLY, lastTs: 9e15 });   // .390 train seam: above the live marker report-mark-on-ack's forward-only apply keeps
   const fb = hook('/api/agent/prompt-context', 'A');
   jm.updatesFor = real;
-  ok(fb.includes(OWN_ONLY) && !fb.includes('zzzz') && activeSessions.get('A')._jobsEventsSeenTs === 4242, 'the route (r3): the block with the count does not fit the room left ⇒ the OWN lines ride now (r2: the whole block waited a prompt), the marker moves with them', fb.slice(-300));
+  ok(fb.includes(OWN_ONLY) && !fb.includes('zzzz') && activeSessions.get('A')._jobsEventsSeenTs === 9e15, 'the route (r3): the block with the count does not fit the room left ⇒ the OWN lines ride now (r2: the whole block waited a prompt), the marker moves with them', fb.slice(-300));
   server.close();
 }
 
@@ -742,6 +742,7 @@ const ROUTE_ROWS = {
   peekNotifs: 'STASH — the conversation\'s OWN held notifications, keyed by its id; only _stashNotif writes them, for a delivery _notifyOwner addressed (owner / subscriber)',
   drainNotifs: 'STASH — the same store, taken by identity', spillNotifs: 'STASH — the same items written to the conversation\'s own read file',
   addressedNow: 'PUSH',   // r3: the parked-notification drain asks the predicate per item
+  claimNotifs: 'STASH — the same items, claimed by identity (the carry stamp, through carry.claim) while the answer that rendered them waits for its confirm; nothing is shown or taken — the confirm, the next answer or the claim\'s bound releases them',   // .390 train seam (report-mark-on-ack's hook-route call)
 };
 // the held-notification item literals of a source: every `{…}` whose OWN keys include jobId, jobName, text and held (any order,
 // any line breaks; nested braces skipped) → { line, sub } (r4 item 3)
