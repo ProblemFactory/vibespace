@@ -29,6 +29,13 @@
 // proves the push is not obviously broken, the heavy tier proves it is
 // actually good, and nothing rides on top of a known-red commit.
 //
+// THE MIRROR VERDICT (B-e381, 2026-11-10): `--heavy-verdict <sha> --gh-run <id>`
+// verifies the CI mirror's run of EXACTLY the pushed sha through gh and writes
+// `<sha>.mirror.green` listing the HOSTED heavy suites it ran (the mirror is the
+// hosted half; the self-hosted half runs on the box). A red clears when the union
+// of descendant greens covers every suite that failed in it; every refusal writes
+// nothing.
+//
 // ONE HEAVY TIER PER MACHINE (2026-09-07 round 2). Two heavy runs on one box
 // double the load the suites' budgets were measured under, and until 2.369.76
 // the heavy suites also claimed machine-global names (fixed ports, fixed /tmp
@@ -168,6 +175,7 @@
 // --shard slices plus one aggregate `heavy` status — see SHARDS).
 // Gate for this file: scripts/test-ci-gate.mjs.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -865,6 +873,7 @@ export const SUITES = [
   { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/7: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
+  { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 3.6 s (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-usage-index-parity', tier: 'fast', why: 'in-process · 3.4 s (restated 2026-10-20, was 2.3 s)' }, // design 011 lane 3, the usage index SHADOW: the REAL worker on a scratch HOME answers the Usage window's aggregate exactly as memory (duplicate rids whose rows differ in account, a torn line, an empty shard, every dimension / filter / pivot, local hour + weekday, a St_Johns DST child, a remote harvest into an old month, a missed push, a repair rewrite); READ-YOUR-WRITES with a tail-only control worker; L0's cursor writer (write on change, dead keys only on proof)
   { name: 'test-usage-exit-hook', tier: 'fast', why: 'in-process · 9.3 s (six child servers in parallel; the controls wait 8 s)' }, // lane usage-fold-worker-exit-hook (.284): a usage fold worker asleep in a read no longer holds the server's exit — src/server/exit-hook.js judges the fold workers at the join (after every 'exit' listener), EXIT_BOUND_MS, then the re-raise; stuck / in flight / merely busy legs on the real UsageHistory in child servers + three scratch-copy controls
@@ -2894,19 +2903,58 @@ const sameLineOfHistory = (a, b, root = repo) => {
 const markerDir = (dir) => dir || path.join(repo, 'data', 'ci-heavy');
 const shortSha = (s) => String(s || '').slice(0, 8);
 
-function readMarkers(dir) {
+// LAW A (lane ci-heavy-verdict r3): a marker that cannot be read as a record of its kind never opens the gate. The MINIMUM every
+// real marker carries — every one of the 30 production held on 2026-11-10, and both writers — is: a JSON OBJECT whose `sha` names the
+// file's commit, `result` = its kind, `failed` = a list of names, `endedAt` = a number (the readers sort, age and print by it). Not
+// required: `scope` (a box marker without one is the oldest shape, read as FULL — unchanged) and `startedAt` (no reader decides by
+// it). A mirror verdict adds `source: 'mirror'`, `scope: 'hosted'` and its non-empty `selected` / `partial` name lists. An empty, unparsable,
+// null / number / string / array file, a directory or a symlink of a marker's name is UNREADABLE: a green of it covers nothing, a red
+// of it still BLOCKS (as a red whose failures are unknown — only a FULL green on a descendant clears it). `failed` / `selected` /
+// `partial` / `absent` that are not lists of names are no list.
+const strList = (x) => Array.isArray(x) && x.every((v) => typeof v === 'string');
+export function markerShapeWhy(rec, kind, nameSha, mirror = false) {
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return `not a JSON object (${rec === null ? 'null' : Array.isArray(rec) ? 'an array' : typeof rec})`;
+  if (typeof rec.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(rec.sha) || !(rec.sha.startsWith(nameSha) || nameSha.startsWith(rec.sha))) return `its sha (${typeof rec.sha === 'string' ? rec.sha.slice(0, 12) : typeof rec.sha}) is not the file's commit`;
+  if (rec.result !== kind) return `its result (${String(rec.result)}) is not «${kind}»`;
+  if (!strList(rec.failed)) return 'its `failed` is not a list of names';
+  if (!Number.isFinite(rec.endedAt)) return 'it has no end time';
+  if (mirror && (rec.source !== 'mirror' || rec.scope !== 'hosted' || !strList(rec.selected) || !rec.selected.length || !strList(rec.partial))) return 'it is not a mirror verdict (source mirror, scope hosted, a list of names)';
+  return null;
+}
+function readMarkers(dir, { withMirror = false, withUnreadable = false } = {}) {
   const d = markerDir(dir);
   let files = [];
-  try { files = fs.readdirSync(d); } catch { return []; }
+  // no directory = no markers (CLEAR). For the GATE's reader (withUnreadable) a directory that cannot be READ is not «no markers»:
+  // it throws and the guard's answer is BLOCKED. The other readers (status, timings, the launcher) keep «none», as before.
+  try { files = fs.readdirSync(d); } catch (e) { if ((e && e.code === 'ENOENT') || !withUnreadable) return []; throw e; }
   const out = [];
   for (const f of files) {
-    const m = /^([0-9a-f]{7,40})\.(green|red|pid|skipped)$/.exec(f);
-    if (!m) continue;
-    let rec = {};
-    try { rec = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')); } catch {}
-    out.push({ ...rec, sha: rec.sha || m[1], kind: m[2], file: path.join(d, f) });
+    // `<sha>.mirror.green` = the CI mirror's verdict (lane ci-heavy-verdict r2): the HOSTED half, listed. Only heavyBlocker asks
+    // for it (withMirror); every other reader (status, the launcher's already-green) sees the box's own markers, as before.
+    const m = /^([0-9a-f]{7,40})(\.mirror)?\.(green|red|pid|skipped)$/.exec(f);
+    if (!m || (m[2] && (!withMirror || m[3] !== 'green'))) continue;
+    const file = path.join(d, f), kind = m[3], mirror = !!m[2];
+    let rec = null, why = null;
+    try {
+      const st = fs.lstatSync(file);
+      if (st.isSymbolicLink()) why = 'a symlink, not a marker file';
+      else if (!st.isFile()) why = 'a directory, not a marker file';
+      else rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) { why = `unparsable (${(e && (e.code || e.message)) || e})`; }
+    if (kind === 'pid' || kind === 'skipped') {   // run records, not verdicts: read as before
+      const r = rec && typeof rec === 'object' && !Array.isArray(rec) ? rec : {};
+      out.push({ ...r, sha: r.sha || m[1], kind, file });
+      continue;
+    }
+    if (!why) why = markerShapeWhy(rec, kind, m[1], mirror);
+    if (why) {   // an unreadable record carries its file's mtime (it has no times of its own) so the readers order it where it landed
+      let mtimeMs = 0; try { mtimeMs = fs.lstatSync(file).mtimeMs; } catch { }
+      if (withUnreadable) out.push({ sha: m[1], kind, file, unreadable: why, failed: [], mtimeMs, ...(mirror ? { source: 'mirror' } : {}) });
+      continue;
+    }
+    out.push({ ...rec, sha: rec.sha || m[1], kind, file, ...(mirror ? { source: 'mirror' } : {}) });
   }
-  return out.sort((a, b) => (b.endedAt || b.startedAt || 0) - (a.endedAt || a.startedAt || 0));
+  return out.sort((a, b) => (b.endedAt || b.startedAt || b.mtimeMs || 0) - (a.endedAt || a.startedAt || a.mtimeMs || 0));
 }
 
 const gitIn = (root, args) => {
@@ -3031,34 +3079,204 @@ export function heavyBlocker({ dir, head, repoRoot = repo } = {}) {
   if (!HEAD) return null;
   const exists = (sha) => gitIn(repoRoot, ['cat-file', '-e', sha + '^{commit}']) !== null;
   const isAncestor = (a, b) => spawnSync('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', a, b], { env: GIT_ENV }).status === 0;
-  const all = readMarkers(dir);
-  const reds = all.filter((m) => m.kind === 'red' && exists(m.sha));
-  // A PARTIAL green (`--only=…`) is not evidence that the tier passed, so it
-  // can never clear a block — otherwise re-running one suite would unlock a
-  // commit the rest of the tier never saw. A partial RED still blocks: a suite
+  const all = readMarkers(dir, { withMirror: true, withUnreadable: true });
+  const reds = all.filter((m) => m.kind === 'red' && exists(m.sha)); // an UNREADABLE red still blocks (LAW A)
+  // A PARTIAL green (`--only=…`) is not evidence that the TIER passed: it vouches for its own list only, so re-running one suite
+  // unlocks a red only when that suite was every one that failed in it (the union below). A partial RED still blocks: a suite
   // really did fail on that commit.
-  const greens = all.filter((m) => m.kind === 'green' && !m.partial && exists(m.sha));
-  // An AFFECTED green (2026-09-15) is green for ITS push only: it clears a red
-  // only when every suite that failed there was in the set it actually ran. A
-  // red of either scope blocks alike.
-  const coversRed = (g, red) => g.scope !== 'affected' || (red.failed || []).every((f) => Array.isArray(g.selected) && g.selected.includes(f));
+  // THE UNION (lane ci-heavy-verdict r2; 主开发's law 2026-11-10: «a marker vouches for exactly the suites that ran, and a red is
+  // cleared only when every suite that failed in it has since RUN GREEN on a descendant»). A FULL green — no `partial`, scope full
+  // (or none, the oldest markers) — vouches for the whole tier and clears alone, as before. Every other green vouches for its LIST:
+  // an affected run's `selected`, a slice's `partial` (--only / --shard / --host), the CI mirror's hosted half (`<sha>.mirror.green`).
+  // A red clears when the UNION of those lists on its descendants covers every suite that failed in it; a red with no failed list
+  // clears only by a FULL green. The reader TRUSTS any well-formed marker file — a hand-written green clears (true before this change
+  // too); «verified, never typed» describes the mirror WRITER. Parity: on the 30 markers production held on 2026-11-10 every HEAD's
+  // verdict is unchanged (test-ci-heavy-verdict §7).
+  // LAW B (r4, 主开发's ruling 2026-11-10 05:34Z): `absent` is subtracted from LIST-scoped greens only — there the list claims a name
+  // that did not run. A FULL green says every suite the runner's table knows at that commit ran green: it clears EVERY kind of red (a
+  // list-less one, an unreadable one), exactly as 2056c98de does, whatever its `absent`. A list-scoped green whose `absent` is not a
+  // list of names counts for nothing (fail closed, like failed / selected / partial). The gap this leaves (a FULL green from an OLDER
+  // table never ran the suites added since) is said in the kb and B-479e, not built.
+  const greens = all.filter((m) => m.kind === 'green' && !m.unreadable && exists(m.sha));
+  const fullOf = (g) => !g.partial && g.scope !== 'affected' && g.scope !== 'hosted' && g.source !== 'mirror';
+  const listOf = (g) => {
+    if (g.absent !== undefined && !strList(g.absent)) return [];
+    const absent = new Set(g.absent || []);
+    return [].concat(strList(g.selected) ? g.selected : [], strList(g.partial) ? g.partial : []).filter((f) => !absent.has(f));
+  };
+  const covers = (g, f) => fullOf(g) || listOf(g).includes(f);
   for (const red of reds) {
     if (!isAncestor(red.sha, HEAD)) continue;
-    const cleared = greens.some((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, HEAD) && coversRed(g, red));
-    if (!cleared) return red;
+    const desc = greens.filter((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, HEAD));
+    const failed = !red.unreadable && strList(red.failed) ? red.failed : [];
+    if (failed.length ? failed.every((f) => desc.some((g) => covers(g, f))) : desc.some(fullOf)) continue;
+    return red;
   }
   return null;
+}
+
+// ── THE MIRROR VERDICT (B-e381, lane ci-heavy-verdict r2, 2026-11-10) ───────
+// heavyBlocker clears a red only when every suite that failed in it has since
+// RUN GREEN on a descendant. On the box the post-push FULL tier wrote no
+// marker after 2026-11-01, so that day's red blocked every later push from the
+// production checkout. Measured: both repositories set core.hooksPath to the
+// repo guard, whose pre-push chains to `$(git rev-parse --git-dir)/hooks/
+// pre-push` — the production checkout's .git/hooks/pre-push is this gate; a
+// cut WORKTREE's git-dir (…/.git/worktrees/<wt>) has none. So .385–.388 were
+// pushed from cut worktrees AROUND this gate (only the secret guard ran), and
+// production pushes with VIBESPACE_SKIP_CI=1 exit before the check AND before
+// the post-push launch: no road started a box heavy run.
+// The CI mirror runs the HOSTED half only (ci.yml: `--host=hosted --shard
+// i/6`; 338 of 399 heavies at .388 — the 61 self-hosted run on the box).
+// `--heavy-verdict <sha> --gh-run <id>` writes THAT evidence as
+// `<sha>.mirror.green`, listing exactly the hosted heavy names of the commit's
+// own plan (never «full»; `partial` set, so a reader that predates the union
+// ignores it), and refuses — writing NOTHING — unless the run is this
+// repository's (origin = its repository AND head repository), the ci workflow
+// BY PATH, a push, headSha byte for byte, completed + success, and fast +
+// every `heavy i/n` the workflow AT THE SHA defines + the `heavy` gate are each
+// success (every job of a needed name; a missing, skipped or duplicate-failed
+// one refuses). gh absent / unauthenticated / 403 / timing out = «cannot
+// verify»: two bounded GETs, no retry, never on a timer. The list is read from
+// the COMMIT (its ci.mjs = the running one, byte for byte; its suite sources by
+// git cat-file). «Verified, never typed» is the WRITER's promise; the reader
+// opens the gate only on a marker it can read as a record of its kind (LAW A).
+export const MIRROR_WORKFLOW = '.github/workflows/ci.yml';
+/** owner/name of a GitHub remote URL (ssh or https), or null. */
+export function repoSlugOf(url) {
+  const m = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+/** The heavy matrix a ci.yml TEXT defines: { n, slots } when its `shard: [..]` list is 1..n and its job name says `heavy ${{ matrix.shard }}/n`; else null. */
+export function workflowShardsAt(text) {
+  const mat = /heavy-shards:[\s\S]*?shard:\s*\[([\d,\s]+)\]/.exec(String(text || ''));
+  const nm = /name:\s*heavy \$\{\{ matrix\.shard \}\}\/(\d+)/.exec(String(text || ''));
+  if (!mat || !nm) return null;
+  const slots = mat[1].split(',').map((x) => Number(x.trim()));
+  const n = Number(nm[1]);
+  return n > 0 && slots.length === n && slots.every((v, k) => v === k + 1) ? { n, slots } : null;
+}
+/** The HOSTED heavy names of the COMMIT's plan (LAW B, r3): its ci.mjs must be byte-for-byte the module running (same git blob),
+ *  and every heavy suite's source is read from the COMMIT (`git cat-file --batch`) — a working tree, a skip-worktree flag or an
+ *  unstaged edit cannot move the list. → { names } | { err }. */
+export function hostedHeavyNamesAt({ repoRoot = repo, sha } = {}) {
+  const self = fs.readFileSync(HERE);
+  const selfBlob = createHash('sha1').update(`blob ${self.length}\0`).update(self).digest('hex');
+  const theirs = gitIn(repoRoot, ['rev-parse', `${sha}:scripts/ci.mjs`]);
+  if (theirs !== selfBlob) return { err: `the running ci.mjs (${selfBlob.slice(0, 9)}) is not the commit's (${String(theirs || 'none').slice(0, 9)}) — run the verdict with ${String(sha).slice(0, 9)}'s own ci.mjs` };
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  const r = spawnSync('git', ['-C', repoRoot, 'cat-file', '--batch'], { input: heavy.map((s) => `${sha}:scripts/${s.name}.mjs`).join('\n') + '\n', env: GIT_ENV, maxBuffer: 256 << 20 });
+  if (r.status !== 0 || !r.stdout) return { err: `cannot read the commit's suite sources (git cat-file exit ${r.status})` };
+  const buf = r.stdout, src = new Map();
+  let at = 0;
+  for (const s of heavy) {
+    const nl = buf.indexOf(10, at); if (nl < 0) break;
+    const head = buf.slice(at, nl).toString('utf8'); at = nl + 1;
+    const mm = /^[0-9a-f]+ blob (\d+)$/.exec(head);
+    if (!mm) { src.set(s.name, ''); continue; }   // «missing»: the commit has no such file
+    const n = Number(mm[1]); src.set(s.name, buf.slice(at, at + n).toString('utf8')); at += n + 1;
+  }
+  return { names: hostPlan(heavy, { sourceOf: (n) => src.get(n) || '' }).hosted.map((s) => s.name).sort() };
+}
+/** THE JUDGE (pure): is this run the green CI mirror of exactly `sha` in repository `slug`? → { ok, jobs } | { ok: false, why }. */
+export function judgeMirrorRun({ sha, slug, run, jobs, totalJobs, workflow } = {}) {
+  const no = (why) => ({ ok: false, why });
+  const lc = (x) => String(x || '').toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(String(sha || ''))) return no(`the sha must be 40 hex (got '${sha}')`);
+  if (!slug) return no('this repository has no GitHub origin to compare the run with');
+  if (!run || typeof run !== 'object') return no('no run to judge');
+  const repoName = run.repository && run.repository.full_name, headName = run.head_repository && run.head_repository.full_name;
+  if (lc(repoName) !== lc(slug)) return no(`the run belongs to ${repoName || 'an unnamed repository'}, not ${slug}`);
+  if (lc(headName) !== lc(slug)) return no(`the run's head is ${headName || 'an unnamed repository'} (a fork), not ${slug}`);
+  if (String(run.path || '').split('@')[0] !== MIRROR_WORKFLOW) return no(`the run is the workflow ${run.path || '?'}, not ${MIRROR_WORKFLOW}`);
+  if (run.event !== 'push') return no(`the run's event is ${run.event || '?'}, not a push of a branch`);
+  if (run.head_sha !== sha) return no(`the run's headSha ${run.head_sha || '?'} is not ${sha}`);
+  if (run.status !== 'completed') return no(`the run is ${run.status || '?'}, not completed`);
+  if (run.conclusion !== 'success') return no(`the run's conclusion is ${run.conclusion || '?'}, not success`);
+  const list = Array.isArray(jobs) ? jobs : [];
+  if (Number.isFinite(totalJobs) && totalJobs > list.length) return no(`the job list is paged (${list.length} of ${totalJobs}) — every job cannot be seen`);
+  const shards = workflowShardsAt(workflow);
+  if (!shards) return no(`${MIRROR_WORKFLOW} at ${sha.slice(0, 9)} defines no readable heavy matrix`);
+  const need = ['fast', ...shards.slots.map((i) => `heavy ${i}/${shards.n}`), 'heavy'];
+  for (const name of need) {
+    const these = list.filter((x) => x && x.name === name);
+    if (!these.length) return no(`the run has no job «${name}» (the workflow at ${sha.slice(0, 9)} defines ${shards.n} heavy shards)`);
+    const j = these.find((x) => x.conclusion !== 'success');
+    if (j) return no(`the job «${name}» is ${j.conclusion || j.status || '?'}${these.length > 1 ? ` (one of ${these.length} jobs of that name)` : ''}, not success`); // THE PER-JOB CHECK
+  }
+  return { ok: true, jobs: need };
+}
+/** ONE bounded gh GET → { json } | { err }; no retry. */
+export function ghApiJson(apiPath, { timeoutMs = 30000 } = {}) {
+  const r = spawnSync('gh', ['api', apiPath], { encoding: 'utf-8', timeout: timeoutMs, maxBuffer: 16 << 20 });
+  if (r.error) return { err: r.error.code === 'ENOENT' ? 'gh is not installed' : (r.error.code === 'ETIMEDOUT' ? `gh timed out after ${Math.round(timeoutMs / 1000)} s` : String(r.error.message || r.error)) };
+  if (r.status !== 0) {
+    const tail = String(r.stderr || '').trim().split('\n').pop() || `gh exit ${r.status}`;
+    return { err: (/HTTP 40[13]|rate limit|auth|gh auth login|GH_TOKEN/i.test(String(r.stderr || '')) ? 'gh refused (unauthenticated or rate-limited): ' : 'gh failed: ') + tail };
+  }
+  try { return { json: JSON.parse(r.stdout) }; } catch { return { err: 'gh answered something that is not JSON' }; }
+}
+/** THE WRITER: verify, then write <markers>/<sha>.mirror.green (the hosted list) — or refuse and write nothing.
+ *  `hosted` = the hosted heavy names of the sha's plan; by default read from the COMMIT (hostedHeavyNamesAt), never the working tree. */
+export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJson, hosted, now = Date.now(), by = process.env.USER || 'unknown' } = {}) {
+  const no = (why) => ({ ok: false, why });
+  if (!/^\d+$/.test(String(runId || ''))) return no(`--gh-run wants a run id (got '${runId || ''}')`);
+  const full = gitIn(repoRoot, ['rev-parse', '--verify', '-q', String(sha || '') + '^{commit}']);
+  if (!full) return no(`${sha || '(no sha)'} is no commit in ${repoRoot}`);
+  const origin = gitIn(repoRoot, ['remote', 'get-url', 'origin']);
+  const slug = repoSlugOf(origin);
+  if (!slug) return no(`the origin remote (${origin || 'none'}) is no GitHub repository`);
+  const workflow = gitIn(repoRoot, ['show', `${full}:${MIRROR_WORKFLOW}`]);
+  if (workflow === null) return no(`cannot read ${MIRROR_WORKFLOW} at ${full.slice(0, 9)}`);
+  let names = hosted;
+  if (!names) { const h = hostedHeavyNamesAt({ repoRoot, sha: full }); if (h.err) return no(h.err); names = h.names; }
+  if (!Array.isArray(names) || !names.length) return no('the commit\'s plan lists no hosted heavy suite');
+  const d = markerDir(dir);
+  try { if (fs.existsSync(d) && !fs.statSync(d).isDirectory()) return no(`the markers path ${d} is not a directory`); }
+  catch (e) { return no(`the markers path ${d} cannot be used: ${e.code || e.message}`); }
+  const r = ghJson(`repos/${slug}/actions/runs/${runId}`);
+  if (!r || r.err || !r.json) return no(`cannot verify: ${(r && r.err) || 'gh gave nothing'}`);
+  const j = ghJson(`repos/${slug}/actions/runs/${runId}/jobs?filter=latest&per_page=100`);
+  if (!j || j.err || !j.json) return no(`cannot verify: ${(j && j.err) || 'gh gave nothing'}`);
+  const v = judgeMirrorRun({ sha: full, slug, run: r.json, jobs: j.json.jobs, totalJobs: j.json.total_count, workflow });
+  if (!v.ok) return v;
+  const list = names.slice().sort();
+  const rec = { sha: full, result: 'green', failed: [], scope: 'hosted', source: 'mirror', hosts: 'hosted', selected: list, partial: list, ghRun: Number(runId), attempt: r.json.run_attempt,
+    jobs: v.jobs, repo: slug, workflow: MIRROR_WORKFLOW, verifiedAt: now, startedAt: Date.parse(r.json.run_started_at) || now, endedAt: now, by };
+  const file = path.join(d, `${full}.mirror.green`);
+  try { fs.mkdirSync(d, { recursive: true }); } catch (e) { return no(`the markers path ${d} cannot be used: ${e.code || e.message}`); } // only now: a refusal leaves no directory behind
+  try { fs.unlinkSync(file); } catch {} // never written THROUGH whatever stands at the path (a symlink, an old verdict)
+  try { fs.writeFileSync(file, JSON.stringify(rec, null, 2) + '\n', { flag: 'wx' }); } catch (e) { return no(`the marker could not be written at ${file}: ${e.code || e.message}`); }
+  return { ok: true, file, rec };
 }
 
 // Keep the last N results (with their logs). A red older than that stops
 // blocking — deliberate: 30 heavy runs is far past the point where "fix it or
 // bypass it" was the honest answer, and an unbounded directory of 10-minute
 // logs is its own problem.
-function pruneMarkers(dir, keep = 30) {
+/** THE WRITER'S REFUSAL (r4): the verdict a PARTIAL run (--only / --shard / --host) must not overwrite — a FULL green or red of this
+ *  commit, OR any file of its verdict names (`<sha>.green` / `<sha>.red`) that cannot be read: LAW A says such a red blocks until a
+ *  FULL green, so a partial run must never erase it (round 3 hid it from this question and the partial run unlinked it). */
+export function existingVerdictOf(dir, sha) {
+  return readMarkers(dir, { withUnreadable: true }).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && (m.unreadable || !m.partial)) || null;
+}
+/** Keep the newest `keep` COMMITS — every file of a commit inside the window stays, whatever the age of one of them (a commit's
+ *  time = its newest marker; an unreadable file's = its mtime); every file of a commit outside it goes, unreadable ones too (r4). */
+export function pruneMarkers(dir, keep = 30) {
   const d = markerDir(dir);
-  const results = readMarkers(dir).filter((m) => m.kind !== 'pid');
-  for (const m of results.slice(keep)) {
-    for (const ext of ['green', 'red', 'skipped', 'log', 'pid']) { try { fs.unlinkSync(path.join(d, `${m.sha}.${ext}`)); } catch {} }
+  const results = readMarkers(dir, { withMirror: true, withUnreadable: true }).filter((m) => m.kind !== 'pid');
+  const newest = new Map();
+  for (const m of results) {
+    let t = m.endedAt || m.startedAt || m.mtimeMs || 0;
+    if (!t) { try { t = fs.lstatSync(m.file).mtimeMs; } catch { } }
+    newest.set(m.sha, Math.max(newest.get(m.sha) || 0, t || 0));
+  }
+  const order = [...newest.entries()].sort((a, b) => b[1] - a[1]).map(([sha]) => sha);
+  for (const sha of order.slice(keep)) {
+    for (const ext of ['green', 'red', 'skipped', 'log', 'pid', 'mirror.green']) {
+      const f = path.join(d, `${sha}.${ext}`);
+      try { if (fs.lstatSync(f).isDirectory()) fs.rmdirSync(f); else fs.unlinkSync(f); } catch {}
+    }
   }
 }
 
@@ -3649,7 +3867,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // describe what ran — normally refused at t=0, reachable here only via
     // --dirty-ok), and a PARTIAL run trying to overwrite a full verdict (a
     // `--only` re-run must not erase what the whole tier said).
-    const existing = readMarkers(dir).find((m) => m.sha === sha && (m.kind === 'green' || m.kind === 'red') && !m.partial);
+    const existing = existingVerdictOf(dir, sha);
     let noVerdict = '';
     if (abandonedWhy || (abandonedWhy = abandoned())) noVerdict = abandonedWhy;
     else if (dirtyAtStart) noVerdict = 'the tree was DIRTY — the sha would not describe what ran';
@@ -3657,7 +3875,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // old ref that predates them would otherwise earn a GREEN marker for a run
     // of zero suites — the vacuous green `--only` already refuses on a typo.
     else if (absent.length && absent.length === heavy.length) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
-    else if ((only || shard || host) && existing) noVerdict = `partial run — keeping the existing FULL ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}`;
+    else if ((only || shard || host) && existing) noVerdict = `partial run — keeping the existing ${existing.unreadable ? 'UNREADABLE' : 'FULL'} ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}${existing.unreadable ? ` (${existing.unreadable})` : ''}`;
     if (noVerdict) {
       console.log('\n[ci:heavy] ' + noVerdict);
     } else {
@@ -3739,6 +3957,9 @@ const reachableFromABranch = (sha) => {
 // test-ci-heavy-launch drives every arm; heavyLaunch feeds it the disk.
 export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope, range, now = Date.now() } = {}) {
   const mine = (m) => m.sha === sha || (full && m.sha === full);
+  // r4: never «already green» while a marker of this commit cannot be read (an unreadable red blocks; we cannot tell what it says)
+  const unread = markers.find((m) => m.unreadable && mine(m));
+  if (unread) return { skip: false, why: `an UNREADABLE marker of this sha sits beside its green (${path.basename(unread.file || '')}: ${unread.unreadable})` };
   const red = markers.find((m) => m.kind === 'red' && mine(m));
   const g = markers.find((m) => m.kind === 'green' && mine(m));
   if (!g) return { skip: false, why: red ? 'the marker for this sha is RED' : 'no green marker for this sha' };
@@ -3804,7 +4025,7 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   {
     const full = gitOut(['rev-parse', sha + '^{commit}']) || sha;
     const ct = Number(gitOut(['show', '-s', '--format=%ct', full]));
-    const markers = readMarkers(dir).filter((m) => m.kind === 'green' || m.kind === 'red').map((m) => {
+    const markers = readMarkers(dir, { withUnreadable: true }).filter((m) => m.kind === 'green' || m.kind === 'red').map((m) => {
       let mtimeMs = 0; try { mtimeMs = fs.statSync(m.file).mtimeMs; } catch { }
       return { ...m, mtimeMs };
     });
@@ -3839,18 +4060,21 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   return 0;
 }
 
-function checkHeavy({ dir, head } = {}) {
+export function checkHeavy({ dir, head } = {}) {
   let blocker = null;
   try { blocker = heavyBlocker({ dir, head }); } catch (e) {
-    // A broken checker must never silently block every push — but it must not
-    // be silent either (§no-silent-failures).
-    console.error(`[ci] WARNING: could not read the heavy-gate markers (${e.message}) — not blocking`);
-    return 0;
+    // LAW A (lane ci-heavy-verdict r3): a checker that cannot read the markers does NOT open the gate. A marker directory that does
+    // not exist (or holds none) is CLEAR; one that exists and cannot be read is BLOCKED. The way out is the documented switch, with a
+    // written word (as .389 itself went).
+    console.error(`\n[ci] PUSH BLOCKED — the heavy-gate markers cannot be read (${(e && e.message) || e}): a marker that cannot be read never opens the gate.`);
+    console.error('     Fix the marker directory, or — with a written word — VIBESPACE_SKIP_CI=1 git push\n');
+    return 1;
   }
   if (!blocker) return 0;
   const when = blocker.endedAt ? new Date(blocker.endedAt).toLocaleString() : '?';
   console.error(`\n[ci] PUSH BLOCKED — the heavy tier went RED on ${shortSha(blocker.sha)} (${when}), which is an ancestor of HEAD.`);
   console.error(`     failed: ${(blocker.failed || []).join(', ') || '(no suite names recorded)'}`);
+  if (blocker.unreadable) console.error(`     its marker ${path.relative(repo, blocker.file)} is UNREADABLE (${blocker.unreadable}) — it blocks until a FULL green on a descendant`);
   console.error(`     log:    ${path.relative(repo, path.join(markerDir(dir), blocker.sha + '.log'))}`);
   // The recovery has to be REACHABLE. It used to also offer "or wait for the
   // next push's background run" — but the background run is launched BY a
@@ -3866,7 +4090,7 @@ function checkHeavy({ dir, head } = {}) {
 }
 
 function status({ dir, head: wantHead } = {}) {
-  const all = readMarkers(dir);
+  const all = readMarkers(dir, { withUnreadable: true });   // r4: an unreadable marker is listed as UNREADABLE — the gate blocks on it
   const results = all.filter((m) => m.kind !== 'pid');
   const running = inFlight(dir);
   const lockPath = defaultLockPath();
@@ -3888,8 +4112,9 @@ function status({ dir, head: wantHead } = {}) {
     // SKIPPED is not a verdict — it is the absence of one, said out loud, so a
     // commit that never got its turn on the machine cannot be mistaken for one
     // that passed (or for "nobody has pushed lately").
-    const label = m.kind === 'skipped' ? 'SKIP ' : m.result === 'green' ? 'GREEN' : 'RED  ';
-    const detail = m.kind === 'skipped' ? `no verdict — ${m.reason || 'did not run'}`
+    const label = m.unreadable ? 'UNREADABLE' : m.kind === 'skipped' ? 'SKIP ' : m.result === 'green' ? 'GREEN' : 'RED  ';
+    const detail = m.unreadable ? `${path.basename(m.file)}: ${m.unreadable}${m.kind === 'red' ? ' — it BLOCKS until a FULL green on a descendant' : ' — it covers nothing'}`
+      : m.kind === 'skipped' ? `no verdict — ${m.reason || 'did not run'}`
       : m.result === 'green' ? `${m.suites} suites` : 'failed: ' + (m.failed || []).join(', ');
     // `absent` is not decoration: it is what makes "97 suites" above true or
     // false, so the CLI carries it exactly like the route and the report do.
@@ -4046,11 +4271,12 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'host', 'hosts', 'isolate', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
   (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
+  --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
   --list-affected      the heavy suites a --range touches · --census · --hosts · --shard-timings <files…>
   --reap [--dry-run]   the scratch reaper
   ops: --markers=<dir> --head=<sha> --lock=<file> --lock-wait-ms=<n> --pid-file=<f> --serial-overlap=<n> --dirty-ok --allow-hub-full
@@ -4103,6 +4329,14 @@ function main(argv) {
   if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); return exitFlushed(0); }
   if (arg('status')) return exitFlushed(status({ dir, head }));
   if (arg('check-heavy')) return exitFlushed(checkHeavy({ dir, head }));
+  if (arg('heavy-verdict') !== undefined) {
+    if (argv.includes('--markers')) { console.error('✗ heavy verdict REFUSED: write --markers=<dir> (the space form `--markers <dir>` is not read here, and a marker must never land in the default directory by mistake) — nothing written'); return exitFlushed(3); }
+    const vSha = str('heavy-verdict') || argv[argv.indexOf('--heavy-verdict') + 1] || '';
+    const vRun = str('gh-run') || (argv.includes('--gh-run') ? argv[argv.indexOf('--gh-run') + 1] || '' : '');
+    const v = heavyVerdict({ sha: vSha, runId: vRun, dir });
+    if (v.ok) { console.log(`✓ heavy verdict: CI mirror run ${vRun} (attempt ${v.rec.attempt}) is green for ${v.rec.sha} — the HOSTED half: ${v.rec.selected.length} heavy suites (${v.rec.jobs.join(', ')}) — wrote ${v.file}`); return exitFlushed(0); }
+    console.error(`✗ heavy verdict REFUSED for ${vSha || '(no sha)'}: ${v.why} — nothing written`); return exitFlushed(3);
+  }
   if (arg('heavy-launch') !== undefined) return exitFlushed(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
   if (arg('heavy') || arg('heavy-affected')) {
     const affected = !!arg('affected') || !!arg('heavy-affected');
