@@ -4902,6 +4902,12 @@ class ChatView {
       this._statusBar.setServedModel(op.data?.model || null);
       return;
     }
+    // THE LOCK MOVED (lane fable-52-cli-321 F1): a press, a pick under it or the server's own upgrade, on whichever client —
+    // the attach status's two fields, through the bar's attach door, so no client holds a stale lock target until a reload
+    if (op.subtype === 'model-lock') {
+      this._statusBar.applyStatus({ modelLocked: !!op.data?.modelLocked, lockedModel: op.data?.lockedModel || null, lockMoved: true });
+      return;
+    }
     // Live effort (2.369.62): the running turn's value AND the pending pick.
     // Fired by turn_context / wrapper_meta / thread_settings_applied alike, so
     // a `/effort` typed into the chat or another client's pick lands here with

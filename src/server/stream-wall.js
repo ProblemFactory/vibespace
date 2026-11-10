@@ -25,6 +25,11 @@ const SIDECAR_CAP = 256 * 1024;  // a wrapper sidecar is a few KB; anything bigg
  *  engine key is not wired): the lock, the newest pick, the spawn model — the pool engine's own ladder minus the served
  *  model (no ACP consumer notes one). */
 function ownModelOf(s) { return (s && s._modelLocked && s._lockedModel) || (s && s._pickedModel) || (s && s._spawnModel) || null; }
+/** THE LOCK, TOLD (lane fable-52-cli-321 F1 — the multi-client law: a persistent change reaches the other clients live): the
+ *  frame every client of the conversation gets the moment the lock or its target moves, whoever moved it — a Lock / Unlock
+ *  press, a pick under the lock (ws-handler), the parse's target-less latch and its alias → full-id upgrade. Its data are the
+ *  attach status's own two fields; the bar takes them through applyStatus. A bundle that does not know the subtype ignores it. */
+function lockFrame(s, id) { return { type: 'msg', sessionId: id, op: 'meta', subtype: 'model-lock', data: { modelLocked: !!(s && s._modelLocked), lockedModel: (s && s._lockedModel) || null } }; }
 /** THE WRAPPER'S OWN SIDECAR (r3's rung, bounded in r4): `<dir>/<webui id>.json` — local-only (the id is the hub's own; a
  *  path that resolves outside `dir` is refused), at most SIDECAR_CAP bytes (a bigger file is skipped by name), read only
  *  for a WALL record. → the parsed object, or null. */
@@ -164,4 +169,4 @@ function configure(deps) { road = createStreamWallRoad(deps); return road; }
 /** The ACP consumer's entry (src/server/stdout/acp-events.js). */
 function onRecord(session, rec, opts) { return road ? road.onRecord(session, rec, opts) : null; }
 
-module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, ownModelOf, readWrapperSidecar, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT, SIDECAR_CAP };
+module.exports = { createStreamWallRoad, configure, onRecord, sameWall, roomOf, roomNotice, ownModelOf, lockFrame, readWrapperSidecar, LIVE_MS, SAME_RESET_S, ROOM_MAX_PCT, SIDECAR_CAP };

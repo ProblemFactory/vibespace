@@ -688,11 +688,13 @@ function registerWsHandler(wss, ctx) {
                 session._modelLocked = !!data.lock;
                 session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
                 if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked, lockedModel: session._lockedModel }); }
+                broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                 broadcastActiveSessions();
               } else if (data.model && session._modelLocked) {
                 // changing the model while locked re-targets the lock
                 session._lockedModel = data.model;
                 if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, lockedModel: session._lockedModel }); }
+                broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
               }
             } catch {}
           }

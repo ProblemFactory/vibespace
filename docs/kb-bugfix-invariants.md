@@ -911,6 +911,21 @@
 - (2026-11-09) A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681) — 不变量 = an ask lands in the kind it is for, through that kind's ONE writer; the site the owner reads is the site the fill compares (kb-bugfix-invariants)
 - (2026-11-09) EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (Fable 5.2; Haiku 5.5 at ×10). 不变量 = what the installed CLI states about its models (ids, sizes, prices, families, aliases) is READ from the binary at runtime, never re-typed; the shipped tables are the seed (kb-bugfix-invariants)
 - (2026-11-09) A REPLY WAS «READ BY» A TURN THAT NEVER CARRIED IT (report-mark-on-ack). 不变量 = an injection's marks move only when the caller confirms the turn carried it; unconfirmed ⇒ composed again «sent again», counted «[inject] not carried» (kb-bugfix-invariants)
+- (2026-11-10) A LOCKED CHIP READ AMBER «🔒⚠ claude-fable-5-2» WHILE FABLE 5.2 SERVED ITS fable[1m] LOCK (the owner; fable-52-cli-321 F1) — 不变量 = amber only when the lock target does not hold the served model; every client is told live when the lock moves ⇒ kb-bugfix-invariants
+
+## A LOCKED CHIP READ AMBER «🔒⚠ claude-fable-5-2» WHILE FABLE 5.2 SERVED ITS fable[1m] LOCK (the owner's phone, 2026-11-10; lane fable-52-cli-321 F1, .390)
+
+**Symptom.** A conversation locked to fable[1m], answered by Fable 5.2 since the CLI update, showed an amber «🔒⚠ claude-fable-5-2» on the phone once its older messages were loaded; after a reload the chip read «🔒 claude-fable-5-1», a model nothing served any more.
+
+**Cause.** The bar held the served model against `_statusModel` — the model the LAST DRAWN record set. Every stream-json turn writes an init naming the model it ran, chat-view's draw of an init (or a «/model» echo) calls setModel, and the virtual scroll draws older history AFTER the newest: the pre-update init (claude-fable-5-1) won, and 5.2 was judged a fallback from it. The locked label was `_statusModel` itself.
+
+**Fix.** Locked with a known target, a served model the LOCK TARGET holds is never amber (an alias lock family-wide through the bar's sameModel, a full-id lock exactly), one it does not hold is; the locked label names the served model, else the target. Round 1 stopped there and was NOT accepted: the bar learned the target only at attach, and no frame told another client when the lock moved (set-model under a lock re-targets silently; the parse's latch and alias upgrade too) — a second client then drew a false amber where master was plain and right, and hid real fallbacks. So every server writer of the lock now broadcasts stream-wall's `lockFrame` (a `model-lock` meta op: the attach status's two fields), applied by chat-view through the bar's attach door; a served fact standing when the lock moved is judged as before until the next served model.
+
+**不变量.** A locked chip names the served model and is amber exactly when the lock target does not hold a model served since the lock last moved; a record drawn on a scroll never moves it; every client holds the server's lock and target — a persistent change is told to every client live, never learned at the next reload.
+
+**Limits (round 8 closes both).** Unlocked conversations keep the drawn-record comparison. After a reload the served model is unknown until it changes, so a standing fallback reads plain until then. (A reading, not a limit: a /model typed under a lock does not re-target the server's lock — the repin brings it back — and the amber while it serves says what the lock means.)
+
+**Pins.** test-status-bar-chips ⑦ (fast, fake DOM over the real bar): the owner's scene, (c) a drawn 5-1 init and an opus echo after the served fact, (e) a real fallback amber naming the lock target and its clearing, (d) an unlock reads no stale target, a reload names the target, nothing reported credits no CLI, (b) the [1m] form held / a full-id lock exact, (a) a target-less lock as before; two clients through the REAL set-model case and chat-view's model-lock line (pick, fallback, unlock, relock, fallback, a served fact older than the move); a census of every server writer of the lock. test-mobile-gaps (heavy): the 5-1 scene live on the phone at 390×844.
 
 ## A REPLY WAS «READ BY» A CONVERSATION WHOSE TURN NEVER CARRIED IT (the coordinator's record, 2026-11-09 23:14–23:24Z; lane report-mark-on-ack, .389)
 

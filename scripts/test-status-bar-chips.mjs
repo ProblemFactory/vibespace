@@ -32,6 +32,8 @@
 //   ⑤ wiring pins — render() ends in `this._reconcile(chips)`, the file never
 //     assigns `this._element.innerHTML`, the click handling is still the ONE
 //     delegated listener (nothing bound per chip); ci.mjs carries this suite.
+//   ⑦ the LOCKED chip (lane fable-52-cli-321, F1) — the served model held against the
+//     lock target, the label naming the served model else that target; edges (a)–(e) by name.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -249,6 +251,153 @@ console.log('— ⑤ wiring');
   ok(counters.innerHTML === n, '⑥ the same kinds / the same basis again write nothing');
   bar.setAddedKinds([]);
   ok(!keys(bar).includes('kinds'), '⑥ no kinds ⇒ no chip');
+}
+
+// ⑦ lane fable-52-cli-321, F1 (2.369.390): THE OWNER'S LOCKED CHIP. His phone read an amber «🔒⚠ claude-fable-5-2» on a
+// conversation locked to fable[1m] and served by Fable 5.2: the bar held the served model against the model the LAST DRAWN record
+// set (the init of a turn from before the CLI update, met on a scroll up). LOCKED with a known target ⇒ the served model is held
+// against the LOCK TARGET (an alias lock family-wide, a full id exactly) and the label names the served model, else that target —
+// never a drawn record's model. Every client holds the CURRENT target: the server tells each one live when the lock moves
+// (stream-wall lockFrame → the `model-lock` op → applyStatus). Unlocked, or a lock whose target an older meta never named ⇒ as before.
+console.log('— ⑦ a locked chip holds the served model against the lock target (the owner\'s 🔒 fable[1m] scene)');
+{
+  const chipOf = (bar) => { const el = byKey(bar).model; return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: /chat-status-model-locked/.test(el.className), dim: /chat-status-dim/.test(el.className), title: el.getAttribute('title') || '' }; };
+  const plain = (c, text) => c.locked && !c.amber && c.text === text;
+  const lockedOn = (target, model = 'claude-fable-5-2') => { const b = mkBar(ChatStatusBar); b.applyStatus({ ...firstStatus, model, modelLocked: true, lockedModel: target }); return b; };
+  // (the scene) attached, a live turn served by 5-2, then the scroll up draws an older turn's init (5-1) and a /model echo of
+  // another family — chat-view's own setModel for each drawn record, AFTER the served fact arrived
+  const bar = lockedOn('fable[1m]');
+  bar.setServedModel('claude-fable-5-2');
+  const live = chipOf(bar);
+  bar.setModel('claude-fable-5-1');
+  const drawn51 = chipOf(bar);
+  bar.setModel('claude-opus-5-5');
+  const drawnOpus = chipOf(bar);
+  ok(plain(live, 'claude-fable-5-2'), `⑦ the owner's scene: locked fable[1m], served claude-fable-5-2 ⇒ plain «🔒 ${live.text}»`, JSON.stringify(live));
+  ok(plain(drawn51, 'claude-fable-5-2'), `⑦ (c) …an older turn's init drawn on a scroll up (claude-fable-5-1) changes neither the label nor the amber: plain «🔒 ${drawn51.text}» (before: amber «🔒⚠ claude-fable-5-2»)`, JSON.stringify(drawn51));
+  ok(plain(drawnOpus, 'claude-fable-5-2'), `⑦ (c) …nor a /model echo of another family drawn after it (claude-opus-5-5): plain «🔒 ${drawnOpus.text}»`, JSON.stringify(drawnOpus));
+  // (e) a real fallback under the lock ⇒ amber, its tooltip naming the LOCK TARGET; the family served again ⇒ it clears
+  bar.setServedModel('claude-opus-5-5');
+  const fb = chipOf(bar);
+  ok(fb.locked && fb.amber && fb.text === '⚠ claude-opus-5-5' && /instead of fable\[1m\]/.test(fb.title) && /LOCKED — retries fable\[1m\]/.test(fb.title), `⑦ (e) a real fallback under the lock (served claude-opus-5-5) ⇒ amber «🔒${fb.text}», the tooltip names the lock target («instead of fable[1m]»)`, JSON.stringify(fb));
+  bar.setServedModel('claude-fable-5-2');
+  const back = chipOf(bar);
+  ok(plain(back, 'claude-fable-5-2'), `⑦ (e) …and it clears when the family is served again: plain «🔒 ${back.text}»`, JSON.stringify(back));
+  // (d) the person unlocks ⇒ the chip is as before at once: an unlock that leaves the old target in the field (a status without
+  // lockedModel) reads NO stale target — a pick of opus served by opus is plain, not «⚠» against fable[1m]
+  bar.applyStatus({ modelLocked: false });
+  bar.setModel('claude-opus-5-5'); bar.setServedModel('claude-opus-5-5');
+  const un = chipOf(bar);
+  ok(!un.locked && !un.amber && un.text === 'claude-opus-5-5', `⑦ (d) unlocked ⇒ the chip is as before at once, no stale lock target read: «${un.text}», plain`, JSON.stringify(un));
+  bar.dispose();
+  // a reload: the served model is unknown until it changes (the served-model op is change-only) ⇒ the label names the LOCK TARGET,
+  // never the status's or a drawn record's model; the next served record names itself
+  const re = lockedOn('fable[1m]', 'claude-fable-5-1');
+  const re0 = chipOf(re);
+  re.setModel('claude-fable-5-1');
+  const re1 = chipOf(re);
+  re.setServedModel('claude-fable-5-2');
+  const re2 = chipOf(re);
+  ok(plain(re0, 'fable[1m]') && plain(re1, 'fable[1m]'), `⑦ after a reload, no served model yet ⇒ the lock target, plain «🔒 ${re0.text}» — a drawn 5-1 init leaves it «🔒 ${re1.text}» (before: «🔒 claude-fable-5-1»)`, JSON.stringify({ re0, re1 }));
+  ok(plain(re2, 'claude-fable-5-2'), `⑦ …the next served record names itself: plain «🔒 ${re2.text}»`, JSON.stringify(re2));
+  re.dispose();
+  // locked, NOTHING reported by the CLI yet: the label is the lock target, the title credits no CLI report
+  const nr = mkBar(ChatStatusBar);
+  nr.applyStatus({ modelLocked: true, lockedModel: 'fable[1m]' });
+  const nrc = chipOf(nr);
+  ok(plain(nrc, 'fable[1m]') && !nrc.dim && /^Model not reported by the CLI yet/.test(nrc.title) && !/as last reported/.test(nrc.title), `⑦ locked, nothing reported yet ⇒ the label «🔒 ${nrc.text}», the title says the CLI reported nothing («${nrc.title.split(' · ')[0]}»)`, JSON.stringify(nrc));
+  nr.dispose();
+  // (b) a lock on the [1m] form served by the same model WITHOUT [1m] (the served id never carries it) ⇒ held; a FULL-id lock is
+  // held exactly — another point release under it is a fallback
+  const b1 = lockedOn('claude-fable-5-2[1m]', 'claude-fable-5-1');
+  b1.setServedModel('claude-fable-5-2');
+  const b1c = chipOf(b1);
+  ok(plain(b1c, 'claude-fable-5-2'), `⑦ (b) locked claude-fable-5-2[1m], served claude-fable-5-2 ⇒ held, plain «🔒 ${b1c.text}»`, JSON.stringify(b1c));
+  b1.dispose();
+  const b2 = lockedOn('claude-fable-5-1');
+  b2.setServedModel('claude-fable-5-2');
+  const b2c = chipOf(b2);
+  ok(b2c.locked && b2c.amber && b2c.text === '⚠ claude-fable-5-2' && /instead of claude-fable-5-1/.test(b2c.title), `⑦ (b) a FULL-id lock (claude-fable-5-1) served by claude-fable-5-2 ⇒ amber «🔒${b2c.text}» — a point release is held exactly`, JSON.stringify(b2c));
+  b2.dispose();
+  // (a) a lock an older meta stored WITHOUT its target ⇒ as before: no new amber, no lost amber
+  const a1 = mkBar(ChatStatusBar);
+  a1.applyStatus({ ...firstStatus, model: 'claude-fable-5-2', modelLocked: true });
+  a1.setServedModel('claude-fable-5-2');
+  const a1c = chipOf(a1);
+  a1.setServedModel('claude-opus-5-5');
+  const a1f = chipOf(a1);
+  ok(plain(a1c, 'claude-fable-5-2') && a1f.locked && a1f.amber && a1f.text === '⚠ claude-opus-5-5', `⑦ (a) locked with NO target known (an older meta) ⇒ as before: served = the reported model plain «🔒 ${a1c.text}», a fallback amber «🔒${a1f.text}»`, JSON.stringify({ a1c, a1f }));
+  a1.dispose();
+
+  // TWO CLIENTS, NO RELOAD (主开发 17:27Z — the owner's day: phone + desktop). The REAL set-model case of src/ws-handler.js (its
+  // text, run with the session, a recording broadcastToSession and the module's own require) moves the lock as the person asks on
+  // client A; every frame it broadcasts reaches BOTH bars through chat-view's own `model-lock` line; the CLI's live records (the
+  // echo, each turn's init, the served model) are drawn on both. After each step both bars hold the server's lock and target, and
+  // the chip says what the lock means.
+  const { createRequire } = await import('node:module');
+  const wsSrc = read('src/ws-handler.js'), cvSrc = read('src/lib/chat-view.js');
+  const caseText = wsSrc.slice(wsSrc.indexOf("        case 'set-model': {"), wsSrc.indexOf("        case 'set-effort': {"));
+  const lockLine = /if \(op\.subtype === 'model-lock'\) \{\n\s*(this\._statusBar\.applyStatus\([^\n]*\);)\n\s*return;\n\s*\}/.exec(cvSrc);
+  ok(caseText.length > 200 && !!lockLine, `⑦ two clients: the real set-model case (${caseText.length} chars) and chat-view's model-lock line are read`);
+  const applyLock = new Function('op', (lockLine ? lockLine[1] : '').replace('this._statusBar', 'this'));
+  const twoClients = (text) => {
+    const run = new Function('data', 'activeSessions', 'adapterRegistry', 'readSessionMeta', 'writeSessionMeta', 'broadcastActiveSessions', 'broadcastToSession', 'require', `switch (data.type) {\n${text}\n}`);
+    const SID = 'sid-two', sess = { pty: { write() {} }, mode: 'chat', backend: 'claude', _modelLocked: true, _lockedModel: 'fable[1m]', sockName: null };
+    const A = lockedOn('fable[1m]'), B = lockedOn('fable[1m]'), bars = [A, B];
+    const say = (d) => run({ type: 'set-model', sessionId: SID, ...d }, new Map([[SID, sess]]), { get: () => ({ formatSetModel: (m) => JSON.stringify({ set_model: m }) }) }, () => ({}), () => {}, () => {},
+      (_s, _id, frame) => { if (frame && frame.op === 'meta' && frame.subtype === 'model-lock') bars.forEach((x) => applyLock.call(x, frame)); }, createRequire(path.join(repo, 'src/ws-handler.js')));
+    const draw = (m) => bars.forEach((x) => x.setModel(m)), serve = (m) => bars.forEach((x) => x.setServedModel(m));
+    const agree = () => bars.every((x) => !!x._modelLocked === !!sess._modelLocked && (x._lockedModel || null) === (sess._lockedModel || null));
+    const out = {};
+    serve('claude-fable-5-2');
+    // A picks opus under the lock (the bar's own pick: the frame, the optimistic re-target) ⇒ the server re-targets the lock
+    A._lockedModel = 'opus'; A._statusModel = 'opus'; A.render(); say({ model: 'opus' });
+    draw('claude-opus-5-5'); draw('claude-opus-5-5'); serve('claude-opus-5-5');   // the set_model echo, the next turn's init and served model
+    out.pick = { agree: agree(), A: chipOf(A), B: chipOf(B) };
+    draw('claude-opus-5-5'); serve('claude-fable-5-2');                              // a REAL fallback under the new lock
+    out.fallback = { agree: agree(), A: chipOf(A), B: chipOf(B) };
+    say({ lock: false }); A._modelLocked = false; A._lockedModel = null; A.render();  // A unlocks
+    out.unlock = { agree: agree(), A: chipOf(A), B: chipOf(B) };
+    draw('claude-opus-5-5'); serve('claude-opus-5-5');
+    say({ lock: true, lockModel: 'claude-opus-5-5' }); A._modelLocked = true; A._lockedModel = 'claude-opus-5-5'; A.render();   // A locks again
+    out.relock = { agree: agree(), A: chipOf(A), B: chipOf(B) };
+    draw('claude-opus-5-5'); serve('claude-fable-5-2');                              // a REAL fallback under the new lock
+    out.fallback2 = { agree: agree(), A: chipOf(A), B: chipOf(B) };
+    bars.forEach((x) => x.dispose());
+    return out;
+  };
+  const tc = twoClients(caseText);
+  ok(tc.pick.agree && plain(tc.pick.A, 'claude-opus-5-5') && plain(tc.pick.B, 'claude-opus-5-5'), `⑦ two clients: A re-targets the lock to opus by a pick ⇒ B is told live (both hold the server's target), served opus ⇒ both plain «🔒 ${tc.pick.B.text}» — never «⚠» against a stale fable[1m]`, JSON.stringify(tc.pick));
+  ok(tc.fallback.agree && tc.fallback.A.amber && tc.fallback.B.amber && /instead of opus/.test(tc.fallback.B.title), `⑦ two clients: …then a REAL fallback (served claude-fable-5-2 against the opus lock) ⇒ amber on both «🔒${tc.fallback.B.text}» — never hidden by B's old target`, JSON.stringify(tc.fallback));
+  ok(tc.unlock.agree && !tc.unlock.A.locked && !tc.unlock.B.locked, `⑦ two clients: A unlocks ⇒ B unlocked at once (no lock badge left until a reload)`, JSON.stringify(tc.unlock));
+  ok(tc.relock.agree && plain(tc.relock.A, 'claude-opus-5-5') && plain(tc.relock.B, 'claude-opus-5-5'), `⑦ two clients: A locks again (on opus) ⇒ B locked on the same target, plain «🔒 ${tc.relock.B.text}»`, JSON.stringify(tc.relock));
+  ok(tc.fallback2.agree && tc.fallback2.A.amber && tc.fallback2.B.amber, `⑦ two clients: …and a REAL fallback after the unlock + relock ⇒ amber on both «🔒${tc.fallback2.B.text}»`, JSON.stringify(tc.fallback2));
+  // a served fact OLDER than the lock's last move is judged as before: a fallback to opus (amber), then A picks fable again under the
+  // lock (the frame reaches B; nothing new is served yet), then /model opus typed on A (its echo drawn) — the opus record predates
+  // the re-pick, so B reads what the old comparison read (plain «claude-opus-5-5»), never a fallback that has not happened since
+  {
+    const B2 = lockedOn('fable[1m]');
+    B2.setServedModel('claude-fable-5-2'); B2.setModel('claude-fable-5-2'); B2.setServedModel('claude-opus-5-5');
+    const f0 = chipOf(B2);
+    applyLock.call(B2, { type: 'msg', op: 'meta', subtype: 'model-lock', data: { modelLocked: true, lockedModel: 'fable[1m]' } });
+    B2.setModel('claude-fable-5-2');                       // the set_model echo of the re-pick
+    B2.setModel('claude-opus-5-5');                        // the /model opus echo
+    const f1 = chipOf(B2);
+    B2.setModel('claude-opus-5-5'); B2.setServedModel('claude-fable-5-2'); B2.setServedModel('claude-opus-5-5');   // later turns: fable, then opus served AFTER the move
+    const f2 = chipOf(B2);
+    ok(f0.amber && !f1.amber && f1.text === 'claude-opus-5-5' && f2.amber, `⑦ two clients: a served fact older than the lock's last move is judged as before — a fallback (amber), the lock re-picked elsewhere, /model opus typed ⇒ «🔒 ${f1.text}» plain as before; opus served AFTER the move ⇒ amber «🔒${f2.text}»`, JSON.stringify({ f0, f1, f2 }));
+    B2.dispose();
+  }
+  // every server writer of the lock or its target tells every client: each `session._modelLocked =` / `session._lockedModel =`
+  // in the set-model case and the parse is followed (within three lines) by a broadcast of stream-wall's lockFrame
+  const census = [];
+  for (const f of ['src/ws-handler.js', 'src/server/stdout/claude-stream-json.js']) {
+    const lines = read(f).split('\n');
+    lines.forEach((l, i) => { if (/\bsession\._(?:modelLocked|lockedModel) = /.test(l) && !/\/\//.test(l.split('=')[0])) census.push({ f, line: i + 1, told: lines.slice(i, i + 4).some((x) => /broadcastToSession\(session, (?:data\.sessionId|id), (?:require\('\.\/server\/stream-wall\.js'\)\.)?lockFrame\(session, (?:data\.sessionId|id)\)\)/.test(x)) }); });
+  }
+  const untold = census.filter((c) => !c.told);
+  ok(census.length >= 5 && untold.length === 0, `⑦ every server writer of the lock is told to every client — ${census.length} writers (ws-handler's press and pick, the parse's latch and upgrade), each followed by lockFrame's broadcast${untold.length ? ' — UNTOLD: ' + untold.map((c) => c.f + ':' + c.line).join(', ') : ''}`);
+  ok(/subtype: 'model-lock', data: \{ modelLocked: !!\(s && s\._modelLocked\), lockedModel: \(s && s\._lockedModel\) \|\| null \}/.test(read('src/server/stream-wall.js')), '⑦ lockFrame carries exactly the attach status\'s two fields (modelLocked, lockedModel)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

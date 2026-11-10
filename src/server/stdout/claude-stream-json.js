@@ -41,6 +41,7 @@ const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequ
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
+const { lockFrame } = require('../../server/stream-wall.js'); // (spelled from src/) lane fable-52-cli-321 F1: the lock's frame, told to every client when the parse moves its target
 const browserHelpers = require('../../server/browser-helpers.js'); // (spelled from src/ like every require here — suites rebase '../../') MULTIVIEW §4 (B-89d0): a helper's browser is named by WITNESS — the Task that opened it + its `vibespace-browser new-child`
 
 // SendUserFile → the published-pages channel (owner ruling 8(c),
@@ -791,6 +792,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             if (session._modelLocked && !session._lockedModel && !announced && servedDefinesModel(session)) {
               session._lockedModel = session._servedModel;
               try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: session._lockedModel }); } catch {}
+              try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the latched target, told to every client (F1)
             }
           }
           // CLI error-class telemetry (2.207.0, names/enums only — no
@@ -1069,6 +1071,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 if (echo && echo.id && modelsMatch(session._lockedModel, echo.id)) {
                   session._lockedModel = echo.id;
                   try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: echo.id }); } catch {}
+                  try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the upgraded target, told to every client (F1)
                 }
               }
               if (sendsRequest(msg)) {

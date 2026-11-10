@@ -150,10 +150,38 @@ fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ item
 // CLI — and the magnifier is gated to live windows like Ctrl+F itself.
 const LIVE_SID = 'f01d0000-0000-4000-8000-0000000ab1fe';
 const stubPath = `${wt}-claude-stub`;
-fs.writeFileSync(stubPath, `#!/bin/sh
-for a in "$@"; do case "$a" in --version) echo "2.1.274 (Claude Code) stub"; exit 0;; --help) echo "Usage: claude [options]"; exit 0;; esac; done
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"${LIVE_SID}","model":"claude-fable-5","cwd":"${CWD}","tools":[],"permissionMode":"default","claude_code_version":"2.1.274"}'
-exec cat >/dev/null
+// lane fable-52-cli-321 (F1, the owner's locked chip): a create asked for `fable[1m]` gets the SCENE conversation instead — the
+// CLI's own stream-json shape, an init + an assistant record + a result per turn: `PRE n` = n turns of the pre-update CLI (served
+// claude-fable-5-1), `POST n` = n turns of 2.1.321 (claude-fable-5-2). Every other spawn: as before (an init, then it waits).
+const SCENE_SID = '5c5e0051-0000-4000-8000-0000000f5251';
+fs.writeFileSync(stubPath, `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
+if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const mi = args.indexOf('--model'), scene = mi >= 0 && args[mi + 1] === 'fable[1m]';
+const SID = scene ? ${JSON.stringify(SCENE_SID)} : ${JSON.stringify(LIVE_SID)};
+const init = (model) => out({ type: 'system', subtype: 'init', session_id: SID, model, cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: scene ? (model === 'claude-fable-5-1' ? '2.1.319' : '2.1.321') : '2.1.274' });
+init(scene ? 'claude-fable-5-1' : 'claude-fable-5');
+let n = 0, buf = '';
+const turn = (model, what) => { const k = ++n; init(model);
+  out({ type: 'assistant', session_id: SID, uuid: 'scene-a-' + k, message: { id: 'msg_scene_' + k, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: what + ' turn ' + k + ' served by ' + model }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 3 } } });
+  out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 50, num_turns: 1, result: 'ok', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 5, output_tokens: 3 }, modelUsage: { [model]: { inputTokens: 5, outputTokens: 3, contextWindow: 1000000 } } }); };
+process.stdin.on('data', (d) => {
+  if (!scene) return;
+  buf += d; let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch { continue; }
+    if (m && m.type === 'control_request') { out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response: {} } }); continue; }
+    if (!m || m.type !== 'user') continue;
+    const c = m.message && m.message.content; const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => b.text || '').join('') : '';
+    const pre = /^PRE (\\d+)/.exec(text), post = /^POST (\\d+)/.exec(text);
+    if (pre) { for (let j = 0; j < +pre[1]; j++) turn('claude-fable-5-1', 'old'); continue; }
+    if (post) { for (let j = 0; j < +post[1]; j++) turn('claude-fable-5-2', 'new'); continue; }
+    turn('claude-fable-5-2', 'live');
+  }
+});
+process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const startServer = () => spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 let srv = startServer(); // `let`: the first-screen legs restart it on another For-you store (lane phone-first-screen)
@@ -634,6 +662,53 @@ try {
       check('the real list put back: the chip no longer claims a pool', await waitFor(`!document.querySelector('.window-active .chat-view .chat-status-billing')?.classList.contains('pooled')`, 3000));
     }
     try { liveWs.close(); } catch {}
+  }
+
+  // ── THE OWNER'S LOCKED CHIP (lane fable-52-cli-321, F1; 2.369.390) ──
+  // The owner's phone read an amber «🔒⚠ claude-fable-5-2» on a conversation locked to fable[1m] and served by Fable 5.2: its
+  // OLDER turns (before the CLI update) ran claude-fable-5-1, each turn's init names the model it ran, and a drawn init set the
+  // model the bar held the served one against — the virtual scroll draws the older history AFTER the newest. Here: the same
+  // conversation live (the stub above, the real wrapper) — 40 turns of the old CLI, locked fable[1m], the phone attaches (no
+  // served model yet), 40 turns of 2.1.321 arrive live, then the older history loads (the view's own jumpToIndex(0) — what the
+  // minimap / a scroll up runs) and the reader comes back down. Locked ⇒ held against the LOCK TARGET, named by the served model.
+  console.log('the locked model chip on a long conversation whose older turns were served by 5-1 (F1)');
+  {
+    const sWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => sWs.on('open', r));
+    const frames = [];
+    sWs.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch {} });
+    sWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, model: 'fable[1m]', reqId: 'scene51' }));
+    let sid = null;
+    for (let i = 0; i < 80 && !sid; i++) { const f = frames.find((m) => m?.type === 'created' && m.reqId === 'scene51'); if (f) sid = f.sessionId; else await sleep(250); }
+    check('the scene conversation is created live through the real spawn path (stub CLI, model fable[1m])', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
+    if (sid) {
+      const say = async (text, ms) => { sWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text })); await sleep(ms); };
+      await say('PRE 40', 4000);
+      sWs.send(JSON.stringify({ type: 'set-model', sessionId: sid, lock: true, lockModel: 'fable[1m]' })); await sleep(1000);
+      await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'scene 5-1', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+      const VIEW = `[...(app.sessions?.values?.() || [])].find((v) => v && v._statusBar && v._statusBar._sessionId === ${JSON.stringify(sid)})`;
+      check('the scene window attaches on the phone', await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-1/.test((${VIEW})._messageList.textContent)`, 20000));
+      const look = `(() => { const v = ${VIEW}; const el = v._statusBar.element.querySelector('[data-chip="model"]'); const txt = v._messageList.textContent;
+        return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: !!v._statusBar._modelLocked,
+          old: (txt.match(/old turn \\d+ served by claude-fable-5-1/g) || []).length, neu: (txt.match(/new turn \\d+ served by claude-fable-5-2/g) || []).length }; })()`;
+      await sleep(600);
+      const attached = await evalJs(look);
+      check(`at attach, no served model yet: the chip names the LOCK TARGET, «${attached.text}» — locked, plain (never an init's model)`, attached.locked && !attached.amber && attached.text === 'fable[1m]', attached);
+      await say('POST 40', 4000);
+      const tail = await evalJs(look);
+      check(`2.1.321's turns arrive live (served claude-fable-5-2): the chip names what serves, «${tail.text}» — locked, plain`, tail.locked && !tail.amber && tail.text === 'claude-fable-5-2' && tail.neu > 0, tail);
+      await evalJs(`(async () => { await (${VIEW}).jumpToIndex(0); return true; })()`);
+      const drewOld = await waitFor(`/old turn 1 served by claude-fable-5-1/.test((${VIEW})._messageList.textContent)`, 15000);
+      await sleep(600);
+      const older = await evalJs(look);
+      await shot('model-chip-older-history.png');
+      check(`…the older history loaded AFTER the newest (the pre-update turns drawn: ${older.old} served by claude-fable-5-1, their inits with them)`, drewOld && older.old > 0, older);
+      check(`…and the locked chip is unchanged, «${older.text}», plain — never held against an older record's model (before: amber «🔒⚠ claude-fable-5-2»)`, older.text === tail.text && !older.amber && older.locked, { tail, older });
+      await evalJs(`(async () => { await (${VIEW}).jumpToBottom({ user: true }); return true; })()`); await sleep(800);
+      const down = await evalJs(look);
+      check(`…and back down at the tail: «${down.text}», unchanged`, down.text === tail.text && !down.amber, down);
+    }
+    try { sWs.close(); } catch {}
   }
 
   // ── #7 switcher: "+" desktop tab, tab long-press, window-row long-press ──

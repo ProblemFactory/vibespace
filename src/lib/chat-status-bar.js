@@ -312,6 +312,7 @@ export class ChatStatusBar {
     // 'in' not truthy: the server always sends lockedModel (null after an
     // unlock) — a truthy guard left other clients showing the stale target
     if ('lockedModel' in status) this._lockedModel = status.lockedModel || null;
+    if (status.lockMoved) this._servedBeforeLock = true; // F1: the lock moved (chat-view's model-lock op) — the served fact standing now is older than it
     if (status.sandbox) this._statusSandbox = status.sandbox;
     if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
     if (status.turnMs) this._statusTurnMs = status.turnMs;
@@ -514,12 +515,28 @@ export class ChatStatusBar {
   setServedModel(model) {
     if (this._servedModel === model) return;
     this._servedModel = model;
+    this._servedBeforeLock = false;
     this.render();
   }
 
+  /** THE LOCKED CHIP (lane fable-52-cli-321, F1). LOCKED with a known target ⇒ the served model is held against the LOCK
+   *  TARGET (an alias lock family-wide, a full id exactly) — never against the model a DRAWN record set (an old init or /model
+   *  echo met on a scroll up rewrote `_statusModel`, and the owner's 🔒 fable[1m] served by 5.2 read amber «claude-fable-5-2»).
+   *  Every client holds the CURRENT target: the server tells each one live when the lock moves (stream-wall lockFrame → the
+   *  `model-lock` op → applyStatus). A served model the target holds is never amber; one it does not hold is amber once it was
+   *  served after the lock last moved — a served fact OLDER than that move (the lock re-targeted while it stood) is judged as
+   *  before, against the model last reported, until the next served model. Unlocked, or a lock whose target an older meta never
+   *  named ⇒ exactly as before. */
+  _lockTarget() { return this._modelLocked && this._lockedModel ? this._lockedModel : null; }
+
   _modelMismatch() {
-    if (!this._servedModel || !this._statusModel) return false;
-    return !sameModel(this._servedModel, this._statusModel);
+    const target = this._lockTarget();
+    if (!target || this._servedBeforeLock) {
+      if (!this._servedModel || !this._statusModel) return false;
+      if (target && sameModel(this._servedModel, target)) return false;
+      return !sameModel(this._servedModel, this._statusModel);
+    }
+    return !!this._servedModel && !sameModel(this._servedModel, target);
   }
 
   /** B-c643: a safety-classifier reroute (the `model-refusal-fallback` notice's
@@ -727,23 +744,25 @@ export class ChatStatusBar {
     // rendered: when a value hasn't been reported/commanded we say so
     // explicitly ("?") instead of hiding or guessing.
     {
-      const known = !!this._statusModel;
+      const target = this._lockTarget(); // F1: a lock with a known target names the served model, else that target
+      const want = target || this._statusModel;
+      const known = !!this._statusModel; // the CLI's report — a lock target shown in its place is not one (the label, not the title)
       const mismatch = this._modelMismatch();
       const locked = !!this._modelLocked;
       const refusal = mismatch && this._refusalFallback && sameModel(this._refusalFallback.to, this._servedModel) ? this._refusalFallback : null; // B-c643
       const title = refusal
-        ? t('Safety-classifier fallback: {from} flagged a message{category}, so {served} is answering instead of {model}. Your model setting is unchanged. Click to re-pick.', { from: refusal.from || '?', category: refusal.category ? ` (${refusal.category})` : '', served: this._servedModel, model: this._statusModel })
+        ? t('Safety-classifier fallback: {from} flagged a message{category}, so {served} is answering instead of {model}. Your model setting is unchanged. Click to re-pick.', { from: refusal.from || '?', category: refusal.category ? ` (${refusal.category})` : '', served: this._servedModel, model: want })
         : mismatch
-        ? t('Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.', { served: this._servedModel, model: this._statusModel })
+        ? t('Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.', { served: this._servedModel, model: want })
         : known
           ? t('Model (as last reported by the CLI) — click to change')
           : t('Model not reported by the CLI yet — click to set');
       const lockTip = locked ? ' \u00b7 ' + t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : '';
       const why = refusal ? ` \u00b7 ${escHtml(t('refusal'))}${refusal.category ? ` (${escHtml(refusal.category)})` : ''}` : '';
       const label = locked
-        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml(this._statusModel || '?'))
+        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
         : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(this._statusModel) : t('model: ?')));
-      chip('model', `chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
+      chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
       // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
       // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
       if (hasEffortMenu(this._backend)) {
