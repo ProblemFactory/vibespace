@@ -157,7 +157,8 @@ try {
     // that re-delivered per entry is exactly the failure this pins against)
     const ar = fs.readFileSync(new URL('../src/agent-routes.js', import.meta.url), 'utf-8');
     // channel-jump verify r5: the ONE drain site is the fit-or-wait helper (drainNotifsUnderCap) both hook routes call
-    ok(/const drained = \[\.\.\.\(stashed\.length \? jm\.drainNotifs\(cid, new Set\(stashed\)\) : \[\]\)[\s\S]{0,900}?\.renderNotifStash\(drained/.test(ar) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar) && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
+    // .390 train seam: report-mark-on-ack wrapped the drain in take() (drained = carry ? waiting : take()) — the anchor follows take()
+    ok(/const got = \[\.\.\.\(stashed\.length \? jm\.drainNotifs\(cid, new Set\(stashed\)\) : \[\]\)[\s\S]{0,1500}?const drained = carry \? waiting : take\(\);[\s\S]{0,900}?\.renderNotifStash\(drained/.test(ar) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar) && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
       'wiring pin: the drain sites render ONE block and never re-enter the delivery ladder per entry (r5: one helper, two routes)');
   }
 
