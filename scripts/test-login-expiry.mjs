@@ -2079,7 +2079,7 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
           return out; })()`);
       };
       const NOUN = { en: 'Long-lived token', zh: '长期 token', ja: '長期トークン' };
-      const LEAD = { en: ['Written to this account’s folder; CLI 2.1.296 verified.', 'Written to this account’s folder, but this CLI version (2.1.301) is not measured'], zh: ['已写入此账号目录；CLI 2.1.296 已验。', '已写入此账号目录，但此 CLI 版本（2.1.301）未测量'], ja: ['このアカウントのフォルダーに書き込み済み；CLI 2.1.296 で検証済み。', 'このアカウントのフォルダーに書き込み済みですが、この CLI バージョン（2.1.301）は未計測です'] };
+      const LEAD = { en: ['Written to this account’s folder; CLI 2.1.296 verified.', 'Written to this account’s folder, but Claude Code 2.1.301 is not in this VibeSpace’s records yet'], zh: ['已写入此账号目录；CLI 2.1.296 已验。', '已写入这个账号的文件夹，但 Claude Code 2.1.301 还不在这个 VibeSpace 的记录里'], ja: ['このアカウントのフォルダーに書き込み済み；CLI 2.1.296 で検証済み。', 'このアカウントのフォルダに書き込み済みですが、Claude Code 2.1.301 はまだこの VibeSpace の記録にありません'] }; // lane cli-self-measure: never «unmeasured»
       const nounOk = (lang, r) => [r.W, r.Hd].every((c) => c.chip === NOUN[lang] && c.lines === 1 && c.fits);
       for (const lang of ['en', 'zh', 'ja']) {
         const desk = await look(lang, false), phone = await look(lang, true);
@@ -2090,7 +2090,7 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
         const W = desk.desk.rows.W, Hd = desk.desk.rows.Hd;
         ck('BROWSER ' + lang + ': the hover leads with the facts the chip used to say (「' + LEAD[lang][0] + '」) and keeps the rest; the re-login door stays',
           W.title.startsWith(LEAD[lang][0]) && W.title.length > LEAD[lang][0].length + 20 && W.relogin === 'sub-w');
-        ck('BROWSER ' + lang + ': a HELD file\'s hover names the hub\'s CLI as unmeasured (never "verified")', Hd.title.startsWith(LEAD[lang][1]) && !Hd.title.includes('2.1.296') && Hd.relogin === 'sub-h');
+        ck('BROWSER ' + lang + ': a HELD file\'s hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «unmeasured», never "verified")', Hd.title.startsWith(LEAD[lang][1]) && !Hd.title.includes('2.1.296') && Hd.relogin === 'sub-h');
       }
       const base = await look('base-en', false);
       console.log('    base desk: [' + base.desk.rows.W.chip + '] ' + base.desk.rows.W.lines + ' lines');
@@ -2193,15 +2193,15 @@ console.log('— §12 the row says why its reading ages: never probed / the last
           return { rows: out, xss: window.__xss === 1, repainted: window.repainted }; })()`);
       };
       const W = {
-        en: { never: 'Long-lived token only, and claude 2.1.308 isn’t measured with it: can’t be probed — refreshes when a session uses it', noProfile: 'Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it', failed: 'Last probe failed: ', chip: 'long-lived token only', ago: 'Last refreshed 2100 min ago' },
-        zh: { never: '仅长期 token，且 claude 2.1.308 未测量：无法主动探测，用到时才刷新', noProfile: '仅长期 token（无 profile 权限）：无法主动探测，用到时才刷新', failed: '上次探测失败：', chip: '仅长期 token', ago: '2100 分钟前刷新' },
-        ja: { never: '長期トークンのみで、claude 2.1.308 は未計測：自動では確認できません。セッションで使われたときに更新されます', noProfile: '長期トークンのみ（profile 権限なし）：自動では確認できません。セッションで使われたときに更新されます', failed: '前回の確認に失敗しました：', chip: '長期トークンのみ', ago: '2100 分前に更新' },
+        en: { never: 'Long-lived token only, and Claude Code 2.1.308 isn’t cleared for it on this machine yet: can’t be probed — refreshes when a session uses it', noProfile: 'Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it', failed: 'Last probe failed: ', chip: 'long-lived token only', ago: 'Last refreshed 2100 min ago' },
+        zh: { never: '只有长期 token，而 Claude Code 2.1.308 还没有在本机为它确认通过：无法探测——会话使用它时会刷新', noProfile: '仅长期 token（无 profile 权限）：无法主动探测，用到时才刷新', failed: '上次探测失败：', chip: '仅长期 token', ago: '2100 分钟前刷新' },
+        ja: { never: '長期トークンのみで、Claude Code 2.1.308 はまだこのマシンでその確認が通っていません：調べられません——セッションが使うときに更新されます', noProfile: '長期トークンのみ（profile 権限なし）：自動では確認できません。セッションで使われたときに更新されます', failed: '前回の確認に失敗しました：', chip: '長期トークンのみ', ago: '2100 分前に更新' },
       };
       const base = await look('base-en');
       for (const lang of ['en', 'zh', 'ja']) {
         const { rows: R, xss, repainted } = await look(lang), w = W[lang];
         console.log('    ' + lang + ' O age [' + R.O.age + '] «' + R.O.ageTitle + '» · chip «' + R.O.chipTitle.slice(0, 80) + '…»\n    ' + lang + ' F age «' + R.F.ageTitle + '»');
-        ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '», as the base draws it) and its age chip\'s tooltip says it is not probed and why (claude 2.1.308 unmeasured), refreshed by use',
+        ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '», as the base draws it) and its age chip\'s tooltip says it is not probed and why (Claude Code 2.1.308 not cleared on this machine yet), refreshed by use',
           R.O.age === base.rows.O.age && R.O.age !== '' && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
         ck('§12 BROWSER ' + lang + ': …its 「仅长期 token」 chip keeps its ONE word, its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
           R.O.chip === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));

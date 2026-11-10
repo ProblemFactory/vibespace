@@ -1544,6 +1544,16 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
+  // lane cli-self-measure (2026-11-09, the owner: «每次更新都要重新测量也太弱智了？»): the hub checks a new Claude Code ITSELF —
+  // src/server/cli-self-measure.js forks the release road's measurement (fake token, loopback stand-in, nothing leaves the
+  // machine); off = the release road only (a VibeSpace update that has measured the version places those accounts)
+  'accounts.cliSelfMeasure': {
+    type: 'boolean', default: true,
+    label: t('Check a new Claude Code version on this machine'),
+    description: t('ON (recommended): when Claude Code updates to a version VibeSpace has no record of, the hub checks on this machine how the new version uses an account’s long-lived token — with a fake token and a local stand-in server, so nothing leaves the machine — and the accounts that hold only such a token rejoin the pool when it passes, about five minutes later. OFF: those accounts wait for a VibeSpace update that has measured the version. Linux hubs; the check needs strace.'),
+    tier: 'advanced',
+    category: t('Session'), liveApply: true,
+  },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),

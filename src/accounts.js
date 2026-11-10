@@ -67,6 +67,15 @@ const CROSS_PROVIDER_VALUES = Object.freeze(['never', 'allow']); // a pool's cro
 // to construct at migration time). Same number, one place.
 const { OAT_TTL_MS: OAT_TTL_MS_SHARED } = require('./login-state.js');
 
+// THE LOCAL FACET (lane cli-self-measure): the hub's own check of the CLI it spawns, as the words read it — elapsed minutes and
+// «late» computed HERE (the store owns the clock), so every sentence is a pure function of the answer
+function localFacetOf(caps, now = Date.now()) {
+  const l = caps && caps.local;
+  if (!l || typeof l.state !== 'string') return {};
+  const startedAt = Number(l.startedAt) || null;
+  return { local: { state: l.state, ...(startedAt ? { elapsedMin: Math.max(0, Math.floor((now - startedAt) / 60e3)) } : {}), ...(l.state === 'checking' && Number(l.lateAt) && now >= Number(l.lateAt) ? { late: true } : {}), typicalMin: Math.max(1, Math.round((Number(l.typicalMs) || 300e3) / 60e3)), ...(Number(l.killAt) && startedAt ? { boundMin: Math.round((Number(l.killAt) - startedAt) / 60e3) } : {}), ...(l.reason && l.reason.code ? { reason: String(l.reason.code), observation: String(l.reason.observation || ''), ...(l.reason.version ? { reasonVersion: String(l.reason.version).slice(0, 20) } : {}), ...(l.reason.machine ? { reasonMachine: String(l.reason.machine) } : {}) } : {}) } };
+}
+
 class AccountManager {
   constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null }) {
     this.dataDir = dataDir;
@@ -96,6 +105,10 @@ class AccountManager {
     // `claude --version`) and the measurement that grants that version (the
     // fixture) gate every write. Unknown version ⇒ nothing is written.
     this._oatCli = null;
+    this._oatCliBin = null;    // lane cli-self-measure: {path, cmd, sha256, identity} of the binary that answered (oat-file-sync)
+    this._cliMeasured = null;  // …and the hub's OWN measurement of it (src/server/cli-self-measure.js hands it in: noteCliMeasured)
+    this._cliNoteHook = null;  // …which is told synchronously at every version note (it decides checking / pass from its ledger)
+    this._cliRecheck = null;   // the version clock's tick (oat-file-sync registers it; the 60 s binary-identity check asks it)
     this._oatFixturePath = oatFixture || path.join(__dirname, '..', 'scripts', 'fixtures', 'oat-in-file.json');
     this._oatFileFacts = new Map(); // id → the last verdict (the row's door)
     this._oatChain = Promise.resolve(); // THE ONE QUEUE of the oat's acts on member credential files (verify r1 F13 / F7)
@@ -1374,14 +1387,61 @@ class AccountManager {
   // the member and the pool stops placing on it (F5); every act is guarded by a
   // fresh stat (F7), refuses a symlinked dir (F8), and runs through ONE queue on
   // fs.promises, one sweep row per loop turn (F13).
-  noteCliVersion(v) {
+  noteCliVersion(v, bin = null) {
     const before = this.oatFileCaps();
     this._oatCli = v == null || v === '' ? null : String(v);
+    // THE BYTES BESIDE THE VERSION (lane cli-self-measure, law 1 + acceptance law B): the hub's own PASS is keyed by version +
+    // sha256 — the bytes are the key, the version a label. No facts at all (an old caller, no stat) ⇒ the last known bytes stand
+    this._oatCliBin = this._nextCliBin(bin);
+    if (typeof this._cliNoteHook === 'function') { this._inCliNote = true; try { this._cliNoteHook(this.oatFileCaps()); } catch { } finally { this._inCliNote = false; } }
     const after = this.oatFileCaps();
     const changed = before.ok !== after.ok || before.cli !== after.cli;
     if (changed) this.syncOatFiles().catch(() => { }); // a changed verdict re-syncs every row (queued, off the loop's back)
     return { ...after, changed };
   }
+  /** law B: the next bytes facts from a read — a hash that failed on an UNCHANGED identity changes nothing (no flap); a CHANGED
+   *  identity whose hash failed is unknown bytes (sha256 null ⇒ no own PASS); no facts ⇒ the last known stand */
+  _nextCliBin(bin) {
+    const prev = this._oatCliBin;
+    if (!bin || typeof bin !== 'object' || !bin.identity) return prev || null;
+    if (typeof bin.sha256 === 'string' && bin.sha256) return { path: bin.path || null, cmd: bin.cmd || null, sha256: bin.sha256, identity: bin.identity };
+    if (prev && prev.identity === bin.identity) return prev;
+    return { path: bin.path || null, cmd: bin.cmd || null, sha256: null, identity: bin.identity };
+  }
+  /** law B — A CHANGED BINARY IS HELD AT ONCE: the version clock read no version (silent: a loaded box, mid-upgrade) but the file
+   *  the sessions spawn has a new identity ⇒ the bytes facts move now, so this hub's own PASS (keyed by the old bytes) stops
+   *  counting on this tick; a changed verdict re-syncs every row. → {...caps, changed} */
+  noteCliBinary(bin) {
+    const before = this.oatFileCaps();
+    this._oatCliBin = this._nextCliBin(bin);
+    if (typeof this._cliNoteHook === 'function') { this._inCliNote = true; try { this._cliNoteHook(this.oatFileCaps()); } catch { } finally { this._inCliNote = false; } }
+    const after = this.oatFileCaps();
+    const changed = before.ok !== after.ok;
+    if (changed) this.syncOatFiles().catch(() => { });
+    return { ...after, changed };
+  }
+  /** THE HUB'S OWN MEASUREMENT (lane cli-self-measure): src/server/cli-self-measure.js — the ledger's one writer — hands in
+   *  its view of the binary in use: {cli, sha256, state: 'checking'|'pass'|'fail'|'cannot-run'|'aborted', startedAt, lateAt,
+   *  killAt, typicalMs, reason: {code, observation}} or null. A view for another version or other bytes is never read
+   *  (oatFileCaps). A changed verdict re-syncs every row (queued), as a version note does. */
+  noteCliMeasured(view) {
+    const before = this.oatFileCaps();
+    this._cliMeasured = view && typeof view === 'object' && typeof view.state === 'string' ? { ...view } : null;
+    if (this._inCliNote) return null; // inside noteCliVersion: it compares and re-syncs itself
+    const after = this.oatFileCaps();
+    const changed = before.ok !== after.ok;
+    if (changed) this.syncOatFiles().catch(() => { });
+    if (changed || JSON.stringify(before.local) !== JSON.stringify(after.local)) this._notify();
+    return { ...after, changed };
+  }
+  setCliNoteHook(fn) { this._cliNoteHook = typeof fn === 'function' ? fn : null; }
+  /** does any subscription here hold a long-lived token? (lane cli-self-measure: the hub's own check runs only when it has one to place) */
+  hasLongLivedTokens() { return this._state.accounts.some((a) => this._acctType(a) === 'subscription' && !!a.oatEnc); }
+  setCliRecheck(fn) { this._cliRecheck = typeof fn === 'function' ? fn : null; }
+  /** the version clock's tick now (the 60 s binary-identity check: the file the sessions spawn changed) → its caps, or null */
+  recheckCli() { try { return this._cliRecheck ? Promise.resolve(this._cliRecheck()) : Promise.resolve(null); } catch { return Promise.resolve(null); } }
+  /** the binary the version clock last read: {path, cmd, sha256, identity} or null */
+  cliBinary() { return this._oatCliBin ? { ...this._oatCliBin } : null; }
   _oatFixture() {
     if (this._oatFixtureMemo === undefined) {
       try { this._oatFixtureMemo = JSON.parse(fs.readFileSync(this._oatFixturePath, 'utf-8')); } catch { this._oatFixtureMemo = null; }
@@ -1396,7 +1456,12 @@ class AccountManager {
     const fx = this._oatFixture();
     const cli = cliCaps.cliVersionOf(this._oatCli) || (this._oatCli ? 'unparsed' : null);
     const platformOk = this._platform !== 'darwin' && this._platform !== 'win32';
-    return { ok: platformOk && cliCaps.oatInFile(this._oatCli, fx), known: !!cli, cli, measured: cliCaps.measuredVersions(fx).join(', ') || null };
+    const fixtureOk = cliCaps.oatInFile(this._oatCli, fx);
+    // the hub's own PASS counts for EXACTLY the version and the bytes it measured (law 2: never another build)
+    const bin = this._oatCliBin, lm = this._cliMeasured;
+    const own = !fixtureOk && lm && cli && lm.cli === cli && bin && lm.sha256 === bin.sha256 ? lm : null;
+    const local = own ? { state: own.state, startedAt: Number(own.startedAt) || null, lateAt: Number(own.lateAt) || null, killAt: Number(own.killAt) || null, typicalMs: Number(own.typicalMs) || null, ...(own.reason ? { reason: { code: String(own.reason.code || ''), observation: String(own.reason.observation || '').slice(0, 200), ...(typeof own.reason.version === 'string' && own.reason.version ? { version: own.reason.version.slice(0, 20) } : {}), ...(own.reason.machine === 'image' || own.reason.machine === 'managed' ? { machine: own.reason.machine } : {}) } } : {}) } : null;
+    return { ok: platformOk && (fixtureOk || (!!local && local.state === 'pass')), known: !!cli, cli, measured: cliCaps.measuredVersions(fx).join(', ') || null, ...(local ? { local } : {}) };
   }
   /** ONE QUEUE for every act on a member's credential file (F13 + F7): a setOat, a clearOat and a sweep row
    *  never interleave on one file. → a promise of the row's result. */
@@ -1498,7 +1563,7 @@ class AccountManager {
     const reason = f && (f.reason || f.verdict);
     // a token that no longer decrypts is the row's fact even while the file it wrote still serves (F4)
     if (reason === 'oat-unreadable' || reason === 'key-missing' || reason === 'key-unreadable') return { state: 'refused', reason, cli: caps.cli, ...(f.code ? { code: f.code } : {}) };
-    if (ls && ls.oatFile) return caps.known && !caps.ok ? { state: 'held', reason: 'cli-unmeasured', cli: caps.cli } : { state: 'written', cli: caps.cli };
+    if (ls && ls.oatFile) return caps.known && !caps.ok ? { state: 'held', reason: 'cli-unmeasured', cli: caps.cli, ...localFacetOf(caps) } : { state: 'written', cli: caps.cli };
     if (!reason || !OAT_FILE_REFUSALS.includes(reason)) return null;
     return { state: 'refused', reason, cli: caps.cli, ...(f.code ? { code: f.code } : {}) };
   }
@@ -1742,9 +1807,13 @@ class AccountManager {
   cliUnmeasuredNotice() {
     const c = this.oatFileCaps();
     if (!c.known || c.ok || !c.cli || c.cli === 'unparsed') return null;
+    // RULING R2 (lane cli-self-measure): a check inside its bound files NOTHING — the pool's card and the roster say it; an
+    // item only once it runs late, fails, cannot run or was stopped (each with what differed and the «check again» press)
+    const lf = localFacetOf(c).local;
+    if (lf && lf.state === 'checking' && !lf.late) return null;
     const members = this.cliUnmeasuredMembers();
     if (!members.length) return null;
-    return { cli: c.cli, members, prefix: cliCaps.cliUnmeasuredPrefix(c.cli), item: cliCaps.cliUnmeasuredItem({ cli: c.cli, names: members.map((m) => m.name) }) };
+    return { cli: c.cli, members, prefix: cliCaps.cliUnmeasuredPrefix(c.cli), state: lf ? lf.state + (lf.late ? ':late' : '') : 'none', item: cliCaps.cliUnmeasuredItem({ cli: c.cli, names: members.map((m) => m.name), local: lf }) };
   }
   /** WHY a NEW placement may not land on member `id` — null exactly when _placeable says true (test-account-pool pins the
    *  two as one answer over every shape); else { code, cli?, file?, reason? }:
@@ -1762,11 +1831,11 @@ class AccountManager {
     if (info.loggedIn && !info.oatFile) return null;
     if (info.loggedIn) {
       if (this.oatCheckOf(id)?.state === 'mismatch') return { code: 'oat-mismatch' };
-      return unmeasured ? { code: 'cli-unmeasured', cli: caps.cli, file: true } : null;
+      return unmeasured ? { code: 'cli-unmeasured', cli: caps.cli, file: true, ...localFacetOf(caps) } : null;
     }
     const fact = this._oatFact(this.get(id));
     if (fact && fact.validUntil > Date.now()) {
-      if (unmeasured) return { code: 'cli-unmeasured', cli: caps.cli, file: false };
+      if (unmeasured) return { code: 'cli-unmeasured', cli: caps.cli, file: false, ...localFacetOf(caps) };
       const f = this._oatFileFacts.get(id);
       // (acceptance r2) the LOCKED vault is its own wall (the sweep could not decrypt the token: kept, written once the
       // vault opens) — and before this process's first sweep there is no refusal yet to name (never «re-login»)
@@ -2145,7 +2214,7 @@ class AccountManager {
           // …or every such token is ANOTHER account's (the identity post-check, lane oat-identity-postcheck): said by name
           const foreign = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile && this.oatCheckOf(m.id)?.state === 'mismatch').map((m) => m.name || m.id);
           if (held && foreign.length === held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: the long-lived token${foreign.length === 1 ? '' : 's'} its member${foreign.length === 1 ? '' : 's'} ${foreign.join(', ')} ${foreign.length === 1 ? 'holds belongs' : 'hold belong'} to another account — conversations already running continue; re-mint or re-bind the token in Manage Agents`), { code: 'oat-identity-mismatch' });
-          if (held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: its members hold only long-lived tokens and the claude CLI ${this.oatFileCaps().cli || ''} was never measured with one in a member's folder — conversations already running continue; sign a member in, or wait for a measured CLI`), { code: 'oat-cli-unmeasured' });
+          if (held) throw Object.assign(new Error(cliCaps.cliHeldSpawnText({ pool: a.name, cli: this.oatFileCaps().cli, local: localFacetOf(this.oatFileCaps()).local })), { code: 'oat-cli-unmeasured' });
           throw new Error(`every member of pool "${a.name}" is signed out — re-login one in Manage Agents (the pool cannot route around a fully signed-out member set)`);
         }
         // Prefer a member whose LOGIN SESSION is not already dead (2026-09-07):

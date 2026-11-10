@@ -134,6 +134,7 @@ const NOT_A_WRITE = [
   [/writeFileSync\(path\.join\(shared, 'config\.toml'\), ''\)/, 'codex seedDir: an EMPTY symlink target created only when absent (a harness prerequisite, never content — verify r1 ②)'],
   [/writeFileSync\(path\.join\(dir, '\.claude\.json'\)/, "claude seedDir: an ISOLATED login dir's .claude.json (never ~/.claude.json)"],
   [/writeFileSync\(path\.join\(probeConfigDir, '\.claude\.json'\)/, "the /usage probe's ISOLATED config dir (B-855a c1)"],
+  [/const homeConfig = \(home\) => fs\.writeFileSync\(path\.join\(home, '\.claude\.json'\)/, "the long-lived-token measurement's per-variant SCRATCH HOME (src/claude-oat-probe.js, lane cli-self-measure — a fake account label under its own scratch, never ~/.claude.json)"],
 ];
 const GUARD = /ownerWriteRefusal\(\)|refuseOwnerWrite\(\)|refusalNow\(\)|\(refused \? /;
 const SITES = [

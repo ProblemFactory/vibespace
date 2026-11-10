@@ -15,6 +15,9 @@
  * This module never touches a credential file itself: the store is the actor.
  * The same tick tells `onCliVersion` the version it read (lane cli-2-1-308-records: src/server/cli-registration.js
  * says ONCE when that build is one the record oracle does not know) — one --version read serves both.
+ * THE BYTES BESIDE THE VERSION (lane cli-self-measure): the same tick reads the binary's sha256 (machineProbes.cliBinary,
+ * memoized by stat identity) and hands it to the store with the version — the hub's OWN measurement (src/server/cli-self-measure.js)
+ * is keyed by both — and registers this tick as the store's recheck (the 60 s binary-identity check asks it at once).
  * A KNOWN UNMEASURED CLI KEEPS EVERY TOKEN FILE (lane pool-silent-members R1): the store holds them, the pool names the
  * members unplaceable, and src/server/cli-unmeasured-notice.js (the pool engine's tick) files the ONE For-you item.
  */
@@ -34,12 +37,15 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
   async function tickOnce() {
     let caps = null;
     try {
-      const bin = typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd;
+      const bin = typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd; // the COMMAND (a string) — the name every hook here reads
       const v = await machineProbes.cliVersion(bin || 'claude');
+      // the bytes beside the version (lane cli-self-measure): read even when --version is silent, so a CHANGED file is held at once
+      let binFacts = null;
+      if (typeof machineProbes.cliBinary === 'function') { try { binFacts = await machineProbes.cliBinary(bin || 'claude'); } catch { binFacts = null; } }
       // a probe that FAILED (a timeout on a loaded box, the binary mid-upgrade) is not an unmeasured CLI: the
       // last known version stands — taking credential files back from running sessions on a hiccup is the bug
-      if (!v) { caps = { ...accounts.oatFileCaps(), changed: false }; if (said !== 'probe-failed') { said = 'probe-failed'; log(`[oat-file] claude --version gave no answer — keeping CLI ${caps.cli || '(unknown)'}`); } await accounts.syncOatFiles(); return caps; }
-      caps = accounts.noteCliVersion(v);      // a changed verdict re-syncs every row itself
+      if (!v) { if (binFacts && typeof accounts.noteCliBinary === 'function') accounts.noteCliBinary(binFacts); caps = { ...accounts.oatFileCaps(), changed: false }; if (said !== 'probe-failed') { said = 'probe-failed'; log(`[oat-file] claude --version gave no answer — keeping CLI ${caps.cli || '(unknown)'}`); } await accounts.syncOatFiles(); return caps; }
+      caps = accounts.noteCliVersion(v, binFacts);      // a changed verdict re-syncs every row itself
       if (onCliVersion) { try { onCliVersion(caps.cli || v); } catch { } }
       // lane cli-update-needs-nothing: the same read tells the model catalog which binary the sessions spawn (read once per
       // binary, never run) — through a hook cli-env's create sets (this clock requires no module: test-oat-mint ⑥)
@@ -47,10 +53,11 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
       if (!caps.changed) await accounts.syncOatFiles(); // else: a login that died since the last tick
       else await accounts.oatFileSettled();
       const words = `${caps.cli || 'unknown'}:${caps.ok}`;
-      if (words !== said) { said = words; log(`[oat-file] claude CLI ${caps.cli || '(unknown)'} — ${caps.ok ? 'measured: a member with no usable login gets its long-lived token in its folder' : `not measured (fixture: ${caps.measured || 'none'}): no long-lived token goes into a member folder and nothing new is placed on one already there; the files already there STAY (the pool names those members unplaceable)`}`); }
+      if (words !== said) { said = words; log(`[oat-file] claude CLI ${caps.cli || '(unknown)'} — ${caps.ok ? `${caps.local ? 'checked on this machine (this hub\'s own PASS for these bytes)' : 'measured'}: a member with no usable login gets its long-lived token in its folder` : `held — no PASS on record for it (fixture: ${caps.measured || 'none'}${caps.local ? `; this hub's own check: ${caps.local.state}` : ''}): no long-lived token goes into a member folder and nothing new is placed on one already there; the files already there STAY (the pool names those members unplaceable)`}`); }
     } catch (e) { log('[oat-file] sweep failed:', (e && e.message) || e); }
     return caps;
   }
+  if (typeof accounts.setCliRecheck === 'function') accounts.setCliRecheck(() => tick());
   function loop() {
     timer = setTimeout(async () => { await tick(); if (!stopped) loop(); }, timer === null ? bootDelayMs : recheckMs);
     if (timer.unref) timer.unref();

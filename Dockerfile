@@ -22,10 +22,12 @@ FROM node:22-bookworm-slim
 # git/curl/ca-certificates: tooling claude commonly needs
 # python3/make/g++: node-pty native build fallback (prebuilds usually suffice)
 # fontconfig: /api/fonts (fc-list) — optional but small
+# strace: the hub's own check of a new Claude Code (src/claude-oat-probe.js) proves nothing leaves the machine —
+#   without it a new version's long-lived-token accounts wait for a VibeSpace update (lane cli-self-measure)
 # tini: pid 1 that reaps orphans (node as pid 1 never does — every detached
 # process that dies would stay a zombie and read alive to `kill -0`)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      dtach procps psmisc zip unzip tar git curl ca-certificates \
+      dtach procps psmisc zip unzip tar git curl ca-certificates strace \
       python3 make g++ fontconfig openssh-client rclone fuse3 tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -61,6 +63,10 @@ COPY . .
 # data/ is dockerignored — create it IN the image owned by vibe, or the VOLUME
 # would materialize at runtime owned by root and auth.json writes fail (EACCES)
 RUN npm run build && mkdir -p /app/data && chown -R vibe:vibe /app
+# THE IMAGE STAMP (the same file deploy/docker/Dockerfile writes): a VibeSpace image says so — src/claude-oat-probe.js reads it to
+# word a refusal for an image («the next VibeSpace image brings it») rather than for a machine its owner manages
+ARG VIBESPACE_IMAGE_VERSION=dev
+RUN mkdir -p /usr/share/vibespace && printf '{"version":"%s","built":"%s"}\n' "$VIBESPACE_IMAGE_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /usr/share/vibespace/image.json
 
 USER vibe
 ENV HOME=/home/vibe \

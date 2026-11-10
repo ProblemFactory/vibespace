@@ -64,7 +64,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCheckingNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const { requestInFlight } = require('../turn-state.js'); // PURE: is a request in flight (never a turn paused on the owner) — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
@@ -477,7 +477,11 @@ setTimeout(() => {
 }, 15000);
 // lane pool-silent-members R1: a claude CLI the oat fixture never measured is never silent — ONE For-you item per version
 const cliUnmeasuredNotice = require('./cli-unmeasured-notice.js').create({ accounts: () => accounts, todos: () => getUserTodos(), file: path.join(rootDir, 'data', 'cli-unmeasured-notice.json') }); // its OWN memory per version (acceptance r2)
-setInterval(() => { try { sweepUsageAnchors(); } catch {} try { cliUnmeasuredNotice.tick(); } catch {} }, 60000);
+// lane cli-self-measure: the hub CHECKS a new Claude Code itself (the release road's measurement, forked — src/claude-oat-probe.js);
+// its PASS places the held members and fires the pool's ONE edge for each (the conversations waiting continue by themselves).
+// Ticked on this same 60 s interval (its R4 binary-identity check rides it); the store is late-bound (getAccounts, raw)
+const cliSelfMeasure = require('./cli-self-measure.js').create({ accounts: () => { try { return getAccounts(); } catch { return null; } }, dataDir: path.join(rootDir, 'data'), app, enabled: () => { try { return serverSetting('accounts.cliSelfMeasure') !== false; } catch { return true; } }, onMembersBack: (ids) => { for (const id of ids) { try { onMemberReadingFresh(id, 'cli-measured', { placeable: true }); } catch {} } }, onCheckEnded: () => { const ar = getAutoResume(); if (ar && ar.armedIds && ar.refreshStatus) { let ids = []; try { ids = ar.armedIds() || []; } catch {} for (const id of ids) { try { ar.refreshStatus(id); } catch {} } } } });
+setInterval(() => { try { sweepUsageAnchors(); } catch {} try { cliUnmeasuredNotice.tick(); } catch {} try { cliSelfMeasure.tick().catch(() => {}); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 
 // ── Plan C (B-a612, 2.315.0): per-session pool placement ────────────────────
@@ -2139,6 +2143,24 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
  *  null when the verdict has no target to name (the arm then inherits or
  *  stays cause-less and the card keeps its old sentence). Words live in
  *  auto-resume.js armNoticeFor; this is structure only. */
+// LAW G4 (lane cli-self-measure): while the hub's own check holds members of THIS conversation's pool, the arm's cause says so — the
+// card, the watch notice and the status chip then name the check and its minutes, never a reset days away. The facet carries the
+// run's start, so a reader drops it the moment that run is no longer checking (global.__vsCliCheckingNow, the ORCH's live answer)
+// could this member serve if the check passes? Its LAST reading's verdict (acceptance r2 item 6: the promise looks at the member that
+// would come back — a spent or reading-less member promises nothing)
+const memberServable = (id) => { try { return quotaVerdict(poolReadCache()(id), Date.now() / 1000, { tier: 'hot' }).usable === true; } catch { return false; } };
+function checkingFor(session) {
+  try {
+    const caps = accounts.oatFileCaps();
+    const l = caps && caps.local;
+    if (!l || l.state !== 'checking' || !session || !session._accountId) return null;
+    const held = (accounts.poolRoster(session._accountId) || []).filter((r) => r && r.why && r.why.code === 'cli-unmeasured' && r.why.local && r.why.local.state === 'checking');
+    if (!held.some((r) => memberServable(r.id))) return null; // nobody it holds could serve: the card keeps the wall's own words (item 6)
+    const lf = held[0].why.local;
+    return { cli: caps.cli, n: held.length, startedAt: Number(l.startedAt) || null, typicalMin: lf.typicalMin || 5, boundMin: lf.boundMin || 20 };
+  } catch { return null; }
+}
+const withChecking = (cause, session) => { const ck = checkingFor(session); return ck && cause ? { ...cause, checking: ck } : cause; };
 function armCauseFor(v, demoted, armWall, evResetMs) {
   if (!v || v.usable !== false) return null;
   const floorRule = { fiveHour: VERDICT_THRESH.fiveHour.hot, weekly: VERDICT_THRESH.weekly.hot };
@@ -3088,7 +3110,7 @@ function onWalledTurn(session, sigs) {
     const evReset = Math.max(0, ...sigs.map((s2) => s2.resetsAtMs || 0));
     const target = v.blockedUntil || evReset;
     if (target > Date.now()) {
-      ar.armIfEnabled(id, session, target, v.reason || 'usage limit', { ...armWall, cause: armCauseFor(v, demoted, armWall, evReset) });
+      ar.armIfEnabled(id, session, target, v.reason || 'usage limit', { ...armWall, cause: withChecking(armCauseFor(v, demoted, armWall, evReset), session) });
       // VERIFY the cache's word (inc-mtdsoj5f, userW: an ALIVE account read
       // dead-with-a-far-reset — "blocked until Aug-31" off stale data — until a
       // MANUAL refresh fixed it; a confident cache can lie exactly like an
@@ -3289,9 +3311,9 @@ function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}
       // the fire's last check, asked here too (acceptance r4): a pool usable only through a member the link did not move
       // to is no «usable again» — that near-arm re-ran the gate into the same hold. The link's member decides
       const lv = v.usable === true ? linkHold(session, scope, model, v, Date.now()) : null;
-      if (lv) { if (lv.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, lv.blockedUntil, lv.reason, { cause: armCauseFor(lv, null, null, 0) }); return; } scheduleWallProbe(session, scope, model, attempt + 1); return; }
+      if (lv) { if (lv.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, lv.blockedUntil, lv.reason, { cause: withChecking(armCauseFor(lv, null, null, 0), session) }); return; } scheduleWallProbe(session, scope, model, attempt + 1); return; }
       if (v.usable === true) { ar?.armIfEnabled?.(id, session, Date.now() + 45000, 'account usable again'); return; }
-      if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason, { cause: armCauseFor(v, null, null, 0) }); return; }
+      if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason, { cause: withChecking(armCauseFor(v, null, null, 0), session) }); return; }
       scheduleWallProbe(session, scope, model, attempt + 1);
     } catch (e) { console.warn('[wall] probe failed:', e.message); }
   }, WALL_PROBE_BACKOFF[attempt]);
@@ -3380,7 +3402,7 @@ async function beforeAutoResumeFire(id, session) {
     if (v.usable === false || (v.held && v.usable !== true)) {
       // HELD AND SAID (acceptance r3): no member can serve on the reading after the probe — the journal names the wall
       if (pooled) console.log(`[auto-resume] ${id}: continue held at the fire — no member of ${a.name || scope} can serve on the reading after the probe (${String(v.reason || '').slice(0, 400)})`);
-      if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason, { cause: armCauseFor(v, null, null, 0) });
+      if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason, { cause: withChecking(armCauseFor(v, null, null, 0), session) });
       else scheduleWallProbe(session, scope, model, 1);
       return false;
     }
@@ -5785,16 +5807,20 @@ function readingForeignForWake(memberId, snap) {
  *      broadcast, and guessing is worse than waiting.
  *
  *  "No reading" is a REFUSAL TO ACT, never a verdict of 0%. */
-function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now() } = {}) {
+function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), placeable = false } = {}) {
   const out = { member: memberId || null, why, acted: false, reason: null, detail: null, pools: [], fired: [], skipped: [] };
   try {
     if (!memberId || typeof memberId !== 'string') { out.reason = 'no-member'; return out; }
     try { memberServeLapsed(memberId); } catch { } // a fresh reading of its own window IS the evidence that re-admits a lapsed member — at once
     let snap = null;
     try { snap = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); } catch { }
-    if (!snap) { out.reason = 'no-reading'; return out; }
-    const age = at - (Number(snap.fetchedAt) || 0);
-    if (!(age >= 0) || age > MEMBER_READING_FRESH_MS) { out.reason = 'stale-reading'; return out; }
+    // PLACEABLE (lane cli-self-measure, acceptance r1 law G3): the member's READING did not change — its ELIGIBILITY did (the hub's own
+    // check of a new Claude Code passed; it was held for minutes or hours). The freshness gate is skipped: half ① re-decides on the
+    // last reading the pool already uses, half ② fires only a conversation that lands on it and only when that reading says usable —
+    // every continue through auto-resume's own fire (its pre-fire gate and the spend authorizer)
+    if (!snap) { if (!placeable) { out.reason = 'no-reading'; return out; } }
+    const age = snap ? at - (Number(snap.fetchedAt) || 0) : 0;
+    if (snap && !placeable && (!(age >= 0) || age > MEMBER_READING_FRESH_MS)) { out.reason = 'stale-reading'; return out; }
     const foreign = readingForeignForWake(memberId, snap);
     if (foreign) { out.reason = 'foreign-reading'; out.detail = foreign; return out; }
     // THE FLOOR IS STAMPED ONLY WHEN WE ACT. A declined wake costs one file
@@ -7607,9 +7633,16 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         // as a spent quota bucket with "wait for a window to reset".
         // It lives there, not here, so the suite can assert the STRING.
         const nk = `pool-blocked-${poolId}-${d.reason}-${Math.floor(now / 3600000)}`;
+        // the blocked notice says EVERYTHING it says, always (acceptance r1 law G1); a running check is an ADDITION under its OWN key
+        // (G2: a FAIL five minutes later still raises the real warning — the hour's blocked key is never spent on the promise)
         serverNotice(nk, poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(currentId), when: (ms) => OF.when(ms, { now }) }), { level: 'warn' });
+        const ck = poolCheckingNotice(d, { poolName: a.name, servable: memberServable });
+        if (ck) serverNotice(`pool-checking-${poolId}-${Math.floor(now / 3600000)}`, ck.text, { level: 'info', i18n: ck.i18n });
         journalPoolDetail(nk, a.name, d, nameOf(currentId), now);
-        poolBlockedTodo(poolId, a.name, d, nameOf(currentId), now); // …and every member's line where the owner looks (r3)
+        // …and every member's line where the owner looks (r3). A running check hides no wall (law G1): the item is filed whenever
+        // anything else holds the pool; only when the check is the WHOLE story (ck.promise — a PASS alone unblocks) is it the pool
+        // card's line and no For-you item (ruling R2)
+        if (!(ck && ck.promise)) poolBlockedTodo(poolId, a.name, d, nameOf(currentId), now);
       }
       return;
     }

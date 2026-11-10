@@ -89,7 +89,7 @@ const PRODUCERS = {
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
   'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
-  'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: [] },
+  'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: ['cli-check-again'] }, // lane cli-self-measure: a FAIL / cannot-run / stopped check's item carries «Check again»
   'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request', 'vault-words-ask'] },   // + lane vault-entry-description: an agent's proposal of an entry's words
   'src/server/feedback-forward.js': { origin: 'server', scope: 'group', types: [] },
 };

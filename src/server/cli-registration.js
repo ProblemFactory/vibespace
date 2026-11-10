@@ -59,7 +59,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     seen[v] = rec ? { ...rec, sources: [...rec.sources, source] } : { firstSeen: now(), sources: [source] };
     save();
     if (!rec) {
-      log(`[cli-registration] claude ${v} is not registered — records may show as new fields until the next release (seen ${source === 'hub' ? 'as the hub\'s CLI' : 'on a conversation\'s records'}; this release knows ${pinned[pinned.length - 1]} and older. Record draft: Manage agents ▸ claude ▸ 生成记录草稿, or node scripts/claude-cli-dump.mjs --auto)`);
+      log(`[cli-registration] claude ${v} is newer than this release's record table — a record kind it adds is listed in Diagnostics, conversations are not affected (seen ${source === 'hub' ? 'as the hub\'s CLI' : 'on a conversation\'s records'}; this release knows ${pinned[pinned.length - 1]} and older. Record draft: Manage agents ▸ claude ▸ 生成记录草稿, or node scripts/claude-cli-dump.mjs --auto)`);
       try { event('cli-unknown-version', `claude ${v} · ${source}`); } catch { }
     }
     return { version: v, registered: false, said: !rec };

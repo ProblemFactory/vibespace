@@ -96,6 +96,7 @@ function serveAfterFailure(prev, { why = '', now = Date.now(), fp = '' } = {}) {
 // data" — see the essay in quota-model.js.
 const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC, nowSecOf, resetLanded, memberProofState, windowDisplay } = require('./quota-model.js');
 const { familyOfScopedBucket } = require('./model-family.js');
+const { observationText } = require('./cli-caps.js'); // PURE: lane cli-self-measure — what the hub's own check of a new CLI saw, in words
 const { capsOf } = require('./backend-caps.js'); // PURE: the harness row states its prompt-cache TTL (cacheTtlSecFor)
 
 const SWITCH_THRESHOLD_PCT = 5;
@@ -1246,9 +1247,18 @@ function unplaceableText(why) {
   const w = why && typeof why === 'object' ? why : {};
   const cli = typeof w.cli === 'string' && /^[0-9A-Za-z.+-]{1,40}$/.test(w.cli) ? w.cli : '?';
   switch (w.code) {
-    case 'cli-unmeasured': return w.file === false
-      ? `no credential file in its folder (CLI ${cli} unmeasured) — re-login or wait for the measurement`
-      : `long-lived token only (CLI ${cli} unmeasured) — re-login or wait for the measurement`;
+    // lane cli-self-measure: the hub CHECKS a new build itself (≈ 5 min) — the words follow its state; never «unmeasured»,
+    // never «wait for the measurement» (the owner, 2026-11-09)
+    case 'cli-unmeasured': {
+      const l = w.local && typeof w.local === 'object' ? w.local : null;
+      const typ = l && Number.isFinite(l.typicalMin) ? l.typicalMin : 5;
+      if (l && l.state === 'checking') return `Claude Code ${cli} is being checked on this machine (about ${typ} min${Number.isFinite(l.elapsedMin) && l.elapsedMin > 0 ? `, started ${l.elapsedMin} min ago` : ''}${l.late ? ' — taking longer than usual' : ''}) — it rejoins the pool when the check passes`;
+      if (l && l.state === 'fail') return `Claude Code ${cli} uses long-lived tokens differently (${observationText(l.reason)}) — re-login it to use it now`;
+      if (l && (l.state === 'cannot-run' || l.state === 'aborted')) return `VibeSpace could not check Claude Code ${cli} on this machine (For you says why) — re-login it to use it now`;
+      return w.file === false
+        ? `no credential file in its folder, and Claude Code ${cli} is not in this VibeSpace's records yet — re-login, or a VibeSpace update places it`
+        : `long-lived token only, and Claude Code ${cli} is not in this VibeSpace's records yet — re-login, or a VibeSpace update places it`;
+    }
     // (acceptance r2) the LOCKED vault is the wall, never the login: the token is kept and written once it opens — the
     // deploy of this very fix restarts the hub (the vault locks), and «re-login» sent the owner to six needless logins
     case 'vault-locked': return 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)';
@@ -1285,7 +1295,7 @@ const namesOf = (list, fmt = (m) => m.name || m.id) => {
 };
 /** the members the pool cannot place, one clause per reason: «acct-13: signed out …» / «6 accounts: <reason> (a, b, c and 3 more)» */
 // ONE REASON SAID FOR MANY (acceptance r3: «14 accounts: … in ITS folder»): the grouped clause speaks of THEIR folders
-const PLURAL = [['its long-lived token is kept and written to its folder', 'their long-lived tokens are kept and written to their folders'],
+const PLURAL = [['it rejoins the pool', 'they rejoin the pool'], ['re-login it to use it now', 're-login one to use it now'], ['a VibeSpace update places it', 'a VibeSpace update places them'], ['its long-lived token is kept and written to its folder', 'their long-lived tokens are kept and written to their folders'],
   ['long-lived token kept, not written to its folder', 'long-lived tokens kept, not written to their folders'], ['long-lived token only', 'long-lived tokens only'],
   ['in its folder', 'in their folders'], ['to its folder', 'to their folders'], ['its login was wiped', 'their logins were wiped'],
   ['its subscription is inactive — it rejoins once it answers', 'their subscriptions are inactive — each rejoins once it answers'],
@@ -1308,6 +1318,32 @@ function poolNoticeCut(d) {
   return [...groups.values()].some((n) => n > NOTICE_NAMES_MAX);
 }
 const authFailedText = (m) => `${m.name || m.id} (${Number.isFinite(m.agoMin) ? `${m.agoMin} min ago` : 'just now'} — retried after 10 min)`;
+// THE POOL CARD WHILE THE HUB CHECKS A NEW CLAUDE CODE (lane cli-self-measure; acceptance r1 law G): an ADDITION beside the blocked
+// notice — never in its place: everything poolBlockedNotice says (a spent bucket, a re-login, another wall) is still said under its
+// own key; this line names the members the RUNNING check holds, about how long, and — only when those members are the only thing
+// between this conversation and a placement (no other wall named) — that it continues by itself when the check passes (the PASS
+// fires the pool's placeable edge). → {text, i18n: {key, params}, promise} or null (no member held by a running check).
+const i18nKey = (s) => s;
+/** `servable(id)` (the engine's quota verdict over the member's last reading): the PROMISE — «the conversations waiting continue by
+ *  themselves» — is made only when a member the check holds could actually serve after a PASS (acceptance r2 item 6: a held member
+ *  whose own reading is spent, or has none, makes no promise — the blocked words and the For-you item stand). No `servable` ⇒ none */
+function poolCheckingNotice(d, { poolName = '', servable = null } = {}) {
+  const held = (Array.isArray(d && d.unplaceable) ? d.unplaceable : []).filter((m) => m && m.why && m.why.code === 'cli-unmeasured' && m.why.local && m.why.local.state === 'checking');
+  if (!held.length) return null;
+  const l = held[0].why.local, w = held[0].why;
+  const cli = typeof w.cli === 'string' && /^[0-9A-Za-z.+-]{1,40}$/.test(w.cli) ? w.cli : '?';
+  const n = held.length, typ = String(Number.isFinite(l.typicalMin) ? l.typicalMin : 5);
+  const otherWalls = (Array.isArray(d && d.unplaceable) ? d.unplaceable.length : 0) - n + ['quotaBlocked', 'authFailed', 'rejectedMembers', 'loginBlocked', 'lapsedBlocked', 'modelBlocked', 'crossHeld', 'reserveBlocked', 'overageBlocked'].reduce((k, x) => k + (Array.isArray(d && d[x]) ? d[x].length : 0), 0);
+  const promise = otherWalls === 0 && typeof servable === 'function' && held.some((m) => { try { return servable(m.id) === true; } catch { return false; } });
+  const key = !promise ? (n === 1
+    ? i18nKey('Pool "{pool}": checking the new Claude Code {v} on this machine — about {typ} min. If it passes, 1 account it holds rejoins the pool.')
+    : i18nKey('Pool "{pool}": checking the new Claude Code {v} on this machine — about {typ} min. If it passes, {n} accounts it holds rejoin the pool.'))
+    : n === 1
+    ? i18nKey('Pool "{pool}": checking the new Claude Code {v} on this machine — about {typ} min. If it passes, 1 account rejoins the pool and the conversations waiting on it continue by themselves.')
+    : i18nKey('Pool "{pool}": checking the new Claude Code {v} on this machine — about {typ} min. If it passes, {n} accounts rejoin the pool and the conversations waiting on it continue by themselves.');
+  const params = { pool: String(poolName || ''), v: cli, typ, n: String(n) };
+  return { text: key.replace(/\{(\w+)\}/g, (m, k) => (params[k] != null ? params[k] : m)), i18n: { key, params }, promise };
+}
 function poolBlockedNotice(d, { poolName = '', currentName = 'the current member', when = null } = {}) {
   const dead = (d?.deadBuckets || []).join(', ');
   const low = (d?.lowBuckets || []).join(', ');
@@ -1789,6 +1825,6 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 }
 
 module.exports = {
-  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
+  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

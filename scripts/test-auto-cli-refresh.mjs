@@ -498,9 +498,9 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     && AC.probeFailWhy({ exitCode: 1, rawStdout: COST }) === 'exit 1: Total cost: $0.0000',
     '§10a R3 probeFailWhy: «no login in the folder — the CLI answered as a non-subscriber» / «the CLI prints no quota lines for a folder-token login on 2.1.312», never «no quota lines in its answer» for either; a non-zero exit keeps its exit class');
   ok(AC.notProbedWords(AC.OAT_NO_PROFILE) === 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it'
-    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '2.1.308' } }) === 'long-lived token only, and claude 2.1.308 is not measured with it in the account\'s folder; refreshes when a session uses it'
+    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '2.1.308' } }) === 'long-lived token only, and Claude Code 2.1.308 isn\'t cleared for it on this machine yet (the hub checks a new build itself when its switch is on); refreshes when a session uses it'
     && AC.notProbedWords(AC.OAT_NOT_IN_FOLDER, { oatFile: { reason: 'write-failed' } }) === 'long-lived token only, not written to the account\'s folder (write-failed); refreshes when a session uses it'
-    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '<b>x</b> 1' } }).includes('claude ? is') && AC.notProbedWords(AC.PROBEABLE) === '',
+    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '<b>x</b> 1' } }).includes('Claude Code ? isn') && AC.notProbedWords(AC.PROBEABLE) === '',
     '§10a the journal names the fact that failed (the CLI version, the folder refusal — a value outside their shape is said as «?» / dropped)');
   // the reason + THE ONE scrub: a planted token-shaped line never survives (built at runtime — never a literal)
   const OAT = ['sk-ant-', 'oat01-', 'Qx7Lm2'.repeat(14)].join('');
@@ -591,7 +591,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const of = (w, key) => w.calls.filter((c) => c.key === key);
   const linesOf = (w, key, re) => w.logs.filter((l) => l.startsWith(`[auto-cli] quota refresh ${key}: `) && re.test(l));
   const NP_LINE = '[auto-cli] quota refresh sub-np: not probed — long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it';
-  const UM_LINE = '[auto-cli] quota refresh sub-um: not probed — long-lived token only, and claude 2.1.308 is not measured with it in the account\'s folder; refreshes when a session uses it';
+  const UM_LINE = '[auto-cli] quota refresh sub-um: not probed — long-lived token only, and Claude Code 2.1.308 isn\'t cleared for it on this machine yet (the hub checks a new build itself when its switch is on); refreshes when a session uses it';
   {
     // the owner's state file: booked failures (36) and an attempt stamp an hour old on the profile-less row
     const w = world({ stateFile: { v: 1, attempts: { 'sub-np': T0 - H, 'sub-ok': T0 - 2 * H }, fails: { 'sub-np': 36 }, projReads: {} } });

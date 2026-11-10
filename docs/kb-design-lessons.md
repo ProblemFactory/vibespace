@@ -315,6 +315,30 @@ What survives for codex is the SESSION scope, which asks the session's OWN alrea
 
 **§9 addendum (lane agy-wall-signal; the owner's ruling «A» 2026-11-02): THE SECOND OWNER-APPROVED USAGE READ — ONE per Antigravity wall.** A wall the stream names is a READING (the passive half of every quota contract — the on-demand read is the person's, the signal is the stream's): antigravity's `quota.signalFromStream` reads the wrapper's RESOURCE_EXHAUSTED notice / error prompt_end into ONE typed wall (the model's group, the window its stated reset can be, 100 %, ts + «90h39m34s»), written for the session's account through the one write path. The owner then ruled that the wall may fire ONE `agy -p /usage` of that account — the second exception beside auto-cli, and as narrow: the EVENT is the wall (never a timer, a cadence, a session start / stop / idle); once per (account, limit, reset); only a LIVE wall record (≤ 5 min — a replayed buffer never fires); only where the descriptor declares `quota.onDemand.onWallSignal` (gated in the door itself — claude / codex / opencode / shell declare none and are proven to spawn nothing); through the existing door (src/server/cli-usage-door.js: the minute's pace, `accounts.onDemandQuotaRefresh = off` refuses it, the judge); the judge's STOP is absolute — 'turn-started' ⇒ nothing written and the one-shot DISARMED for that account until the hub restarts; any other failure ⇒ one line, no retry (the next wall may try). test-vendor-whitelist 5c pins the door's TWO callers with their gates (a third caller, a missing gate or a timer is RED). Do NOT generalize it: another harness's wall read is another ruling.
 
+**§9 addendum (2.369.391, lane cli-self-measure): THE HUB'S OWN MEASUREMENT OF A NEW CLAUDE CODE — what it is and what it is not.**
+
+**Its limit, first (主开发's ruling, acceptance r4 — four rounds each closed one road and met the next, because each asked for a fence against a binary that SETS OUT to deceive its tracer; that fence cannot hold, and the owner's standing rule is «no enforcement that cannot hold; honest words»).** THE MEASUREMENT IS A WITNESS OF AN HONEST BUILD'S CONDUCT. It answers one question — does this unknown build of the vendor's own CLI still handle the long-lived token the way the recorded builds do — and it FAILS CLOSED on everything it cannot account for. It is NOT a sandbox against a hostile binary: the binary runs as the same user, in no namespace. What protects the person does not depend on the trace: the run gets a made-up credential, a scratch HOME and a loopback mock, so nothing real is in reach by the build's normal conduct, and no real token ever leaves. The record's design (below) buys this: the build's own writes and an accident cannot damage the record. It does not buy a record that a build which deliberately rewrites its launcher or links files around cannot falsify — the tripwires for those two (the launcher compared with the shipped bytes before every launch; a link's or a rename's source judged like an open) fire on the simple shapes and say so; they are not a wall, and no round asks for one.
+
+It IS the release road's oat measurement (`src/claude-oat-probe.js`, one implementation with `scripts/measure-claude-cred-read.mjs`). The hub forks it in a child, with a timeout, at the first sight of a (version, sha256) with no PASS on record. It runs:
+- the real binary, in its non-interactive stream-json mode on a pipe;
+- with a per-run FAKE long-lived token in a scratch credential file, reached through a scratch per-session link;
+- with every API / OAuth / OTel base and every proxy on a loopback mock that refuses each CONNECT (403);
+- with the CLI's own no-traffic / no-auto-update switches, and an env that is an allowlist (`ENV_ALLOW`, asserted per spawn);
+- under a strace belt (%file,%network,%process, -y) that SIGKILLs the CLI's group at the first destination that is not the mock's port — any family: inet6, a unix path, a UDP send with no connect, the box's resolver at 127.0.0.53 (a clean 2.1.321 run makes 8 connects, all to the mock, and no lookup at all — measured); NETLINK, the kernel, is counted in the record;
+- through ONE launcher for every run of the binary, the `--version` read included — its RECORD is the tracer's own stderr stream, a socket only the measurement holds (no file, nothing read back by path; a trampoline gives the binary its own stderr, so the build's own writes cannot reach the record), kept whole up to 64 MiB a launch (past it the run voids by name — never a record cut short), and every line of it is read by ONE grammar: a split call is joined before it is judged, and a record that cannot account for every call (an unparsed line, a half that never ended, an opening call cut by a death, a tracer that had to be killed, a record with no call at all) voids the run;
+- with the doors the trace cannot see through SHUT by the tracer itself (io_uring_setup ⇒ ENOSYS — the runtime falls back; handle opens, another process's memory / fds, ptrace ⇒ EPERM) — one that opens anyway voids;
+- ended by the KERNEL: each run is `setpriv --pdeathsig KILL -- strace --kill-on-exit -f` in its own session — the process that spawned the tracer goes ⇒ the kernel kills the tracer ⇒ the kernel kills every tracee (a setsid grandchild included); nothing ever signals a pid read from the trace (measured: without --kill-on-exit the tracees outlive the tracer). strace < 6.6 or no setpriv ⇒ refused by name. WHY 6.6: --kill-on-exit (PTRACE_O_EXITKILL) appeared in strace 6.6, and below it a tracer that dies only DETACHES what it traces (measured), so «nothing is left behind» cannot be promised — such a hub does not run its own check (`strace-old`, said only where a member is held, with the door per machine kind: «update strace to 6.6 or newer (this one is X)» on a machine its owner manages — or, when the tracer did not say its version, that it did not say (never «?»); in a VibeSpace image, the next image brings it and a release that records the build places the accounts meanwhile), and the release road places them exactly as before this lane. Both Docker images are bookworm (strace 6.1) today; the strace line in both Dockerfiles stays — harmless now, needed the day the base moves (a fleet change with its own acceptance).
+
+It IS NOT:
+- a vendor call: no request leaves the box (the mock's own log is the proof: every bearer a fake label, every CONNECT refused);
+- a billed turn: there is no real account and no reachable endpoint, which is why the program-use billing law does not bite;
+- a read of a real credential: the file fence DENIES BY DEFAULT — a successful open under the person's REAL home (the passwd entry: the CLI reads getpwuid's home whatever $HOME says) or the hub's data dir — or /proc of a process that is not the run's (environ, mem, cmdline, fd) — read outside every quoted payload, a link's or a rename's source judged like an open — voids the run unless it lies in the run's scratch, the binary's install dir (when that dir holds no deny root — else only the binary file) or the one interpreter file a #! CLI runs under; preflight refuses a scratch inside, containing or linking into a credential store. `/etc/claude-code` and `/home/claude/.claude/remote`, which 2.1.321 opens whatever HOME is, refuse the run by name when present;
+- a `-p /usage`;
+- a timer: once per build, a FAIL never again by itself;
+- a weaker belt: no strace ⇒ cannot-run, said in For you.
+
+A machine where the fences cannot be proven does not run it; the members stay held (fail closed), and For you says why.
+
 ### 10. Settings System (Global + Per-Terminal)
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
 
@@ -709,6 +733,29 @@ REMAINING BACKLOG (not yet fixed — see [[project-code-review-2026-07-backlog]]
 
 **Gated by (run BEFORE commit):** test-claude-update-needs-nothing (the drill: a never-seen CLI pickable in its 1M form, priced from its catalog with the source said, in its family's lane, no «wait for a release», said once; every scene with its RED control; §M the census over scripts/fixtures/cli-update-census.json — a model-keyed site with no row is RED) + test-claude-update-needs-nothing-hub (heavy: a scratch hub, the stand-in as CLAUDE_CMD) + test-pricing-tiers.
 
+
+### Row: A fact about a machine the HUB can measure itself — a new Claude Code build's credential reading (lane cli-self-measure, 2026-11-09)
+
+**The change touches…** Anything that decides, from the Claude CLI's version, whether a pool member's long-lived token may be spent. That fact is about the machine (its binary), so it is measured where it lives: by the hub that spawns that binary, not by a release that ships a record.
+
+**It belongs in…**
+- The measurement: SHARED `src/claude-oat-probe.js`. The release script and the hub's forked child both call it; neither grows a mock, belt or judge of its own.
+- The hub's road: ORCH `src/server/cli-self-measure.js`, created by the pool engine. It keeps the ledger `data/cli-self-measure.json`, keyed by version + sha256, and hands the store its view (`accounts.noteCliMeasured`).
+- The binary's bytes: `machine-probes.cliBinary` (streamed sha256, stat-identity memo), read by the version clock `oat-file-sync` beside `--version`.
+- The words: PURE `src/cli-caps.js` (the item per state) and `src/account-pool-auto.js` (the roster clause, `poolCheckingNotice`).
+
+The laws:
+1. Fail closed stays: nothing is placed on a long-lived-token member under a build without a PASS, the fixture's or this hub's for those exact bytes. A PASS is the JUDGE's (cli-caps oatInFile over the record's three verdicts) under the current probe version — never a child's boolean, re-judged at load and after a bump. A changed binary drops it on that tick, `--version` silent or not.
+2. The hold lasts as long as the check, ≈ 4.5 min, bounded at 20. A running check never hides a wall: its words are an ADDITION under their own key, and they promise the waiting conversations continue only when a PASS alone unblocks them AND a member the check holds could serve on its last reading — then the pool's one edge is fired PLACEABLE (the member's eligibility changed, not its reading) and they do. The conversation's own card, watch notice and chip say the check, never a far reset.
+3. The probe refuses by name what it cannot prove (law 3, kb §9 addendum 2.369.391).
+4. Every version gate answers «does an ordinary update need a release?» with NO.
+
+**Gated by (run BEFORE commit):**
+- test-cli-self-measure (fast): the structure census, the fences (deny-by-default included), the store, the ORCH over a stub fork (an unreadable ledger, the judge, a changed binary, the press during a check), the census rows the hub's fork and the network classifier must keep, R8, the words census, LAW 5's version-gate census over the shared cli-update-census.json.
+- test-oat-measure-fake (heavy, strace): hub-road parity and each fence proven to fire on the real tracer — foreign token, guarded read, an open under the data dir, an off-box connect, a UDP send, a unix connect; the version read traced; a setsid grandchild, a SIGTERM and the run's own deadline leave nothing.
+- test-vendor-whitelist §13 (the module that runs the vendor's binary: ONE launcher, the mock's bases only, assertEnv first); test-new-member-wake (the PLACEABLE edge, its RED control); test-architecture §68 / §85 / §86 / §94.
+- test-cli-caps.
+- test-oat-materialize.
 ### Row: A one-shot migration that retires what an instance held of a removed feature (lane engine-spi-egress L3, 2026-11-03 — its acceptance's three findings, as laws)
 
 **The change touches…** A boot migration that moves records, settings rows, a program path or running processes OFF a feature this version no longer ships (2026-11-cloak-to-plugin: CloakBrowser's profiles, seeds, rows and running browsers onto its plugin).
