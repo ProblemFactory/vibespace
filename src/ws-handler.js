@@ -672,7 +672,7 @@ function registerWsHandler(wss, ctx) {
           break;
         }
         case 'set-model': {
-          { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }); } catch { } } }
+          { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }, { durable: true }).then((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } }); } catch { } } }   // round 3 (smaller 6a): its promise is never dropped — a failure is said
           const session = activeSessions.get(data.sessionId);
           if (session?.pty && session.mode === 'chat' && (data.model || 'lock' in data)) {
             const adapter = adapterRegistry.get(session.backend);
@@ -687,14 +687,17 @@ function registerWsHandler(wss, ctx) {
               if ('lock' in data) {
                 session._modelLocked = !!data.lock;
                 session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
-                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked, lockedModel: session._lockedModel }); }
-                broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
-                broadcastActiveSessions();
+                Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), modelLocked: session._modelLocked, lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {   // round 2 (law B): a person's act — the writer's NEXT write, the ANSWER after it
+                  broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
+                  broadcastActiveSessions(); ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
+                }, () => { });
               } else if (data.model && session._modelLocked) {
                 // changing the model while locked re-targets the lock
                 session._lockedModel = data.model;
-                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, lockedModel: session._lockedModel }); }
-                broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
+                Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {
+                  broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
+                  ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
+                }, () => { });
               }
             } catch {}
           }
@@ -727,7 +730,7 @@ function registerWsHandler(wss, ctx) {
                 session._effortOrigin = 'chosen';
                 if (session.sockName) {
                   const m = readSessionMeta(session.sockName);
-                  writeSessionMeta(session.sockName, { ...m, effort: session._effort, effortOrigin: session._effortOrigin });
+                  writeSessionMeta(session.sockName, { ...m, effort: session._effort, effortOrigin: session._effortOrigin }, { durable: true }).then((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } }, () => { });
                 }
               } catch {}
             }
@@ -781,8 +784,10 @@ function registerWsHandler(wss, ctx) {
           catch (e) { refuse(e.message); break; }
           session.pty.write(payload + '\n');
           session._outputStyle = style || null;
-          if (session.sockName) { try { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, outputStyle: session._outputStyle }); } catch { } }
-          broadcastToSession(session, data.sessionId, { type: 'response-style-updated', sessionId: data.sessionId, outputStyle: session._outputStyle, live: true });
+          Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), outputStyle: session._outputStyle }, { durable: true }) : true).then((ok) => {
+            broadcastToSession(session, data.sessionId, { type: 'response-style-updated', sessionId: data.sessionId, outputStyle: session._outputStyle, live: true });
+            ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
+          }, () => { });
           break;
         }
 
@@ -1062,7 +1067,7 @@ function registerWsHandler(wss, ctx) {
               if (session._goal && session._goal !== goalText) {
                 session._prevGoal = session._goal;
                 // /goal resume survives restarts (2.219.0): stash in session meta
-                try { if (session.sockName) writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), prevGoal: session._prevGoal }); } catch {}
+                try { if (session.sockName) writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), prevGoal: session._prevGoal }, { durable: true }).then((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } }, () => { }); } catch {}
               }
               if (session.pty) session.pty.write(JSON.stringify({ type: 'set-goal', goal: goalText }) + '\n');
               session._goal = goalText;

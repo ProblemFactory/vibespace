@@ -6828,7 +6828,7 @@ function persistPoolPin(session) {
     if (!session || !session.sockName) return;
     const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
     if (prev === undefined || prev === null || typeof prev !== 'object') return; // not wired / no meta — memory only (never create one here)
-    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null });
+    return sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null }, { durable: true });   // round 2 (law B): the owner's pin — durable before the answer
   } catch (e) { console.warn('[pool] pin not persisted:', e.message); }
 }
 /** THE ONE WRITER of a conversation's pin. `memberId` = a member of the conversation's pool, or

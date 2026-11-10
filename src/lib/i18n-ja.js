@@ -12161,4 +12161,5 @@ export default {
   "Claude Code is checked — those accounts are back in the pool": "Claude Code の確認が済みました——それらのアカウントはプールに戻りました",
   "Checking Claude Code on this machine again — about five minutes": "このマシンで Claude Code をもう一度確認しています——約 5 分",
   "Could not start the check": "確認を始められませんでした",
+  "Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.": "保存しましたが、まだディスクに書かれていません — ストレージがまだ書き込んでいません（遅いか、失敗しています）。メモリに残り、ストレージが書けるときに書かれます。それまでに再起動すると失われます。",
 };

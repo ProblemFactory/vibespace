@@ -65,6 +65,9 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
   const code = String(r.code || '');
   const raw = r.error ? String(r.error) : '';
   switch (code) {
+    // hub-loop-stalls commit 2 round 3 (law F's last third): a person's act kept in memory, not on disk yet — said in the
+    // person's language, never dropped
+    case 'not-durable': return t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.');
     case 'not-found': return t('No such conversation');
     // r4 (design-integrations-per-account): the OAuth client is the ACCOUNT's — the remedy is its own dialog, never the Integrations window
     case 'needs-credentials': return t('No usable OAuth client — pick a preset or enter your own client (Edit or Re-authorize)');

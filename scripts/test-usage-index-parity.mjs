@@ -138,31 +138,31 @@ fs.writeFileSync(tr(SIDS[1]), turn(2, T(2026, 9, 2, 11)));
 const uh0 = new UsageHistory({ dataDir: l0data, homeDir: l0home, scanYield: () => Promise.resolve() });
 const curFile = path.join(l0data, 'usage-history', '_cursors.json');
 const inoOf = (f) => fs.statSync(f).ino;
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 const cur1 = JSON.parse(fs.readFileSync(curFile, 'utf8'));
 ok(Object.keys(cur1).length === 2, 'the first walk writes both transcripts\' cursors');
 // the walker's unchanged-file path stamps `sid` into an entry once (parity-pinned with the shipped
 // scanner), so the first idle walk after a scan still changes the bytes; from then on nothing moves
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 const ino1 = inoOf(curFile);
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 ok(inoOf(curFile) === ino1, 'a walk that moved no cursor writes NOTHING (the file is the same inode — every write is tmp + rename)');
 uh0._cursorsJson = null; // CONTROL: forget the on-disk text — the next walk must write
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 ok(inoOf(curFile) !== ino1, 'CONTROL: with the on-disk text forgotten the same walk rewrites the file (the inode check can see a write)');
 const ino2 = inoOf(curFile);
 fs.appendFileSync(tr(SIDS[0]), turn(3, T(2026, 9, 2, 12)));
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 ok(inoOf(curFile) !== ino2 && JSON.parse(fs.readFileSync(curFile, 'utf8'))[tr(SIDS[0])].offset === fs.statSync(tr(SIDS[0])).size, 'a moved cursor is written');
 // dead keys
 fs.unlinkSync(tr(SIDS[1]));
 uh0._cursors['/nonexistent-root-uidx/x/y.jsonl'] = { offset: 9 }; // outside both walk roots: no proof either way
 uh0._cursors[path.join(proj, 'never-there.jsonl')] = { offset: 1 };
-await uh0.scan(true); // within the hour of the first prune: nothing is dropped yet
+await uh0.scan(true); uh0.flushCursors(); // within the hour of the first prune: nothing is dropped yet
 let cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
 ok(cur[tr(SIDS[1])] && cur[path.join(proj, 'never-there.jsonl')], 'the dead-key sweep runs at most hourly (a key whose file left an hour-young sweep ago stays)');
 uh0._cursorsPrunedAt = 0;
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
 ok(!cur[tr(SIDS[1])] && !cur[path.join(proj, 'never-there.jsonl')], 'a key whose transcript is gone (stat ENOENT under a readable root) is dropped by the walk\'s writer');
 ok(cur[tr(SIDS[0])] && cur['/nonexistent-root-uidx/x/y.jsonl'], 'a live key stays; a key outside the walk\'s roots stays');
@@ -170,7 +170,7 @@ ok(cur[tr(SIDS[0])] && cur['/nonexistent-root-uidx/x/y.jsonl'], 'a live key stay
 const moved = path.join(l0home, '.claude', 'projects-away');
 fs.renameSync(path.join(l0home, '.claude', 'projects'), moved);
 uh0._cursorsPrunedAt = 0;
-await uh0.scan(true);
+await uh0.scan(true); uh0.flushCursors();
 cur = JSON.parse(fs.readFileSync(curFile, 'utf8'));
 ok(cur[tr(SIDS[0])], 'with the projects directory missing (an unmounted HOME) NO key is dropped — a dropped live cursor would re-append a whole transcript');
 fs.renameSync(moved, path.join(l0home, '.claude', 'projects'));

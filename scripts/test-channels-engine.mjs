@@ -1816,9 +1816,9 @@ const esrc2 = engineSource(REPO);
     ok(smc.calls === 2 && smc.held === 0, `CONTROL: a copy without the stop guard starts the queued wake after stop() (${smc.calls} calls, ${smc.held} held) — the legs above would go red`);
     // the store half: the pre-fix markDirty dropped a change after close() (the debounce was gone) — the hold never reached the disk
     const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-    const SLINE = "    if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }\n    if (debounce) return;";
+    const SLINE = "    if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }\n    W().dirty(";
     ok(ssrc.split(SLINE).length === 2, 'the post-close flush lines are present once in the store (the control patches exactly them)');
-    const sc = patchPath('src', 'channel-store'); writeCopy(sc, ssrc.replace(SLINE, '    if (debounce || closed) return;'));
+    const sc = patchPath('src', 'channel-store'); writeCopy(sc, ssrc.replace(SLINE, '    if (closed) return;\n    W().dirty('));
     const ec = patchPath('src/server', 'channels-engine'); writeCopy(ec, esrc2.replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`));
     const smc2 = await stopMidChain(require(ec), 'r4-stopmid-storectl');
     ok(smc2.calls === 1 && smc2.held === 0, `CONTROL: the engine over the pre-fix store holds the queued hit in memory only — nothing on disk after close() (${smc2.held} held, ${smc2.final} final rows) — the on-disk leg would go red`);
@@ -5658,6 +5658,9 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     let flushes = 0, updates = 0;
     const fl = X.eng.store.index.flush.bind(X.eng.store.index);
     X.eng.store.index.flush = () => { if (String(new Error().stack).includes('feedPage')) flushes++; return fl(); };
+    // lane hub-loop-stalls: the owed-before-cursor write is AWAITED (`durable()` — off the loop); it counts as the flush
+    const du = X.eng.store.index.durable.bind(X.eng.store.index);
+    X.eng.store.index.durable = () => { if (String(new Error().stack).includes('feedPage')) flushes++; return du(); };
     // verify r2 (the revert table: the update half of r1 #12 was unpinned — an index update marks the index dirty and the
     // store's debounced flush rewrites the whole file even when the page forces no flush)
     const up = X.eng.store.index.update.bind(X.eng.store.index);

@@ -113,7 +113,7 @@ function renameSession(deps, data) {
       createdAt: session.createdAt,
       webuiSessionId: targetId,
       mode: session.mode || 'terminal',
-    });
+    }, { durable: true });
   }
   broadcastActiveSessions();
   return { ok: true, targetId, name: session.name };

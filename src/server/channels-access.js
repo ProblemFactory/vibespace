@@ -728,7 +728,7 @@ function create(engineCtx) {
     const prec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
     if (mode !== null && prec && !P.policyModesOf(registry.capsOf(prec.kind)).includes(mode)) return { ok: false, code: 'bad-policy', why: 'mode-not-offered', error: `${vendorNameOf(prec)} does not allow the "${mode}" policy — every message on it waits for your approval` };
     const t = now();
-    await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (e2) e2.policy = mode === null ? null : { mode, by, at: t }; });
+    await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (e2) e2.policy = mode === null ? null : { mode, by, at: t }; }, { durable: true });
     try { store.audit({ kind: 'policy', op: 'set', scope: { kind: 'conversation', id: `${adapterId}/${convId}` }, mode, at: t, by }); } catch {}
     notify([convId]);
     const { en, rec } = convFor(adapterId, convId);
@@ -809,7 +809,7 @@ function create(engineCtx) {
         if (item && item.id) req.todoId = item.id;
       } catch (e) { log.warn(`[channels] ${en.key}: could not file the reach request: ${(e && e.message) || e}`); }
     }
-    await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; healP2(e2); e2.reachRequests.push(req); if (e2.reachRequests.length > 50) e2.reachRequests.splice(0, e2.reachRequests.length - 50); });
+    await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; healP2(e2); e2.reachRequests.push(req); if (e2.reachRequests.length > 50) e2.reachRequests.splice(0, e2.reachRequests.length - 50); }, { durable: true });
     try { store.audit({ kind: 'acl', op: 'request', principal: req.principal, scope: req.scope, why: reason, at: t, by: 'agent' }); } catch {}
     notify([convId]);
     return { ok: true, request: { ...req }, ...(req.todoId ? { filed: CN.filedLine('open-channel', req.id, OF.tray()) } : {}) };
@@ -861,7 +861,7 @@ function create(engineCtx) {
       }
       applied = true;
       r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;
-    });
+    }, { durable: true });
     if (refused) return { ok: false, code: refused.code, error: refused.error };
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'grant' : 'deny', principal: req.principal, scope: req.scope, level: approve ? 'visible' : null, origin: 'request', requestId, at: t, by }); } catch {}
@@ -1120,7 +1120,7 @@ function create(engineCtx) {
       }
     }
     // the table keeps at most 100 requests: DECIDED ones go first, an open one is never dropped (verify r1 F2)
-    await store.index.update((ix) => { const list = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []); list.push(req); while (list.length > 100) { const i = list.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; list.splice(i, 1); } });
+    await store.index.update((ix) => { const list = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []); list.push(req); while (list.length > 100) { const i = list.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; list.splice(i, 1); } }, { durable: true });
     try { store.audit({ kind: 'acl', op: 'watch-request', principal: req.principal, scope, delivery: 'wake', at: t, by: 'agent' }); } catch {}
     notify([]);
     return { ok: true, proposed: true, request: { id: req.id, status: 'open', expiresAt: req.expiresAt }, dailyWakeCap: row.dailyWakeCap, expiresAt: req.expiresAt, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
@@ -1150,7 +1150,7 @@ function create(engineCtx) {
       if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
     }
     let applied = false;
-    await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; });
+    await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; }, { durable: true });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
@@ -1299,7 +1299,7 @@ function create(engineCtx) {
       r2.held.n = heldCountOf(r2);
       if (since && (!r2.held.since || since < r2.held.since)) r2.held.since = since;
       req = r2;
-    });
+    }, { durable: true });
     // a second boot JOINED an open decision: its card says the new count (THE request's store — heldCountOf)
     if (open && open.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
       const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop), key = heldKey(req.held.n, who, day2, drop);
@@ -1395,7 +1395,7 @@ function create(engineCtx) {
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
-    });
+    }, { durable: true });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     const resolve = (fact) => { if (req0.todoId && userTodos && typeof userTodos.get === 'function') { try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', { ...(person ? { decidedBy: 'person', decidedAt: t } : {}), ...fact, ...(dropped ? { dropped } : {}) }); } catch {} } };
     if (!approve) {
@@ -1422,7 +1422,7 @@ function create(engineCtx) {
         stillConvs = heldConvsOf(r2).filter((c) => !heldSpent(c) && heldCountOf({ held: { convs: [c] } }) > 0).length;
         if (still > 0) { reopened = true; r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
         else r2.held.n = touched - back;
-      });
+      }, { durable: true });
       settled = true;
     };
     let delivery = null;
@@ -2276,7 +2276,7 @@ function create(engineCtx) {
       for (const fw of filterWrites) { const fp = filtersOf(ix)[fw.id] || null; filtersOf(ix)[fw.id] = { id: fw.id, ...fw.filter, createdAt: fp ? fp.createdAt : t, updatedAt: t, estimateAtSet: fw.est || (fp ? fp.estimateAtSet : null) || null }; }
       // a filter this grain minted and nothing references any more goes
       for (const fid of oldFilterIds) if (/\|/.test(fid) || /^f-(account|pattern)-/.test(fid)) { if (!filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; }
-    });
+    }, { durable: true });
     // every changed watcher's wake windows (its held hits stay pending — the
     // new shape delivers them, or the prune below drops the orphans)
     for (const pk of [...changedW, ...droppedInert.map((w) => pkOf(w.principal))]) { clearWakeTimer(kind === 'conversation' ? `${site.key}|${pk}` : `scope:${kind === 'account' ? 'acct' : 'pat'}:${site.id}|${pk}`); }
@@ -2504,7 +2504,7 @@ function create(engineCtx) {
     const g = { access: r0.access, watchers: r0.stored };
     const wr = CG.removeRule(id, { by });   // lane grants-unify: its access row and its watch row, through the ONE writer
     if (!wr.ok) return { ok: false, code: wr.code, error: wr.error };
-    await store.index.update((ix) => { const tb = ix.patternAssignments || {}; const fids = g.watchers.map((w) => w.filterId).filter(Boolean); delete tb[id]; for (const fid of fids) if (/^f-pattern-/.test(fid) && !filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; });
+    await store.index.update((ix) => { const tb = ix.patternAssignments || {}; const fids = g.watchers.map((w) => w.filterId).filter(Boolean); delete tb[id]; for (const fid of fids) if (/^f-pattern-/.test(fid) && !filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; }, { durable: true });
     for (const w of g.watchers) clearWakeTimer(`scope:pat:${id}|${pkOf(w.principal)}`);
     await prunePending(adapterId);
     for (const r of g.access) auditGrant('revoke', r.principal, { scope: { kind: 'pattern', id } }, t, by);
@@ -2742,7 +2742,7 @@ function create(engineCtx) {
     const en = store.index.peek(key);
     if (input === null) {
       if (en.filterId && convGrainOf(en).watchers.some((w) => w.mode === 'filtered' && w.filterId === en.filterId)) return { ok: false, code: 'filter-in-use', error: 'this filter is what a notification wakes on — switch that notification to all messages or remove it first' };
-      await store.index.update((ix) => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; const fid = e2.filterId; e2.filterId = null; if (fid && !Object.values(ix.conversations).some((x) => x.filterId === fid)) delete filtersOf(ix)[fid]; });
+      await store.index.update((ix) => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; const fid = e2.filterId; e2.filterId = null; if (fid && !Object.values(ix.conversations).some((x) => x.filterId === fid)) delete filtersOf(ix)[fid]; }, { durable: true });
       notify([convId]);
       return { ok: true, filter: null };
     }
@@ -2757,7 +2757,7 @@ function create(engineCtx) {
       saved = { id, ...v.filter, createdAt: prev ? prev.createdAt : t, updatedAt: t, estimateAtSet: est && typeof est === 'object' ? { matchedPerDay: Number(est.matchedPerDay) || 0, totalPerDay: Number(est.totalPerDay) || 0, windowDays: Number(est.windowDays) || 7, sampled: !!est.sampled, truncated: !!est.truncated, at: t } : (prev ? prev.estimateAtSet : null) || null };
       filtersOf(ix)[id] = saved;
       e2.filterId = id;
-    });
+    }, { durable: true });
     notify([convId]);
     return { ok: true, filter: saved };
   }

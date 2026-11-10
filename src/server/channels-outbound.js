@@ -1630,7 +1630,7 @@ function create(engineCtx) {
         const keys = Object.keys(sb);
         if (keys.length > 64) for (const k of keys.slice(0, keys.length - 64)) delete sb[k];
         en.sentBy = sb;
-      });
+      }, { durable: true });
     } catch (err) { log.warn(`[channels] ${p.adapterId}/${p.convId}: what ${d.id} sent could not be recorded (the reply-to-mine rule will miss it): ${(err && err.message) || err}`); }
   }
   /** lane slack-file-send-key (B-2840): A FILE SEND LEARNS ITS MESSAGE AT INGEST — an adapter that keys a file send by the
@@ -2185,7 +2185,7 @@ function create(engineCtx) {
     });
     if (wake && delivery.ok && en) {
       // the conversation's wake history takes the receipt wake (the panel's count), like every wake
-      try { await store.index.update(() => { const e2 = store.index.entry(p.adapterId, p.convId, { create: false }); if (e2) { healP2(e2); e2.stats.wakes = F.pruneLedger([...e2.stats.wakes, { at: tR, n: 1, cid, ok: true, lane: delivery.lane, why: null, refused: null, whys: [], digest: false, grain: 'receipt', receipt: id, id: `${tR}-receipt-${id}` }], tR); } }); } catch (err) { log.warn(`[channels] receipt ${id}: the conversation's wake history could not take the row: ${(err && err.message) || err}`); }
+      try { await store.index.update(() => { const e2 = store.index.entry(p.adapterId, p.convId, { create: false }); if (e2) { healP2(e2); e2.stats.wakes = F.pruneLedger([...e2.stats.wakes, { at: tR, n: 1, cid, ok: true, lane: delivery.lane, why: null, refused: null, whys: [], digest: false, grain: 'receipt', receipt: id, id: `${tR}-receipt-${id}` }], tR); } }, { durable: true }); } catch (err) { log.warn(`[channels] receipt ${id}: the conversation's wake history could not take the row: ${(err && err.message) || err}`); }
       notify([p.convId]);
     }
     log.log(`[channels] receipt ${id} → ${cid}: ${delivery.ok ? `delivered via ${delivery.lane}${wake ? ' (woke it, the decider\'s choice)' : ''}` : (stashed ? `stashed for the next turn${gone ? ' (its session is not live)' : ''}` : 'not delivered')}${delivery.why ? ` (${delivery.why})` : ''}`);
@@ -2247,7 +2247,7 @@ function create(engineCtx) {
       try {
         const prevId = en.pendingTodoId || null;
         const item = userTodos.add(INBOX_KEY, { origin: 'channels', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n, action: { type: 'open-channel', adapterId: en.adapterId, convId: en.id, key: en.key } });   // B-c127: a click opens the conversation; verify r1 F2: `key` = the item's identity
-        if (item && item.id) await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = item.id; });
+        if (item && item.id) await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = item.id; }, { durable: true });
         // B-c127: a pointer filed before it carried its action (or under an older name) is a DIFFERENT item now — retract it, never orphan it
         if (item && item.id && prevId && prevId !== item.id && typeof userTodos.get === 'function') { try { const it = userTodos.get(prevId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(prevId, 'done', RESOLVED_BY); } catch { /* the new pointer stands */ } }
       } catch (e) {
@@ -2259,7 +2259,7 @@ function create(engineCtx) {
     }
     if (!en.pendingTodoId) return;
     const id = en.pendingTodoId;
-    await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = null; });
+    await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = null; }, { durable: true });
     if (!userTodos || typeof userTodos.get !== 'function') return;
     try {
       const it = userTodos.get(id);

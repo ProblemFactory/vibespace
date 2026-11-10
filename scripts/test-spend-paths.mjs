@@ -801,7 +801,9 @@ function trackedServerSource() {
   ok('§2 WIRING: the two callers of the ladder TYPE themselves (jobs ⇒ job-notification, agent messaging ⇒ peer-message)',
     /spendReason: 'job-notification'/.test(read('src/jobs.js')) && /spendReason: 'peer-message'/.test(read('src/agent-routes.js')));
   ok('§2 WIRING: the ledger is FLUSHED on the routine restart path (a debounced-only write hands the next boot a fresh hour)',
-    /spendGuard\.flush\(\)/.test(srv) && /function shutdown\(\)[\s\S]{0,900}spendGuard\.flush\(\)/.test(srv));
+    // lane hub-loop-stalls commit 2 round 3 (law 2): the store writer's exit begins first — the signal noted, beginExit, the
+    // rank-0 flush — so the spend guard's flush sits further from `function shutdown()`; still on the routine restart path
+    /spendGuard\.flush\(\)/.test(srv) && /function shutdown\(\)[\s\S]{0,1400}spendGuard\.flush\(\)/.test(srv));
   ok('§2 §ban-safety: the vendor whitelist is untouched by this change (design §7 — if it needed a change, the design is wrong)',
     !/spend-authorizer|spend-guard|spend-budget/.test(read('scripts/test-vendor-whitelist.mjs')));
 }

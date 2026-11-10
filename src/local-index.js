@@ -63,6 +63,14 @@ function mountOf(p, mountinfoText) {
   return best;
 }
 
+/** THE ONE VERDICT of the file system a path lives on when it is a network or FUSE one — {target, fstype, source} — else
+ *  null (lane hub-loop-stalls commit 2: the canary said «not under a mount» 91 times for a data dir on fuse.bindfs while
+ *  [local-index] in the same hub said «lands on a fuse.bindfs mount»: both now ask THIS). */
+function netMountOf(p, mountinfoText) {
+  const m = mountOf(p, mountinfoText);
+  return m && NET_FSTYPE.test(m.fstype) ? m : null;
+}
+
 const trimSlash = (s) => String(s || '').replace(/\/+$/, '') || '/';
 
 /**
@@ -612,7 +620,7 @@ function unitOwnedBy({ pid, execPid = null, ppid = null, parentComm = null } = {
 
 module.exports = {
   INDEX_VERSION, INDEX_KIND, INDEX_FILE_RE, OWN_ROOT_DIR, SWEEP_MS, HEARTBEAT_MS, FRESH_MS, NET_FSTYPE, ROW_KEYS, HUB_KEYS, SOCKET_FACTS, DTACH, TURN_WORDS,
-  FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, receiptsFileOf, indexFileOf, mountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
+  FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, receiptsFileOf, indexFileOf, mountOf, netMountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
   procVerdict, socketFactOf, judgeRow, judgeHub, clean, ageWords, orderRows, orderHubs, entriesOf, pickSession, cellWidth, fitCell, tableOf,
   dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame, receiptOf, toolLine, personText, recordLines, historyOf, unionOf, unitOfCgroup, unitOwnedBy,
 };

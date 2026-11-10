@@ -81,7 +81,8 @@ app.post('/api/session-status', (req, res) => {
   if (!sessionKey || typeof sessionKey !== 'string') return res.status(400).json({ error: 'sessionKey required' });
   try {
     const rec = clear ? sessionStatus.clear(sessionKey, 'user') : sessionStatus.setByUser(sessionKey, { state, urgency, reason });
-    res.json({ success: true, status: rec });
+    // round 2 (law B): the person's override / clear is on disk before the answer (the loop never waits for it)
+    Promise.resolve(typeof sessionStatus.persisted === 'function' ? sessionStatus.persisted() : true).then((ok) => (ok === false ? res.status(503).json({ error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', code: 'not-durable', status: rec }) : res.json({ success: true, status: rec })), () => res.json({ success: true, status: rec }));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Agent endpoint — authenticated ONLY by the per-session token spawned into
@@ -116,7 +117,8 @@ app.post('/api/agent/session-status', (req, res) => {
       : clear ? sessionStatus.clear(key, 'agent')
       : sessionStatus.setByAgent(key, { state, urgency, reason, detail });
     if (!show) bookkept(found);
-    res.json({ success: true, sessionKey: key, status: rec });
+    // round 2 (law B): the agent's own report is on disk before the answer
+    Promise.resolve(!show && typeof sessionStatus.persisted === 'function' ? sessionStatus.persisted() : true).then((ok) => (ok === false ? res.status(503).json({ error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', code: 'not-durable', sessionKey: key, status: rec }) : res.json({ success: true, sessionKey: key, status: rec })), () => res.json({ success: true, sessionKey: key, status: rec }));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Status-change history for the expanded card's timeline. Accepts a comma

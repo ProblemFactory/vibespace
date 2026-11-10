@@ -340,33 +340,35 @@ console.log('— ⑦ a locked chip holds the served model against the lock targe
   const lockLine = /if \(op\.subtype === 'model-lock'\) \{\n\s*(this\._statusBar\.applyStatus\([^\n]*\);)\n\s*return;\n\s*\}/.exec(cvSrc);
   ok(caseText.length > 200 && !!lockLine, `⑦ two clients: the real set-model case (${caseText.length} chars) and chat-view's model-lock line are read`);
   const applyLock = new Function('op', (lockLine ? lockLine[1] : '').replace('this._statusBar', 'this'));
-  const twoClients = (text) => {
+  // lane hub-loop-stalls commit 2 round 2 (law B): the lock is a person's act — written as a durable act, its frame goes
+  // AFTER the write, so each change is read a turn later (the stub writes at once)
+  const twoClients = async (text) => {
     const run = new Function('data', 'activeSessions', 'adapterRegistry', 'readSessionMeta', 'writeSessionMeta', 'broadcastActiveSessions', 'broadcastToSession', 'require', `switch (data.type) {\n${text}\n}`);
     const SID = 'sid-two', sess = { pty: { write() {} }, mode: 'chat', backend: 'claude', _modelLocked: true, _lockedModel: 'fable[1m]', sockName: null };
     const A = lockedOn('fable[1m]'), B = lockedOn('fable[1m]'), bars = [A, B];
-    const say = (d) => run({ type: 'set-model', sessionId: SID, ...d }, new Map([[SID, sess]]), { get: () => ({ formatSetModel: (m) => JSON.stringify({ set_model: m }) }) }, () => ({}), () => {}, () => {},
-      (_s, _id, frame) => { if (frame && frame.op === 'meta' && frame.subtype === 'model-lock') bars.forEach((x) => applyLock.call(x, frame)); }, createRequire(path.join(repo, 'src/ws-handler.js')));
+    const say = async (d) => { run({ type: 'set-model', sessionId: SID, ...d }, new Map([[SID, sess]]), { get: () => ({ formatSetModel: (m) => JSON.stringify({ set_model: m }) }) }, () => ({}), () => {}, () => {},
+      (_s, _id, frame) => { if (frame && frame.op === 'meta' && frame.subtype === 'model-lock') bars.forEach((x) => applyLock.call(x, frame)); }, createRequire(path.join(repo, 'src/ws-handler.js'))); await new Promise((r) => setImmediate(r)); };
     const draw = (m) => bars.forEach((x) => x.setModel(m)), serve = (m) => bars.forEach((x) => x.setServedModel(m));
     const agree = () => bars.every((x) => !!x._modelLocked === !!sess._modelLocked && (x._lockedModel || null) === (sess._lockedModel || null));
     const out = {};
     serve('claude-fable-5-2');
     // A picks opus under the lock (the bar's own pick: the frame, the optimistic re-target) ⇒ the server re-targets the lock
-    A._lockedModel = 'opus'; A._statusModel = 'opus'; A.render(); say({ model: 'opus' });
+    A._lockedModel = 'opus'; A._statusModel = 'opus'; A.render(); await say({ model: 'opus' });
     draw('claude-opus-5-5'); draw('claude-opus-5-5'); serve('claude-opus-5-5');   // the set_model echo, the next turn's init and served model
     out.pick = { agree: agree(), A: chipOf(A), B: chipOf(B) };
     draw('claude-opus-5-5'); serve('claude-fable-5-2');                              // a REAL fallback under the new lock
     out.fallback = { agree: agree(), A: chipOf(A), B: chipOf(B) };
-    say({ lock: false }); A._modelLocked = false; A._lockedModel = null; A.render();  // A unlocks
+    await say({ lock: false }); A._modelLocked = false; A._lockedModel = null; A.render();  // A unlocks
     out.unlock = { agree: agree(), A: chipOf(A), B: chipOf(B) };
     draw('claude-opus-5-5'); serve('claude-opus-5-5');
-    say({ lock: true, lockModel: 'claude-opus-5-5' }); A._modelLocked = true; A._lockedModel = 'claude-opus-5-5'; A.render();   // A locks again
+    await say({ lock: true, lockModel: 'claude-opus-5-5' }); A._modelLocked = true; A._lockedModel = 'claude-opus-5-5'; A.render();   // A locks again
     out.relock = { agree: agree(), A: chipOf(A), B: chipOf(B) };
     draw('claude-opus-5-5'); serve('claude-fable-5-2');                              // a REAL fallback under the new lock
     out.fallback2 = { agree: agree(), A: chipOf(A), B: chipOf(B) };
     bars.forEach((x) => x.dispose());
     return out;
   };
-  const tc = twoClients(caseText);
+  const tc = await twoClients(caseText);
   ok(tc.pick.agree && plain(tc.pick.A, 'claude-opus-5-5') && plain(tc.pick.B, 'claude-opus-5-5'), `⑦ two clients: A re-targets the lock to opus by a pick ⇒ B is told live (both hold the server's target), served opus ⇒ both plain «🔒 ${tc.pick.B.text}» — never «⚠» against a stale fable[1m]`, JSON.stringify(tc.pick));
   ok(tc.fallback.agree && tc.fallback.A.amber && tc.fallback.B.amber && /instead of opus/.test(tc.fallback.B.title), `⑦ two clients: …then a REAL fallback (served claude-fable-5-2 against the opus lock) ⇒ amber on both «🔒${tc.fallback.B.text}» — never hidden by B's old target`, JSON.stringify(tc.fallback));
   ok(tc.unlock.agree && !tc.unlock.A.locked && !tc.unlock.B.locked, `⑦ two clients: A unlocks ⇒ B unlocked at once (no lock badge left until a reload)`, JSON.stringify(tc.unlock));

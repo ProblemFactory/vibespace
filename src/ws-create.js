@@ -1748,7 +1748,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                   ...(own ? base : {}),
                   webuiSessionId: id,
                   ...adopted,
-                });
+                }, { durable: true });
                 broadcastActiveSessions();
               },
             });
@@ -1800,7 +1800,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: sessionMode,
-                });
+                }, { durable: true });
                 delete session._codexThreadBaseline;
                 delete session._captureReservedThreadId;
                 broadcastActiveSessions();

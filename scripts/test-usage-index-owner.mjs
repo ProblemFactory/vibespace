@@ -358,7 +358,7 @@ const mutant = (rel, from, to) => {
     for (let k = 0; k < 3; k++) fs.writeFileSync(path.join(slug, `t${k}.jsonl`), tline(k) + '\n');
     const cur = {}; for (let k = 0; k < 3000; k++) cur[path.join(slug, `gone-${k}.jsonl`)] = { offset: 5, lastRid: null };
     fs.writeFileSync(path.join(data, 'usage-history', '_cursors.json'), JSON.stringify(cur));
-    const r = await new UH({ dataDir: data, homeDir: home }).scan(true);
+    const uhw = new UH({ dataDir: data, homeDir: home }), r = await uhw.scan(true); uhw.flushCursors();   // the cursors through the store writer: on disk now
     const hist = path.join(data, 'usage-history');
     return { r, files: fs.readdirSync(hist).filter((f) => f === '_cursors.json' || /^events-/.test(f)).sort().map((f) => [f, fs.readFileSync(path.join(hist, f), 'utf8').split(w).join('<W>')]) };
   };

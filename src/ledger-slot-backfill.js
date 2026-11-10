@@ -501,6 +501,7 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
       const uh = new UsageHistory({ dataDir, homeDir: path.join(dataDir, '.no-home') });
       const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: (k) => (String(k || '').startsWith('codex:') ? null : CLAUDE_MAX_PRIOR_FULL_USD) });
       for (const k of idents) { try { est.ratesFor(k); report.relearned++; } catch (e) { throw new Error(`re-learning ${k} failed: ${e.message}`); } }
+      est.flushRates();   // on disk BEFORE the pass completes (the estimator writes through the store writer)
     }
   }
   report.total = { rekeyed: sumMax(tot.rekeyed), archived: sumMax(tot.archived), corrective: sumMax(tot.corrective) };

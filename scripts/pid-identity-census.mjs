@@ -101,6 +101,7 @@ export const ROWS = [
   // lane usage-fold-worker-exit-hook: THE re-raise past a join bound (usage-index, search-index and the usage ledger's fold workers)
   ['src/server/exit-hook.js', "process.kill(process.pid, 'SIGTERM')", 'self', 'process.pid', 'itself'],
   ['src/server/exit-hook.js', "process.kill(process.pid, 'SIGKILL')", 'self', 'process.pid', 'itself'],
+  ['src/store-exit-keeper.js', "process.kill(process.pid, 'SIGKILL')", 'self', 'process.pid', 'itself'],   // lane hub-loop-stalls commit 2 r4 (MUST 2): the writer's exit keeper ends its own process at the exit's bound
   ['src/server/mounts-plugins-wiring.js', 'pkill -f "${root}/"', 'scan', 'root', 'whatever runs out of the plugin root being removed (its own install path)'],
   // lane stream-mic-road: a Mac's Core Audio daemon BY NAME — restarted as root inside the virtual microphone's install / removal
   // (the plug-in loads only into a fresh coreaudiod: the probe's measured restart), after the owner's administrator password

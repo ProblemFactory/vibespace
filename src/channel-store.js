@@ -328,7 +328,10 @@ const dayStamp = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Build the store. `dir` is `<dataDir>/channels`. `now` is injectable so the
  * retention and audit-roll rules are testable without a clock.
  */
-function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024 } = {}) {
+  // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread; a pace stated for
+  // the index's size) — a 21.7 MB index's rename held the owner's main loop 1.3 s median, 58 times in six hours
+  const W = () => writer || require('./store-writer.js').storeWriter();
   /** lane channel-threads: ONE hook every log writer calls AFTER its bytes are durable — `(adapterId, convId,
    *  {kind:'append'|'prepend'|'trim'|'side', fresh?, msgs?})` — so the engine's derived caches (the thread index,
    *  the message → conversation map) follow every writer, never a list of call sites. A throwing hook is logged. */
@@ -389,7 +392,55 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const ixBlocked = ixLoad.blocked;
 
   let dirty = false;
-  let debounce = null;
+
+  // ── A PERSON'S ACTS LIVE IN A SMALL FILE OF THEIR OWN (lane hub-loop-stalls commit 2, the coordinator's freeze item 2) ──
+  // The index (22 MB at the owner's scale) is written at the pace stated for its size (~11 s apart); a person's act, a
+  // decision or a billing record must not wait that long, nor cost 22 MB a click. A durable update journals ONLY what it
+  // touched — its rows (as the index would print them) and the top-level tables when they changed — as one line of
+  // index-acts.ndjson, `{seq, rows: {key: row | null}, top?}`, written NOW through the store writer (a small whole-file
+  // write: temp + rename, off the loop); its promise resolves when that line is on disk. The index records the last act
+  // it holds (`actsSeq`); the load replays the lines past it, in order; a written index drops its acts from the journal.
+  // An act that reached the WHOLE map (an account's policy, a removal) writes the index itself, durable.
+  const actsFile = path.join(dir, 'index-acts.ndjson');
+  // THE JOURNAL IS APPEND-ONLY (round 2, law C iii): an act appends ITS line (fsynced, through the writer's thread) — the
+  // bytes an act writes never grow with the acts before it; several acts in flight ride one append. A written index that
+  // holds them makes the journal owe a COMPACTION (one small whole-file rewrite keeping only the lines past it). The
+  // journal has a stated bound (ACTS_MAX_BYTES): reaching it is said and makes the index's own write urgent (it folds the
+  // journal); while the index cannot be written the journal keeps growing by each act's own bytes — linear, said.
+  const ACTS_MAX_BYTES = actsMaxBytes;   // 8 MB (a suite states a smaller one)
+  let actSeq = Number(ix.actsSeq) > 0 ? Number(ix.actsSeq) : 0, actLines = [], pendingActsSeq = 0, actsReplayed = 0;
+  let appendedSeq = 0, journalBytes = 0, compactOwed = false, actsOverSaid = 0;
+  if (!ixBlocked && ix.conversations && typeof ix.conversations === 'object') {
+    let text = null;
+    try { text = timedSync('channels-acts.read', () => fs.readFileSync(actsFile, 'utf8')); } catch { text = null; }
+    const held = actSeq;
+    let skippedHeld = 0, unreadable = 0, wrongShape = 0, backwards = 0, last = held, partialRows = 0, wrongTop = 0;
+    const kindOf = (x) => (x === null ? 'null' : Array.isArray(x) ? 'array' : typeof x);
+    const lines = (text || '').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      let o = null; try { o = JSON.parse(line); } catch { o = null; }
+      if (!o) { unreadable++; continue; }   // not JSON: a line cut short
+      if (!Number.isInteger(o.seq) || !o.rows || typeof o.rows !== 'object' || Array.isArray(o.rows) || Object.values(o.rows).some((row) => row !== null && (typeof row !== 'object' || Array.isArray(row)))) { wrongShape++; continue; }   // round 3 (smaller 7): JSON, but not an act's line — said as such
+      if (o.seq <= held) { skippedHeld++; continue; }   // the index holds it already
+      if (o.seq <= last) { backwards++; continue; }      // out of order: never applied over a later act
+      // round 4 (true words 5): the load SAYS a row that is not a whole conversation row (no key of its own — applied as
+      // written, over the whole one) and a top-level table of another type than the index's own (NOT applied: the index's kept)
+      for (const [k, row] of Object.entries(o.rows)) { if (row === null) delete ix.conversations[k]; else if (row && typeof row === 'object') { if (row.key !== k) partialRows++; ix.conversations[k] = row; } }
+      if (o.top && typeof o.top === 'object') for (const [k, v] of Object.entries(o.top)) if (k !== 'conversations' && !k.startsWith('_')) { if (ix[k] !== undefined && kindOf(ix[k]) !== kindOf(v)) { wrongTop++; continue; } ix[k] = v; }
+      actLines.push({ seq: o.seq, text: line + '\n' }); last = actSeq = Math.max(actSeq, o.seq); actsReplayed++;
+    }
+    appendedSeq = actSeq; journalBytes = text ? Buffer.byteLength(text) : 0;
+    // ROUND 4 (MUST 1): THE TAIL IS UNKNOWN UNTIL IT ENDS IN A NEWLINE — ALSO AT THE LOAD. A failed append cut exactly at its
+    // newline (with the truncate-back failing too, or a kill between them) leaves a whole JSON line with no '\n': whatever
+    // it parses as, its state is unknown, and an act appended straight onto it would GLUE to it (both gone at the next
+    // load). So the next journal write re-establishes a whole tail first — the compaction — before any act is appended.
+    const openTail = !!text && text.length > 0 && text[text.length - 1] !== '\n';
+    if (skippedHeld || unreadable || wrongShape || backwards || openTail || wrongTop) compactOwed = true;   // the next journal write is a compaction (what is not applied is never kept)
+    if (actsReplayed) dirty = true;
+    if (actsReplayed || unreadable || wrongShape || backwards || openTail || partialRows || wrongTop) warn(`[channels] index-acts.ndjson: ${actsReplayed} act${actsReplayed === 1 ? '' : 's'} the index did not hold yet replayed${openTail ? '; its last line had no newline (a write that may not have finished) — the journal is written whole before the next act' : ''}${partialRows ? `; ${partialRows} row${partialRows === 1 ? '' : 's'} not a whole conversation row (no key of its own) applied as written` : ''}${wrongTop ? `; ${wrongTop} top-level table${wrongTop === 1 ? '' : 's'} of another type than the index's own not applied (the index's kept)` : ''}${unreadable ? `; ${unreadable} line${unreadable === 1 ? '' : 's'} not readable dropped (a line cut short — a write that did not finish)` : ''}${wrongShape ? `; ${wrongShape} line${wrongShape === 1 ? '' : 's'} of JSON that is not an act's (no seq, no rows of rows) dropped` : ''}${backwards ? `; ${backwards} out of order dropped` : ''}${skippedHeld ? `; ${skippedHeld} the index already holds skipped` : ''}`);
+  }
   let interval = null;
   let closed = false;
   const dedup = new Map(); // `${adapterId}/${convId}` -> Set<vendorId>
@@ -488,7 +539,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // whole-file serialization; a difference is said (and appended to <file>) and the whole file is written instead
   const verifyTo = String((process.env && process.env.VIBESPACE_CHANNELS_INDEX_VERIFY) || '');
   const fire = (key) => { for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } } };
-  function touchKey(key) { dirtyKeys.add(key); if (curTouch) curTouch.add(key); else fire(key); }
+  function touchKey(key) {
+    dirtyKeys.add(key);
+    if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
+    else fire(key);
+  }
   function touchAll(why) { if (!allDirty) flushStats.lastFull = why; allDirty = true; if (curTouch) curTouch.all = true; else fire(null); }
   // the view an update's fn receives: the live root, except that reaching `conversations` through it is a whole-map touch
   const touchView = new Proxy(ix, {
@@ -499,39 +554,68 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 
   const logPath = (adapterId, convId) => path.join(msgsDir, safeSeg(adapterId), `${safeSeg(convId)}.ndjson`);
 
-  function markDirty() {
+  function markDirty(act = false) {
     dirty = true;
     // R4 verify r4: a change that lands AFTER close() (a wake queued behind one
     // in flight when the engine stopped holds its hits pending) is written
     // NOW — the debounce is gone, and an unflushed hold was a lost message
     if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }
-    if (debounce) return;
-    debounce = setTimeout(flushFromTimer, FLUSH_DEBOUNCE_MS);
-    if (debounce.unref) debounce.unref();
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, onWritten: indexWritten, ...(act ? { rank: 0 } : {}) });
   }
 
-  // THE DEBOUNCED WRITE MAY NOT THROW (lane-dead-bridge, measured: a server whose table was full died HERE —
-  // `EMFILE … index.json.tmp-…` from this timer — the same death session-status's timer caused at 12:03:17).
-  // A failed write keeps the index dirty and retries (1 s … 60 s); a refusal is said, the server keeps running.
-  let failures = 0;
-  function flushFromTimer() {
-    debounce = null;
-    try { flush(); failures = 0; }
-    catch (e) {
-      failures++;
-      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, failures - 1));
-      if (failures === 1 || failures % 10 === 0) warn(`[channels] index.json not written (${(e && e.code) || (e && e.message) || e}; attempt ${failures}) — kept in memory, retrying in ${Math.round(retryMs / 1000)} s`);
-      if (!debounce && !closed) { debounce = setTimeout(flushFromTimer, retryMs); if (debounce.unref) debounce.unref(); }
-    }
-  }
-
-  function flush({ full = false } = {}) {
-    if (!dirty) return false;
+  // THE WRITER ASKS FOR THE BYTES when the index is due (lane hub-loop-stalls commit 2): the serialization runs HERE on
+  // the main thread (measured: 12 ms after one changed row, 107 ms for a whole rebuild of a 22 MB index — under the boot
+  // law's 250 ms; the index's SHAPE — one 22 MB file rewritten whole — is the named follow-up), the syscalls on the
+  // writer's thread. A failed write keeps the index dirty and the writer retries (1 s … 60 s) — said, never thrown
+  // (lane-dead-bridge: a server whose table was full died in this write's timer).
+  let fullOwed = false, pendingTop = null;
+  function produceIndex() {
+    if (!dirty && !fullOwed) return null;
     // every refusal is said (r3: a once-only line went silent after the first)
-    if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); return false; }
-    const wrote = writeIndex(full);
-    dirty = false;   // only once it is on disk (or equal to it) — a failed write stays owed (lane-dead-bridge)
-    return wrote;
+    if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); dirty = false; return null; }
+    const full = fullOwed; fullOwed = false;
+    if (actSeq > 0 && ix.actsSeq !== actSeq) ix.actsSeq = actSeq;   // the last act this write holds (the load replays past it)
+    pendingActsSeq = actSeq;
+    const p = prepareIndex(full);
+    dirty = false;   // handed to the writer — a failed write dirties it again (indexWritten)
+    if (!p) return null;
+    pendingTop = p.top;
+    return p.parts;
+  }
+  function indexWritten(ok) {
+    if (ok) {
+      bytesOwed = false; lastTop = pendingTop; flushStats.writes++;
+      actsOverSaid = 0;   // round 4 (true words 5): the index LANDED — a later bound is a new episode, never «not landed since»
+      // the acts this index holds leave the journal: a COMPACTION is owed (one small whole-file rewrite at its own pace — a
+      // line the index holds is skipped at load anyway)
+      const before = actLines.length; actLines = actLines.filter((x) => x.seq > pendingActsSeq);
+      if (actLines.length !== before) { compactOwed = true; W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, allowEmpty: true, onWritten: actsWritten }); }
+      return;
+    }
+    bytesOwed = true; lastTop = null; dirty = true;   // owed: the writer has kept it dirty and retries
+  }
+
+  /** THE SYNCHRONOUS WRITE (close, a suite, a change after close): through the writer — a write of the index in flight
+   *  settles first (never two writes of one file at once), then the index's bytes are written on this thread. During the
+   *  hub's exit the writer only keeps it dirty: its exit flush writes every store once, bounded. */
+  function flush({ full = false } = {}) {
+    if (!dirty && !W().pending(indexFile)) return false;   // a clean index is not rewritten (`full` = HOW, when there is something to write)
+    if (full) fullOwed = true;
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, onWritten: indexWritten });
+    const r = W().flushSync([indexFile]);
+    // a failed write THROWS, as the inline write did (the writer keeps it owed and retries): a caller ordering a cursor
+    // after the rows never advances it past rows that are not on disk
+    const miss = r.left.find((x) => x.file === indexFile);
+    if (miss) throw Object.assign(new Error(`index.json not written: ${miss.why}`), { code: 'EINDEXWRITE' });
+    return r.written.length > 0;
+  }
+  /** THE INDEX ON DISK BEFORE WHAT FOLLOWS — an ordering write (a listing's cursor advances only past rows on disk; a cut
+   *  walk's stop lands before its page) AWAITED, never a hold of the loop: the writer writes the index now and the promise
+   *  says whether it landed (false: the write failed and stays owed — the caller keeps its cursor where it was). */
+  function durableIndex() {
+    if (closed) { try { flush(); return Promise.resolve(true); } catch { return Promise.resolve(false); } }
+    if (dirty) markDirty(true);
+    return W().durable(indexFile);
   }
 
   // ── THE INCREMENTAL WRITE (B-f32b): the same bytes as `writeJsonAtomic(indexFile, ix)`, from cached chunks ──
@@ -606,18 +690,22 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let lastTop = null;
   const topText = () => { let t = ''; for (const k of Object.keys(ix)) { if (k === 'conversations' || k === 'updatedAt' || k.startsWith('_')) continue; t += JSON.stringify(k) + ':' + JSON.stringify(ix[k], INDEX_KEYS) + ','; } return t; };
   const liveBufs = () => layout.chunks.filter((c) => c.n > 0).map((c) => c.buf);
-  function writeIndex(full) {
+  /** The index's bytes for ONE write (the writer's `produce`): the touched chunks re-serialized (a whole rebuild when
+   *  `full`, after a touch of everything, or with no cache) — null when they equal the last write (QUIET IS FREE). The
+   *  poll stamps' side file lands FIRST (a row's own stamps taken into the map reach it before the index that no longer
+   *  holds them). → {parts, top} */
+  function prepareIndex(full) {
     const conv = ix.conversations;
-    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); timedSync('channels-index.write', () => writeBuffersAtomic(indexFile, [Buffer.from(JSON.stringify(ix, INDEX_KEYS, 1), 'utf8')])); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; flushStats.writes++; return true; }
+    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); const s0 = JSON.stringify(ix, INDEX_KEYS, 1); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; return { parts: [Buffer.from(s0, 'utf8')], top: null }; }
     if (full || allDirty || !layout) {
       const before = layout ? liveBufs() : null;
       buildLayout(conv); flushStats.full++;
       if (!before || !sameJoined(before, liveBufs())) bytesOwed = true;
     } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
-    allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write below stays owed via `dirty`
+    allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write stays owed (indexWritten)
     const top = topText();
-    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return false; }
+    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }
     ix.updatedAt = now();
     let parts = assemble();
     if (verifyTo && !wasFull) {
@@ -633,9 +721,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     // a row's own stamps taken into the map land in the side file BEFORE the index that no longer holds them
     if (stampsOwed) stampsFlush();
-    timedSync('channels-index.write', () => writeBuffersAtomic(indexFile, parts));
-    bytesOwed = false; lastTop = top; flushStats.writes++;
-    return true;
+    return { parts, top };
   }
   /** THE SWEEP (every interval tick): re-serialize the next SWEEP_CHUNKS cached chunks and compare. A difference is a
    *  row changed OUTSIDE `update()`/`entry()` (the one-door rule broken somewhere): it is written, and said once per
@@ -681,24 +767,99 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // break the chain for everyone behind it — the chain swallows the rejection
   // and hands it to THIS caller only.
   let chain = Promise.resolve();
-  function update(fn) {
+  /** `{durable: true}` — A PERSON'S ACT, A DECISION OR A BILLING RECORD (lane hub-loop-stalls commit 2): the caller's
+   *  promise resolves only once the index holding it is ON DISK (the writer writes it now, off the loop — its pace set
+   *  aside for that write; the next update never waits for it). Everything else is written at the index's pace (a lost
+   *  change re-derives at the next walk). */
+  function update(fn, { durable = false } = {}) {
     // r3: a BLOCKED index refuses the ACTION, not only the write — an update
     // that resolved while the flush was refused was a user action that
     // succeeded on screen and vanished at the next restart
     if (ixBlocked) return Promise.reject(blockedError(ixBlocked));
+    let whole = false, none = false;   // this act reached the whole map (the index itself is written durable) / changed nothing
     const run = chain.then(() => {
       const t = curTouch = new Set();
+      if (durable) { t.before = new Map(); t.topBefore = topText(); }   // what an act may compare (an act that changes nothing writes nothing)
       // verify r1: the rows are marked again at the update's END — a write inside an async fn's await cleared their
       // marks, and the fn may change them after it (a no-op for a sync fn: no write can run inside it)
       const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };
+      const end = (v) => { done(); if (durable && !closed) { const k = actOf(t); whole = k === 'whole'; none = k === 'none'; } return v; };
       let r;
       try { r = fn(touchView); } catch (e) { done(); throw e; }
-      if (r && typeof r.then === 'function') return Promise.resolve(r).finally(done);
-      done();
-      return r;
-    }).then((r) => { markDirty(); return r; });
+      if (r && typeof r.then === 'function') return Promise.resolve(r).then(end, (e) => { done(); throw e; });
+      return end(r);
+    }).then((r) => { markDirty(durable && whole); return r; });
     chain = run.then(() => {}, () => {});
-    return run;
+    if (!durable) return run;
+    return run.then(async (r) => {
+      const ok = closed || none ? true : await W().durable(whole ? indexFile : actsFile);
+      if (ok) return r;
+      // A FAILED ACT REACHES THE PERSON (round 2, law F): it IS in memory and the writer keeps retrying — the caller's
+      // answer says so, never {ok: true}
+      // round 3 (smaller 7): ONE line per cause — an outage fails every act; the first is said, the rest counted until a write lands
+      const fileN = whole ? 'index.json' : 'index-acts.ndjson';
+      // round 4 (true words 4): WHY, by the writer's own record — a write still QUEUED at durable()'s bound is waiting, never «failed»
+      const wn = (() => { try { return W().whyNotDurable(whole ? indexFile : actsFile); } catch { return null; } })();
+      const why = wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow${wn.lastMs ? ` (its last write took ${(wn.lastMs / 1000).toFixed(1)} s)` : ''}; kept, written in its turn` : 'its write failed — kept, retried';
+      if (!notDurableSaid[fileN]) { notDurableSaid[fileN] = 1; warn(`[channels] ${fileN}: an act is in memory but not on disk yet (${why}; the next acts not on disk the same way are counted, said when a write lands)`); }
+      else notDurableSaid[fileN]++;
+      throw Object.assign(new Error('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { code: 'not-durable', status: 503, applied: true, result: r });
+    });
+  }
+  /** ONE durable update's journal line — ONLY the rows it CHANGED (as the index prints them; null = removed) and the
+   *  top-level tables when they changed — appended through the writer. → 'line' | 'none' (it changed nothing: nothing is
+   *  written, round 2, law C iv) | 'whole' (it reached the whole map: the caller writes the index itself, durable) */
+  function actOf(t) {
+    if (t.all) return 'whole';
+    const conv = ix.conversations, rows = [];
+    for (const k of t) {
+      const s0 = hasOwn(conv, k) ? JSON.stringify(conv[k], INDEX_KEYS) : null;
+      const now0 = s0 === undefined ? null : s0;
+      if (t.before && t.before.has(k) && t.before.get(k) === now0) continue;   // touched, unchanged
+      rows.push(`${JSON.stringify(k)}:${now0 === null ? 'null' : now0}`);
+    }
+    const top = topText();
+    let topPart = '';
+    if (top !== (t.topBefore === undefined ? lastTop : t.topBefore)) {
+      const f = [];
+      for (const k of Object.keys(ix)) { if (k === 'conversations' || k === 'updatedAt' || k === 'actsSeq' || k.startsWith('_')) continue; const v = JSON.stringify(ix[k], INDEX_KEYS); if (v !== undefined) f.push(`${JSON.stringify(k)}:${v}`); }
+      topPart = `,"top":{${f.join(',')}}`;
+    }
+    if (!rows.length && !topPart) return 'none';
+    const seq = ++actSeq;
+    actLines.push({ seq, text: `{"seq":${seq},"rows":{${rows.join(',')}}${topPart}}\n` });
+    W().dirty(actsFile, { name: 'channels-acts.write', produce: produceActs, debounceMs: FLUSH_DEBOUNCE_MS, rank: 0, allowEmpty: true, onWritten: actsWritten });
+    if (journalBytes > ACTS_MAX_BYTES) {   // THE BOUND: said, and the index's own write made urgent (it folds the journal)
+      if (actsOverSaid++ % 100 === 0) warn(`[channels] index-acts.ndjson is past its bound (${Math.round(journalBytes / 1048576)} MB of ${ACTS_MAX_BYTES / 1048576}) — the index is written now to fold it${actsOverSaid > 1 ? ` (still past it: the index has not landed since — ${flushStats.writes} index write${flushStats.writes === 1 ? '' : 's'} so far; the acts keep coming faster than its paced turn)` : ''}`);
+      if (!closed) { markDirty(); W().durable(indexFile).catch(() => { }); }
+    }
+    return 'line';
+  }
+  /** the journal's bytes for ONE write: a COMPACTION when owed (the lines past the written index, whole), else an APPEND
+   *  of the lines not on disk yet — never the whole journal per act */
+  let actsWriting = null;
+  const notDurableSaid = {};   // file → acts that failed since the first was said (round 3, smaller 7)
+  const sayLanded = (fileN) => { const n = notDurableSaid[fileN]; if (n > 1) warn(`[channels] ${fileN}: written again — ${n - 1} more act${n - 1 === 1 ? '' : 's'} had failed the same way meanwhile (each kept in memory, now on disk)`); delete notDurableSaid[fileN]; };
+  function produceActs() {
+    if (compactOwed) { actsWriting = { compact: true, upTo: actSeq }; return actLines.map((x) => x.text).join(''); }
+    const fresh = actLines.filter((x) => x.seq > appendedSeq);
+    if (!fresh.length) return null;
+    actsWriting = { compact: false, upTo: fresh[fresh.length - 1].seq };
+    return { append: fresh.map((x) => x.text).join('') };
+  }
+  function actsWritten(ok) {
+    const w = actsWriting; actsWriting = null;
+    // round 3 (law 4): THE JOURNAL'S TAIL IS ALWAYS A WHOLE LINE BEFORE THE NEXT APPEND — after ANY failed append its tail is
+    // unknown (the thread truncates back, but a truncate can fail too: ENOSPC after 4 KB + ftruncate EIO left a fragment the
+    // retried act was glued to), so the next write is a COMPACTION through the whole-file road: every act not yet held by
+    // the index, whole lines, temp + rename — the act promised «written when the storage answers» is on disk then
+    if (!ok) { if (w && !w.compact) compactOwed = true; return; }
+    sayLanded('index-acts.ndjson');
+    if (!w) return;
+    const prev = appendedSeq;
+    if (w.upTo > appendedSeq) appendedSeq = w.upTo;
+    if (w.compact) { compactOwed = false; journalBytes = actLines.filter((x) => x.seq <= w.upTo).reduce((n, x) => n + Buffer.byteLength(x.text), 0); }
+    else journalBytes += actLines.filter((x) => x.seq > prev && x.seq <= w.upTo).reduce((n, x) => n + Buffer.byteLength(x.text), 0);
   }
 
   /**
@@ -1970,15 +2131,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return true;
   }
 
-  interval = setInterval(() => {   // every tick sweeps (B-f32b), then the same guarded write (lane-dead-bridge)
+  interval = setInterval(() => {   // every tick sweeps (B-f32b); a dirty index is the writer's (its pace, its retries)
     try { sweep(); } catch (e) { warn('[channels] index sweep failed:', (e && e.message) || e); }
-    if (dirty && !debounce) flushFromTimer();
+    if (dirty) markDirty();
   }, FLUSH_INTERVAL_MS);
   if (interval.unref) interval.unref();
 
   function close() {
     closed = true;
-    if (debounce) { clearTimeout(debounce); debounce = null; }
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     stampsFlush();
@@ -2007,7 +2167,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
-      update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null,
+      update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),

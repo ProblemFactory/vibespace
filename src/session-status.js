@@ -69,40 +69,39 @@ class SessionStatusManager {
       for (const k of keys.slice(0, keys.length - MAX_ENTRIES)) { delete this._state.statuses[k]; (this._pruned = this._pruned || []).push(k); }   // …and the next broadcast names them gone
     }
     this._dirty = true;
-    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);
+    // lane hub-loop-stalls commit 2: through THE STORE WRITER (its own thread; on a slow storage this rename held the
+    // loop for its whole delay) — a burst still coalesces (its 500 ms debounce); a failed write keeps the state dirty, is
+    // retried by the writer (1 s … 60 s) and REPORTED through onWriteError, never thrown (lane-dead-bridge 2026-09-30)
+    require('./store-writer.js').storeWriter().dirty(this._file, { name: 'session-status.write', debounceMs: 500,
+      produce: () => {
+        if (!this._dirty) return null;
+        const json = JSON.stringify(this._state, null, 2);
+        this._dirty = false;
+        if (json === this._lastWritten) return null;   // no real change → no write
+        this._writing = json;
+        return json;
+      },
+      onWritten: (ok, e) => {
+        if (ok) { this._lastWritten = this._writing; this._writeFailures = 0; return; }
+        this._dirty = true; this._writeFailures = (this._writeFailures || 0) + 1;
+        try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs: Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1)) }); } catch { }
+      } });
   }
 
-  // THE DEBOUNCED WRITE MAY NOT THROW (lane-dead-bridge, 2026-09-30 12:03:17):
-  // this timer's bare writeFileSync met `EMFILE` — relayed by the workspace's
-  // FUSE daemon, not raised by this process — and the throw became
-  // `uncaughtException` → exit(1): the whole server died for one status file.
-  // A failed write keeps the state DIRTY (nothing is lost in memory), retries
-  // with a backoff (1 s, 2 s … 60 s) and is REPORTED through onWriteError,
-  // which names who ran out. The exit-path flush() keeps its throw — its
-  // callers already guard it.
-  _flushFromTimer() {
-    try { this._flush(); this._writeFailures = 0; }
-    catch (e) {
-      this._writeFailures++;
-      this._dirty = true;
-      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1));
-      if (!this._writeTimer) { this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, retryMs); this._writeTimer.unref?.(); }
-      try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs }); } catch { }
-    }
-  }
-
-  _flush() {
-    if (!this._dirty) return;
-    const json = JSON.stringify(this._state, null, 2);
-    if (json === this._lastWritten) { this._dirty = false; return; } // no real change → skip write
-    const tmp = this._file + '.tmp';
-    timedSync('session-status.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
-    this._lastWritten = json;
-    this._dirty = false;
+  /** round 2 (law B): an agent's own report, the person's override or clear — acts nothing re-derives: the writer's NEXT
+   *  write (rank 0 at a stop), and the promise resolves when it is on disk (false: it failed — kept, retried) — the route
+   *  answers after it */
+  persisted() {
+    if (!this._dirty) return Promise.resolve(true);
+    const W = require('./store-writer.js').storeWriter();
+    if (W.pending(this._file)) W.dirty(this._file, { name: 'session-status.write', rank: 0 });
+    return W.durable(this._file);
   }
 
   // Synchronous flush for process exit (SIGINT/SIGTERM), like SyncStore/layouts.
-  flush() { if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }
+  // A person's clear is written HERE before the answer (the writer settles its own write of this file first); during the
+  // hub's exit the writer only keeps it dirty and its bounded exit flush writes it.
+  flush() { if (this._dirty) this._save(); require('./store-writer.js').storeWriter().flushSync([this._file]); }
 
   // `extra` rides the broadcast beside the statuses: a history clear names what it touched (`cleared: [{key, ats}]` —
   // ids only) because the statuses map it sends may be EXACTLY what every client already holds (a cleared entry that is

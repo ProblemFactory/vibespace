@@ -222,6 +222,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   });
   const r = ue.ratesFor(key);
   ck('class: rates learned from the file (no prior)', approx(r.sevenDay.impliedFullUsd, 1730, 1));
+  ue.flushRates();   // lane hub-loop-stalls: the snapshot goes through the store writer — written now for the check
   ck('class: rates.json snapshot written', fs.existsSync(path.join(dir, 'rates.json')));
   const e1 = ue.estimateFor('sub-x', null, T0 + 2 * HR);
   ck('class: estimate = anchor 0.45 + 17.3/1730 = 0.46', approx(e1.sevenDay.utilization, 0.46, 0.001));
@@ -233,6 +234,26 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const e2 = ue.estimateFor('sub-x', raw, T0 + 3 * HR + 1000);
   ck('class: newer raw cache wins as base', approx(e2.sevenDay.utilization, 0.5 + 17.3 / 1730, 0.001) && e2.anchorAt === T0 + 3 * HR);
   ck('class: accountIdsFor unions file + extras', ue.accountIdsFor(key, ['sub-new']).includes('sub-x') && ue.accountIdsFor(key, ['sub-new']).includes('sub-new'));
+  // lane hub-loop-stalls commit 2 round 2 (smaller 2): THE RATES COPY READ BEFORE A MIGRATION NEVER WRITES BACK WHAT IT
+  // DROPPED — the estimator keeps the file's content in memory after its first persist; a boot migration archives and
+  // unlinks rates.json; the next persist (another identity) must not put the dropped identity back. server.js settles the
+  // rates before the migrations and reloads them after (reloadRates). RED without the reload: the dropped entry returns.
+  {
+    const fp = path.join(dir, 'rates.json');
+    ue.settleRates();                                   // before the migrations: on disk, nothing in flight
+    const before = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+    fs.unlinkSync(fp);                                  // the migration: archive + drop (fixture-ledger-purge / reading-repair)
+    ue.reloadRates();                                   // after the migrations
+    const key2 = 'org:other';
+    fs.writeFileSync(path.join(dir, 'anchors-org_other.ndjson'), lines.map((l) => JSON.stringify({ ...l, identityKey: key2 })).join('\n') + '\n');
+    ue.ratesFor(key2); ue.flushRates();
+    const after = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+    ck('r2 smaller 2: the identity in rates.json before the migration was there (the control has something to lose)', !!before[key]);
+    ck('r2 smaller 2: a persist after the migration dropped rates.json never writes the dropped identity back', !after[key] && !!after[key2]);
+    // and its rates are re-learned from the anchors at the next ask (nothing cached from before the migration)
+    ue.ratesFor(key); ue.flushRates();
+    ck('r2 smaller 2: the dropped identity is re-learned at its next ask', !!JSON.parse(fs.readFileSync(fp, 'utf-8'))[key]);
+  }
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

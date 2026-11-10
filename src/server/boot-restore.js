@@ -190,7 +190,7 @@ function armRestoredCapture(id, s) {
     attempt: () => captureLockId({ session: s, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath, readPpid }),
     onAdopt: (lockId) => {
       const adopted = adoptCapturedId(s, lockId);
-      if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), ...adopted }); } catch {} }
+      if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), ...adopted }, { durable: true }); } catch {} }
       broadcastActiveSessions();
     },
   });
@@ -279,7 +279,7 @@ function retireDeadSocket(sockFile, socketPath) {
   try {
     const dm = readSessionMeta(sockFile) || {};
     if ((dm.host || dm.dialDeviceId) && !dm.orphanedAt) {
-      writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() });
+      writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() }, { sync: true });
       const op = path.join(META_DIR, sockFile + '.json');
       fs.renameSync(op, op + '.orphan');
       console.log(`    ↳ remote session meta preserved as orphan (${dm.keeperSid || dm.dialDeviceId || dm.host})`);
@@ -822,7 +822,7 @@ function restoreSessions() {
             if (matched.name) s.name = matched.name;
             if (matched.cwd) s.cwd = matched.cwd;
             if (s.backendSessionId && s.sockName) {
-              try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), name: s.name, cwd: s.cwd, backendSessionId: s.backendSessionId, claudeSessionId: null }); } catch {}
+              try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), name: s.name, cwd: s.cwd, backendSessionId: s.backendSessionId, claudeSessionId: null }, { durable: true }); } catch {}
               changed = true;
             }
           }

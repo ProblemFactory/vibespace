@@ -3779,7 +3779,9 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
       if (!b) { bad.push(`${row.file}: site ${site}() not found`); continue; }
       const okNames = rows72.filter(([, r]) => r.file === row.file && r.sites.includes(site)).map(([n]) => n);
       for (const l of unwrapped72(b.text, okNames)) bad.push(`${row.file} ${site}(): ${l}`);
-      if (b.text.includes(`timedSync('${name}'`)) seen.push(name + '@' + site);
+      // lane hub-loop-stalls commit 2: a site that hands its bytes to THE STORE WRITER under the row's name is timed there
+      // (src/store-writer.js records each write's own time under that name, off the main thread)
+      if (b.text.includes(`timedSync('${name}'`) || b.text.includes(`name: '${name}'`)) seen.push(name + '@' + site);
     }
   }
   ok(bad.length === 0, `§72 every sync write inside a named store's sites is inside its timedSync (${rows72.filter(([, r]) => r.kind === 'write').length} write rows)${bad.length ? ' — UNWRAPPED: ' + [...new Set(bad)].join(' | ') : ''}`);
@@ -3792,6 +3794,7 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
     if (f === 'src/timed-sync.js') continue;
     const t = strip72(read(f));
     for (const m of t.matchAll(/\btimedSync\(\s*('([^']*)'|[^'\s])/g)) { if (m[2] === undefined) computed.push(f); else calls.push([f, m[2]]); }
+    for (const m of t.matchAll(/\.dirty\([^,()]+,\s*\{\s*name:\s*'([^']+)'/g)) calls.push([f, m[1]]);   // lane hub-loop-stalls commit 2: a hand-off to THE STORE WRITER by the row's name (it records the write's time there)
   }
   const unknown = calls.filter(([f, n]) => !STORES[n] || STORES[n].file !== f);
   ok(computed.length === 0 && unknown.length === 0 && calls.length >= rows72.length, `§72 ${calls.length} timedSync calls, each a literal row of the table, in that row's own file${computed.length ? ' — computed name in: ' + computed.join(' ') : ''}${unknown.length ? ' — unknown / misplaced: ' + unknown.map((x) => x.join(':')).join(' ') : ''}`);

@@ -208,17 +208,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // in its own data dir, so they are independent — run one after another they slept ~8 s of the suite's 8. Each leg returns
 // its verdicts and they are judged in the old order once all have settled; the real timers, the real EISDIR and the
 // pre-fix child are unchanged.
-const writerLeg = async ([rel, cls, file, poke]) => {
+const writerLeg = async ([rel, cls, file, poke, tmpOf = (f) => f + '.tmp']) => {
   const out = [];
   const dir = path.join(ROOT, 'st-' + cls);
-  fs.mkdirSync(path.join(dir, file + '.tmp'), { recursive: true });   // the tmp path is a DIRECTORY: every write fails (EISDIR) — the error class that killed the server
+  fs.mkdirSync(path.join(dir, tmpOf(file)), { recursive: true });   // the tmp path is a DIRECTORY: every write fails (EISDIR) — the error class that killed the server
   const Cls = require(path.join(REPO, rel))[cls];
   const errs = [];
   const m = new Cls({ dataDir: dir, onChange() { }, onWriteError: (e, f, o) => errs.push({ code: e.code, f, ...o }) });
   poke(m);
   await sleep(800);
   out.push([errs.length === 1 && errs[0].code === 'EISDIR' && errs[0].failures === 1 && errs[0].retryMs === 1000 && m._dirty === true, `${cls}: the failed write did NOT throw — dirty kept, reported (${JSON.stringify(errs[0])})`]);
-  fs.rmdirSync(path.join(dir, file + '.tmp'));
+  fs.rmdirSync(path.join(dir, tmpOf(file)));
   await sleep(1400);
   out.push([fs.existsSync(path.join(dir, file)) && m._dirty === false && m._writeFailures === 0, `${cls}: the retry landed once the file system recovered`]);
   try { clearTimeout(m._expiryTimer); clearInterval(m._expiryTimer); } catch { }
@@ -231,24 +231,30 @@ const channelLeg = async () => {
   const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
   const dir = path.join(ROOT, 'channels');
   const warns = [];
-  const st = createChannelStore({ dir, log: { warn: (...a) => warns.push(a.join(' ')), log() { } } });
-  const tmp = path.join(dir, `index.json.tmp-${process.pid}`);
-  fs.mkdirSync(tmp, { recursive: true });   // the index's tmp path is a directory: its write fails (EISDIR)
+  // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread) — its failed write
+  // is the writer's to say and to retry, never a throw on any thread
+  const SW = require(path.join(REPO, 'src/store-writer.js'));
+  const writer = SW.create({ log: { warn: (...a) => warns.push(a.join(' ')), log() { } } });
+  const st = createChannelStore({ dir, writer, log: { warn: (...a) => warns.push(a.join(' ')), log() { } } });
+  const tmp = path.join(dir, `index.json.tmp-${process.pid}-w`);
+  fs.mkdirSync(tmp, { recursive: true });   // the writer's tmp path is a directory: its write fails (EISDIR)
   await st.index.update((ix) => { ix.conversations['fake/c1'] = { probe: 1 }; });
   await sleep(800);
-  out.push([warns.some((w) => /\[channels\] index\.json not written \(EISDIR; attempt 1\) — kept in memory, retrying in 1 s/.test(w)), `channel-store: the failed index write did NOT throw — said and owed (${JSON.stringify(warns[0] || '')})`]);
+  out.push([warns.some((w) => /\[store-write\] channels-index\.write not written \(EISDIR; attempt 1\) — kept in memory, retrying in 1 s/.test(w)), `channel-store: the failed index write did NOT throw — said and owed (${JSON.stringify(warns[0] || '')})`]);
   fs.rmdirSync(tmp);
   await sleep(1500);
   let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { }
   out.push([onDisk && onDisk.conversations && onDisk.conversations['fake/c1'], 'channel-store: the retry wrote the owed index (dirty is cleared only once it is on disk)']);
   try { st.close(); } catch { }
+  writer.stop();
   return out;
 };
 const controlLeg = async () => {
-  // CONTROL — the PRE-FIX session-status: its timer called _flush() bare; the same failure is a process death
+  // CONTROL — the PRE-FIX session-status: a timer writing bare on the main thread (lane hub-loop-stalls commit 2: the
+  // hand-off to the store writer is put back to that shape); the same failure is a process death
   const out = [];
   const src = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
-  const pre = src.replace('this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);', 'this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);');
+  const pre = src.replace(/require\('\.\/store-writer\.js'\)\.storeWriter\(\)\.dirty\(this\._file, \{[\s\S]*?\n {6}\} \}\);/, "if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; const tmp = this._file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2)); fs.renameSync(tmp, this._file); }, 500);");
   out.push([pre !== src, 'control setup: the pre-fix copy took its patch']);
   const copy = M.write('src/session-status.js', pre, 'prefix');
   const dir = path.join(ROOT, 'st-pre');
@@ -264,7 +270,8 @@ const controlLeg = async () => {
 };
 const legsG = await Promise.all([
   ...[
-    ['src/session-status.js', 'SessionStatusManager', 'session-status.json', (m) => { m._state.statuses.k = { at: 1 }; m._save(); }],
+    // lane hub-loop-stalls commit 2: session-status reaches the disk through THE STORE WRITER — its temp is the writer's
+    ['src/session-status.js', 'SessionStatusManager', 'session-status.json', (m) => { m._state.statuses.k = { at: 1 }; m._save(); }, (f) => `${f}.tmp-${process.pid}-w`],
     ['src/user-todos.js', 'UserTodoManager', 'user-todos.json', (m) => { m._state.items.push({ id: 'x', status: 'open', text: 't', createdAt: 1 }); m._save(); }],   // through the store's OWN timer (verify r1: a poke that armed the guarded timer by hand let a reverted guard go green)
   ].map(writerLeg),
   channelLeg(),

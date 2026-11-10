@@ -6856,7 +6856,7 @@ class ChatView {
       // batch verb ends every pending row, which is what setQueueOpResult('')
       // already means.
       if (msg.code === 'queue-op-unsupported') { try { this._chatInput?.setQueueOpResult(msg.id || '', false, msg.message || msg.error || ''); } catch { } }
-      this._renderers.appendSystem('✗ ' + (msg.message || msg.error || t('Message rejected.')));
+      this._renderers.appendSystem('✗ ' + (msg.code === 'not-durable' ? t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.') : (msg.message || msg.error || t('Message rejected.'))));   // round 3 (law F): the person's language
       try { track('event', msg.code === 'input-rejected' ? 'chat-input-rejected' : 'chat-action-refused', this._telemDetail(`${msg.code || 'action'}: ${msg.message || msg.error || ''}`)); } catch {}
       return;
     }

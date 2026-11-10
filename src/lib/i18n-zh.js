@@ -12162,4 +12162,5 @@ export default {
   "Claude Code is checked — those accounts are back in the pool": "Claude Code 已确认——这些账号回到了账号池",
   "Checking Claude Code on this machine again — about five minutes": "正在本机再次确认 Claude Code——约五分钟",
   "Could not start the check": "无法开始确认",
+  "Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.": "已保存，但还没写到磁盘——存储还没写入它（存储很慢或出错）。它留在内存里，存储可以写时就会写入；在那之前重启会丢失它。",
 };

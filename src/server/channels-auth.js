@@ -1137,7 +1137,7 @@ function create(engineCtx) {
       for (const k of Object.keys(ix.conversations)) if (ix.conversations[k] && ix.conversations[k].adapterId === rec.id) delete ix.conversations[k];
       if (ix.accountAssignments) delete ix.accountAssignments[rec.id];
       if (ix.patternAssignments) for (const [id, pa] of Object.entries(ix.patternAssignments)) if (pa && pa.adapterId === rec.id) delete ix.patternAssignments[id];
-    });
+    }, { durable: true });
     await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
     await purgeIfDeclared(rec);
   }

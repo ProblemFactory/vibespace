@@ -32,8 +32,9 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
       const m = rec.mode || null;
       if ((session._permissionMode || null) === m) return;
       session._permissionMode = m;
-      if (session.sockName) { try { writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: m }); } catch { } }
-      broadcastToSession(session, id, { type: 'permission-mode-ack', sessionId: id, ok: true, mode: m || '' });
+      // round 2 (law B): the person's permission mode — the writer's NEXT write, the ack after it
+      let w = Promise.resolve(true); if (session.sockName) { try { w = Promise.resolve(writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: m }, { durable: true })); } catch { } }
+      w.then((ok) => broadcastToSession(session, id, { type: 'permission-mode-ack', sessionId: id, ok: true, mode: m || '', ...(ok === false ? { persisted: false, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' } : {}) }), () => { });
     };
     // ACP v1 harnesses (S8, docs/design-harness-plugins.md §2.3): the
     // generic wrapper (data/bin/acp-wrapper.js) journals ONE JSON record per
@@ -99,7 +100,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
                 forkedFrom: session.forkedFrom || null,
                 permissionMode: session._permissionMode || null, effort: session._effort || null,
                 createdAt: session.createdAt, webuiSessionId: id, mode: session.mode,
-              });
+              }, { durable: true });
               broadcastActiveSessions();
             }
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }

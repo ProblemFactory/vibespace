@@ -27,7 +27,7 @@ const row = (kind, store, file, sites = []) => Object.freeze({ kind, store, file
 const STORES = Object.freeze({
   'session-meta.write': row('write', 'session-meta/<sock>', 'src/server/session-stdout.js', ['writeSessionMeta']),
   'session-meta.read': row('read', 'session-meta/<sock>', 'src/server/session-stdout.js'),
-  'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_flush']),
+  'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),   // through the store writer (lane hub-loop-stalls commit 2)
   'session-status.read': row('read', 'session-status', 'src/session-status.js'),
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_flush']),
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),
@@ -36,10 +36,13 @@ const STORES = Object.freeze({
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
-  'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['writeIndex']),
+  'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
+  'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
+  'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
-  'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),
+  'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
+  'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
   'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-hold-road.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor (r11: the hold road's file)
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js

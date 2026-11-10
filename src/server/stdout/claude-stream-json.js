@@ -563,7 +563,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             // persist the disarm for resumes — a restart between first-id and
             // a later id-bearing line must not re-arm implicit-fork adoption
             if (session._resumeSpawn && session.sockName) {
-              try { writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), sawFirstId: true }); } catch {}
+              try { writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), sawFirstId: true }, { durable: true }); } catch {}
             }
           }
           if (typeof msg.session_id === 'string' && msg.session_id
@@ -599,7 +599,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 createdAt: session.createdAt,
                 webuiSessionId: id,
                 mode: session.mode,
-              });
+              }, { durable: true });
             }
             broadcastActiveSessions();
           }
@@ -875,7 +875,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.permissionMode === 'string' && msg.permissionMode
               && session._permissionMode !== msg.permissionMode) {
             session._permissionMode = msg.permissionMode;
-            if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: msg.permissionMode });
+            // round 3 (smaller 3): DURABLE — re-derived only while the CLI runs; a kill in the window resumed the conversation
+            // in the OLD mode (a person who had left plan mode found it again)
+            if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: msg.permissionMode }, { durable: true });
           }
 
           // set_permission_mode verdict (2.195.0): the CLI REFUSES a
@@ -890,15 +892,17 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             const pend = session._pendingModeReqs.get(msg.response.request_id);
             session._pendingModeReqs.delete(msg.response.request_id);
             const ok = msg.response?.subtype === 'success';
+            let persisted = Promise.resolve(true);
             if (ok) {
               session._permissionMode = pend.mode;
-              if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: pend.mode });
+              if (session.sockName) persisted = Promise.resolve(writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: pend.mode }, { durable: true }));   // round 2 (law B): the ack after the disk
             }
             if (!ok) global.__vsEvent?.('perm-mode-refused', pend.mode);
-            broadcastToSession(session, id, {
+            persisted.then((pok) => broadcastToSession(session, id, {
               type: 'permission-mode-ack', sessionId: id, ok, mode: pend.mode,
               error: ok ? null : String(msg.response?.error || 'permission mode change refused'),
-            });
+            ...(pok === false ? { persisted: false, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' } : {}),
+            }), () => { });
           }
 
           // lane artifacts-model: Write / Edit → the conversation's deliverable rows + their cards (the registry asks the

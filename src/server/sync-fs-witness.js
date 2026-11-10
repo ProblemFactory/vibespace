@@ -83,7 +83,7 @@ function callWords(e) {
   if (!e) return '';
   const where = !e.mount ? 'not under a mount'
     : e.mount.kind === 'storage' ? `under storage mount «${e.mount.root}»`
-    : e.mount.kind === 'home' ? `under the network mount «${e.mount.root}» this instance lives on (witnessed, never refused)`
+    : e.mount.kind === 'home' ? `under the ${e.mount.fstype ? e.mount.fstype + ' ' : 'network '}mount «${e.mount.root}» this instance lives on (witnessed, never refused)`
     : `under the network mount «${e.mount.root}» (witnessed, never refused)`;
   return `${e.fn}(${e.path})${e.store ? ` (${e.store})` : ''} ${e.ms} ms${e.failed ? ' (it failed)' : ''}, ${where}${e.caller ? ` ← ${e.caller}` : ''}`;
 }
@@ -108,7 +108,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD,
   samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc' } = {}) {
   if (one && !fresh) return one;
-  let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed;
+  let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed, ownMount = null;
   const ring = [], fdPaths = new Map(), saidSites = new Map();
   const counts = { refused: 0, allowed: 0, held: 0, heldOnMount: 0, slow: 0, rootsRead: 0 };
   let onHeld = (e) => { try { log.warn?.(heldLine(e.ms, e)); } catch { } };
@@ -118,8 +118,9 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   const ownPath = (p) => typeof p === 'string' && p.indexOf('/..') < 0 && OWN.some((o) => p.startsWith(o));
 
   function refresh() {
-    let mounts = [], reg = [];
-    try { mounts = MPC.parseMountinfo(readMountinfo()); } catch { }
+    let mounts = [], reg = [], mi = '';
+    try { mi = readMountinfo(); mounts = MPC.parseMountinfo(mi); } catch { }
+    try { ownMount = dataDir ? require('../local-index.js').netMountOf(path.resolve(dataDir), mi) : null; } catch { ownMount = null; }
     try { reg = registry() || []; } catch { }
     roots = MPC.rootsOf({ mounts, registry: reg, rootDir, dataDir });
     CTX = { mountRoots: roots, rootDir, dataDir, home, cwd };
@@ -165,7 +166,9 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
       try {   // nothing here may break an fs call: only the deliberate refusal leaves this hook
         let hit = null, hp = null;
         for (const p of pathsOf(fn, args, self)) {
-          if (ownPath(p)) continue;
+          // the instance's own tree is never refused — but on a network / FUSE data dir its words say that mount, never
+          // «not under a mount» (the data dir's OWN file system decides: src/local-index.js netMountOf, [local-index]'s verdict)
+          if (ownPath(p)) { if (ownMount && !hit && dataDir && p.startsWith(String(dataDir).replace(/\/+$/, '') + '/')) { hit = { kind: 'home', root: ownMount.target, fstype: ownMount.fstype }; hp = p; } continue; }
           const r = MPC.rootOf(p, CTX);
           if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }
         }
@@ -207,7 +210,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         if (ms < ringMs) return;
         counts.slow++;
         const stack = new Error().stack;
-        const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null } : null;
+        const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null, ...(c.root.fstype ? { fstype: c.root.fstype } : {}) } : null;
         const e = { fn, path: c ? c.path : shown(args[0]), ...(c && c.store ? { store: c.store } : {}), ms: Math.round(ms), at, failed: !!failed, class: mount ? 'mount' : 'local', mount,
           caller: LB.callerOf(stack, rootDir), stack: mount ? hubFrames(stack, rootDir) : null, said: false };
         ring.push(e); if (ring.length > RING_KEEP) ring.splice(0, ring.length - RING_KEEP);

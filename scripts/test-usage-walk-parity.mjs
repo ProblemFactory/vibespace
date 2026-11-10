@@ -720,6 +720,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       const post = uhB.aggregate({});
       ok(answered && JSON.stringify(answered.totals) === JSON.stringify(post.totals) && answered.totals && post.totals && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
         'the route\'s totals EQUAL the post-walk totals (and are non-empty) — never a partial answer');
+      uhB.flushCursors();   // lane hub-loop-stalls: the cursors go through the store writer — on disk now for the read
       const cur2 = JSON.parse(fs.readFileSync(path.join(bData, 'usage-history', '_cursors.json'), 'utf-8'));
       ok(JSON.stringify(cur2) === JSON.stringify(syncW.cursors), 'the persisted cursor store equals the sync walk\'s cursors');
       ok(uhB.scan().skipped === true, 'the 15 s throttle keeps its meaning (an unforced scan right after answers {skipped})');

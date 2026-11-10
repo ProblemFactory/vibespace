@@ -73,7 +73,7 @@ function constEnv(ast, src) {
   return env;
 }
 
-function walk(node, visit, parents = []) {
+export function walk(node, visit, parents = []) {
   if (!node || typeof node.type !== 'string') return;
   visit(node, parents);
   parents.push(node);
@@ -91,7 +91,7 @@ const ROUTE_VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all', 'us
 const memberName = (m) => (m.type === 'MemberExpression' ? `${m.object.type === 'ThisExpression' ? 'this' : m.object.type === 'Identifier' ? m.object.name : m.object.type === 'MemberExpression' ? memberName(m.object) : '?'}.${keyName(m.property)}` : m.type === 'Identifier' ? m.name : '?');
 
 /** The enclosing scope's NAME of a node from its parents: Class.method / function / const name / route:VERB path / <module>. */
-function scopeOf(parents) {
+export function scopeOf(parents) {
   const names = [];
   for (let i = parents.length - 1; i >= 0; i--) {
     const p = parents[i], up = parents[i - 1];

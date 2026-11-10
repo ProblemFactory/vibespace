@@ -690,14 +690,29 @@ class UsageEstimator {
   }
 
   _persistRates(identityKey, rates, nAnchors) {
+    // lane hub-loop-stalls commit 2: through THE STORE WRITER (its own thread; on the owner's hub this write held the loop
+    // twice ≥ 1 s in six hours). The file is read at the first persist after a (re)load and kept here; each persist merges
+    // into that copy and the writer takes its latest text. A lost last write costs a re-learn of that identity's rates from
+    // its anchors (idempotent). THE ORDER AROUND THE BOOT'S MIGRATIONS (round 2, smaller 2 — four of them archive and drop
+    // this file, one re-learns into it): server.js settles it BEFORE them (settleRates: what this process learned is on disk,
+    // nothing of it in flight) and reloads AFTER (reloadRates: the copy is dropped and re-read at the next persist) — a
+    // copy read before a migration never writes back what it dropped.
     try {
       const fp = path.join(this.dir, 'rates.json');
-      let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { }
-      all[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates };
-      fs.mkdirSync(this.dir, { recursive: true });
-      fs.writeFileSync(fp + '.tmp', JSON.stringify(all, null, 1)); fs.renameSync(fp + '.tmp', fp);
+      if (!this._ratesAll) { let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { } this._ratesAll = all; fs.mkdirSync(this.dir, { recursive: true }); }
+      this._ratesAll[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates };
+      require('./store-writer.js').storeWriter().dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });
     } catch { }
   }
+  /** the rates written NOW, on this thread — a one-shot repair (src/ledger-slot-backfill.js) records itself only after the
+   *  rates it re-learned are on disk (a kill inside it re-learns them at the retry) */
+  flushRates() { try { require('./store-writer.js').storeWriter().flushSync([path.join(this.dir, 'rates.json')]); } catch { } }
+  /** BEFORE the boot's migrations: this process's learned rates on disk now and no write of them in flight (a write that
+   *  landed after a migration's unlink would put the dropped rates back) */
+  settleRates() { this.flushRates(); }
+  /** AFTER the boot's migrations: the copy read before them is dropped (the next persist re-reads what they left), the rates
+   *  learned from the anchors before them re-learned at the next ask */
+  reloadRates() { this._ratesAll = null; this._rateCache.clear(); this._lineCache.clear(); this._estMemo.clear(); }
   _costFn(accountIds) {
     const { costBetweenMulti } = require('./usage-anchors.js');
     const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;

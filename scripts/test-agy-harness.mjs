@@ -283,12 +283,15 @@ const fixes2 = (async () => {
   const baseEvents = evSrc.split(NOTE).length === 3 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.split(NOTE).join(''), 'base-events') : null;
   const STRIP = ".trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();\n";
   const noStrip = evSrc.split(STRIP).length === 2 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.replace(STRIP, '.trim();\n'), 'no-strip') : null;
-  const hubOf = (records, mod = require(path.join(REPO, 'src/server/stdout/acp-events.js'))) => {
+  // lane hub-loop-stalls commit 2 round 2 (law B): the person's permission mode is written as a durable act and the ack
+  // goes AFTER the write — so the hub's answer is read after the write settles (a microtask turn here: the stub writes at once)
+  const hubOf = async (records, mod = require(path.join(REPO, 'src/server/stdout/acp-events.js'))) => {
     const S = { backend: 'antigravity', mode: 'chat', buffer: '', sockName: 'cw-x', _permissionMode: null }, told = [], metas = [];
     let onData = null;
     mod.create({ engine: { noteTurnEnd() { } }, noteHarnessModels() { }, deliverRef: null, permissionRulesRef: null })
       .attach(S, 's', { onData: (cb) => { onData = cb; } }, { feedLive() { }, broadcastToSession: (_s, _id, m) => told.push(m), broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta: (_k, m) => metas.push(m), updateSessionTodos() { } });
     onData('\x1b[H\x1b[J' + records.map((r) => JSON.stringify(r)).join('\r\n') + '\r\n'); // what the hub's dtach client reads: the clear preamble, then CRLF lines
+    await new Promise((r) => setImmediate(r));
     return { mode: S._permissionMode, acks: told.filter((m) => m.type === 'permission-mode-ack').map((m) => [m.ok, m.mode]), meta: metas.map((m) => m.permissionMode).filter(Boolean).pop() || null };
   };
   const statusOf = (Cls, dir) => new Cls({ buffer: fs.readFileSync(path.join(dir, 's.buf'), 'utf8') }, 's', { buffersDir: dir }).chatStatus();
@@ -353,7 +356,7 @@ const fixes2 = (async () => {
         // by CONVERSATION id, over the live session — whose hub journal may not hold the wrapper's boot records yet
         const route = async (Cls) => createTranscriptService({ activeSessions: new Map([['s', { backend: 'antigravity', backendSessionId: cid, buffer: '', _webuiId: 's' }]]), createSessionMessages: (sess, sid) => new Cls(sess, sid, { buffersDir: at }) })
           .status({ backend: 'antigravity', sessionId: cid, cwd: at }).then((x) => x.chatStatus).catch((e) => ({ err: e.message }));
-        return { argv, text: b.text(), st: statusOf(AcpSessionMessages, at), said: b.find('notice', (r) => r.noticeKind === 'mode-resumed')?.text || null, routeSt: await route(AgyReader), routeBase: baseReader ? await route(baseReader) : undefined, hub: hubOf(b.records), hubBase: baseEvents ? hubOf(b.records, baseEvents) : undefined, hubNoStrip: noStrip ? hubOf(b.records, noStrip) : undefined, first: b.records[0]?.kind };
+        return { argv, text: b.text(), st: statusOf(AcpSessionMessages, at), said: b.find('notice', (r) => r.noticeKind === 'mode-resumed')?.text || null, routeSt: await route(AgyReader), routeBase: baseReader ? await route(baseReader) : undefined, hub: await hubOf(b.records), hubBase: baseEvents ? await hubOf(b.records, baseEvents) : undefined, hubNoStrip: noStrip ? await hubOf(b.records, noStrip) : undefined, first: b.records[0]?.kind };
       } finally { await ended(b); }
     };
     const r = await resume(WRAPPER, dir);

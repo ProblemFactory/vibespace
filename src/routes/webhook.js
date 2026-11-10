@@ -287,7 +287,7 @@ async function syncRow(slug, options) {
     en.title = p.title; en.kind = live.length > 1 ? 'group' : 'dm'; en.participants = live.map((c) => c.name).join(', ') || p.title;
     if (!(Number(en.readAt) > 0)) en.readAt = D.now();
     if (options) en.options = options;
-  });
+  }, { durable: true });
   // the conversation's send identity is resolved NOW (a path the owner just made is sendable — its convCaps say so)
   try { if (typeof e.refreshConvCaps === 'function') await e.refreshConvCaps(ADAPTER_ID, slug); } catch { }
   const people = e.store.peopleRead(ADAPTER_ID);

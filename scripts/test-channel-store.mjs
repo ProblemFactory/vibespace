@@ -744,7 +744,7 @@ function rebuildUnderFault(PS, name, code) {
   // to have, so prose is blanked before asking whether one survives.
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js', './channel-thread.js', './channel-facts.js', './channel-revisions.js', './timed-sync.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the PURE modules the side log\'s dedup key and compaction fold are theirs, and (lane lark-threads) the place patch\'s widen-only rules, and (lane message-facts) the fx lines\' compaction fold, and (lane channel-record-revisions) the rv lines\' (SHARED may import PURE)', reqs.join(','));
+  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js', './channel-thread.js', './channel-facts.js', './channel-revisions.js', './timed-sync.js', './store-writer.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the PURE modules the side log\'s dedup key and compaction fold are theirs, and (lane lark-threads) the place patch\'s widen-only rules, and (lane message-facts) the fx lines\' compaction fold, and (lane channel-record-revisions) the rv lines\' (SHARED may import PURE); the SHARED store writer (lane hub-loop-stalls: the index\'s write off the main thread)', reqs.join(','));
   ok(!/module\.exports[\s\S]*writeIndex|exports\.writeIndex/.test(src), 'there is deliberately NO "write the whole index back" export — the serialized owner is the index\'s only writer (§5.1), and (design 011 lane 1, store-timing) the PURE store-write clock around the index read and write');
   ok(!/writeAdapters/.test(noComments), '…and none for adapters.json either (r2): every caller used to re-parse and write its own private copy back, which is the read-modify-write lost update this invariant exists to eliminate');
   ok(/appendLines\(fp[\s\S]{0,300}?for \(const r of fresh\) rememberVendorId/.test(src) && !/if \(set\.has\(r\.vendorId\)[\s\S]{0,120}?rememberVendorId/.test(src), 'the dedup set is written AFTER the bytes are durable, never inside the selection loop');
@@ -1376,7 +1376,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   ok(headRow.writes === 0 && headRow.stamp === T + 50e3 && headRow.disk, `⑭ a pass that still stamps the ROW (a write past the door) is healed where the row is serialized: ${headRow.writes} writes, the stamp taken into the side map, the file = the whole-file bytes`, JSON.stringify(headRow));
   const KEEP = ['  const s = JSON.stringify(value, INDEX_KEYS, 1);', '  const s = JSON.stringify(value, RUNTIME_KEYS, 1);'];
   const HEAL = ['      healRow(k, conv[k]);\n', ''];
-  const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return false; }\n', ''];
+  const SKIP = ['    if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }\n', ''];
   const CLOSE = ['    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache\n    stampsFlush();\n', '    flush({ full: true });\n'];
   const OWED = ['    if (stampsOwed) stampsFlush();\n', ''];
   const LOADHEAL = ['    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;\n', ''];

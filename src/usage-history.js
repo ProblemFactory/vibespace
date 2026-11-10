@@ -37,6 +37,9 @@ const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asl
 // family key would also match carries its own exact key (Opus 4/4.1/3, Haiku
 // 3/3.5, Mythos Preview below): without one it silently borrowed the newer
 // generation's price. Editable at data/usage-history/pricing.json.
+// round 4 (true words 6): a re-walk over a COLD ledger reads the tails of the shards it appends to — at least 256 KB, twice
+// what it appends, at most 4 MB a shard (the rows a killed walk appended are the last ones)
+const TAIL_DEDUP_MIN = 256 * 1024, TAIL_DEDUP_MAX = 4 * 1024 * 1024;
 const DEFAULT_PRICING = {
   // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
   // (~30% more tokens per unit of English text), so effective $/word is higher.
@@ -301,7 +304,7 @@ class UsageHistory {
     // verifier). Same shape as usage-routes' reloadRateLimitCache(): the
     // boot-time consumer re-reads after the repair instead of the repair
     // reaching into a live object.
-    this.reloadCursors = () => { this._cursors = timedSync('usage-cursors.read', () => this._loadCursors()); };
+    this.reloadCursors = () => { this.settleCursors(); this._cursors = timedSync('usage-cursors.read', () => this._loadCursors()); };
     // …and the same for the EVENTS (2026-09-10). `_loadEvents` keeps a byte
     // watermark per shard and only reads the appended tail, so a migration
     // that REWRITES a shard in place (the origin backfill) is invisible to an
@@ -584,7 +587,7 @@ class UsageHistory {
     if (!force && this._pausedNow()) return { skipped: true, paused: true };
     this._scanForced = !!force;
     this._lastScanAt = Date.now();
-    this._scanning = true;
+    this._scanning = true; this._lastReWalked = 0;
     this._scanPromise = this._walkAndAppend();
     return this._scanPromise;
   }
@@ -670,6 +673,28 @@ class UsageHistory {
         },
       });
       filesTouched = walk.filesTouched;
+      // round 3 (smaller 5): THE RE-WALK AFTER A KILL RE-APPENDS NOTHING IT ALREADY APPENDED — a kill between the shard append
+      // and the cursor write re-walks those rows (20 kills: 1 128 rows for 152 request ids, compounding). The ledger knows
+      // every request id it holds once warm: the walk waits for the warm (its rows are in memory; the checks below re-run
+      // after the wait) and the commit skips every row whose id the ledger already has
+      if (typeof this.whenWarm === 'function' && this._evCache) { try { await this.whenWarm(); } catch { } }
+      // ROUND 4 (true words 6): ON A COLD LEDGER — the boot's own order: the walk runs BEFORE the warm — the rows a killed walk
+      // appended (its cursor write lost) are the TAIL of their shards: each shard this walk appends to has its last bytes read
+      // (fs.promises, ≤ TAIL_DEDUP_MAX) and a row whose request id is there is not appended again (20 kills: bounded)
+      let tailRids = null;
+      if (!this._evCache || (typeof this.ledgerLoading === 'function' && this.ledgerLoading())) {
+        tailRids = new Set();
+        for (const [shard, lines] of Object.entries(shardBuffers)) {
+          if (!lines.length) continue;
+          let fh = null;
+          try {
+            fh = await fs.promises.open(shard, 'r');
+            const st = await fh.stat(), want = Math.min(TAIL_DEDUP_MAX, Math.max(TAIL_DEDUP_MIN, 2 * lines.reduce((a, l) => a + l.length + 1, 0))), n = Math.min(st.size, want);
+            const b = Buffer.alloc(n); await fh.read(b, 0, n, st.size - n);
+            for (const l of b.toString('utf8').split('\n')) { if (!l) continue; let rid = null; try { rid = JSON.parse(l).rid; } catch { rid = null; } if (rid) tailRids.add(rid); }
+          } catch { } finally { try { if (fh) await fh.close(); } catch { } }
+        }
+      }
       // A repair re-read the cursor store WHILE this walk was parked at a
       // budget point (reloadCursors after a migration): the walk advanced the
       // map the repair replaced, so writing it back would resurrect what the
@@ -685,17 +710,26 @@ class UsageHistory {
 
       // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
       // the shard appends and the cursor write
+      let appendedNow = false, reAppended = 0;
+      const knows = this._evCache && !(typeof this.ledgerLoading === 'function' && this.ledgerLoading()) ? (id) => this.ledgerKnowsId(id) : tailRids ? (id) => tailRids.has(id) : null;
+      if (knows) for (const shard of Object.keys(shardBuffers)) shardBuffers[shard] = shardBuffers[shard].filter((l) => { let rid = null; try { rid = JSON.parse(l).rid; } catch { } if (rid && knows(rid)) { reAppended++; return false; } return true; });
+      added -= reAppended;
+      if (reAppended) console.log(`[usage-history] the walk met ${reAppended} request${reAppended === 1 ? '' : 's'} the ledger already holds (a re-walk after a lost cursor write${tailRids ? ' — the ledger cold: its shards\' tails read' : ''}) — not appended again`);
+      this._lastReWalked = reAppended;
       for (const [shard, lines] of Object.entries(shardBuffers)) {
-        if (lines.length) { const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+        if (lines.length) { appendedNow = true; const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
-      this._writeCursors(deadFacts);
+      // round 2 (smaller 1): THE CURSOR FOLLOWS ITS APPEND IN ORDER — after rows were appended, the cursors are the writer's
+      // NEXT write (never its pace): a kill between the two re-appends at most what one cursor write's time let through
+      // (the readers' rid dedup absorbs those rows), never a window per kill
+      if (this._writeCursors(deadFacts) && appendedNow) { try { require('./store-writer.js').storeWriter().durable(this.cursorsFile).catch(() => { }); } catch { } }
       this._lastScan = Date.now();
     } catch (e) {
       if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk
       console.error('[usage-history] scan failed:', e && e.message);
       return { added: 0, filesTouched, error: String((e && e.message) || e) };
     } finally { this._scanning = false; }
-    return { added, filesTouched };
+    return { added, filesTouched, reWalked: this._lastReWalked || 0 };
   }
 
   /** Remote-host events (2.127.0): ingest the NDJSON a host-side
@@ -837,11 +871,22 @@ class UsageHistory {
     if (deadFacts !== undefined) { this._cursorsPrunedAt = now; this._dropDeadCursors(deadFacts); }
     else if (now - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS) { this._cursorsPrunedAt = now; this._pruneDeadCursors(); }
     const json = JSON.stringify(this._cursors);
-    if (json === this._cursorsJson) return false;
-    timedSync('usage-cursors.write', () => this._writeAtomic(this.cursorsFile, json));   // store-timing's row; its site = this function since usage-index-shadow L0
-    this._cursorsJson = json;
+    if (json === this._cursorsJson || json === this._cursorsOwed) return false;
+    // lane hub-loop-stalls commit 2: the cursors reach the disk through THE STORE WRITER (its own thread; the owner's hub
+    // held its loop on this rename twice ≥ 1 s in six hours) — the text the writer takes is the latest at its turn; a lost
+    // last write costs a re-walk of the files past the written cursors (the ledger's dedup makes a re-walk idempotent)
+    this._cursorsOwed = json;
+    require('./store-writer.js').storeWriter().dirty(this.cursorsFile, { name: 'usage-cursors.write',   // store-timing's row (the writer records under it)
+      produce: () => { const t = this._cursorsOwed; this._cursorsWriting = t; return t == null || t === this._cursorsJson ? null : t; },
+      onWritten: (ok) => { if (ok) { this._cursorsJson = this._cursorsWriting; if (this._cursorsOwed === this._cursorsWriting) this._cursorsOwed = null; } } });
     return true;
   }
+  /** the cursors written NOW, on this thread (a caller that reads the file next — a suite) */
+  flushCursors() { try { require('./store-writer.js').storeWriter().flushSync([this.cursorsFile]); } catch { } }
+  /** lane hub-loop-stalls commit 2: before anything OUTSIDE this object reads or rewrites _cursors.json (the boot's one-shot
+   *  migrations, then reloadCursors): an owed write is dropped and a write in flight waited on — no older state lands after
+   *  theirs; the walk re-derives what it held (the ledger's dedup makes the re-walk idempotent) */
+  settleCursors() { try { require('./store-writer.js').storeWriter().forget(this.cursorsFile); } catch { } this._cursorsOwed = null; }
   _pruneDeadCursors() {   // the prune in one go (the hourly fallback, and a suite's seam): the same steps, driven straight through
     const steps = this._deadCursorSteps(this._cursors);
     let r; do { r = steps.next(); } while (!r.done);

@@ -37,19 +37,23 @@ app.post('/api/editor/open', (req, res) => {
   // for remote sessions, whose helper+claude survive on the host) otherwise
   // loses the only record of it and the session silently hangs mid-turn.
   // Cleared by /api/editor/signal; re-broadcast on terminal attach.
+  let persisted = Promise.resolve(true);
   if (sessionId && activeSessions.has(sessionId)) {
     const s = activeSessions.get(sessionId);
     s._pendingEditor = { filePath: file, signalPath: signal, host: editorHost, at: Date.now() };
-    try { if (s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: s._pendingEditor }); } catch {}
+    try { if (s.sockName) persisted = Promise.resolve(writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: s._pendingEditor }, { durable: true })); } catch {}   // round 2 (law B): the only record of an edit in flight — on disk before the editor opens
   }
   // Broadcast to all WebSocket clients — include sessionId so each client opens editor on the right window
   const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null, host: editorHost });
-  wss.clients.forEach(client => {
-    if (client.readyState === WS_OPEN) {
-      try { client.send(msg); } catch {}
-    }
-  });
-  res.json({ success: true });
+  const answer = () => {
+    wss.clients.forEach(client => {
+      if (client.readyState === WS_OPEN) {
+        try { client.send(msg); } catch {}
+      }
+    });
+    res.json({ success: true });
+  };
+  persisted.then(answer, answer);
 });
 
 // Editor: signal completion (called by client when user saves/closes editor)

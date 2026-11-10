@@ -1644,6 +1644,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (readInFlight) return;
     readInFlight = true;
     fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then((d) => { if (d && d.code === 'not-durable') showToast(routeErrorText(d), { type: 'error' }); })   // round 3: a failed mark is SAID (law F), never dropped
       .catch(() => {}).finally(() => { readInFlight = false; });
   }
 

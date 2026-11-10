@@ -974,6 +974,23 @@ fs.renameSync = function (a, b) {
   if ((point === 'shard' && /^events-\\d{4}-\\d{2}\\.ndjson$/.test(base)) || (point === 'attribution' && base === 'attribution.ndjson') || (point === 'rates' && base === 'rates.json') || (point === 'ledger' && base === 'migrations.json')) process.kill(process.pid, 'SIGKILL');
   return origRename.apply(this, arguments);
 };
+// lane hub-loop-stalls commit 2 round 3 (law 2): a store writer's synchronous flush (the estimator's flushRates) runs its
+// rename on the WRITER'S THREAD — the kill follows it there: a stand-in thread runs the real writeJob with a renameSync that
+// kills the process at the same file
+{
+  const SWm = require(${JSON.stringify(path.join(REPO_ROOT, 'src/store-writer.js'))});
+  const KW = path.join(process.argv[2], 'kill-writer-thread.cjs');
+  fs.writeFileSync(KW, "'use strict';\\n" +
+    "const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'), path = require('path');\\n" +
+    "const { writeJob } = require(" + JSON.stringify(${JSON.stringify(path.join(REPO_ROOT, 'src/store-writer-worker.js'))}) + ");\\n" +
+    "const S = new Int32Array(workerData.sab), point = process.env.KILL_POINT;\\n" +
+    "const pf = Object.assign({}, fs, { renameSync: (a, b) => { if (point === 'rates' && path.basename(String(b)) === 'rates.json') process.kill(process.pid, 'SIGKILL'); return fs.renameSync(a, b); } });\\n" +
+    "parentPort.on('message', (m) => { if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return; Atomics.store(S, 0, m.id); let err = null; const t0 = process.hrtime.bigint();\\n" +
+    "  if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch (e) { } } else { try { writeJob(m, pf); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch (e2) { } } }\\n" +
+    "  const ms = Number(process.hrtime.bigint() - t0) / 1e6; Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);\\n" +
+    "  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err }); });\\n");
+  const wr = SWm.create({ workerPath: KW }); SWm.storeWriter = () => wr;
+}
 const { create } = require(${JSON.stringify(MIG)});
 const root = process.argv[2], d = path.join(root, 'data'), ID = ${JSON.stringify(ID)}, notices = [];
 const mm = create({ rootDir: root, homeDir: path.join(root, 'home'), serverNotice: (k, t) => notices.push([k, t]) });
@@ -1888,7 +1905,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // Reproduced on a real boot (/var/tmp/vibespace-lanes/settings-prune/r1-repro/boot-cache.mjs): 7 back, 0 after the fix.
     {
       const sv = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
-      ok(/\.runLocalMigrations\(\); persistenceRouter\.reloadSettings\?\.\(\)/.test(sv), 'server.js drops the settings cache right after the boot migrations ran');
+      ok(/\.runLocalMigrations\(\)\)?; persistenceRouter\.reloadSettings\?\.\(\)/.test(sv), 'server.js drops the settings cache right after the boot migrations ran (lane hub-loop-stalls: the run is the boot trace\'s «migrations» step)');
       const express = require('express');
       const survive = async (P, tag) => {
         const r = mkRoot('cache-' + tag);

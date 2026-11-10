@@ -1404,9 +1404,10 @@ function create(deps = {}) {
     return { pages, complete };
   }
   /** lane discovery-cursor-persist: the walk's state reaches the record only AFTER the rows it listed are on disk (the
-   *  index flush FIRST — the feed's owed-before-cursor order): a crash between the two re-lists, it never skips a row. */
+   *  index write FIRST — the feed's owed-before-cursor order): a crash between the two re-lists, it never skips a row.
+   *  Awaited off the loop (lane hub-loop-stalls commit 2: the inline write held the loop 0.5 s at boot on a slow disk). */
   async function keepDisc(rec, d) {
-    try { store.index.flush(); } catch (err) { log.warn(`[channels] ${rec.id}: the listed conversations were not flushed (${(err && err.message) || err}) — the listing's cursor on disk stays where it was`); return; }
+    if (!(await store.index.durable())) { log.warn(`[channels] ${rec.id}: the listed conversations did not reach the disk (the index write failed — retried) — the listing's cursor on disk stays where it was`); return; }
     rec.discovery = Drain.discoveryRecord(d);
     await saveAdapters();
   }
@@ -1789,7 +1790,7 @@ function create(deps = {}) {
       }
     });
     let durable = true;
-    if (writes) try { store.index.flush(); } catch (err) { durable = false; log.warn(`[channels] ${rec.id}: the change feed's owed marks were not flushed (${(err && err.message) || err}) — its cursor stays; the window is read again`); }
+    if (writes && !(await store.index.durable())) { durable = false; log.warn(`[channels] ${rec.id}: the change feed's owed marks did not reach the disk (the index write failed — retried) — its cursor stays; the window is read again`); }
     for (const [vid] of fold.seenAdd) e.feedSeen.set(vid, t);
     Feed.trimSeen(e.feedSeen, t);
     for (const h of verdict.hits) if (h && h.convId && !(Number(e.feedConvAt.get(h.convId)) >= Number(h.at))) { e.feedConvAt.delete(h.convId); e.feedConvAt.set(h.convId, Number(h.at) || 0); }
@@ -3647,7 +3648,7 @@ function create(deps = {}) {
         const w = e2 && e2.stats && Array.isArray(e2.stats.wakes) && e2.stats.wakes.length ? e2.stats.wakes[e2.stats.wakes.length - 1] : null;
         if (w && w.ok === false && !w.handedOverAt && w.lane === 'stash' && cid && w.cid === String(cid)) { w.handedOverAt = t; w.handedOverTo = String(cid); stamped.push(k); }
       }
-    });
+    }, { durable: true });
     if (stamped.length) notify(stamped);
     return stamped;
   }
@@ -4553,7 +4554,7 @@ function create(deps = {}) {
       const en = store.index.entry(adapterId, convId, { create: false });
       if (!en) return;
       if (every === null) delete en.refresh; else en.refresh = { every, by: by === 'migration' ? 'migration' : 'user', at: t };
-    });
+    }, { durable: true });
     notify([`${adapterId}/${convId}`]);
     const en = store.index.peek(`${adapterId}/${convId}`);
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
@@ -5302,7 +5303,7 @@ function create(deps = {}) {
       const ks = Object.keys(tc).sort((a, b) => (Number(tc[b] && tc[b].at) || 0) - (Number(tc[a] && tc[a].at) || 0));
       en.threadCuts = Object.fromEntries(ks.slice(0, THREAD_WALKS_KEPT).map((x) => [x, tc[x]]));
     });
-    try { store.index.flush(); } catch (err) { log.warn(`[channels] ${adapterId}/${convId}: the thread walk's stop was not flushed (it rides the next write): ${(err && err.message) || err}`); }
+    if (!(await store.index.durable())) log.warn(`[channels] ${adapterId}/${convId}: the thread walk's stop did not reach the disk (the index write failed — it rides the retry)`);
   }
   /**
    * THE READ SHAPE (spec §3.5): a page of records as the window reads it — `withBlocks` + each record's `place`
@@ -5920,14 +5921,18 @@ function create(deps = {}) {
   async function noteRecall(rec, convId, vid) {
     if (!deliver || typeof deliver.stashFor !== 'function') return;
     const due = [];
-    await store.index.update(() => {
+    // round 3 (smaller 2): the note goes WITH the mark — a durable update that failed (not-durable: applied in memory, not on
+    // disk yet) still sends the notes; round 2 rejected before them and the agent never heard of the recall (master sent it)
+    let notDurable = null;
+    try { await store.index.update(() => {
       const en = store.index.entry(rec.id, convId, { create: false });
       if (!en || !Array.isArray(en.wokeFor)) return;
       // ONE note per conversation (lane channel-recall-engine-leg): a message carried to it twice (a re-delivery, a scope
       // digest beside a wake) has two rows here — both are marked, the conversation hears it once (the first wake's time)
       const key = Rev.wokeKeyOf(vid);   // the door's key (lane channel-recall-ledger)
       for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
-    });
+    }, { durable: true }); } catch (e) { if (e && e.code === 'not-durable' && e.applied) notDurable = e; else throw e; }
+    if (notDurable && due.length) log.warn(`[channels] ${rec.id}/${convId}: a recall's «noted» marks are in memory, not on disk yet — the note is sent now (a restart before the storage answers may send it once more)`);
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
     // removed since the wake hears nothing more from here
@@ -6908,7 +6913,7 @@ function create(deps = {}) {
       changed = en.readAt !== stamp || en.unread !== unread;
       en.readAt = stamp;
       en.unread = unread;
-    });
+    }, { durable: true });
     if (!found) return false;
     // B-f32b: the KEY — a bare id makes notify scan every key of the index (50 274 at userW's)
     if (changed) notify([`${adapterId}/${convId}`]);
@@ -7753,7 +7758,7 @@ function create(deps = {}) {
     const fresh = seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all;
     const carriedNow = fromPending || parked;
     if (!fresh.length && !(parked && parked.elided)) {
-      if (parked) await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); });   // this batch already handed them to that session
+      if (parked) await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }, { durable: true });   // this batch already handed them to that session
       return { ok: true, deduped: true, cid: target.cid, n: 0 };
     }
     const label = rec.label || rec.id;
@@ -7766,10 +7771,10 @@ function create(deps = {}) {
     catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the next-turn notification for ${pk} could not be stashed: ${(err && err.message) || err}`); if (!fromPending) await keepPending(rec, convId, fresh.filter((h) => !parked || !parked.hits.includes(h)), 0, pk, 'next-turn'); return { ok: false, held: true, why: 'stash-failed' }; }
     if (batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of fresh) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
     // the carried rows were handed over — clear those and only those (still on the chain: the next reader sees them gone)
-    if (parked) { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }); notify([convId]); }
+    if (parked) { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }, { durable: true }); notify([convId]); }
     // THE LEDGER DOOR — the free stash road (lane channel-recall-ledger, B-70d2): the hits reached this conversation, so a
     // later recall of one of them is noted here too (was: no row — a next-turn watch, the agent's default, heard nothing)
-    try { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (e2) noteDelivered(e2, fresh, target.cid, now()); }); }
+    try { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (e2) noteDelivered(e2, fresh, target.cid, now()); }, { durable: true }); }
     catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the woken-for ledger could not take the next-turn delivery for ${pk}: ${(err && err.message) || err}`); }
     log.log(`[channels] ${rec.id}/${convId}: ${fresh.length} hit(s) for ${pk} ride its next turn (next-turn notification, no wake)${parked ? ` — ${parked.hits.length} parked while nobody was live carried along` : ''}`);
     return { ok: true, stashed: true, next: true, cid: target.cid, n: fresh.length, ...(parked ? { carried: parked.hits.length } : {}), stored: st && st.stored };
@@ -7808,7 +7813,7 @@ function create(deps = {}) {
         e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + drop.size;
         e2.pending = e2.pending.filter((_, i) => !drop.has(i));
       }
-    });
+    }, { durable: true });
   }
   /** THE ROAD OF STORED HITS (lane boot-flush-next-turn, MONEY): a pending row remembers the road it was parked on
    *  (`road: 'next-turn'` from `stashHits` — nobody was live; `'wake'` from a held wake / a window). A door may start a
@@ -7827,7 +7832,7 @@ function create(deps = {}) {
   async function stashPending(rec, convId, item, pk, pend) {
     const r = await stashHits(rec, convId, pend.hits, { item, pk, fromPending: pend });
     if (!r || !r.ok) return r;
-    await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), pend); });
+    await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), pend); }, { durable: true });
     notify([convId]);
     return r;
   }
@@ -8001,7 +8006,7 @@ function create(deps = {}) {
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
           noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
-      }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
+      }, { durable: true }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
       notify(held.map((h) => h.key));
       return { ok, stashed, cid: target.cid, n, conversations: groups.length };
@@ -8195,7 +8200,7 @@ function create(deps = {}) {
         // R4 verify r5: {bootId, pid} rides the reservation so a crash's ghost
         // (a reserved row never finalized, from a previous boot) is releasable.
         own.stats.wakes = F.pruneLedger([...(Array.isArray(own.stats.wakes) ? own.stats.wakes : []), { ...row, id, reserved: true, bootId: BOOT_ID, pid: process.pid }], row.at);
-      });
+      }, { durable: true });
       return id;
     } catch (err) { log.warn(`[channels] ${rec.id}${convId ? '/' + convId : ''}: the ledger could not take the wake's row — held, not billed: ${(err && err.message) || err}`); return null; }
   }
@@ -8279,7 +8284,7 @@ function create(deps = {}) {
     if (already) {
       const unseen = hits.filter((h) => !(h.record && already.has(h.record.id)));
       if (!unseen.length && !allElided) {
-        await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); });
+        await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); }, { durable: true });
         log.log(`[channels] ${rec.id}/${convId}: ${pk} — this batch already reached ${target.cid} through another notification; not woken twice`);
         return { ok: true, deduped: true, cid: target.cid, n: 0 };
       }
@@ -8394,7 +8399,7 @@ function create(deps = {}) {
         if (Number(newElided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(newElided);
       }
       if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[w.principal.id] = target.cursor;
-    }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the ledger could not take the wake's outcome — the reservation stays counted: ${(err && err.message) || err}`); }
+    }, { durable: true }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the ledger could not take the wake's outcome — the reservation stays counted: ${(err && err.message) || err}`); }
     log.log(`[channels] wake ${rec.id}/${convId} → ${target.name || target.cid}: ${n} hit(s) (${F.whyText(whys)})${coalesced && coalesced.n > 1 ? `, ${coalesced.n} coalesced in ${Math.round(coalesced.seconds)} s` : ''}${digest ? ', digest' : ''} — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
     notify([convId]);
     return { ok, stashed, cid: target.cid, n, why: ok ? null : ((r && r.reason) || 'refused'), refused: ok ? null : refusalWords(still, r, 'wake').refused, held: targetGone || undefined };

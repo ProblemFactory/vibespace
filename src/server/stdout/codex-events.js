@@ -170,7 +170,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
               createdAt: session.createdAt,
               webuiSessionId: id,
               mode: session.mode,
-            });
+            }, { durable: true });
             broadcastActiveSessions();
           }
           // Track turn lifecycle: streaming state + activity label

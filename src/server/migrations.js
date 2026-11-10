@@ -1499,6 +1499,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   }
 
   function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
+    // lane hub-loop-stalls commit 2: the live ledger's cursors are written by the store writer — an owed write is settled
+    // before any migration reads or rewrites _cursors.json (never an older state landing after a migration's own)
+    try { const uh0 = typeof usageHistory === 'function' ? usageHistory() : usageHistory; if (uh0 && typeof uh0.settleCursors === 'function') uh0.settleCursors(); } catch { }
     // `todos` (r3, review F2b): a failed row is ONE For-you item keyed by its id, resolved by the run that succeeds (the runner's)
     const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, onLate: (r) => {
       // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's.

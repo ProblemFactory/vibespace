@@ -385,8 +385,31 @@ function settleWrapperMeta(metaPath, maxMs, done) {
 }
 
 // Read/write session metadata
+// lane hub-loop-stalls commit 2: a meta's UPDATES reach the disk through THE STORE WRITER (its own thread; the owner's
+// hub held its loop on this rename, 4 holds ≥ 1 s in six hours) — the latest text not yet on disk is kept HERE and
+// readSessionMeta answers it (this process reads its own write); a meta's FIRST version (a new socket) is written
+// synchronously, so a kill can never leave a live socket without its meta. Directory scanners that read the files
+// themselves (browser-env, usage-routes, channels liveness, boot-restore, weekly-lanes-unfold) may see a version up to
+// one write old (≤ META_DEBOUNCE_MS + the 500 ms gap + the write) — the census row says so.
+const META_DEBOUNCE_MS = 100;
+const pendingMeta = new Map();    // file → the latest meta TEXT not yet on disk
+const writingMeta = new Map();    // file → the text the writer's thread is writing now
+const knownMeta = new Set();      // files whose first version is ON DISK (this process wrote it, or the directory listed it)
+const listedMetaDirs = new Set();  // round 3 (law 3): A FILE'S FIRST VERSION IS A FACT OF THE DISK, NOT OF THIS PROCESS — the
+                                   // meta directory is listed ONCE per process (one readdir), so after a restart the first
+                                   // update of an existing meta takes the writer; only a file that does not exist yet (a
+                                   // socket being born) is written here, synchronously
+function knownOnDisk(dir, fp) {
+  if (knownMeta.has(fp)) return true;
+  if (!listedMetaDirs.has(dir)) { listedMetaDirs.add(dir); try { for (const f of fs.readdirSync(dir)) if (f.endsWith('.json')) knownMeta.add(path.join(dir, f)); } catch { } }
+  return knownMeta.has(fp);
+}
+const storeWriter = () => require('../store-writer.js').storeWriter();
 function readSessionMeta(sockName) {
-  try { return timedSync('session-meta.read', () => JSON.parse(fs.readFileSync(path.join(META_DIR, sockName + '.json'), 'utf-8'))); } catch { return {}; }
+  const fp = path.join(META_DIR, sockName + '.json');
+  const owed = pendingMeta.get(fp);
+  if (owed !== undefined) { try { return JSON.parse(owed); } catch { return {}; } }
+  try { return timedSync('session-meta.read', () => JSON.parse(fs.readFileSync(fp, 'utf-8'))); } catch { return {}; }
 }
 // Tombstones (2.89.1): teardown deletes the meta, but debounced/straggler
 // writers (status flush, todo coalesce, attribution) can fire AFTER the delete
@@ -424,8 +447,15 @@ function sessionMetaOwnerConflict(sockName, meta) {
 // session never touches the store.
 let _browserBindings = null;
 const browserBindings = () => _browserBindings || (_browserBindings = require('./browser-bindings.js').create({ dataDir: path.dirname(META_DIR) }));
-function writeSessionMeta(sockName, meta) {
-  if (_metaTombstones.has(sockName)) return;
+/** `{durable: true}` — A BINDING OR A PERSON'S ACT (round 2, law B: the conversation's backend session id after a fork /
+ *  resume, a model lock, effort, permission mode, response style, a goal, a rename, a reach level, a pin, an editor in
+ *  flight): the write is the writer's NEXT (off the loop, rank 0 at a stop) and the returned promise resolves when it is
+ *  on disk (false: it failed — kept, retried; the caller tells the person) — the caller ANSWERS after it. `{sync: true}`
+ *  — a caller that renames / reads the file itself right after (boot-restore's retireDeadSocket): written here, now.
+ *  Everything else (stamps, caches, rings re-derived) is paced. Census ⑦ (scripts/test-store-write-census.mjs) pins every
+ *  call by scope. */
+function writeSessionMeta(sockName, meta, { durable = false, sync = false } = {}) {
+  if (_metaTombstones.has(sockName)) return Promise.resolve(true);
   sessionMetaOwnerConflict(sockName, meta);
   // SESSION-BRAIN step 1 (design §session-brain campaign): the buffer's OWNER
   // is EXPLICIT in every session record. Today the server writes
@@ -441,7 +471,29 @@ function writeSessionMeta(sockName, meta) {
   // the next restore.
   const fp = path.join(META_DIR, sockName + '.json');
   const tmp = fp + '.tmp';
-  timedSync('session-meta.write', () => { fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, fp); });
+  const text = JSON.stringify(meta);
+  let done = Promise.resolve(true);
+  if (!sync && !knownOnDisk(META_DIR, fp)) {   // its FIRST version (a socket being born — never a live socket without its meta after a kill): here, now
+    timedSync('session-meta.write', () => { fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp); });
+    knownMeta.add(fp); pendingMeta.delete(fp);
+  } else if (sync) {
+    // round 3 (law 3): a caller that renames / reads the file right after (boot-restore's retireDeadSocket) — this version
+    // SUPERSEDES a paced one in flight: that write lands first, then this one, on the writer's thread, waited for here
+    // (round 2 forgot the flying write, whose landing was then unlinked: the file this write had just made was deleted)
+    pendingMeta.set(fp, text);
+    storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: 0,
+      produce: () => { const t = pendingMeta.get(fp); if (t === undefined) return null; writingMeta.set(fp, t); return t; },
+      onWritten: (ok) => { const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp); } });
+    const r = storeWriter().flushSync([fp]);
+    if (r.left.length) console.warn(`[session] ${sockName}: its meta could not be written before its rename (${r.left[0].why}) — kept in memory, retried`);
+    knownMeta.add(fp);
+  } else {
+    pendingMeta.set(fp, text);
+    storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: META_DEBOUNCE_MS, ...(durable ? { rank: 0 } : {}),
+      produce: () => { const t = pendingMeta.get(fp); if (t === undefined) return null; writingMeta.set(fp, t); return t; },
+      onWritten: (ok) => { const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp); } });
+    if (durable) done = storeWriter().durable(fp).then((ok) => { if (!ok) { let wn = null; try { wn = storeWriter().whyNotDurable(fp); } catch { } console.warn(`[session] ${sockName}: a binding / a person's choice is in memory but not on disk yet (${wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow; kept, written in its turn` : 'its write failed — kept, retried'})`); } return ok; });
+  }
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
   // r6: the id a record may BIND is not always the id it NAMES — a claude/codex
   // fork carries the PARENT's conversation id until the harness announces its
@@ -453,11 +505,15 @@ function writeSessionMeta(sockName, meta) {
   // consumer) — that one is SAID once per (session, id), because the running
   // process keeps the browser it spawned with and nothing else would tell.
   try { if (meta && meta.browserKey) { const b = browserBindings(); const sid = b.bindableIdOf(meta); if (sid) b.record(sid, meta.browserKey); else b.noteUnbound(meta, sockName); } } catch (e) { console.warn('[browser] binding record failed: ' + (e && e.message)); }
+  return done;
 }
 function deleteSessionMeta(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
-  try { fs.unlinkSync(path.join(META_DIR, sockName + '.json')); } catch {}
+  const fp = path.join(META_DIR, sockName + '.json');
+  pendingMeta.delete(fp); knownMeta.delete(fp);
+  try { storeWriter().forget(fp); } catch {}   // its pending write dropped; one in flight lands BEFORE the unlink, never after
+  try { fs.unlinkSync(fp); } catch {}
 }
 
 // ── SESSION LIVENESS (2026-09-09, the restore incident) ────────────────────
