@@ -157,16 +157,19 @@ function loginBoxEl(item) {
   const allowLab = mk('label', 'ut-login-allow');
   allowLab.append(allow, mk('span', null, t('Let {who} sign in to {site} with it', { who, site })));
   const allowSays = mk('div', 'ut-secret-note ut-login-says');
+  const allowFence = mk('div', 'ut-secret-note ut-login-fence');
   const row = mk('div', 'ut-secret-row');
   const save = btn('', 'ut-act ut-secret-save'), deny = btn(t('Refuse'), 'ut-act ut-secret-deny');
   const sayAllow = () => {
     allowSays.textContent = allow.checked ? t('{who} can sign in as you on {site} with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit.', { who, site }) : t('{who} cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for….', { who });
+    allowFence.textContent = allow.checked ? t('VibeSpace never hands the password to the agent and types it only on {site} into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.', { site }) : '';
+    allowFence.style.display = allowFence.textContent ? '' : 'none';
     save.textContent = allow.checked ? t('Save and allow') : t('Save only');
   };
   allow.addEventListener('change', sayAllow); sayAllow();
   row.append(save, deny);
   const note = mk('div', 'ut-secret-note', t('Wrong site? Refuse — the agent can ask again with the right one.'));
-  box.append(f.fields[0], f.fields[1], kept, f.fields[2], otpRow, f.otpNames, f.hint, allowLab, allowSays, row, note, stateEl());
+  box.append(f.fields[0], f.fields[1], kept, f.fields[2], otpRow, f.otpNames, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
   applySecretBox(box);
   return box;
 }
@@ -305,7 +308,7 @@ export async function postSecretAnswer(item, answer, { value = null, name, note,
   const body = answer === 'store' ? (totp ? { answer, totpLink: totp.uri, totpSeed: totp.seed, totp: { name: totp.name, digits: totp.digits, period: totp.period, algorithm: totp.algorithm }, allow: totp.allow === true } : login ? { answer, ...login } : { answer, value, ...(typeof name === 'string' ? { name } : {}), ...(typeof note === 'string' ? { note } : {}) }) : { answer };   // name / note: lane vault-entry-description · login: lane login-request-card (its password as `loginPassword` — the route takes it off the body)
   const r = await fetchJson(`/api/vault/secret-requests/${encodeURIComponent(item.action.requestId)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (r && r.ok && totp && r.outcome === 'stored') { showToast(r.allowed ? t('Saved «{name}» — the agent may read its current code while it runs; it never sees the seed', { name: r.name }) : totp.allow ? t('Saved «{name}», but its code was not given — that conversation was not running; give it in Vault ▸ Two-step codes ▸ Use for…', { name: r.name }) : t('Saved «{name}» — the agent cannot read its code until you give it', { name: r.name }), totp.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane totp-request-card
-  if (r && r.ok && login && r.outcome === 'stored') { showToast(r.allowed ? t('Saved to the vault — the agent may sign in with it on that site; it never sees the password') : login.allow ? t('Saved to the vault, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…') : t('Saved to the vault — the agent cannot sign in with it until you allow it'), login.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane login-request-card
+  if (r && r.ok && login && r.outcome === 'stored') { showToast(r.allowed ? t('Saved to the vault — the agent may sign in with it on that site; VibeSpace never hands it the password') : login.allow ? t('Saved to the vault, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…') : t('Saved to the vault — the agent cannot sign in with it until you allow it'), login.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane login-request-card
   if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;
   if (typeof onRefusal === 'function') { try { onRefusal(code, r); } catch { } }

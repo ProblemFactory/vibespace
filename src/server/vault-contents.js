@@ -164,7 +164,7 @@ function secretSource({ vault, machineName } = {}) {
       if (!g.value) return null;
       let text;
       try { text = g.value.toString('utf8'); } finally { g.value.fill(0); }
-      if (String(entry).startsWith('web-login:')) { const rec = require('../browser-login.js').recordOf(text); if (!rec) throw Object.assign(new Error('key-malformed'), { code: 'key-malformed' }); return rec.password; }   // lane browser-login: ONE value — the password (never the record's other fields)
+      if (String(entry).startsWith('web-login:')) { const BL = require('../browser-login.js'); const rec = BL.recordOf(text); const sv = rec ? BL.resolveSlotValue(rec, 'password') : null; if (!sv || !sv.ok) throw Object.assign(new Error('key-malformed'), { code: 'key-malformed' }); return sv.value; }   // lane browser-login: ONE value — current password, or pending on an unconfirmed registration (never the record's other fields)
       if (!String(entry).startsWith(T.ENTRY_PREFIX)) return text;
       const rec = T.recordOf(text);
       if (!rec) throw Object.assign(new Error('key-malformed'), { code: 'key-malformed' });

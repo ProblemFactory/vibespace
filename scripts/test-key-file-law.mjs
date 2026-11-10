@@ -699,5 +699,194 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
 // ③b's verdict over EVERYTHING above (③, the boots, ④) — the RED controls' own hits were taken out where they ran
 ok(BELT.hits.length === 0 && BELT.lawful > 0, `BEHAVIOUR: ${BELT.lawful} key-file fs calls while the six stores ran every leg, booted over fresh + filled dirs (mounts' restore() too) and the passkey doors ran — every one from src/secret-box.js under key-file.js's loadOrMintKey`, BELT.hits.join(' | '));
 for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+
+// ── ⑤ RULE 5′ (lane vault-login r22): NO sha256(…secret…) WRITTEN UNDER data/ ────────────────────────────────────────
+console.log('⑤ RULE 5′: no sha256(…secret…) written under data/ — static census + runtime data/ sweep + planted writer RED');
+BELT.paused++;
+try {
+  const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
+  const SHA256_WRITERS_KFL = new Set([
+    'src/agent-routes.js', 'src/agentd/agentd.js', 'src/agentd/client.js', 'src/agentd/stream-mac.js',
+    'src/agentd/stream-window-source.js', 'src/app-serve.js', 'src/auth.js', 'src/channel-outbox-files.js',
+    'src/claude-oat-probe.js', 'src/ctx-sync.js', 'src/desktop-mic.js', 'src/exit-proxy.js', 'src/incident.js', 'src/jobs.js',
+    'src/kept-copies.js', 'src/mounts.js', 'src/node-runtime.js', 'src/plugins/frp.js',
+    'src/server/automation-engine.js', 'src/server/browser-cloak-install.js', 'src/server/browser-logins.js', 'src/server/channel-api-cards.js',
+    'src/server/channel-api.js', 'src/server/channels-attention.js', 'src/server/cli-self-measure.js', 'src/server/decision-engine.js',
+    'src/server/desktop-access.js', 'src/server/dropline-oauth.js', 'src/server/engine-distribution.js',
+    'src/server/feedback-forward.js', 'src/server/local-index.js', 'src/server/migrations.js', 'src/server/plugin-install.js',
+    'src/server/stash-handover.js', 'src/server/tls.js', 'src/server/vault-run-door.js',
+    'src/server/vault-totp.js', 'src/server/voice-teach-engine.js', 'src/ssh-key.js',
+    'src/user-todos.js', 'src/webdav.js',
+  ]);
+  const WRITE_NAMES_KFL = new Set(['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'replaceShredding', 'writeJsonAtomic', '_save', 'saveRegistry']);
+  const judgeDigestWriters = (srcMap) => {
+    const red = [];
+    for (const [rel, text] of srcMap) {
+      if (rel.startsWith('src/lib/')) continue;
+      const { toks, err } = tokensOf(text);
+      if (err) { red.push(`${rel}: tokenize (${err})`); continue; }
+      const hasSha256 = toks.some((t, i) => isName(t, 'createHash') && isPunc(toks[i + 1], '(') && toks[i + 2] && String(toks[i + 2].value) === 'sha256');
+      const hasWrite = toks.some((t) => isName(t) && WRITE_NAMES_KFL.has(t.value));
+      if (hasSha256 && hasWrite && !SHA256_WRITERS_KFL.has(rel)) {
+        red.push(`${rel}: unclassified sha256 + persistence writer`);
+      }
+      if ((rel === 'src/browser-profiles.js' || rel === 'src/server/browser-keeper.js') && toks.some((t) => isName(t, 'credSigs'))) {
+        red.push(`${rel}: credSigs persisted outside vault`);
+      }
+    }
+    return red;
+  };
+  const r0 = judgeDigestWriters(SRC);
+  ok(r0.length === 0, 'RULE 5′ static census (SRC): 0 unclassified sha256 persistence writers and 0 credSigs in browser-profiles/keeper', r0.join(' | '));
+  const plantedSrc = new Map(SRC);
+  plantedSrc.set('src/accounts.js', (plantedSrc.get('src/accounts.js') || '') + "\nconst _badDigest = (k) => require('crypto').createHash('sha256').update(k).digest('hex');\n");
+  ok(judgeDigestWriters(plantedSrc).length > 0, 'RULE 5′ static RED control: a planted sha256 writer in src/accounts.js goes RED');
+
+  const d5 = freshDir('r22-data-nodigest');
+  const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+  const BL = require(path.join(REPO, 'src/browser-login.js'));
+  const LF5 = require(path.join(REPO, 'src/server/browser-login-fill.js'));
+  const Lm = require(path.join(REPO, 'src/server/browser-logins.js'));
+  const BK = require(path.join(REPO, 'src/server/browser-keeper.js'));
+  const Dm5 = require(path.join(REPO, 'src/server/browser-dialogs.js'));
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const eng5 = VE.create({ dataDir: d5, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+  const vpw5 = `Birch${crypto.randomInt(1000, 9999)}Key!`;
+  await eng5.setup(vpw5);
+  const acc5 = new AccountManager({ dataDir: d5 });
+  const ak5 = 'sk-ant-kfl5-' + crypto.randomBytes(6).toString('hex');
+  acc5.add({ name: 'kfl5', key: ak5 });
+  const GS5 = require(path.join(REPO, 'src/server/grants-store.js'));
+  const grants5 = GS5.create({ memory: true });
+  grants5.set('browser-login', 'https://vault.example.test#*', { to: [{ kind: 'conversation', key: 'conv-kfl5' }] });
+  const logins5 = Lm.create({ vault: eng5, grants: () => grants5, forYou: { add: () => 'fy5', resolve() {} } });
+  const p05 = `Spruce${crypto.randomInt(1000, 9999)}!`;
+  const entry5 = 'web-login:https://vault.example.test#owner';
+  logins5.addOwn({ origin: 'https://vault.example.test', username: 'owner', password: p05 }, { who: 'owner' });
+  const keeper5 = BK.create({
+    rootDir: d5, dataDir: d5, profilesRoot: path.join(d5, 'profiles'), runtimeRoot: path.join(d5, 'run'),
+    log: quiet, launchImpl: async () => { throw new Error('no launch'); },
+  });
+  const pf5 = keeper5.createProfile({ label: 'KFL5' }, { owner: { kind: 'user', id: 'owner' } });
+  const fk5 = await startFakeKernel({ firstUrl: 'https://vault.example.test/settings/password' });
+  const mkWatch5 = (Dmod, rk) => Dmod.create({
+    keeper: {
+      cdpEndpointFor: async () => ({ ok: true, url: fk5.wsUrl }),
+      mediator: () => ({}),
+      onLease: () => () => {},
+      saveLoginFenceState: (id, st) => rk.saveLoginFenceState(id, st),
+      loginFenceStateOf: (id) => rk.loginFenceStateOf(id),
+    },
+    log: quiet, enableTimeoutMs: 300,
+    holdersOf: () => [{ browserKey: 'bk-kfl5', sessionId: 'sess-kfl5', ephemeral: false }],
+    leaseCountOf: () => 1, logins: logins5,
+    conversationOf: () => ({ cid: 'conv-kfl5', name: 'Chat' }),
+  });
+  const w5 = mkWatch5(Dm5, keeper5);
+  await w5.arm(pf5.id, { budgetMs: 3000 });
+  const tid5 = fk5.targets()[0].targetId;
+  fk5.setDom(tid5, {
+    url: 'https://vault.example.test/settings/password',
+    elements: [
+      { id: 'op', tag: 'input', type: 'password', axRole: 'textbox', axName: 'Current password' },
+      { id: 'np', tag: 'input', type: 'password', axRole: 'textbox', axName: 'New password' },
+    ],
+  });
+  await w5.noteSnapshot({ profileId: pf5.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]\n- textbox "New password" [ref=e2]');
+  const fillCur5 = await w5.fillVaultField(
+    { profileId: pf5.id, browserKey: 'bk-kfl5', ephemeral: false },
+    { target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+  );
+  const fillNew5 = await w5.fillVaultField(
+    { profileId: pf5.id, browserKey: 'bk-kfl5', ephemeral: false },
+    { target: '@e2', spec: 'vault.example.test#owner/password', generate: true, facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+  );
+  const rec5 = BL.recordOf(eng5.secretGet(entry5).value.toString('utf8'));
+  const p15 = rec5 && rec5.pending ? rec5.pending.password : null;
+  const keyBufs5 = VE.STORE_KEYS.map((k) => [`key:${k.name}`, eng5.keyFor(k.name).key]).filter(([, b]) => Buffer.isBuffer(b));
+  const secrets5 = [['vaultPw', vpw5], ['accountSecret', ak5], ['loginP0', p05], ['loginP1', p15], ...keyBufs5];
+  const shaForms = (v) => {
+    const b = Buffer.isBuffer(v) ? v : Buffer.from(String(v), 'utf8');
+    const rawStr = b.toString('utf8');
+    const d256 = crypto.createHash('sha256').update(b).digest();
+    const d1 = crypto.createHash('sha1').update(b).digest();
+    const d512 = crypto.createHash('sha512').update(b).digest();
+    return [
+      rawStr, JSON.stringify(rawStr).slice(1, -1), encodeURIComponent(rawStr),
+      b.toString('hex'), b.toString('base64'), b.toString('base64url'),
+      d256.toString('hex'), d256.toString('hex').toUpperCase(), d256.toString('base64'), d256.toString('base64url'),
+      d1.toString('hex'), d1.toString('hex').toUpperCase(), d1.toString('base64'), d1.toString('base64url'),
+      d512.toString('hex'), d512.toString('hex').toUpperCase(), d512.toString('base64'), d512.toString('base64url'),
+    ].filter((x) => x && x.length >= 6);
+  };
+  const walkDataFiles5 = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? walkDataFiles5(p) : e.isFile() ? [p] : [];
+  });
+  const sweep5 = (dir) => {
+    const hits = [];
+    for (const f of walkDataFiles5(dir)) {
+      const txt = realRead(f, 'utf8');
+      const rel = path.relative(dir, f);
+      for (const [lbl, sec] of secrets5) {
+        if (!sec) continue;
+        for (const form of shaForms(sec)) {
+          if (txt.includes(form)) hits.push(`${rel}:${lbl}`);
+        }
+      }
+    }
+    return hits;
+  };
+  const sweepHits0 = sweep5(d5);
+  ok(fillCur5.ok && fillNew5.ok && Boolean(p15) && walkDataFiles5(d5).length >= 3 && sweepHits0.length === 0,
+    'RULE 5′ runtime data/ sweep (live browser-dialogs fillVaultField): store keys, vault password, account secret and typed web-login P0/P1 leave 0 raw/sha256/sha1/sha512 traces across all files under data/',
+    sweepHits0.join(' | '));
+  const dsrc5 = realRead(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const m4Src5 = dsrc5.replace(
+    '          urlAtFill: String(e.liveFill.urlAtFill || tabLoginUrlOf(e)),',
+    '          urlAtFill: String((e.liveFill.credSigs && e.liveFill.credSigs[0] && e.liveFill.credSigs[0].sha256) || e.liveFill.urlAtFill || tabLoginUrlOf(e)),',
+  );
+  const MUT5 = mutantCopies('key-file-law-r22-m4', REPO);
+  const Dm5M4 = m4Src5 !== dsrc5 ? MUT5.load('src/server/browser-dialogs.js', m4Src5, 'kfl-m4-evasive') : null;
+  const d5M4 = freshDir('r22-data-m4');
+  const d5M4Sub = path.join(d5M4, 'sub');
+  fs.mkdirSync(d5M4Sub, { recursive: true });
+  const keeper5M4 = BK.create({
+    rootDir: d5M4, dataDir: d5M4, profilesRoot: path.join(d5M4, 'profiles'), runtimeRoot: path.join(d5M4, 'run'),
+    log: quiet, launchImpl: async () => { throw new Error('no launch'); },
+  });
+  const pf5M4 = keeper5M4.createProfile({ label: 'KFL5M4' }, { owner: { kind: 'user', id: 'owner' } });
+  let sweepHitsM4 = [];
+  if (Dm5M4) {
+    const w5M4 = mkWatch5(Dm5M4, keeper5M4);
+    await w5M4.arm(pf5M4.id, { budgetMs: 3000 });
+    logins5.confirmOwn(entry5, { who: 'owner' });
+    await w5M4.noteSnapshot({ profileId: pf5M4.id, browserKey: 'bk-kfl5' }, '- textbox "Current password" [ref=e1]');
+    await w5M4.fillVaultField(
+      { profileId: pf5M4.id, browserKey: 'bk-kfl5', ephemeral: false },
+      { target: '@e1', spec: 'vault.example.test#owner/password', facts: { conversationKeys: ['conv-kfl5'] }, conv: 'conv-kfl5', actor: 'Chat' },
+    );
+    fs.writeFileSync(path.join(d5M4Sub, 'nested-sha512.json'), JSON.stringify({ h: crypto.createHash('sha512').update(p05, 'utf8').digest('hex') }), { mode: 0o600 });
+    fs.mkdirSync(path.join(d5M4, 'profiles', 'bp-00000001'), { recursive: true });
+    fs.writeFileSync(path.join(d5M4, 'profiles', 'bp-00000001', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha1').update(p05, 'utf8').digest('hex') }), { mode: 0o600 });
+    fs.mkdirSync(path.join(d5M4, 'run'), { recursive: true });
+    fs.writeFileSync(path.join(d5M4, 'run', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha256').update(p05, 'utf8').digest('base64url') }), { mode: 0o600 });
+    sweepHitsM4 = sweep5(d5M4);
+    w5M4.shutdown();
+  }
+  ok(Boolean(Dm5M4)
+    && sweepHitsM4.includes('browser-profiles.json:loginP1')
+    && sweepHitsM4.includes(`${path.join('sub', 'nested-sha512.json')}:loginP0`)
+    && sweepHitsM4.includes(`${path.join('profiles', 'bp-00000001', 'leak.json')}:loginP0`)
+    && sweepHitsM4.includes(`${path.join('run', 'leak.json')}:loginP0`),
+    'RULE 5′ PIN B evasive-mutant M4 RED control: smuggling credSigs.sha256 into persisted scrubs via live fillVaultField (and digests under sub/, profiles/, and run/) goes RED',
+    sweepHitsM4.join(' | '));
+  w5.shutdown();
+  await fk5.close();
+  LF5.clearAllFilledSecrets?.();
+  for (const [, b] of keyBufs5) b.fill(0);
+  eng5.close();
+} finally { BELT.paused--; }
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

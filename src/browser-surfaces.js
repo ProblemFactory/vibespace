@@ -69,9 +69,9 @@ const TEXT_MAX = 4000;
  * `sink` (lane passkey-sink, P2): the kernel FEATURE whose own road answers this kind — on a kernel whose `features` list it
  * (`sinkOf`), the surface is that road's held card only (webauthn: the passkey record — `VibeSpace.webauthnRequest` carries the
  * ceremony, `VibeSpace.webauthnAnswer` / `cancelSurface` answer it; never a dialog_open, never a browser-surface card).
- * lane browser-login (P3): the credential row's answerer is `credentials` — on a kernel that lists it the login form is the web
- * login road's (`VibeSpace.credentialFormDetected` carries the form, `vibespace-browser login` fills it from the vault through
- * `VibeSpace.fillCredential`); the surface stays NOTED (the agent may only dismiss it) and its line names the `login` verb.
+ * lane browser-login (P3, r22 pivot): the credential row's answerer is `credentials` — on a kernel that lists it, vault fields
+ * are filled over CDP through `vibespace-browser fill <@ref|selector> --vault <entry>/<field>` (retiring `VibeSpace.fillCredential`);
+ * `VibeSpace.credentialSubmitted` offers the owner's takeover save-login card, while the surface stays NOTED (the agent may only dismiss it).
  */
 const KIND_TABLE = Object.freeze({
   'js-dialog': { cls: 'held', agent: 'all', policy: null, modality: 'tab-modal', detail: { dialogType: 'word', defaultPrompt: 'text' } }, // alert: P accept — the watch's autoAnswerVerdict (today's rule, its storm budget)
@@ -273,7 +273,7 @@ function closedBlock(b, { how = '', by = '', answeredBy = null, answerId = null,
 function agentMay(b, a) {
   if (!b || !a) return false;
   const row = rowOf(b.kind);
-  if (a.kind === 'credential') return false; // a credential is never the agent's to type (P3: the `login` verb fills through the vault)
+  if (a.kind === 'credential') return false; // a credential is never the agent's to type directly (P3: `fill --vault` types from the vault)
   if (a.kind === 'dismiss') return row.agent !== 'none';
   if (b.kind === 'file-chooser' && b.detail && b.detail.mode === 'save') return false; // where the browser SAVES is the owner's
   if (b.kind === 'download' && b.detail && b.detail.dangerous === true) return false;
@@ -401,7 +401,8 @@ function answersLine(b) {
   let s = mine.length ? `Answer it: ${mine.map((a) => `${cmd(a)} (${quoted(a.label)})`).join('  |  ')}.` : 'You cannot answer it.';
   if (theirs.length) s += ` Only the user can pick ${theirs.map((a) => quoted(a.label)).join(' or ')} — in the live view, or on their For-you card.`;
   if (textFields.length && mine.some((a) => a.kind === 'text' || a.kind === 'choose')) s += ` Its fields: ${textFields.map(fieldWord).join('; ')}.`;
-  if (b.sink === 'credentials' || b.logins) s += ' A login the vault keeps fills it: vibespace-browser login (you never see the password).'; // lane browser-login
+  if (b.sink === 'credentials') s += ' A login the vault keeps fills it: vibespace-browser fill @ref --vault <entry>/password (VibeSpace never hands you the password).'; // lane browser-login (DOM login form note only)
+  else if (b.kind === 'http-auth') s += ' Tell the user which site asks (fill --vault targets page elements only); do not retry in a loop.';
   return s;
 }
 /**

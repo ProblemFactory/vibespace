@@ -88,6 +88,31 @@ function writeAtomic(file, text) {
   try { const d = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); } } catch { /* a dir fsync is best effort */ }
 }
 
+const VAULT_TMP_RE = /^vault\.json\.tmp-(\d+)-[0-9a-f]{8}$/;
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; } catch (e) { return Boolean(e && e.code === 'EPERM'); }
+}
+function sweepStaleVaultTmp(dir, curNow = Date.now()) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return 0; }
+  let swept = 0;
+  for (const name of names) {
+    const m = VAULT_TMP_RE.exec(name);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    if (pid === process.pid) continue;
+    const full = path.join(dir, name);
+    let st;
+    try { st = fs.lstatSync(full); } catch { continue; }
+    if (!st.isFile() || st.isSymbolicLink()) continue;
+    if (pidAlive(pid) && curNow - st.mtimeMs < 60_000) continue;
+    try { fs.unlinkSync(full); swept++; } catch { /* best effort */ }
+  }
+  return swept;
+}
+
 /** Overwrite a file's bytes in place (random, same length, fsync) and unlink it — the plaintext key never lingers in a free block we could reach. */
 function shred(file) {
   if (fs.lstatSync(file).isSymbolicLink()) throw Object.assign(new Error(`${path.basename(file)} is a symbolic link — never shredded through it`), { code: 'ELOOP' });   // verify r2: the overwrite would reach the link's TARGET
@@ -137,6 +162,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     try { rec = JSON.parse(text); } catch { rec = null; }
     if (rec && V.recordShapeOk(rec)) { record = rec; recordBad = null; } else { record = null; recordBad = 'not-a-record'; }
   }
+  sweepStaleVaultTmp(dataDir, now());
   load();
 
   const setUp = () => !!record || !!recordBad;
@@ -185,11 +211,63 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   const announce = () => { try { bcast({ type: 'vault-state', ...facts() }); } catch { } };
 
+  let batchDepth = 0, batchDirty = false;
+  const batchAfterQueue = [];
   function writeRecord(rec) {
     masks = null;   // lane vault-masker-once: an entry added / edited / removed (any record write, even one that then fails) ⇒ the forms are rebuilt at the next ask
     if (faultAt) faultAt('write-record', '');
+    if (batchDepth > 0) {
+      batchDirty = true;
+      return;
+    }
     writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\n');
     contentsChanged('record');
+  }
+  /** Coalesce synchronous in-memory `record` mutations into AT MOST ONE atomic `vault.json` write,
+   *  rolling back `record` on failure and running `afterCommit` side effects only after that write succeeds. */
+  function batchRecordWrite(fn) {
+    if (typeof fn !== 'function') throw new TypeError('vault-engine: batchRecordWrite needs a function');
+    const snap = record ? JSON.parse(JSON.stringify(record)) : record;
+    const outerDirty = batchDirty;
+    const outerQueueLen = batchAfterQueue.length;
+    const afterCommit = (cb) => { if (typeof cb === 'function') batchAfterQueue.push(cb); };
+    batchDepth++;
+    try {
+      const out = fn(afterCommit);
+      if (batchDepth === 1) {
+        const cbs = batchAfterQueue.splice(0, batchAfterQueue.length);
+        if (batchDirty && record) {
+          batchDepth = 0;
+          batchDirty = false;
+          try {
+            writeRecord(record);
+          } catch (e) {
+            record = snap;
+            masks = null;
+            throw e;
+          }
+        } else {
+          batchDepth = 0;
+          batchDirty = false;
+        }
+        for (const cb of cbs) cb();
+        return out;
+      }
+      return out;
+    } catch (e) {
+      if (batchDepth === 1) {
+        batchDirty = false;
+        batchAfterQueue.length = 0;
+        record = snap;
+      } else {
+        record = snap;
+        batchDirty = outerDirty;
+        batchAfterQueue.length = outerQueueLen;
+      }
+      throw e;
+    } finally {
+      if (batchDepth > 0) batchDepth--;
+    }
   }
   // lane vault-use-grants (the owner 2026-10-27 «我现在完全无法在 vault 里看到刚才建立的密码» — measured: an OPEN Vault window
   // learnt nothing until it was closed and reopened): THE ONE NOTIFY of a change to what the Vault window lists — the record's
@@ -313,11 +391,12 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, noteShared = false } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, noteShared = false, pending = null, rev = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
     try {
+      const prevBox = record && record.entries ? record.entries[name] : null;
       const box = { ...V.wrapEntry(dek, name, plain), at: now() };   // int317: `at` = when it was sealed (the Vault window's «saved»)
       if (prov) box.prov = prov;        // lane vault-mint-put: 'minted' | 'stored' — the Vault window's provenance chip (never a value)
       if (actor) box.actor = String(actor).slice(0, 128);   // which conversation / group owns it (a name/id, never a value)
@@ -332,6 +411,9 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       if (askedBy && typeof askedBy === 'object' && askedBy.conv) box.askedBy = { conv: String(askedBy.conv).slice(0, 160), name: String(askedBy.name || '').slice(0, 80) };
       if (owner) box.owner = String(owner).slice(0, 128);       // lane vault-agent-own: the conversation that stored it (its durable id — an id, never a value): its own to use
       if (forHost) box.forHost = String(forHost).slice(0, 200); // lane vault-agent-own: a mint's `--for <host/service>` — the host it may go to without asking
+      if (pending === 'register' || pending === 'change') box.pending = pending;
+      const boxRev = Number.isInteger(rev) && rev >= 1 ? rev : (prevBox && Number.isInteger(prevBox.rev) && prevBox.rev >= 1 ? prevBox.rev : null);
+      if (boxRev !== null) box.rev = boxRev;
       const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
       return { ok: true };
@@ -373,7 +455,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(!b.label && b.note ? { note: b.note } : {}), ...(b.noteShared === true ? { noteShared: true } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(!b.label && b.note ? { note: b.note } : {}), ...(b.noteShared === true ? { noteShared: true } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}), ...(b.pending === 'register' || b.pending === 'change' ? { pending: b.pending } : {}), ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), `pending` state and `rev` counter, never a value
   /** lane vault-entry-description r2: the words an EXISTING entry carries ({ label, note, noteShared } as its box holds them) —
    *  a rotation (mint / put of the same name) writes them back unchanged; null = no such entry. Never a value. */
   const wordsKept = (name) => { const o = record && record.entries[name]; return o ? { label: o.label || null, note: o.note || null, noteShared: o.noteShared === true } : null; };
@@ -404,9 +486,29 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (!record || !record.entries[name]) return { ok: true, already: true };
     const { [name]: gone, ...rest } = record.entries;
-    try { const next = { ...record, entries: rest }; writeRecord(next); record = next; } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
+    const isWebLogin = /^web-login:/.test(String(name || ''));
+    let sealedRev = 0;
+    if (isWebLogin && dek && gone) {
+      const plain = V.unwrapEntry(dek, name, gone);
+      if (plain) {
+        try {
+          const parsed = JSON.parse(plain.toString('utf8'));
+          if (parsed && Number.isInteger(parsed.rev) && parsed.rev >= 1) sealedRev = parsed.rev;
+        } catch { /* non-JSON or corrupt entry */ } finally {
+          V.zero(plain);
+        }
+      }
+    }
+    const nextFloor = isWebLogin
+      ? Math.max(Number(record.loginRevFloor) || 0, Number(gone && gone.rev) || 0, sealedRev, 1)
+      : (Number(record.loginRevFloor) || 0);
+    try {
+      const next = { ...record, ...(nextFloor > 0 ? { loginRevFloor: nextFloor } : {}), entries: rest };
+      writeRecord(next); record = next;
+    } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
     return { ok: true };
   }
+  const loginRevFloor = () => (record && Number.isInteger(record.loginRevFloor) && record.loginRevFloor >= 0 ? record.loginRevFloor : 0);
   /** Seal a plaintext secret FILE (written before the vault was set up, or restored from a backup) into `name`: wrapped, the
    *  record written and READ BACK (the entry opens to the very bytes), only then the file overwritten and unlinked. A file
    *  that differs from the entry already held is KEPT and audited (a value we cannot prove redundant is never destroyed);
@@ -772,6 +874,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
      *  card = { actor, by, key, entry, door, outcome, n, since, at } (names and codes; never a value). */
     onFailing(fn) { if (typeof fn === 'function') failingHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
+    batchRecordWrite, loginRevFloor,   // lane vault-login: single-write batchRecordWrite (afterCommit) + monotonic floor across web-login drop/re-add
     editEntryWords,   // lane vault-entry-description: THE writer of an entry's name and description after its creation
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked
     epoch: () => epoch, resumeSeal,

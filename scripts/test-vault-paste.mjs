@@ -159,7 +159,7 @@ const sweepRoads = async (w, s, token, who, roads, { onLast = async () => {} } =
   }
   return out;
 };
-function makeWorld(name, { door = null, routes = null } = {}) {
+function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const auth = new Auth(dataDir, {});
   auth.setPassword('signin-' + name);
@@ -171,7 +171,7 @@ function makeWorld(name, { door = null, routes = null } = {}) {
   const vaultRun = RUN.create({ dataDir, vault, sources, userTodos, log: (m) => LOGS.push(String(m)), liveOf: () => true });
   const DOOR = door || require(path.join(REPO, 'src/server/vault-paste-door.js'));
   const grants = GS.create({ memory: true });   // lane login-request-card: a login's «Let it sign in» row lands here
-  const logins = BLS.create({ vault, grants: () => grants, log: (m) => LOGS.push(String(m)) });
+  const logins = (loginsMod || BLS).create({ vault, grants: () => grants, log: (m) => LOGS.push(String(m)) });
   // lane totp-request-card: THE two-step door (its ONE writer addEntry, the entry's «Use for…» grant) and the wiring's runOf (a
   // running conversation's run = its token's digest — the agent route's own runOfToken), handed to the paste door as production does
   const TOTPM = require(path.join(REPO, 'src/server/vault-totp.js'));
@@ -487,8 +487,8 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
     'ticked ⇒ ONE grant row through the grants store: this conversation on THIS account of THIS site — nothing wider', rows.map((x) => GM.publicRow(x)));
   ok(GM.admits(rows, { conversationKeys: ['cid-asker-1'] }).ok && !GM.admits(rows, { conversationKeys: ['cid-other-2'] }).ok, '…the fill\'s gate (GM.admits) admits the asking conversation and not another');
   const rc = stashOf('cid-asker-1').filter((e) => e.ref === a.json.requestId);
-  ok(rc.length === 1 && new RegExp(`STORED — a website login for ${SITE.replace(/\./g, '\\.')} \\(user owner@shop\\.example\\) is in the vault`).test(rc[0].text) && /standing, until they remove it in Vault ▸ Web logins ▸ Use for…/.test(rc[0].text) && rc[0].text.includes(P.LOGIN_USE.split('{origin}')[0]) && /vibespace-browser login https:\/\/shop\.example\.test --user owner@shop\.example signs in/.test(rc[0].text) && /paused since 2\.369\.364/.test(rc[0].text) && !rc[0].text.includes(S_LOGIN),
-    'the receipt: STORED, the site, the user (this conversation may fill it), standing, HOW TO USE IT (LOGIN_USE: the kernel profile / standard Chrome paused) — never the password', rc[0] && rc[0].text);
+  ok(rc.length === 1 && new RegExp(`STORED — a website login for ${SITE.replace(/\./g, '\\.')} \\(user owner@shop\\.example\\) is in the vault`).test(rc[0].text) && /standing, until they remove it in Vault ▸ Web logins ▸ Use for…/.test(rc[0].text) && rc[0].text.includes(P.LOGIN_USE.split('{origin}')[0]) && /vibespace-browser fill <@ref> --vault https:\/\/shop\.example\.test#owner@shop\.example\/user/.test(rc[0].text) && /--vault https:\/\/shop\.example\.test#owner@shop\.example\/password/.test(rc[0].text) && /VibeSpace never hands you the password/.test(rc[0].text) && !rc[0].text.includes(S_LOGIN),
+    'the receipt: STORED, the site, the user (this conversation may fill it), standing, HOW TO USE IT (LOGIN_USE: snapshot -i + fill <@ref> --vault across standard Chrome and custom kernels) — never the password', rc[0] && rc[0].text);
   const done = (W.userTodos.snapshot().resolved || []).find((x) => x.action && x.action.requestId === a.json.requestId);
   ok(done && done.status === 'done' && done.resolvedBy === 'stored', 'the item resolved «stored»', done && [done.status, done.resolvedBy]);
 
@@ -950,9 +950,9 @@ async function runRoad(name, { door, routes } = {}) {
   ok(m4.bearerStored, 'MUTANT the answer door without person() ⇒ a BEARER stores (RED — the real door refuses it human_only)', m4);
   // lane login-request-card: the login road's own mutants
   const MPW = ['mutant', 'road', 'pw'].join('-');   // built, never a literal the secret scan reads as an assignment
-  async function loginRoad(name, { door } = {}) {
+  async function loginRoad(name, { door, loginsMod } = {}) {
     STASH.length = 0;
-    const w = makeWorld(name, { door });
+    const w = makeWorld(name, { door, loginsMod });
     await w.vault.setup(PW);
     const s = await serve(w);
     const a = await s.agent(w.SESSION_TOKEN, { words: 'a mutant login', purpose: 'the mutant', kind: 'login', hosts: 'https://mutant.example.test' });
@@ -986,7 +986,10 @@ async function runRoad(name, { door, routes } = {}) {
   }
   const lb = await loginRoad('m-login-base');
   ok(!lb.unknownStored && lb.stored && !lb.receipt.includes('mutant-user'), 'the real login road: an unknown two-step name refused, then stored unticked — the receipt names no user (the login mutants\' baseline)', lb);
-  const l1 = await loginRoad('m-login-totp', { door: mutant('src/server/vault-paste-door.js', "if (v.totpName) { let names = [];", "if (false) { let names = [];") });
+  const l1 = await loginRoad('m-login-totp', {
+    door: mutant('src/server/vault-paste-door.js', "if (v.totpName) { let names = [];", "if (false) { let names = [];"),
+    loginsMod: mutant('src/server/browser-logins.js', "if (!tl.some((s) => s && s.name === `totp:${str(totpName)}`)) {", "if (false && !tl.some((s) => s && s.name === `totp:${str(totpName)}`)) {"),
+  });
   ok(l1.unknownStored, 'MUTANT the login door without its two-step-name check ⇒ a name that names no entry is stored (RED)', l1);
   const l2 = await loginRoad('m-login-user', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });", "settle(q, 'stored', { login: { user, updated: !!r.updated, allowed: true, asked: l.allow === true } });") });   // r3: the anchor names the LIVE settle line
   ok(l2.receipt.includes('mutant-user'), 'MUTANT the receipt treats an unticked login as allowed ⇒ it names the user (RED — an agent that may not fill it never learns its user)', l2.receipt);

@@ -198,6 +198,120 @@ function pausedWords(method, pv) {
   return INT.interruptedText(method);
 }
 function isPausedMethod(method) { return pausedVerdict(method).refuse; }
+const LIVE_FILL_CODE = 'login_fill_live';
+const LIVE_FILL_REFUSED_DOMAINS = new Set(['Debugger', 'HeapProfiler', 'Profiler', 'Audits', 'Tracing']);
+const LIVE_FILL_DROPPED_EVENTS = new Set(['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded', 'Audits.issueAdded']);
+const LIVE_FILL_ALLOWED_CLASSES = new Set(['input', 'view', 'session', 'harmless']);
+const POINTER_LOCATE_METHODS = Object.freeze(['Browser.getVersion', 'DOM.getBoxModel', 'DOM.resolveNode', 'DOM.getDocument', 'DOM.querySelector']);
+const NAV_HANDSHAKE_METHODS = Object.freeze(['Browser.getVersion', 'Page.getFrameTree']);
+const CLI_HANDSHAKE_METHODS = Object.freeze(['Browser.getVersion']);
+/** Exact non-script `read` CDP methods exempted per allowed CLI verb while a vault secret stands filled (measured on agent-browser 0.38.2).
+ *  `Runtime.evaluate` and `Runtime.callFunctionOn` are NEVER exempted wholesale — only built-in non-value locator/scroll/nav expressions pass `isAllowedVerbScript`. */
+const LIVE_FILL_VERB_METHODS = Object.freeze({
+  click: new Set(POINTER_LOCATE_METHODS),
+  dblclick: new Set(POINTER_LOCATE_METHODS),
+  hover: new Set(POINTER_LOCATE_METHODS),
+  focus: new Set(POINTER_LOCATE_METHODS),
+  fill: new Set(POINTER_LOCATE_METHODS),
+  type: new Set(POINTER_LOCATE_METHODS),
+  check: new Set(POINTER_LOCATE_METHODS),
+  uncheck: new Set(POINTER_LOCATE_METHODS),
+  select: new Set(POINTER_LOCATE_METHODS),
+  scrollintoview: new Set(POINTER_LOCATE_METHODS),
+  scroll: new Set(CLI_HANDSHAKE_METHODS),
+  wait: new Set(CLI_HANDSHAKE_METHODS),
+  press: new Set(CLI_HANDSHAKE_METHODS),
+  keyboard: new Set(CLI_HANDSHAKE_METHODS),
+  keydown: new Set(CLI_HANDSHAKE_METHODS),
+  keyup: new Set(CLI_HANDSHAKE_METHODS),
+  mouse: new Set(CLI_HANDSHAKE_METHODS),
+  size: new Set(CLI_HANDSHAKE_METHODS),
+  stop: new Set(CLI_HANDSHAKE_METHODS),
+  close: new Set(CLI_HANDSHAKE_METHODS),
+  open: new Set(NAV_HANDSHAKE_METHODS),
+  goto: new Set(NAV_HANDSHAKE_METHODS),
+  navigate: new Set(NAV_HANDSHAKE_METHODS),
+  back: new Set(NAV_HANDSHAKE_METHODS),
+  forward: new Set(NAV_HANDSHAKE_METHODS),
+  reload: new Set(NAV_HANDSHAKE_METHODS),
+  tab: new Set(NAV_HANDSHAKE_METHODS),
+  window: new Set(NAV_HANDSHAKE_METHODS),
+});
+const NAV_META_EXPRS = new Set(['location.href', 'document.title', '1', 'JSON.stringify([window.innerWidth,window.innerHeight])']);
+const EVAL_SECRET_READ_RE = /\.\s*value\b|[A-Za-z0-9_$)\]]\s*\[|\b(?:FormData|cookie|localStorage|sessionStorage|indexedDB|innerHTML|outerHTML|textContent|innerText|fetch|XMLHttpRequest|sendBeacon|WebSocket|BroadcastChannel|eval|Function)\b|\bwindow\s*\.\s*name\b/;
+const QS_HANDLE_EXPR_RE = /^document\.querySelector\((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\)$/;
+const SCROLL_EXPR_RE = /^window\.scroll(?:By|To)\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$/;
+const LOCATOR_IIFE_HEAD_RE = /^\(\(\)\s*=>\s*\{\s*const el = document\.querySelector\((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\);\s*/;
+const BLOCKER_AT_BODY_NORM = "const blockerAt = (doc, el, x, y) => { let d = doc, lx = x, ly = y; let hit = d.elementFromPoint(lx, ly); while (hit && (hit.tagName === 'IFRAME' || hit.tagName === 'FRAME') && hit.contentDocument && hit !== el) { const r = hit.getBoundingClientRect(); lx -= r.x + hit.clientLeft; ly -= r.y + hit.clientTop; d = hit.contentDocument; hit = d.elementFromPoint(lx, ly); } if (!hit || hit === el) return null; const up = (n) => n.parentNode || n.host || (n.getRootNode && n.getRootNode().host) || null; for (let n = hit; n; n = up(n)) { if (n === el) return null; } for (let n = el; n; n = up(n)) { if (n === hit) return null; } const hitLabel = hit.closest ? hit.closest('label') : null; if (hitLabel && (hitLabel.control === el || hitLabel.contains(el))) return null; const elLabel = el.closest ? el.closest('label') : null; if (elLabel && elLabel.contains(hit)) return null; let desc = hit.tagName.toLowerCase(); if (hit.id) desc += '#' + hit.id; else if (typeof hit.className === 'string' && hit.className.trim()) desc += '.' + hit.className.trim().split(/\\s+/).slice(0, 2).join('.'); if (!hit.id && hit.closest) { const anchored = hit.closest('[id]'); if (anchored && anchored !== hit) desc += ' inside ' + anchored.tagName.toLowerCase() + '#' + anchored.id; } return desc; };";
+const LOCATOR_IIFE_TAIL_NORM = `if (!el) return null; const inView = (r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight) && r.left < (window.innerWidth || document.documentElement.clientWidth); let rect = el.getBoundingClientRect(); if (!inView(rect)) { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); rect = el.getBoundingClientRect(); } const x = rect.x + rect.width / 2; const y = rect.y + rect.height / 2; ${BLOCKER_AT_BODY_NORM} return { x: x, y: y, blocker: blockerAt(document, el, x, y) }; })()`;
+const BLOCKER_CALL_FN_NORM = `function(x, y) { let topDoc = this.ownerDocument || document; while (topDoc.defaultView && topDoc.defaultView.frameElement) { topDoc = topDoc.defaultView.frameElement.ownerDocument; } ${BLOCKER_AT_BODY_NORM} return blockerAt(topDoc, this, x, y); }`;
+const CHECKED_CALL_FN_NORM = "function() { var el = this; var tag = el.tagName && el.tagName.toUpperCase(); if (tag === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) { return el.checked; } var role = el.getAttribute && el.getAttribute('role'); var ariaCheckedRoles = ['checkbox','radio','switch','menuitemcheckbox','menuitemradio','option','treeitem']; if (role && ariaCheckedRoles.indexOf(role) !== -1) { return el.getAttribute('aria-checked') === 'true'; } var label = el; if (tag !== 'LABEL') { label = el.closest && el.closest('label'); } if (label && label.tagName && label.tagName.toUpperCase() === 'LABEL' && label.control) { var ctrl = label.control; if (ctrl.type === 'checkbox' || ctrl.type === 'radio') { return ctrl.checked; } } var input = el.querySelector && el.querySelector('input[type=\"checkbox\"], input[type=\"radio\"]'); if (input) return input.checked; return false; }";
+const SELECT_CALL_FN_NORM = "function(vals) { const normalize = (value) => String(value ?? '') .replace(/[\\u200B\\u200C\\u200D\\u2060\\uFEFF]/g, '') .replace(/\\s+/g, ' ') .trim(); const options = Array.from(this.options); const wanted = new Set(); for (const value of vals) { let matches = options.filter((opt) => value === opt.value || value === opt.label.trim() || value === opt.textContent.trim() ); if (matches.length === 0) { const normalizedValue = normalize(value); matches = options.filter((opt) => normalize(opt.label) === normalizedValue ); if (matches.length > 1) { return { error: 'Multiple options matched ' + JSON.stringify(value) + ' after whitespace normalization' }; } } if (matches.length === 0) { const available = options.map(o => o.value + ' (\"' + normalize(o.label) + '\")').join(', '); return { error: 'No option matched ' + JSON.stringify(vals) + '. Available options: ' + available }; } for (const opt of matches) wanted.add(opt); } if (wanted.size === 0) { const available = options.map(o => o.value + ' (\"' + normalize(o.label) + '\")').join(', '); return { error: 'No option matched ' + JSON.stringify(vals) + '. Available options: ' + available }; } for (const opt of options) opt.selected = wanted.has(opt); this.dispatchEvent(new Event('change', { bubbles: true })); return { matched: wanted.size }; }";
+const SCROLL_CALL_FNS_NORM = new Set([
+  'function() { this.focus(); }',
+  "function() { this.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); }",
+  'function() { if (this.scrollIntoViewIfNeeded) this.scrollIntoViewIfNeeded(); else this.scrollIntoView(); }',
+]);
+const normVerbJs = (s) => String(s || '').replace(/\/\/[^\r\n]*/g, '').replace(/\s+/g, ' ').trim();
+const NAV_META_VERBS = new Set(['open', 'goto', 'navigate', 'back', 'forward', 'reload', 'tab', 'window', 'size', 'wait']);
+const LOCATOR_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'fill', 'type', 'check', 'uncheck', 'select', 'scrollintoview', 'wait']);
+const CALL_FN_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'fill', 'type', 'check', 'uncheck', 'select', 'scrollintoview']);
+function isAllowedVerbScript(verb, method, params) {
+  if (!verb || !params || typeof params !== 'object') return false;
+  if (method === 'Runtime.evaluate') {
+    const expr = typeof params.expression === 'string' ? params.expression.trim() : '';
+    const exprNoStr = expr.replace(/(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '""');
+    if (!expr || expr.length > 4096 || EVAL_SECRET_READ_RE.test(exprNoStr)) return false;
+    if (NAV_META_VERBS.has(verb) && NAV_META_EXPRS.has(expr)) return true;
+    if (verb === 'scroll' && SCROLL_EXPR_RE.test(expr)) return true;
+    if (LOCATOR_VERBS.has(verb) && !params.returnByValue && QS_HANDLE_EXPR_RE.test(expr)) return true;
+    if (LOCATOR_VERBS.has(verb)) {
+      const m = LOCATOR_IIFE_HEAD_RE.exec(expr);
+      if (m && normVerbJs(expr.slice(m[0].length)) === LOCATOR_IIFE_TAIL_NORM) return true;
+    }
+    return false;
+  }
+  if (method === 'Runtime.callFunctionOn') {
+    if (!CALL_FN_VERBS.has(verb)) return false;
+    const fn = typeof params.functionDeclaration === 'string' ? params.functionDeclaration.trim() : '';
+    if (!fn || fn.length > 4096) return false;
+    const norm = normVerbJs(fn);
+    if (SCROLL_CALL_FNS_NORM.has(norm)) return true;
+    if (norm === BLOCKER_CALL_FN_NORM) return true;
+    if ((verb === 'check' || verb === 'uncheck') && norm === CHECKED_CALL_FN_NORM) return true;
+    if (verb === 'select' && norm === SELECT_CALL_FN_NORM) return true;
+    return false;
+  }
+  return false;
+}
+/** lane vault-login-chrome r3+r4: THE LIVE-FILL CDP FENCE IS A CENSUS, NOT A DENY-LIST.
+ *  Gates on `src/cdp-census.js` classes: refuses `read`, `page-mutation`, `refused`, and `unknown` (no row in `src/cdp-census.js`),
+ *  plus the Debugger-class domains (`Debugger`, `HeapProfiler`, `Profiler`, `Audits`); allows `input`, `view`, `session`, and `harmless`
+ *  outside those domains. When a specific allowed CLI verb is in flight (`allowVerb` = string verb name), exempts ONLY the exact
+ *  methods named in `LIVE_FILL_VERB_METHODS[allowVerb]` (and built-in non-value locator expressions via `isAllowedVerbScript`,
+ *  NEVER `Runtime.evaluate` or `Runtime.callFunctionOn` wholesale). */
+function liveFillCdpVerdict(method, { allowVerb = null, params = null } = {}) {
+  const m = String(method || '');
+  if (m === 'Browser.getVersion') return { refuse: false, code: null, why: null, error: null };
+  const row = CENSUS.rowOf(m);
+  const refuse = (why) => ({
+    refuse: true,
+    code: LIVE_FILL_CODE,
+    why,
+    error: `${m} is refused while a vault login fill is in progress or unsubmitted in this tab — wait for the fill to finish and submit the form, or reload / navigate away before reading`,
+  });
+  if (!row) return refuse('unclassified');
+  if (LIVE_FILL_REFUSED_DOMAINS.has(row.domain)) return refuse(row.domain);
+  if (row.cls === 'refused') return refuse('refused');
+  if (LIVE_FILL_ALLOWED_CLASSES.has(row.cls)) return { refuse: false, code: null, why: null, error: null };
+  const verb = typeof allowVerb === 'string' && allowVerb ? allowVerb.trim() : '';
+  if (verb) {
+    const exact = LIVE_FILL_VERB_METHODS[verb];
+    if (exact && exact.has(m)) return { refuse: false, code: null, why: null, error: null };
+    if (isAllowedVerbScript(verb, m, params)) return { refuse: false, code: null, why: null, error: null };
+  }
+  return refuse(row.cls);
+}
 /**
  * lane chrome-157 (主开发's ruling, 2026-11-12): A METHOD WITH NO CENSUS ROW IS REFUSED BY NAME ON EVERY MEDIATED LEASE, IN BOTH
  * DRIVING STATES. judge() consulted the census only while the person drove, so the census's «never a hole» held only then: a
@@ -633,6 +747,69 @@ function leaseRoadVerdict({ mediated = false, proxy = false, ephemeral = false, 
   return { mode: SCOPE_MODE, why: 'shared' };
 }
 
+const LOGIN_CHANNEL_CODE = 'login_channel_unmediated';
+const quoteCliArg = (s) => (/^[A-Za-z0-9._-]+$/.test(s) ? s : JSON.stringify(s));
+/**
+ * THE LOGIN-CHANNEL LAW (PURE, ONE verdict — lane vault-login r29):
+ * Vault login fills (and `vibespace-vault request --kind login`) run ONLY on a LOCAL MEDIATED CHANNEL
+ * (`road.mode === 'mediated'` or `'scope'`, with `proxy`, `!external`, `!remote`, `!remoteSession`, `hasCdp`).
+ * Every other channel is refused by name (`login_channel_unmediated`) with actionable next steps for THIS conversation.
+ */
+function loginFillChannelVerdict(road, { proxy = true, external = false, remote = false, remoteSession = false, hasCdp = true, usableProfiles = [], restrictedCount = 0, profileLabel = '', action = 'fill' } = {}) {
+  const mode = road && typeof road === 'object' ? road.mode : null;
+  const why0 = road && typeof road === 'object' && road.why ? String(road.why) : 'unmediated';
+  const admittedMode = mode === MEDIATED_MODE || mode === SCOPE_MODE;
+  if (admittedMode && proxy !== false && !external && !remote && !remoteSession && hasCdp !== false) {
+    return { ok: true, code: null, mode, why: why0, error: null };
+  }
+  const actWords = action === 'request' ? 'request the login and sign in' : 'sign in';
+  const names = (Array.isArray(usableProfiles) ? usableProfiles : [])
+    .map((x) => String(x && typeof x === 'object' ? (x.label || x.id || '') : (x || '')).trim())
+    .filter(Boolean);
+  const shown = names.slice(0, 6);
+  const more = names.length > shown.length ? ` (+${names.length - shown.length} more)` : '';
+  const firstCmd = shown.length ? `vibespace-browser use ${quoteCliArg(shown[0])}` : '';
+  const switchStep = shown.length
+    ? `Authorized local named profile${names.length === 1 ? '' : 's'} for this conversation: ${shown.map((n) => `"${n}"`).join(', ')}${more} — run \`${firstCmd}\` to switch there, then ${actWords}.`
+    : Number(restrictedCount) > 0
+      ? `No local named browser profile is currently authorized for this conversation — ask the user (or use \`vibespace-ask\`) to add this conversation or its Task Group under Agent browser panel → <profile> → Who can use it → Change… (never create a duplicate profile for an existing login), then run \`vibespace-browser use <profile>\` and ${actWords} there.`
+      : `No local named browser profile is authorized for this conversation yet — ask the user to authorize or create a local named profile in the Agent browser panel (or create one for a new site with \`vibespace-browser new <label>\` and \`vibespace-browser use <label>\`), then ${actWords} there.`;
+  const labelWord = profileLabel ? `"${String(profileLabel).slice(0, 80)}"` : 'this profile';
+  let why = why0;
+  let reason;
+  if (remoteSession) {
+    why = 'remote-session';
+    reason = 'this conversation runs on another machine — Vault login fills run only on a local mediated named browser profile on this Hub.';
+  } else if (proxy === false || why0 === 'no-proxy') {
+    why = 'no-proxy';
+    reason = 'this server has no mediating CDP proxy running — Vault login fills require a local mediated browser channel.';
+  } else if (why0 === 'ephemeral') {
+    why = 'ephemeral';
+    reason = 'this is the conversation\'s own temporary browser — Vault does not fill logins here (its CDP channel is unmediated, and any sign-in is lost when the temporary browser closes).';
+  } else if (external) {
+    why = 'external';
+    reason = `${labelWord} is an external browser reached over raw CDP — Vault does not fill logins on unmediated external browsers.`;
+  } else if (hasCdp === false) {
+    why = 'no-cdp';
+    reason = `${labelWord} has no mediated CDP channel — Vault login fills require a local mediated named browser profile.`;
+  } else if (remote || why0 === 'remote') {
+    why = 'remote';
+    reason = `${labelWord} runs on a paired machine — Vault login fills run only on a local mediated named browser profile on this Hub.`;
+  } else {
+    why = why0 || 'unmediated';
+    reason = `this browser session is not on an agent's local mediated CDP channel (mode ${JSON.stringify(mode || null)}, why ${JSON.stringify(why)}) — Vault login fills require a local mediated named browser profile.`;
+  }
+  const needSwitchStep = !remoteSession && why !== 'no-proxy';
+  return {
+    ok: false,
+    code: LOGIN_CHANNEL_CODE,
+    mode: null,
+    why,
+    usableProfiles: names,
+    error: needSwitchStep ? `${reason} ${switchStep}` : reason,
+  };
+}
+
 /**
  * A browser→client REPLY to a forwarded call: grow the scope from what the
  * browser handed back (a target this lease created, a session it was
@@ -779,8 +956,9 @@ module.exports = {
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
+  LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_DROPPED_EVENTS, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, isAllowedVerbScript, liveFillCdpVerdict, // lane vault-login-chrome r3+r4+r5+r28: census-class CDP fence + dropped page read events while a vault secret stands filled in the tab
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
-  SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)
+  SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, LOGIN_CHANNEL_CODE, loginFillChannelVerdict, // lane browser-shared-profile-freeze + vault-login r29: the scope road & the ONE login-channel verdict
   INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)
   creditExpiryReceipt, ALWAYS_REFUSED_WHY, // verify r3: honest expiry words (spent / other_tab / not_dispatched); the deaf-page method's words
   mediatedNamespace, mediatedEnvFor, grantKey, grantView, mediationSentence,

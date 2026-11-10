@@ -6901,6 +6901,153 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (n) commit();
     return n;
   }
+  /** lane vault-login: read/write persisted live-fill fences & scrub entry names through the ONE registry writer (zero secret bytes or digests on disk). */
+  function loginFenceStateOf(profileId) {
+    ensureLoaded();
+    const pid = String(profileId || '');
+    const st = reg.loginFences && reg.loginFences[pid];
+    if (!st || typeof st !== 'object') return { fences: [], scrubs: [] };
+    return {
+      fences: Array.isArray(st.fences) ? st.fences.map((f) => ({ ...f, ...(Array.isArray(f.also) ? { also: f.also.map((a) => ({ ...a })) } : {}) })) : [],
+      scrubs: Array.isArray(st.scrubs) ? st.scrubs.map((s) => ({ ...s })) : [],
+    };
+  }
+  function saveLoginFenceState(profileId, { fences = [], scrubs = [] } = {}) {
+    ensureLoaded();
+    const pid = String(profileId || '');
+    if (!pid || !B.isProfileId(pid)) return false;
+    if (!reg.loginFences || typeof reg.loginFences !== 'object') reg.loginFences = {};
+    const nf = (Array.isArray(fences) ? fences : []).filter((f) => f && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => {
+      const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
+        loginId: String(a.loginId).slice(0, 320),
+        ...(a.typedSlot === 'current' || a.typedSlot === 'password' || a.typedSlot === 'previous' || a.typedSlot === 'pending' || a.typedSlot === 'otp' ? { typedSlot: a.typedSlot } : {}),
+        ...(Number.isInteger(a.rev) && a.rev >= 1 ? { rev: a.rev } : {}),
+        ...(typeof a.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(a.entryGen) ? { entryGen: a.entryGen } : {}),
+        ...(a.typedPrevious === true ? { typedPrevious: true } : {}),
+        ...(Number.isFinite(a.at) && a.at > 0 ? { at: Math.floor(a.at) } : {}),
+      })) : [];
+      return {
+        targetId: String(f.targetId).slice(0, 64),
+        urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
+        origin: String(f.origin).slice(0, 512),
+        loginId: String(f.loginId || '').slice(0, 320),
+        at: Number(f.at) || 0,
+        ...(typeof f.mode === 'string' && f.mode ? { mode: String(f.mode).slice(0, 24) } : {}),
+        ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
+        ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
+        ...(f.typedSlot === 'current' || f.typedSlot === 'password' || f.typedSlot === 'previous' || f.typedSlot === 'pending' || f.typedSlot === 'otp' ? { typedSlot: f.typedSlot } : {}),
+        ...(Number.isInteger(f.rev) && f.rev >= 1 ? { rev: f.rev } : {}),
+        ...(typeof f.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(f.entryGen) ? { entryGen: f.entryGen } : {}),
+        ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
+        ...(f.unknownTyped === true ? { unknownTyped: true } : {}),
+        ...(also.length ? { also } : {}),
+      };
+    });
+    const ns = (Array.isArray(scrubs) ? scrubs : []).filter((s) => s && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
+      name: String(s.name).slice(0, 320),
+      at: Number(s.at) || 0,
+    }));
+    const next = nf.length || ns.length ? { fences: nf, scrubs: ns } : null;
+    const prev = reg.loginFences[pid] || null;
+    if (JSON.stringify(prev) === JSON.stringify(next)) return true;
+    if (next) reg.loginFences[pid] = next;
+    else delete reg.loginFences[pid];
+    commit();
+    return true;
+  }
+  /** lane vault-login r29: THE ONE channel check for `fill --vault` and `vibespace-vault request --kind login`.
+   *  Resolves which browser this call targets (explicit `profileId`, else `B.resolveHandle` on `setFor(browserKey)` without
+   *  mutating `told`), computes `usableProfiles` + `restrictedCount` among local mediated named profiles for THIS conversation,
+   *  and delegates to PURE `M.leaseRoadVerdict` + `M.loginFillChannelVerdict`. */
+  function loginChannelFor({ profileId = null, browserKey = '', ownerKey = '', handle = '', subagent = false, remoteSession = false, agentFacts = null, action = 'fill' } = {}) {
+    ensureLoaded();
+    const bk = String(browserKey || '');
+    const parentBk = ownerKey ? B.parentKeyOf(String(ownerKey)) : B.parentKeyOf(bk);
+    const proxy = !!(mediator && mediationOn() && typeof mediator.grantFor === 'function');
+    const g = agentFacts && typeof agentFacts === 'object'
+      ? {
+          keys: Array.isArray(agentFacts.conversationKeys) && agentFacts.conversationKeys.length ? agentFacts.conversationKeys : keysOfKey(parentBk),
+          ids: Array.isArray(agentFacts.taskIds) ? agentFacts.taskIds : groupsOfKey(parentBk).ids,
+          unreadable: Boolean(agentFacts.groupsUnreadable),
+        }
+      : groupsOfKey(parentBk);
+    const isLocalMediatedCandidate = (np) => {
+      if (!np || isEph(np) || np.legacy || np.host) return false;
+      const nrec = reg.browsers[np.id] || null;
+      if (nrec && (!isLocalRec(nrec) || nrec.external)) return false;
+      const nprow = rowOf(np.provider);
+      return Boolean(nprow && nprow.starts && nprow.cdp !== false);
+    };
+    const usableProfiles = [];
+    let restrictedCount = 0;
+    if (proxy) {
+      for (const np of named()) {
+        if (!isLocalMediatedCandidate(np)) continue;
+        const may = B.mayAttach(np, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable });
+        if (may && may.ok) usableProfiles.push(np.label || np.id);
+        else restrictedCount++;
+      }
+    }
+    let pid = typeof profileId === 'string' && profileId.trim() ? profileId.trim() : '';
+    let resolvedEphemeral = false;
+    if (!pid) {
+      if (!bk) {
+        resolvedEphemeral = true;
+      } else if (ownerKey) {
+        const jv = J.jobResolveVerdict(B.resolveHandle({ set: setFor(String(ownerKey)), handle: String(handle || ''), subagent: false }));
+        if (!jv.ok) return jv;
+        pid = jv.profileId;
+      } else if (B.isChildKey(bk)) {
+        resolvedEphemeral = true;
+      } else {
+        const set = setFor(bk);
+        const rv = B.resolveHandle({ set, handle: String(handle || ''), subagent: !!subagent });
+        if (rv.ok && rv.kind === 'attachment' && rv.attachment && rv.attachment.profileId) {
+          pid = rv.attachment.profileId;
+        } else if (rv.ok && rv.kind === 'pin' && rv.profileId) {
+          const pinP = profile(rv.profileId);
+          const may = pinP ? B.mayAttach(pinP, { browserKey: parentBk || bk, conversationKeys: g.keys, taskIds: g.ids, groupsUnreadable: !!g.unreadable }) : null;
+          if (pinP && may && may.ok) pid = rv.profileId;
+          else resolvedEphemeral = true;
+        } else if (rv.ok) {
+          resolvedEphemeral = true;
+        } else {
+          if (action === 'request' && rv.code === 'profile_required' && Array.isArray(set.attachments)) {
+            const heldLocal = set.attachments.find((a) => isLocalMediatedCandidate(profile(a.profileId)));
+            if (heldLocal) pid = heldLocal.profileId;
+          }
+          if (!pid) return rv;
+        }
+      }
+    }
+    const p = pid ? profile(pid) : null;
+    const eph = resolvedEphemeral || !p || isEph(p);
+    const rec = p ? (reg.browsers[p.id] || null) : null;
+    const prow = p && !eph ? rowOf(p.provider) : null;
+    const external = Boolean((!eph && prow && !prow.starts) || (p && p.provider === 'cdp') || (rec && rec.external));
+    const hasCdp = eph ? true : Boolean(!prow || prow.cdp !== false);
+    const remote = Boolean((p && p.host) || (rec && rec.hostId));
+    const remSess = Boolean(remoteSession || (bk && isRemoteKey(bk)));
+    const agent = Boolean((!bk || B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk));
+    const road = M.leaseRoadVerdict({
+      mediated: Boolean(p && !eph && isMediated(p)),
+      proxy,
+      ephemeral: eph,
+      remote: remote || external || remSess,
+      agent,
+    });
+    return M.loginFillChannelVerdict(road, {
+      proxy,
+      external,
+      remote,
+      remoteSession: remSess,
+      hasCdp,
+      usableProfiles,
+      restrictedCount,
+      profileLabel: p && !eph ? (p.label || p.id) : '',
+      action,
+    });
+  }
   /** lane site-reset step 3: the agent's `site-reset <host>` on a SHARED profile files ONE proposal (never runs): the same
    *  record shape as a backend switch's (SW.siteResetProposalFor, `sr-…`), the same card / For-you item / routes. A second
    *  ask on the same (conversation, profile, host) while one stands is the SAME card; a rejection not yet told is told now. */
@@ -7634,7 +7781,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor /* lane vault-login */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields

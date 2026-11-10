@@ -101,9 +101,11 @@ let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 let SFm = null, PTm = null;
 const SF = () => SFm || (SFm = require('../browser-surfaces.js'));
 const PT = () => PTm || (PTm = require('../peer-text.js'));
-let BLm = null, LFm = null;
+let BLm = null, LFm = null, VRm = null, BMm = null;
 const BL = () => BLm || (BLm = require('../browser-login.js')); // lane browser-login: lazily (two passkey suites copy this file beside three modules only)
-const LF = () => LFm || (LFm = require('./browser-login-fill.js')); // lane vault-login-chrome: hub-side Chrome login form inspection + CDP fill
+const LF = () => LFm || (LFm = require('./browser-login-fill.js')); // lane browser-login r22: hub-side isolated-world element fill + wipe
+const VR = () => VRm || (VRm = require('../vault-run.js')); // lane browser-login: value-based scrubber over filled secrets
+const BM = () => BMm || (BMm = require('../browser-mediation.js')); // lane vault-login r29: pure mediated-channel judgment
 // lane passkey-sink: the PURE passkey signer — asked only on a kernel with `webauthn` (required at first use, like SF / PT)
 let WAm = null;
 const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
@@ -159,8 +161,29 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null, rearmMs = REARM_MS /* lane passkey-browse-yourself */,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
   passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, drainMs = PK_DRAIN_MS /* r6; r7: the slow mark */, holdBeatMs = PK_HOLD_BEAT_MS, holdMaxMs = PK_HOLD_MAX_MS /* r7 */, leftMax = 3 /* B-97ae round 2: per browser, the leftover items past which ONE counts the rest */, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
-  logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
+  logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines */, conversationOf = null /* lane browser-login: sessionId → {cid, name} */,
+  liveFillMaxMs = 10 * 60 * 1000 /* ceiling before an un-navigated live-fill fence wipes inputs and lifts */,
+  scrubWalkBudgetMs = 250 /* time bound (ms) for walking a parsed CDP JSON frame */,
+  wipeMaxScanPositions = 524288 /* per-eval window-position work bound before failing closed with 'too much text to check' */,
+  axMaxPayloadBytes = 4 * 1024 * 1024 /* max frame bytes on the dedicated short-lived queryAXTree socket (N2) */,
+  axQueryTimeoutMs = 2500 /* hard timeout (ms) for on-demand @ref queryAXTree resolution (N2) */,
+  axMaxNodes = 8192 /* max AX nodes accepted from a single queryAXTree call (N2) */,
+  interceptTimeoutMs = 1500 /* hard timeout (ms) for Fetch.enable / Network.enable fence confirmation (r27) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
+  const scrubByProfile = new Map();       // profileId → [{label, value, bytes, at}] (survives watch reconnects and navigations; cleared when the browser stops)
+  const scrubNamesByProfile = new Map();  // profileId → [{name, at}] (persisted through keeper's ONE writer until the browser stops)
+  const scrubCompiledByProfile = new Map(); // profileId → compiled scrubber fn | null
+  const activeTabByProfile = new Map();   // profileId → Map(parentKey → {tid, at})
+  const stashedSnapshotsByProfile = new Map(); // profileId → Map(targetId → {url, specs, at})
+  const stashedStepOtpsByProfile = new Map();  // profileId → Map(targetId → {url, stepOtpValues, credSigs})
+  const fillEpochsByProfile = new Map();  // profileId → Map(targetId → number)
+  const credSigsByProfile = new Map();    // profileId → Array<{len, sha256, rHash, rPow}>
+  const credRequestIdsByProfile = new Map(); // profileId → Set<string>
+  const knownFenceProfiles = new Set();   // profileIds whose live/persisted login fences this watch instance tracks
+  const fenceAuditLines = [];             // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
+  let unparseableScrubFrames = 0;
+  let cutScrubFrames = 0;
+  let disposed = false, unsubVaultOpen = null, unsubVaultLock = null, unsubFenceRefSource = null;
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
   const told = new Map();          // browserKey → Set(answered id) — a note is told once
@@ -251,7 +274,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   // ── the socket ──
   function newWatch(profileId, url) {
-    const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
+    if (profileId) knownFenceProfiles.add(String(profileId));
+    const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, fencesRearmed: false, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
       pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkLeft: { tabs: new Map(), more: new Set(), moreId: null } /* B-97ae round 2 */, pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
@@ -288,6 +312,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // verify r4 #3: the persisted witness is pruned to the tabs this browser HAS — a healed browser's or a restart's dead ids
       // named nothing (a ghost-only scope read as attributed: the named refusal never fired, `stop` said "nothing of yours")
       if (keeper && typeof keeper.pruneOwnTabs === 'function') { try { const n = keeper.pruneOwnTabs(w.profileId, infos.filter((t) => t && t.type === 'page' && t.targetId).map((t) => String(t.targetId))); if (n) say('prune:' + w.profileId + ':' + now(), `${w.profileId}: ${n} persisted tab witness(es) named tabs this browser does not have — dropped`); } catch (err) { say('prune-err:' + (err && err.message), `${w.profileId}: the persisted tab witness was not pruned — ${err && err.message}`); } }
+      try {
+        await rearmLoginFences(w);
+      } finally {
+        if (w.state === 'open') w.fencesRearmed = true;
+      }
       w.readySeen = true; // lane site-reset: tabs tracked from here on appeared while watched
       // lane mirror-green-222: ready = the tabs enabled here carry the passkey hook — `arm` resolved between Page.enable and
       // the hook's last CDP answer, so a verb's first fact read the tab as `unknown` (the mirror's red, run 37419676410)
@@ -302,6 +331,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function down(w, why, { keepNotices = false } = {}) {
     if (w.state === 'down') return;
     w.state = 'down';
+    w.fencesRearmed = false;
     for (const id of w.pkForYou.values()) { try { forYou?.resolve?.(id); } catch { /* the tray's own failure */ } } w.pkForYou.clear(); // lane browser-passkey
     for (const e of w.targets.values()) pkLeftEnd(w, e, 'down'); // B-97ae round 2: the socket (the browser, the hub) went — its sessions took their authenticators (S12)
     for (const rec of [...w.prompts.values()]) dropPrompt(w, rec, 'down'); // lane browser-ui-prompts: a gone socket's paused sign-in is Chrome's again
@@ -312,7 +342,43 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const rec of w.surf.values()) { surfaceAskDone(w, rec); if (!open.includes(rec)) open.push(rec); } w.surf.clear(); // lane browser-surfaces: a NOTED one is in the live view's bar too
     w.open.clear();
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
-    for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } }
+    if (why !== 'the browser stopped') {
+      let stashMap = null;
+      let otpStashMap = null;
+      for (const e of w.targets.values()) {
+        if (e.liveFill && Array.isArray(e.liveFill.stepOtpValues) && e.liveFill.stepOtpValues.length > 0) {
+          const fu = stripHash(e.liveFill.urlAtFill || tabLoginUrlOf(e));
+          if (fu) {
+            if (!otpStashMap) otpStashMap = stashedStepOtpsByProfile.get(w.profileId) || new Map();
+            otpStashMap.set(e.targetId, {
+              url: fu,
+              stepOtpValues: [...e.liveFill.stepOtpValues],
+              credSigs: Array.isArray(e.liveFill.credSigs) ? [...e.liveFill.credSigs] : [],
+            });
+          }
+        }
+        if (!e.snapshotRefs || !e.snapshotRefs.specs || (e.snapshotRefs.navSeq ?? 0) !== (e.navSeq || 0)) continue;
+        const u = stripHash(tabLoginUrlOf(e));
+        if (!u) continue;
+        if (!stashMap) stashMap = stashedSnapshotsByProfile.get(w.profileId) || new Map();
+        stashMap.set(e.targetId, { url: u, specs: e.snapshotRefs.specs, at: e.snapshotRefs.at || now() });
+      }
+      if (stashMap && stashMap.size) stashedSnapshotsByProfile.set(w.profileId, stashMap);
+      if (otpStashMap && otpStashMap.size) stashedStepOtpsByProfile.set(w.profileId, otpStashMap);
+    }
+    for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; } }
+    try {
+      const persistedTids = new Set();
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        try {
+          const st = keeper.loginFenceStateOf(w.profileId);
+          for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
+            if (f && f.targetId) persistedTids.add(String(f.targetId));
+          }
+        } catch { /* keeper fence state unreadable — keep nothing */ }
+      }
+      LF().clearFilledSecretsForProfileExcept(w.profileId, persistedTids);
+    } catch { /* */ }
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
     if (why === SOCKET_CLOSED && w.openedAt && now() - w.openedAt >= REARM_HEALTHY * rearmMs) { const r = rearms.get(w.profileId); if (r && !r.t) rearms.delete(w.profileId); } // a healthy socket's close starts the backoff over
@@ -327,8 +393,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w.kernel && w.mode !== 'person') decideAhead(w, info.browserContextId || null); // acceptance r1: never on the person's watch (Chrome asks him, his saved grants stand) // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
-    if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
-    const e = { targetId: tid, bctx: info.browserContextId ? String(info.browserContextId) : '', url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
+    if (known) { known.url = String(info.url || known.url || ''); if (info.url) known.loginNavUrl = String(info.url); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
+    let restoredRefs = null, expiredByNav = false;
+    const stashMap = stashedSnapshotsByProfile.get(w.profileId);
+    if (stashMap && stashMap.has(tid)) {
+      const stashed = stashMap.get(tid);
+      stashMap.delete(tid);
+      if (!stashMap.size) stashedSnapshotsByProfile.delete(w.profileId);
+      if (stashed && stashed.url && stripHash(String(info.url || '')) === stashed.url) {
+        restoredRefs = { specs: stashed.specs, resolved: new Map(), map: null, at: stashed.at, navSeq: 0 };
+      } else {
+        expiredByNav = true;
+      }
+    }
+    const e = { targetId: tid, bctx: info.browserContextId ? String(info.browserContextId) : '', url: String(info.url || ''), loginNavUrl: String(info.url || ''), navSeq: 0, snapshotRefs: restoredRefs, snapshotExpiredByNav: expiredByNav, inflightCredReqs: null, activeFill: null, activeFills: null, fetchMode: 'off', fetchSyncP: null, credPreArming: false, credFetchAll: false, credNetEnabled: false, title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
       seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, againQ: [], records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set(), frameOf: new Map(), mainCtxOf: new Map(), holds: new Map() /* r7: ceremony → what IT loaded {auth, ids, uv} */ } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
     // verify r2: the ONE conversation whose verb was in flight when it appeared (null = nobody / unclear) — verify r3 #1: only for
     // a tab born of NO page (the CLI's `tab new`, the page it gets on attach: measured, no `openerId`); a tab a PAGE opened
@@ -357,6 +435,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       e.enabled = true; e.heldAt = 0;
       armPasskey(w, e);
       if (!w.kernel && w.mode !== 'person') armPrompts(w, e); // acceptance r1: never on the person's watch (his own file chooser, Chrome's own sign-in sheet) // lane browser-ui-prompts (lane browser-surfaces: a kernel's chooser / sign-in are surfaces — never hooked twice)
+      else syncTabFetchMode(w, e); // N1: if a live credential signature stands on this tab, keep '*' Request interception active
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       return;
     }
@@ -381,8 +460,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'VibeSpace.surfaceUpdated': return onSurfaceUpdated(w, surfaceTab(w, m), p);
       case 'VibeSpace.surfaceClosed': return onSurfaceClosed(w, surfaceTab(w, m), p);
       case 'VibeSpace.webauthnRequest': return pkRequest(w, surfaceTab(w, m), p); // lane passkey-sink: a kernel with `webauthn` — the ceremony's data (its surface is the held card)
-      case 'VibeSpace.credentialFormDetected': return onLoginForm(w, surfaceTab(w, m), p); // lane browser-login: a kernel with `credentials` — a form the `login` verb may fill
-      case 'VibeSpace.credentialSubmitted': return onLoginSubmitted(w, surfaceTab(w, m), p); // lane browser-login: the page took a form — the vault saves what it should (the ONE writer)
+      case 'VibeSpace.credentialFormDetected': return; // r22 pivot: kernel form pushes retired (agent locates, hub fills)
+      case 'VibeSpace.credentialSubmitted': return onOwnerTakeoverSubmit(w, surfaceTab(w, m), p); // human takeover save-login card only
       case 'Target.targetCreated': case 'Target.targetInfoChanged': track(w, p.targetInfo); return;
       case 'Target.targetDestroyed': {
         const tid = String(p.targetId || '');
@@ -390,6 +469,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!e) return;
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
+        const closedCtxId = e.liveFill ? (e.liveFill.isoContextId || 0) : 0;
+        clearPostLiftOnTab(e);
+        if (e.liveFill) clearLiveFillOnTab(w, e, 'tab-closed', { audit: false });
+        try { LF().clearFilledSecretsForTarget(tid, closedCtxId); } catch { /* */ }
+        if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+        dropActiveTarget(w.profileId, tid);
+        e.snapshotRefs = null;
+        if (e.activeFill) { e.activeFill.contextGone = true; e.activeFill.heldRequests = []; e.activeFill.abort?.(); }
+        if (e.inflightCredReqs) e.inflightCredReqs.clear();
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
         pkLeftEnd(w, e, 'closed'); // B-97ae walk (b): the closed tab took the key it kept
         if (w.prompts.has(tid)) dropPrompt(w, w.prompts.get(tid), 'tab-closed'); // lane browser-ui-prompts
@@ -401,19 +489,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (dlg) { w.open.delete(tid); emit({ kind: 'closed', profileId: w.profileId, targetId: tid, answered: { id: dlg.id, dialog: dlg, how: 'dismissed', by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }
         return;
       }
-      case 'Target.detachedFromTarget': { const sid = String(p.sessionId || ''); const tid = w.sessions.get(sid); w.sessions.delete(sid); const e = tid && w.targets.get(tid); if (e && e.sid === sid) { e.sid = null; e.enabled = false; pkLeftEnd(w, e, 'detached'); } return; } // B-97ae round 2: the session took its authenticator (S12)
+      case 'Target.detachedFromTarget': { const sid = String(p.sessionId || ''); const tid = w.sessions.get(sid); w.sessions.delete(sid); const e = tid && w.targets.get(tid); if (e && e.sid === sid) { e.sid = null; e.enabled = false; pkLeftEnd(w, e, 'detached'); if (e.activeFill) { e.activeFill.contextGone = true; e.activeFill.heldRequests = []; e.activeFill.abort?.(); } } return; } // B-97ae round 2: the session took its authenticator (S12)
       // verify r1 A7: a main-frame navigation IN FLIGHT (started, not committed) — a timeout then is the network's
       // verify r2 #5: `navFirst` = the first start of a RUN of navigations none of which committed (a page that starts a new
       // one every 20 s is ONE run — a per-start clock never reached the grace: never hung, never told), `navCount` its size
-      case 'Page.frameStartedNavigating': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId && !/samedocument/i.test(String(p.navigationType || ''))) { const t = now(); if (!e.navSince) { e.navFirst = t; e.navCount = 0; } e.navSince = t; e.navCount = (e.navCount || 0) + 1; e.navUrl = String(p.url || ''); startHop(e, t); } return; }
+      case 'Page.frameStartedNavigating': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId && !/samedocument/i.test(String(p.navigationType || ''))) { const t = now(); if (!e.navSince) { e.navFirst = t; e.navCount = 0; } e.navSince = t; e.navCount = (e.navCount || 0) + 1; e.navUrl = String(p.url || ''); startHop(e, t); if (e.activeFill) { const navOrigin = BL().originOf(e.navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } } return; }
       // lane site-reset: the renderer's OWN request (script / meta refresh / reload / a click's link or form) — measured on
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
-      case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
+      case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) { e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; if (e.activeFill && p.url) { const reqOrigin = BL().originOf(String(p.url)); if (!reqOrigin || (e.activeFill.wantOrigin && reqOrigin !== e.activeFill.wantOrigin)) { e.activeFill.crossNav = reqOrigin || 'an unverified page'; e.activeFill.abort?.(); } } } return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || ''); if (navUrl) e.loginNavUrl = navUrl; e.navSeq = (e.navSeq || 0) + 1; if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
-        if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) hop(w, e, { url: String(p.url || ''), same: true });
+        if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) { const navUrl = String(p.url || ''); if (navUrl) e.loginNavUrl = navUrl; hop(w, e, { url: navUrl, same: true }); if (e.liveFill && stripHash(navUrl) !== stripHash(e.liveFill.urlAtFill)) wipeAfterSameOriginSubmit(w, e, 'same-doc-nav'); }
         if (e && String(p.frameId || '') === e.targetId) endNav(e);
         // verify r4 #4: the main frame STOPPED LOADING — this page loaded before the next hop (measured on 0.38.1: every hop of a
         // <meta refresh> dashboard and of the fast bounce, none of the incident's pending shape); the standing loop is re-judged
@@ -425,7 +513,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // sign-in (paused until the user answers in the live view), every other paused Document request continued at once
       case 'Page.fileChooserOpened': return onPrompt(w, m, 'file', p);
       case 'Fetch.authRequired': return onPrompt(w, m, 'http-auth', p);
-      case 'Fetch.requestPaused': { call(w, 'Fetch.continueRequest', { requestId: String(p.requestId || '') }, m.sessionId ? String(m.sessionId) : null); return; }
+      case 'Fetch.requestPaused': { onCredFetchPaused(w, m, p); return; }
+      case 'Network.loadingFinished': case 'Network.loadingFailed': { const e = tabOf(w, m); if (e && e.inflightCredReqs && e.inflightCredReqs.delete(String(p.requestId || ''))) wipeAfterSameOriginSubmit(w, e, 'submitted'); return; }
       case 'Page.javascriptDialogOpening': return onOpen(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       case 'Page.javascriptDialogClosed': return onClosed(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
@@ -445,15 +534,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) { try { pkHarvest(w, e, m.method, p); } catch (err) { pkFailed(w, e, null, err); } } return; } // lane passkey-store-core: the harvest
       // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
-      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
+      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); if (e.activeFill && e.activeFill.isoContextId && id === Number(e.activeFill.isoContextId)) { e.activeFill.contextGone = true; e.activeFill.abort?.(); } e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
       // B-97ae round 2 MUST 3(i): A CRASHED PAGE IS A PAGE THAT WENT — (a)'s road. MEASURED on real Chrome (test-browser-passkey-
       // chrome S13): a renderer crash during a lend says Target.targetCrashed (the browser's discovery — this watch's) and
       // Inspector.targetCrashed (a session with Inspector on), and NO context event until a reload; the lent authenticator — its
       // key and UV — SURVIVES the crash AND the reload (the reloaded page signed with it in 2 ms). So the crash itself ends the
       // tab's pending ceremonies through THE ONE END; its documents are dead — the context maps cleared, and the records it ends
       // are marked page-gone (pkPageGone), so the drain sends no call that would look for a dead context and wait out callTimeoutMs.
-      case 'Target.targetCrashed': case 'Inspector.targetCrashed': { const e = m.method === 'Target.targetCrashed' ? w.targets.get(String(p.targetId || '')) : tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); } return; }
-      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
+      case 'Target.targetCrashed': case 'Inspector.targetCrashed': { const e = m.method === 'Target.targetCrashed' ? w.targets.get(String(p.targetId || '')) : tabOf(w, m); if (e) { if (e.activeFill) { e.activeFill.contextGone = true; e.activeFill.heldRequests = []; e.activeFill.abort?.(); } e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); } return; }
+      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { if (e.activeFill) { e.activeFill.contextGone = true; e.activeFill.abort?.(); } e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
       default: return;
     }
   }
@@ -538,17 +627,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched' };
     const e = w.targets.get(tid);
     if (!e) return { ok: false, code: 'not-found' };
-    if (t.ephemeral) return { ok: true, own: true }; // its own browser: every tab is its already
+    if (t.ephemeral) { noteActiveTab(t, tid); return { ok: true, own: true }; } // its own browser: every tab is its already
     const mine = parentKey(t.browserKey);
     if (!mine) return { ok: false, code: 'bad-request' };
     if (namedByAnother(w, tid, mine)) return { ok: false, code: 'not_your_tab' };
     const was = e.owner || null;
-    if (was && parentKey(was) === mine) return { ok: true, was };
+    if (was && parentKey(was) === mine) { noteActiveTab(t, tid); return { ok: true, was }; }
     e.owner = String(t.browserKey);
     if (keeper) {
       if (was && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, was, tid); } catch { /* the keeper's own failure */ } }
       if (typeof keeper.noteOwnTab === 'function') { try { keeper.noteOwnTab(w.profileId, e.owner, tid); } catch (err) { say('bind-tab:' + (err && err.message), `${w.profileId}: a tab the ack named was not recorded on its lease — ${err && err.message}`); } }
     }
+    noteActiveTab(t, tid);
     return { ok: true, was, rebound: !!was };
   }
   function namedByAnother(w, tid, mine) {
@@ -738,7 +828,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function arm(profileId, { budgetMs = 800, rearm = false, by = 'agent' } = {}) {
     const pid = String(profileId || '');
     if (!rearm) { gaveUp.delete(pid); const r = rearms.get(pid); if (r && !r.t) rearms.delete(pid); } // acceptance r1: any arm but a re-arm's own starts the tries over
-    remode(pid); // acceptance r1: an arm (a verb, his press, his window) re-reads WHO holds it
+    const rm = remode(pid); // acceptance r1: an arm (a verb, the person's press, the person's window) re-reads WHO holds it
+    if (rm && !rearm && budgetMs > 0) {
+      let tr = null;
+      await Promise.race([rm, new Promise((r) => { tr = setTimeout(r, budgetMs); if (tr.unref) tr.unref(); })]);
+      if (tr) clearTimeout(tr);
+    }
     if (!pid || !keeper || typeof keeper.cdpEndpointFor !== 'function') return { ok: false, code: 'not_watched', error: 'no keeper' };
     let w = watches.get(pid);
     if (!w || w.state === 'down') {
@@ -760,6 +855,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   function disarm(profileId, why = 'the browser stopped') {
     const w = watches.get(String(profileId || ''));
+    if (why === 'the browser stopped') {
+      stashedSnapshotsByProfile.delete(String(profileId || ''));
+      stashedStepOtpsByProfile.delete(String(profileId || ''));
+    }
     dropOutcomes(String(profileId || ''));
     openers.delete(String(profileId || ''));
     refusals.delete(String(profileId || '')); gaveUp.delete(String(profileId || '')); // acceptance r3: a refusal is the stopped browser's — never said of the next one (r5: nor the given-up socket's)
@@ -780,7 +879,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.state !== 'open') return null; // still connecting: its tabs are tracked in the mode it has now
     try { log.log?.(`[browser-dialog] ${pid}: the watch is now ${want === 'person' ? "the person's own (observation only — Chrome asks him)" : "the agent's (its permission plan, prompt hooks and passkey authenticator)"}`); } catch { /* */ }
     emit({ kind: 'mode', profileId: pid, mode: want });
-    if (w.kernel) { try { w.ws && w.ws.close(1000); } catch { /* closing */ } down(w, 'the watch changed hands', { keepNotices: true }); return arm(pid, { budgetMs: 0, rearm: true }); }
+    if (w.kernel) { try { w.ws && w.ws.close(1000); } catch { /* closing */ } down(w, 'the watch changed hands', { keepNotices: true }); return arm(pid, { budgetMs: knownFenceProfiles.has(pid) ? 800 : 0, rearm: true }); }
     return (want === 'person' ? toPerson(w) : toAgent(w)).catch((e) => say('mode:' + pid + ':' + (e && e.message), `${pid}: the watch's mode did not move cleanly — ${e && e.message}`));
   }
   /** agent → person: every policy off over the same socket — a paused sign-in handed back to Chrome's own sheet, the file chooser +
@@ -789,7 +888,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const tabs = [...w.targets.values()].filter((e) => e.sid);
     for (const rec of [...w.prompts.values()]) { const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person'); }
     await Promise.all(tabs.map(async (e) => {
-      if (e.enabled) { await call(w, 'Fetch.disable', {}, e.sid); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
+      if (e.enabled) { await syncTabFetchMode(w, e); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
       if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; const x = await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid), d = await call(w, 'WebAuthn.disable', {}, e.sid); const xa = pkAnswer(w, e, x), da = pkAnswer(w, e, d); if ((xa === 'refused' || xa === 'silent') && (da === 'refused' || da === 'silent')) { const uvHeld = [...e.pk.holds.values()].some((h) => h.auth === id && h.uv); const seen = await pkLook(w, e, id, [], uvHeld, { anyKey: true }); if (seen) pkLeftSet(w, e, id, seen, [pkWhy('WebAuthn.removeVirtualAuthenticator', x, xa), pkWhy('WebAuthn.disable', d, da)]); } } // round 3: the same look as the others (its UV too) // B-97ae round 2 MUST 3(ii): the handover's removal judged and said as (b)'s
     }));
     if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));
@@ -802,6 +901,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of [...w.targets.values()]) {
       if (!e.sid || !e.enabled) continue;
       armPrompts(w, e);
+      await syncTabFetchMode(w, e);
       if (pks && e.pk.armed && !e.pk.auth) e.pk.auth = await pairAuthenticator(w, e, e.sid);
       else if (e.pk.once) e.pk.once = false; // a vault ceremony in flight keeps its authenticator — the agent's from now on
     }
@@ -1108,12 +1208,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (verb === 'upload' && profileId) { const w = watches.get(String(profileId)); if (w) for (const rec of [...w.prompts.values()]) if (rec.type === 'file') dropPrompt(w, rec, 'uploaded'); } // lane browser-ui-prompts: the agent's upload answers the chooser
     if (!browserKey) return;
     if (profileId && watches.get(String(profileId))) watches.get(String(profileId)).lastVerbAt = now(); // lane browser-swiftshader-cpu
-    const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0 }; on[String(profileId)] = { n: o.n + 1, at: now() }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
+    const r = running.get(browserKey) || { n: 0, at: 0, on: {} }; const on = { ...(r.on || {}) }; if (profileId) { const o = on[String(profileId)] || { n: 0, at: 0 }; on[String(profileId)] = { n: o.n + 1, at: now(), verb: verb ? String(verb) : (o.verb || null) }; } running.set(browserKey, { n: r.n + 1, at: now(), on });
     // lane site-reset: a page-ACTING command's instant — a page turn right after it is the agent's, never the page's loop
     const w = profileId ? watches.get(String(profileId)) : null;
     if (w && verb && ST.loopActing(verb)) { w.commands.push(now()); if (w.commands.length > LOOP_COMMANDS_KEEP) w.commands.splice(0, w.commands.length - LOOP_COMMANDS_KEEP); }
   }
-  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
+  function verbEnded(browserKey, { profileId = null } = {}) { if (!browserKey) return; const r = running.get(browserKey); if (!r) return; const on = { ...(r.on || {}) }; if (profileId && on[String(profileId)]) { const o = on[String(profileId)]; if (o.n <= 1) delete on[String(profileId)]; else on[String(profileId)] = { n: o.n - 1, at: o.at, verb: o.verb || null }; } if (r.n <= 1) running.delete(browserKey); else running.set(browserKey, { n: r.n - 1, at: r.at, on }); }
   function verbRunning(browserKey) { const r = running.get(browserKey); if (!r) return false; if (now() - r.at > VERB_RUNNING_MAX_MS) { running.delete(browserKey); return false; } return r.n > 0; }
 
   /** Rule 6: a dialog that opened while a holder of this browser ran NO verb ⇒ ONE free next-turn notice (never a wake). */
@@ -2020,7 +2120,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function armPrompts(w, e) {
     if (!e.sid) return;
     call(w, 'Page.setInterceptFileChooserDialog', { enabled: true }, e.sid).then((r) => { if (r && r.error) say('fc:' + r.error.message, `${w.profileId}: the file chooser was not hooked — ${r.error.message}`); });
-    call(w, 'Fetch.enable', { patterns: [{ urlPattern: '*', resourceType: 'Document', requestStage: 'Request' }], handleAuthRequests: true }, e.sid).then((r) => { if (r && r.error) say('auth:' + r.error.message, `${w.profileId}: HTTP sign-ins were not hooked — ${r.error.message}`); });
+    syncTabFetchMode(w, e);
     const geo = [...w.grants.values()].find((g) => g.kind === 'geolocation' && g.setting === 'granted'); if (geo) call(w, 'Emulation.setGeolocationOverride', geo.position || {}, e.sid); // lane browser-ui-prompts-r2
   }
   function onPrompt(w, m, type, p) {
@@ -2394,7 +2494,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.surf.size > 256) { const old = w.surf.keys().next().value; const x = w.surf.get(old); w.surf.delete(old); surfaceAskDone(w, x); }
     const sink = SF().sinkOf(rec.kind, w.kernel);
     if (sink === 'webauthn') { rec.passkey = true; return pkSurface(w, rec); } // lane passkey-sink: the passkey record stands for it — never a second dialog_open, never a browser-surface card
-    if (sink === 'credentials' || (rec.kind === 'http-auth' && loginSinks(w))) { if (sink) rec.sink = sink; else rec.logins = true; } // lane browser-login: the login road fills it — the agent's line names `vibespace-browser login`
+    if (sink === 'credentials') rec.sink = sink; // m1: DOM credential notes only; http-auth stays owner-answered like standard Chrome
     if (rec.cls === 'silent') { // SILENT: one journal line per kind, never a card, never a note
       say('supp:' + w.profileId + ':' + ((rec.detail && rec.detail.suppressedKind) || rec.kind), `${w.profileId}: surface:${rec.kind} ${(rec.detail && rec.detail.suppressedKind) || ''}${rec.detail && rec.detail.reason ? ` (${rec.detail.reason})` : ''}`);
       emit({ kind: 'surface', state: 'trace', profileId: w.profileId, targetId: tid, surface: { id: rec.id, kind: rec.kind, suppressedKind: (rec.detail && rec.detail.suppressedKind) || null } });
@@ -2563,99 +2663,2161 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const x = w.surfTimers.get(rec.id); if (x) { clearTimeout(x); w.surfTimers.delete(rec.id); }
     const fy = w.surfForYou.get(rec.id); if (fy) { w.surfForYou.delete(rec.id); try { forYou?.resolve?.(fy); } catch { /* the tray's own failure */ } }
   }
-  // ── lane browser-login (P3 of the custom browser kernel, design §4): WEB LOGINS — on a kernel whose features list
-  // `credentials` the kernel reports a page's login forms (`VibeSpace.credentialFormDetected` → the tab's `e.forms`, ≤ 8, a new
-  // document clears them), fills what the VAULT holds (`VibeSpace.fillCredential` — the values ride this loopback socket and
-  // nothing here keeps them) and says when the page took a form (`VibeSpace.credentialSubmitted` → the ONE writer,
-  // src/server/browser-logins.js, saves what it should). The agent's door is `fillLogin` (`vibespace-browser login`): the
-  // verdict, the grant, the two-step code and every use line are the logins module's; an http-auth surface is answered the same
-  // way (its credential answer, the same phishing rule and grant).
+  // ── lane browser-login r22 («agent locates, hub fills»): ONE CDP PRIMITIVE FOR STANDARD CHROME & CUSTOM KERNEL ──
   function loginSinks(w) { return !!(w && w.kernel && Array.isArray(w.kernel.features) && w.kernel.features.includes('credentials')); }
-  function onLoginForm(w, tid, p) {
+  const stripHash = (u) => String(u || '').split('#')[0];
+  const tabLoginUrlOf = (e) => String((e && (e.loginNavUrl || e.url)) || '');
+
+  function onOwnerTakeoverSubmit(w, tid, p) {
     const e = tid ? w.targets.get(tid) : null;
-    if (!e || !loginSinks(w)) { say('login-form:' + w.profileId, `${w.profileId}: a login form ${e ? 'from a browser that does not list the credentials feature' : 'for a tab this watch does not know'} was not kept`); return; }
-    const f = BL().formOf(p, { now: now() });
-    if (!f) { say('login-form-bad:' + w.profileId, `${w.profileId}: a login form the kernel reported had no field VibeSpace can fill — not kept`); return; }
-    e.forms = BL().keepForm(e.forms, { ...f, targetId: e.targetId });
-    emit({ kind: 'login-form', profileId: w.profileId, targetId: e.targetId, form: { id: f.id, kind: f.kind, origin: f.pageOrigin } });
+    const rawPw = p && typeof p.password === 'string' ? p.password : null;
+    if (p) p.password = undefined;
+    if (!e || !loginSinks(w) || !logins || typeof logins.offerOwnerSaveCard !== 'function') return;
+    if (!pkTakeover(w, e)) return;
+    const pageOrigin = (p && (p.pageOrigin || p.origin)) || tabLoginUrlOf(e);
+    const uname = p && p.usernameHint !== undefined && p.usernameHint !== null ? p.usernameHint : (p && p.username);
+    if (!rawPw) {
+      say('takeover-save-dropped:' + w.profileId + ':missing_secret', `${w.profileId}: takeover credentialSubmitted dropped (bad_request: missing credential)`);
+      try { logins.noticeTakeoverSaveDropped?.({ origin: pageOrigin, code: 'bad_request', why: 'missing credential', profileId: w.profileId }); } catch { /* */ }
+      return;
+    }
+    try {
+      const r = logins.offerOwnerSaveCard({ origin: pageOrigin, username: uname, password: rawPw, profileId: w.profileId });
+      if (!r || !r.ok) {
+        const code = (r && r.code) || 'bad_request';
+        const why = (r && r.error) || code;
+        say('takeover-save-dropped:' + w.profileId + ':' + code, `${w.profileId}: takeover save-login card not offered (${code}: ${why})`);
+        try { logins.noticeTakeoverSaveDropped?.({ origin: pageOrigin, code, why, profileId: w.profileId }); } catch { /* */ }
+      }
+    } catch (err) {
+      say('takeover-save-err:' + w.profileId, `${w.profileId}: takeover save-login card failed — ${err && err.message}`);
+    }
   }
-  /** The conversation a tab's page is for — its id and its name (the notice's words, the entry's provenance). */
-  function loginConv(w, e) {
-    const bk = pkOwner(w, e);
-    const h = (holdersOf ? holdersOf(w.profileId) || [] : []).find((x) => x && !x.human && bk && parentKey(x.browserKey) === parentKey(bk));
-    let c = null; try { c = h && h.sessionId && typeof conversationOf === 'function' ? conversationOf(h.sessionId) : null; } catch { c = null; }
-    return { conv: (c && c.cid) || (h && h.sessionId) || null, name: (c && c.name) || null };
+
+  function resolveKnownTargetId(w, rawTid) {
+    if (!rawTid) return null;
+    const s = String(rawTid).trim().slice(0, 64);
+    if (!s) return null;
+    if (!w) return s;
+    if (w.targets.has(s)) return s;
+    const up = s.toUpperCase();
+    for (const k of w.targets.keys()) if (k.toUpperCase() === up) return k;
+    if (/^[0-9A-F]{4,}$/i.test(s)) {
+      const hits = [];
+      for (const k of w.targets.keys()) if (k.toUpperCase().startsWith(up)) hits.push(k);
+      if (hits.length === 1) return hits[0];
+    }
+    return null;
   }
-  function onLoginSubmitted(w, tid, p) {
-    const e = tid ? w.targets.get(tid) : null;
-    if (!e || !loginSinks(w) || !logins) { say('login-sub:' + w.profileId, `${w.profileId}: a login submission ${e ? 'on a browser VibeSpace keeps no logins for' : 'for a tab this watch does not know'} was not saved`); return; }
-    const filled = e.filled && e.filled.formId === String(p.surfaceId || p.formId || '') && now() - e.filled.at < 10 * 60e3 ? e.filled : null;
-    const by = pkTakeover(w, e) ? 'human' : 'agent';
-    const who = filled ? { conv: filled.conv, name: filled.actor } : loginConv(w, e);
-    let r;
-    try { r = logins.submitted({ origin: p.pageOrigin || p.origin, usernameHint: p.usernameHint, password: typeof p.password === 'string' ? p.password : null, outcome: p.outcome, by, name: filled ? filled.name : null, conv: who.conv, convName: who.name, profileId: w.profileId }); }
-    catch (err) { r = { state: 'none', why: err && err.message }; }
-    p.password = undefined; // the loopback socket's bytes go nowhere else
-    if (filled && r && r.state !== 'held') e.filled = null;
-    say('login-saved:' + w.profileId + ':' + Date.now(), `${w.profileId}: a login submission on ${BL().originOf(p.pageOrigin || p.origin) || 'a page'} — ${r ? r.state : 'none'}${r && r.why ? ` (${String(r.why).slice(0, 60)})` : ''}`);
-    emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: r ? r.state : 'none', name: (r && r.name) || null });
+  function noteActiveTarget(profileId, browserKey = null, targetId = null) {
+    const pid = String(profileId || '');
+    if (!pid || !targetId) return;
+    const w = watches.get(pid);
+    const tid = w ? resolveKnownTargetId(w, targetId) : String(targetId).trim().slice(0, 64);
+    if (!tid) return;
+    let m = activeTabByProfile.get(pid);
+    if (!m) { m = new Map(); activeTabByProfile.set(pid, m); }
+    m.set(parentKey(browserKey) || '*', { tid, at: now() });
   }
-  /** The forms standing on the conversation's tabs (a kernel's) — ids, kinds, origins and field types only. */
-  function loginForms(profileId, scope = null) {
-    const w = watches.get(String(profileId || ''));
-    if (!w || !loginSinks(w)) return [];
-    const out = [];
-    for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) out.push({ id: f.id, targetId: e.targetId, kind: f.kind, origin: f.pageOrigin, fields: f.fields.map((x) => x.type) });
-    return out;
+  function noteActiveTab(target, targetId) {
+    if (!target || !target.profileId || !targetId) return;
+    noteActiveTarget(target.profileId, target.browserKey, targetId);
   }
-  /** THE `login` DOOR: the road (src/browser-login.js roadVerdict — the standard-Chrome road through
-   *  `src/server/browser-login-fill.js` is WITHDRAWN in 2.369.364, refused by name before anything below runs; its branches stay
-   *  for the root fix to re-open) → the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan →
-   *  the kernel fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
-  async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
-    const pid = String(profileId || ''); const w = watches.get(pid);
-    if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
-    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-    const road = BL().roadVerdict(w.kernel);   // lane vault-login-chrome r2 (HOTFIX 2.369.364): the road FIRST, from the capability row — standard Chrome (login_fill_withdrawn) and a kernel without `credentials` (login_no_form) are refused here, before a form is read, the vault is opened or a CDP command is sent
-    if (!road.ok) return road;
-    const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
-    const forms = [];
-    if (w.kernel) {
-      for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
-      for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
-    } else {
+  function activeTabEntryOfProfile(profileId, browserKey = null) {
+    const m = activeTabByProfile.get(String(profileId || ''));
+    if (!m) return null;
+    const bk = parentKey(browserKey);
+    const v = bk ? m.get(bk) : m.get('*');
+    return v && v.tid ? v : null;
+  }
+  function activeTabOfProfile(profileId, browserKey = null) {
+    const v = activeTabEntryOfProfile(profileId, browserKey);
+    return v ? v.tid : null;
+  }
+  function dropActiveTarget(profileId, targetId) {
+    const m = activeTabByProfile.get(String(profileId || ''));
+    if (!m || !targetId) return;
+    const up = String(targetId).toUpperCase();
+    for (const [k, v] of [...m.entries()]) if (v && String(v.tid || '').toUpperCase() === up) m.delete(k);
+  }
+  function extractArgvTab(argv) {
+    if (!Array.isArray(argv)) return null;
+    for (let i = 0; i < argv.length; i++) {
+      const a = String(argv[i] || '');
+      if ((a === '--tab' || a === '--target') && argv[i + 1] && !String(argv[i + 1]).startsWith('-')) return String(argv[i + 1]).slice(0, 64);
+      const eq = /^--(?:tab|target)=(.+)$/.exec(a);
+      if (eq && eq[1]) return eq[1].slice(0, 64);
+    }
+    return null;
+  }
+  function allowVerbInFlight(profileId, browserKey = null) {
+    const pid = String(profileId || '');
+    if (!pid) return null;
+    const t = now();
+    const want = browserKey ? parentKey(browserKey) : null;
+    for (const [bk, r] of running) {
+      if (want && parentKey(bk) !== want) continue;
+      const o = r && r.on ? r.on[pid] : null;
+      if (!o || !(o.n > 0) || t - (o.at || 0) > WITNESS_MS) continue;
+      if (o.verb && BL().liveFillAllowsVerb(o.verb)) return String(o.verb);
+    }
+    return null;
+  }
+  function recordFenceAudit(profileId, fence, why) {
+    const pid = String(profileId || '');
+    const row = {
+      at: now(), profileId: pid,
+      targetId: (fence && fence.targetId) || null,
+      loginId: (fence && fence.loginId) || null,
+      origin: (fence && fence.origin) || null,
+      why: String(why || 'ended').slice(0, 48),
+    };
+    fenceAuditLines.push(row);
+    if (fenceAuditLines.length > 64) fenceAuditLines.splice(0, fenceAuditLines.length - 64);
+    try { log.warn?.(`[browser-dialog] ${pid}: live-fill fence on tab ${String(row.targetId || '?').slice(0, 12)} (${row.origin || '?'}) ended by ${row.why}`); } catch { /* */ }
+    try { keeper?.audit?.({ sessionId: null, browserKey: (fence && fence.browserKey) || null, profileId: pid, verb: (`login-fence-ended:${row.why}`).slice(0, 32), ok: false }); } catch { /* optional */ }
+    emit({ kind: 'login-fence-ended', ...row });
+  }
+  function syncPersistedLoginFences(profileId) {
+    const pid = String(profileId || '');
+    if (pid) knownFenceProfiles.add(pid);
+    if (!pid || !keeper || typeof keeper.saveLoginFenceState !== 'function') return;
+    const w = watches.get(pid);
+    let fences = [];
+    if (w && w.state === 'open') {
       for (const e of w.targets.values()) {
-        if (!inScope(scope, e.targetId) || !e.sid) continue;
-        const f = await LF().inspectTabLoginForm({ call: (m, p) => call(w, m, p, e.sid), targetId: e.targetId, now: now() });
-        if (f) forms.push(f);
+        if (!e.liveFill) continue;
+        fences.push({
+          targetId: e.targetId,
+          urlAtFill: String(e.liveFill.urlAtFill || tabLoginUrlOf(e)),
+          origin: String(e.liveFill.origin || ''),
+          at: Number(e.liveFill.at) || now(),
+          loginId: e.liveFill.loginId || null,
+          mode: String(e.liveFill.mode || 'login'),
+          browserKey: e.liveFill.browserKey || null,
+          ...(BL().TYPED_SLOTS.includes(e.liveFill.typedSlot) ? { typedSlot: e.liveFill.typedSlot } : {}),
+          ...(Number.isInteger(e.liveFill.rev) && e.liveFill.rev >= 1 ? { rev: e.liveFill.rev } : {}),
+          ...(typeof e.liveFill.entryGen === 'string' && BL().ENTRY_GEN_RE.test(e.liveFill.entryGen) ? { entryGen: e.liveFill.entryGen } : {}),
+          ...(e.liveFill.typedPrevious ? { typedPrevious: true } : {}),
+          ...(e.liveFill.unknownTyped ? { unknownTyped: true } : {}),
+          ...(Array.isArray(e.liveFill.also) && e.liveFill.also.length ? { also: e.liveFill.also } : {}),
+          ...(e.liveFill.holdReason ? { holdReason: String(e.liveFill.holdReason) } : {}),
+        });
+      }
+    } else if (typeof keeper.loginFenceStateOf === 'function') {
+      try { fences = keeper.loginFenceStateOf(pid).fences || []; } catch { fences = []; }
+    }
+    const scrubs = [...(scrubNamesByProfile.get(pid) || [])];
+    try { keeper.saveLoginFenceState(pid, { fences, scrubs }); } catch { /* optional */ }
+  }
+  function recordProfileCredSigs(profileId, sigs) {
+    const pid = String(profileId || '');
+    if (!pid || !Array.isArray(sigs) || !sigs.length) return;
+    let list = credSigsByProfile.get(pid);
+    if (!list) { list = []; credSigsByProfile.set(pid, list); }
+    for (const sg of sigs) {
+      if (!sg || !sg.len || !sg.sha256) continue;
+      const idx = list.findIndex((x) => x.len === sg.len && x.sha256 === sg.sha256);
+      if (idx !== -1) list.splice(idx, 1);
+      list.push(sg);
+    }
+    if (list.length > 128) list.splice(0, list.length - 128);
+  }
+  function noteCredRequestId(profileId, reqId) {
+    const pid = String(profileId || '');
+    const id = reqId != null ? String(reqId).trim() : '';
+    if (!pid || !id) return;
+    let set = credRequestIdsByProfile.get(pid);
+    if (!set) { set = new Set(); credRequestIdsByProfile.set(pid, set); }
+    set.delete(id);
+    set.add(id);
+    while (set.size > 512) set.delete(set.values().next().value);
+  }
+  function isCredRequestId(profileId, reqId) {
+    const set = credRequestIdsByProfile.get(String(profileId || ''));
+    return Boolean(set && reqId != null && set.has(String(reqId).trim()));
+  }
+  function bodyCarriesCred(profileId, bodyText) {
+    const sigs = credSigsByProfile.get(String(profileId || ''));
+    if (!sigs || !sigs.length || typeof bodyText !== 'string' || !bodyText) return false;
+    return valueCarriesCredential(bodyText, sigs) || Boolean(inspectRequestBody(bodyText, sigs, '', { hasPostData: true }).carries);
+  }
+  function bumpFillEpoch(profileId, targetId) {
+    const pid = String(profileId || '');
+    const tid = String(targetId || '');
+    if (!pid || !tid) return 0;
+    let m = fillEpochsByProfile.get(pid);
+    if (!m) { m = new Map(); fillEpochsByProfile.set(pid, m); }
+    const next = (m.get(tid) || 0) + 1;
+    m.set(tid, next);
+    try { keeper?.mediator?.()?.interruptForFill?.({ profileId: pid, targetId: tid }); } catch { /* optional */ }
+    return next;
+  }
+  function fillEpochOf(profileId, targetId = null) {
+    const m = fillEpochsByProfile.get(String(profileId || ''));
+    if (!m) return 0;
+    if (targetId) {
+      const w = watches.get(String(profileId || ''));
+      const tid = w ? resolveKnownTargetId(w, targetId) : String(targetId);
+      return tid ? (m.get(tid) || 0) : 0;
+    }
+    let sum = 0;
+    for (const v of m.values()) sum += v;
+    return sum;
+  }
+  function effectiveLiveFillOf(e) {
+    if (!e) return null;
+    if (e.liveFill) return e.liveFill;
+    const af = e.activeFill || (e.activeFills && e.activeFills.size > 0 ? e.activeFills.values().next().value : null);
+    if (!af) return null;
+    return {
+      targetId: e.targetId,
+      origin: af.wantOrigin || BL().originOf(tabLoginUrlOf(e)) || '',
+      at: Number(af.at) || now(),
+      active: true,
+      holdReason: '',
+    };
+  }
+  function hasActiveFillOnProfile(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (w && w.state === 'open') {
+      for (const e of w.targets.values()) if (effectiveLiveFillOf(e)) return true;
+    }
+    return Boolean(liveFillOnTarget(profileId, null));
+  }
+  function recordScrubSecret(profileId, label, val, { persist = true, at = now() } = {}) {
+    const pid = String(profileId || '');
+    if (!pid || typeof val !== 'string' || !val) return;
+    const sg = credSigOf(val);
+    if (sg) recordProfileCredSigs(pid, [sg]);
+    const minB = VR().MIN_MASK_BYTES || 8;
+    const bytes = Buffer.byteLength(val, 'utf8');
+    if (bytes < minB) return;
+    const lbl = String(label || 'login');
+    let list = scrubByProfile.get(pid);
+    if (!list) { list = []; scrubByProfile.set(pid, list); }
+    const idx = list.findIndex((x) => x.value === val);
+    if (idx !== -1) list.splice(idx, 1);
+    list.push({ label: lbl, value: val, bytes, at });
+    if (list.length > 32) list.splice(0, list.length - 32);
+    scrubCompiledByProfile.delete(pid);
+    let names = scrubNamesByProfile.get(pid);
+    if (!names) { names = []; scrubNamesByProfile.set(pid, names); }
+    const ni = names.findIndex((x) => x.name === lbl);
+    if (ni !== -1) names.splice(ni, 1);
+    names.push({ name: lbl, at });
+    if (names.length > 32) names.splice(0, names.length - 32);
+    if (persist) syncPersistedLoginFences(pid);
+  }
+  function hydratePersistedScrubs(profileId) {
+    const pid = String(profileId || '');
+    if (!pid || !logins || typeof logins.scrubSecretsOf !== 'function') return;
+    const names = scrubNamesByProfile.get(pid) || [];
+    for (const s of names) {
+      if (!s || !s.name) continue;
+      let vals = [];
+      try {
+        const res = logins.scrubSecretsOf(s.name, { minBytes: 1 });
+        vals = Array.isArray(res) ? res : (res && Array.isArray(res.values) ? res.values : []);
+      } catch { vals = []; }
+      for (const v of vals) recordScrubSecret(pid, s.name, v, { persist: false, at: s.at || now() });
+    }
+  }
+  function hasScrubSecrets(profileId) {
+    const pid = String(profileId || '');
+    let list = scrubByProfile.get(pid);
+    if ((!list || !list.length) && scrubNamesByProfile.has(pid)) {
+      hydratePersistedScrubs(pid);
+      list = scrubByProfile.get(pid);
+    }
+    const sigs = credSigsByProfile.get(pid);
+    return !!((list && list.length > 0) || (sigs && sigs.length > 0));
+  }
+  function scrubberForProfile(profileId) {
+    const pid = String(profileId || '');
+    if (!hasScrubSecrets(pid)) {
+      scrubCompiledByProfile.delete(pid);
+      return null;
+    }
+    if (scrubCompiledByProfile.has(pid)) return scrubCompiledByProfile.get(pid);
+    const list = scrubByProfile.get(pid);
+    const minB = VR().MIN_MASK_BYTES || 8;
+    const pairs = [];
+    for (const b of list || []) if (b.bytes >= minB) pairs.push({ label: b.label, value: b.value });
+    const fn = pairs.length ? VR().compileTextScrubber(pairs) : null;
+    scrubCompiledByProfile.set(pid, fn);
+    return fn;
+  }
+  function scrubText(profileId, text) {
+    if (typeof text !== 'string' || !text) return text;
+    const fn = scrubberForProfile(profileId);
+    return fn ? fn(text) : text;
+  }
+  function scrubValuesForLogin(profileId, loginId = null, also = null) {
+    const out = [];
+    const wantIds = new Set();
+    if (loginId) wantIds.add(String(loginId));
+    if (Array.isArray(also)) {
+      for (const a of also) if (a && a.loginId) wantIds.add(String(a.loginId));
+    }
+    const list = scrubByProfile.get(String(profileId || '')) || [];
+    for (const b of list) {
+      if (!b || typeof b.value !== 'string' || !b.value) continue;
+      if (wantIds.size > 0 && b.label && !wantIds.has(String(b.label))) continue;
+      out.push(b.value);
+    }
+    if (wantIds.size > 0 && logins && typeof logins.scrubSecretsOf === 'function') {
+      for (const lid of wantIds) {
+        try {
+          const vals = logins.scrubSecretsOf(lid, { minBytes: 1 });
+          const arr = Array.isArray(vals) ? vals : (vals && Array.isArray(vals.values) ? vals.values : []);
+          for (const v of arr) if (typeof v === 'string' && v) out.push(v);
+        } catch { /* vault may be locked */ }
       }
     }
-    forms.sort((a, b) => (a.at || 0) - (b.at || 0));
-    const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
-    if (!plan.ok) return plan;
-    const e = w.targets.get(String(plan.form.targetId || ''));
-    let r = null, kerr = null, chromeStep = null;
-    if (!e || !e.sid) kerr = 'not_attached';
-    else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
-    else if (!w.kernel) {
-      const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), origin: plan.origin, loginId: plan.name, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
-      if (!cf || !cf.ok) kerr = (cf && cf.code) || 'eval_failed';
-      else chromeStep = cf.step || plan.form.step || null;
-    } else {
-      r = await call(w, 'VibeSpace.fillCredential', { surfaceId: plan.form.id, values: plan.values, expectedOrigin: plan.origin, submit: !!submit }, e.sid);
-      kerr = !r || r.timeout ? 'timeout' : r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(stale_origin|invalid_values|no_such_surface|eval_failed)\b/) || [])[1] || 'eval_failed') : r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
-    }
-    plan.values = null; // handed to the kernel — kept by no one here
-    const u = logins.noteFill(plan, { conv, actor, outcome: kerr ? 'login_failed' : 'ok' });
-    if (kerr) return { ok: false, code: kerr === 'stale_origin' ? 'login_phishing' : 'login_failed', error: kerr === 'stale_origin' ? `the page is no longer ${plan.origin} (the kernel checked it again) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
-    if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
-    if (!w.kernel && submit && (plan.mode === 'signup' || plan.mode === 'change')) {
-      try {
-        const sr = logins.submitted({ origin: plan.origin, usernameHint: plan.user, password: null, outcome: 'navigated', by: 'agent', name: plan.name, conv, convName: actor, profileId: w.profileId });   // int361: the password-naming call on its own line (test-browser-prompts' watch: no line naming the password emits)
-        emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null }); } catch { /* */ }
-    }
-    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
+    return [...new Set(out)];
   }
+  const CDP_ENVELOPE_KEYS = new Set(['id', 'method', 'params', 'sessionId', 'result', 'error']);
+  const CDP_ENVELOPE_SCALARS = new Set(['id', 'method', 'sessionId']);
+  function sanitizeRequestHeadersInPlace(headers, sigs) {
+    if (!headers || typeof headers !== 'object' || !Array.isArray(sigs) || !sigs.length) return false;
+    let did = false;
+    if (Array.isArray(headers)) {
+      for (const h of headers) {
+        if (!h || typeof h.value !== 'string' || !h.value.trim()) continue;
+        const lower = String(h.name || '').toLowerCase();
+        const hit = (lower === 'referer' || lower === 'referrer')
+          ? urlCarriesCredential(h.value, sigs)
+          : valueCarriesCredential(h.value.trim(), sigs);
+        if (hit) { h.value = '[vault:redacted]'; did = true; }
+      }
+      return did;
+    }
+    for (const k of Object.keys(headers)) {
+      const v = headers[k];
+      if (typeof v !== 'string' || !v.trim()) continue;
+      const lower = String(k).toLowerCase();
+      const hit = (lower === 'referer' || lower === 'referrer')
+        ? urlCarriesCredential(v, sigs)
+        : valueCarriesCredential(v.trim(), sigs);
+      if (hit) { headers[k] = '[vault:redacted]'; did = true; }
+    }
+    return did;
+  }
+  function redactCredentialUrl(rawUrl) {
+    try {
+      const uo = new URL(rawUrl);
+      uo.username = '';
+      uo.password = '';
+      if (uo.search) uo.search = '?[vault:redacted]';
+      if (uo.hash) uo.hash = '#[vault:redacted]';
+      return uo.href;
+    } catch {
+      return '[vault:redacted]';
+    }
+  }
+  function sanitizeRequestFrame(pid, parsed, sigs) {
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(sigs) || !sigs.length) return false;
+    let sanitized = false;
+    if (typeof parsed.method === 'string' && parsed.params && typeof parsed.params === 'object') {
+      const p = parsed.params;
+      if (parsed.method === 'Network.requestWillBeSent' || parsed.method === 'Fetch.requestPaused') {
+        const req = p.request;
+        if (req && typeof req === 'object') {
+          const reqUrl = String(req.url || '');
+          const urlCarries = reqUrl ? urlCarriesCredential(reqUrl, sigs) : false;
+          const hdrCarries = headersCarryCredential(req.headers, sigs);
+          const contentType = headerValueOf(req.headers, 'content-type');
+          const contentEncoding = headerValueOf(req.headers, 'content-encoding');
+          const inline = extractInlinePostData(req);
+          const bodyRes = (inline.hasData && !inline.binary)
+            ? inspectRequestBody(inline.text, sigs, contentType, { hasPostData: true, contentEncoding })
+            : { carries: false, undecodable: inline.binary };
+          const rawPostCarries = !bodyRes.carries && typeof req.postData === 'string' && req.postData
+            ? valueCarriesCredential(req.postData, sigs)
+            : false;
+          const carries = urlCarries || hdrCarries || Boolean(bodyRes.carries) || rawPostCarries;
+          if (carries) {
+            if (p.requestId) noteCredRequestId(pid, p.requestId);
+            if (p.networkId) noteCredRequestId(pid, p.networkId);
+            if (bodyRes.carries || rawPostCarries) {
+              if (typeof req.postData === 'string') { req.postData = '[vault:redacted]'; sanitized = true; }
+              if (Array.isArray(req.postDataEntries) && req.postDataEntries.length) {
+                req.postDataEntries = [];
+                if (typeof req.postData !== 'string') req.postData = '[vault:redacted]';
+                sanitized = true;
+              }
+            }
+            if (urlCarries) {
+              req.url = redactCredentialUrl(reqUrl);
+              sanitized = true;
+              if (typeof p.documentURL === 'string' && urlCarriesCredential(p.documentURL, sigs)) {
+                p.documentURL = redactCredentialUrl(p.documentURL);
+              }
+            }
+            if (hdrCarries && sanitizeRequestHeadersInPlace(req.headers, sigs)) sanitized = true;
+          }
+        }
+      } else if (parsed.method === 'Network.requestWillBeSentExtraInfo') {
+        if (p.headers && sanitizeRequestHeadersInPlace(p.headers, sigs)) {
+          if (p.requestId) noteCredRequestId(pid, p.requestId);
+          sanitized = true;
+        }
+      }
+    }
+    if (parsed.result && typeof parsed.result === 'object' && typeof parsed.result.postData === 'string' && parsed.result.postData) {
+      if (valueCarriesCredential(parsed.result.postData, sigs) || Boolean(inspectRequestBody(parsed.result.postData, sigs, '', { hasPostData: true }).carries)) {
+        parsed.result.postData = '[vault:redacted]';
+        sanitized = true;
+      }
+    }
+    return sanitized;
+  }
+  function scrubCdpFrame(profileId, frameStr) {
+    if (typeof frameStr !== 'string' || !frameStr) return frameStr;
+    const pid = String(profileId || '');
+    const fn = scrubberForProfile(pid);
+    const sigs = credSigsByProfile.get(pid);
+    const hasSigs = Boolean(sigs && sigs.length > 0);
+    if (!fn && !hasSigs) return frameStr;
+    if (!fn) {
+      if (!frameStr.includes('requestWillBeSent') && !frameStr.includes('requestPaused') && !frameStr.includes('"postData"')) {
+        return frameStr;
+      }
+      let parsedOnly;
+      try { parsedOnly = JSON.parse(frameStr); } catch { return frameStr; }
+      return sanitizeRequestFrame(pid, parsedOnly, sigs) ? JSON.stringify(parsedOnly) : frameStr;
+    }
+    let parsed;
+    try { parsed = JSON.parse(frameStr); } catch { unparseableScrubFrames++; return fn.spelled(frameStr); }
+    let changed = hasSigs ? sanitizeRequestFrame(pid, parsed, sigs) : false;
+    const budgetMs = Number(scrubWalkBudgetMs) > 0 ? Number(scrubWalkBudgetMs) : 250;
+    const deadline = performance.now() + budgetMs;
+    const minB = VR().MIN_MASK_BYTES || 8;
+    let visited = 0, cut = false;
+    const walk = (node, isTop = false) => {
+      if (!cut && (++visited & 511) === 0 && performance.now() > deadline) cut = true;
+      if (typeof node === 'string') {
+        if (cut) {
+          if (node.length >= minB || (node.length >= 3 && Buffer.byteLength(node, 'utf8') >= minB)) { changed = true; return '[vault:scrub-cut]'; }
+          return node;
+        }
+        const s = fn(node);
+        if (s !== node) changed = true;
+        return s;
+      }
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) {
+          const v = node[i];
+          const next = walk(v, false);
+          if (next !== v) node[i] = next;
+        }
+        return node;
+      }
+      if (node && typeof node === 'object') {
+        const keys = Object.keys(node);
+        let keyChanged = false;
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          const nk = (isTop && CDP_ENVELOPE_KEYS.has(k)) ? k : fn(k);
+          if (nk !== k) { keyChanged = true; changed = true; }
+          const v = node[k];
+          if (isTop && CDP_ENVELOPE_SCALARS.has(k)) {
+            if (typeof v === 'string') {
+              const sv = fn(v);
+              if (sv !== v) { changed = true; node[k] = sv; }
+            }
+            continue;
+          }
+          const next = walk(v, false);
+          if (next !== v) node[k] = next;
+        }
+        if (keyChanged) {
+          const rebuilt = {};
+          for (let i = 0; i < keys.length; i++) {
+            const k = keys[i];
+            const nk = (isTop && CDP_ENVELOPE_KEYS.has(k)) ? k : fn(k);
+            rebuilt[nk] = node[k];
+          }
+          return rebuilt;
+        }
+        return node;
+      }
+      return node;
+    };
+    const next = walk(parsed, true);
+    if (cut) {
+      cutScrubFrames++;
+      say('scrub-cut:' + pid, `${pid}: CDP frame scrub walk exceeded ${budgetMs} ms budget; remaining strings redacted with [vault:scrub-cut]`);
+    }
+    return changed ? JSON.stringify(next) : frameStr;
+  }
+  function scrubOutput(target, raw) {
+    const pid = String((target && target.profileId) || '');
+    if (!pid || !raw || typeof raw !== 'object') return { out: '', err: '', changed: false };
+    const o0 = typeof raw.out === 'string' ? raw.out : '';
+    const e0 = typeof raw.err === 'string' ? raw.err : '';
+    const out = o0 ? scrubText(pid, o0) : '';
+    const err = e0 ? scrubText(pid, e0) : '';
+    return { out, err, changed: out !== o0 || err !== e0 };
+  }
+  /** A1: THE ONE check for whether the logins vault is locked (`logins.isLocked()` === `true`). */
+  function isLoginVaultLocked() {
+    if (!logins || typeof logins.isLocked !== 'function') return false;
+    try { return logins.isLocked() === true; } catch { return false; }
+  }
+  function fenceLacksSecretsWhileLocked(targetId, contextId, credSigs, svs, loginId, stepOtpValues = null) {
+    void loginId;
+    if (!isLoginVaultLocked()) return false;
+    const sigs = Array.isArray(credSigs) ? credSigs : [];
+    if (sigs.length === 0) return true;
+    const availVals = [
+      ...(Array.isArray(svs) ? svs : []),
+      ...(Array.isArray(stepOtpValues) ? stepOtpValues : []),
+      ...(LF().valuesForTarget?.(targetId, contextId || 0) || []),
+    ];
+    const valSigs = availVals.map(credSigOf).filter(Boolean);
+    return !sigs.every((sg) => sg && valSigs.some((vs) => vs.len === sg.len && vs.sha256 === sg.sha256));
+  }
+  function fileCeilingWipeNotice(w, e, lf) {
+    if (!lf || lf.ceilingNoticed || !forYou || typeof forYou.add !== 'function') return;
+    lf.ceilingNoticed = true;
+    const origin = lf.origin || BL().originOf(tabLoginUrlOf(e)) || '';
+    const tidShort = String((e && e.targetId) || lf.targetId || 'tab').slice(0, 8);
+    const tabLabel = origin ? `${origin} (tab ${tidShort})` : `tab ${tidShort}`;
+    const holdTooMuch = lf.holdReason === BL().HOLD_TOO_MUCH_TEXT;
+    const holdLocked = lf.holdReason === BL().HOLD_VAULT_LOCKED;
+    const holdUnknown = Boolean(lf.unknownTyped || lf.holdReason === BL().HOLD_UNKNOWN_TYPED);
+    const i18nText = holdTooMuch
+      ? { key: 'a filled password could not be cleared on {tab} (too much text to check) — reload it', params: { tab: tabLabel } }
+      : holdLocked
+        ? { key: 'a filled password could not be cleared on {tab} (the vault was locked while the fill was live) — reload it', params: { tab: tabLabel } }
+        : holdUnknown
+          ? { key: 'a filled password could not be cleared on {tab} (unknown what it typed — the login changed since filling) — reload it', params: { tab: tabLabel } }
+          : { key: 'a filled password could not be cleared on {tab} — reload it', params: { tab: tabLabel } };
+    const i18nDetail = [{ key: 'Open the browser live view or reload that tab so the typed credential leaves the page.' }];
+    const text = i18nText.key.replace('{tab}', tabLabel);
+    const detail = i18nDetail[0].key;
+    try {
+      lf.ceilingNoticeId = forYou.add(w.profileId, { origin: 'browser', kind: 'notice', urgency: 'normal', text, detail, i18n: { text: i18nText, detail: i18nDetail } }) || null;
+    } catch { /* optional */ }
+  }
+
+  /** N1 + A1 + m2: THE ONE Fetch + Network mode driver for tab `e`.
+   *  While ANY live fill fence (`e.liveFill`) or pre-insert arming (`e.credPreArming`) stands on `e` — including during EVERY hold
+   *  state (`too_much_text`, `vault_locked`, `unknown_typed`), the post-restart pre-unlock window (while `credSigs` is empty),
+   *  and across `agent ↔ person` flips — `'*'` Request interception and bounded `Network` tracking stay UP; when no fence
+   *  stands on `e`, `Network.disable` runs and `Fetch` returns to `'doc-auth'` or `'off'`. */
+  async function syncTabFetchMode(w, e) {
+    if (!w || !e) return { ok: false, fenceErr: 'browser watch unavailable' };
+    const run = async () => {
+      if (!e.sid || w.state !== 'open') return { ok: false, fenceErr: 'browser CDP session is closed' };
+      const wantCred = Boolean(e.liveFill || e.credPreArming);
+      const wantActiveFill = Boolean(e.activeFill);
+      const wantFetch = wantActiveFill
+        ? ((!w.kernel && w.mode !== 'person') ? 'fill-auth' : 'fill-noauth')
+        : wantCred
+          ? ((!w.kernel && w.mode !== 'person') ? 'all-auth' : 'all-noauth')
+          : ((e.enabled && !w.kernel && w.mode !== 'person') ? 'doc-auth' : 'off');
+      let failReason = '';
+      const noteFail = (domain, r) => {
+        if (!failReason) {
+          failReason = r && r.timeout
+            ? `${domain} timed out`
+            : `${domain} failed${r && r.error && r.error.message ? `: ${String(r.error.message).slice(0, 120)}` : ''}`;
+        }
+      };
+      const ops = [];
+      if (wantCred && !e.credNetEnabled) {
+        ops.push(call(w, 'Network.enable', { maxPostDataSize: 65536, maxResourceBufferSize: 65536, maxTotalBufferSize: 262144 }, e.sid, interceptTimeoutMs).then((r) => {
+          if (r && !r.error && !r.timeout) e.credNetEnabled = true;
+          else { e.credNetEnabled = false; noteFail('Network.enable', r); }
+        }).catch((err) => { e.credNetEnabled = false; noteFail('Network.enable', { error: err }); }));
+      } else if (!wantCred && e.credNetEnabled) {
+        e.credNetEnabled = false;
+        ops.push(call(w, 'Network.disable', {}, e.sid, interceptTimeoutMs).catch(() => {}));
+      }
+      if (e.fetchMode !== wantFetch) {
+        const applyFetchResult = (r) => {
+          if (r && !r.error && !r.timeout) {
+            e.fetchMode = wantFetch;
+            e.credFetchAll = wantFetch === 'all-auth' || wantFetch === 'all-noauth' || wantFetch === 'fill-auth' || wantFetch === 'fill-noauth';
+          } else {
+            e.fetchMode = null;
+            e.credFetchAll = false;
+            noteFail(wantFetch === 'off' ? 'Fetch.disable' : 'Fetch.enable', r);
+          }
+        };
+        if (wantFetch === 'fill-auth' || wantFetch === 'fill-noauth') {
+          ops.push(call(w, 'Fetch.enable', {
+            patterns: [
+              { urlPattern: '*', requestStage: 'Request' },
+              { urlPattern: '*', resourceType: 'Document', requestStage: 'Response' },
+            ],
+            handleAuthRequests: wantFetch === 'fill-auth',
+          }, e.sid, interceptTimeoutMs).then(applyFetchResult).catch((err) => applyFetchResult({ error: err })));
+        } else if (wantFetch === 'all-auth' || wantFetch === 'all-noauth') {
+          ops.push(call(w, 'Fetch.enable', {
+            patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+            handleAuthRequests: wantFetch === 'all-auth',
+          }, e.sid, interceptTimeoutMs).then(applyFetchResult).catch((err) => applyFetchResult({ error: err })));
+        } else if (wantFetch === 'doc-auth') {
+          ops.push(call(w, 'Fetch.enable', {
+            patterns: [{ urlPattern: '*', resourceType: 'Document', requestStage: 'Request' }],
+            handleAuthRequests: true,
+          }, e.sid, interceptTimeoutMs).then((r) => {
+            if (r && r.error) say('auth:' + r.error.message, `${w.profileId}: HTTP sign-ins were not hooked — ${r.error.message}`);
+            applyFetchResult(r);
+          }).catch((err) => applyFetchResult({ error: err })));
+        } else {
+          ops.push(call(w, 'Fetch.disable', {}, e.sid, interceptTimeoutMs).then(applyFetchResult).catch((err) => applyFetchResult({ error: err })));
+        }
+      }
+      if (ops.length) await Promise.all(ops);
+      const fetchOk = e.fetchMode === wantFetch && (!wantActiveFill || (e.fetchMode === 'fill-auth' || e.fetchMode === 'fill-noauth')) && (!wantCred || e.credFetchAll);
+      const netOk = !wantCred || Boolean(e.credNetEnabled);
+      const ok = Boolean(e.sid && w.state === 'open' && fetchOk && netOk);
+      return { ok, wantFetch, fetchMode: e.fetchMode, wantCred, credNetEnabled: Boolean(e.credNetEnabled), fenceErr: ok ? '' : (failReason || 'request interception is not active on this tab') };
+    };
+    const prev = e.fetchSyncP || Promise.resolve();
+    const cur = prev.then(run, run);
+    e.fetchSyncP = cur.then(() => {}, () => {});
+    return cur;
+  }
+
+  async function ensureTabCredIntercept(w, e) {
+    if (!w || !e || !e.sid || w.state !== 'open') return { ok: false, fenceErr: 'browser CDP session is closed' };
+    e.credPreArming = true;
+    return syncTabFetchMode(w, e);
+  }
+
+  function syncTabCredIntercept(w, e) {
+    syncTabFetchMode(w, e).catch(() => {});
+  }
+
+  function extractInlinePostData(req) {
+    if (!req || typeof req !== 'object') return { text: '', hasData: false, binary: false };
+    if (Array.isArray(req.postDataEntries) && req.postDataEntries.length) {
+      try {
+        const bufs = [];
+        for (const x of req.postDataEntries) {
+          if (x && typeof x.bytes === 'string') bufs.push(Buffer.from(x.bytes, 'base64'));
+        }
+        const joined = Buffer.concat(bufs);
+        if (joined.includes(0)) return { text: '', hasData: true, binary: true };
+        const str = joined.toString('utf8');
+        if (str.includes('\ufffd') || !Buffer.from(str, 'utf8').equals(joined)) return { text: '', hasData: true, binary: true };
+        return { text: str, hasData: str.length > 0, binary: false };
+      } catch { return { text: '', hasData: false, binary: true }; }
+    }
+    if (typeof req.postData === 'string' && req.postData.length > 0) {
+      if (req.postData.includes('\u0000') || req.postData.includes('\ufffd')) return { text: '', hasData: true, binary: true };
+      return { text: req.postData, hasData: true, binary: false };
+    }
+    return { text: '', hasData: false, binary: false };
+  }
+  function headerValueOf(headers, wantLower) {
+    if (!headers || typeof headers !== 'object') return '';
+    if (Array.isArray(headers)) {
+      for (const h of headers) {
+        if (h && String(h.name || '').toLowerCase() === wantLower && typeof h.value === 'string' && h.value.trim()) return h.value.trim();
+      }
+      return '';
+    }
+    for (const k of Object.keys(headers)) {
+      if (String(k).toLowerCase() === wantLower && typeof headers[k] === 'string' && headers[k].trim()) return headers[k].trim();
+    }
+    return '';
+  }
+
+  function continueResponseStage(w, reqId, sid, p) {
+    if (p && p.responseStatusCode != null) {
+      call(w, 'Fetch.continueResponse', { requestId: reqId }, sid, 1500).then((r) => {
+        if (r && r.error) call(w, 'Fetch.continueRequest', { requestId: reqId }, sid, 1500).catch(() => {});
+      }).catch(() => {});
+    } else {
+      call(w, 'Fetch.continueRequest', { requestId: reqId }, sid, 1500).catch(() => {});
+    }
+  }
+
+  function onCredFetchPaused(w, m, p) {
+    const sid = m.sessionId ? String(m.sessionId) : null;
+    const reqId = String(p.requestId || '');
+    const e = tabOf(w, m);
+    const af = e && e.activeFill;
+    const isRespStage = p.responseStatusCode != null || p.responseErrorReason != null;
+    const isTopDoc = p.resourceType === 'Document' && (!p.frameId || String(p.frameId) === String((af && af.topFrameId) || (e && e.targetId) || ''));
+    if (af && isTopDoc && af.wantOrigin) {
+      const reqUrl = String((p.request && p.request.url) || '');
+      const reqOrigin = BL().originOf(reqUrl);
+      let redirectOrigin = null;
+      if (isRespStage && Number(p.responseStatusCode) >= 300 && Number(p.responseStatusCode) < 400) {
+        const loc = headerValueOf(p.responseHeaders, 'location');
+        if (loc) {
+          try { redirectOrigin = BL().originOf(new URL(loc, reqUrl || af.wantOrigin).href); } catch { redirectOrigin = 'invalid'; }
+        }
+      }
+      const crossDoc = !reqOrigin || reqOrigin !== af.wantOrigin || Boolean(redirectOrigin && redirectOrigin !== af.wantOrigin);
+      if (crossDoc) {
+        af.crossNav = (redirectOrigin && redirectOrigin !== af.wantOrigin && redirectOrigin !== 'invalid')
+          ? redirectOrigin
+          : (reqOrigin || 'an unverified page');
+        af.abort?.();
+        if (Array.isArray(af.heldRequests) && af.heldRequests.length < 32) {
+          af.heldRequests.push({ reqId, sid, m, p, isResponse: isRespStage });
+        } else {
+          call(w, 'Fetch.failRequest', { requestId: reqId, errorReason: 'Aborted' }, sid);
+        }
+        return;
+      }
+    }
+    if (isRespStage) {
+      continueResponseStage(w, reqId, sid, p);
+      return;
+    }
+    const lf = e && e.liveFill;
+    if (e && lf && p.responseStatusCode == null && !p.responseErrorReason && (!Array.isArray(lf.credSigs) || lf.credSigs.length === 0)) {
+      const req = p.request || {};
+      const reqUrl = String(req.url || '');
+      const reqOrigin = BL().originOf(reqUrl);
+      const crossOrigin = !reqOrigin || reqOrigin !== lf.origin;
+      if (crossOrigin) {
+        noteCredRequestId(w.profileId, reqId);
+        if (p.networkId) noteCredRequestId(w.profileId, p.networkId);
+        const why = lf.unknownTyped ? 'unknown_typed' : 'vault_locked_unhydrated';
+        say('unhydrated-fence:' + w.profileId + ':' + why, `${w.profileId}: cross-origin request to ${reqOrigin || reqUrl.slice(0, 120)} blocked fail-closed (${why})`);
+        call(w, 'Fetch.failRequest', { requestId: reqId, errorReason: 'BlockedByClient' }, sid);
+        try {
+          logins?.noticeCrossOriginBlocked?.({
+            origin: lf.origin,
+            targetOrigin: reqOrigin || reqUrl.slice(0, 120),
+            username: lf.user || '',
+            profileId: w.profileId,
+          });
+        } catch { /* */ }
+        emit({
+          kind: 'login-cross-origin-blocked',
+          profileId: w.profileId,
+          targetId: e.targetId,
+          origin: lf.origin,
+          targetOrigin: reqOrigin || null,
+          reason: why,
+        });
+        return;
+      }
+      call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+      return;
+    }
+    if (e && lf && Array.isArray(lf.credSigs) && lf.credSigs.length > 0 && p.responseStatusCode == null && !p.responseErrorReason) {
+      const sigs = lf.credSigs;
+      const req = p.request || {};
+      const reqUrl = String(req.url || '');
+      const reqOrigin = BL().originOf(reqUrl);
+      const crossOrigin = !reqOrigin || reqOrigin !== lf.origin;
+      const contentType = headerValueOf(req.headers, 'content-type');
+      const contentEncoding = headerValueOf(req.headers, 'content-encoding');
+      const urlHdrCtx = { capHit: null };
+      const urlCarries = urlCarriesCredential(reqUrl, sigs, urlHdrCtx);
+      const hdrCarries = headersCarryCredential(req.headers, sigs, urlHdrCtx);
+      const inline = extractInlinePostData(req);
+      const hasPost = Boolean(req.hasPostData || inline.hasData || inline.binary);
+
+      const finish = (bodyRes) => {
+        const carries = urlCarries || hdrCarries || Boolean(bodyRes && bodyRes.carries);
+        const undecodable = Boolean((bodyRes && bodyRes.undecodable) || urlHdrCtx.capHit);
+        if (carries || undecodable) {
+          noteCredRequestId(w.profileId, reqId);
+          if (p.networkId) noteCredRequestId(w.profileId, p.networkId);
+        }
+        if (crossOrigin && (carries || undecodable)) {
+          if (!carries && undecodable) {
+            const why = (bodyRes && bodyRes.reason) || urlHdrCtx.capHit || 'unknown_encoding';
+            say('undecodable-body:' + w.profileId + ':' + why, `${w.profileId}: cross-origin request to ${reqOrigin || reqUrl.slice(0, 120)} blocked fail-closed (undecodable_body:${why})`);
+          }
+          call(w, 'Fetch.failRequest', { requestId: reqId, errorReason: 'BlockedByClient' }, sid);
+          try {
+            logins?.noticeCrossOriginBlocked?.({
+              origin: lf.origin,
+              targetOrigin: reqOrigin || reqUrl.slice(0, 120),
+              username: lf.user || '',
+              profileId: w.profileId,
+            });
+          } catch { /* */ }
+          emit({
+            kind: 'login-cross-origin-blocked',
+            profileId: w.profileId,
+            targetId: e.targetId,
+            origin: lf.origin,
+            targetOrigin: reqOrigin || null,
+            reason: carries ? 'credential' : ('undecodable:' + ((bodyRes && bodyRes.reason) || urlHdrCtx.capHit || 'unknown')),
+          });
+          return;
+        }
+        if (!crossOrigin && carries) {
+          const netId = p.networkId ? String(p.networkId) : '';
+          if (netId) {
+            if (!e.inflightCredReqs) e.inflightCredReqs = new Set();
+            e.inflightCredReqs.add(netId);
+            while (e.inflightCredReqs.size > 32) e.inflightCredReqs.delete(e.inflightCredReqs.values().next().value);
+          }
+        }
+        call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+      };
+
+      if (inline.binary) {
+        finish({ carries: false, undecodable: true, reason: 'binary_post_data' });
+        return;
+      }
+      if (hasPost && !inline.hasData) {
+        (async () => {
+          const gpd = await call(w, 'Fetch.getRequestPostData', { requestId: reqId }, sid, 1500).catch(() => null);
+          if (!gpd || typeof gpd.postData !== 'string') {
+            finish({ carries: false, undecodable: true, reason: 'unreadable_post_data' });
+            return;
+          }
+          finish(inspectRequestBody(gpd.postData, sigs, contentType, { hasPostData: true, contentEncoding }));
+        })();
+        return;
+      }
+      const bodyRes = hasPost
+        ? inspectRequestBody(inline.text, sigs, contentType, { hasPostData: true, contentEncoding })
+        : { carries: false, undecodable: false };
+      finish(bodyRes);
+      return;
+    }
+    call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
+  }
+
+  function clearPostLiftOnTab(e) {
+    if (!e) return;
+    if (e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }
+    e.postLiftGuards = null;
+  }
+
+  async function recheckPostLiftOnTab(w, e) {
+    if (!w || w.state !== 'open' || !e || !e.sid || e.liveFill || !Array.isArray(e.postLiftGuards) || !e.postLiftGuards.length) return false;
+    if (e.postLiftChecking) return e.postLiftChecking;
+    const p = (async () => {
+      try {
+        const guards = Array.isArray(e.postLiftGuards) ? [...e.postLiftGuards] : [];
+        for (const g of guards) {
+          if (!g || !g.prebuiltTargets || !w || w.state !== 'open' || !e.sid || e.liveFill) break;
+          if (stripHash(tabLoginUrlOf(e)) !== stripHash(g.lfSnap.urlAtFill)) continue;
+          const wr = await LF().wipeTabTypedInputs({
+            call: (m, prm) => call(w, m, prm, e.sid, 1200),
+            oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+            targetId: e.targetId,
+            contextId: g.lfSnap.isoContextId || 0,
+            prebuiltTargets: g.prebuiltTargets,
+            allowTypedHeuristic: false,
+            maxScanPositions: wipeMaxScanPositions,
+          }).catch(() => null);
+          const refilled = Boolean(wr && (!wr.ok || Number(wr.wiped) > 0 || !wr.verifiedEmpty || wr.tooMuchText));
+          if (refilled && !e.liveFill && stripHash(tabLoginUrlOf(e)) === stripHash(g.lfSnap.urlAtFill)) {
+            clearPostLiftOnTab(e);
+            armLiveFillOnTab(w, e, {
+              ...g.lfSnap,
+              holdReason: wr && wr.tooMuchText ? BL().HOLD_TOO_MUCH_TEXT : '',
+              postLiftHeld: true,
+            }, { persist: true, noTimer: true });
+            await syncTabFetchMode(w, e);
+            if (e.liveFill) fileCeilingWipeNotice(w, e, e.liveFill);
+            return true;
+          }
+        }
+        return false;
+      } finally {
+        if (e) e.postLiftChecking = null;
+      }
+    })();
+    e.postLiftChecking = p;
+    return p;
+  }
+
+  function clearLiveFillOnTab(w, e, why, { audit = false, persist = true, prebuiltTargets = null } = {}) {
+    if (!e) return;
+    e.credPreArming = false;
+    if (!e.liveFill) {
+      if (why === 'navigated' || why === 'tab-closed' || why === 'url-changed') clearPostLiftOnTab(e);
+      syncTabCredIntercept(w, e);
+      return;
+    }
+    const lf = e.liveFill;
+    e.liveFill = null;
+    try { LF().clearFilledSecretsForTarget(e.targetId, lf.isoContextId || 0); } catch { /* */ }
+    if (Array.isArray(lf.stepOtpValues)) lf.stepOtpValues.length = 0;
+    if (w && w.profileId) {
+      const om = stashedStepOtpsByProfile.get(w.profileId);
+      if (om) { om.delete(e.targetId); if (!om.size) stashedStepOtpsByProfile.delete(w.profileId); }
+    }
+    if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+    if (lf.ceilingNoticeId) { try { forYou?.resolve?.(lf.ceilingNoticeId); } catch { /* */ } }
+    if (e.inflightCredReqs) e.inflightCredReqs.clear();
+    if ((why === 'submitted' || why === 'same-doc-nav' || why === 'ceiling') && prebuiltTargets && Array.isArray(prebuiltTargets.targets) && prebuiltTargets.targets.length > 0) {
+      const lfSnap = {
+        urlAtFill: lf.urlAtFill,
+        origin: lf.origin,
+        user: lf.user,
+        loginId: lf.loginId,
+        browserKey: lf.browserKey,
+        mode: lf.mode || 'login',
+        at: lf.at,
+        isoContextId: lf.isoContextId || 0,
+        credSigs: Array.isArray(lf.credSigs) ? [...lf.credSigs] : [],
+        typedSlot: lf.typedSlot || null,
+        rev: lf.rev ?? null,
+        entryGen: lf.entryGen || null,
+        typedPrevious: Boolean(lf.typedPrevious),
+        unknownTyped: Boolean(lf.unknownTyped),
+        also: Array.isArray(lf.also) ? lf.also.map((a) => ({ ...a })) : [],
+        holdReason: '',
+      };
+      const nextGuards = Array.isArray(e.postLiftGuards) ? [...e.postLiftGuards] : [];
+      nextGuards.push({ lfSnap, prebuiltTargets });
+      e.postLiftGuards = nextGuards.slice(-4);
+      if (e.postLiftTimer) clearTimeout(e.postLiftTimer);
+      const pt = setTimeout(() => { e.postLiftTimer = null; recheckPostLiftOnTab(w, e).catch(() => {}); }, 35);
+      if (pt.unref) pt.unref();
+      e.postLiftTimer = pt;
+    } else if (why === 'navigated' || why === 'tab-closed' || why === 'url-changed') {
+      clearPostLiftOnTab(e);
+    }
+    if (audit) recordFenceAudit(w.profileId, lf, why);
+    if (persist) syncPersistedLoginFences(w.profileId);
+    syncTabCredIntercept(w, e);
+  }
+
+  function wipeAfterSameOriginSubmit(w, e, why = 'submitted') {
+    const lf = e && e.liveFill;
+    if (!lf || lf.wiping) return;
+    lf.wiping = true;
+    (async () => {
+      let wipedEmpty = false, wipeTooMuch = false, wipeLockedHold = false, wipeUnknownHold = false, preTargets = null;
+      try {
+        if (w.state === 'open' && e.sid) {
+          const inMemVals = (LF().valuesForTarget?.(e.targetId, lf.isoContextId || 0) || []).filter((x) => typeof x === 'string' && x);
+          const hasInMemOtpOnly = lf.typedSlot === 'otp' && Array.isArray(lf.stepOtpValues) && lf.stepOtpValues.length > 0 && (!Array.isArray(lf.also) || lf.also.length === 0);
+          const slotHydrated = (inMemVals.length === 0 && !hasInMemOtpOnly)
+            ? hydrateTabFenceSecrets(e.targetId, lf.loginId, { typedSlot: lf.typedSlot || null, typedPrevious: Boolean(lf.typedPrevious), rev: lf.rev ?? null, entryGen: lf.entryGen || null, mode: lf.mode || 'login', at: lf.at || null, also: Array.isArray(lf.also) ? lf.also : null })
+            : { values: inMemVals, otpValues: [], sigs: lf.credSigs || [], locked: false, movedOn: false };
+          if (slotHydrated.movedOn) {
+            wipeUnknownHold = true;
+          } else {
+            const svs = [...new Set([...scrubValuesForLogin(w.profileId, lf.loginId, lf.also), ...(slotHydrated.values || [])])];
+            const otpVals = [...new Set([...(Array.isArray(lf.stepOtpValues) ? lf.stepOtpValues : []), ...(slotHydrated.otpValues || [])])];
+            const lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId, otpVals);
+            if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;
+            try { preTargets = LF().targetsForTab(e.targetId, lf.isoContextId || 0, svs, e.sid, { wholeOnlyValues: otpVals.length ? otpVals : null }); } catch { preTargets = null; }
+            const wr = (!lockedDrop || svs.length > 0) ? await LF().wipeTabTypedInputs({
+              call: (m, p) => call(w, m, p, e.sid, 1500),
+              oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+              targetId: e.targetId,
+              contextId: lf.isoContextId || 0,
+              secretValues: svs,
+              wholeOnlyValues: otpVals.length ? otpVals : null,
+              maxScanPositions: wipeMaxScanPositions,
+            }).catch(() => null) : null;
+            wipedEmpty = !lockedDrop && Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
+            wipeTooMuch = Boolean(wr && wr.tooMuchText);
+            wipeLockedHold = lockedDrop && !wipeTooMuch;
+          }
+        }
+      } finally {
+        if (e.liveFill === lf) {
+          lf.wiping = false;
+          const hadTooMuch = wipeTooMuch || lf.holdReason === BL().HOLD_TOO_MUCH_TEXT;
+          if (wipedEmpty && !hadTooMuch) {
+            clearLiveFillOnTab(w, e, why, { audit: false, persist: true, prebuiltTargets: preTargets });
+          } else if (wipeUnknownHold) {
+            lf.unknownTyped = true;
+            lf.holdReason = BL().HOLD_UNKNOWN_TYPED;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            syncPersistedLoginFences(w.profileId);
+          } else if (hadTooMuch) {
+            lf.holdReason = BL().HOLD_TOO_MUCH_TEXT;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            syncPersistedLoginFences(w.profileId);
+          } else if (wipeLockedHold && isLoginVaultLocked()) {
+            lf.holdReason = BL().HOLD_VAULT_LOCKED;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            syncPersistedLoginFences(w.profileId);
+          }
+        }
+      }
+    })();
+  }
+
+  function expireLiveFillCeiling(w, e) {
+    const lf = e && e.liveFill;
+    if (!lf || lf.wiping || lf.postLiftHeld) return;
+    if (lf.unknownTyped || lf.holdReason === BL().HOLD_UNKNOWN_TYPED) {
+      if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+      lf.unknownTyped = true;
+      lf.holdReason = BL().HOLD_UNKNOWN_TYPED;
+      syncTabCredIntercept(w, e);
+      fileCeilingWipeNotice(w, e, lf);
+      syncPersistedLoginFences(w.profileId);
+      return;
+    }
+    lf.wiping = true;
+    if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+    (async () => {
+      let wipedEmpty = false, wipeTooMuch = false, wipeLockedHold = false, wipeUnknownHold = false, preTargets = null;
+      try {
+        if (w.state === 'open' && e.sid) {
+          const inMemVals = (LF().valuesForTarget?.(e.targetId, lf.isoContextId || 0) || []).filter((x) => typeof x === 'string' && x);
+          const hasInMemOtpOnly = lf.typedSlot === 'otp' && Array.isArray(lf.stepOtpValues) && lf.stepOtpValues.length > 0 && (!Array.isArray(lf.also) || lf.also.length === 0);
+          const slotHydrated = (inMemVals.length === 0 && !hasInMemOtpOnly)
+            ? hydrateTabFenceSecrets(e.targetId, lf.loginId, { typedSlot: lf.typedSlot || null, typedPrevious: Boolean(lf.typedPrevious), rev: lf.rev ?? null, entryGen: lf.entryGen || null, mode: lf.mode || 'login', at: lf.at || null, also: Array.isArray(lf.also) ? lf.also : null })
+            : { values: inMemVals, otpValues: [], sigs: lf.credSigs || [], locked: false, movedOn: false };
+          if (slotHydrated.movedOn) {
+            wipeUnknownHold = true;
+          } else {
+            const svs = [...new Set([...scrubValuesForLogin(w.profileId, lf.loginId, lf.also), ...(slotHydrated.values || [])])];
+            const otpVals = [...new Set([...(Array.isArray(lf.stepOtpValues) ? lf.stepOtpValues : []), ...(slotHydrated.otpValues || [])])];
+            const lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId, otpVals);
+            if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;
+            try { preTargets = LF().targetsForTab(e.targetId, lf.isoContextId || 0, svs, e.sid, { wholeOnlyValues: otpVals.length ? otpVals : null }); } catch { preTargets = null; }
+            const wr = (!lockedDrop || svs.length > 0) ? await LF().wipeTabTypedInputs({
+              call: (m, p) => call(w, m, p, e.sid, 1500),
+              oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+              targetId: e.targetId,
+              contextId: lf.isoContextId || 0,
+              secretValues: svs,
+              wholeOnlyValues: otpVals.length ? otpVals : null,
+              maxScanPositions: wipeMaxScanPositions,
+            }).catch(() => null) : null;
+            wipedEmpty = !lockedDrop && Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
+            wipeTooMuch = Boolean(wr && wr.tooMuchText);
+            wipeLockedHold = lockedDrop && !wipeTooMuch;
+          }
+        }
+      } finally {
+        if (e.liveFill === lf) {
+          lf.wiping = false;
+          const unlockedMidWipe = Boolean(lf.recheckAfterWipe) || (wipeLockedHold && !isLoginVaultLocked(lf.loginId));
+          lf.recheckAfterWipe = false;
+          if (wipedEmpty) {
+            clearLiveFillOnTab(w, e, 'ceiling', { audit: true, persist: true, prebuiltTargets: preTargets });
+          } else if (wipeUnknownHold) {
+            lf.unknownTyped = true;
+            lf.holdReason = BL().HOLD_UNKNOWN_TYPED;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_UNKNOWN_TYPED);
+            syncPersistedLoginFences(w.profileId);
+          } else if (unlockedMidWipe) {
+            if (lf.holdReason === BL().HOLD_VAULT_LOCKED || lf.holdReason === BL().HOLD_TOO_MUCH_TEXT) lf.holdReason = '';
+            syncPersistedLoginFences(w.profileId);
+            expireLiveFillCeiling(w, e);
+          } else if (wipeTooMuch) {
+            lf.holdReason = BL().HOLD_TOO_MUCH_TEXT;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_TOO_MUCH_TEXT);
+            syncPersistedLoginFences(w.profileId);
+          } else if (wipeLockedHold) {
+            lf.holdReason = BL().HOLD_VAULT_LOCKED;
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, lf);
+            recordFenceAudit(w.profileId, lf, 'ceiling-hold:' + BL().HOLD_VAULT_LOCKED);
+            syncPersistedLoginFences(w.profileId);
+          } else {
+            if (lf.holdReason === BL().HOLD_VAULT_LOCKED && !isLoginVaultLocked(lf.loginId)) lf.holdReason = '';
+            fileCeilingWipeNotice(w, e, lf);
+            const retryMs = Math.max(1000, Math.min(liveFillMaxMs, 30000));
+            const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, retryMs);
+            if (timer.unref) timer.unref();
+            e.liveFillTimer = timer;
+          }
+        }
+      }
+    })();
+  }
+
+  function armLiveFillOnTab(w, e, info, { persist = true, noTimer = false, retryMs = null } = {}) {
+    if (!w || !e) return;
+    e.credPreArming = false;
+    if (e.liveFill && Array.isArray(e.liveFill.stepOtpValues)) e.liveFill.stepOtpValues.length = 0;
+    if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+    const parsedLogin = info.loginId ? BL().parseName(info.loginId) : null;
+    const lf = {
+      targetId: e.targetId,
+      urlAtFill: String(info.urlAtFill || tabLoginUrlOf(e)),
+      origin: String(info.origin || ''),
+      user: info.user ? String(info.user) : ((parsedLogin && parsedLogin.user) || ''),
+      loginId: info.loginId || null,
+      browserKey: info.browserKey || null,
+      mode: info.mode || 'login',
+      at: Number(info.at) || now(),
+      isoContextId: Number(info.isoContextId) || 0,
+      credSigs: Array.isArray(info.credSigs) ? info.credSigs : [],
+      typedSlot: BL().TYPED_SLOTS.includes(info.typedSlot) ? info.typedSlot : null,
+      rev: Number.isInteger(info.rev) && info.rev >= 1 ? info.rev : null,
+      entryGen: typeof info.entryGen === 'string' && BL().ENTRY_GEN_RE.test(info.entryGen) ? info.entryGen : null,
+      stepOtpValues: Array.isArray(info.stepOtpValues) ? [...info.stepOtpValues] : [],
+      typedPrevious: Boolean(info.typedPrevious),
+      unknownTyped: Boolean(info.unknownTyped),
+      also: Array.isArray(info.also) ? info.also.slice(-8).map((a) => ({ ...a })) : [],
+      holdReason: info.holdReason ? String(info.holdReason) : '',
+      postLiftHeld: Boolean(info.postLiftHeld),
+      wiping: false,
+      recheckAfterWipe: false,
+      ceilingNoticed: false,
+      ceilingNoticeId: null,
+    };
+    e.liveFill = lf;
+    bumpFillEpoch(w.profileId, e.targetId);
+    if (!noTimer && !lf.postLiftHeld && !lf.unknownTyped && lf.holdReason !== BL().HOLD_VAULT_LOCKED && lf.holdReason !== BL().HOLD_UNKNOWN_TYPED) {
+      const left = retryMs != null ? Math.max(0, Number(retryMs) || 0) : Math.max(0, liveFillMaxMs - (now() - lf.at));
+      const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
+      if (timer.unref) timer.unref();
+      e.liveFillTimer = timer;
+    }
+    if (persist) syncPersistedLoginFences(w.profileId);
+    syncTabCredIntercept(w, e);
+  }
+
+  function hydrateTabFenceSecrets(targetId, loginId, { typedSlot = null, typedPrevious = false, rev = null, entryGen = null, mode = null, at = null, also = null } = {}) {
+    const rem = (LF().valuesForTarget?.(targetId, 0) || []).filter((x) => typeof x === 'string' && x);
+    const hasAlso = Array.isArray(also) && also.length > 0;
+    if (rem.length > 0 && typedSlot !== 'otp' && !hasAlso) {
+      return { values: rem, otpValues: [], byLogin: loginId ? [{ loginId, values: rem }] : [], sigs: rem.map(credSigOf).filter(Boolean), locked: false, movedOn: false };
+    }
+    if (isLoginVaultLocked()) {
+      return { values: rem, otpValues: [], byLogin: rem.length && loginId ? [{ loginId, values: rem }] : [], sigs: rem.map(credSigOf).filter(Boolean), locked: true, movedOn: false };
+    }
+    const hydrateOne = (lid, slotOpts) => {
+      if (lid && logins && typeof logins.fenceSecretsOf === 'function') {
+        try {
+          const res = logins.fenceSecretsOf(lid, { ...slotOpts, minBytes: 1 });
+          if (res && res.locked === true) return { values: [], otpValues: [], all: [], locked: true, movedOn: false };
+          if (!res || res.movedOn) return { values: [], otpValues: [], all: [], locked: false, movedOn: true };
+          const all = (Array.isArray(res.values) ? res.values : []).filter((x) => typeof x === 'string' && x);
+          const pw = Array.isArray(res.pwValues)
+            ? res.pwValues.filter((x) => typeof x === 'string' && x)
+            : (slotOpts.typedSlot === 'otp' ? [] : all);
+          const otp = Array.isArray(res.otpValues)
+            ? res.otpValues.filter((x) => typeof x === 'string' && x)
+            : (slotOpts.typedSlot === 'otp' ? all : []);
+          return { values: pw, otpValues: otp, all, locked: false, movedOn: all.length === 0 };
+        } catch { /* */ }
+      }
+      if (lid && logins && typeof logins.scrubSecretsOf === 'function') {
+        try {
+          const vals = logins.scrubSecretsOf(lid, { minBytes: 1, includePrevious: Boolean(slotOpts.typedPrevious) });
+          const arr = Array.isArray(vals) ? vals : [];
+          const clean = arr.filter((x) => typeof x === 'string' && x);
+          return { values: clean, otpValues: [], all: clean, locked: false, movedOn: false };
+        } catch { /* */ }
+      }
+      return { values: [], otpValues: [], all: [], locked: false, movedOn: false };
+    };
+    const main = hydrateOne(loginId, { typedSlot, typedPrevious: Boolean(typedPrevious), rev, entryGen, mode, at });
+    if (main.locked) return { values: [], otpValues: [], byLogin: [], sigs: [], locked: true, movedOn: false };
+    if (main.movedOn) return { values: [], otpValues: [], byLogin: [], sigs: [], locked: false, movedOn: true };
+    const pwVals = [...new Set([...rem, ...main.values])];
+    const otpVals = [...main.otpValues];
+    const allSigsVals = [...new Set([...rem, ...main.all])];
+    const byLogin = [];
+    if (loginId && main.values.length) byLogin.push({ loginId, values: [...main.values] });
+    for (const a of (Array.isArray(also) ? also : [])) {
+      if (!a || !a.loginId) continue;
+      const sub = hydrateOne(a.loginId, { typedSlot: a.typedSlot || null, typedPrevious: Boolean(a.typedPrevious), rev: a.rev ?? null, entryGen: a.entryGen || null, mode, at: a.at ?? at ?? null });
+      if (sub.locked) return { values: [], otpValues: [], byLogin: [], sigs: [], locked: true, movedOn: false };
+      if (sub.movedOn) return { values: [], otpValues: [], byLogin: [], sigs: [], locked: false, movedOn: true };
+      for (const v of sub.values) if (!pwVals.includes(v)) pwVals.push(v);
+      for (const v of sub.otpValues) if (!otpVals.includes(v)) otpVals.push(v);
+      for (const v of sub.all) if (!allSigsVals.includes(v)) allSigsVals.push(v);
+      if (sub.values.length) byLogin.push({ loginId: a.loginId, values: [...sub.values] });
+    }
+    return { values: pwVals, otpValues: otpVals, byLogin, sigs: allSigsVals.map(credSigOf).filter(Boolean), locked: false, movedOn: false };
+  }
+
+  async function rearmLoginFences(w) {
+    if (!w || !keeper || typeof keeper.loginFenceStateOf !== 'function') return;
+    let st = { fences: [], scrubs: [] };
+    try { st = keeper.loginFenceStateOf(w.profileId) || st; } catch { return; }
+    if (Array.isArray(st.scrubs) && st.scrubs.length) {
+      let names = scrubNamesByProfile.get(w.profileId);
+      if (!names) { names = []; scrubNamesByProfile.set(w.profileId, names); }
+      for (const s of st.scrubs) {
+        if (!s || !s.name || names.some((x) => x.name === s.name)) continue;
+        names.push({ name: s.name, at: Number(s.at) || now() });
+      }
+      hydratePersistedScrubs(w.profileId);
+    }
+    if (!Array.isArray(st.fences) || !st.fences.length) {
+      syncPersistedLoginFences(w.profileId);
+      return;
+    }
+    for (const f of st.fences) {
+      if (!f || !f.targetId || !f.origin) continue;
+      const tid = resolveKnownTargetId(w, f.targetId);
+      const e = tid ? w.targets.get(tid) : null;
+      if (!e) {
+        try { LF().clearFilledSecretsForTarget(f.targetId); if (tid) LF().clearFilledSecretsForTarget(tid); } catch { /* */ }
+        { const om = stashedStepOtpsByProfile.get(w.profileId); if (om) { om.delete(f.targetId); if (tid) om.delete(tid); if (!om.size) stashedStepOtpsByProfile.delete(w.profileId); } }
+        recordFenceAudit(w.profileId, f, 'target-gone');
+        continue;
+      }
+      if (stripHash(tabLoginUrlOf(e)) !== stripHash(f.urlAtFill)) {
+        try { LF().clearFilledSecretsForTarget(f.targetId); LF().clearFilledSecretsForTarget(e.targetId); } catch { /* */ }
+        { const om = stashedStepOtpsByProfile.get(w.profileId); if (om) { om.delete(f.targetId); om.delete(e.targetId); if (!om.size) stashedStepOtpsByProfile.delete(w.profileId); } }
+        recordFenceAudit(w.profileId, f, 'url-changed');
+        continue;
+      }
+      const otpMap = stashedStepOtpsByProfile.get(w.profileId);
+      let stashedOtp = null;
+      if (otpMap && otpMap.has(e.targetId)) {
+        const cand = otpMap.get(e.targetId);
+        otpMap.delete(e.targetId);
+        if (!otpMap.size) stashedStepOtpsByProfile.delete(w.profileId);
+        if (cand && cand.url && cand.url === stripHash(tabLoginUrlOf(e)) && Array.isArray(cand.stepOtpValues) && cand.stepOtpValues.length > 0) {
+          stashedOtp = cand;
+        }
+      }
+      const hasInMemOtpOnly = f.typedSlot === 'otp' && Boolean(stashedOtp) && (!Array.isArray(f.also) || f.also.length === 0);
+      const hydrated = hasInMemOtpOnly
+        ? { values: [], otpValues: [], byLogin: [], sigs: stashedOtp.stepOtpValues.map(credSigOf).filter(Boolean), locked: false, movedOn: false }
+        : hydrateTabFenceSecrets(e.targetId, f.loginId, {
+          typedSlot: f.typedSlot || null,
+          typedPrevious: Boolean(f.typedPrevious),
+          rev: f.rev ?? null,
+          entryGen: f.entryGen || null,
+          mode: f.mode || 'login',
+          at: f.at || null,
+          also: Array.isArray(f.also) ? f.also : null,
+        });
+      const restoredOtps = [...new Set([...(stashedOtp ? stashedOtp.stepOtpValues : []), ...(hydrated.otpValues || [])])];
+      if (f.unknownTyped || f.holdReason === BL().HOLD_UNKNOWN_TYPED || hydrated.movedOn) {
+        armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: [], stepOtpValues: restoredOtps, unknownTyped: true, holdReason: BL().HOLD_UNKNOWN_TYPED }, { persist: false, noTimer: true });
+        await syncTabFetchMode(w, e);
+        recordFenceAudit(w.profileId, e.liveFill, 'rearm-hold:' + BL().HOLD_UNKNOWN_TYPED);
+        fileCeilingWipeNotice(w, e, e.liveFill);
+        if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
+        continue;
+      }
+      const hydratedSigs = [...hydrated.sigs];
+      if (restoredOtps.length && hydratedSigs.length > 0) {
+        for (const sg of restoredOtps.map(credSigOf).filter(Boolean)) {
+          if (!hydratedSigs.some((x) => x.len === sg.len && x.sha256 === sg.sha256)) hydratedSigs.push(sg);
+        }
+      }
+      const hydratedVals = hydrated.values;
+      if (hydratedVals.length) {
+        if (Array.isArray(hydrated.byLogin) && hydrated.byLogin.length) {
+          for (const bl of hydrated.byLogin) {
+            for (const sv of bl.values) recordScrubSecret(w.profileId, bl.loginId, sv, { persist: false });
+          }
+        } else {
+          for (const sv of hydratedVals) recordScrubSecret(w.profileId, f.loginId, sv, { persist: false });
+        }
+        try { LF().rememberFilledSecrets?.(e.targetId, 0, hydratedVals, w.profileId); } catch { /* */ }
+      }
+      const savedHold = f.holdReason === BL().HOLD_VAULT_LOCKED
+        ? (isLoginVaultLocked() ? BL().HOLD_VAULT_LOCKED : '')
+        : (f.holdReason || '');
+      if (now() - (Number(f.at) || 0) >= liveFillMaxMs) {
+        let wipedEmpty = false, wipeTooMuch = false, lockedDrop = false, preTargets = null;
+        if (e.sid) {
+          const svs = [...new Set([...scrubValuesForLogin(w.profileId, f.loginId, f.also), ...hydratedVals])];
+          lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, 0, hydratedSigs, svs, f.loginId, restoredOtps);
+          try { preTargets = LF().targetsForTab(e.targetId, 0, svs, e.sid, { wholeOnlyValues: restoredOtps.length ? restoredOtps : null }); } catch { preTargets = null; }
+          const wr = (!lockedDrop || svs.length > 0 || restoredOtps.length > 0) ? await LF().wipeTabTypedInputs({ call: (m, p) => call(w, m, p, e.sid, 1500), oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn), targetId: e.targetId, secretValues: svs, wholeOnlyValues: restoredOtps.length ? restoredOtps : null, maxScanPositions: wipeMaxScanPositions }).catch(() => null) : null;
+          wipedEmpty = !lockedDrop && Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
+          wipeTooMuch = Boolean(wr && wr.tooMuchText);
+        }
+        if (wipedEmpty) {
+          try { LF().clearFilledSecretsForTarget(f.targetId); LF().clearFilledSecretsForTarget(e.targetId); } catch { /* */ }
+          if (preTargets && Array.isArray(preTargets.targets) && preTargets.targets.length > 0) {
+            const lfSnap = {
+              urlAtFill: f.urlAtFill || tabLoginUrlOf(e),
+              origin: f.origin,
+              user: f.user || '',
+              loginId: f.loginId || null,
+              browserKey: f.browserKey || null,
+              mode: f.mode || 'login',
+              at: f.at || now(),
+              isoContextId: 0,
+              credSigs: hydratedSigs,
+              typedSlot: f.typedSlot || null,
+              rev: f.rev ?? null,
+              entryGen: f.entryGen || null,
+              typedPrevious: Boolean(f.typedPrevious),
+              unknownTyped: Boolean(f.unknownTyped),
+              also: Array.isArray(f.also) ? f.also.map((a) => ({ ...a })) : [],
+              holdReason: '',
+            };
+            e.postLiftGuards = [...(Array.isArray(e.postLiftGuards) ? e.postLiftGuards : []), { lfSnap, prebuiltTargets: preTargets }].slice(-4);
+            if (e.postLiftTimer) clearTimeout(e.postLiftTimer);
+            const pt = setTimeout(() => { e.postLiftTimer = null; recheckPostLiftOnTab(w, e).catch(() => {}); }, 35);
+            if (pt.unref) pt.unref();
+            e.postLiftTimer = pt;
+          }
+          recordFenceAudit(w.profileId, f, 'ceiling');
+          continue;
+        }
+        const hadTooMuch = wipeTooMuch || savedHold === BL().HOLD_TOO_MUCH_TEXT;
+        const nextHold = hadTooMuch ? BL().HOLD_TOO_MUCH_TEXT : (lockedDrop ? BL().HOLD_VAULT_LOCKED : savedHold);
+        const retryDelay = Math.max(1000, Math.min(liveFillMaxMs, 30000));
+        armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, stepOtpValues: restoredOtps, holdReason: nextHold }, { persist: false, noTimer: Boolean(hadTooMuch || lockedDrop), retryMs: retryDelay });
+        await syncTabFetchMode(w, e);
+        if (lockedDrop && !hadTooMuch) recordFenceAudit(w.profileId, e.liveFill, 'ceiling-hold:' + BL().HOLD_VAULT_LOCKED);
+        fileCeilingWipeNotice(w, e, e.liveFill);
+        if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
+        continue;
+      }
+      armLiveFillOnTab(w, e, { ...f, targetId: e.targetId, credSigs: hydratedSigs, stepOtpValues: restoredOtps, holdReason: savedHold }, { persist: false });
+      await syncTabFetchMode(w, e);
+      if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
+    }
+    syncPersistedLoginFences(w.profileId);
+  }
+
+  function clearProfileLoginFencesOnStop(pid, w) {
+    const active = [];
+    if (w) {
+      for (const e of w.targets.values()) {
+        if (e.inflightCredReqs) e.inflightCredReqs.clear();
+        clearPostLiftOnTab(e);
+        e.snapshotRefs = null;
+        if (!e.liveFill) continue;
+        active.push(e.liveFill);
+        if (Array.isArray(e.liveFill.stepOtpValues)) e.liveFill.stepOtpValues.length = 0;
+        if (e.liveFill.ceilingNoticeId) { try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ } }
+        if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+        e.liveFill = null;
+      }
+    } else if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+      try { active.push(...(keeper.loginFenceStateOf(pid).fences || [])); } catch { /* */ }
+    }
+    for (const f of active) recordFenceAudit(pid, f, 'browser-stop');
+    try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ }
+    knownFenceProfiles.delete(String(pid));
+    scrubByProfile.delete(pid);
+    scrubNamesByProfile.delete(pid);
+    scrubCompiledByProfile.delete(pid);
+    activeTabByProfile.delete(pid);
+    stashedSnapshotsByProfile.delete(pid);
+    stashedStepOtpsByProfile.delete(pid);
+    fillEpochsByProfile.delete(pid);
+    credSigsByProfile.delete(pid);
+    credRequestIdsByProfile.delete(pid);
+    if (keeper && typeof keeper.saveLoginFenceState === 'function') {
+      try { keeper.saveLoginFenceState(pid, { fences: [], scrubs: [] }); } catch { /* optional */ }
+    }
+  }
+
+  function fencedTargetsFor(target) {
+    const pid = String((target && target.profileId) || '');
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open') {
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        const fences = st && Array.isArray(st.fences) ? st.fences : [];
+        return fences.filter((f) => f && f.targetId && f.origin).map((f) => ({ targetId: String(f.targetId), origin: String(f.origin) }));
+      }
+      return [];
+    }
+    const scope = scopeFor(target);
+    const out = [];
+    for (const e of w.targets.values()) {
+      const lf = effectiveLiveFillOf(e);
+      if (lf && inScope(scope, e.targetId)) out.push({ targetId: e.targetId, origin: lf.origin });
+    }
+    return out;
+  }
+
+  function liveFillVerdictFor(target, { verb = '', argv = null, batchVerbs = null, targetId = null } = {}) {
+    const pid = String((target && target.profileId) || '');
+    const w = watches.get(pid);
+    const explicitTarget = targetId || extractArgvTab(argv);
+    if (!w || w.state !== 'open') {
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        const fences = st && Array.isArray(st.fences) ? st.fences : [];
+        if (fences.length) {
+          const bk = parentKey(target && target.browserKey);
+          const act = activeTabOfProfile(pid, bk);
+          const wantTid = explicitTarget ? String(explicitTarget).toUpperCase() : (act ? String(act).toUpperCase() : null);
+          const pf = wantTid && wantTid !== '__UNKNOWN__'
+            ? fences.find((f) => String(f.targetId || '').toUpperCase() === wantTid || (wantTid.length >= 4 && String(f.targetId || '').toUpperCase().startsWith(wantTid)))
+            : fences.find((f) => !f.browserKey || !bk || parentKey(f.browserKey) === bk);
+          if (pf) {
+            const pfHold = pf.holdReason === BL().HOLD_VAULT_LOCKED && !isLoginVaultLocked(pf.loginId) ? '' : (pf.holdReason || '');
+            return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: pf.origin, holdReason: pfHold });
+          }
+        }
+      }
+      return { ok: true };
+    }
+    let maxFillAt = 0, any = false;
+    const scope = scopeFor(target);
+    for (const e of w.targets.values()) {
+      const lf = effectiveLiveFillOf(e);
+      if (!lf) continue;
+      any = true;
+      if (inScope(scope, e.targetId) && (lf.at || 0) > maxFillAt) maxFillAt = lf.at || 0;
+    }
+    if (!any) return { ok: true };
+    const batchSwitchesTab = verb === 'batch' && Array.isArray(batchVerbs) && batchVerbs.some((v) => String(v || '').trim().split(/\s+/)[0] === 'tab');
+    let cands = null;
+    if (explicitTarget) {
+      const tid = resolveKnownTargetId(w, explicitTarget);
+      if (tid) {
+        const e = w.targets.get(tid);
+        cands = e && inScope(scope, e.targetId) ? [e] : [];
+      }
+    } else if (!batchSwitchesTab) {
+      const actEntry = activeTabEntryOfProfile(pid, target && target.browserKey);
+      const actE = actEntry && actEntry.tid ? w.targets.get(actEntry.tid) : null;
+      if (actE && inScope(scope, actE.targetId) && (effectiveLiveFillOf(actE) || (actEntry.at || 0) >= maxFillAt)) {
+        cands = [actE];
+      }
+    }
+    if (!cands) cands = [...w.targets.values()].filter((e) => effectiveLiveFillOf(e) && inScope(scope, e.targetId));
+    const t = now();
+    for (const e of cands) {
+      if (!e) continue;
+      if (e.liveFill && t - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed && !e.liveFill.postLiftHeld) expireLiveFillCeiling(w, e);
+      const lf = effectiveLiveFillOf(e);
+      if (lf) return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: lf.origin, holdReason: lf.holdReason || '' });
+    }
+    return { ok: true };
+  }
+
+  function liveFillOnTarget(profileId, targetId = null) {
+    const pid = String(profileId || '');
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open') {
+      if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+        let st = null; try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+        const fences = st && Array.isArray(st.fences) ? st.fences : [];
+        if (fences.length) {
+          if (targetId) {
+            const up = String(targetId).toUpperCase();
+            return fences.find((f) => String(f.targetId || '').toUpperCase() === up) || null;
+          }
+          return fences[0] || null;
+        }
+      }
+      return null;
+    }
+    const check = (e) => {
+      if (!e) return null;
+      if (e.liveFill && now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed && !e.liveFill.postLiftHeld) expireLiveFillCeiling(w, e);
+      return effectiveLiveFillOf(e);
+    };
+    if (targetId) {
+      const tid = resolveKnownTargetId(w, targetId);
+      return check(tid ? w.targets.get(tid) : null);
+    }
+    for (const e of w.targets.values()) { const lf = check(e); if (lf) return lf; }
+    return null;
+  }
+
+  function hasPostLiftGuard(profileId, targetId = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open') return false;
+    if (targetId) {
+      const tid = resolveKnownTargetId(w, targetId);
+      const e = tid ? w.targets.get(tid) : null;
+      return Boolean(e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0);
+    }
+    for (const e of w.targets.values()) {
+      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) return true;
+    }
+    return false;
+  }
+
+  async function recheckPostLift(profileId, targetId = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open') return false;
+    if (targetId) {
+      const tid = resolveKnownTargetId(w, targetId);
+      const e = tid ? w.targets.get(tid) : null;
+      return e ? recheckPostLiftOnTab(w, e) : false;
+    }
+    let any = false;
+    for (const e of [...w.targets.values()]) {
+      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) {
+        if (await recheckPostLiftOnTab(w, e)) any = true;
+      }
+    }
+    return any;
+  }
+
+  async function recheckPostLiftFor(target, { verb = '', argv = null, batchVerbs = null, targetId = null } = {}) {
+    const pid = String((target && target.profileId) || '');
+    const w = watches.get(pid);
+    if (!w || w.state !== 'open') return false;
+    if (BL().liveFillVerdict({ verb, argv, batchVerbs, origin: 'https://x.test' }).ok) return false;
+    const explicitTarget = targetId || extractArgvTab(argv);
+    const scope = scopeFor(target);
+    let cands = null;
+    if (explicitTarget) {
+      const tid = resolveKnownTargetId(w, explicitTarget);
+      const e = tid ? w.targets.get(tid) : null;
+      cands = e && inScope(scope, e.targetId) ? [e] : [];
+    } else {
+      cands = [...w.targets.values()].filter((e) => e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0 && inScope(scope, e.targetId));
+    }
+    let any = false;
+    for (const e of cands) {
+      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) {
+        if (await recheckPostLiftOnTab(w, e)) any = true;
+      }
+    }
+    return any;
+  }
+
+  async function inspectOopIframes(w, treeFrameIds, visit) {
+    if (!w || w.state !== 'open' || !(treeFrameIds instanceof Set) || !treeFrameIds.size || typeof visit !== 'function') return;
+    const tgRes = await call(w, 'Target.getTargets', {}, null, 2000);
+    const infos = tgRes && !tgRes.timeout && !tgRes.error && tgRes.result && Array.isArray(tgRes.result.targetInfos) ? tgRes.result.targetInfos : [];
+    for (const ti of infos.slice(0, 64)) {
+      if (!ti || ti.type !== 'iframe' || !ti.targetId) continue;
+      const pFid = ti.parentFrameId ? String(ti.parentFrameId) : '';
+      if (!pFid || !treeFrameIds.has(pFid)) continue;
+      const att = await call(w, 'Target.attachToTarget', { targetId: String(ti.targetId), flatten: true }, null, 2000);
+      const oopSid = att && !att.timeout && !att.error && att.result && att.result.sessionId ? String(att.result.sessionId) : '';
+      if (!oopSid) continue;
+      try {
+        await visit({ targetId: String(ti.targetId), url: String(ti.url || ''), call: (m, p) => call(w, m, p, oopSid, 2000) });
+      } finally {
+        await settle(call(w, 'Target.detachFromTarget', { sessionId: oopSid }, null, 1500));
+      }
+    }
+  }
+
+  function pickScopedTabFor(w, target, { targetId = null } = {}) {
+    const pid = w.profileId;
+    const scope = scopeFor(target);
+    if (targetId) {
+      const tid = resolveKnownTargetId(w, targetId);
+      const e = tid ? w.targets.get(tid) : null;
+      return e && inScope(scope, e.targetId) && e.sid ? e : null;
+    }
+    const actEntry = activeTabEntryOfProfile(pid, target && target.browserKey);
+    const actE = actEntry && actEntry.tid ? w.targets.get(actEntry.tid) : null;
+    if (actE && inScope(scope, actE.targetId) && actE.sid) return actE;
+    const tabs = [...w.targets.values()].filter((x) => inScope(scope, x.targetId) && x.sid);
+    return tabs.filter((x) => /^https?:/.test(tabLoginUrlOf(x))).sort((a, b) => (b.seenAt || 0) - (a.seenAt || 0))[0] || tabs[0] || null;
+  }
+
+  /** Record lightweight `@ref` descriptors on the active tab after a successful `snapshot` (N2: 0 CDP / Accessibility calls). */
+  async function noteSnapshot(target, opts = {}) {
+    const pid = String((target && target.profileId) || '');
+    const w = watches.get(pid);
+    const normOpts = typeof opts === 'string'
+      ? { parsedRefs: require('../browser-verbs.js').parseSnapshotRefs(opts), targetId: null }
+      : (Array.isArray(opts) ? { parsedRefs: opts, targetId: null } : (opts || {}));
+    const parsedRefs = normOpts.parsedRefs;
+    const targetId = normOpts.targetId || null;
+    if (!w || w.state !== 'open' || !Array.isArray(parsedRefs)) return { ok: false, count: 0 };
+    const e = pickScopedTabFor(w, target, { targetId });
+    if (!e || !e.sid) return { ok: false, count: 0 };
+    const specs = new Map();
+    for (const pr of parsedRefs.slice(0, 16384)) {
+      if (!pr || typeof pr.ref !== 'string' || !pr.ref) continue;
+      const rawKey = pr.ref.startsWith('@') ? pr.ref : `@${pr.ref}`;
+      const key = rawKey.slice(0, 64);
+      if (!/^@[A-Za-z0-9_-]+$/.test(key)) continue;
+      specs.set(key, {
+        ref: key,
+        role: String(pr.role || '').slice(0, 128),
+        name: String(pr.name || '').slice(0, 2048),
+        nth: Number.isInteger(pr.nth) && pr.nth >= 0 ? pr.nth : 0,
+      });
+    }
+    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };
+    e.snapshotExpiredByNav = false;
+    { const sm = stashedSnapshotsByProfile.get(pid); if (sm) { sm.delete(e.targetId); if (!sm.size) stashedSnapshotsByProfile.delete(pid); } }
+    noteActiveTarget(pid, target && target.browserKey, e.targetId);
+    return { ok: true, targetId: e.targetId, count: specs.size };
+  }
+
+  /** R29 Law 1: THE ONE channel judgment asked by both `precheckVaultFill` and `fillVaultField`. */
+  function checkLoginChannelFor({
+    profileId = '',
+    ephemeral = false,
+    browserKey = '',
+    ownerKey = '',
+    handle = '',
+    subagent = false,
+    remoteSession = false,
+    agentFacts = null,
+    action = 'fill',
+  } = {}) {
+    if (keeper && typeof keeper.loginChannelFor === 'function') {
+      return keeper.loginChannelFor({
+        profileId,
+        ephemeral,
+        browserKey,
+        ownerKey,
+        handle,
+        subagent,
+        remoteSession,
+        agentFacts,
+        action,
+      });
+    }
+    let pid = String(profileId || '').trim();
+    let isChild = Boolean(handle && /^\w*bk-[\w-]+\.\d+$/.test(String(handle)));
+    if (!pid && browserKey && keeper && typeof keeper.resolveFor === 'function') {
+      let rv = null;
+      try { rv = keeper.resolveFor({ browserKey, handle: handle || '', subagent: Boolean(subagent) }); } catch { rv = null; }
+      if (rv && rv.ok) {
+        if (rv.kind === 'child') isChild = true;
+        else if (rv.attachment && rv.attachment.profileId) pid = String(rv.attachment.profileId);
+        else if (rv.profileId) pid = String(rv.profileId);
+      }
+    }
+    let p = null;
+    if (pid && !pid.startsWith('eph-') && keeper) {
+      try {
+        if (typeof keeper.profile === 'function') p = keeper.profile(pid) || null;
+        else if (typeof keeper.list === 'function') p = ((keeper.list() && keeper.list().profiles) || []).find((x) => x && x.id === pid) || null;
+      } catch { p = null; }
+    }
+    const isEph = Boolean(ephemeral) || isChild || !pid || pid.startsWith('eph-') || Boolean(p && p.ephemeral);
+    const isExt = Boolean(p && (p.provider === 'cdp' || p.external));
+    const isRem = Boolean(p && (p.host || p.hostId));
+    const hasMed = typeof keeper?.mediator === 'function' ? Boolean(keeper.mediator()) : true;
+    const bRec = !isEph && typeof keeper?.browserOf === 'function' ? keeper.browserOf(pid) : null;
+    const hasCdp = isEph ? true : Boolean(!isRem && (!bRec || bRec.wsEndpoint || bRec.cdpPort));
+    const isMed = Boolean(!isEph && p && (p.sharing === 'instance' || p.mediated === true) && !p.legacy);
+    const road = BM().leaseRoadVerdict({
+      mediated: isMed,
+      proxy: hasMed,
+      ephemeral: isEph,
+      remote: isRem || isExt || Boolean(remoteSession),
+      agent: true,
+    });
+    return BM().loginFillChannelVerdict(road, {
+      proxy: hasMed,
+      external: isExt,
+      remote: isRem,
+      remoteSession: Boolean(remoteSession),
+      hasCdp,
+      usableProfiles: [],
+      restrictedCount: 0,
+      profileLabel: (p && p.label) || pid || '',
+      action,
+    });
+  }
+
+  /** Pre-CDP gate check (M1 + R29 Law 1: channel -> vault lock -> spec/entry/grant/slot BEFORE opening or touching the browser). */
+  function precheckVaultFill({
+    target: elemTarget = '',
+    spec = '',
+    generate = false,
+    user = null,
+    facts = {},
+    conv = null,
+    actor = null,
+    owners = [],
+    profileId = '',
+    ephemeral = false,
+    browserKey = '',
+    ownerKey = '',
+    handle = '',
+    subagent = false,
+    remoteSession = false,
+    agentFacts = null,
+  } = {}) {
+    if (!logins || typeof logins.resolveFill !== 'function') return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
+    const tgtStr = String(elemTarget || '').trim();
+    if (!tgtStr) return { ok: false, code: 'bad_request', error: 'missing target (@ref or CSS selector)' };
+    const ch = checkLoginChannelFor({ profileId, ephemeral, browserKey, ownerKey, handle, subagent, remoteSession, agentFacts, action: 'fill' });
+    if (!ch || !ch.ok) return ch || { ok: false, code: BM().LOGIN_CHANNEL_CODE, error: 'vault login fill requires a local mediated named profile' };
+    const pre = logins.resolveFill({
+      tabOrigin: '',
+      inFrame: false,
+      skipOrigin: true,
+      spec,
+      generate: !!generate,
+      user,
+      facts,
+      conv,
+      actor,
+      owners,
+      profileId: String(ch.profileId || profileId || ''),
+      checkOnly: true,
+    });
+    return pre || { ok: false, code: 'bad_request', error: 'invalid vault fill request' };
+  }
+
+  /** THE `fill --vault` PRIMITIVE DOOR (identical on standard Chrome and custom kernel over `e.sid`). */
+  async function fillVaultField(target, {
+    target: elemTarget = '',
+    spec = '',
+    generate = false,
+    user = null,
+    targetId = null,
+    checkOnly = false,
+    prechecked = false,
+    facts = {},
+    conv = null,
+    actor = null,
+    owners = [],
+    ownerKey = '',
+    handle = '',
+    subagent = false,
+    remoteSession = false,
+    agentFacts = null,
+  } = {}) {
+    const pid = String((target && target.profileId) || '');
+    const tgtStr = String(elemTarget || '').trim();
+    // R29 Law 1: BOTH `precheckVaultFill` and `fillVaultField` ask `checkLoginChannelFor` (even when `prechecked: true`).
+    const ch = checkLoginChannelFor({
+      profileId: pid,
+      ephemeral: Boolean(target && target.ephemeral),
+      browserKey: (target && target.browserKey) || '',
+      ownerKey,
+      handle,
+      subagent,
+      remoteSession,
+      agentFacts,
+      action: 'fill',
+    });
+    if (!ch || !ch.ok) return ch || { ok: false, code: BM().LOGIN_CHANNEL_CODE, error: 'vault login fill requires a local mediated named profile' };
+    // M1: Check vault lock + spec + entry + grant BEFORE touching the browser over CDP.
+    if (!prechecked) {
+      const early = precheckVaultFill({ target: tgtStr, spec, generate, user, facts, conv, actor, owners, profileId: pid, ephemeral: Boolean(target && target.ephemeral), browserKey: (target && target.browserKey) || '', ownerKey, handle, subagent, remoteSession, agentFacts });
+      if (!early || !early.ok) return early || { ok: false, code: 'bad_request', error: 'invalid vault fill request' };
+    }
+    const w = watches.get(pid);
+    if (!logins || typeof logins.resolveFill !== 'function') return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    if (!tgtStr) return { ok: false, code: 'bad_request', error: 'missing target (@ref or CSS selector)' };
+    const isRef = /^@[A-Za-z0-9_-]+$/.test(tgtStr);
+    const e = pickScopedTabFor(w, target, { targetId });
+    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: 'no active tab in scope to fill — open a page first' };
+
+    const trackedTabOrigin = BL().originOf(tabLoginUrlOf(e));
+    const parsedEarlySpec = BL().parseVaultFillSpec(spec, { user, generate: !!generate, tabOrigin: trackedTabOrigin });
+    const earlyWantOrigin = (parsedEarlySpec && parsedEarlySpec.ok && parsedEarlySpec.origin) || trackedTabOrigin || null;
+    const myQueueEntry = !checkOnly ? { wantOrigin: earlyWantOrigin, at: now() } : null;
+    if (myQueueEntry) {
+      if (!e.activeFills) e.activeFills = new Set();
+      e.activeFills.add(myQueueEntry);
+      bumpFillEpoch(pid, e.targetId);
+    }
+
+    const prevQueue = !checkOnly ? e.fillQueue : null;
+    let releaseQueue = null;
+    let myQueue = null;
+    if (!checkOnly) {
+      myQueue = new Promise((r) => { releaseQueue = r; });
+      e.fillQueue = myQueue;
+    }
+    if (prevQueue) {
+      await prevQueue.then(() => {}, () => {});
+      if (!w || w.state !== 'open' || !e.sid) {
+        if (myQueueEntry) e.activeFills?.delete(myQueueEntry);
+        if (releaseQueue) {
+          const rq = releaseQueue;
+          releaseQueue = null;
+          if (e.fillQueue === myQueue) e.fillQueue = null;
+          rq();
+        }
+        return { ok: false, code: 'target_not_found', error: 'no active tab in scope to fill — open a page first' };
+      }
+    }
+
+    let abortPreInsert = null;
+    const abortPreInsertP = !checkOnly ? new Promise((r) => { abortPreInsert = r; }) : null;
+    const myActiveFill = !checkOnly ? {
+      wantOrigin: earlyWantOrigin,
+      at: myQueueEntry ? myQueueEntry.at : now(),
+      topFrameId: e.targetId,
+      navSeqAtStart: e.navSeq || 0,
+      isoContextId: 0,
+      crossNav: null,
+      contextGone: false,
+      insertStarted: false,
+      aborted: false,
+      abortP: abortPreInsertP,
+      abort() {
+        if (!this.insertStarted && !this.aborted) {
+          this.aborted = true;
+          if (abortPreInsert) abortPreInsert({ timeout: true, crossNavAborted: true });
+        }
+      },
+      heldRequests: [],
+    } : null;
+
+    const releaseActiveFill = async () => {
+      try {
+        if (myQueueEntry && e.activeFills) e.activeFills.delete(myQueueEntry);
+        if (e.credPreArming) e.credPreArming = false;
+        const af = e.activeFill === myActiveFill ? myActiveFill : null;
+        if (af) e.activeFill = null;
+        await syncTabFetchMode(w, e);
+        if (af && Array.isArray(af.heldRequests) && af.heldRequests.length) {
+          const held = af.heldRequests.splice(0);
+          for (const h of held) {
+            if (!h || !h.reqId) continue;
+            if (h.isResponse) {
+              continueResponseStage(w, h.reqId, h.sid, h.p);
+            } else {
+              try { onCredFetchPaused(w, h.m, h.p); } catch {
+                call(w, 'Fetch.continueRequest', { requestId: h.reqId }, h.sid, 1500).catch(() => {});
+              }
+            }
+          }
+        }
+      } finally {
+        if (releaseQueue) {
+          const rq = releaseQueue;
+          releaseQueue = null;
+          if (e.fillQueue === myQueue) e.fillQueue = null;
+          rq();
+        }
+      }
+    };
+
+    const fenceConfirmed = (fm, needCred = false) => Boolean(
+      fm && fm.ok && e.sid && w.state === 'open'
+      && (!myActiveFill || e.fetchMode === 'fill-auth' || e.fetchMode === 'fill-noauth')
+      && (!needCred || (e.credNetEnabled && e.credFetchAll))
+    );
+
+    const runActiveFill = async () => {
+    if (myActiveFill) {
+      e.activeFill = myActiveFill;
+      const fm = await syncTabFetchMode(w, e);
+      if (!fenceConfirmed(fm, false)) {
+        return {
+          ok: false,
+          code: 'login_fence_unavailable',
+          error: `refused to fill without active browser request interception (${(fm && fm.fenceErr) || 'Fetch.enable not confirmed'}) — nothing was filled`,
+        };
+      }
+    }
+    const fillCallMs = Math.min(callTimeoutMs, 1500);
+    const callForFill = (m, p, sid) => {
+      if (myActiveFill && !myActiveFill.insertStarted && m !== 'Input.insertText') {
+        if (myActiveFill.aborted || myActiveFill.crossNav || myActiveFill.contextGone) {
+          return Promise.resolve({ timeout: true, crossNavAborted: true });
+        }
+        return Promise.race([call(w, m, p, sid, fillCallMs), myActiveFill.abortP]);
+      }
+      return call(w, m, p, sid, fillCallMs);
+    };
+    const iso = await LF().openIsolatedOrigin({
+      call: (m, p) => callForFill(m, p, e.sid),
+      browserCall: (m, p) => callForFill(m, p, null),
+      targetId: e.targetId,
+      trackedUrl: () => tabLoginUrlOf(e),
+    });
+    if (!iso.ok) {
+      if (myActiveFill && myActiveFill.crossNav) return { ok: false, code: 'login_phishing', error: `the tab started navigating to ${myActiveFill.crossNav} — nothing was filled` };
+      if (iso.mismatch) return { ok: false, code: 'login_phishing', error: `the browser target URL (${iso.browserOrigin || 'none'}) and the page origin disagree — nothing was filled` };
+      return { ok: false, code: 'target_not_found', error: 'no top-level document is available on the current tab' };
+    }
+
+    // Gate 3: Browser-truth origin check (`login_phishing`) BEFORE page/frame/ref inspection.
+    const pre = logins.resolveFill({
+      tabOrigin: iso.origin,
+      inFrame: false,
+      skipOrigin: false,
+      spec,
+      generate: !!generate,
+      user,
+      facts,
+      conv,
+      actor,
+      owners,
+      profileId: pid,
+      checkOnly: true,
+    });
+    if (!pre || !pre.ok) return pre || { ok: false, code: 'bad_request', error: 'invalid vault fill request' };
+    if (myActiveFill) {
+      myActiveFill.wantOrigin = pre.origin;
+      myActiveFill.topFrameId = iso.topFrameId || e.targetId;
+      myActiveFill.isoContextId = Number(iso.contextId) || 0;
+    }
+
+    // Gate 4 (L4 + N2 + 5b): `@ref` belongs ONLY to the active tab's latest snapshot and resolves on demand via bounded `queryAXTree`.
+    let refEntry = null;
+    if (isRef) {
+      const snapAtCall = e.snapshotRefs;
+      const snapFresh = Boolean(snapAtCall && (snapAtCall.navSeq ?? 0) === (e.navSeq || 0));
+      if (snapFresh && snapAtCall.resolved && snapAtCall.resolved.has(tgtStr)) {
+        refEntry = snapAtCall.resolved.get(tgtStr) || null;
+      } else if (snapFresh && snapAtCall.map && snapAtCall.map.has(tgtStr)) {
+        refEntry = snapAtCall.map.get(tgtStr) || null;
+      } else if (snapFresh && snapAtCall.specs && snapAtCall.specs.has(tgtStr)) {
+        const specItem = snapAtCall.specs.get(tgtStr);
+        const rr = await LF().resolveSnapshotRef({
+          wsUrl: w.url || '',
+          WebSocketImpl,
+          targetId: e.targetId,
+          frameTree: iso.frameTree,
+          parsedRef: specItem,
+          maxPayloadBytes: axMaxPayloadBytes,
+          timeoutMs: axQueryTimeoutMs,
+          maxNodes: axMaxNodes,
+        });
+        if (!rr || !rr.ok || !rr.entry) {
+          return {
+            ok: false,
+            code: 'target_not_found',
+            error: (rr && rr.error) || `element ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
+          };
+        }
+        if (e.snapshotRefs === snapAtCall && (snapAtCall.navSeq ?? 0) === (e.navSeq || 0) && snapAtCall.resolved) {
+          snapAtCall.resolved.set(tgtStr, rr.entry);
+        }
+        refEntry = rr.entry;
+      }
+      if (!refEntry) {
+        return {
+          ok: false,
+          code: 'target_not_found',
+          error: e.snapshotExpiredByNav
+            ? `element ${tgtStr} expired because the page navigated since the last snapshot — run \`vibespace-browser snapshot -i\` and retry`
+            : `element ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
+        };
+      }
+      const preInFrame = Boolean(refEntry.inFrame || (refEntry.frameId && String(refEntry.frameId) !== iso.topFrameId));
+      if (preInFrame) {
+        return {
+          ok: false,
+          code: 'login_in_frame',
+          error: "the target element is inside a frame — open the frame's own address in a top-level tab or ask the owner in live view",
+        };
+      }
+    }
+    if (checkOnly) return pre;
+
+    const prevLf = e.liveFill ? { ...e.liveFill } : null;
+    let resolved = null;
+    const res = await LF().fillVaultElement({
+      call: (m, p) => callForFill(m, p, e.sid),
+      browserCall: (m, p) => callForFill(m, p, null),
+      oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+      targetId: e.targetId,
+      trackedUrl: () => tabLoginUrlOf(e),
+      iso,
+      profileId: pid,
+      origin: pre.origin,
+      target: tgtStr,
+      refEntry,
+      slot: pre.slot,
+      secret: pre.field !== 'user',
+      preArmIntercept: async () => {
+        const arm = await ensureTabCredIntercept(w, e);
+        if (!fenceConfirmed(arm, pre.field !== 'user')) {
+          return {
+            ok: false,
+            code: 'login_fence_unavailable',
+            error: `refused to fill without active browser request interception (${(arm && arm.fenceErr) || 'interception not confirmed'}) — nothing was filled`,
+          };
+        }
+        return { ok: true };
+      },
+      guardBeforeInsert: (info) => {
+        if (myActiveFill) {
+          if (myActiveFill.crossNav) {
+            return { ok: false, code: 'login_phishing', error: `the tab started navigating to ${myActiveFill.crossNav}, not ${pre.origin} — nothing was filled` };
+          }
+          if (!fenceConfirmed({ ok: true }, pre.field !== 'user')) {
+            return { ok: false, code: 'login_fence_unavailable', error: 'refused to fill because browser request interception dropped before typing — nothing was filled' };
+          }
+          if (e.navSince && e.navUrl) {
+            const inFlightOrigin = BL().originOf(e.navUrl);
+            if (!inFlightOrigin || inFlightOrigin !== pre.origin) {
+              return { ok: false, code: 'login_phishing', error: `the tab started navigating to ${inFlightOrigin || 'an unverified page'}, not ${pre.origin} — nothing was filled` };
+            }
+          }
+          const curTabOrigin = BL().originOf(tabLoginUrlOf(e));
+          if (curTabOrigin && curTabOrigin !== pre.origin) {
+            return { ok: false, code: 'login_phishing', error: `the tab is on ${curTabOrigin}, not ${pre.origin} — nothing was filled` };
+          }
+          if (myActiveFill.contextGone || e.navSince || (e.navSeq || 0) !== myActiveFill.navSeqAtStart) {
+            return { ok: false, code: 'login_form_changed', error: 'the page navigated during typing preparation — nothing was filled' };
+          }
+          if (info && info.stage === 'before-insert') {
+            myActiveFill.insertStarted = true;
+          }
+        }
+        return { ok: true };
+      },
+      resolveValue: () => {
+        resolved = logins.resolveFill({
+          tabOrigin: iso.origin,
+          inFrame: false,
+          spec,
+          generate: !!generate,
+          user,
+          facts,
+          conv,
+          actor,
+          owners,
+          profileId: pid,
+          checkOnly: false,
+        });
+        if (!resolved || !resolved.ok) return resolved || { ok: false, code: 'not_written', error: 'vault value unavailable' };
+        const val = resolved.value;
+        resolved.value = '';
+        return { ok: true, value: val, extraSecrets: resolved.scrubSecrets || [] };
+      },
+      onBeforeInsert: ({ contextId }) => {
+        if (!resolved || !resolved.secret) return;
+        const scList = Array.isArray(resolved.scrubSecrets) ? resolved.scrubSecrets : [];
+        for (const sv of scList) recordScrubSecret(pid, resolved.name, sv, { persist: false });
+        const sigs = scList.map(credSigOf).filter(Boolean);
+        // Merge with any already-live secret sigs on the same tab (e.g., filling `password` then `pending` on a change form).
+        const prevSigs = e.liveFill && Array.isArray(e.liveFill.credSigs) ? e.liveFill.credSigs : [];
+        const mergedSigs = [...prevSigs];
+        for (const sg of sigs) {
+          if (!mergedSigs.some((x) => x.len === sg.len && x.sha256 === sg.sha256)) mergedSigs.push(sg);
+        }
+        recordProfileCredSigs(pid, mergedSigs);
+        const prevOtps = e.liveFill && Array.isArray(e.liveFill.stepOtpValues) ? e.liveFill.stepOtpValues : [];
+        const otpVals = resolved.slot === 'otp' ? [...new Set([...prevOtps, ...scList.filter((s) => s.length <= 12)])] : prevOtps;
+        const mode = resolved.pending === 'register' ? 'signup' : (resolved.pending === 'change' ? 'change' : 'login');
+        const typedSlot = BL().TYPED_SLOTS.includes(resolved.slot) ? resolved.slot : 'password';
+        const keepUnknown = Boolean(prevLf && (prevLf.unknownTyped || prevLf.holdReason === BL().HOLD_UNKNOWN_TYPED));
+        const keepHold = keepUnknown
+          ? BL().HOLD_UNKNOWN_TYPED
+          : ((prevLf && prevLf.holdReason) ? String(prevLf.holdReason) : '');
+        const prevAlso = prevLf && Array.isArray(prevLf.also) ? [...prevLf.also] : [];
+        if (prevLf && prevLf.loginId && (prevLf.loginId !== resolved.name || prevLf.typedSlot !== typedSlot || prevLf.rev !== resolved.rev || prevLf.entryGen !== resolved.entryGen)) {
+          if (!prevAlso.some((a) => a.loginId === prevLf.loginId && a.typedSlot === prevLf.typedSlot && a.rev === prevLf.rev)) {
+            prevAlso.push({
+              loginId: prevLf.loginId,
+              typedSlot: prevLf.typedSlot || null,
+              rev: prevLf.rev ?? null,
+              entryGen: prevLf.entryGen || null,
+              typedPrevious: Boolean(prevLf.typedPrevious),
+              at: Number(prevLf.at) || now(),
+            });
+          }
+        }
+        armLiveFillOnTab(w, e, {
+          urlAtFill: iso.url || tabLoginUrlOf(e),
+          origin: resolved.origin,
+          user: resolved.user,
+          loginId: resolved.name,
+          browserKey: (target && target.browserKey) || null,
+          mode,
+          at: now(),
+          isoContextId: contextId,
+          credSigs: mergedSigs,
+          typedSlot,
+          rev: resolved.rev,
+          entryGen: resolved.entryGen,
+          stepOtpValues: otpVals,
+          typedPrevious: resolved.slot === 'previous' || Boolean(prevLf && prevLf.typedPrevious),
+          unknownTyped: keepUnknown,
+          also: prevAlso,
+          holdReason: keepHold,
+        }, { persist: true });
+        noteActiveTarget(pid, target && target.browserKey, e.targetId);
+      },
+    });
+
+    if (!res || !res.ok) {
+      if (!res?.attemptedInsert) {
+        if (resolved && resolved.secret && e.liveFill) {
+          if (prevLf) armLiveFillOnTab(w, e, prevLf, { persist: true });
+          else clearLiveFillOnTab(w, e, 'fill-aborted', { audit: false, persist: true });
+        }
+        if (resolved && resolved.generated && typeof resolved.rollbackGenerate === 'function') {
+          resolved.rollbackGenerate();
+        }
+      } else if (!res.insUncertain && w.state === 'open' && e.sid && !(e.inflightCredReqs && e.inflightCredReqs.size > 0)) {
+        const svs = [
+          ...(Array.isArray(resolved && resolved.scrubSecrets) ? resolved.scrubSecrets : []),
+          ...(prevLf && prevLf.loginId ? scrubValuesForLogin(pid, prevLf.loginId) : []),
+        ];
+        const wr = await LF().wipeTabTypedInputs({
+          call: (m, p) => call(w, m, p, e.sid, 1500),
+          oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
+          targetId: e.targetId,
+          contextId: Number(res && res.contextId) || (e.liveFill && e.liveFill.isoContextId) || 0,
+          secretValues: svs,
+          wholeOnlyValues: e.liveFill && Array.isArray(e.liveFill.stepOtpValues) ? e.liveFill.stepOtpValues : null,
+          maxScanPositions: wipeMaxScanPositions,
+        }).catch(() => null);
+        if (wr && wr.ok === true && wr.verifiedEmpty === true) {
+          if (prevLf && (prevLf.unknownTyped || prevLf.holdReason)) armLiveFillOnTab(w, e, prevLf, { persist: true });
+          else clearLiveFillOnTab(w, e, 'fill-failed-wiped', { audit: false, persist: true });
+          if (resolved && resolved.generated && typeof resolved.rollbackGenerate === 'function') {
+            resolved.rollbackGenerate();
+          }
+        }
+      }
+      if (!res?.attemptedInsert && myActiveFill && myActiveFill.crossNav) {
+        return { ok: false, code: 'login_phishing', error: `the tab started navigating to ${myActiveFill.crossNav}, not ${pre.origin} — nothing was filled` };
+      }
+      return { ok: false, code: (res && res.code) || 'login_form_changed', error: (res && res.error) || 'vault fill failed' };
+    }
+
+    const u = resolved && typeof resolved.noteFillUse === 'function' ? resolved.noteFillUse() : null;
+    const receipt = (u && u.receipt) || null;
+    const out = {
+      ok: true,
+      entry: resolved.name,
+      origin: resolved.origin,
+      user: resolved.user,
+      field: resolved.field,
+      slot: resolved.slot,
+      target: tgtStr,
+      generated: !!resolved.generated,
+      pending: resolved.pending || null,
+      receipt,
+    };
+    return out;
+    };
+    try {
+      return await runActiveFill();
+    } finally {
+      await releaseActiveFill();
+    }
+  }
+
+  function loginFenceStats() {
+    return {
+      fencedProfiles: knownFenceProfiles.size,
+      auditCount: fenceAuditLines.length,
+      unparseableScrubFrames,
+      cutScrubFrames,
+    };
+  }
+
+  function collectLiveFenceRefs() {
+    const liveTargetIds = new Set();
+    const liveContextIds = new Set();
+    for (const w of watches.values()) {
+      if (!w || w.state !== 'open') continue;
+      for (const e of w.targets.values()) {
+        if (!e.liveFill) continue;
+        liveTargetIds.add(String(e.targetId));
+        if (e.liveFill.isoContextId > 0) liveContextIds.add(`${e.targetId}:${e.liveFill.isoContextId}`);
+      }
+    }
+    if (keeper && typeof keeper.loginFenceStateOf === 'function') {
+      for (const pid of knownFenceProfiles) {
+        try {
+          const st = keeper.loginFenceStateOf(pid);
+          for (const f of (st && Array.isArray(st.fences)) ? st.fences : []) {
+            if (f && f.targetId) liveTargetIds.add(String(f.targetId));
+          }
+        } catch { /* */ }
+      }
+    }
+    return { liveTargetIds, liveContextIds };
+  }
+
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
   function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }
 
@@ -2665,7 +4827,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     unsubLease = keeper.onLease((ev) => {
       if (!ev || !ev.profileId) return null;
       if (ev.kind === 'browser-stopped' || ev.kind === 'browser-ready') kernelOf.delete(String(ev.profileId)); // lane browser-surfaces: a browser started again may be another engine (Change build…) — asked again
-      if (ev.kind === 'browser-stopped') disarm(ev.profileId, 'the browser stopped');
+      if (ev.kind === 'browser-stopped') { clearProfileLoginFencesOnStop(String(ev.profileId), watches.get(String(ev.profileId))); disarm(ev.profileId, 'the browser stopped'); }
       else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); openers.delete(String(ev.profileId)); refusals.delete(String(ev.profileId)); gaveUp.delete(String(ev.profileId)); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId, { by: 'person' }); } // lane passkey-browse-yourself: a heal under his browsing is watched again (acceptance r2: a new browser — its opener is asked again)
       // lane passkey-browse-yourself (rule 1): the person's own browsing starts (his press launched or joined the browser) ⇒ the
       // watch opens now — before any agent verb, before his window connects (the keeper's settleArming bounds the wait)
@@ -2684,6 +4846,127 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // took its sessions (and, measured — S12 — the authenticators in them) when it went: it is not kept
   try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep('pk-left:') : 0; if (n) log.log?.(`[browser-dialog] ${n} passkey «could not be taken back» item(s) of a past hub life resolved — that hub's sessions took the authenticators with them`); } catch { /* the tray's own failure */ }
 
+  if (logins && typeof logins.onVaultOpen === 'function') {
+    unsubVaultOpen = logins.onVaultOpen(() => {
+      if (disposed) return;
+      const openPids = new Set();
+      for (const [pid, w] of watches) {
+        if (!w || w.state !== 'open') continue;
+        openPids.add(pid);
+        hydratePersistedScrubs(pid);
+        let synced = false;
+        for (const e of w.targets.values()) {
+          if (!e.liveFill) continue;
+          const heldForLock = e.liveFill.holdReason === BL().HOLD_VAULT_LOCKED;
+          const lacksSigs = !e.liveFill.unknownTyped && e.liveFill.holdReason !== BL().HOLD_UNKNOWN_TYPED && (!Array.isArray(e.liveFill.credSigs) || e.liveFill.credSigs.length === 0) && Boolean(e.liveFill.loginId);
+          if (!heldForLock && !lacksSigs) continue;
+          const hydrated = (!Array.isArray(e.liveFill.credSigs) || e.liveFill.credSigs.length === 0 || (e.liveFill.typedSlot === 'otp' && (!Array.isArray(e.liveFill.stepOtpValues) || e.liveFill.stepOtpValues.length === 0)) || (Array.isArray(e.liveFill.also) && e.liveFill.also.length > 0))
+            ? hydrateTabFenceSecrets(e.targetId, e.liveFill.loginId, {
+              typedSlot: e.liveFill.typedSlot || null,
+              typedPrevious: Boolean(e.liveFill.typedPrevious),
+              rev: e.liveFill.rev ?? null,
+              entryGen: e.liveFill.entryGen || null,
+              mode: e.liveFill.mode || 'login',
+              at: e.liveFill.at || null,
+              also: Array.isArray(e.liveFill.also) ? e.liveFill.also : null,
+            })
+            : { values: [], otpValues: [], byLogin: [], sigs: e.liveFill.credSigs, movedOn: false };
+          if (e.liveFill.unknownTyped || hydrated.movedOn) {
+            if (e.liveFill.ceilingNoticeId) { try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ } e.liveFill.ceilingNoticeId = null; }
+            e.liveFill.ceilingNoticed = false;
+            e.liveFill.unknownTyped = true;
+            e.liveFill.holdReason = BL().HOLD_UNKNOWN_TYPED;
+            e.liveFill.credSigs = [];
+            if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
+            syncTabCredIntercept(w, e);
+            fileCeilingWipeNotice(w, e, e.liveFill);
+            recordFenceAudit(w.profileId, e.liveFill, 'rearm-hold:' + BL().HOLD_UNKNOWN_TYPED);
+            synced = true;
+            continue;
+          }
+          if (heldForLock) {
+            e.liveFill.holdReason = '';
+            e.liveFill.ceilingNoticed = false;
+            if (e.liveFill.ceilingNoticeId) { try { forYou?.resolve?.(e.liveFill.ceilingNoticeId); } catch { /* */ } e.liveFill.ceilingNoticeId = null; }
+          }
+          if ((!Array.isArray(e.liveFill.credSigs) || e.liveFill.credSigs.length === 0) && hydrated.sigs.length) {
+            e.liveFill.credSigs = hydrated.sigs;
+          }
+          if (Array.isArray(hydrated.otpValues) && hydrated.otpValues.length) {
+            const curOtps = Array.isArray(e.liveFill.stepOtpValues) ? e.liveFill.stepOtpValues : [];
+            e.liveFill.stepOtpValues = [...new Set([...curOtps, ...hydrated.otpValues])];
+          }
+          if (Array.isArray(hydrated.values) && hydrated.values.length) {
+            if (Array.isArray(hydrated.byLogin) && hydrated.byLogin.length) {
+              for (const bl of hydrated.byLogin) {
+                for (const sv of bl.values) recordScrubSecret(pid, bl.loginId, sv, { persist: false });
+              }
+            } else {
+              for (const sv of hydrated.values) recordScrubSecret(pid, e.liveFill.loginId, sv, { persist: false });
+            }
+            try { LF().rememberFilledSecrets?.(e.targetId, 0, hydrated.values, pid); } catch { /* */ }
+          }
+          syncTabCredIntercept(w, e);
+          synced = true;
+          if (heldForLock) {
+            if (e.liveFill.wiping) e.liveFill.recheckAfterWipe = true;
+            else if (now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs) expireLiveFillCeiling(w, e);
+            else if (!e.liveFillTimer) {
+              const left = Math.max(0, liveFillMaxMs - (now() - (Number(e.liveFill.at) || 0)));
+              const lf = e.liveFill;
+              const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
+              if (timer.unref) timer.unref();
+              e.liveFillTimer = timer;
+            }
+          }
+        }
+        if (synced) syncPersistedLoginFences(pid);
+      }
+      if (keeper && typeof keeper.loginFenceStateOf === 'function' && typeof keeper.saveLoginFenceState === 'function') {
+        for (const pid of knownFenceProfiles) {
+          if (openPids.has(pid)) continue;
+          let st = null;
+          try { st = keeper.loginFenceStateOf(pid); } catch { st = null; }
+          if (!st || !Array.isArray(st.fences) || !st.fences.length) continue;
+          let changed = false;
+          const nextFences = st.fences.map((f) => {
+            if (!f) return f;
+            if (!f.unknownTyped && f.holdReason !== BL().HOLD_UNKNOWN_TYPED && f.loginId) {
+              const hyd = hydrateTabFenceSecrets(f.targetId, f.loginId, {
+                typedSlot: f.typedSlot || null,
+                typedPrevious: Boolean(f.typedPrevious),
+                rev: f.rev ?? null,
+                entryGen: f.entryGen || null,
+                mode: f.mode || 'login',
+                at: f.at || null,
+                also: Array.isArray(f.also) ? f.also : null,
+              });
+              if (hyd.movedOn) {
+                changed = true;
+                return { ...f, unknownTyped: true, holdReason: BL().HOLD_UNKNOWN_TYPED };
+              }
+            }
+            if (f.holdReason === BL().HOLD_VAULT_LOCKED) {
+              changed = true;
+              return { ...f, holdReason: '' };
+            }
+            return f;
+          });
+          if (changed) {
+            try { keeper.saveLoginFenceState(pid, { fences: nextFences, scrubs: st.scrubs || [] }); } catch { /* */ }
+          }
+        }
+      }
+    });
+  }
+  if (logins && typeof logins.onVaultLock === 'function') {
+    try { unsubFenceRefSource = LF().registerFenceRefSource?.(collectLiveFenceRefs) || null; } catch { unsubFenceRefSource = null; }
+    unsubVaultLock = logins.onVaultLock(() => {
+      if (disposed) return;
+      try { LF().clearUnfencedFilledSecrets(); } catch { /* */ }
+    });
+  }
+  try { keeper?.mediator?.()?.setLoginFence?.({ liveFillTarget: liveFillOnTarget, allowVerbInFlight, noteActiveTarget, scrubText, scrubCdpFrame, fillEpochOf, isCredRequestId, bodyCarriesCred, hasActiveFillOnProfile, hasPostLiftGuard, recheckPostLift }); } catch { /* optional */ }
   return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, waitSettled /* int347: the alert race */, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     pageAnswers, // lane browser-shared-profile-freeze: the verb's own tab asked first, bounded (a silent page answered page_busy by name)
@@ -2695,9 +4978,412 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
-    fillLogin, loginForms, // lane browser-login: the `login` verb's door (the vault's values to the kernel, never to anyone else) + the forms a tab reports
+    fillVaultField, precheckVaultFill, checkLoginChannelFor, noteSnapshot, liveFillVerdictFor, liveFillOnTarget, fencedTargetsFor, allowVerbInFlight, noteActiveTab, noteActiveTarget, hasScrubSecrets, scrubOutput, scrubText, scrubCdpFrame, loginFenceStats, hasPostLiftGuard, recheckPostLift, recheckPostLiftFor, // lane browser-login r22..r29
     passkeyFactOf, // lane passkey-browse-yourself: ONE passkey fact per live view (his browsing window reads it from its relay)
-    shutdown: () => { for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
+    shutdown: () => { disposed = true; for (const r of rearms.values()) if (r.t) clearTimeout(r.t); rearms.clear(); shutdown(); try { unsubFenceRefSource?.(); } catch { /* */ } try { unsubLease?.(); } catch { /* */ } try { unsubVaultOpen?.(); } catch { /* */ } try { unsubVaultLock?.(); } catch { /* */ } }, _watches: watches };
+}
+
+const CRED_ROLL_BASE = 131;
+const SCAN_LIMITS = Object.freeze({
+  maxBodyBytes: 1048576,
+  maxStringChars: 262144,
+  maxJsonNodes: 4096,
+  maxNestedJsonNodes: 2048,
+  maxNestedDepth: 3,
+  maxTextLines: 4096,
+  maxMultipartParts: 256,
+  maxB64Tokens: 64,
+});
+
+function noteScanCap(scanCtx, reason) {
+  if (scanCtx && typeof scanCtx === 'object' && !scanCtx.capHit) {
+    scanCtx.capHit = reason;
+  }
+}
+
+function credSigOf(sv) {
+  if (typeof sv !== 'string' || !sv) return null;
+  const sha256 = crypto.createHash('sha256').update(sv, 'utf8').digest('hex');
+  const w = sv.length;
+  let rHash = 0 | 0;
+  let rPow = 1 | 0;
+  for (let i = 0; i < w; i++) {
+    rHash = (Math.imul(rHash, CRED_ROLL_BASE) + sv.charCodeAt(i)) | 0;
+    if (i > 0) rPow = Math.imul(rPow, CRED_ROLL_BASE);
+  }
+  return { len: w, sha256, rHash, rPow };
+}
+
+function stringCarriesSig(s, sigs, scanCtx = null) {
+  if (typeof s !== 'string' || !s || !Array.isArray(sigs) || !sigs.length) return false;
+  const n = s.length;
+  if (n > SCAN_LIMITS.maxStringChars) {
+    noteScanCap(scanCtx, 'string_too_long');
+    return false;
+  }
+  for (const sg of sigs) {
+    if (!sg || !sg.len || !sg.sha256 || n < sg.len) continue;
+    const w = sg.len;
+    if (n === w) {
+      if (crypto.createHash('sha256').update(s, 'utf8').digest('hex') === sg.sha256) return true;
+      continue;
+    }
+    if (w < 4) continue;
+    if (typeof sg.rHash === 'number' && typeof sg.rPow === 'number') {
+      let h = 0 | 0;
+      for (let i = 0; i < w; i++) h = (Math.imul(h, CRED_ROLL_BASE) + s.charCodeAt(i)) | 0;
+      if (h === sg.rHash && crypto.createHash('sha256').update(s.slice(0, w), 'utf8').digest('hex') === sg.sha256) return true;
+      const pow = sg.rPow | 0;
+      for (let i = 1, max = n - w; i <= max; i++) {
+        h = (Math.imul((h - Math.imul(s.charCodeAt(i - 1), pow)) | 0, CRED_ROLL_BASE) + s.charCodeAt(i + w - 1)) | 0;
+        if (h === sg.rHash && crypto.createHash('sha256').update(s.slice(i, i + w), 'utf8').digest('hex') === sg.sha256) return true;
+      }
+    } else if (n - w <= 8192) {
+      for (let i = 0, max = n - w; i <= max; i++) {
+        if (crypto.createHash('sha256').update(s.slice(i, i + w), 'utf8').digest('hex') === sg.sha256) return true;
+      }
+    } else {
+      noteScanCap(scanCtx, 'string_too_long');
+    }
+  }
+  return false;
+}
+
+function decodeBase64Token(tok, scanCtx = null) {
+  if (typeof tok !== 'string' || tok.length < 6) return '';
+  if (tok.length > SCAN_LIMITS.maxStringChars) {
+    noteScanCap(scanCtx, 'string_too_long');
+    return '';
+  }
+  let norm = tok.replace(/-/g, '+').replace(/_/g, '/');
+  const rem = norm.length % 4;
+  if (rem === 1) return '';
+  if (rem === 2) norm += '==';
+  else if (rem === 3) norm += '=';
+  try {
+    const buf = Buffer.from(norm, 'base64');
+    if (!buf.length || buf.includes(0)) return '';
+    const str = buf.toString('utf8');
+    if (!str || str.includes('\ufffd')) return '';
+    return str;
+  } catch { return ''; }
+}
+
+function decodeQuotedPrintable(s) {
+  if (typeof s !== 'string' || !s) return '';
+  const soft = s.replace(/=\r?\n/g, '');
+  const bytes = [];
+  for (let i = 0; i < soft.length; i++) {
+    if (soft[i] === '=' && i + 2 < soft.length && /^[0-9A-Fa-f]{2}$/.test(soft.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(soft.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      const chunk = Buffer.from(soft[i], 'utf8');
+      for (let j = 0; j < chunk.length; j++) bytes.push(chunk[j]);
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+function valueCarriesCredential(val, sigs, depth = 0, scanCtx = null) {
+  if (typeof val !== 'string' || !val || !Array.isArray(sigs) || !sigs.length) return false;
+  if (val.length > SCAN_LIMITS.maxStringChars) {
+    noteScanCap(scanCtx, 'string_too_long');
+    return false;
+  }
+  if (stringCarriesSig(val, sigs, scanCtx)) return true;
+
+  const candidates = [val];
+  if (val.includes('%') || val.includes('+')) {
+    try {
+      const u1 = decodeURIComponent(val.replace(/\+/g, ' '));
+      if (u1 && u1 !== val) {
+        if (stringCarriesSig(u1, sigs, scanCtx)) return true;
+        candidates.push(u1);
+      }
+    } catch { /* */ }
+    if (val.includes('%')) {
+      try {
+        const u2 = decodeURIComponent(val);
+        if (u2 && !candidates.includes(u2)) {
+          if (stringCarriesSig(u2, sigs, scanCtx)) return true;
+          candidates.push(u2);
+        }
+      } catch { /* */ }
+    }
+  }
+
+  for (const cand of candidates) {
+    if (/^basic\s+/i.test(cand)) {
+      const decBasic = decodeBase64Token(cand.replace(/^basic\s+/i, '').trim(), scanCtx);
+      if (decBasic && stringCarriesSig(decBasic, sigs, scanCtx)) return true;
+    }
+    const b64Re = /[A-Za-z0-9+/=_-]{6,}/g;
+    let m, seenB64 = 0;
+    while ((m = b64Re.exec(cand)) !== null) {
+      if (seenB64 >= SCAN_LIMITS.maxB64Tokens) {
+        noteScanCap(scanCtx, 'too_many_base64_tokens');
+        break;
+      }
+      seenB64++;
+      const dec = decodeBase64Token(m[0], scanCtx);
+      if (!dec) continue;
+      if (stringCarriesSig(dec, sigs, scanCtx)) return true;
+      const dt = dec.trimStart();
+      if (dt[0] === '{' || dt[0] === '[' || dt[0] === '"') {
+        if (depth < 2) {
+          if (valueCarriesCredential(dec, sigs, depth + 1, scanCtx)) return true;
+        } else {
+          try { JSON.parse(dt); noteScanCap(scanCtx, 'nested_json_too_deep'); } catch { /* not JSON */ }
+        }
+      }
+    }
+    const trimmed = cand.trimStart();
+    if (trimmed[0] === '{' || trimmed[0] === '[' || trimmed[0] === '"') {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (depth >= SCAN_LIMITS.maxNestedDepth) {
+          if (typeof parsed === 'object' && parsed !== null) noteScanCap(scanCtx, 'nested_json_too_deep');
+          else if (typeof parsed === 'string' && parsed !== cand) {
+            if (stringCarriesSig(parsed, sigs, scanCtx)) return true;
+            noteScanCap(scanCtx, 'nested_json_too_deep');
+          }
+        } else {
+          const stack = [parsed];
+          let seen = 0;
+          while (stack.length) {
+            if (seen >= SCAN_LIMITS.maxNestedJsonNodes) {
+              noteScanCap(scanCtx, 'nested_json_too_many_nodes');
+              break;
+            }
+            seen++;
+            const cur = stack.pop();
+            if (typeof cur === 'string') {
+              if (cur !== cand && valueCarriesCredential(cur, sigs, depth + 1, scanCtx)) return true;
+            } else if (Array.isArray(cur)) {
+              for (let i = 0; i < cur.length; i++) stack.push(cur[i]);
+            } else if (cur && typeof cur === 'object') {
+              for (const k of Object.keys(cur)) {
+                if (valueCarriesCredential(k, sigs, depth + 1, scanCtx)) return true;
+                stack.push(cur[k]);
+              }
+            }
+          }
+        }
+      } catch { /* not JSON */ }
+    }
+  }
+  return false;
+}
+
+function parseMultipartParts(bodyText, contentType = '') {
+  let boundary = '';
+  const bm = /boundary=(?:"([^"]+)"|([^\s;]+))/i.exec(String(contentType || ''));
+  if (bm) boundary = String(bm[1] || bm[2] || '').trim();
+  if (!boundary) {
+    const first = /^--([^\r\n]{1,128})\r?\n/.exec(bodyText);
+    if (first) boundary = first[1];
+  }
+  if (!boundary) return { ok: false, parts: [] };
+  const delim = '--' + boundary;
+  const chunks = bodyText.split(delim);
+  if (chunks.length < 2) return { ok: false, parts: [] };
+  const parts = [];
+  for (let i = 1; i < chunks.length; i++) {
+    let chunk = chunks[i];
+    if (chunk.startsWith('--')) break;
+    if (parts.length >= SCAN_LIMITS.maxMultipartParts) {
+      return { ok: false, parts, capHit: 'multipart_too_many_parts' };
+    }
+    if (chunk.startsWith('\r\n')) chunk = chunk.slice(2);
+    else if (chunk.startsWith('\n')) chunk = chunk.slice(1);
+    else continue;
+    let sepIdx = chunk.indexOf('\r\n\r\n');
+    let sepLen = 4;
+    if (sepIdx < 0) {
+      sepIdx = chunk.indexOf('\n\n');
+      sepLen = 2;
+    }
+    if (sepIdx < 0) continue;
+    const headers = chunk.slice(0, sepIdx);
+    let rawBody = chunk.slice(sepIdx + sepLen);
+    if (rawBody.endsWith('\r\n')) rawBody = rawBody.slice(0, -2);
+    else if (rawBody.endsWith('\n')) rawBody = rawBody.slice(0, -1);
+    let body = rawBody;
+    const cte = /content-transfer-encoding\s*:\s*([^\r\n;]+)/i.exec(headers);
+    const enc = cte ? cte[1].trim().toLowerCase() : '';
+    if (enc === 'base64') {
+      const dec = decodeBase64Token(rawBody.replace(/\s+/g, ''));
+      if (dec) body = dec;
+    } else if (enc === 'quoted-printable') {
+      body = decodeQuotedPrintable(rawBody);
+    }
+    parts.push({ headers, rawBody, body });
+  }
+  return { ok: parts.length > 0, parts };
+}
+
+function inspectRequestBody(bodyText, sigs, contentType = '', { hasPostData = false, contentEncoding = '', scanCtx: outerCtx = null } = {}) {
+  if (!Array.isArray(sigs) || !sigs.length) return { carries: false, undecodable: false, format: 'none' };
+  if (typeof bodyText !== 'string' || !bodyText) {
+    return hasPostData
+      ? { carries: false, undecodable: true, reason: 'missing_post_data' }
+      : { carries: false, undecodable: false, format: 'empty' };
+  }
+  if (Buffer.byteLength(bodyText, 'utf8') > SCAN_LIMITS.maxBodyBytes) {
+    return { carries: false, undecodable: true, reason: 'body_too_large' };
+  }
+  if (contentEncoding && !/^identity$/i.test(String(contentEncoding).trim())) {
+    return { carries: false, undecodable: true, reason: 'compressed_body' };
+  }
+  if (bodyText.includes('\u0000') || bodyText.includes('\ufffd')) {
+    return { carries: false, undecodable: true, reason: 'binary_body' };
+  }
+
+  const scanCtx = outerCtx && typeof outerCtx === 'object' ? outerCtx : { capHit: null };
+  const finishClean = (format) => (scanCtx.capHit
+    ? { carries: false, undecodable: true, reason: scanCtx.capHit }
+    : { carries: false, undecodable: false, format });
+
+  const ctRaw = String(contentType || '').trim();
+  const media = ctRaw.split(';')[0].trim().toLowerCase();
+  const trimmed = bodyText.trimStart();
+
+  // 1. Multipart form-data (`multipart/*` or `--boundary\r\nContent-Disposition:`)
+  if (media.startsWith('multipart/') || (!media && /^--[^\r\n]{1,128}\r?\ncontent-disposition:/i.test(bodyText))) {
+    const mp = parseMultipartParts(bodyText, ctRaw);
+    if (mp.capHit) return { carries: false, undecodable: true, reason: mp.capHit };
+    if (!mp.ok) return { carries: false, undecodable: true, reason: 'malformed_multipart' };
+    for (const part of mp.parts) {
+      if (valueCarriesCredential(part.body, sigs, 0, scanCtx) || (part.rawBody !== part.body && valueCarriesCredential(part.rawBody, sigs, 0, scanCtx)) || valueCarriesCredential(part.headers, sigs, 0, scanCtx)) {
+        return { carries: true, undecodable: false, format: 'multipart' };
+      }
+    }
+    return finishClean('multipart');
+  }
+
+  // 2. JSON (`application/json`, `*+json`, `text/json`, or JSON literal when Content-Type is omitted)
+  const declaredJson = media === 'application/json' || media.endsWith('+json') || media === 'text/json';
+  if (declaredJson || (!media && (trimmed[0] === '{' || trimmed[0] === '[' || trimmed[0] === '"'))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const stack = [parsed];
+      let seen = 0;
+      while (stack.length) {
+        if (seen >= SCAN_LIMITS.maxJsonNodes) {
+          return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };
+        }
+        seen++;
+        const cur = stack.pop();
+        if (typeof cur === 'string') {
+          if (valueCarriesCredential(cur, sigs, 1, scanCtx)) return { carries: true, undecodable: false, format: 'json' };
+        } else if (Array.isArray(cur)) {
+          for (let i = 0; i < cur.length; i++) stack.push(cur[i]);
+        } else if (cur && typeof cur === 'object') {
+          for (const k of Object.keys(cur)) {
+            if (valueCarriesCredential(k, sigs, 1, scanCtx)) return { carries: true, undecodable: false, format: 'json' };
+            stack.push(cur[k]);
+          }
+        }
+      }
+      return finishClean('json');
+    } catch {
+      if (declaredJson) return { carries: false, undecodable: true, reason: 'malformed_json' };
+    }
+  }
+
+  // 3. URL-encoded form (`application/x-www-form-urlencoded` or single-line `k=v` when Content-Type is omitted)
+  if (media === 'application/x-www-form-urlencoded' || (!media && !bodyText.includes('\n') && bodyText.includes('='))) {
+    try {
+      for (const [k, v] of new URLSearchParams(bodyText)) {
+        if (valueCarriesCredential(k, sigs, 0, scanCtx) || valueCarriesCredential(v, sigs, 0, scanCtx)) {
+          return { carries: true, undecodable: false, format: 'urlencoded' };
+        }
+      }
+      if (!bodyText.includes('=') && valueCarriesCredential(bodyText, sigs, 0, scanCtx)) {
+        return { carries: true, undecodable: false, format: 'urlencoded' };
+      }
+      if (media === 'application/x-www-form-urlencoded') {
+        return finishClean('urlencoded');
+      }
+    } catch {
+      if (media === 'application/x-www-form-urlencoded') return { carries: false, undecodable: true, reason: 'malformed_urlencoded' };
+    }
+  }
+
+  // 4. Plain text (`text/plain` or omitted Content-Type: `<form enctype="text/plain">` `k=v` lines, raw text, base64, Basic/Bearer)
+  if (media === 'text/plain' || !media) {
+    const lines = bodyText.split(/\r?\n/);
+    const maxLines = Math.min(lines.length, SCAN_LIMITS.maxTextLines);
+    for (let i = 0; i < maxLines; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx >= 0) {
+        if (valueCarriesCredential(line.slice(eqIdx + 1), sigs, 0, scanCtx) || valueCarriesCredential(line.slice(0, eqIdx), sigs, 0, scanCtx)) {
+          return { carries: true, undecodable: false, format: 'text/plain' };
+        }
+      }
+      if (valueCarriesCredential(line, sigs, 0, scanCtx)) {
+        return { carries: true, undecodable: false, format: 'text/plain' };
+      }
+    }
+    if (lines.length > SCAN_LIMITS.maxTextLines) {
+      return { carries: false, undecodable: true, reason: 'text_too_many_lines' };
+    }
+    return finishClean('text/plain');
+  }
+
+  // 5. Unrecognized / binary Content-Type -> fail closed on cross-origin (`undecodable: true`).
+  return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };
+}
+
+function bodyCarriesCredential(bodyText, sigs, contentType = '', opts = {}) {
+  return Boolean(inspectRequestBody(bodyText, sigs, contentType, opts).carries);
+}
+
+function urlCarriesCredential(reqUrl, sigs, scanCtx = null) {
+  if (typeof reqUrl !== 'string' || !reqUrl || !Array.isArray(sigs) || !sigs.length) return false;
+  if (reqUrl.length > SCAN_LIMITS.maxStringChars) {
+    noteScanCap(scanCtx, 'string_too_long');
+    return false;
+  }
+  try {
+    const uo = new URL(reqUrl);
+    if (uo.username && valueCarriesCredential(uo.username, sigs, 0, scanCtx)) return true;
+    if (uo.password && valueCarriesCredential(uo.password, sigs, 0, scanCtx)) return true;
+    if (uo.search) {
+      for (const [k, v] of uo.searchParams) {
+        if (valueCarriesCredential(k, sigs, 0, scanCtx) || valueCarriesCredential(v, sigs, 0, scanCtx)) return true;
+      }
+      if (valueCarriesCredential(uo.search.slice(1), sigs, 0, scanCtx)) return true;
+    }
+    if (uo.hash && valueCarriesCredential(uo.hash.slice(1), sigs, 0, scanCtx)) return true;
+    for (const seg of uo.pathname.split('/')) {
+      if (seg.length >= 4 && valueCarriesCredential(seg, sigs, 0, scanCtx)) return true;
+    }
+  } catch {
+    const qIdx = reqUrl.indexOf('?');
+    const hIdx = reqUrl.indexOf('#');
+    const cut = qIdx >= 0 ? qIdx : hIdx;
+    if (cut >= 0 && valueCarriesCredential(reqUrl.slice(cut + 1), sigs, 0, scanCtx)) return true;
+  }
+  return false;
+}
+
+function headersCarryCredential(headers, sigs, scanCtx = null) {
+  if (!headers || typeof headers !== 'object' || !Array.isArray(sigs) || !sigs.length) return false;
+  for (const k of Object.keys(headers)) {
+    const lower = String(k).toLowerCase();
+    const v = headers[k];
+    if (typeof v !== 'string' || !v.trim()) continue;
+    if (lower === 'referer' || lower === 'referrer') {
+      if (urlCarriesCredential(v, sigs, scanCtx)) return true;
+      continue;
+    }
+    if (valueCarriesCredential(v.trim(), sigs, 0, scanCtx)) return true;
+  }
+  return false;
 }
 
 /** lane passkey-browse-yourself r4 — THE HOLDER ROWS the watch judges WHO holds a browser on (its mode, a ceremony's owner): the
@@ -2717,4 +5403,19 @@ function holdersOfKeeper(keeper) {
     } catch { return []; }
   };
 }
-module.exports = { create, holdersOfKeeper, ANSWERED_KEEP, OUTCOMES_KEEP, VERB_RUNNING_MAX_MS, RE_ENABLE_MS, tabName /* B-97ae round 3 */ };
+module.exports = {
+  create,
+  holdersOfKeeper,
+  ANSWERED_KEEP,
+  OUTCOMES_KEEP,
+  VERB_RUNNING_MAX_MS,
+  RE_ENABLE_MS,
+  tabName /* B-97ae round 3 */,
+  SCAN_LIMITS,
+  credSigOf,
+  valueCarriesCredential,
+  inspectRequestBody,
+  bodyCarriesCredential,
+  urlCarriesCredential,
+  headersCarryCredential,
+};

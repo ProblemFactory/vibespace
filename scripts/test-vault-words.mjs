@@ -49,9 +49,16 @@ const ROWS = {
   'src/browser-passkey.js': [['VibeSpace\'s saved passkeys cannot be opened right now', 'agent', 'lane passkey-sink: a kernel ceremony refused webauthn_key_locked — said to the agent\'s next verbs (PK.refusedText)']],
   // lane browser-login: a web login the custom kernel would fill — the agent's `vibespace-browser login` refused vault_locked (the fill, a
   // signup the vault would mint for); the person's own save doors (the Vault window's 网站登录…, the save-login card) say it as a field verdict
-  'src/browser-login.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then', 'agent', 'lane browser-login: LOCKED — `vibespace-browser login` refused vault_locked (BL.LOCKED, the fill verdict\'s words)']],
+  'src/browser-login.js': [
+    ['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then', 'agent', 'lane browser-login: LOCKED — `vibespace-browser fill --vault` refused vault_locked (BL.LOCKED, the fill verdict\'s words)'],
+    ['the vault was locked while the fill was live', 'label', 'lane vault-login-r3: HOLD_VAULT_LOCKED — parenthetical cause inside 409 login_fill_live when a re-armed tab fence hit its 10-min ceiling while locked; the remedy asked is to reload the tab, while vault-hooks\'s own item tells the lock'],
+  ],
+  'src/server/browser-dialogs.js': [
+    ['(the vault was locked while the fill was live) — reload it', 'label', 'lane vault-login-r3: the ceiling-hold For-you reload notice when a re-armed tab fence could not hydrate a short target while locked — the notice asks to reload the tab, while vault-hooks\'s own item tells the lock', { count: 1 }],
+  ],
   'src/server/browser-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered', 'agent', 'lane browser-login: a signup the vault could not seal before the fill (vault_locked) — nothing filled, no account made'],
-    ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }]],
+    ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }],
+    ['the vault is locked — unlock it, then ', 'label', 'the owner\'s own pending-password Confirm / Discard doors (in the Vault window and on the pending-login For-you card) answer as a field verdict while the person is at the door — not a background refusal', { count: 4 }]],
   'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],
   'src/lib/vault-totp-row.js': [['The vault is locked — unlock it first, then preview again', 'label', '添加… ▸ 两步验证…\'s preview-time verdict line (lane vault-totp-add) — 「解锁…」 beside the words is the door; a field verdict while the person is in the dialog, not a background refusal']],
   'src/lib/vault-use-row.js': [['Unverified until you unlock the vault — not in use until then', 'label', 'the «谁可以用…» row\'s locked-read note (lane vault-use-grants r6) — while the vault is locked the chips are greyed and the members listed «unverified», shown as a field-side note while the person is at the Vault window (the run door still refuses with vault_locked and its own words); not a background refusal the two-facts rule governs']],
@@ -289,6 +296,58 @@ for (const [name, m, want] of muts) { const r = m.n === 1 ? census(m.files, DICT
 const zh2 = { ...zh, [K1]: '保险库已锁定——先解锁' };
 const rz = census(FILES, { zh: zh2, ja });
 ok(rz.red.some((l) => /the zh words/.test(l)), 'MUTANT «the zh words of the channels card lose For you»: RED (a person reads it in Chinese too)', rz.red.slice(0, 2));
+
+console.log('⑥ M3 DOC REFUSAL CENSUS — every login_* code in the 6 docs is in BL.REFUSALS / paste login codes (no invented login_focus_hijacked)');
+const BL = require(path.join(REPO, 'src/browser-login.js'));
+const P = require(path.join(REPO, 'src/vault-paste.js'));
+const PD = require(path.join(REPO, 'src/server/vault-paste-door.js'));
+const PASTE_LOGIN_CODES = [...Object.keys(P.WORDS || {}), ...Object.keys(PD.MORE_WORDS || {})].filter((k) => /^login_/.test(k));
+const DOC_LIVE = ['docs/agent/browser-manual.md', 'docs/kb-api.md', 'docs/kb-features.md'];
+const DOC_HIST = ['docs/changelog-engineering.md', 'docs/kb-bugfix-invariants.md', 'docs/kb-file-structure.md'];
+const DOC_ALL = [...DOC_LIVE, ...DOC_HIST];
+const DOC_FILES = new Map(DOC_ALL.map((rel) => [rel, read(rel)]));
+const HIST_RETIRED = new Set(['login_no_form', 'login_fill_withdrawn']);
+function loginDocCensus(docMap) {
+  const allowedLive = new Set([...BL.REFUSALS, ...PASTE_LOGIN_CODES]);
+  const allowedHist = new Set([...BL.REFUSALS, ...PASTE_LOGIN_CODES, ...HIST_RETIRED]);
+  const red = [];
+  for (const rel of DOC_ALL) {
+    const txt = docMap.get(rel) || '';
+    const isLive = DOC_LIVE.includes(rel);
+    const lines = txt.split('\n');
+    let inCurrent = false;
+    lines.forEach((ln, idx) => {
+      if (/^(?:##\s+.*2\.369\.(?:38[18]|391)\b|\s*THE PIVOT:.*2\.369\.(?:38[18]|391)\b)/.test(ln)) inCurrent = true;
+      else if (/^##\s+/.test(ln)) inCurrent = false;
+      const codes = ln.match(/\blogin_[a-z0-9_]+\b/g) || [];
+      for (const c of codes) {
+        const allow = isLive || inCurrent ? allowedLive : allowedHist;
+        if (!allow.has(c)) red.push(`${rel}:${idx + 1}: unknown refusal code «${c}» (not in BL.REFUSALS or paste login codes)`);
+      }
+    });
+  }
+  const api = docMap.get('docs/kb-api.md') || '';
+  if (/POST \/api\/agent\/browser\/fill-vault[^\n]*\{profile,\s*target,\s*vault\b/.test(api)) {
+    red.push('docs/kb-api.md: /fill-vault body documents `vault` instead of `spec`');
+  }
+  if (/\b403\b[^\n|·→]{0,40}login_in_frame/.test(api) || /\|\s*403\s*\|[^|\n]*`login_in_frame`/.test(api)) {
+    red.push('docs/kb-api.md: `login_in_frame` documented under 403 instead of 409');
+  }
+  if (!/POST \/api\/agent\/browser\/fill-vault[^\n]*\{profile,\s*target,\s*spec\b/.test(api)) {
+    red.push('docs/kb-api.md: /fill-vault body must document `{profile, target, spec, ...}`');
+  }
+  return red;
+}
+const docRed = loginDocCensus(DOC_FILES);
+ok(docRed.length === 0, `6 docs carry 0 invented login_* codes and kb-api matches {profile, target, spec} + 409 login_in_frame`, docRed);
+const docMutMap = new Map(DOC_FILES);
+docMutMap.set('docs/agent/browser-manual.md', DOC_FILES.get('docs/agent/browser-manual.md').replace('login_form_changed', 'login_focus_hijacked'));
+const docMutRed = loginDocCensus(docMutMap);
+ok(docMutRed.some((l) => /browser-manual\.md.*login_focus_hijacked/.test(l)), 'MUTANT «login_focus_hijacked in docs/agent/browser-manual.md»: census goes RED by name', docMutRed);
+const apiMutMap = new Map(DOC_FILES);
+apiMutMap.set('docs/kb-api.md', DOC_FILES.get('docs/kb-api.md').replace('409 `login_in_frame`', '403 `login_in_frame`'));
+const apiMutRed = loginDocCensus(apiMutMap);
+ok(apiMutRed.some((l) => /login_in_frame.*403/.test(l)), 'MUTANT «403 login_in_frame in docs/kb-api.md»: census goes RED by name', apiMutRed);
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);
