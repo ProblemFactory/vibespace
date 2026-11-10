@@ -2206,6 +2206,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-plus-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; margin-bottom: 4px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-dim); cursor: pointer; }
   .chat-plus-btn:active { background: var(--bg-hover); color: var(--text); }
   .chat-plus-btn svg { display: block; }
+  /* lane phone-take-photo: the + sheet's rows wear the glyph of what they open (拍照 · 照片 · 文件 · 文件夹), at the phone
+     sheets' own row size (style.css .mobile-sheet: 44 px, 14 px words, 20 px glyphs — viewers.css's 11 px desk row won here) */
+  .chat-plus-sheet .context-menu-item { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 16px; font-size: 14px; }
+  .chat-plus-sheet .chat-sheet-ico { display: inline-flex; flex-shrink: 0; font-size: 20px; color: var(--text-secondary); }
   .chat-input-field { position: relative; flex: 1; min-width: 0; display: flex; }
   .chat-input-field .chat-input { min-height: 44px; max-height: 164px; padding: 10px 46px 10px 12px; border-radius: 22px; line-height: 24px; }
   html.voice-absent .chat-input-field:not(.chat-input-tall) .chat-input { padding-right: 12px; }

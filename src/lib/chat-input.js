@@ -1,5 +1,5 @@
 import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay, onOutsidePress, isTouchDevice } from './utils.js';
-import { UI_ICONS } from './icons.js';
+import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
@@ -11,6 +11,25 @@ import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits f
 import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box; lane draft-focus-guard: landDraft = THE verdict for every draft another client saved
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+
+/** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
+ *  image-only file input in its system PHOTO PICKER — a gallery with no camera in it — so a phone sheet that offers
+ *  pictures gets its OWN camera input: images, `capture="environment"` (the back camera opens at once), one shot. The
+ *  gallery input keeps its multi-select and never gains `capture`. `row()` = the sheet's 拍照 row, or null where no finger
+ *  device can have a camera — isTouchDevice(), the product's touch test `(hover: none) and (pointer: coarse)`, asked
+ *  each time the sheet opens: no row that cannot work. A cancelled camera changes nothing, so nothing is added and nothing
+ *  is said. THE ONE helper for a phone door that offers a picture (today the composer's + sheet). */
+export function cameraDoor(onShot) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.setAttribute('capture', 'environment');
+  input.style.display = 'none';
+  input.onchange = () => { const shot = input.files && input.files[0]; if (shot) onShot(shot); input.value = ''; };
+  return { input, row: () => (isTouchDevice() ? sheetRow(UI_ICONS.camera, t('Take photo'), () => input.click()) : null) };
+}
+/** a + sheet row: the glyph of what it opens (src/lib/icons.js) + its words */
+export const sheetRow = (icon, label, action) => ({ label, labelHtml: `<span class="chat-sheet-ico">${icon}</span><span>${escHtml(label)}</span>`, action });
 
 // A PRESS IN PROGRESS (lane draft-focus-guard): a draft held while the box was being typed in is judged again at its blur —
 // but a press on Send blurs the box BEFORE its click sends, so the judge waits until no pointer is down, then one task (the
@@ -420,7 +439,7 @@ export class ChatInput {
     inputWrap.append(attachBtn, attachInput, this._voice.btn, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown, this._voice.chip);
 
     // THE PHONE COMPOSER (lane phone-chat-composer, owner 2026-10-13 "输入框非常窄"): on a phone the text box owns its
-    // row — ONE leading "+" door (a sheet: image / file / folder — the three inputs above) instead of three icon
+    // row — ONE leading "+" door (a sheet: 拍照 / 照片 / 文件 / 文件夹 — the camera door + the three inputs above) instead of three icon
     // buttons beside it, and the microphone INSIDE the field's trailing edge (its recording capsule replaces it in
     // place). The desk row above is never touched: the phone face re-parents the same nodes while the viewport is
     // ≤ 768 px and puts the desk order back when it widens.
@@ -430,14 +449,18 @@ export class ChatInput {
     plusBtn.title = t('Add attachment');
     plusBtn.setAttribute('aria-label', t('Add attachment'));
     plusBtn.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>';
+    // lane phone-take-photo: the rows say what they open — 拍照 first (the camera itself, only on a finger device),
+    // then 照片 (the gallery, many at once), 文件, 文件夹; the shot lands on the picked image's road (_addImageAttachment)
+    const camera = cameraDoor((shot) => this._addImageAttachment(shot));
     plusBtn.onclick = (e) => {
       e.preventDefault();
       const r = plusBtn.getBoundingClientRect();
       showContextMenu(r.left, r.top, [
-        { label: t('Image'), action: () => attachInput.click() },
-        { label: t('File'), action: () => fileInput.click() },
-        { label: t('Folder'), action: () => dirInput.click() },
-      ]);
+        camera.row(),
+        sheetRow(UI_ICONS.image, t('Photos'), () => attachInput.click()),
+        sheetRow(FILE_ICONS.unknown, t('File'), () => fileInput.click()),
+        sheetRow(FILE_ICONS.folder, t('Folder'), () => dirInput.click()),
+      ].filter(Boolean), 'context-menu', { extraClass: 'chat-plus-sheet' });
     };
     const field = document.createElement('div');
     field.className = 'chat-input-field';
@@ -451,7 +474,7 @@ export class ChatInput {
     if (typeof ResizeObserver === 'function') new ResizeObserver(tall).observe(this._textarea);
     const phoneFace = (on) => {
       if (on === inputWrap.classList.contains('chat-input-phone')) return;
-      if (on) { field.append(this._textarea, this._voice.btn, expandBtn); inputWrap.replaceChildren(plusBtn, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip); tall(); }
+      if (on) { field.append(this._textarea, this._voice.btn, expandBtn); inputWrap.replaceChildren(plusBtn, camera.input, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip); tall(); }
       else inputWrap.replaceChildren(...deskKids);
       inputWrap.classList.toggle('chat-input-phone', on);
     };

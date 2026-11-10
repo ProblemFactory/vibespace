@@ -8971,6 +8971,9 @@ export default {
   "Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps": "本次：浏览器 ⇄ hub {a} ms · hub ⇄ 机器 {b} ms · 更新往返 {c} ms · {fps} fps · {kbps} kbps",
   "Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)": "记录的参考：同样的各跳上，一次按键在 no-delay 修复前 {before} ms，修复后 {after} ms（中位数）",
   "Add attachment": "添加附件",
+  // lane phone-take-photo: the phone + sheet's camera row and its gallery row
+  "Take photo": "拍照",
+  "Photos": "照片",
   // lane channel-record-revisions: a recalled message folded, an edit's versions
   "{name} recalled a message · {time}": "{name} 撤回了一条消息 · {time}",
   "Recalled {time} — VibeSpace keeps the content": "撤回于 {time} — VibeSpace 保留了内容",

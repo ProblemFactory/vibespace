@@ -5,6 +5,9 @@
 // pinned one. A source census over src/lib/chat-input.js, src/lib/chat-status-bar.js and the public/chat.css block,
 // each judged on the shipped text AND on a planted copy (RED controls): the desk row gaining the door, the phone face
 // keeping a desk button beside the field, the phone CSS un-gated, the ⋯ chip on the desk.
+// lane phone-take-photo (owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): the sheet's rows are 拍照 / 照片 / 文件 /
+// 文件夹 — 拍照 = the camera door's OWN input (images, capture="environment", one shot), shown only on a finger device
+// (isTouchDevice), its shot on the picked image's road; the gallery input keeps `multiple` and never gains capture.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,7 +23,7 @@ const ok = (name, cond, detail) => {
 };
 
 const DESK_ROW = 'attachBtn, attachInput, this._voice.btn, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown, this._voice.chip';
-const PHONE_ROW = 'plusBtn, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip';
+const PHONE_ROW = 'plusBtn, camera.input, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip';
 function judgeInput(src) {
   const appends = [...src.matchAll(/^\s*inputWrap\.append\((.*)\);$/gm)].map((m) => m[1]);
   const phone = [...src.matchAll(/inputWrap\.replaceChildren\(([^)]*)\)/g)].map((m) => m[1]);
@@ -29,7 +32,16 @@ function judgeInput(src) {
     phone: phone.includes(PHONE_ROW) && phone.includes('...deskKids'),
     deskFirst: src.indexOf('const deskKids = [...inputWrap.childNodes];') > src.indexOf(`inputWrap.append(${DESK_ROW});`),
     mic: /field\.append\(this\._textarea, this\._voice\.btn, expandBtn\)/.test(src),
-    sheet: /label: t\('Image'\), action: \(\) => attachInput\.click\(\) \},\s*\{ label: t\('File'\), action: \(\) => fileInput\.click\(\) \},\s*\{ label: t\('Folder'\), action: \(\) => dirInput\.click\(\) \}/.test(src),
+    sheet: /\[\s*camera\.row\(\),\s*sheetRow\(UI_ICONS\.image, t\('Photos'\), \(\) => attachInput\.click\(\)\),\s*sheetRow\(FILE_ICONS\.unknown, t\('File'\), \(\) => fileInput\.click\(\)\),\s*sheetRow\(FILE_ICONS\.folder, t\('Folder'\), \(\) => dirInput\.click\(\)\),\s*\]\.filter\(Boolean\)/.test(src),
+    // lane phone-take-photo: the camera door — its own input, images, the back camera, ONE shot; the row only on a finger device;
+    // the shot on the picked image's road; the gallery input keeps its multi-select and never gains capture
+    camera: (() => {
+      const a = src.indexOf('export function cameraDoor('), b = src.indexOf('\n}\n', a), door = a >= 0 && b > a ? src.slice(a, b) : '';
+      return /input\.accept = 'image\/\*';/.test(door) && /input\.setAttribute\('capture', 'environment'\);/.test(door) && !/multiple/.test(door)
+        && /row: \(\) => \(isTouchDevice\(\) \? sheetRow\(UI_ICONS\.camera, t\('Take photo'\), \(\) => input\.click\(\)\) : null\)/.test(door)
+        && /const camera = cameraDoor\(\(shot\) => this\._addImageAttachment\(shot\)\);/.test(src);
+    })(),
+    gallery: /attachInput\.accept = 'image\/\*';\s*attachInput\.multiple = true;/.test(src) && !/attachInput\.(setAttribute\('capture'|capture\b)/.test(src),
     gated: /window\.matchMedia\(VC_PHONE_MEDIA\)/.test(src) && /phoneFace\(phoneMq\.matches\)/.test(src),
   };
 }
@@ -57,7 +69,9 @@ ok('desk: the composer row is the pinned one (image · mic · upload · field ·
 ok('phone: ONE leading + door, then the field — the desk buttons are not beside it', jI.phone, jI);
 ok('the desk order is captured before the phone face exists', jI.deskFirst, jI);
 ok('phone: the mic (and ⤢) live INSIDE the field box', jI.mic, jI);
-ok('the + sheet reaches the image / file / folder inputs, in that order', jI.sheet, jI);
+ok('the + sheet says what each row opens — 拍照 (the camera door) · 照片 · 文件 · 文件夹, in that order', jI.sheet, jI);
+ok('拍照 = the camera door\'s OWN input (image/*, capture=environment, one shot), its row only on a finger device, the shot on _addImageAttachment', jI.camera, jI);
+ok('照片 = the gallery input: image/*, multiple, no capture', jI.gallery, jI);
 ok('the phone face is gated on the 768 px query (and follows it)', jI.gated, jI);
 ok('the status bar: ⋯ exists only on a phone or a desk window narrower than NARROW_BAR_PX (lane desktop-small P2-4); the fold writes nothing on a wide desk bar', jB.more && jB.foldGate, jB);
 ok('the model chip\'s sheet carries effort + style on a phone', jB.sheetRows, jB);
@@ -65,7 +79,7 @@ ok('chat.css: the phone block is gated — outside the query it only hides the d
 
 console.log('② i18n — the sheet + bar words in zh / ja');
 for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
-  const src = read(f), miss = ['Add attachment', 'Image', 'File', 'Folder', 'More', 'Close', 'Effort', 'Output style'].filter((k) => !src.includes(`"${k}":`));
+  const src = read(f), miss = ['Add attachment', 'Take photo', 'Photos', 'File', 'Folder', 'More', 'Close', 'Effort', 'Output style'].filter((k) => !src.includes(`"${k}":`));
   ok(`${path.basename(f)} has every word`, !miss.length, miss);
 }
 
@@ -74,6 +88,11 @@ const deskLine = `inputWrap.append(${DESK_ROW});`;
 ok('RED: the desk row gaining the + door', !judgeInput(ci.replace(deskLine, `inputWrap.append(plusBtn, ${DESK_ROW});`)).desk);
 ok('RED: the phone face keeping the desk mic beside the field', !judgeInput(ci.replace(PHONE_ROW, 'plusBtn, attachInput, this._voice.btn, fileInput, dirInput, field, this._slashDropdown, this._voice.chip')).phone);
 ok('RED: the phone CSS un-gated', !judgeCss(css.replace(/(THE PHONE COMPOSER[\s\S]*?)@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{/, '$1@media all {')).gated);
+ok('RED: the camera row on every device (no touch test)', !judgeInput(ci.replace('row: () => (isTouchDevice() ? sheetRow(', 'row: () => (true ? sheetRow(')).camera);
+ok('RED: the camera door taking many shots', !judgeInput(ci.replace("input.setAttribute('capture', 'environment');", "input.setAttribute('capture', 'environment'); input.multiple = true;")).camera);
+ok('RED: the shot on another road (the upload)', !judgeInput(ci.replace('cameraDoor((shot) => this._addImageAttachment(shot))', 'cameraDoor((shot) => this.uploadFiles([shot]))')).camera);
+ok('RED: the gallery input gaining capture', !judgeInput(ci.replace('attachInput.multiple = true;', "attachInput.multiple = true; attachInput.setAttribute('capture', 'environment');")).gallery);
+ok('RED: 拍照 opening the gallery input', !judgeInput(ci.replace('        camera.row(),', "        sheetRow(UI_ICONS.camera, t('Take photo'), () => attachInput.click()),")).sheet);
 ok('RED: ⋯ on every desk bar', !judgeBar(sb.replace("if (this._oneRow()) chip('more', ", "chip('more', ")).more);
 
 console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');

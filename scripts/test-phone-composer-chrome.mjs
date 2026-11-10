@@ -9,8 +9,13 @@
 //     rest behind ⋯ (a tap opens the bar in place), effort + style reachable from the model chip's sheet
 //   desk 1100: the composer + bar DOM signature is the pinned desk one; its PNG equals the one rendered with the lane's
 //     phone CSS block stripped (RED control: the same block un-gated ⇒ a different PNG)
+//   ③ lane phone-take-photo (owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): the sheet reads 拍照 / 照片 / 文件 / 文件夹,
+//     each with its glyph; 拍照's input = image/*, capture="environment", one shot; the gallery's = image/*, multiple, NO
+//     capture; a photo set on the camera input (DOM.setFileInputFiles — headless Chrome has no camera) = ONE chip, sent with
+//     the message as an image block; a cancelled camera adds nothing and says nothing; a phone-wide window on a FINE pointer
+//     (no finger device) has no 拍照 row; the desk has no camera input at all
 // PNGs: PHONE_COMPOSER_PNG_DIR (default: the scratch dir), named <PHONE_COMPOSER_TAG|after>-390.png, -412.png,
-//   -412-light.png, -390-rec.png, -390-more.png, desk-1100.png
+//   -412-light.png, -390-rec.png, -390-more.png, -390-sheet.png, -390-shot.png, desk-1100.png
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -80,10 +85,10 @@ app.use(require(path.join(REPO, 'src/routes/voice.js')).create({ client, prefs: 
 const chatCss = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8');
 const BLOCK = /\/\* ── THE PHONE COMPOSER[\s\S]*?\/\* ── end THE PHONE COMPOSER ── \*\//;
 const cssVariant = { real: chatCss, stripped: chatCss.replace(BLOCK, ''), leak: chatCss.replace(BLOCK, (b) => b.replace(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)/g, '@media all')) };
-for (const n of ['style', 'fonts']) if (fs.existsSync(path.join(REPO, `public/${n}.css`))) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
+for (const n of ['style', 'viewers', 'fonts']) if (fs.existsSync(path.join(REPO, `public/${n}.css`))) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 app.get('/chat.css', (q, s) => s.type('text/css').send(cssVariant[q.query.v] || chatCss));
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
-app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="${q.query.theme === 'light' ? 'light' : 'dark'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/chat.css?v=${q.query.css || 'real'}"><link rel="stylesheet" href="/fonts.css"><style>body{margin:0;background:var(--bg-window)} #frame{position:fixed;inset:0;display:flex;flex-direction:column}</style></head><body><div id="frame" class="chat-view"></div><script src="/page.js"></script></body></html>`));
+app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="${q.query.theme === 'light' ? 'light' : 'dark'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/viewers.css"><link rel="stylesheet" href="/chat.css?v=${q.query.css || 'real'}"><link rel="stylesheet" href="/fonts.css"><style>body{margin:0;background:var(--bg-window)} #frame{position:fixed;inset:0;display:flex;flex-direction:column}</style></head><body><div id="frame" class="chat-view"></div><script src="/page.js"></script></body></html>`));
 const PORT = await freePort();
 srv = http.createServer(app);
 await new Promise((r) => srv.listen(PORT, '127.0.0.1', r));
@@ -111,7 +116,7 @@ const FAKE_MIC = `(() => {
   // which hidden input a sheet row reached (the file chooser itself never opens headless)
   window.__picked = [];
   const click = HTMLInputElement.prototype.click;
-  HTMLInputElement.prototype.click = function () { if (this.type === 'file') { window.__picked.push(this.hasAttribute('webkitdirectory') ? 'folder' : (this.accept === 'image/*' ? 'image' : 'file')); return; } return click.call(this); };
+  HTMLInputElement.prototype.click = function () { if (this.type === 'file') { window.__picked.push(this.hasAttribute('webkitdirectory') ? 'folder' : this.hasAttribute('capture') ? 'camera' : (this.accept === 'image/*' ? 'image' : 'file')); return; } return click.call(this); };
 })();`;
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 15; SM-S938B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
 async function page(w, h, { phone, theme = 'dark', css = 'real' }) {
@@ -153,6 +158,44 @@ async function page(w, h, { phone, theme = 'dark', css = 'real' }) {
 const rect = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; })()`;
 const inside = (a, b) => a && b && a.l >= b.l - 0.5 && a.r <= b.r + 0.5 && a.t >= b.t - 0.5 && a.b <= b.b + 0.5;
 
+// ③ lane phone-take-photo: the camera door's input, a shot through it, a cancel; a headless Chrome has no camera, so the shot
+// is a real JPEG file set on the input by CDP (DOM.setFileInputFiles) — what the camera hands the page after a shot
+const SHOT_JPG = path.join(root, 'shot.jpg');
+async function cameraLeg(p) {
+  console.log('③ 390 — the camera door (lane phone-take-photo)');
+  // the «photo»: a real JPEG drawn by the page itself (a device label), written where CDP can hand it to the input
+  const jpg = await p.ev(`(() => { const c = document.createElement('canvas'); c.width = 640; c.height = 480; const g = c.getContext('2d'); g.fillStyle = '#5b6470'; g.fillRect(0, 0, 640, 480); g.fillStyle = '#f4f1e8'; g.fillRect(120, 150, 400, 180); g.fillStyle = '#222'; g.font = 'bold 40px sans-serif'; g.fillText('SW-3F-07', 170, 230); g.font = '26px sans-serif'; g.fillText('10.0.3.7 · port 24', 170, 290); return c.toDataURL('image/jpeg', 0.85).split(',')[1]; })()`);
+  fs.writeFileSync(SHOT_JPG, Buffer.from(jpg, 'base64'));
+  const attrs = await p.ev(`(() => { const ins = [...document.querySelectorAll('#frame .chat-input-wrap > input[type=file]')]; return ins.map((e) => ({ accept: e.accept, capture: e.getAttribute('capture'), multiple: e.multiple, dir: e.hasAttribute('webkitdirectory') })); })()`);
+  const cam = attrs.filter((a) => a.capture !== null), gal = attrs.filter((a) => a.capture === null && a.accept === 'image/*');
+  ok('390: ONE camera input — image/*, capture="environment", one shot', cam.length === 1 && cam[0].accept === 'image/*' && cam[0].capture === 'environment' && !cam[0].multiple, attrs);
+  ok('390: the gallery input has NO capture and keeps multiple', gal.length === 1 && gal[0].multiple, attrs);
+  if (cam.length !== 1) { // no camera door to drive: the rest of the leg fails BY NAME (the base's RED), never a page throw
+    for (const n of ['390: a cancelled camera adds nothing and says nothing', '390: CDP set the shot on the camera input', '390: the shot becomes ONE attachment chip (the picked image\'s chip, its name) and nothing is said', '390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears']) ok(n, false, 'no camera input');
+    return;
+  }
+  await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); window.__toasts = 0; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && /toast/.test(n.className || '')) window.__toasts++; }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
+  // a cancelled camera: the input fires `cancel` (no file) — and a change with no file: nothing is added, nothing said
+  await p.ev(`(() => { const c = document.querySelector('#frame .chat-input-wrap > input[capture]'); c.dispatchEvent(new Event('cancel', { bubbles: true })); c.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await sleep(300);
+  const after0 = await p.ev(`({ chips: document.querySelectorAll('#frame .chat-attach-item').length, toasts: window.__toasts })`);
+  ok('390: a cancelled camera adds nothing and says nothing', after0.chips === 0 && after0.toasts === 0, after0);
+  const doc = await p.cdp('DOM.getDocument', { depth: 0 });
+  const q = await p.cdp('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#frame .chat-input-wrap > input[capture]' });
+  const set = await p.cdp('DOM.setFileInputFiles', { nodeId: q.result.nodeId, files: [SHOT_JPG] });
+  ok('390: CDP set the shot on the camera input', !set.error && !!q.result.nodeId, set.error || q);
+  const chip = await p.until(`document.querySelectorAll('#frame .chat-attach-item').length === 1 && !!document.querySelector('#frame .chat-attach-item img')`, 5000);
+  const one = await p.ev(`({ chips: document.querySelectorAll('#frame .chat-attach-item').length, name: (document.querySelector('#frame .chat-attach-name') || {}).textContent, toasts: window.__toasts })`);
+  ok('390: the shot becomes ONE attachment chip (the picked image\'s chip, its name) and nothing is said', chip && one.chips === 1 && one.name === 'shot.jpg' && one.toasts === 0, one);
+  await p.shot(`${TAG}-390-shot.png`);
+  await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.value = 'the label on the switch'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const n0 = await p.ev('window.__sent.length');
+  await p.tap('#frame .chat-send-btn');
+  await p.until(`window.__sent.length > ${n0}`, 3000);
+  const sent = await p.ev(`(() => { try { const m = JSON.parse(window.__sent[window.__sent.length - 1]); const c = m.message.content; return { images: c.filter((b) => b.type === 'image').map((b) => b.source.media_type + ':' + b.source.data.length), text: (c.find((b) => b.type === 'text') || {}).text, chips: document.querySelectorAll('#frame .chat-attach-item').length }; } catch (e) { return { raw: window.__sent.slice(-1), err: String(e) }; } })()`);
+  ok('390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears', sent.images && sent.images.length === 1 && /^image\/jpeg:\d+$/.test(sent.images[0]) && sent.text === 'the label on the switch' && sent.chips === 0, sent);
+}
+
 async function phoneLeg(w, minRatio) {
   console.log(`① phone ${w} (DPR 3, Android UA, touch, dark) — the field owns the row, one + door, the mic in the field, one 40-px bar`);
   const p = await page(w, 860, { phone: true });
@@ -177,16 +220,21 @@ async function phoneLeg(w, minRatio) {
   ok(`${w}: the status bar is ONE row ≤ 40 px`, m.barH <= 40, m.barH);
   ok(`${w}: no horizontal overflow with the agent-browser chip present`, m.browser && m.sw <= m.cw, m);
   ok(`${w}: no gap between bar chips > 8 px, ⋯ present`, m.gap <= 8 && m.more, m);
-  // the + sheet: three rows, each reaching its own hidden input
+  // the + sheet: four rows (lane phone-take-photo: 拍照 first, on a finger device), each reaching its own hidden input
   const picked = [];
-  for (const i of [0, 1, 2]) {
+  for (const i of [0, 1, 2, 3]) {
     await p.tap('#frame .chat-plus-btn');
-    const rows = await p.ev(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent.trim())`).catch(() => []);
-    if (i === 0) ok(`${w}: the + sheet offers 图片 / 文件 / 文件夹`, JSON.stringify(rows) === JSON.stringify(['图片', '文件', '文件夹']), rows);
+    const rows = await p.ev(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => ({ text: e.textContent.trim(), svg: !!e.querySelector('.chat-sheet-ico svg'), h: Math.round(e.getBoundingClientRect().height) }))`).catch(() => []);
+    if (i === 0) {
+      if (w === 390) await p.shot(`${TAG}-390-sheet.png`, 420);
+      ok(`${w}: the + sheet says what each row opens — 拍照 / 照片 / 文件 / 文件夹`, JSON.stringify(rows.map((r) => r.text)) === JSON.stringify(['拍照', '照片', '文件', '文件夹']), rows);
+      ok(`${w}: every sheet row wears its glyph and is ≥ 44 px tall (the phone sheets' row)`, rows.length === 4 && rows.every((r) => r.svg && r.h >= 44), rows);
+    }
     await p.tap(`.context-menu .context-menu-item:nth-child(${i + 1})`);
     picked.push(...(await p.ev('window.__picked.splice(0)')));
   }
-  ok(`${w}: each sheet row reaches its input (image · file · folder)`, JSON.stringify(picked) === JSON.stringify(['image', 'file', 'folder']), picked);
+  ok(`${w}: each sheet row reaches its input (camera · image · file · folder)`, JSON.stringify(picked) === JSON.stringify(['camera', 'image', 'file', 'folder']), picked);
+  if (w === 390) await cameraLeg(p);
   // the ⤢ glyph: hidden at one line, shown past two
   const exp1 = await p.ev(`document.querySelector('#frame .chat-expand-btn').offsetWidth`);
   await p.ev(`(() => { const t = document.querySelector('#frame textarea'); t.focus(); t.value = 'one\\ntwo\\nthree\\nfour'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -229,11 +277,22 @@ async function phoneLeg(w, minRatio) {
 await phoneLeg(390, 0.72);
 await phoneLeg(412, 0.75);
 
+console.log('④ 390 on a FINE pointer (a narrow desk window, no finger device) — the sheet has no 拍照 row');
+{
+  const f = await page(390, 860, { phone: false });
+  await f.tap('#frame .chat-plus-btn');
+  const rows = await f.ev(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent.trim())`).catch(() => []);
+  const touch = await f.ev(`matchMedia('(hover: none) and (pointer: coarse)').matches`);
+  ok('fine pointer: the + sheet reads 照片 / 文件 / 文件夹 — no row that cannot work', !touch && JSON.stringify(rows) === JSON.stringify(['照片', '文件', '文件夹']), { touch, rows });
+  f.close();
+}
+
 console.log('② desk 1100 — the composer + bar untouched (DOM signature pinned; PNG = the phone block stripped; RED control = un-gated)');
 {
   const SIG_JS = `(() => { const sig = (e) => e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\\s+/).join('.') : '') + (e.children.length ? '(' + [...e.children].map(sig).join(',') + ')' : ''); return sig(document.querySelector('#frame .chat-input-area')) + '|' + sig(document.querySelector('#frame .chat-status-bar')); })()`;
   const d = await page(1100, 760, { phone: false });
   const sig = await d.ev(SIG_JS);
+  const deskCam = await d.ev(`document.querySelectorAll('#frame input[capture]').length`); // lane phone-take-photo
   const real = await d.shot('desk-1100.png', 260);
   d.close();
   const s = await page(1100, 760, { phone: false, css: 'stripped' }); const stripped = await s.shot(null, 260); s.close();
@@ -247,6 +306,7 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '43b4907f5e0b';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
+  ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });
 }
 

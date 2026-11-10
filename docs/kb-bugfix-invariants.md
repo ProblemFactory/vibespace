@@ -907,6 +907,7 @@
 - (2026-11-10) A STALE RED HEAVY MARKER BLOCKED EVERY PRODUCTION PUSH, AND FOUR RELEASES WENT AROUND THE GATE (B-e381; lane ci-heavy-verdict) — 不变量 = a marker vouches for exactly the suites that ran; a red clears only when every failed suite has run green on a descendant
 - (2026-11-10) THE HEAVY LOCK HAD NO QUEUE: A 50-MS PRIVATE CLAIMER HELD THE BOX WHILE THE TRAIN'S 53 SUITES WAITED (lane ci-heavy-queue) — 不变量 = heavy waiters are served oldest first, and the machine lock is taken only by ci.mjs
 - (2026-11-09) A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (jobs-addressed-push) — 不变量 = push is addressed: a job's line or row reaches only its owner lineage and subscribers, inside view; others get an id-less «not yours» count ⇒ kb-bugfix-invariants
+- (2026-11-09) A PHONE COULD NOT TAKE A PHOTO FROM THE CHAT (owner, Android Chrome) — 不变量 = a sheet that offers pictures on a finger device offers the camera through its OWN capture input, never the gallery's; the shot rides the picked image's road ⇒ kb-bugfix-invariants
 
 ## A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (2026-11-09; the owner said yes to the fix 2026-11-10; lane jobs-addressed-push, .389)
 
@@ -9233,3 +9234,15 @@ Gates:
 **The tests.** test-pricing-tiers §2d (the rows, a control on the table without them), §4 (the census + four controls), §5 (the unknown-id road); test-record-shape's 2.1.321 pin; test-cli-caps ⑥, test-account-pool, test-oat-materialize (the 2.1.321 record); test-cli-registration ②c.
 
 **Not closed.** Fast mode is unpriced: the ledger keeps no `usage.speed`, so a fast turn would show at half its list cost (none on this box yet). The census covers the Fable family only: today Opus, Sonnet and Haiku disagree across tables (no `claude-opus-5-5` picker row; Haiku 5.5 priced as Haiku 4.5; Sonnet 5.5's cache hit at $0.20 against $0.10), and making them agree is its own lane.
+
+## A PHONE COULD NOT TAKE A PHOTO FROM THE CHAT (the owner, 2026-11-09 14:14 PT, Android Chrome; lane phone-take-photo, 2.369.390)
+
+**Symptom.** «为啥我在手机上添加图片的时候不能拍照» — photographing device labels in the office, the chat's + sheet → 图片 opened the system photo picker, a gallery with no camera in it. The only road: leave for the camera app, shoot, come back, pick.
+
+**Cause.** The image door was ONE hidden `<input type=file accept="image/*" multiple>`, no `capture`. Android Chrome hands an image-only input to the system photo picker, which has no camera entry (iOS Safari's sheet for the same input offers Take Photo). No `capture` existed anywhere in the client.
+
+**Fix.** `cameraDoor(onShot)` (chat-input.js, exported — the ONE helper for a phone door that offers a picture): its OWN input — image/*, `capture="environment"`, one shot — and `row()` = the 拍照 row, or null where `isTouchDevice()` says no finger device. The + sheet reads 拍照 · 照片 · 文件 · 文件夹 with glyphs; the shot goes to `_addImageAttachment` (the picked image's chip and send). The gallery input is unchanged; the desk row has no camera input.
+
+**不变量.** A sheet that offers pictures on a finger device offers the camera too, through its own capture input — never by putting `capture` on the gallery input (Android would lose the gallery and the many-at-once pick); no row shows where it cannot work; a cancelled camera changes nothing.
+
+**Pins.** test-phone-composer (the rows, the door's attributes, the touch gate, the road; five RED controls) · test-phone-composer-chrome ③ ④ (a JPEG set by CDP `DOM.setFileInputFiles` = one chip sent as an image block; a cancel; no 拍照 on a fine pointer) — RED by name on f5e087bb5. A headless Chrome has no camera: the owner accepts on the phone.

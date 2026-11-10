@@ -8970,6 +8970,9 @@ export default {
   "Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps": "現在：ブラウザー ⇄ hub {a} ms · hub ⇄ マシン {b} ms · 更新の往復 {c} ms · {fps} fps · {kbps} kbps",
   "Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)": "記録済みの参考値：同じ経路でのキー入力 1 回は no-delay 修正前 {before} ms、修正後 {after} ms（中央値）",
   "Add attachment": "添付を追加",
+  // lane phone-take-photo: the phone + sheet's camera row and its gallery row
+  "Take photo": "写真を撮る",
+  "Photos": "写真",
   // lane channel-record-revisions: a recalled message folded, an edit's versions
   "{name} recalled a message · {time}": "{name} がメッセージの送信を取り消しました · {time}",
   "Recalled {time} — VibeSpace keeps the content": "{time} に取り消し — 内容は VibeSpace が保持しています",
