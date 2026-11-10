@@ -1592,5 +1592,87 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
   } finally { fakeSrv.close(); fs.rmSync(scratch15, { recursive: true, force: true }); }
 }
 
+// ── 13: THE MODULE THAT RUNS THE VENDOR'S BINARY (lane cli-self-measure, acceptance r1 law H2) ──
+// src/claude-oat-probe.js constructs no vendor request — it RUNS the vendor's own binary (the hub's check of a new Claude Code)
+// against a loopback mock with fake tokens. Its safety is the env every run carries: every API / OAuth / OTel base is the mock's
+// origin, every proxy the mock, and THE ONE LAUNCHER checks it (assertEnv) before the binary starts. Both RED controls below are
+// the mutants acceptance r1 built (a real API host as a base; assertEnv deleted) — each turned every fast suite green before this row.
+{
+  console.log('\n13: the module that runs the vendor\'s binary (src/claude-oat-probe.js)');
+  const PROBE_SRC = fs.readFileSync(path.join(REPO, 'src/claude-oat-probe.js'), 'utf-8');
+  // THE ONE LAUNCHER, DERIVED (acceptance r2 (a)): EVERY child-process call in the module — spawn / spawnSync / exec / execSync /
+  // execFile / execFileSync / fork, a destructured or assigned alias included — is found with its argument text. Exactly ONE may run
+  // the binary (it names CLAUDE or any identifier bound from an expression naming it): the launcher's
+  // spawn('setpriv', ['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', …, CLAUDE, …]). No call runs a shell.
+  const launchRuns = (src) => {
+    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+    const s0 = strip(src).replace(/require\((['"])(?:node:)?child_process\1\)\s*\./g, 'child_process.'); // require('child_process').spawnSync( is a call too
+    const CP = ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'];
+    const fns = new Set(CP);
+    // every alias: a destructured name, a name assigned a function, and every name bound to the MODULE (cp2 = require(…)) — r3 (8)
+    for (const m of s0.matchAll(/\{([^}]*)\}\s*=\s*require\(['"](?:node:)?child_process['"]\)/g)) for (const part of m[1].split(',')) { const mm = /(\w+)\s*:\s*(\w+)/.exec(part); if (mm && CP.includes(mm[1])) fns.add(mm[2]); }
+    for (const m of s0.matchAll(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*(?:\\w+\\.)?(?:${CP.join('|')})\\b(?!\\s*\\()`, 'g'))) fns.add(m[1]);
+    const mods = new Set(['child_process', 'childProcess', 'cp']);
+    for (const m of s0.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*require\(['"](?:node:)?child_process['"]\)\s*[;\n]/g)) mods.add(m[1]);
+    // the binary's names: CLAUDE, the member it came from (o.claude), and every name an expression naming one is ever ASSIGNED to
+    // (a declaration or a later `other = CLAUDE`)
+    const bins = new Set(['CLAUDE']);
+    // a name is the binary when what it is bound to IS the binary: the bare name, one call wrapping it (realOr(CLAUDE)), a template of
+    // it, or the member it came from (o.claude) — never any expression that merely mentions it (a spawn's handle is no binary)
+    const isBin = (rhs) => { const e = rhs.trim().replace(/;$/, '').trim(); return /^\w+\.claude$/.test(e) || [...bins].some((b) => new RegExp(`^(?:[\\w.]+\\(\\s*)?${b}(?:\\s*\\))?$`).test(e) || e === '`${' + b + '}`'); };
+    for (let grew = true; grew;) { grew = false; for (const m of s0.matchAll(/(?:^|[^\w.=!<>])(\w+)\s*=(?![=>])\s*([^;\n]+)/g)) if (!bins.has(m[1]) && isBin(m[2])) { bins.add(m[1]); grew = true; } }
+    const callRe = new RegExp(`(?:(?<![\\w.])(?:${[...fns].join('|')})|\\b(?:${[...mods].join('|')})\\.(?:${CP.join('|')}))\\s*\\(`, 'g');
+    const argsAt = (i) => { let d = 0, q = null; for (let k = i; k < s0.length; k++) { const c = s0[k]; if (q) { if (c === '\\') { k++; continue; } if (c === q) q = null; continue; } if (c === '"' || c === "'" || c === '`') { q = c; continue; } if (c === '(') d++; else if (c === ')') { d--; if (d === 0) return s0.slice(i + 1, k); } } return s0.slice(i + 1); };
+    const calls = [...s0.matchAll(callRe)].map((m) => ({ fn: m[0].replace(/\s*\($/, ''), args: argsAt(m.index + m[0].length - 1) }));
+    // …or a TEMPLATE-LITERAL path to it (acceptance r4 tidy 8: `${home}/.local/bin/claude`, …/claude/versions/<v>) — a realistic road
+    const namesBin = (a) => [...bins].some((b) => new RegExp(`(?<![\\w.'"])${b}\\b`).test(a)) || /\b\w+\.claude\b/.test(a) || /`[^`]*\bclaude(?:\/versions\/[^`]*)?`/i.test(a);
+    const SHELL = /(?:^|[\s,[(])['"`](?:\/(?:usr\/)?bin\/)?(?:sh|bash|zsh|dash|ash|ksh|busybox)['"`]/; // a shell named anywhere in the call (after /usr/bin/env too)
+    const isLauncher = (c) => c.fn === 'spawn' && /^'setpriv', \['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', /.test(c.args) && namesBin(c.args);
+    const bad = calls.filter((c) => !isLauncher(c) && (namesBin(c.args) || /\bshell\s*:\s*true\b/.test(c.args) || /(?:^|\.)(?:exec|execSync)$/.test(c.fn) || SHELL.test(c.args))).map((c) => `${c.fn}(${c.args.slice(0, 80)})`);
+    // a DYNAMIC import of child_process (r4 tidy 8) binds the module where no census here follows it — refused outright
+    for (const m of s0.matchAll(/\bimport\(\s*(['"`])(?:node:)?child_process\1\s*\)/g)) bad.push(`a dynamic ${m[0]}`);
+    return { calls: calls.length, launchers: calls.filter(isLauncher).length, bad };
+  };
+  const judge13 = (src) => {
+    const env = (/const cliEnv = \(home\) => \(\{([\s\S]*?)\n  \}\);/.exec(src) || [])[1] || '';
+    const bases = ['ANTHROPIC_BASE_URL: BASE', 'CLAUDE_LOCAL_OAUTH_API_BASE: BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE: BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE: BASE', "OTEL_EXPORTER_OTLP_ENDPOINT: BASE + '/otel'"].every((b) => env.includes(b));
+    const li = src.indexOf('  function launch('), le = src.indexOf('\n  function startCli(', li);
+    const launcher = li >= 0 && le > li ? src.slice(src.indexOf('\n', li) + 1, le) : '';
+    const checked = /^\s*assertEnv\(env, \{/.test(launcher) && launcher.indexOf('assertEnv(env') < launcher.indexOf("spawn('setpriv'");
+    const noVendor = !/api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.com|claude\.ai\//.test(src); // a vendor HOST (the header name the diff reads, anthropic-beta, is no call)
+    const lr = launchRuns(src);
+    const oneRun = lr.launchers === 1 && lr.bad.length === 0;
+    return { bases, checked, noVendor, oneRun, launchRuns: lr };
+  };
+  const j = judge13(PROBE_SRC);
+  ok(j.bases && j.checked && j.noVendor && j.oneRun, `every base of every run is the loopback mock, the ONE launcher checks the env (assertEnv) before the binary starts, the module names no vendor host, and of its ${j.launchRuns.calls} child-process calls exactly ONE runs the binary (the launcher) and none runs a shell`, JSON.stringify(j));
+  const m1 = judge13(PROBE_SRC.replace('ANTHROPIC_BASE_URL: BASE', "ANTHROPIC_BASE_URL: 'https://api.anthropic.com'"));
+  ok(!m1.bases && !m1.noVendor, 'RED CONTROL: the real API host as a base is caught', JSON.stringify(m1));
+  const m2 = judge13(PROBE_SRC.replace(/\n    assertEnv\(env, \{ base: BASE[^\n]*\n/, '\n'));
+  ok(!m2.checked, 'RED CONTROL: the launcher without its assertEnv is caught', JSON.stringify(m2));
+  // r3 item 1: THE TRAMPOLINE is where the binary really starts — exactly one child-process call, handing it the tracer's stdin /
+  // stdout (0, 1) and its OWN stderr file, never the tracer's stderr (the record); and only the launcher names the trampoline
+  const TRAMP_SRC = fs.readFileSync(path.join(REPO, 'src/claude-oat-trampoline.js'), 'utf-8');
+  const trampOk = (t) => { const lr = launchRuns(t.replace(/\bbin\b/g, 'CLAUDE')); return lr.calls === 1 && /spawn\(bin, args, \{ stdio: \[0, 1, err\] \}\)/.test(t) && !/stdio:\s*\[[^\]]*\b2\b|'inherit'/.test(t); };
+  ok(trampOk(TRAMP_SRC) && (PROBE_SRC.match(/\bTRAMP\b/g) || []).length === 4 && /process\.execPath, '--no-warnings', TRAMP, errFile, CLAUDE, \.\.\.args\]/.test(PROBE_SRC), 'the trampoline (src/claude-oat-trampoline.js) starts the binary ONCE with the tracer\'s stdin / stdout and its own stderr file — never the record — and only the launcher runs it (TRAMP named 4×: made, written, compared with the shipped bytes before every launch, run)');
+  ok(!trampOk(TRAMP_SRC.replace('stdio: [0, 1, err]', "stdio: 'inherit'")) && !trampOk(TRAMP_SRC.replace('stdio: [0, 1, err]', 'stdio: [0, 1, 2]')), 'RED CONTROL: a trampoline that hands the binary the tracer\'s stderr (inherit, or fd 2) is caught');
+  // acceptance r2 (a): the three spellings r1's census missed, each planted in the module — RED
+  for (const [what, plant] of [
+    ['a spawnSync of the binary', "\nfunction peek() { return require('child_process').spawnSync(CLAUDE, ['--version']); }\n"],
+    ['the binary by ANOTHER name', "\nfunction peek2() { const bin = CLAUDE; return execFileSync(bin, ['--version']); }\n"],
+    ['a shell string', "\nfunction peek3() { return require('child_process').execSync(`${CLAUDE} --version`); }\n"],
+    ['a destructured alias', "\nconst { execFileSync: ef } = require('child_process');\nfunction peek4() { return ef(CLAUDE, ['-v']); }\n"],
+    // acceptance r3 (8): the five the r3 census missed
+    ['a LATER assignment of the binary', "\nfunction peek5() { let other; other = CLAUDE; return execFileSync(other, ['--version']); }\n"],
+    ['the member path it came from (o.claude)', "\nfunction peek6(o) { return execFileSync(o.claude, ['--version']); }\n"],
+    ['/usr/bin/env + a shell', "\nfunction peek7() { return execFileSync('/usr/bin/env', ['sh', '-c', 'true']); }\n"],
+    ['dash / busybox sh', "\nfunction peek8() { execFileSync('dash', ['-c', 'true']); return execFileSync('busybox', ['sh', '-c', 'true']); }\n"],
+    ['a second module alias (cp2)', "\nconst cp2 = require('child_process');\nfunction peek9() { return cp2.execFileSync(CLAUDE, ['-v']); }\n"],
+    // acceptance r4 tidy 8: the two REALISTIC misses (the reflective ones — Reflect.apply, .call, a runners object — are not worth a line)
+    ['a template-literal path to the binary', "\nfunction peek10() { return execFileSync(`${os.homedir()}/.local/bin/claude`, ['--version']); }\n"],
+    ['a dynamic import of child_process', "\nasync function peek11() { const m = await import('node:child_process'); return m.execFileSync('true'); }\n"],
+  ]) { const mj = judge13(PROBE_SRC + plant); ok(!mj.oneRun && mj.launchRuns.bad.length >= 1, `RED CONTROL: ${what} is a second way to run the binary — caught`, JSON.stringify(mj.launchRuns)); }
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

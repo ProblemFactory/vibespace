@@ -426,7 +426,9 @@ try {
 
   console.log('§M the census — every model-keyed site has a row; every row: no release on an ordinary update, and by which road');
   {
-    const C = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/cli-update-census.json'), 'utf8'));
+    const C0 = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/fixtures/cli-update-census.json'), 'utf8'));
+    // the file is shared (an append union with lane cli-self-measure's keyedOn 'version' rows, read by test-cli-self-measure §8): this leg reads the MODEL rows
+    const C = { ...C0, rows: C0.rows.filter((r) => r.keyedOn === 'model') };
     const GREP_CANDIDATES = 'fable|opus|sonnet|haiku|mythos|claude-|\\[1m|familyOf|1000000|200000|1e6|2e5'; // one prefilter for git grep (ERE) and the scan
     const KINDS = {
       'family-word': /(?:includes|startsWith|test|match|===|==)\s*\(?\s*['"/`](?:\\b)?(?:fable|opus|sonnet|haiku|mythos)\b/,

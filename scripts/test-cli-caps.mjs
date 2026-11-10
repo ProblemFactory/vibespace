@@ -169,12 +169,16 @@ ok('a reader that counts an inherited map entry ⇒ its leg goes RED', flips(m7,
 // ── ④ census ──
 console.log('④ census');
 const S = fs.readFileSync(SCRIPT, 'utf8');
+// lane cli-self-measure: the measurement's core moved into src/claude-oat-probe.js (the script and the hub both call it) — the
+// census reads the module for what measures and the script for what writes the fixture
+const PS = fs.readFileSync(path.join(REPO, 'src/claude-oat-probe.js'), 'utf8');
 ok('the measurement takes OAT_VARIANTS from src/cli-caps.js (one spelling of the six)', /\bOAT_VARIANTS\b[^\n]*=\s*createRequire\([^\n]*'src', 'cli-caps\.js'/.test(S));
 ok('…and never spells the list itself', !/\[\s*'oat-file',\s*'oat-env'/.test(S));
-ok('every variant name has its branch in the measurement', SIX.filter((v) => v !== 'oat-file').every((v) => S.includes(`'${v}'`)), SIX.filter((v) => !S.includes(`'${v}'`)).join(', '));
+ok('every variant name has its branch in the measurement (the module)', SIX.filter((v) => v !== 'oat-file').every((v) => PS.includes(`'${v}'`)), SIX.filter((v) => !PS.includes(`'${v}'`)).join(', '));
 ok('--write-fixture writes scripts/fixtures/oat-in-file.json by default', /'fixtures', 'oat-in-file\.json'/.test(S) && S.includes("flag('write-fixture')"));
 ok('…ADDING its record through cli-caps withMeasured over the file as it is when written (never this run\'s record alone)', S.includes('const next = withMeasured(fixtureNow(), fx);') && S.includes('fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1)') && !/JSON\.stringify\(fx,/.test(S));
-ok('…and refusing BEFORE the run a version it could not add (the same rule over the file as it is then)', S.includes("if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: cliVersionOf(version), variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture") && S.indexOf('withMeasured(fixtureNow(), { cliVersion') < S.indexOf('for (const name of want)'));
+ok('…and refusing BEFORE the run a file it could not add to, and AGAIN at write time over the file as it is then (the version is the run\'s own answer)', S.includes("if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: '0.0.0', variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture") && S.indexOf("withMeasured(fixtureNow(), { cliVersion: '0.0.0'") < S.indexOf('PROBE.measure(') && S.includes("try { withMeasured(fixtureNow(), fx); } catch (e) { console.error(`REFUSED: --write-fixture") && S.indexOf('try { withMeasured(fixtureNow(), fx); }') < S.indexOf('const next = withMeasured(fixtureNow(), fx);'));
+ok('no token-shaped literal in the module either (built at runtime)', !/sk-ant-(oat|ort|api)\d/.test(PS));
 ok('no token-shaped literal in the measurement (built at runtime)', !/sk-ant-(oat|ort|api)\d/.test(S));
 ok('src/cli-caps.js imports nothing (PURE)', !/\brequire\s*\(|^\s*import\s/m.test(SRC));
 
@@ -199,13 +203,13 @@ const measure = (args) => spawnSync(process.execPath, [SCRIPT, '--no-netns', '--
   const r3 = measure(['--loopback-real', '--variant', 'oat-file']);
   ok('--no-netns --loopback-real without --claude refuses before anything runs (never the one on PATH)', r3.status === 2 && /REFUSED: --loopback-real needs --claude <the real claude>/.test(r3.stderr), `exit ${r3.status}: ${String(r3.stderr).slice(-300)}`);
   const MS = fs.readFileSync(SCRIPT, 'utf8');
-  ok('…the rung lives in the TRACKED script: the real binary only with --no-netns --loopback-real, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, HTTPS_PROXY = the mock, the record\'s rung + proxy (the belt on both rungs is test-oat-measure-fake\'s, a heavy)',
-    /const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS) && /const CLAUDE = NETNS \? opt\('claude'\) : LOOPBACK_REAL \? realClaude\(\) : fakeClaude\(\);/.test(MS)
-    && /\.\.\.\(LOOPBACK_REAL \? \{ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' \} : \{\}\)/.test(MS) && /const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(MS)
+  ok('…the rung lives in the TRACKED script: the real binary only with --no-netns --loopback-real, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (on every rung since lane cli-self-measure r2 — assertEnv requires it), HTTPS_PROXY = the mock, the record\'s rung + proxy (the belt on both rungs is test-oat-measure-fake\'s, a heavy)',
+    /const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS) && /const RUNG = NETNS \? 'netns' : LOOPBACK_REAL \? 'loopback-real' : 'fake';/.test(MS) && /const CLAUDE = resolveClaude\(RUNG, o\.claude\);/.test(PS)
+    && /CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', \/\/ the CLI's optional traffic off — on EVERY rung \(assertEnv requires it\)/.test(PS) && /const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(PS)
     && /\.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', variants: \{\} \};/.test(MS));
   // (acceptance r3: never a claim wider than the code — the --out record names its rung and its proxy too, not only the fixture's)
-  ok('…and the --out record says them as well — every record the script writes names its proxy (the mock), the loopback-real one its rung', /const record = \{ measuredAt: [^\n]*, netns: NETNS, \.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', resolver: RESOLVER,/.test(MS));
-  ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', /LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(MS) && /: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(MS));
+  ok('…and the --out record says them as well — every record the script writes names its proxy (the mock), the loopback-real one its rung', /const record = \{\s*measuredAt: [^\n]*, netns: NETNS, \.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', resolver: RESOLVER,/.test(PS));
+  ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', /LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(PS) && /: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(PS));
 }
 
 // ── ⑥ the committed fixture (主开发's namespace rung writes it) ──

@@ -204,6 +204,13 @@ function continueNoticeFor({ kind, armReason, label, moved = false, cause = null
  *  07:50). A switch says WHICH member and that the continue follows in
  *  seconds; only an arm anchored on a real reset states the reset instant.
  *  PURE: (armReason, resetsAtMs, nowMs) → sentence. */
+// LAW G4 (lane cli-self-measure): a cause's `checking` facet counts only while THAT run is still checking (the ORCH's live answer)
+function liveCause(c) {
+  if (!c || typeof c !== 'object' || !c.checking) return c || null;
+  let now = null; try { now = typeof global.__vsCliCheckingNow === 'function' ? global.__vsCliCheckingNow() : null; } catch { now = null; }
+  if (now && now.cli === c.checking.cli && now.startedAt === c.checking.startedAt) return c;
+  const { checking, ...rest } = c; return rest;
+}
 function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
   const m = /^switched to a usable account \((.+)\)/.exec(String(armReason || ''));
   if (m) {
@@ -216,8 +223,10 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
   // and why the rejector's earlier one does not count (its OTHER dead bucket,
   // under the floor, keeps it dead past that). Structure comes from the
   // engine's armCauseFor; a cause-less arm keeps the old sentence verbatim.
-  const c = cause && typeof cause === 'object' ? cause : null;
+  const c = cause && typeof cause === 'object' ? liveCause(cause) : null;
   const fmt = (ms) => new Date(ms).toLocaleString();
+  // the hub's own check of a new Claude Code holds members of this pool: the check and its minutes, never a date days away
+  if (c && c.checking) return `Claude Code ${c.checking.cli} 是本机的新版本，VibeSpace 正在确认它（约 ${c.checking.typicalMin} 分钟，最多 ${c.checking.boundMin} 分钟）；确认通过后它占着的 ${c.checking.n} 个账号回到账号池，能接手时这个对话会自己继续（状态栏可取消）。`;
   // THE OWNER'S 全B (2026-09-28): the wall is a member taken OUT of the pool with nobody to take over — the card
   // names that cause, never "usage limit reached"
   if (c && c.kind === 'removed-member') {
@@ -402,7 +411,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       bucket: a ? (a.bucket || null) : null,
       // B-73fe: the STRUCTURE behind the wait (who resets when, and why the
       // rejector's own reset is not it) — the client says the words
-      cause: a ? (a.cause || null) : null,
+      cause: a ? liveCause(a.cause || null) : null,
     };
   }
   const _refuseNotified = new Map(); // id → last far-refusal notice ts (1/h floor)
@@ -472,6 +481,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       const lastN = _refuseNotified.get(id) || 0;
       if (notify && at - lastN > 3600000) {
         _refuseNotified.set(id, at);
+        const ck = liveCause(cause) && liveCause(cause).checking;
+        if (ck) { try { notify(id, session, armNoticeFor(reason, resets, at, cause)); } catch { } } else
         try { notify(id, session, `用量已达上限，最近的重置在 ${new Date(resets).toLocaleString()}（约${hrs}小时后），超过自动等待上限（${Math.round(MAX_WAIT_MS / 3600000)}h），不会按时间自动续跑；但配额一旦提前恢复会自动继续。也可切换账号或手动继续。`); } catch { }
       }
     }
@@ -1127,6 +1138,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 
   return {
     armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
+    refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
     _armed: armed, _fires: fires,

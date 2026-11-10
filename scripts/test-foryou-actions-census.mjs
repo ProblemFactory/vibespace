@@ -120,7 +120,12 @@ console.log('③ the audit\'s two drifts — a rotate suggestion merges by its e
 console.log('④ handled ⇒ a branch in user-todos-actions.js; card ⇒ where For-you draws its verbs');
 const ACT = code(files['src/lib/user-todos-actions.js']);
 const branches = (src, ty) => new RegExp(`(?:\\.type\\s*[!=]==?\\s*'${ty}'|\\[[^\\]]*'${ty}'[^\\]]*\\]\\.includes\\()`).test(src);
-{ const miss = FA.ROWS.filter((r) => r.handled && !branches(ACT, r.type)).map((r) => r.type); ok(!miss.length, `every handled row (${FA.ROWS.filter((r) => r.handled).length}) has its \`type ===\` branch in src/lib/user-todos-actions.js`, miss); }
+// lane cli-self-measure: a handled row that DECLARES its door (`checkRoute` + `checkSaid` — the held Claude Code's Check again) is
+// run by the model's ONE row-reading branch, never a branch per type (the id-branch ratchet, test-architecture §78)
+const ROW_DOOR = /const checkRow = rec && rec\.action \? FORYOU_ROW_OF\[rec\.action\.type\] : null;\s*\n\s*if \(checkRow && typeof checkRow\.checkRoute === 'string'\)/;
+const doorMiss = (src) => FA.ROWS.filter((r) => r.handled && !branches(src, r.type) && !(typeof r.checkRoute === 'string' && ROW_DOOR.test(src))).map((r) => r.type);
+{ const miss = doorMiss(ACT); ok(!miss.length, `every handled row (${FA.ROWS.filter((r) => r.handled).length}) has its \`type ===\` branch in src/lib/user-todos-actions.js — or declares its door (checkRoute) for the row-reading branch`, miss); }
+ok(FA.ROWS.some((r) => typeof r.checkRoute === 'string') && doorMiss(ACT.replace(ROW_DOOR, '/* the row door, removed */')).includes('cli-check-again'), 'RED CONTROL: the row-reading door removed ⇒ a row that declares its route has no branch at all');
 const ROWJS = code(files['src/lib/user-todos-row.js']);
 const rowImports = [...ROWJS.matchAll(/from '\.\/([\w-]+\.js)'/g)].map((m) => `src/lib/${m[1]}`);
 const rowDraws = (ty) => ROWJS.includes(`'${ty}'`) || rowImports.some((f) => new RegExp(`export const [A-Z_]+ = '${ty}'`).test(files[f] || ''));

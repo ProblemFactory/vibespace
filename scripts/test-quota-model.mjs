@@ -2857,6 +2857,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/lib/session-lifecycle.js', 'the picker chip: pctOf(undefined) = null ⇒ seg() renders nothing'],
         ['src/lib/usage-source.js', 'codexRefreshToast skips a window with no usedPercent'],
         ['src/routes/reset-credit.js', 'a doc comment names the answer\'s fields; no read'],
+        ['src/claude-oat-probe.js', 'the long-lived-token measurement\'s loopback MOCK answers the vendor\'s rate-limit headers (anthropic-ratelimit-unified-5h-*) to the CLI under test — it writes them, it reads no stored 5h window (lane cli-self-measure)'],
       ]);
       console.log('  … 5h readers found:', found.length);
       const unl = found.filter((f) => !ABSENCE.has(f));

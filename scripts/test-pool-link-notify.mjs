@@ -139,7 +139,15 @@ console.log('§4 the writer census');
   // no other server file re-points a pool credential link (browser-env re-points BROWSER config links; the
   // daemon's reflex runs on the device and lands here through noteDeviceRepoint)
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
-  const callers = walk(path.join(REPO, 'src')).filter((f) => /repointPoolSymlink\(/.test(strip(fs.readFileSync(f, 'utf8')))).map((f) => path.relative(REPO, f)).sort();
+  // lane cli-self-measure: the measurement's hot-switch variants NAME the primitive in their change LABELS — string literals of ONE
+  // shape ('repointPoolSymlink(link→B)+utimes(B)' …) in src/claude-oat-probe.js. Exactly those labels are exempt, never the file: a
+  // real call there is still a caller, and a new label is counted below
+  const LABEL = /'repointPoolSymlink\(link→[A-Z]\)\+utimes\([A-Z]\)[^'\n]*'/g;
+  const callerText = (f, t) => strip(t).replace(f.endsWith('src/claude-oat-probe.js') ? LABEL : /$^/g, "''");
+  const callers = walk(path.join(REPO, 'src')).filter((f) => /repointPoolSymlink\(/.test(callerText(f, fs.readFileSync(f, 'utf8')))).map((f) => path.relative(REPO, f)).sort();
+  const probeSrc = strip(fs.readFileSync(path.join(REPO, 'src/claude-oat-probe.js'), 'utf8'));
+  ok((probeSrc.match(LABEL) || []).length === 4 && !/repointPoolSymlink\(/.test(callerText('src/claude-oat-probe.js', probeSrc)), 'the measurement names the primitive only in its FOUR change labels (strings) — no call', (probeSrc.match(LABEL) || []).length);
+  ok(/repointPoolSymlink\(/.test(callerText('src/claude-oat-probe.js', probeSrc + "\nrepointPoolSymlink(link, B);\n")), 'RED CONTROL: a real call planted in src/claude-oat-probe.js is a caller (the exemption is the label shape, never the file)');
   const KNOWN = { 'src/accounts.js': 'THE store (judged above)', 'src/account-material.js': 'the primitive itself', 'src/agentd/agentd.js': 'the device reflex — recorded via noteDeviceRepoint', 'src/server/browser-env.js': 'browser config links, not pool links' };
   ok(callers.every((f) => KNOWN[f]) && callers.includes('src/accounts.js'), `the re-point census: ${callers.join(', ')} — a new caller must be judged here`, callers.filter((f) => !KNOWN[f]));
   const srv = strip(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'));

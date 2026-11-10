@@ -16,6 +16,12 @@ const { placeOf } = require('./queue-chips.js'); // PURE (lane midturn-order): w
 const { queueDroppedOf, putbackNotice } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): Stop's put-back record + its toast facts
 
 const asArray = (v) => (Array.isArray(v) ? v : []);
+// lane cli-self-measure (ruling R8 — the founding requirement, 2026-03-22 item 7: an ordinary Claude Code update needs no
+// update of VibeSpace): a record kind a build ADDED is counted ONCE per process per build through the local telemetry road —
+// `cli-record-kind` for a build this release has no record table for (an ordinary update: the quiet chip, nothing else), or
+// `cli-record-surprise` for a build it DOES register (a real surprise: the chip's hover says so). Never a card in the chat.
+const _kindsCounted = new Set();
+const registeredClaude = (v) => { try { return require('./record-shape.js').SCHEMA_CLI_VERSIONS.includes(String(v)); } catch { return false; } };
 
 class MessageWindow {
   constructor(sessionId) {
@@ -85,9 +91,13 @@ class MessageWindow {
     const key = kind + ':' + nm;
     const was = kinds.get(key);
     const ver = cli ? String(cli).slice(0, 40) : null;
+    const claude = (this.harnessLabel || 'Claude Code') === 'Claude Code';
+    const registered = !!ver && claude && registeredClaude(ver);
+    const counted = `${this.harnessLabel || 'Claude Code'}|${ver || '-'}|${key}`;
+    if (!_kindsCounted.has(counted) && _kindsCounted.size < 2000) { _kindsCounted.add(counted); try { global.__vsEvent?.(registered ? 'cli-record-surprise' : 'cli-record-kind', `${this.harnessLabel || 'Claude Code'} ${ver || '?'} · ${kind}:${nm}`.slice(0, 200)); } catch { } }
     if (was && (!ver || was.cli === ver)) return;
     if (!was && kinds.size >= 50) return;
-    kinds.set(key, { kind, name: nm, cli: ver || (was && was.cli) || null });
+    kinds.set(key, { kind, name: nm, cli: ver || (was && was.cli) || null, ...(registered ? { registered: true } : {}) });
     if (emit) this._emit({ op: 'meta', subtype: 'record-kinds', data: { kinds: this.addedKinds() } });
   }
   /** The kinds above, in the order first seen. */

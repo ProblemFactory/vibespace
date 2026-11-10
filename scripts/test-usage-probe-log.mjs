@@ -240,7 +240,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   say(`printf '%s\\n' "$CLAUDE_SECURESTORAGE_CONFIG_DIR" > '${envFile}'\n${PANEL}`);
   const tries = [
     ['④a a token WITHOUT user:profile', { ...PROBEABLE_FACTS, oatScopes: SCOPES.filter((x) => x !== 'user:profile') }, 'unprobeable:oat-no-profile', /without the user:profile scope/],
-    ['④b the hub\'s claude unmeasured with a token in the folder', { ...PROBEABLE_FACTS, oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }, 'unprobeable:cli-unmeasured', /claude 2\.1\.308 is not measured/],
+    ['④b the hub\'s claude unmeasured with a token in the folder', { ...PROBEABLE_FACTS, oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }, 'unprobeable:cli-unmeasured', /Claude Code 2\.1\.308 isn't cleared for it on this machine yet/],
     ['④b\' the token not in its folder (a write that failed)', { ...PROBEABLE_FACTS, loginState: { ...OAT_LS, oatFile: undefined, login: 'expired' }, oatFile: { state: 'refused', reason: 'write-failed' } }, 'unprobeable:oat-not-in-folder', /not written to the account's folder \(write-failed\)/],
   ];
   for (const [label, facts, el, re] of tries) {

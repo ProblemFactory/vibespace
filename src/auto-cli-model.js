@@ -77,7 +77,7 @@ function notProbedWords(el, row = null) {
   const cli = row && row.oatCli && typeof row.oatCli.cli === 'string' && VERSION_RE.test(row.oatCli.cli) ? row.oatCli.cli : '?';
   const why = row && row.oatFile && typeof row.oatFile.reason === 'string' && /^[a-z-]{1,40}$/.test(row.oatFile.reason) ? row.oatFile.reason : '';
   if (el === OAT_NO_PROFILE) return 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it';
-  if (el === CLI_UNMEASURED) return `long-lived token only, and claude ${cli} is not measured with it in the account's folder; refreshes when a session uses it`;
+  if (el === CLI_UNMEASURED) return `long-lived token only, and Claude Code ${cli} isn't cleared for it on this machine yet (the hub checks a new build itself when its switch is on); refreshes when a session uses it`;
   if (el === OAT_NOT_IN_FOLDER) return `long-lived token only, not written to the account's folder${why ? ` (${why})` : ''}; refreshes when a session uses it`;
   if (el === OAT_FOLDER_NO_PANEL) return `long-lived token in the account's folder: claude ${cli} prints no quota lines for a folder-token login; refreshes when a session uses it`;
   if (el === NO_LOGIN) return 'not logged in; nothing to read its quota with until it is';

@@ -33,7 +33,7 @@ import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store 
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -345,7 +345,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // lane controls-that-lie: an ask that names a grant — the button DOES it («Who can use it» gains the conversation, then the agent is told)
     'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
-    'browser-floor-check': () => actBtn('browser-floor-check', UI_ICONS.refresh, t('Check again'), t('Ask for the browser version once more now — this notice goes away by itself once it reads'), 'iw-act-primary'), // B-0b8c
+    // the «Check again» verbs (B-0b8c's browser version, lane cli-self-measure's held Claude Code): the registry row declares the hover
+    ...Object.fromEntries(CHECK_AGAIN_TYPES.map((ty) => [ty, () => actBtn(ty, UI_ICONS.refresh, t('Check again'), t(FY_ROW[ty].checkAgain), 'iw-act-primary')])),
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     // lane hub-act-ask: a hub act held on a cluster instance — Allow once (primary) / Always on this machine / Deny
@@ -770,7 +771,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       return;
     }
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
-    if (a === 'browser-floor-check') { if (await model.runAction(it)) advance(id); return; } // B-0b8c: one probe now — an answer withdraws the item server-side
+    if (CHECK_AGAIN_TYPES.includes(a)) { if (await model.runAction(it)) advance(id); return; } // B-0b8c + lane cli-self-measure: one check now — an answer withdraws the item server-side
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
     if (a === 'proposal-approve' || a === 'proposal-reject') {

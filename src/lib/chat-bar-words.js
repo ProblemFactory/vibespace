@@ -33,6 +33,9 @@ export function addedKindsChipWords(kinds, t) {
   const text = n === 1 ? t('1 record kind this version added — Diagnostics') : t('{n} record kinds this version added — Diagnostics', { n });
   const lines = list.slice(0, 12).map((k) => (k.kind === 'fields' ? t('{name}: new fields', { name: k.name }) : t('{name}: a new record', { name: k.name })) + (k.cli ? ` (${k.cli})` : ''));
   if (n > 12) lines.push(t('…and {n} more', { n: n - 12 }));
-  const title = t('The agent\'s program sent records VibeSpace does not know yet — most likely it updated to a version this release has not registered. Nothing changes for the conversation; they are listed in ⚙ Diagnostics. Click to open it.') + '\n' + lines.join('\n');
+  // lane cli-self-measure (ruling R8): an ordinary update is a quiet fact (no release of ours is owed); a build this VibeSpace
+  // registers that still sends an unknown record is a real surprise — said so, and reported (message-window: cli-record-surprise)
+  const surprise = list.some((k) => k.registered);
+  const title = (surprise ? t('The agent\'s program sent a record VibeSpace does not recognize, on a version this VibeSpace knows — a real surprise, and it is reported. Nothing changes for the conversation; it is listed in ⚙ Diagnostics. Click to open it.') : t('The agent\'s program sent records VibeSpace does not know yet — it is newer than this VibeSpace\'s record table. Nothing changes for the conversation; they are listed in ⚙ Diagnostics. Click to open it.')) + '\n' + lines.join('\n');
   return { text, title };
 }
