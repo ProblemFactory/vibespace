@@ -60,6 +60,7 @@ const PRODUCERS = {
   'src/server/jobs-wiring.js': { origin: 'jobs', scope: 'conversation', types: [], why: 'a job\'s ask is answered in its own form (jobId) — no card' },
   'src/server/channels-engine.js': { origin: 'channels', scope: 'group', types: ['channel-reauth'] },
   'src/server/channels-access.js': { origin: 'channels', scope: 'about', types: ['open-channel', 'channel-watch-request', 'channel-held-digest'] },   // r6: a held digest's decision (no `about` — the owner's tray)
+  'src/server/groups-engine.js': { origin: 'channels', scope: 'group', types: ['open-channel'], why: 'int388 seam (.388): lane paced-wake-retry\'s owner item for a held group wake that fell (sign-in off). ' + 'Scope group because of two fields read at its one add() (groups-engine.js, userTodos.add(\'channels\', {…})): the first argument is the hub\'s «channels» GROUP key, not a conversation key, and the item object carries NO `about` field (this census reads `about:` at the site). ' + 'The lane added test-user-todos-layout\'s fast row only; a For-you producer owes a row in BOTH censuses' },
   'src/server/channels-outbound.js': { origin: 'channels', scope: 'group', types: ['open-channel'], why: 'a reply / reaction / recall proposal is its own card in the chat (channel-touch-view chatProposalCards)' },
   'src/server/channel-api-cards.js': { origin: 'channels', scope: 'group', types: ['channel-api-proposal'] },
   'src/server/browser-handback.js': { origin: 'browser', scope: 'conversation', types: ['browser-takeover'] },
