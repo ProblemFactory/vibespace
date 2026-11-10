@@ -181,11 +181,11 @@ const doorProbes = async () => {
   const msgAcl = require('../src/msg-acl.js');
   const vis = (cid) => msgAcl.levelFor({ cid, groups: ['g1'] }, ['g-outside'], (g) => st.rowsFor('group-visibility', g));
   out.groupVisibility = [{ ok: vis('m1') !== 'none' }, { ok: vis('m2') !== 'none' }];
-  // lane browser-login: a web login's «any account on this site» row (PURE src/browser-login.js fillVerdict asks GM.admits over its rows)
+  // lane browser-login (r22 pivot): a web login's «any account on this site» row (PURE src/browser-login.js fillVerdict asks GM.admits over its rows)
   const BLg = require('../src/browser-login.js');
-  const lf = BLg.formOf({ surfaceId: 'surf-cred-1', pageOrigin: 'https://shop.example.test', fields: [{ fieldId: 'f-1', type: 'password' }] });
+  const spec = BLg.parseVaultFillSpec('shop.example.test/password');
   const lrows = (res) => (res === 'https://shop.example.test#*' ? [{ door: 'browser-login', resource: res, to: [G1], except: [M1] }] : []);
-  const loginV = (cid) => BLg.fillVerdict({ forms: [lf], entries: [{ origin: 'https://shop.example.test', user: 'alice' }], grantRows: lrows, facts: { conversationKeys: [cid], groupIds: ['g1'] }, vaultState: 'unlocked' });
+  const loginV = (cid) => BLg.fillVerdict({ tabOrigin: 'https://shop.example.test', spec, entries: [{ origin: 'https://shop.example.test', user: 'alice', hasCurrent: true }], grantRows: lrows, facts: { conversationKeys: [cid], groupIds: ['g1'] }, vaultState: 'unlocked' });
   out.browserLogin = [loginV('m1'), loginV('m2')].map((x) => ({ ok: x.ok, code: x.ok ? null : x.grant }));
   out.wake = await wakeWorlds();
   return out;

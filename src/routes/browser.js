@@ -128,7 +128,54 @@ const { sameToken } = require('../pairing-token.js'); // B-8dda
 const router = express.Router();
 
 let ctx = null;
-function setup(deps) { ctx = deps; }
+const vaultFillTickets = new Map();
+const VAULT_FILL_TICKET_TTL_MS = 30_000;
+const VAULT_FILL_TICKET_MAX = 256;
+function setup(deps) {
+  ctx = deps;
+  vaultFillTickets.clear();
+}
+function mintVaultFillTicket(f, { handle = '', target = '', spec = '', generate = false, user = null } = {}) {
+  const now = Date.now();
+  for (const [k, v] of vaultFillTickets) {
+    if (!v || now >= v.expiresAt) vaultFillTickets.delete(k);
+  }
+  while (vaultFillTickets.size >= VAULT_FILL_TICKET_MAX) {
+    vaultFillTickets.delete(vaultFillTickets.keys().next().value);
+  }
+  const id = 'vft_' + require('crypto').randomBytes(24).toString('base64url');
+  vaultFillTickets.set(id, {
+    sessionId: f && f.sessionId ? String(f.sessionId) : null,
+    browserKey: f && f.browserKey ? String(f.browserKey) : null,
+    handle: String(handle || '').trim(),
+    target: String(target || ''),
+    spec: String(spec || ''),
+    generate: Boolean(generate),
+    user: user ? String(user) : null,
+    expiresAt: now + VAULT_FILL_TICKET_TTL_MS,
+  });
+  return id;
+}
+function consumeVaultFillTicket(req, f) {
+  const raw = req && req.body ? req.body.fillTicket : null;
+  if (typeof raw !== 'string' || !/^vft_[A-Za-z0-9_-]{24,64}$/.test(raw)) return false;
+  const rec = vaultFillTickets.get(raw);
+  vaultFillTickets.delete(raw);
+  if (!rec || Date.now() >= rec.expiresAt) return false;
+  if (rec.sessionId !== (f && f.sessionId ? String(f.sessionId) : null)) return false;
+  if (rec.browserKey !== (f && f.browserKey ? String(f.browserKey) : null)) return false;
+  if (rec.handle !== String(req.body?.handle || '').trim()) return false;
+  const V = require('../browser-verbs.js');
+  const argv = Array.isArray(req.body?.argv) ? req.body.argv.map(String) : [];
+  const cls = V.classify(argv, { ours: true });
+  if (!cls || cls.kind === 'refused' || cls.verb !== 'fill' || typeof V.hasVaultFillFlag !== 'function' || !V.hasVaultFillFlag(cls.argv)) return false;
+  const parsed = typeof V.parseFillVaultArgs === 'function' ? V.parseFillVaultArgs(cls.argv) : null;
+  if (!parsed || !parsed.ok) return false;
+  return parsed.target === rec.target
+    && parsed.spec === rec.spec
+    && Boolean(parsed.generate) === rec.generate
+    && (parsed.user ? String(parsed.user) : null) === rec.user;
+}
 // lane e2a (design-agent-browser-v2 §E2): the window-targets engine — the desktop-app rung's ONE owner of window leases,
 // the opener grant and the launch (src/server/window-live-wiring.js hands it once both exist)
 let windowEngine = null;
@@ -216,8 +263,8 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // form that is not the site's own (or not https), several logins (--user), the owner's grant, the vault locked, the site's
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
-  login_fill_withdrawn: 409, login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
-  login_bad_origin: 400, login_bad_user: 400, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
+  login_fill_withdrawn: 409, login_retired: 409, login_no_form: 409, login_in_frame: 409, login_form_changed: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
+  login_bad_origin: 400, login_bad_user: 400, login_bad_field: 400, bad_request: 400, login_fill_live: 409, login_fence_unavailable: 409, login_channel_unmediated: 409, login_not_pending: 409, login_pending_exists: 409, login_no_previous: 409, login_no_otp: 409, code_paced: 429, target_not_found: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
   browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
@@ -383,6 +430,7 @@ function needKey(res, f) {
       return null;
     }
     f.browserKey = r.key;
+    if (Array.isArray(f.conversationKeys) && !f.conversationKeys.includes(String(r.key))) f.conversationKeys.push(String(r.key));
     if (r.minted) { f.minted = { key: r.key, origin: r.origin || 'new', variant: r.variant || null }; if (res && res.locals) res.locals.minted = f.minted; }
   }
   return f;
@@ -1247,7 +1295,7 @@ router.post('/api/browser/logins/cards/:id/:verb', (req, res) => {
   if (!shown) return res.status(400).json({ error: 'an answer names the card it was pressed on (`shown`)', code: 'shown_required' });
   const r = L.answerCard(String(req.params.id || '').slice(0, 40), { approve: verb === 'approve', shown });
   if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
-  res.json({ ok: true, saved: !!r.saved, updated: !!r.updated });
+  res.json({ ok: true, saved: !!r.saved, updated: !!r.updated, confirmed: !!r.confirmed, discarded: !!r.discarded });
 });
 router.post('/api/browser/surfaces/:id/:verb', async (req, res) => {
   if (refuseHost(req, res)) return;
@@ -1781,12 +1829,14 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       // the ladder); a refusal (browser_cap / launch_failed)
       // is typed like any other
       const pairs = shared ? null : managedPairs(f);
+      const isServerVaultFill = consumeVaultFillTicket(req, f);
       if (pairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
+        if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: isServerVaultFill ? [] : pairs, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs })), profile: e.profile, browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
       }
       stampActive(f, '');
       return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
@@ -1798,22 +1848,26 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       // command runs with (the parent's, minus the unset, plus the child's)
       const parentPairs = managedPairs(f);
       const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
+      const isServerVaultFill = consumeVaultFillTicket(req, f);
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
         { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
+        if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         // verify r2 (D6): a helper's browser keeps nothing — said ONCE, in its own first answer (the CLI prints the note)
-        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
+        return send({ ok: true, kind: 'child', handle: v.handle, env: isServerVaultFill ? [] : env.pairs, unset: env.unset, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs: childPairs })), handles: v.handles, pinTab: false, profile: e.profile, browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
       }
       return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
+    const isServerVaultFill = consumeVaultFillTicket(req, f);
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     // verify r3 (F4): the rebound note is SAID ONCE — in an answer that is delivered. A client gone before this write (the
     // agent harness's own tool timeout fired while the rebind queued) never reads it: put it back for the next command.
     if (r && r.rebound && clientGone(req, res) && typeof k.restoreRebound === 'function') k.restoreRebound(v.attachment.profileId, f.browserKey, r.rebound);
     { const g = await cliGoneVerdict(k, r.browser); if (g) return failVerdict(res, g); }
+    if (await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
-    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, resolvedAt) });
+    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...(isServerVaultFill ? { cdpUrl: undefined, env: [] } : envBasis(f, { k, pairs: r.env, ephemeral: false })), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(r.browser, resolvedAt) });
   } catch (e) { fail(res, e); }
 });
 /** lane jobs-browser (B-dbc1): a job's command runs in its OWNER conversation's pinned / default profile (the owner's set,
@@ -1823,6 +1877,7 @@ async function resolveForJob(req, res, k, f) {
   const B = require('../browser-profiles.js'), J = require('../browser-job-principal.js');
   try {
     const verb = B.auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
+    const isServerVaultFill = consumeVaultFillTicket(req, f);
     const jv = J.jobResolveVerdict(B.resolveHandle({ set: k.setFor(f.ownerKey), handle: req.body?.handle || '', subagent: false }));
     if (!jv.ok) return failVerdict(res, { ...jv, handles: [] });
     const r = await k.attach({ profileId: jv.profileId, browserKey: f.browserKey, sessionId: f.sessionId || null, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
@@ -1830,8 +1885,9 @@ async function resolveForJob(req, res, k, f) {
     k.tell(f.browserKey);
     const v = k.resolveFor({ browserKey: f.browserKey, handle: '', verb });
     if (!v.ok) return failVerdict(res, v);
+    if (await liveFillRefusal(res, k, f, r.profile && r.profile.id, req, verb)) return;
     const at = typeof k.clock === 'function' ? k.clock() : Date.now();
-    res.json({ ok: true, kind: 'attachment', job: true, handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: true, at, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, at) });
+    res.json({ ok: true, kind: 'attachment', job: true, handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...(isServerVaultFill ? { cdpUrl: undefined, env: [] } : envBasis(f, { k, pairs: r.env, ephemeral: false })), handles: v.handles, isDefault: true, at, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(r.browser, at) });
   } catch (e) { fail(res, e); }
 }
 /** lane browser-resume B (§3.9): what a start did with the conversation's KEPT browser, as the agent's answer — ONE field
@@ -1887,6 +1943,8 @@ router.post('/api/agent/browser/tab', async (req, res) => {
       const ack = r.opened.ack || r.opened.targetId || null;
       if (ack && ctx.dialogs && typeof ctx.dialogs.bindTab === 'function') { try { const t = dialogTargetFor(k, f, r.profileId); if (t.ok) ctx.dialogs.bindTab(t, ack); } catch (e) { console.warn('[browser] the new tab was not bound to its conversation — ' + (e && e.message)); } }
       const { ack: _ack, ...opened } = r.opened; r.opened = opened;
+    } else if (r.switched && r.switched.targetId && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
+      try { const t = dialogTargetFor(k, f, r.profileId); if (t.ok) ctx.dialogs.noteActiveTab(t, r.switched.targetId); } catch { /* optional */ }
     }
     res.json(r);
   } catch (e) { fail(res, e); }
@@ -1935,10 +1993,18 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     // not told, the verb's outcome for the unresponsive verdict (a timeout, or `dialog` = the CLI cut it at a dialog)
     // verify r4 #1 (site-reset): a `tab new` that succeeded NAMES its tab (the CLI read the binary's own ack) — the watch binds it
     // to THIS conversation before the fact after the verb is read (never "the verb that happened to be in flight")
-    const tabAck = req.body?.tab && typeof req.body.tab === 'object' && typeof req.body.tab.targetId === 'string' ? req.body.tab.targetId.slice(0, 64) : null;
+    const tabObj = req.body?.tab && typeof req.body.tab === 'object' ? req.body.tab : null;
+    const tabTid = tabObj && typeof tabObj.targetId === 'string' ? tabObj.targetId.slice(0, 64) : null;
+    const tabAck = tabObj && tabObj.new && tabTid ? tabTid : null;
+    if (profileId && tabObj && (tabObj.switched || tabObj.new) && tabTid && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
+      try { const t0 = dialogTargetFor(k, f, profileId); if (t0.ok) ctx.dialogs.noteActiveTab(t0, tabTid); } catch { /* optional */ }
+    }
     // int347: `daemonSaw` = the dialog type the verb's own daemon printed (its «… dialog is blocking the page» line) — awaited on the watch
     const saw = req.body?.daemonSaw && typeof req.body.daemonSaw === 'object' && typeof req.body.daemonSaw.type === 'string' ? { type: req.body.daemonSaw.type.slice(0, 24) } : null;
     const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck, saw }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
+    if (profileId && Array.isArray(req.body?.snapshotRefs) && ctx.dialogs && typeof ctx.dialogs.noteSnapshot === 'function') {
+      try { const tSnap = dialogTargetFor(k, f, profileId); if (tSnap.ok) await ctx.dialogs.noteSnapshot(tSnap, { parsedRefs: req.body.snapshotRefs.slice(0, 16384) }); } catch { /* optional */ }
+    }
     // lane site-reset: a verb the loop CUT keeps its session's daemon waiting until 0.38.1's own timeout — remembered, said
     if (req.body?.loop === 'cut' && since > 0) { try { ctx.dialogs?.noteCut?.(f.browserKey, since); } catch { /* optional */ } }
     if (dlg.dialog && ctx.dialogs && typeof ctx.dialogs.busyFor === 'function') { const b = ctx.dialogs.busyFor(f.browserKey); if (b > 0) dlg.dialog.busy = require('../browser-stuck.js').busyText(b); }
@@ -1976,7 +2042,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const vpq = req.body?.viewport && typeof req.body.viewport === 'object' ? req.body.viewport : null;
     let viewport = null;
     if (vpq && ctx.browserViewport) { try { viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: typeof vpq.handle === 'string' ? vpq.handle.slice(0, 200) : '', argv: Array.isArray(vpq.argv) ? vpq.argv.slice(0, 16).map((x) => String(x).slice(0, 200)) : [], ran: vpq.ran !== false }); } catch { viewport = null; } }
-    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(egressRefused ? { egressRefused } : {}) });
+    let scrubbed = null;
+    if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {
+      const t = dialogTargetFor(k, f, profileId);
+      if (t.ok) { const sc = ctx.dialogs.scrubOutput(t, req.body.output); if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err }; }
+    }
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
@@ -1999,10 +2070,40 @@ function dialogTargetFor(k, f, profileId) {
   return { ok: true, profileId: p.id, ephemeral: false, sessionId: f.sessionId, browserKey: f.browserKey };
 }
 function endVerb(f, profileId = null) { try { ctx.dialogs?.verbEnded?.(f.browserKey, { profileId: profileId || null }); } catch { /* optional */ } }
+/** lane vault-login r22: while a vault secret stands filled in a tab before submission/navigation, refuse reading/eval/capture verbs by name (`login_fill_live`). */
+async function liveFillRefusal(res, k, f, profileId, req, verb) {
+  const D = ctx.dialogs;
+  if (!D || !profileId || typeof D.liveFillVerdictFor !== 'function') return false;
+  const t = dialogTargetFor(k, f, profileId);
+  if (!t.ok) return false;
+  try { await D.arm(t.profileId); } catch { return false; }
+  const rawBatch = Array.isArray(req.body?.batchVerbs) ? req.body.batchVerbs : null;
+  const batchVerbs = rawBatch ? (rawBatch.length > 256 ? ['__overflow__'] : rawBatch.map((x) => String(x || ''))) : null;
+  const rawArgv = Array.isArray(req.body?.argv) ? req.body.argv : null;
+  const argv = rawArgv ? rawArgv.slice(0, 64).map((x) => String(x || '')) : null;
+  const targetId = typeof req.body?.targetId === 'string' && req.body.targetId.trim() ? req.body.targetId.trim().slice(0, 64) : null;
+  if (req.body?.fenceCheckOnly === true && targetId && targetId !== '__unknown__' && typeof D.noteActiveTab === 'function') {
+    try { D.noteActiveTab(t, targetId); } catch { /* optional */ }
+  }
+  if (typeof D.recheckPostLiftFor === 'function') {
+    try { await D.recheckPostLiftFor(t, { verb, argv, batchVerbs, targetId }); } catch { /* optional */ }
+  }
+  const lv = D.liveFillVerdictFor(t, { verb, argv, batchVerbs, targetId });
+  if (lv && !lv.ok) {
+    const BL = require('../browser-login.js'), PT = require('../peer-text.js');
+    res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code, ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) });
+    return true;
+  }
+  if (req.body?.fenceCheckOnly === true) {
+    res.json({ ok: true });
+    return true;
+  }
+  return false;
+}
 /** `{dialog: {watched, open, text, notes, stuck}}` for a resolve / audit answer ({} without a watch). A resolve ARMS the
  *  watch first (bounded — it must be on the tab before the verb can open a dialog) and marks the verb running; an
  *  audit ends it and notes its outcome. Notes are told ONCE (consumed here). Never throws. */
-async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, ended = false, verb = null, bind = null, saw = null } = {}) {
+async function dialogAnswerFor(k, f, profileId, { arm = true, started = arm, outcome = null, ended = false, verb = null, bind = null, saw = null } = {}) {
   const D = ctx.dialogs;
   // int347 (the alert race): the verb's OWN daemon printed a page dialog ⇒ the watch's fact of it is AWAITED (its open /
   // close event, bounded) before the fact is read — never raced: an alert it accepted was told to the NEXT verb, and this
@@ -2024,6 +2125,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     // lane site-reset: a page-ACTING verb's instant (its page turn is the agent's, never a loop) — never one the CLI will
     // answer with the standing loop instead of running it (a refused click must not reset the loop it was refused for)
     if (arm) D.verbStarted(f.browserKey, { profileId: t.profileId, verb: fct.loop && !require('../browser-stuck.js').loopPasses(verb) ? null : verb });
+    else if (started) D.verbStarted(f.browserKey, { profileId: t.profileId, verb: fct.loop && !require('../browser-stuck.js').loopPasses(verb) ? null : verb });
     // lane browser-shared-profile-freeze: THE TAB THE VERB ACTS ON, ASKED FIRST (bounded, through the watch's own session) —
     // a page-waiting verb on a tab that answers nothing is answered `page_busy` by name and never handed to the driver
     // (measured: a verb on a silent page holds that conversation's driver 20–60 s and its `tab new` / `tab list` behind it).
@@ -2054,7 +2156,10 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
+    const scrubOut = !!((arm || started) && typeof D.hasScrubSecrets === 'function' && D.hasScrubSecrets(t.profileId));
+    const fencedTabs = (arm || started) && verb && typeof D.fencedTargetsFor === 'function' ? D.fencedTargetsFor(t) : [];
+    const checkActiveTabFence = !!(fencedTabs.length && !require('../browser-login.js').liveFillVerdict({ verb, origin: fencedTabs[0].origin }).ok);
+    return { ...(scrubOut ? { scrubOutput: true } : {}), ...(checkActiveTabFence ? { checkActiveTabFence: true } : {}), dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -2126,38 +2231,131 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     res.json({ ok: true, cancelled: r.n, text: r.text });
   } catch (e) { fail(res, e); }
 });
-/** lane browser-login (P3 of the custom browser kernel, design §4): `vibespace-browser login [<origin>] [--user <u>] [--submit]`
- *  · `login [<origin>] --new-user <u> --generate` (register through the vault) · `login [<origin>] [--user <u>] --generate` (a
- *  change-password form) — a login the VAULT keeps, filled by the kernel on THIS conversation's own tab (the watch's
- *  `fillLogin`; the verdict, the grant, the two-step code and the use line are src/server/browser-logins.js's). The answer says
- *  WHAT was filled (kinds) and the use's receipt — never a value (test-vault-law ⑫). While the user drives, the page is theirs. */
-router.post('/api/agent/browser/login', async (req, res) => {
+/** lane vault-login r22: `vibespace-browser fill <@ref|selector> --vault [new:]<entry>/<field> [--generate] [--user <name>]` —
+ *  ONE vault field typed by Hub into the agent-named DOM element on THIS conversation's own tab (identical on standard Chrome
+ *  and the custom browser kernel). The answer says WHICH field/slot was filled + the vault use receipt (`vr-...`) — never a
+ *  value (test-vault-law ⑫). While the user drives, the page is theirs. */
+router.post('/api/agent/browser/fill-vault', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   const D = ctx.dialogs;
   const BL = require('../browser-login.js');
-  if (!D || typeof D.fillLogin !== 'function') return res.status(409).json({ error: 'VibeSpace keeps no web logins on this server', code: 'not_watched' });
+  if (!D || typeof D.fillVaultField !== 'function') return res.status(409).json({ error: 'VibeSpace keeps no web logins on this server', code: 'not_watched' });
   const body = req.body || {};
   const word = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
-  if (body.newUser !== undefined && body.newUser !== null && body.generate !== true) return res.status(400).json({ error: 'a new account\'s password is the vault\'s: --new-user <name> goes with --generate', code: 'bad-request' });
-  const t0 = dialogTargetFor(k, f, body.profile);
-  if (!t0.ok) return failVerdict(res, t0);
+  const elemTarget = word(body.target, 300);
+  const spec = word(body.spec, 300);
+  if (!elemTarget || !spec) return res.status(400).json({ error: '`fill --vault` takes <@ref|selector> and --vault [new:]<entry>/<field>', code: 'bad-request' });
   try {
+    const s = f.session || {};
+    const cid = require('../claude-lock-capture.js').addressableId(s);
+    const facts = { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable };
+    const conv = cid ? String(cid) : f.sessionId;
+    const actor = String(s.webuiName || s.name || '').slice(0, 80) || null;
+    const owners = [cid, f.sessionId].filter(Boolean).map(String);
+    const beltLogin = (x) => require('../peer-text.js').toAgentText(BL.loginText(x), { max: BL.TEXT_MAX });
+    const chanOpts = {
+      browserKey: f.browserKey || '',
+      ownerKey: f.job ? (f.ownerKey || '') : '',
+      handle: word(body.handle, 120) || '',
+      subagent: sidechainOpen(s),
+      remoteSession: Boolean(f.remote),
+      agentFacts: agentFactsOf(f),
+    };
+    // A2 + M1: `prepare: true` runs the 0-CDP vault/spec/grant precheck BEFORE `/resolve` and mints a server-held one-time ticket
+    // bound to this session + handle + fill target + spec so NO request-body flag on `/resolve` can ever bypass a safety check.
+    if (body.prepare === true) {
+      if (typeof D.precheckVaultFill === 'function') {
+        const pre = D.precheckVaultFill({
+          target: elemTarget,
+          spec,
+          generate: body.generate === true,
+          user: word(body.user, 200),
+          facts,
+          conv,
+          actor,
+          owners,
+          profileId: '',
+          ...chanOpts,
+        });
+        if (!pre || !pre.ok) {
+          const code = (pre && pre.code) || 'bad_request';
+          return res.status(STATUS[code] || 409).json({ error: beltLogin(pre || { code, error: 'invalid vault fill request' }), code, ...(pre && pre.grant ? { grant: pre.grant } : {}), ...(f.minted ? { minted: f.minted } : {}) });
+        }
+      }
+      const fillTicket = mintVaultFillTicket(f, {
+        handle: body.handle || '',
+        target: elemTarget,
+        spec,
+        generate: body.generate === true,
+        user: word(body.user, 200),
+      });
+      return res.json({ ok: true, prepared: true, fillTicket, ...(f.minted ? { minted: f.minted } : {}) });
+    }
+    const t0 = dialogTargetFor(k, f, body.profile);
+    if (!t0.ok) {
+      if (typeof D.precheckVaultFill === 'function' && (!body.profile || t0.code === 'not-found')) {
+        const pre0 = D.precheckVaultFill({ target: elemTarget, spec, generate: body.generate === true, user: word(body.user, 200), facts, conv, actor, owners, profileId: '', ...chanOpts });
+        if (pre0 && !pre0.ok && pre0.code === 'login_channel_unmediated') {
+          return res.status(STATUS[pre0.code] || 409).json({ error: beltLogin(pre0), code: pre0.code });
+        }
+      }
+      return failVerdict(res, t0);
+    }
+    // M1: Refuse locked vault / bad spec / missing entry / ungranted BEFORE arming watch or sending any CDP call.
+    if (typeof D.precheckVaultFill === 'function') {
+      const pre = D.precheckVaultFill({
+        target: elemTarget,
+        spec,
+        generate: body.generate === true,
+        user: word(body.user, 200),
+        facts,
+        conv,
+        actor,
+        owners,
+        profileId: t0.profileId,
+        ...chanOpts,
+      });
+      if (!pre || !pre.ok) {
+        const code = (pre && pre.code) || 'bad_request';
+        return res.status(STATUS[code] || 409).json({ error: beltLogin(pre || { code, error: 'invalid vault fill request' }), code, ...(pre && pre.grant ? { grant: pre.grant } : {}) });
+      }
+    }
     const armed = await D.arm(t0.profileId);
     if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched' });
     const t = dialogTargetFor(k, f, body.profile); // the reach, asked again after the await
     if (!t.ok) return failVerdict(res, t);
+    if (typeof D.thawPaint === 'function') { try { await D.thawPaint(t.profileId, { holder: t }); } catch { /* the fill runs on the page as it is */ } }
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
-    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('login'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
-    const s = f.session || {};
-    const cid = require('../claude-lock-capture.js').addressableId(s);
-    const r = await D.fillLogin(t, { origin: word(body.origin, 300), user: word(body.user, 200), newUser: word(body.newUser, 200), generate: body.generate === true, submit: body.submit === true,
-      facts: { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable }, conv: cid ? String(cid) : f.sessionId, actor: String(s.webuiName || s.name || '').slice(0, 80) || null, owners: [cid, f.sessionId].filter(Boolean).map(String) });   // owners: lane vault-agent-own — its durable id and its registered one (a login it stored itself)
-    const text = require('../peer-text.js').toAgentText(BL.loginText(r), { max: BL.TEXT_MAX });
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('fill'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    const r = await D.fillVaultField(t, {
+      target: elemTarget,
+      spec,
+      generate: body.generate === true,
+      user: word(body.user, 200),
+      targetId: word(body.targetId, 64),
+      prechecked: typeof D.precheckVaultFill === 'function',
+      facts,
+      conv,
+      actor,
+      owners,
+      ...chanOpts,
+    });
+    const text = beltLogin(r);
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
-    try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'login', dialog: { type: 'login', message: r.origin } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
-    if (r.step) { const j0 = res.json.bind(res); res.json = (b) => j0(b && typeof b === 'object' ? { ...b, step: r.step } : b); }
-    res.json({ ok: true, mode: r.mode, origin: r.origin, user: r.user, filled: r.filled, submitted: !!r.submitted, receipt: r.receipt || null, text });
+    try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'fill-vault', dialog: { type: 'fill-vault', message: `${r.origin || ''} (${r.field || ''})` } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
+    res.json({
+      ok: true,
+      entry: r.entry,
+      origin: r.origin,
+      user: r.user,
+      field: r.field,
+      slot: r.slot,
+      ...(r.generated ? { generated: true } : {}),
+      ...(r.pending ? { pending: r.pending } : {}),
+      receipt: r.receipt || null,
+      text,
+    });
   } catch (e) { fail(res, e); }
 });
 /** lane browser-ui-prompts-r2 (B-ebfc): the agent's `permission <kind> allow|deny [origin] [lat,lon]` — OUR CDP act on THIS
@@ -2296,6 +2494,13 @@ router.post('/api/agent/browser/direct', async (req, res) => {
       const r = await D.closeTab(t, tid ? { targetId: tid } : {});
       if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
       return res.json({ ok: true, text: tid ? ST.busyCloseText(r) : ST.closeText({ ...r, busyMs }), url: r.url, title: r.title, opened: !!r.opened, ...(r.was ? { loop: r.was } : {}) });
+    }
+    if (typeof D.liveFillVerdictFor === 'function') {
+      if (typeof D.recheckPostLiftFor === 'function') {
+        try { await D.recheckPostLiftFor(t, { verb: 'screenshot' }); } catch { /* optional */ }
+      }
+      const lv = D.liveFillVerdictFor(t, { verb: 'screenshot' });
+      if (lv && !lv.ok) { const BL = require('../browser-login.js'), PT = require('../peer-text.js'); return res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code }); }
     }
     const r = await D.captureTab(t);
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code, ...(r.loop ? { loop: r.loop } : {}) });

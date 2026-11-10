@@ -18,7 +18,7 @@ vibespace-vault totp <name>         the CURRENT two-step code of an entry you ad
 vibespace-vault totp add <name> --from-file <0600 file> | --stdin
                                     store a two-step seed you hold (the otpauth:// link or the seed) as a two-step entry
 vibespace-vault login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]
-                                    store a website login you hold (its password) — the browser kernel fills it
+                                    store a website login you hold (its password) — vibespace-browser fill <@ref> --vault types it onto that site
 vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]
                                     the HUB makes a random secret in YOUR namespace and seals it — you never see it
 vibespace-vault put <name> --from-file <0600 file> | --stdin
@@ -199,10 +199,10 @@ and an optional two-step code's name.
   `vault.requestGrantsRequester` off. With it ticked, this conversation may fill that login, for that account on that
   site, until the user removes it in Vault ▸ Web logins ▸ Use for… — there is no time limit.
 - **The receipt** at your next turn says STORED (or UPDATED) for the site.
-  - It names the user only when this conversation may sign in with it, and it says how:
-    `vibespace-browser login <site> --user <user>` on a custom-kernel profile.
-  - On standard Chrome the vault sign-in is paused since 2.369.364, so ask a person to sign in in the live view:
-    `vibespace-browser ask-human "<what you need>"`.
+  - It names the user only when this conversation may sign in with it, and it says how across both standard Chrome and
+    custom browser kernels: open `<site>`, run `vibespace-browser snapshot -i`, then fill each field with
+    `vibespace-browser fill <@ref> --vault <site>#<user>/user` and `--vault <site>#<user>/password` (plus `/otp` if a
+    paired two-step code is asked), and submit the form — VibeSpace never hands you the password.
   - Unticked, it says the user has not allowed it yet. Never ask for the login in the chat.
 - **REFUSED and WITHDRAWN** work as for a paste box: do not ask again for 10 minutes after a refusal; after a withdrawal,
   ask again once the vault is unlocked.
@@ -332,7 +332,7 @@ never need the value again:
   the seed back. A name already in the vault is refused (`exists` — pick another).
 - **login add `<origin>` --user `<name>`** — a website login you were given: its password from a 0600 file or stdin,
   optionally `--totp <name>` (a two-step entry YOU added with `totp add` — another is refused `bad_totp`). It becomes a web-login entry, yours: `vibespace-browser
-  login <origin> --user <name>` fills it on your tab (the kernel fills — you never see the password, nor the code) with no
+  fill <@ref> --vault <origin>#<name>/password` types it on your tab (Hub types — VibeSpace never returns the password or the code) with no
   grant; another conversation needs the user's 用于…. A login already kept for that account is never written over
   (`login_exists`).
 

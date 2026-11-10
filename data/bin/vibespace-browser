@@ -152,12 +152,16 @@ PAGE VERBS (your own browser, or the attachment you name):
   vibespace-browser passkey list | register <site> [--user <name>] | forget <site|id>   this profile's passkeys (never a
                                                   key); register asks the owner first (waits ≤ 5 min), then press the page's
                                                   "create a passkey"; each sign-in follows the policy the owner set per key
-  vibespace-browser login [<origin>] [--user <name>] [--submit]   on the custom browser kernel: a login the owner keeps
-                                                  in the vault is filled into the page's form — you never see the password
-                                                  (standard Chrome: withdrawn in 2.369.364 [login_fill_withdrawn] — ask the
-                                                  owner with vibespace-vault request, or ask-human)
-  vibespace-browser login [<origin>] --new-user <name> --generate   register an account THROUGH the vault (it makes the
-                                                  password; the login is saved for the owner automatically)
+  vibespace-browser fill <@ref|selector> --vault <entry>/<field>   fill one vault field (user | password | previous |
+                                                  pending | otp) into the element you name on a local mediated named profile
+                                                  (vibespace-browser use <profile>; refused [login_channel_unmediated] on
+                                                  temporary/ephemeral, paired-machine, external CDP, or remote browsers) —
+                                                  VibeSpace never returns the password; standard Chrome and custom kernels
+                                                  share this Hub CDP road
+  vibespace-browser fill <@ref|selector> --vault new:<site>[#<user>]/password --generate   register through the vault
+                                                  on a local named profile (or --vault <entry>/password --generate to change a
+                                                  password; 24-char default — if a site rejects it, ask the owner via
+                                                  vibespace-vault request --kind login --host <site> while on that profile)
   vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
                                                   ever pends); flip one kind for one origin (your tab's by default)
   vibespace-browser stop                          stop the current tab loading (at once, even while it loops)
@@ -652,6 +656,9 @@ async function runPage(c) {
     cls = V.classify(rawArgs, { ours: true, stdin: stdinBuf });
     if (cls.kind === 'refused') refuseLocally(cls);
   }
+  const isVaultFill = cls.verb === 'fill' && typeof V.hasVaultFillFlag === 'function' && V.hasVaultFillFlag(cls.argv);
+  const vaultFillArgs = isVaultFill && typeof V.parseFillVaultArgs === 'function' ? V.parseFillVaultArgs(cls.argv) : null;
+  if (vaultFillArgs && !vaultFillArgs.ok) refuseLocally(vaultFillArgs, 2);
   // lane L r2: an upload from a credential store is refused HERE, by name — before the binary is looked up,
   // before /resolve (server-independent)
   if (cls.uploadFiles && cls.uploadFiles.length) {
@@ -677,10 +684,11 @@ async function runPage(c) {
   const runCwd = daemonCwd();
   if (!runCwd.ok) refuseLocally(runCwd);
   let bin = realBinary();
+  if (isVaultFill) bin = { ok: true, path: '' };
   if (!bin.ok) refuseLocally(bin);
   // r4 (takeover finding 6): the flag table is a measurement of ONE version. Another build ⇒ every flag is
   // judged under both readings (and said once) — before /resolve, so a refused command starts no browser
-  const binVersionRaw = installedVersion(bin.path);
+  const binVersionRaw = isVaultFill ? V.TABLE_VERSION : installedVersion(bin.path);
   const binVersion = (String(binVersionRaw).match(/(\d+\.\d+\.\d+)/) || [])[1] || null;
   const drift = V.versionDrift(binVersionRaw);
   if (drift) {
@@ -708,15 +716,41 @@ async function runPage(c) {
   // verb or a batch line. The resolve says whether a PINNED picture size rules it (then nothing runs); after a set that ran,
   // the audit answers the page's resulting size
   const vpSet = isViewportSet(rest);
-  const vpInBatch = cls.verb === 'batch' && batchCommands(cls, framed).some(isViewportSet);
-  let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+  const batchCmds = cls.verb === 'batch' ? batchCommands(cls, framed) : null;
+  const vpInBatch = !!(batchCmds && batchCmds.some(isViewportSet));
+  const batchVerbs = batchCmds ? batchCmds.map((w) => {
+    const v0 = String(w[V.verbAt(w)] || 'unknown');
+    if (v0 === 'wait' && w.some((a) => /^--(?:fn|function|js|eval)(?:=|$)/.test(String(a || '')))) return 'wait --fn';
+    return v0;
+  }) : null;
+  const prepareVaultFill = async () => {
+    if (!isVaultFill || !vaultFillArgs) return null;
+    const prep = await call('POST', '/api/agent/browser/fill-vault', {
+      prepare: true,
+      handle: handle || '',
+      target: vaultFillArgs.target,
+      spec: vaultFillArgs.spec,
+      ...(vaultFillArgs.generate ? { generate: true } : {}),
+      ...(vaultFillArgs.user ? { user: vaultFillArgs.user } : {}),
+    }, { soft: true });
+    if (prep && prep._failed) {
+      if (cls.argv.includes('--json')) console.log(JSON.stringify({ success: false, data: null, code: prep.code || 'refused', error: prep.error || '' }));
+      console.error(`${prep.error || 'HTTP ' + prep._status} [${prep.code || 'refused'}]`);
+      if (prep.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one on this command (${prep.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
+      process.exit(1);
+    }
+    return prep && typeof prep.fillTicket === 'string' ? prep.fillTicket : null;
+  };
+  let fillTicket = await prepareVaultFill();
+  let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(fillTicket ? { fillTicket } : {}), ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
   // lane browser-takeover-queue: a person is asked to take over this browser (`ask-human`) — the verb WAITS for their
   // handback (bounded), then asks again ONCE; still waiting / a reply ⇒ nothing ran, said by the server's words
   if (r._failed && (r.code === 'human_asked' || r.code === 'browser_paused') && r.request && r.request.id) {
     const w = await waitForHuman(r.request);
     if (!w.ended) { console.error(`${r.error || r.code} [${r.code}]`); console.error(`  ${w.line}`); process.exit(1); }
     console.error(`note: ${w.line}`);
-    r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+    fillTicket = await prepareVaultFill();
+    r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(fillTicket ? { fillTicket } : {}), ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
   }
   if (r._failed) {
     // lane browser-viewport-answer: a set refused while the user drives says the page's size first (their pane rules it)
@@ -736,7 +770,7 @@ async function runPage(c) {
   // 0.38.0 ↔ 0.38.1). The answer names that version; this command runs a binary of exactly it, found on this machine
   // (VibeSpace's verified install of it beside this command, else PATH's), and a `browser.cli` switch applies at its next
   // launch. None here ⇒ refused by name — never a silent fall to another version.
-  const wantCli = r.browser && r.browser.cli && typeof r.browser.cli.version === 'string' ? r.browser.cli.version : null;
+  const wantCli = !isVaultFill && r.browser && r.browser.cli && typeof r.browser.cli.version === 'string' ? r.browser.cli.version : null;
   if (wantCli && wantCli !== binVersion && typeof V.cliForBrowser === 'function') {
     const cands = [];
     const inst = installedCliFor(wantCli);
@@ -773,7 +807,7 @@ async function runPage(c) {
   const words0 = cls.argv.filter((x) => !x.startsWith('-'));
   const wantsJson = cls.argv.includes('--json');
   const dialogVerb = words0[0] === 'dialog';
-  const DIALOG_PASS = new Set(['dialog', 'tab', 'close', 'answer', 'surfaces', 'login']); // what may run while a dialog holds the page (answer it, leave the tab, close) — lane browser-surfaces: + a kernel prompt's own answer / list — lane browser-login: + `login` (a held HTTP sign-in is answered by a saved login)
+  const DIALOG_PASS = new Set(['dialog', 'tab', 'close', 'answer', 'surfaces']); // what may run while a dialog holds the page (answer it, leave the tab, close) — lane browser-surfaces: + a kernel prompt's own answer / list
   const head = [];   // the lines a page verb prints before its output — held until the verdict (a dialog's sentence goes FIRST)
   for (const n of (dlg && Array.isArray(dlg.notes) ? dlg.notes : [])) head.push(`note: ${n} [page_dialog]`);
   // verify r1 A7: the resolve-time verdict is said only when the verb's own audit cannot say the verdict AFTER it (a verb
@@ -995,6 +1029,29 @@ async function runPage(c) {
   // lane site-reset: `stop` / `site-reset` are OURS on the page road — the resolve above chose the browser and its env; the
   // verb itself goes to the server (never to the binary as a verb)
   if (cls.ours) return runOursPage(cls, { r, head, profileId, wantsJson });
+  // lane vault-login r22: `fill <@ref|selector> --vault <entry>/<field>` goes straight to Hub's CDP socket (never to the binary —
+  // zero secret ever leaves Hub or enters a child process's argv/env/stdout).
+  if (isVaultFill && vaultFillArgs) {
+    const a = await call('POST', '/api/agent/browser/fill-vault', {
+      profile: profileId,
+      target: vaultFillArgs.target,
+      spec: vaultFillArgs.spec,
+      ...(vaultFillArgs.generate ? { generate: true } : {}),
+      ...(vaultFillArgs.user ? { user: vaultFillArgs.user } : {}),
+    }, { soft: true });
+    for (const h of head) console.error(h);
+    const au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'fill', ok: !a._failed, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    if (a._failed) {
+      if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
+      console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
+      if (a.code === 'browser_interrupted') console.error('  the user drives this browser — its forms are theirs now; wait for the handback');
+      process.exit(1);
+    }
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: { entry: a.entry || null, origin: a.origin || null, user: a.user || null, field: a.field || null, slot: a.slot || null, ...(a.generated ? { generated: true } : {}), ...(a.pending ? { pending: a.pending } : {}), receipt: a.receipt || null }, error: null }));
+    else console.log(a.text || 'done');
+    if (au && !au._failed && au.interrupted) { printInterrupted(au.interrupted, 0); process.exit(1); }
+    process.exit(0);
+  }
   // lane site-reset: while a loop stands, a bare `tab close` and a `screenshot` go through VibeSpace's own socket (measured:
   // a verb the loop cut keeps the session's daemon waiting until its own 25 s timeout — the binary's queue would hold them)
   if (loopStand && profileId && ((words[0] === 'tab' && words[1] === 'close' && words.length === 2) || words[0] === 'screenshot')) {
@@ -1012,6 +1069,15 @@ async function runPage(c) {
     else console.log(line);
     console.error(`[${(vp && vp.code) || 'size_pinned'}]`);
     process.exit(1);
+  }
+  if (r.checkActiveTabFence) {
+    const curTab = await tabNewAck('', { bin: bin.path, env, cwd: runCwd.dir, wantsJson: false });
+    const re = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, fenceCheckOnly: true, targetId: curTab && curTab.targetId ? curTab.targetId : '__unknown__', ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
+    if (re && re._failed) {
+      await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: false, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+      printRefusal(re);
+      process.exit(1);
+    }
   }
   // r5 F1 (b): the binary (and a daemon this spawn starts) runs in the private directory, never this shell's
   const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });
@@ -1056,8 +1122,8 @@ async function runPage(c) {
   }
   child.on('exit', async (code) => {
     childDone = true; pollAbort.abort(); if (shotTimer) clearTimeout(shotTimer);
-    const outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
-    const tail = (outText + errText).slice(-4000);
+    let outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
+    let tail = (outText + errText).slice(-4000);
     // §3.7's audit: who used which browser, when, to do WHAT (the verb only —
     // a fill's content is never recorded) — the ephemeral browser too. A
     // navigation also stamps the lease's lastUrl (the URL rides `url`, never
@@ -1067,15 +1133,29 @@ async function runPage(c) {
     // lane browser-stuck: …and what the verb ran into (`dialog`: the watch's fact after it, the notes it was not told);
     // `timedOut` / `dialog` feed the unresponsive verdict (the browser CLI's own timeout words, measured on 0.38.1)
     const timedOut = DS ? DS.timedOutText(outText + '\n' + errText) : /CDP command timed out|tab is not responding/.test(outText + errText);
+    const needScrub = !!(r.scrubOutput && (outText || errText));
+    const scrubCapOk = !needScrub || (Buffer.byteLength(outText, 'utf8') <= 16 * 1024 * 1024 && Buffer.byteLength(errText, 'utf8') <= 16 * 1024 * 1024);
     let au = null;
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
-    // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
-    const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
+    // verify r4 #1 + vault-login r22: `tab new` and `tab <id>` report the resulting active targetId so the watch binds / tracks the aimed tab; `snapshot` reports parsed `@ref` lines so Hub builds its own backendNodeId map
+    const isTabNew = words[0] === 'tab' && words[1] === 'new';
+    const isTabSwitch = words[0] === 'tab' && !!words[1] && !['new', 'list', 'close'].includes(words[1]);
+    const tabAck = isTabNew && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
+    const tabSwitchAck = isTabSwitch && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
+    const snapshotRefs = words[0] === 'snapshot' && code === 0 && profileId && typeof V.parseSnapshotRefs === 'function' ? V.parseSnapshotRefs(outText) : null;
     // int347 (the alert race): the verb's OWN daemon printed a page dialog line ⇒ the audit waits for the watch to have it
     const daemonSaw = DS && dlg && dlg.watched && !dialogVerb && !dialogHit ? DS.daemonDialogLine(outText + '\n' + errText) : null;
     // lane tailnet-names r2: a failed navigation's own network error (Chrome's net::ERR_*) — the audit's words follow its cause
     const navErr = navVerb && navUrl && code !== 0 ? ((/net::(ERR_[A-Z0-9_]+)/.exec(outText + '\n' + errText) || [])[1] || null) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(navErr ? { netError: navErr } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(navErr ? { netError: navErr } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(tabSwitchAck ? { tab: { switched: true, targetId: tabSwitchAck.targetId } } : {}), ...(snapshotRefs !== null ? { snapshotRefs } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}), ...(needScrub && scrubCapOk ? { output: { out: outText, err: errText } } : {}) }, { soft: true }); } catch { au = null; }
+    if (needScrub) {
+      if (!scrubCapOk || !au || au._failed) { console.error('vibespace-browser: refused — the browser output could not be scrubbed by the hub; nothing was printed [login_fill_live]'); process.exit(1); }
+      if (au.scrubbed && typeof au.scrubbed === 'object') {
+        if (typeof au.scrubbed.out === 'string') outText = au.scrubbed.out;
+        if (typeof au.scrubbed.err === 'string') errText = au.scrubbed.err;
+        tail = (outText + errText).slice(-4000);
+      }
+    }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -1262,37 +1342,6 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     }
     if (wantsJson) console.log(JSON.stringify({ success: true, data: sub === 'status' ? { passkey: a.passkey || null, store: a.store || null } : sub === 'list' ? { keys: a.keys || [], agentsOff: !!a.agentsOff } : sub === 'register' ? { state: a.state, proposal: a.proposal || null } : sub === 'forget' ? { removed: a.removed || [] } : { cancelled: a.cancelled || 0 }, error: null }));
     else if (sub === 'list' && Array.isArray(a.keys) && a.keys.length) { console.log(a.text); for (const k of a.keys) console.log(`  ${k.id}  ${k.rpId}  ${k.userName || '-'}  by ${k.source}  policy ${k.policy}  last used ${k.lastUsedAt ? new Date(k.lastUsedAt).toISOString().slice(0, 16).replace('T', ' ') : 'never'}`); }
-    else console.log(a.text || 'done');
-    process.exit(0);
-  }
-  // lane browser-login: `login [<origin>] [--user <u>] [--submit]` · `login [<origin>] --new-user <u> --generate` — a login the
-  // VAULT keeps, filled by the custom kernel on your own tab (you never see a value: the answer says what was filled + a receipt);
-  // lane vault-login-chrome r2: on standard Chrome the hub refuses it by name (login_fill_withdrawn, 2.369.364) before any vault read
-  if (verbName === 'login') {
-    const pos = []; let user = null, newUser = null, submit = false, generate = false;
-    for (let i = 1; i < cls.argv.length; i++) {
-      const x = cls.argv[i];
-      if (x === '--json') continue;
-      if (x === '--submit') { submit = true; continue; }
-      if (x === '--generate') { generate = true; continue; }
-      if (x === '--user' || x === '--new-user') { const v = cls.argv[i + 1]; i++; if (v === undefined || v.startsWith('--')) refuseLocally({ code: 'bad-request', error: `${x} takes a user name`, remedy: 'vibespace-browser login https://example.com --user alice' }, 2); if (x === '--user') user = v; else newUser = v; continue; }
-      if (x.startsWith('--user=')) { user = x.slice(7); continue; }
-      if (x.startsWith('--new-user=')) { newUser = x.slice(11); continue; }
-      if (x.startsWith('--')) refuseLocally({ code: 'bad-request', error: `login does not take ${x}`, remedy: 'vibespace-browser login [<origin>] [--user <name>] [--submit] | --new-user <name> --generate' }, 2);
-      pos.push(x);
-    }
-    if (pos.length > 1) refuseLocally({ code: 'bad-request', error: '`login` takes at most one site (its origin, e.g. https://example.com) — or none: the form on your tab', remedy: 'vibespace-browser login https://example.com --user alice' }, 2);
-    if (newUser !== null && (!generate || user !== null)) refuseLocally({ code: 'bad-request', error: 'a new account takes --new-user <name> --generate (the vault makes its password) — not --user', remedy: 'vibespace-browser login https://example.com --new-user alice --generate' }, 2);
-    const a = await call('POST', '/api/agent/browser/login', { profile: profileId, ...(pos[0] ? { origin: pos[0] } : {}), ...(user ? { user } : {}), ...(newUser ? { newUser } : {}), ...(generate ? { generate: true } : {}), ...(submit ? { submit: true } : {}) }, { soft: true });
-    for (const h of head) console.error(h);
-    await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'login', ok: !a._failed, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
-    if (a._failed) {
-      if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
-      console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
-      if (a.code === 'browser_interrupted') console.error('  the user drives this browser — its forms are theirs now; wait for the handback');
-      process.exit(1);
-    }
-    if (wantsJson) console.log(JSON.stringify({ success: true, data: { mode: a.mode || 'login', origin: a.origin || null, user: a.user || null, filled: a.filled || [], ...(a.step ? { step: a.step } : {}), submitted: !!a.submitted, receipt: a.receipt || null }, error: null }));
     else console.log(a.text || 'done');
     process.exit(0);
   }

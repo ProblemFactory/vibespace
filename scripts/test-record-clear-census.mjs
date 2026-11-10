@@ -458,7 +458,7 @@ const ROUTES = {
   // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
   'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
   // lane browser-login: the Vault window's web logins (names, provenance words and grant rows — never a password; a person's doors)
-  'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta', 'POST /api/vault/use-grants': 'meta', 'POST /api/vault/use-grants/revoke': 'meta', 'POST /api/vault/use-grants/resume': 'meta', 'POST /api/vault/use-policy': 'meta', 'POST /api/vault/use-policy/revoke': 'meta',   // lane vault-use-grants: a vault-use grant row (ids, hosts, an end — no record text); round 6: /resume un-pauses one member
+  'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta', 'POST /api/vault/web-logins/confirm': 'meta', 'POST /api/vault/web-logins/discard': 'meta', 'POST /api/vault/use-grants': 'meta', 'POST /api/vault/use-grants/revoke': 'meta', 'POST /api/vault/use-grants/resume': 'meta', 'POST /api/vault/use-policy': 'meta', 'POST /api/vault/use-policy/revoke': 'meta',   // lane vault-use-grants: a vault-use grant row (ids, hosts, an end — no record text); round 6: /resume un-pauses one member
   // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
   'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
   // lane vault-manual-and-lock: an agent's REQUEST (the session resolved through the jobs stash like run), its USES (its own
@@ -484,7 +484,7 @@ const ROUTES = {
   'POST /api/agent/browser/passkey': 'meta', // lane browser-passkey: the page's passkey wait — status / cancel through the watch
   'POST /api/agent/browser/size': 'meta', // lane launch-picture-size: the conversation's FIXED picture size ({w, h} in the page-size note — no content)
   'POST /api/agent/browser/permission': 'meta', // lane browser-ui-prompts-r2: one page permission decided through the watch (the lease's l.permissions row: kind + origin, no content)
-  'POST /api/agent/browser/login': 'meta', // lane browser-login: a saved web login filled through the watch — the answer is what was filled (kinds) + a receipt, never a record's text
+  'POST /api/agent/browser/fill-vault': 'meta', // lane browser-login (r22 pivot): one vault login field filled into an agent-named element through the watch — the answer is field + receipt, never a record's text
   'POST /api/agent/browser/restart': 'meta', // int220 (lane browser-unresponsive): the keeper's restartProfile on a browser the caller holds — no record of the five kinds
   'POST /api/agent/browser/site-reset': 'meta',
   'GET /api/agent/browser/providers': 'meta',
@@ -2138,6 +2138,8 @@ const I_RECV = {
   'src/input-inject.js|r.replace': ['harness', 'THE RESPAWN RULE\'s verdict — the Accessibility grant\'s from / to (granted · denied · unknown — src/input-inject.js macRespawn)'],
   // lane voice-teach-skips: the settings list's 加入 toast names why Dropline skipped the word — the vendor's skip CODE
   'src/lib/voice-teach-ui.js|skip': ['vendor code', 'Dropline\'s skip reason for ONE dictionary word (review / refused mapped to fixed words, else the vendor\'s own short code) — never a record\'s text'],
+  // lane vault-login: an existing web-login summary's pending kind ('register' | 'change' | null), compared to pick a fixed refusal
+  'src/browser-login.js|dup': ['vault entry', 'an existing web-login entry summary\'s `pending` kind (\'register\' | \'change\' | null) compared to choose one of two fixed login_exists sentences — never a record\'s words'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

@@ -190,7 +190,7 @@ registerVaultAdd({ id: 'totp', label: () => t('Two-step code…'), run: (app, c)
 registerVaultAdd({ id: 'automation', label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
 // lane vault-paste-request (the owner 2026-10-23: 「我压根没法添加啊」): a plain secret the registry lists no row for — a password, an
 // API key, an OAuth client secret — a FREE entry `secret:<id>` (name, kind, value, note), the same masked field as For you's paste box
-registerVaultAdd({ id: 'web-login', label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (the custom kernel fills it; agents never see it)
+registerVaultAdd({ id: 'web-login', label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (Hub types it on that site; VibeSpace never hands it to agents)
 registerVaultAdd({ id: 'secret', label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
 
 /** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */

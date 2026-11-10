@@ -1,0 +1,1785 @@
+#!/usr/bin/env node
+/**
+ * Round 29 regression nails for `vault-login` (`go-r29` — Compulsory 1 & 2, Items 3–5, and 2 Minor Items):
+ *   - R29-1a: Compulsory 1-1 — ONE pure verdict `loginFillChannelVerdict` (`src/browser-mediation.js`) shared by
+ *     `precheckVaultFill` AND `fillVaultField` (even when `prechecked: true`), admitting ONLY local mediated channels
+ *     (`mode === 'mediated'` or `'scope'`, with `proxy`, `!external`, `!remote`, `!remoteSession`, `hasCdp`) and
+ *     refusing every other channel with `409 login_channel_unmediated` (`0` `Input.insertText` calls).
+ *   - R29-1b: Compulsory 1-2 — `vibespace-vault request --kind login` (`src/server/vault-paste-door.js`) refuses
+ *     `409 login_channel_unmediated` BEFORE any For-you card (`userTodos`) is created on ephemeral, paired-machine
+ *     remote, external raw-CDP, and remote-session channels; admits `200` (`1` card) when attached/pinned to an
+ *     authorized local mediated profile; non-login kinds (`api-key`) still return `200`.
+ *   - R29-1c: Compulsory 1-3 — Actionable refusal words tailored to THIS conversation: explains why (temporary
+ *     browser, unmediated CDP, sign-in lost when closed), lists ONLY local mediated named profiles this conversation
+ *     is already authorized to use (`vibespace-browser use <profile>`), and when 0 are authorized explains how to
+ *     request authorization (`vibespace-ask` / `Who can use it → Change…`) while warning not to create duplicate
+ *     profiles when restricted ones exist.
+ *   - R29-1d: Compulsory 1-4 — Dynamic exhaustive grid census derived from `leaseRoadVerdict`'s `mode` and `why`
+ *     literals in `src/browser-mediation.js` × profile kinds (auto-RED if a new `mode` or `why` is added without a row).
+ *   - R29-1e: Compulsory 1-5 + Minor Item 2 — `data/bin/vibespace-browser`, `docs/agent/browser-manual.md`, and
+ *     `docs/kb-bugfix-invariants.md` state the channel law and the `< 8`-byte 6-digit OTP raw non-console / post-lift
+ *     `Runtime.consoleAPICalled` boundary.
+ *   - R29-1f: Compulsory 1-6 — Real `browser-keeper` `P5` concurrent raw-WS `awaitPromise` read attack across
+ *     managed ephemeral, subagent child handle, paired-machine remote, external raw-CDP, remote session, and
+ *     unproxied (`no-proxy`) channels (`409 login_channel_unmediated`, `0` `Input.insertText`, `""` on raw WS),
+ *     paired with positive local mediated control (`200` fill + `login_fill_live` abort on concurrent mediated read).
+ *   - R29-2: Compulsory 2 — Untouched browser sessions behave identically to `master`: unfenced `Target.sendMessageToTarget`
+ *     is forwarded on `scope` grant (`{"result":{}}`), refused when fenced; sessionless `Browser.getVersion` succeeds
+ *     both unfenced and while another tab is fenced.
+ *   - R29-3: Item 3 — Full fence restoration across Hub restart: `B.loadState` preserves `mode`, `typedSlot: 'otp'`,
+ *     `typedPrevious`, `unknownTyped`, and `also` (incl. `at`); `two-logins` (`< 8`-byte + `>= 8`-byte) wipes both on
+ *     restart ceiling; `otp` fence across unlocked restart and cold-locked `+11 min` restart never mislabels as
+ *     `unknown_typed` and wipes the `t0` 6-digit TOTP code on unlock.
+ *   - R29-4: Item 4 — "Value has left the page": `wipeNode` dispatches `input` + `change` + `blur`, and zero-plaintext
+ *     salted-hash `postLiftGuards` re-arm `409 login_fill_live` in `P2c` (ceiling wipe) and `P2e` (same-origin submit
+ *     wipe) when the site re-injects password or 6-digit OTP into the DOM, lifting cleanly on top-frame navigation.
+ *   - R29-5a & R29-5b: Item 5 — Deterministic nails killing all 12 previously surviving mutants (`M01, M02, M03, M10`
+ *     from Reader A + `M2, M4, M5, M6, M8, M10, M11, M13` from Reader B).
+ *   - R29-6: Minor Item 1 — `totpCode` returning `{ ok: false, code: 'paced' }` (21st OTP fill in 1 min via real
+ *     `vault-totp.js`) maps to `429 code_paced` instead of `409 login_no_otp`.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const SELF_PATH = fileURLToPath(import.meta.url);
+const quiet = { log() {}, warn() {}, error() {} };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function startKernelRelay(fk) {
+  const { WebSocketServer, WebSocket } = createRequire(import.meta.url)('ws');
+  const state = {
+    upstreamCalls: [],
+    hook: null,
+    attachedByTarget: new Map(),
+  };
+  let relayPort = 0;
+  const relayHttp = http.createServer((req, res) => {
+    http.get({ host: '127.0.0.1', port: fk.port, path: req.url }, (upRes) => {
+      let body = '';
+      upRes.setEncoding('utf8');
+      upRes.on('data', (d) => { body += d; });
+      upRes.on('end', () => {
+        const rewritten = body.replaceAll(`127.0.0.1:${fk.port}`, `127.0.0.1:${relayPort}`);
+        res.writeHead(upRes.statusCode || 200, { 'Content-Type': 'application/json' });
+        res.end(rewritten);
+      });
+    }).on('error', () => {
+      res.writeHead(502);
+      res.end();
+    });
+  });
+  const wss = new WebSocketServer({ noServer: true });
+  relayHttp.on('upgrade', (req, sock, head) => {
+    const upUrl = `ws://127.0.0.1:${fk.port}${req.url}`;
+    const upWs = new WebSocket(upUrl);
+    upWs.once('open', () => {
+      wss.handleUpgrade(req, sock, head, (clientWs) => {
+        const sendToClient = (obj) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(JSON.stringify(obj)); } catch { /* gone */ }
+          }
+        };
+        const closeClient = () => {
+          try { clientWs.terminate(); } catch { /* gone */ }
+        };
+        upWs.on('message', (raw) => {
+          const str = String(raw);
+          try {
+            const m = JSON.parse(str);
+            if (m.method === 'Target.attachedToTarget' && m.params?.sessionId && m.params?.targetInfo?.targetId) {
+              const tid = m.params.targetInfo.targetId;
+              if (!state.attachedByTarget.has(tid)) state.attachedByTarget.set(tid, new Set());
+              state.attachedByTarget.get(tid).add({ clientWs, sessionId: m.params.sessionId });
+            }
+          } catch { /* raw */ }
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(str); } catch { /* gone */ }
+          }
+        });
+        upWs.on('close', () => { try { clientWs.close(); } catch { /* gone */ } });
+        clientWs.on('close', () => {
+          for (const set of state.attachedByTarget.values()) {
+            for (const row of [...set]) if (row.clientWs === clientWs) set.delete(row);
+          }
+          try { upWs.close(); } catch { /* gone */ }
+        });
+        clientWs.on('message', async (raw) => {
+          const str = String(raw);
+          let m = null;
+          try { m = JSON.parse(str); } catch { m = null; }
+          if (m && m.method) {
+            state.upstreamCalls.push({ id: m.id, method: m.method, sessionId: m.sessionId || null, params: m.params || {} });
+          }
+          if (m && typeof state.hook === 'function') {
+            const hRes = await state.hook(m, { sendToClient, closeClient, upWs });
+            if (hRes === true) return;
+          }
+          if (upWs.readyState === WebSocket.OPEN) {
+            try { upWs.send(str); } catch { /* gone */ }
+          }
+        });
+      });
+    });
+    upWs.on('error', () => { try { sock.destroy(); } catch { /* gone */ } });
+  });
+  await new Promise((r) => relayHttp.listen(0, '127.0.0.1', r));
+  relayPort = relayHttp.address().port;
+  const wsPath = new URL(fk.wsUrl).pathname;
+  return {
+    port: relayPort,
+    wsUrl: `ws://127.0.0.1:${relayPort}${wsPath}`,
+    state,
+    emitTargetEvent(targetId, method, params) {
+      const set = state.attachedByTarget.get(targetId);
+      let count = 0;
+      if (!set) return 0;
+      for (const { clientWs, sessionId } of [...set]) {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          try {
+            clientWs.send(JSON.stringify({ method, params, sessionId }));
+            count++;
+          } catch { /* gone */ }
+        }
+      }
+      return count;
+    },
+    dropClientSockets() {
+      for (const ws of wss.clients) {
+        try { ws.terminate(); } catch { /* gone */ }
+      }
+    },
+    async close() {
+      for (const ws of wss.clients) { try { ws.terminate(); } catch { /* gone */ } }
+      await new Promise((r) => relayHttp.close(() => r()));
+    },
+  };
+}
+
+async function openCdpWs(WebSocket, cdpUrl, targetId = null) {
+  const ws = new WebSocket(cdpUrl);
+  await new Promise((res, rej) => {
+    ws.once('open', res);
+    ws.once('error', rej);
+  });
+  let seq = 0;
+  const pending = new Map();
+  const events = [];
+  ws.on('message', (raw) => {
+    let m;
+    try { m = JSON.parse(String(raw)); } catch { return; }
+    if (Number.isInteger(m.id) && pending.has(m.id)) {
+      const r = pending.get(m.id);
+      pending.delete(m.id);
+      r(m);
+    } else if (m.method) {
+      events.push(m);
+    }
+  });
+  const call = (method, params = {}, sessionId = undefined) => new Promise((resolve) => {
+    const id = ++seq;
+    pending.set(id, resolve);
+    ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+  });
+  let sid = null;
+  let ctxId = null;
+  if (targetId) {
+    const att = await call('Target.attachToTarget', { targetId, flatten: true });
+    sid = att.result?.sessionId || null;
+  }
+  const evalInDom = async (expression, extra = {}) => {
+    if (!ctxId && sid && targetId) {
+      const iw = await call('Page.createIsolatedWorld', { frameId: targetId, worldName: 'probe' }, sid);
+      ctxId = iw.result?.executionContextId || null;
+    }
+    return call(
+      'Runtime.evaluate',
+      { expression, ...(ctxId ? { contextId: ctxId } : {}), returnByValue: true, ...extra },
+      sid,
+    );
+  };
+  return {
+    ws,
+    sid,
+    ctxId,
+    events,
+    call,
+    evalInDom,
+    close() { try { ws.close(); } catch { /* gone */ } },
+  };
+}
+
+function installFakeAgentBrowser(binDir, abStateDir) {
+  fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(abStateDir, { recursive: true, mode: 0o700 });
+  const script = `#!${process.execPath}
+const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
+const st = process.env.FAKE_AB_STATE;
+const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
+const f = path.join(st, ns + '.json');
+const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
+const argv = process.argv.slice(2).filter((x) => x !== '--pin-tab');
+const [a, b] = argv;
+if (a === '--version') { console.log('agent-browser 0.38.2'); process.exit(0); }
+if (a === 'session' && b === 'info') {
+  const s = read();
+  const act = !!(s && alive(s.pid));
+  out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run') } });
+  process.exit(0);
+}
+if (a === 'open') {
+  let s = read();
+  if (!(s && alive(s.pid))) {
+    const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { detached: true, stdio: 'ignore' });
+    c.unref();
+    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, cdp: process.env.AGENT_BROWSER_CDP || null };
+    fs.writeFileSync(f, JSON.stringify(s));
+    fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, pid: c.pid }) + '\\n');
+  }
+  out({ success: true, data: { url: b } });
+  process.exit(0);
+}
+if (a === 'get' && b === 'cdp-url') {
+  const s = read();
+  if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); }
+  out({ success: true, data: { cdpUrl: process.env.FAKE_CDP_URL } });
+  process.exit(0);
+}
+if (a === 'tab' && b === 'new') {
+  out({ success: true, data: { targetId: process.env.FAKE_TARGET_ID || 'T-1', url: 'about:blank' } });
+  process.exit(0);
+}
+if (a === 'close' && b === '--all') {
+  const s = read();
+  let closed = 0;
+  if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch {} }
+  try { fs.unlinkSync(f); } catch {}
+  out({ success: true, data: { closed, failed: [], sessions: [] } });
+  process.exit(0);
+}
+out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') });
+process.exit(1);
+`;
+  fs.writeFileSync(path.join(binDir, 'agent-browser'), script, { mode: 0o755 });
+  return {
+    reap() {
+      try {
+        const lines = fs.readFileSync(path.join(abStateDir, 'launches.log'), 'utf8').trim().split('\n').filter(Boolean);
+        for (const l of lines) {
+          const row = JSON.parse(l);
+          if (row && row.pid) {
+            try { process.kill(row.pid, 'SIGKILL'); } catch { /* gone */ }
+          }
+        }
+      } catch { /* none */ }
+    },
+  };
+}
+
+export async function runR29LoginNails({ repoDir, ok }) {
+  const req = createRequire(path.join(repoDir, 'package.json'));
+  const express = req('express');
+  const { WebSocket } = req('ws');
+  const B = req('./src/browser-profiles.js');
+  const BF = req('./src/browser-facts.js');
+  const BM = req('./src/browser-mediation.js');
+  const BL = req('./src/browser-login.js');
+  const LF = req('./src/server/browser-login-fill.js');
+  const VE = req('./src/server/vault-engine.js');
+  const VT = req('./src/server/vault-totp.js');
+  const GS = req('./src/server/grants-store.js');
+  const BK = req('./src/server/browser-keeper.js');
+  const Lm = req('./src/server/browser-logins.js');
+  const Dm = req('./src/server/browser-dialogs.js');
+  const CM = req('./src/server/cdp-mediator.js');
+  const Rm = req('./src/routes/browser.js');
+  const VPD = req('./src/server/vault-paste-door.js');
+  const { UserTodoManager } = req('./src/user-todos.js');
+  const { startFakeKernel } = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/fake-kernel.mjs')).href);
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r29-nails-'));
+  const homeDir = path.join(tmpRoot, 'home');
+  fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+
+  try {
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-1a, 1b, 1c, 1d, 1e, 1f — THE LOGIN CHANNEL LAW (Option 甲)
+    // ──────────────────────────────────────────────────────────────────────────
+    const hasVerdictFn = typeof BM.loginFillChannelVerdict === 'function';
+    const dlgSrc = fs.readFileSync(path.join(repoDir, 'src/server/browser-dialogs.js'), 'utf8');
+    const medSrc = fs.readFileSync(path.join(repoDir, 'src/browser-mediation.js'), 'utf8');
+
+    // R29-1d: Dynamic grid census parsed from `leaseRoadVerdict` in `src/browser-mediation.js`
+    {
+      const lrvMatch = medSrc.match(/function\s+leaseRoadVerdict\s*\([\s\S]*?\n\}/);
+      const lrvBody = lrvMatch ? lrvMatch[0] : '';
+      const whyLiterals = [...new Set([...lrvBody.matchAll(/why:\s*'([^']+)'/g)].map((m) => m[1]))];
+      const modeTokens = [...new Set([...lrvBody.matchAll(/mode:\s*([A-Za-z0-9_]+)/g)].map((m) => m[1]))];
+      const modeValues = modeTokens.map((t) => (t === 'null' ? null : (BM[t] ?? t)));
+
+      const GRID = [
+        // Admitted cells (ONLY local mediated channels: 'mediated' and 'scope')
+        { key: 'mediated|mediated|local-instance', roadIn: { mediated: true, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'mediated', wantWhy: 'mediated' },
+        { key: 'scope|shared|local-owner', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, external: false, remote: false, remoteSession: false, hasCdp: true }, wantOk: true, wantMode: 'scope', wantWhy: 'shared' },
+        // Refused cells covering every leaseRoadVerdict mode/why × profile/session kinds
+        { key: 'null|no-proxy|local-owner', roadIn: { mediated: false, proxy: false, ephemeral: false, remote: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
+        { key: 'mediated|mediated|no-proxy-override', roadIn: { mediated: true, proxy: false, ephemeral: false, remote: false, agent: true }, chIn: { proxy: false }, wantOk: false, wantWhy: 'no-proxy' },
+        { key: 'null|ephemeral|managed-ephemeral', roadIn: { mediated: false, proxy: true, ephemeral: true, remote: false, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
+        { key: 'null|ephemeral|child-handle', roadIn: { mediated: false, proxy: true, ephemeral: true, remote: false, agent: true }, chIn: { proxy: true }, wantOk: false, wantWhy: 'ephemeral' },
+        { key: 'null|remote|paired-machine', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, remote: true, profileLabel: 'LabProfile' }, wantOk: false, wantWhy: 'remote' },
+        { key: 'null|remote|external-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, external: true, profileLabel: 'ExtCdp' }, wantOk: false, wantWhy: 'external' },
+        { key: 'null|remote|remote-session', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: true, agent: true }, chIn: { proxy: true, remoteSession: true }, wantOk: false, wantWhy: 'remote-session' },
+        { key: 'scope|shared|no-cdp', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: true }, chIn: { proxy: true, hasCdp: false, profileLabel: 'NoCdpProf' }, wantOk: false, wantWhy: 'no-cdp' },
+        { key: 'null|human|browse-yourself', roadIn: { mediated: false, proxy: true, ephemeral: false, remote: false, agent: false }, chIn: { proxy: true }, wantOk: false, wantWhy: 'human' },
+      ];
+
+      const coveredWhys = new Set();
+      const coveredModes = new Set();
+      const mismatches = [];
+      if (!hasVerdictFn) {
+        mismatches.push('BM.loginFillChannelVerdict is missing');
+      } else {
+        for (const row of GRID) {
+          const road = BM.leaseRoadVerdict(row.roadIn);
+          coveredWhys.add(road.why);
+          coveredModes.add(road.mode);
+          const v = BM.loginFillChannelVerdict(road, row.chIn);
+          if (Boolean(v && v.ok) !== row.wantOk) {
+            mismatches.push({ key: row.key, road, got: v, expectedOk: row.wantOk });
+          } else if (row.wantOk) {
+            if (v.mode !== row.wantMode || v.why !== row.wantWhy || v.code !== null) {
+              mismatches.push({ key: row.key, road, got: v });
+            }
+          } else if (v.code !== 'login_channel_unmediated' || v.why !== row.wantWhy || typeof v.error !== 'string' || !v.error.length) {
+            mismatches.push({ key: row.key, road, got: v, wantWhy: row.wantWhy });
+          }
+        }
+      }
+      const uncoveredWhys = whyLiterals.filter((w) => !coveredWhys.has(w));
+      const uncoveredModes = modeValues.filter((m) => !coveredModes.has(m));
+      ok(
+        hasVerdictFn
+          && whyLiterals.length >= 6
+          && uncoveredWhys.length === 0
+          && uncoveredModes.length === 0
+          && mismatches.length === 0,
+        'R29-1d (Channel Law 1-4 dynamic grid census): every mode & why literal in leaseRoadVerdict × profile kind is covered, admitting ONLY local mediated/scope channels and refusing every other cell with login_channel_unmediated',
+        { whyLiterals, modeValues, uncoveredWhys, uncoveredModes, mismatches },
+      );
+    }
+
+    // R29-1e + Minor Item 2: CLI help, agent manual, and KB invariants text check
+    {
+      const cliHelp = fs.readFileSync(path.join(repoDir, 'data/bin/vibespace-browser'), 'utf8');
+      const manual = fs.readFileSync(path.join(repoDir, 'docs/agent/browser-manual.md'), 'utf8');
+      const kb = fs.readFileSync(path.join(repoDir, 'docs/kb-bugfix-invariants.md'), 'utf8');
+      const cliOk = /login_channel_unmediated/.test(cliHelp) && /local mediated named profile/i.test(cliHelp);
+      const manualOk = /login_channel_unmediated/.test(manual) && /local mediated named/i.test(manual) && /temporary browser/i.test(manual);
+      const kbChanOk = /login_channel_unmediated/.test(kb) && /loginFillChannelVerdict/.test(kb);
+      const kbOtpOk = /6-digit OTP event boundary/.test(kb) && /MIN_MASK_BYTES\s*=\s*8/.test(kb) && /Runtime\.consoleAPICalled/.test(kb);
+      ok(
+        cliOk && manualOk && kbChanOk && kbOtpOk,
+        'R29-1e + Minor 2 (Docs, CLI help, and KB invariants): vibespace-browser help, browser-manual.md, and kb-bugfix-invariants.md document login_channel_unmediated and the < 8-byte OTP raw non-console / post-lift console boundary',
+        { cliOk, manualOk, kbChanOk, kbOtpOk },
+      );
+    }
+
+    // R29-1a, 1b, 1c, 1f: Real keeper + fake-kernel + paste-door + P5 concurrent raw-WS attack across all 6 unmediated roads
+    {
+      const ORIGIN = 'https://chanr29.example.test';
+      const PW_VAL = 'ChanLawSecret!2026_R29';
+      const OTP_VAL = '619402';
+      const binDir = path.join(tmpRoot, 'bin');
+      const abState = path.join(tmpRoot, 'ab-state');
+      const fakeAb = installFakeAgentBrowser(binDir, abState);
+      const dataMed = path.join(tmpRoot, 'data-med');
+      const dataBare = path.join(tmpRoot, 'data-bare');
+      fs.mkdirSync(dataMed, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(dataBare, { recursive: true, mode: 0o700 });
+
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, {
+        url: `${ORIGIN}/login`,
+        elements: [
+          { id: 'u', tag: 'input', type: 'email', name: 'Email' },
+          { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+          { id: 'otp', tag: 'input', type: 'text', name: 'Code' },
+        ],
+      });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY_AGENT = 'bk-0000c29a';
+      const KEY_NOAUTH = 'bk-0000c29b';
+      const KEY_OWNER2 = 'bk-0000c29c';
+      const KEY_BARE = 'bk-0000c29d';
+      const liveSet = new Set([KEY_AGENT, KEY_NOAUTH, KEY_OWNER2, KEY_BARE]);
+      const rtEnv = {
+        FAKE_AB_STATE: abState,
+        FAKE_CDP_URL: relay.wsUrl,
+        FAKE_TARGET_ID: tid,
+        PATH: `${binDir}:${process.env.PATH || '/usr/bin:/bin'}`,
+        HOME: homeDir,
+      };
+      let clock = 1_765_000_000_000;
+      const keeper = BK.create({
+        dataDir: dataMed,
+        homeDir,
+        env: () => rtEnv,
+        broadcast: () => {},
+        serverSetting: (k) => ({ 'browser.idleTimeoutMs': 600_000 })[k],
+        liveKeys: () => liveSet,
+        runtime: BF.createBrowserRuntime({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        facts: BF.createBrowserFacts({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        hostKnown: (h) => h === 'lab-1',
+        log: quiet,
+        now: () => clock,
+        install: false,
+        mediator: med,
+      });
+      const bareKeeper = BK.create({
+        dataDir: dataBare,
+        homeDir,
+        env: () => rtEnv,
+        broadcast: () => {},
+        serverSetting: (k) => ({ 'browser.idleTimeoutMs': 600_000 })[k],
+        liveKeys: () => liveSet,
+        runtime: BF.createBrowserRuntime({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        facts: BF.createBrowserFacts({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        log: quiet,
+        now: () => clock,
+        install: false,
+        mediator: null,
+      });
+
+      const vault = VE.create({ dataDir: dataMed, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r29-master-passphrase');
+      const vtotp = VT.create({ dataDir: dataMed, vault, now: () => clock });
+      vtotp.addEntry({ name: 'chan-2fa', seed: 'JBSWY3DPEHPK3PXP' });
+      const grants = GS.create({ dataDir: dataMed, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({
+        vault,
+        grants: () => grants,
+        totpCode: () => ({ ok: true, code: OTP_VAL }),
+        now: () => clock,
+        log: quiet.log,
+      });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW_VAL, totpName: 'chan-2fa' }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const dialogs = Dm.create({
+        keeper,
+        logins,
+        holdersOf: Dm.holdersOfKeeper(keeper),
+        leaseCountOf: (pid) => keeper.list().leases.filter((l) => l.profileId === pid).length,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        now: () => clock,
+        log: quiet,
+      });
+      const bareDialogs = Dm.create({
+        keeper: bareKeeper,
+        logins,
+        holdersOf: Dm.holdersOfKeeper(bareKeeper),
+        leaseCountOf: (pid) => bareKeeper.list().leases.filter((l) => l.profileId === pid).length,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        now: () => clock,
+        log: quiet,
+      });
+      // Dm.create automatically wires keeper.mediator().setLoginFence(...)!
+
+      let srv = null;
+      let srvBare = null;
+      try {
+        // Create profiles on `keeper`:
+        // 1. Authorized local mediated (`sharing: 'instance'` & `sharing: 'owner'`) for KEY_AGENT, restricted from KEY_NOAUTH!
+        const profShop = keeper.createProfile({ label: 'Shop Named', sharing: 'owner' }, { owner: { kind: 'session', id: KEY_AGENT } });
+        const profSecret = keeper.createProfile({ label: 'Restricted Vault Prof', sharing: 'instance' }, { owner: { kind: 'session', id: KEY_OWNER2 } });
+        const profRemote = keeper.createProfile({ label: 'Remote Lab', host: 'lab-1' }, { owner: { kind: 'instance', id: null } });
+        const profExt = keeper.createProfile({ label: 'Ext Raw CDP', provider: 'cdp', cdpPort: relay.port }, { owner: { kind: 'instance', id: null } });
+        const profBare = bareKeeper.createProfile({ label: 'Bare Unproxied' }, { owner: { kind: 'instance', id: null } });
+
+        // Start managed ephemeral for KEY_AGENT
+        const ephPairs = B.browserEnvFor({ browserKey: KEY_AGENT, variant: B.VARIANTS.N, idleMs: 600_000 });
+        const ephStarted = await keeper.ensureEphemeral({ browserKey: KEY_AGENT, sessionId: 'sess-c29a', envPairs: ephPairs, sessionName: 'AgentA' });
+
+        // R29-1a: ONE shared gate — both precheckVaultFill AND fillVaultField (even with prechecked: true!) call checkLoginChannelFor -> loginFillChannelVerdict
+        const checkCallSites = (dlgSrc.match(/checkLoginChannelFor\s*\(/g) || []).length;
+        const preEph = dialogs.precheckVaultFill({
+          target: '#pw',
+          spec: 'chanr29.example.test#alice/password',
+          browserKey: KEY_AGENT,
+          ephemeral: true,
+          facts: { conversationKeys: [KEY_AGENT] },
+        });
+        const fillEphBypass = await dialogs.fillVaultField(
+          { profileId: ephStarted.profile.id, browserKey: KEY_AGENT, ephemeral: true },
+          { target: '#pw', spec: 'chanr29.example.test#alice/password', prechecked: true, facts: { conversationKeys: [KEY_AGENT] } },
+        );
+        const insertsAfter1a = relay.state.upstreamCalls.filter((c) => c.method === 'Input.insertText').length;
+        ok(
+          hasVerdictFn
+            && checkCallSites >= 2
+            && preEph && preEph.ok === false && preEph.code === 'login_channel_unmediated'
+            && fillEphBypass && fillEphBypass.ok === false && fillEphBypass.code === 'login_channel_unmediated'
+            && insertsAfter1a === 0,
+          'R29-1a (Channel Law 1-1): ONE pure loginFillChannelVerdict shared by precheckVaultFill and fillVaultField (even when prechecked: true) refuses ephemeral with login_channel_unmediated and 0 Input.insertText calls',
+          { hasVerdictFn, checkCallSites, preEph, fillEphBypass, insertsAfter1a },
+        );
+
+        // R29-1c: Actionable refusal words for THIS conversation (Case A: authorized local profiles exist; Case B: 0 authorized, restricted exist; Case C: 0 profiles exist)
+        const chAgentEph = typeof keeper.loginChannelFor === 'function'
+          ? keeper.loginChannelFor({ browserKey: KEY_AGENT, agentFacts: { browserKey: KEY_AGENT, conversationKeys: [KEY_AGENT], taskIds: [] }, action: 'fill' })
+          : null;
+        const chNoAuthEph = typeof keeper.loginChannelFor === 'function'
+          ? keeper.loginChannelFor({ browserKey: KEY_NOAUTH, agentFacts: { browserKey: KEY_NOAUTH, conversationKeys: [KEY_NOAUTH], taskIds: [] }, action: 'fill' })
+          : null;
+        const chZeroProfs = hasVerdictFn
+          ? BM.loginFillChannelVerdict({ mode: null, why: 'ephemeral' }, { proxy: true, usableProfiles: [], restrictedCount: 0, action: 'fill' })
+          : null;
+        const caseAOk = Boolean(
+          chAgentEph && chAgentEph.ok === false && chAgentEph.code === 'login_channel_unmediated'
+            && /temporary browser/i.test(chAgentEph.error)
+            && /unmediated/i.test(chAgentEph.error)
+            && /lost when the temporary browser closes/i.test(chAgentEph.error)
+            && chAgentEph.error.includes('"Shop Named"')
+            && chAgentEph.error.includes('vibespace-browser use "Shop Named"')
+            && !chAgentEph.error.includes('Restricted Vault Prof')
+            && !chAgentEph.error.includes('Remote Lab')
+            && !chAgentEph.error.includes('Ext Raw CDP'),
+        );
+        const caseBOk = Boolean(
+          chNoAuthEph && chNoAuthEph.ok === false && chNoAuthEph.code === 'login_channel_unmediated'
+            && /No local named browser profile is currently authorized for this conversation/.test(chNoAuthEph.error)
+            && /vibespace-ask/.test(chNoAuthEph.error)
+            && /Who can use it/.test(chNoAuthEph.error)
+            && /never create a duplicate profile/i.test(chNoAuthEph.error)
+            && !chNoAuthEph.error.includes('Restricted Vault Prof'),
+        );
+        const caseCOk = Boolean(
+          chZeroProfs && chZeroProfs.ok === false && chZeroProfs.code === 'login_channel_unmediated'
+            && /vibespace-browser new <label>/.test(chZeroProfs.error),
+        );
+        ok(
+          caseAOk && caseBOk && caseCOk,
+          'R29-1c (Channel Law 1-3 actionable refusal words): explains temporary-browser/unmediated reason, lists ONLY authorized local mediated profiles (never restricted/remote/external), and guides vibespace-ask / Who can use it when 0 are authorized',
+          { chAgentEph, chNoAuthEph, chZeroProfs },
+        );
+
+        // R29-1b: Refuse at `vibespace-vault request --kind login` BEFORE any For-you card is created!
+        const todoDir = path.join(tmpRoot, 'todos');
+        fs.mkdirSync(todoDir, { recursive: true, mode: 0o700 });
+        const userTodos = new UserTodoManager({ dataDir: todoDir });
+        let doorRemoteSession = false;
+        let doorHandle = '';
+        const pasteDoor = VPD.create({
+          vault,
+          userTodos,
+          logins,
+          loginChannel: typeof keeper.loginChannelFor === 'function'
+            ? ({ caller }) => keeper.loginChannelFor({
+              browserKey: caller.browserKey || KEY_AGENT,
+              handle: doorHandle,
+              remoteSession: doorRemoteSession,
+              action: 'request',
+              agentFacts: { browserKey: caller.browserKey || KEY_AGENT, conversationKeys: [caller.browserKey || KEY_AGENT], taskIds: [] },
+            })
+            : null,
+        });
+        const callerA = { conversationId: 'conv-c29a', scope: 'sess-c29a', sessionKey: 'sess-c29a', name: 'AgentA', browserKey: KEY_AGENT };
+        // 1) Ephemeral (not attached to any named profile yet)
+        const reqEph = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
+        // 2) Remote profile attached
+        await keeper.attach({ profileId: profRemote.id, browserKey: KEY_AGENT, sessionId: 'sess-c29a' }).catch(() => {});
+        const reqRem = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
+        try { keeper.detach({ profileId: profRemote.id, browserKey: KEY_AGENT, by: 'user' }); } catch { /* */ }
+        // 3) External raw-CDP profile attached
+        await keeper.attach({ profileId: profExt.id, browserKey: KEY_AGENT, sessionId: 'sess-c29a' }).catch(() => {});
+        const reqExt = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
+        try { keeper.detach({ profileId: profExt.id, browserKey: KEY_AGENT, by: 'user' }); } catch { /* */ }
+        // 4) Remote session
+        doorRemoteSession = true;
+        const reqRemSess = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
+        doorRemoteSession = false;
+        const openCardsAfterRefusals = (userTodos.snapshot()?.open || []).length;
+        // 5) Non-login kind (`api-key`) on ephemeral STILL works!
+        const reqApiKey = pasteDoor.request({ caller: callerA, words: 'API token', purpose: 'call API', kind: 'api-key', name: 'CHAN_API_KEY' });
+        const openCardsAfterApiKey = (userTodos.snapshot()?.open || []).length;
+        // 6) Attach to authorized local mediated profile `profShop` -> `--kind login` now succeeds (1 login card)!
+        const atShop = await keeper.attach({ profileId: profShop.id, browserKey: KEY_AGENT, sessionId: 'sess-c29a' });
+        const reqLocalOk = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
+        const openCardsAfterLocal = (userTodos.snapshot()?.open || []).length;
+        keeper.detach({ profileId: profShop.id, browserKey: KEY_AGENT, by: 'user' });
+        if (userTodos._writeTimer) { clearTimeout(userTodos._writeTimer); userTodos._writeTimer = null; }
+
+        ok(
+          VPD.STATUS?.login_channel_unmediated === 409 && pasteDoor.statusOf('login_channel_unmediated') === 409
+            && reqEph.ok === false && reqEph.code === 'login_channel_unmediated' && String(reqEph.words || '').includes('"Shop Named"')
+            && reqRem.ok === false && reqRem.code === 'login_channel_unmediated'
+            && reqExt.ok === false && reqExt.code === 'login_channel_unmediated'
+            && reqRemSess.ok === false && reqRemSess.code === 'login_channel_unmediated'
+            && openCardsAfterRefusals === 0
+            && reqApiKey.ok === true && openCardsAfterApiKey === 1
+            && reqLocalOk.ok === true && openCardsAfterLocal === 2,
+          'R29-1b (Channel Law 1-2 request gate): vibespace-vault request --kind login refuses 409 login_channel_unmediated with 0 For-you cards on ephemeral/remote/external/remoteSession, admits api-key, and admits login once attached to an authorized local mediated profile',
+          { reqEph, reqRem, reqExt, reqRemSess, openCardsAfterRefusals, reqApiKey, reqLocalOk, openCardsAfterLocal },
+        );
+
+        // R29-1f: Reviewer A's P5 concurrent raw-WS read scene against REAL keeper across all 6 unmediated roads + positive local mediated control
+        const KEY_CHILD = `${KEY_AGENT}.1`;
+        const KEY_REM = 'bk-0000c29f';
+        const KEY_EXT = 'bk-0000c290';
+        liveSet.add(KEY_REM);
+        liveSet.add(KEY_EXT);
+        const TOK_EPH = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        const TOK_CHILD = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        const TOK_REM = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        const TOK_EXT = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        const TOK_REMSESS = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        const TOK_BARE = 'vsst_' + crypto.randomBytes(16).toString('hex');
+        keeper.setPin(KEY_REM, profRemote.id);
+        keeper.setPin(KEY_EXT, profExt.id);
+        const sessionsMed = new Map([
+          ['sess-c29a', { agentToken: TOK_EPH, _browserKey: KEY_AGENT, _browserVariant: 'D', name: 'AgentA', cwd: tmpRoot, backendSessionId: 'conv-c29a' }],
+          ['sess-child', { agentToken: TOK_CHILD, _browserKey: KEY_CHILD, _browserVariant: 'D', _subNormalizers: new Map([['sub-1', {}]]), name: 'ChildAgent', cwd: tmpRoot, backendSessionId: 'conv-child' }],
+          ['sess-remprof', { agentToken: TOK_REM, _browserKey: KEY_REM, _browserVariant: 'D', name: 'RemProfAgent', cwd: tmpRoot, backendSessionId: 'conv-remprof' }],
+          ['sess-ext', { agentToken: TOK_EXT, _browserKey: KEY_EXT, _browserVariant: 'D', name: 'ExtAgent', cwd: tmpRoot, backendSessionId: 'conv-ext' }],
+          ['sess-rem', { agentToken: TOK_REMSESS, _browserKey: 'bk-0000c29e', _browserVariant: 'H', hostId: 'lab-1', name: 'RemAgent', cwd: tmpRoot, backendSessionId: 'conv-rem' }],
+        ]);
+        Rm.setup({ keeper, activeSessions: sessionsMed, dialogs, logins, tasksForSession: () => [] });
+        const appMed = express();
+        appMed.use(express.json());
+        appMed.use(Rm.router);
+        srv = await new Promise((r) => { const s = appMed.listen(0, '127.0.0.1', () => r(s)); });
+        const baseMed = `http://127.0.0.1:${srv.address().port}`;
+
+        const runP5Probe = async (baseUrl, token, body) => {
+          const rawCdp = await openCdpWs(WebSocket, relay.wsUrl, tid);
+          const insBefore = relay.state.upstreamCalls.filter((c) => c.method === 'Input.insertText').length;
+          try {
+            const pollExpr = `new Promise((resolve) => {
+              setTimeout(() => {
+                const pw = document.querySelector('#pw')?.value || '';
+                const otp = document.querySelector('#otp')?.value || '';
+                resolve(pw + '|' + otp);
+              }, 80);
+            })`;
+            const readP = rawCdp.evalInDom(pollExpr, { awaitPromise: true });
+            await sleep(15);
+            const res = await fetch(`${baseUrl}/api/agent/browser/fill-vault`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+              body: JSON.stringify(body),
+            });
+            const json = await res.json();
+            const rawRead = await readP;
+            const insDelta = relay.state.upstreamCalls.filter((c) => c.method === 'Input.insertText').length - insBefore;
+            return { status: res.status, code: json.code, error: json.error, insDelta, rawVal: rawRead?.result?.result?.value };
+          } finally {
+            rawCdp.close();
+          }
+        };
+
+        // 1) Ephemeral (default bare verb with no attachment)
+        const p5Eph = await runP5Probe(baseMed, TOK_EPH, { target: '#otp', spec: 'chanr29.example.test#alice/otp' });
+        // 2) Child handle (subagent session resolving to ephemeral child browser)
+        const p5Child = await runP5Probe(baseMed, TOK_CHILD, { target: '#otp', spec: 'chanr29.example.test#alice/otp' });
+        // 3) Paired-machine remote profile (`profRemote.id` pinned, CLI prepare: true + direct fillVaultField)
+        const p5Remote = await runP5Probe(baseMed, TOK_REM, { prepare: true, target: '#pw', spec: 'chanr29.example.test#alice/password' });
+        const p5RemoteDirect = await dialogs.fillVaultField(
+          { profileId: profRemote.id, browserKey: KEY_REM },
+          { target: '#pw', spec: 'chanr29.example.test#alice/password', facts: { conversationKeys: [KEY_REM] } },
+        );
+        // 4) External raw-CDP profile (`profExt.id` pinned, CLI prepare: true + direct fillVaultField)
+        const p5Ext = await runP5Probe(baseMed, TOK_EXT, { prepare: true, target: '#pw', spec: 'chanr29.example.test#alice/password' });
+        const p5ExtDirect = await dialogs.fillVaultField(
+          { profileId: profExt.id, browserKey: KEY_EXT },
+          { target: '#pw', spec: 'chanr29.example.test#alice/password', facts: { conversationKeys: [KEY_EXT] } },
+        );
+        // 5) Remote session (`TOK_REMSESS`)
+        const p5RemSess = await runP5Probe(baseMed, TOK_REMSESS, { prepare: true, target: '#pw', spec: 'chanr29.example.test#alice/password' });
+
+        // Positive control on the SAME real keeper (`profShop` attached -> mediated `scope` grant):
+        const atShop2 = await keeper.attach({ profileId: profShop.id, browserKey: KEY_AGENT, sessionId: 'sess-c29a' });
+        await dialogs.arm(profShop.id);
+        dialogs.noteActiveTab({ profileId: profShop.id, browserKey: KEY_AGENT }, tid);
+        const medCdp = await openCdpWs(WebSocket, atShop2.cdpUrl, tid);
+        const medPollP = medCdp.evalInDom(
+          'new Promise((r) => setTimeout(() => r(document.querySelector("#otp")?.value || ""), 120))',
+          { awaitPromise: true },
+        );
+        await sleep(20);
+        const posFillRes = await fetch(`${baseMed}/api/agent/browser/fill-vault`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${TOK_EPH}` },
+          body: JSON.stringify({ profile: profShop.id, target: '#otp', spec: 'chanr29.example.test#alice/otp' }),
+        });
+        const posFillJson = await posFillRes.json();
+        const medPollReply = await medPollP;
+        medCdp.close();
+
+        // Reset shared `tid` DOM before running Probe #6 (`no-proxy`) so `#otp` starts empty (`rawVal === "|"`):
+        fk.setDom(tid, {
+          url: `${ORIGIN}/login`,
+          elements: [
+            { id: 'u', tag: 'input', type: 'email', name: 'Email' },
+            { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+            { id: 'otp', tag: 'input', type: 'text', name: 'Code' },
+          ],
+        });
+
+        // 6) `no-proxy` (`bareKeeper` with `mediator: null`) — Note: Rm.setup uses module-level state, so spin up after med probes!
+        await bareKeeper.attach({ profileId: profBare.id, browserKey: KEY_BARE, sessionId: 'sess-bare' });
+        const sessionsBare = new Map([
+          ['sess-bare', { agentToken: TOK_BARE, _browserKey: KEY_BARE, _browserVariant: 'D', name: 'BareAgent', cwd: tmpRoot, backendSessionId: 'conv-bare' }],
+        ]);
+        Rm.setup({ keeper: bareKeeper, activeSessions: sessionsBare, dialogs: bareDialogs, logins, tasksForSession: () => [] });
+        const appBare = express();
+        appBare.use(express.json());
+        appBare.use(Rm.router);
+        srvBare = await new Promise((r) => { const s = appBare.listen(0, '127.0.0.1', () => r(s)); });
+        const p5NoProxy = await runP5Probe(`http://127.0.0.1:${srvBare.address().port}`, TOK_BARE, {
+          profile: profBare.id,
+          target: '#pw',
+          spec: 'chanr29.example.test#alice/password',
+        });
+
+        const unmediatedProbes = [p5Eph, p5Child, p5Remote, p5Ext, p5RemSess, p5NoProxy];
+        const allRefusedCleanly = unmediatedProbes.every(
+          (p) => p.status === 409 && p.code === 'login_channel_unmediated' && p.insDelta === 0 && p.rawVal === '|',
+        )
+          && p5RemoteDirect && p5RemoteDirect.ok === false && p5RemoteDirect.code === 'login_channel_unmediated'
+          && p5ExtDirect && p5ExtDirect.ok === false && p5ExtDirect.code === 'login_channel_unmediated';
+        const posControlOk = posFillRes.status === 200
+          && posFillJson.ok === true
+          && Boolean(medPollReply?.error && /login_fill_live/.test(String(medPollReply.error.message || '')))
+          && !JSON.stringify(medPollReply).includes(OTP_VAL);
+
+        ok(
+          allRefusedCleanly && posControlOk,
+          'R29-1f (Channel Law 1-6 real keeper P5 scene): concurrent raw-WS read + fill-vault across ephemeral, child-handle, paired-remote, external-cdp, remote-session, and no-proxy all refuse 409 login_channel_unmediated with 0 Input.insertText, while local mediated profile fills (200) and aborts concurrent mediated read with login_fill_live',
+          { unmediatedProbes, posFillStatus: posFillRes.status, posFillJson, medPollReply },
+        );
+      } finally {
+        if (srvBare) await new Promise((r) => srvBare.close(() => r()));
+        if (srv) await new Promise((r) => srv.close(() => r()));
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        bareDialogs.shutdown();
+        for (const e of keeper.ephemerals()) await keeper.stop(e.profileId).catch(() => {});
+        for (const p of keeper.list().profiles) await keeper.stop(p.id).catch(() => {});
+        for (const p of bareKeeper.list().profiles) await bareKeeper.stop(p.id).catch(() => {});
+        keeper.shutdown();
+        bareKeeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+        fakeAb.reap();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-2 — COMPULSORY 2: UNTOUCHED BROWSER SESSIONS = MASTER
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://untouched29.example.test';
+      const PW_VAL = 'UntouchedPw!2026_R29';
+      const dataDir = path.join(tmpRoot, 'data-r29-2');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tidA = fk.targets()[0].targetId;
+      const tidB = fk.addTarget(`${ORIGIN}/other`);
+      fk.setDom(tidA, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidB, { url: `${ORIGIN}/other`, elements: [{ id: 'txt', tag: 'input', type: 'text', name: 'Note', value: 'hello-B' }] });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const keeper = BK.create({
+        dataDir,
+        homeDir,
+        env: () => ({ HOME: homeDir }),
+        log: quiet,
+        install: false,
+        mediator: med,
+      });
+      const prof = keeper.createProfile({ label: 'UntouchedScope' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const KEY = 'bk-0000a292';
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await vault.setup('r29-2-pass');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, totpCode: () => ({ ok: false, code: 'no_totp' }), log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW_VAL }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
+        browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 's-u29', ephemeral: false }],
+        leaseCountOf: () => 1,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        log: quiet,
+      });
+      // Dm.create automatically wires keeper.mediator().setLoginFence(...)!
+
+      try {
+        await dialogs.arm(PID);
+        const grantScope = await med.grantFor({
+          profileId: PID,
+          browserKey: KEY,
+          upstream: relay.wsUrl,
+          targetIds: [tidA, tidB],
+          mode: 'scope',
+        });
+        const wsScope = await openCdpWs(WebSocket, grantScope.url, tidB);
+        // 1) Unfenced scope session: Target.sendMessageToTarget & sessionless Browser.getVersion MUST succeed (identical to master!)
+        const sendUnfenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":1,"method":"Runtime.enable"}' });
+        const verUnfenced = await wsScope.call('Browser.getVersion', {});
+
+        // 2) Fence Tab A via real fillVaultField -> sessionless Browser.getVersion & Tab B reads MUST still succeed, while Target.sendMessageToTarget is refused login_fill_live!
+        const fillA = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'untouched29.example.test#alice/password', targetId: tidA, facts: { conversationKeys: [KEY] } },
+        );
+        const verWhileAFenced = await wsScope.call('Browser.getVersion', {});
+        const readBWhileAFenced = await wsScope.evalInDom('document.querySelector("#txt").value');
+        const sendWhileAFenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":2,"method":"Runtime.evaluate"}' });
+        wsScope.close();
+
+        ok(
+          Boolean(sendUnfenced && sendUnfenced.result && !sendUnfenced.error)
+            && Boolean(verUnfenced && verUnfenced.result && !verUnfenced.error)
+            && Boolean(fillA && fillA.ok === true)
+            && Boolean(verWhileAFenced && verWhileAFenced.result && !verWhileAFenced.error)
+            && readBWhileAFenced?.result?.result?.value === 'hello-B'
+            && Boolean(sendWhileAFenced && sendWhileAFenced.error && /Target\.sendMessageToTarget is refused|login_fill_live/.test(String(sendWhileAFenced.error.message || ''))),
+          'R29-2 (Compulsory 2 untouched parity): unfenced Target.sendMessageToTarget forwards on scope grant, sessionless Browser.getVersion succeeds both unfenced and while another tab is fenced, Tab B reads stay 200, and fenced Target.sendMessageToTarget is refused',
+          { sendUnfenced, verUnfenced, fillA, verWhileAFenced, readBWhileAFenced, sendWhileAFenced },
+        );
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-3 — ITEM 3: FULL FENCE RESTORATION ACROSS HUB RESTART
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      // 3a) Pure B.normalizeRegistry round-trip check for every persisted loginFences field
+      const sampleState = {
+        version: 1,
+        profiles: [],
+        leases: [],
+        browsers: {},
+        loginFences: {
+          'bp-00001234': {
+            fences: [{
+              targetId: 'T-RESTART',
+              urlAtFill: 'https://restart29.example.test/login',
+              origin: 'https://restart29.example.test',
+              loginId: 'web-login:https://restart29.example.test#alice',
+              at: 1_765_000_123_000,
+              mode: 'change',
+              browserKey: 'bk-00001234',
+              holdReason: 'vault_locked',
+              typedSlot: 'otp',
+              rev: 3,
+              entryGen: 'lg-abcdef012345',
+              typedPrevious: true,
+              unknownTyped: true,
+              also: [{
+                loginId: 'web-login:https://restart29.example.test#bob',
+                typedSlot: 'password',
+                rev: 2,
+                entryGen: 'lg-112233445566',
+                typedPrevious: true,
+                at: 1_765_000_120_000,
+              }],
+            }],
+            scrubs: [{ name: 'web-login:https://restart29.example.test#bob', at: 1_765_000_120_000 }],
+          },
+        },
+      };
+      const loaded = B.normalizeRegistry(sampleState);
+      const lf0 = loaded?.loginFences?.['bp-00001234']?.fences?.[0] || null;
+      const also0 = lf0 && Array.isArray(lf0.also) ? lf0.also[0] : null;
+
+      // 3b) End-to-end Hub restart scenes: (1) two-logins (<8B short + >=8B long) & (2) cold-locked +11m OTP hydration
+      const ORIGIN = 'https://restart29.example.test';
+      const SHORT_BOB = 'Sh!7';
+      const LONG_ALICE = 'AliceRestartPw!2026';
+      const dataDir = path.join(tmpRoot, 'data-r29-3');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_100_000_000;
+
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tidTwo = fk.targets()[0].targetId;
+      const tidOtp = fk.addTarget(`${ORIGIN}/otp`);
+      fk.setDom(tidTwo, {
+        url: `${ORIGIN}/login`,
+        elements: [
+          { id: 'u', tag: 'input', type: 'text', name: 'Mirror' },
+          { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+        ],
+      });
+      fk.setDom(tidOtp, {
+        url: `${ORIGIN}/otp`,
+        elements: [
+          { id: 'otp', tag: 'input', type: 'text', name: 'OTP' },
+        ],
+      });
+      const relay = await startKernelRelay(fk);
+      const med3 = CM.create({ log: quiet });
+      await med3.listen();
+
+      const mkKeeperWrap = () => {
+        const k = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), log: quiet, now: () => clock, install: false, mediator: med3 });
+        return {
+          raw: k,
+          wrap: {
+            ...k,
+            cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
+            browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
+          },
+        };
+      };
+      const k1 = mkKeeperWrap();
+      const prof = k1.raw.createProfile({ label: 'RestartProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const KEY = 'bk-0000a293';
+
+      const vault1 = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault1.setup('r29-3-master');
+      const vtotp1 = VT.create({ dataDir, vault: vault1, now: () => clock });
+      vtotp1.addEntry({ name: 'rst-2fa', seed: 'JBSWY3DPEHPK3PXP' });
+      const grants1 = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins1 = Lm.create({
+        vault: vault1,
+        grants: () => grants1,
+        totpCode: (n, o) => vtotp1.codeForLogin(n, o),
+        now: () => clock,
+        log: quiet.log,
+      });
+      logins1.addOwn({ origin: ORIGIN, username: 'bob', password: SHORT_BOB }, { who: 'owner' });
+      logins1.addOwn({ origin: ORIGIN, username: 'alice', password: LONG_ALICE, totpName: 'rst-2fa' }, { who: 'owner' });
+      grants1.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const dialogs1 = Dm.create({
+        keeper: k1.wrap,
+        logins: logins1,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 's-r293', ephemeral: false }],
+        leaseCountOf: () => 1,
+        liveFillMaxMs: 60_000,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        now: () => clock,
+        log: quiet,
+      });
+
+      let twoLoginsWipedBoth = false;
+      let otpLockedReasonRight = false;
+      let otpUnlockedWipedAtT0 = false;
+      let otpAtT0 = '';
+      let otpAtPlus11m = '';
+      try {
+        await dialogs1.arm(PID);
+        // Tab 1 (`tidTwo`): fill bob (`Sh!7`, <8B) into `#pw`, site mirrors `Sh!7` into `#u` (plain input without data-vs-typed after restart!), then fill alice (`LONG_ALICE`) into `#pw`
+        const fBob = await dialogs1.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'restart29.example.test#bob/password', targetId: tidTwo, facts: { conversationKeys: [KEY] } },
+        );
+        // Site JS copies bob's short password into `#u` (setting `defaultValue` too, so `allowTypedHeuristic` alone misses it after restart unless `f.also` hydrates bob!)
+        const rawWs = await openCdpWs(WebSocket, relay.wsUrl, tidTwo);
+        await rawWs.evalInDom('(() => { const u = document.querySelector("#u"); u.value = document.querySelector("#pw").value; u.defaultValue = u.value; return u.value; })()');
+        rawWs.close();
+        const fAlice = await dialogs1.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'restart29.example.test#alice/password', targetId: tidTwo, facts: { conversationKeys: [KEY] } },
+        );
+
+        // Tab 2 (`tidOtp`): fill alice/otp at `t0 = clock`
+        otpAtT0 = vtotp1.codeForLogin('rst-2fa', { conv: 'probe' }).code || '';
+        const fOtp = await dialogs1.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#otp', spec: 'restart29.example.test#alice/otp', targetId: tidOtp, facts: { conversationKeys: [KEY] } },
+        );
+
+        // Simulate FULL HUB RESTART #1 (unlocked, past ceiling +65s -> `tidTwo` must wipe BOTH `LONG_ALICE` in `#pw` AND `SHORT_BOB` in `#u` via `f.also`!)
+        dialogs1.shutdown();
+        k1.raw.shutdown();
+        LF.clearAllFilledSecrets?.();
+
+        // First test `tidOtp` across a COLD-LOCKED restart at `t0 + 11 min` (before ceiling if `liveFillMaxMs = 20 min`, or past ceiling!)
+        // Advance `+11 min` (`660_000 ms`): `tidTwo` AND `tidOtp` are both past `liveFillMaxMs = 60_000`!
+        // First restart UNLOCKED at `+2s` (within ceiling) -> lock -> advance `+11m` -> unlock!
+        // Wait: even better — restart COLD-LOCKED directly at `t0 + 11 min`!
+        clock += 11 * 60_000;
+        vault1.close();
+
+        const vault2 = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+        // Notice `vault2` starts LOCKED (cold boot)!
+        const vtotp2 = VT.create({ dataDir, vault: vault2, now: () => clock });
+        const grants2 = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+        const logins2 = Lm.create({
+          vault: vault2,
+          grants: () => grants2,
+          totpCode: (n, o) => vtotp2.codeForLogin(n, o),
+          now: () => clock,
+          log: quiet.log,
+        });
+        const k2 = mkKeeperWrap();
+        const dialogs2 = Dm.create({
+          keeper: k2.wrap,
+          logins: logins2,
+          holdersOf: () => [{ browserKey: KEY, sessionId: 's-r293', ephemeral: false }],
+          leaseCountOf: () => 1,
+          liveFillMaxMs: 60_000,
+          enableTimeoutMs: 1200,
+          interceptTimeoutMs: 1200,
+          now: () => clock,
+          log: quiet,
+        });
+        try {
+          await dialogs2.arm(PID);
+          // While locked on cold boot: `tidOtp` fence MUST say `vault_locked` (NEVER `unknown_typed` / "login changed since filling"!)
+          const lfOtpLocked = dialogs2.liveFillOnTarget(PID, tidOtp);
+          otpLockedReasonRight = Boolean(
+            fBob.ok && fAlice.ok && fOtp.ok
+              && lfOtpLocked
+              && lfOtpLocked.holdReason === 'vault_locked'
+              && !lfOtpLocked.unknownTyped,
+          );
+
+          // Now UNLOCK `vault2` at `t0 + 11 min`! `onVaultOpen` triggers `expireLiveFillCeiling` on BOTH `tidTwo` and `tidOtp`!
+          await vault2.unlock('r29-3-master');
+          otpAtPlus11m = vtotp2.codeForLogin('rst-2fa', { conv: 'probe2' }).code || '';
+          await sleep(180);
+
+          const chkTwo = await openCdpWs(WebSocket, relay.wsUrl, tidTwo);
+          const valsTwo = await chkTwo.evalInDom('JSON.stringify({ u: document.querySelector("#u").value, pw: document.querySelector("#pw").value })');
+          chkTwo.close();
+
+          const chkOtp = await openCdpWs(WebSocket, relay.wsUrl, tidOtp);
+          const valsOtp = await chkOtp.evalInDom('document.querySelector("#otp").value');
+          chkOtp.close();
+
+          const parsedTwo = JSON.parse(valsTwo?.result?.result?.value || '{}');
+          const otpDomAfter = valsOtp?.result?.result?.value;
+          twoLoginsWipedBoth = parsedTwo.u === '' && parsedTwo.pw === '' && dialogs2.liveFillOnTarget(PID, tidTwo) === null;
+          otpUnlockedWipedAtT0 = otpDomAfter === '' && dialogs2.liveFillOnTarget(PID, tidOtp) === null && otpAtT0.length === 6;
+        } finally {
+          dialogs2.shutdown();
+          k2.raw.shutdown();
+          vault2.close();
+        }
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs1.shutdown();
+        k1.raw.shutdown();
+        vault1.close();
+        await med3.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+
+      const loaderOk = Boolean(
+        lf0
+          && lf0.mode === 'change'
+          && lf0.typedSlot === 'otp'
+          && lf0.typedPrevious === true
+          && lf0.unknownTyped === true
+          && also0
+          && also0.loginId === 'web-login:https://restart29.example.test#bob'
+          && also0.typedSlot === 'password'
+          && also0.rev === 2
+          && also0.entryGen === 'lg-112233445566'
+          && also0.typedPrevious === true
+          && also0.at === 1_765_000_120_000,
+      );
+      ok(
+        loaderOk && twoLoginsWipedBoth && otpLockedReasonRight && otpUnlockedWipedAtT0,
+        'R29-3 (Item 3 full restart restoration): loadState preserves mode/typedSlot=otp/typedPrevious/unknownTyped/also(at), two-logins wipes <8B short secret from first login via also, and cold-locked +11m OTP restart holds vault_locked (not unknown_typed) then wipes t0 OTP on unlock',
+        { loaderOk, lf0, twoLoginsWipedBoth, otpLockedReasonRight, otpUnlockedWipedAtT0, otpAtT0, otpAtPlus11m },
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-4 — ITEM 4: "VALUE HAS LEFT THE PAGE" (`wipeNode` change/blur + `P2c`/`P2e` re-injection)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const lfSrc = fs.readFileSync(path.join(repoDir, 'src/server/browser-login-fill.js'), 'utf8');
+      const wipeDispatchesChangeAndBlur = /const notifyWipedNode\s*=/.test(lfSrc) && /new Event\('change'/.test(lfSrc) && /\.blur\s*\(\s*\)/.test(lfSrc);
+
+      const ORIGIN = 'https://item4r29.example.test';
+      const PW_VAL = 'ReinjectPw!2026_R29';
+      const OTP_VAL = '739184';
+      const dataDir = path.join(tmpRoot, 'data-r29-4');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_200_000_000;
+
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tidPw = fk.targets()[0].targetId;
+      const tidOtp = fk.addTarget(`${ORIGIN}/otp`);
+      fk.setDom(tidPw, {
+        url: `${ORIGIN}/login`,
+        elements: [
+          { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+          { id: 'go', tag: 'button', type: 'submit', name: 'Sign in' },
+        ],
+      });
+      fk.setDom(tidOtp, {
+        url: `${ORIGIN}/otp`,
+        elements: [
+          { id: 'otp', tag: 'input', type: 'text', name: 'Code' },
+          { id: 'go', tag: 'button', type: 'submit', name: 'Verify' },
+        ],
+      });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), log: quiet, now: () => clock, install: false, mediator: med });
+      const prof = keeper.createProfile({ label: 'Item4Prof' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const KEY = 'bk-0000a294';
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r29-4-pass');
+      const vtotp = VT.create({ dataDir, vault, now: () => clock });
+      vtotp.addEntry({ name: 'otp4', seed: 'JBSWY3DPEHPK3PXP' });
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({
+        vault,
+        grants: () => grants,
+        totpCode: () => ({ ok: true, code: OTP_VAL }),
+        now: () => clock,
+        log: quiet.log,
+      });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW_VAL, totpName: 'otp4' }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
+        browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 's-r294', ephemeral: false }],
+        leaseCountOf: () => 1,
+        liveFillMaxMs: 180,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        now: () => clock,
+        log: quiet,
+      });
+      // Dm.create automatically wires keeper.mediator().setLoginFence(...)!
+
+      try {
+        await dialogs.arm(PID);
+        const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl, targetIds: [tidPw, tidOtp], mode: 'scope' });
+
+        // Scene P2c (ceiling expiry + site re-injecting 6-digit OTP 10ms after wipe!)
+        const rawOtp = await openCdpWs(WebSocket, relay.wsUrl, tidOtp);
+        await rawOtp.evalInDom(`(() => {
+          const el = document.querySelector('#otp');
+          let stashed = '';
+          let n = 0;
+          const tick = () => {
+            if (++n > 200) return;
+            if (el.value) stashed = el.value;
+            else if (stashed) { el.value = stashed; return; }
+            setTimeout(tick, 10);
+          };
+          tick();
+        })()`);
+        const fOtp = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#otp', spec: 'item4r29.example.test#alice/otp', targetId: tidOtp, facts: { conversationKeys: [KEY] } },
+        );
+        clock += 250;
+        await sleep(300); // ceiling fires at 180ms, wipes `#otp`, site re-injects within 10ms, `postLiftTimer` re-arms at +35ms
+        const medOtp = await openCdpWs(WebSocket, grant.url, tidOtp);
+        const readP2cOtp = await medOtp.evalInDom('document.querySelector("#otp").value');
+        const p2cRearmed = dialogs.liveFillOnTarget(PID, tidOtp);
+        medOtp.close();
+        rawOtp.close();
+
+        // Scene P2e (same-origin failed submit + site re-injecting password 10ms after wipe, then top-frame navigation lifts!)
+        const rawPw = await openCdpWs(WebSocket, relay.wsUrl, tidPw);
+        await rawPw.evalInDom(`(() => {
+          const el = document.querySelector('#pw');
+          let stashed = '';
+          let n = 0;
+          const tick = () => {
+            if (++n > 250) return;
+            if (el.value) stashed = el.value;
+            else if (stashed) { el.value = stashed; return; }
+            setTimeout(tick, 10);
+          };
+          tick();
+        })()`);
+        // Extend clock window so tidPw doesn't hit ceiling before same-origin submit
+        const fPw = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'item4r29.example.test#alice/password', targetId: tidPw, facts: { conversationKeys: [KEY] } },
+        );
+        // Simulate same-origin XHR credential submit completing (`Network.requestWillBeSent` + `Network.loadingFinished`)
+        relay.emitTargetEvent(tidPw, 'Network.requestWillBeSent', {
+          requestId: 'req-p2e-1',
+          type: 'Fetch',
+          documentURL: `${ORIGIN}/login`,
+          request: { url: `${ORIGIN}/api/login`, method: 'POST', headers: { 'content-type': 'application/json' }, postData: JSON.stringify({ pw: PW_VAL }) },
+        });
+        relay.emitTargetEvent(tidPw, 'Network.loadingFinished', { requestId: 'req-p2e-1' });
+        await sleep(550); // `wipeAfterSameOriginSubmit` (350ms settle) wipes `#pw` -> site re-injects within 10ms -> `postLiftGuards` re-arms!
+        const medPw = await openCdpWs(WebSocket, grant.url, tidPw);
+        const readP2ePw = await medPw.evalInDom('document.querySelector("#pw").value');
+        const p2eRearmed = dialogs.liveFillOnTarget(PID, tidPw);
+
+        // Top-frame navigation to `/dashboard` clears `postLiftGuards` and lifts fence cleanly!
+        fk.setDom(tidPw, { url: `${ORIGIN}/dashboard`, elements: [{ id: 'ok', tag: 'div', text: 'Welcome' }] });
+        relay.emitTargetEvent(tidPw, 'Page.frameNavigated', {
+          frame: { id: tidPw, url: `${ORIGIN}/dashboard`, securityOrigin: ORIGIN },
+        });
+        await sleep(60);
+        const afterNavFence = dialogs.liveFillOnTarget(PID, tidPw);
+        const readAfterNav = await medPw.call('Runtime.evaluate', { expression: 'location.href', returnByValue: true }, medPw.sid);
+        medPw.close();
+        rawPw.close();
+
+        ok(
+          wipeDispatchesChangeAndBlur
+            && fOtp.ok === true
+            && Boolean(p2cRearmed)
+            && Boolean(readP2cOtp?.error && /login_fill_live/.test(String(readP2cOtp.error.message || '')))
+            && !JSON.stringify(readP2cOtp).includes(OTP_VAL)
+            && fPw.ok === true
+            && Boolean(p2eRearmed)
+            && Boolean(readP2ePw?.error && /login_fill_live/.test(String(readP2ePw.error.message || '')))
+            && !JSON.stringify(readP2ePw).includes(PW_VAL)
+            && afterNavFence === null
+            && readAfterNav?.result?.result?.value === `${ORIGIN}/dashboard`,
+          'R29-4 (Item 4 value has left the page): wipeNode dispatches change+blur, postLiftGuards re-arm login_fill_live on P2c (OTP ceiling re-inject) and P2e (password submit re-inject) with 0 secret leaks, and top-frame navigation lifts cleanly',
+          { wipeDispatchesChangeAndBlur, p2cRearmed, readP2cOtp, p2eRearmed, readP2ePw, afterNavFence, readAfterNav },
+        );
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-5a — KILL ALL 4 SURVIVING READER-A MUTANTS (`M01`, `M02`, `M03`, `M10`)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://muta29.example.test';
+      const PW_VAL = 'MutAPassword!2026_R29';
+      const dataDir = path.join(tmpRoot, 'data-r29-5a');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+
+      // M02 & M03 isolated reply-gate probes on real `cdp-mediator.js`
+      const medIso = CM.create({ log: quiet });
+      await medIso.listen();
+      let isoLive = false;
+      let isoEpoch = 0;
+      let useEpochFn = true;
+      medIso.setLoginFence({
+        liveFillTarget: () => (isoLive ? { at: Date.now() } : null),
+        fillEpochOf: () => (useEpochFn ? isoEpoch : 0),
+      });
+      const gIso = await medIso.grantFor({ profileId: 'bp-0000a502', browserKey: 'bk-0000a502', upstream: relay.wsUrl, targetIds: [tid], mode: 'scope' });
+      const wsIso = await openCdpWs(WebSocket, gIso.url, tid);
+
+      // M02: start Runtime.evaluate at (isoEpoch=0, isoLive=false); advance isoEpoch=1 (isoLive stays false) before upstream replies -> MUST refuse login_fill_live!
+      relay.state.hook = (m, { sendToClient }) => {
+        if (m.method === 'Runtime.evaluate' && m.params?.expression === '"M02_PROBE"') {
+          isoEpoch = 1;
+          setTimeout(() => {
+            sendToClient({ id: m.id, sessionId: m.sessionId, result: { result: { type: 'string', value: 'M02_LEAK' } } });
+          }, 15);
+          return true;
+        }
+        if (m.method === 'Runtime.evaluate' && m.params?.expression === '"M03_PROBE"') {
+          isoLive = true;
+          setTimeout(() => {
+            sendToClient({ id: m.id, sessionId: m.sessionId, result: { result: { type: 'string', value: 'M03_LEAK' } } });
+          }, 15);
+          return true;
+        }
+        return false;
+      };
+      const m02Res = await wsIso.call('Runtime.evaluate', { expression: '"M02_PROBE"', returnByValue: true }, wsIso.sid);
+
+      // M03: keep fillEpoch constant (0), start Runtime.evaluate while isoLive=false, flip isoLive=true before upstream replies -> MUST refuse login_fill_live!
+      useEpochFn = false;
+      isoLive = false;
+      const m03Res = await wsIso.call('Runtime.evaluate', { expression: '"M03_PROBE"', returnByValue: true }, wsIso.sid);
+      relay.state.hook = null;
+      wsIso.close();
+      await medIso.shutdown();
+
+      // M01 & M10 full `cdp-mediator` + `browser-dialogs` probes
+      const med = CM.create({ log: quiet });
+      await med.listen();
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), log: quiet, install: false, mediator: med });
+      const prof = keeper.createProfile({ label: 'MutAProf' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const KEY = 'bk-0000a510';
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await vault.setup('r29-5a-pass');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, totpCode: () => ({ ok: false, code: 'no_totp' }), log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW_VAL }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
+        browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
+        mediator: () => med,
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 's-5a', ephemeral: false }],
+        leaseCountOf: () => 1,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        log: quiet,
+      });
+      // Dm.create automatically wires keeper.mediator().setLoginFence(...)!
+
+      try {
+        await dialogs.arm(PID);
+        const gFull = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl, targetIds: [tid], mode: 'scope' });
+        const wsFull = await openCdpWs(WebSocket, gFull.url, tid);
+
+        // M10: Start pre-fill in-flight Runtime.evaluate (180ms), then run a pre-insert FAILING fill (`#missing_m10` -> target_not_found, so armLiveFillOnTab never runs!).
+        // Entry `bumpFillEpoch` MUST cut off the in-flight read with `login_fill_live`!
+        const inflightM10P = wsFull.evalInDom(
+          'new Promise((r) => setTimeout(() => r("M10_SURVIVED"), 180))',
+          { awaitPromise: true },
+        );
+        await sleep(25);
+        const failFillM10 = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#missing_m10', spec: 'muta29.example.test#alice/password', targetId: tid, facts: { conversationKeys: [KEY] } },
+        );
+        const m10Res = await inflightM10P;
+
+        // M01: Arm fence on `tid`, then send inbound `Runtime.evaluate({ expression: '"M01_INBOUND_PROBE"' })` — MUST be refused on INBOUND (0 upstream forwarding to `relay`!)
+        const okFill = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'muta29.example.test#alice/password', targetId: tid, facts: { conversationKeys: [KEY] } },
+        );
+        const upBeforeM01 = relay.state.upstreamCalls.filter((c) => c.method === 'Runtime.evaluate' && c.params?.expression === '"M01_INBOUND_PROBE"').length;
+        const m01Res = await wsFull.call('Runtime.evaluate', { expression: '"M01_INBOUND_PROBE"', returnByValue: true }, wsFull.sid);
+        const upAfterM01 = relay.state.upstreamCalls.filter((c) => c.method === 'Runtime.evaluate' && c.params?.expression === '"M01_INBOUND_PROBE"').length;
+        wsFull.close();
+
+        ok(
+          Boolean(m01Res?.error && /login_fill_live/.test(String(m01Res.error.message || '')))
+            && upAfterM01 - upBeforeM01 === 0
+            && Boolean(m02Res?.error && /login_fill_live/.test(String(m02Res.error.message || '')))
+            && !JSON.stringify(m02Res).includes('M02_LEAK')
+            && Boolean(m03Res?.error && /login_fill_live/.test(String(m03Res.error.message || '')))
+            && !JSON.stringify(m03Res).includes('M03_LEAK')
+            && failFillM10.ok === false && failFillM10.code === 'target_not_found'
+            && Boolean(m10Res?.error && /login_fill_live/.test(String(m10Res.error.message || '')))
+            && !JSON.stringify(m10Res).includes('M10_SURVIVED')
+            && okFill.ok === true,
+          'R29-5a (Reader A mutants M01, M02, M03, M10): inbound fence forwards 0 Runtime.evaluate calls upstream (M01), reply epoch & liveFill gates each refuse independently (M02, M03), and entry bumpFillEpoch aborts pre-fill in-flight reads even on pre-insert target_not_found (M10)',
+          { upDeltaM01: upAfterM01 - upBeforeM01, m01Res, m02Res, m03Res, failFillM10, m10Res },
+        );
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R29-5b + R29-6 — KILL ALL 8 SURVIVING READER-B MUTANTS (`M2, M4, M5, M6, M8, M10, M11, M13`) + MINOR 1 (`429 code_paced`)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://mutb29.example.test';
+      const LONG_ALICE = 'AliceMutBLong!2026';
+      const SHORT_BOB = 'Sh!7';
+      const dataDir = path.join(tmpRoot, 'data-r29-5b');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_300_000_000;
+
+      const fk = await startFakeKernel({
+        firstUrl: `${ORIGIN}/login`,
+        mode: { standard: true, omitFilledPassword: true },
+      });
+      const tidLock = fk.targets()[0].targetId;
+      const tidM10 = fk.addTarget(`${ORIGIN}/gen`);
+      const tidM11 = fk.addTarget(`${ORIGIN}/abort`);
+      const tidM13 = fk.addTarget(`${ORIGIN}/hold`);
+      fk.setDom(tidLock, {
+        url: `${ORIGIN}/login`,
+        elements: [
+          { id: 'echo', tag: 'div', text: '' },
+          { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+        ],
+      });
+      fk.setDom(tidM10, {
+        url: `${ORIGIN}/gen`,
+        elements: [
+          { id: 'huge', tag: 'textarea', name: 'Blob', value: 'x'.repeat(5200) },
+          { id: 'pw', tag: 'input', type: 'password', name: 'New password' },
+        ],
+      });
+      fk.setDom(tidM11, {
+        url: `${ORIGIN}/abort`,
+        elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }],
+      });
+      fk.setDom(tidM13, {
+        url: `${ORIGIN}/hold`,
+        elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }],
+      });
+      const relay = await startKernelRelay(fk);
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r29-5b-pass');
+      const vtotp = VT.create({ dataDir, vault, now: () => clock });
+      vtotp.addEntry({ name: 'mutb-2fa', seed: 'JBSWY3DPEHPK3PXP' });
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({
+        vault,
+        grants: () => grants,
+        totpCode: (n, o) => vtotp.codeForLogin(n, o),
+        now: () => clock,
+        log: quiet.log,
+      });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: LONG_ALICE, totpName: 'mutb-2fa' }, { who: 'owner' });
+      logins.addOwn({ origin: ORIGIN, username: 'bob', password: SHORT_BOB }, { who: 'owner' });
+      logins.addOwn({ origin: ORIGIN, username: 'genuser', password: ['InitialGen', 'UserPw!1'].join('') }   /* a token-shaped stand-in is built at runtime from its pieces, never a literal */, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      // R29-6: Minor Item 1 — 21st OTP fill in 1 min via real `vault-totp.js` (`code: 'paced'`) returns `code_paced` (HTTP 429), NOT `login_no_otp`!
+      let r29_6_twentieth = null;
+      for (let i = 0; i < 20; i++) {
+        r29_6_twentieth = logins.resolveFill({
+          tabOrigin: ORIGIN,
+          inFrame: false,
+          spec: 'mutb29.example.test#alice/otp',
+          conv: 'conv-pace-r29',
+          facts: { conversationKeys: ['conv-pace-r29'] },
+          checkOnly: false,
+        });
+      }
+      const r29_6_twentyFirst = logins.resolveFill({
+        tabOrigin: ORIGIN,
+        inFrame: false,
+        spec: 'mutb29.example.test#alice/otp',
+        conv: 'conv-pace-r29',
+        facts: { conversationKeys: ['conv-pace-r29'] },
+        checkOnly: false,
+      });
+      const routesSrc = fs.readFileSync(path.join(repoDir, 'src/routes/browser.js'), 'utf8');
+      ok(
+        Boolean(r29_6_twentieth && r29_6_twentieth.ok === true)
+          && Boolean(r29_6_twentyFirst && r29_6_twentyFirst.ok === false && r29_6_twentyFirst.code === 'code_paced')
+          && /code_paced:\s*429/.test(routesSrc),
+        'R29-6 (Minor Item 1 OTP pace code): 21st OTP fill within 1 minute via real vault-totp.js returns 429 code_paced instead of 409 login_no_otp',
+        { r29_6_twentyFirst },
+      );
+
+      // Reader B `M8`: stale `rollbackGenerate` with older `expectedRev` MUST NOT delete a newer `pending`!
+      const gen1 = logins.resolveFill({
+        tabOrigin: ORIGIN,
+        inFrame: false,
+        spec: 'mutb29.example.test#genuser/password',
+        generate: true,
+        facts: { conversationKeys: ['conv-m8'] },
+        checkOnly: false,
+      });
+      const discard1 = logins.discardPending(gen1.name, { who: 'owner' });
+      const gen2 = logins.resolveFill({
+        tabOrigin: ORIGIN,
+        inFrame: false,
+        spec: 'mutb29.example.test#genuser/password',
+        generate: true,
+        facts: { conversationKeys: ['conv-m8'] },
+        checkOnly: false,
+      });
+      gen1.rollbackGenerate(); // stale rollback from gen1's rev!
+      const genEntryAfterM8 = (logins.list().entries || []).find((x) => x.user === 'genuser');
+      logins.discardPending(gen2.name, { who: 'owner' });
+
+      // Reader B `M2`, `M4`, `M5`, `M6`, `M10`, `M11`, `M13`
+      let lastWatchWs = null;
+      class HookedWebSocket extends WebSocket {
+        constructor(url, opts) {
+          super(url, opts);
+          lastWatchWs = this;
+        }
+      }
+      const med5b = CM.create({ log: quiet });
+      await med5b.listen();
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), log: quiet, now: () => clock, install: false, mediator: med5b });
+      const prof = keeper.createProfile({ label: 'MutBProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const KEY = 'bk-0000b500';
+      let triggerM11CrossNavOnSave = false;
+      let m11WatchSid = null;
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
+        browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
+        saveLoginFenceState: (pid, st) => {
+          const r = keeper.saveLoginFenceState(pid, st);
+          if (triggerM11CrossNavOnSave && st && Array.isArray(st.fences) && st.fences.some((f) => f.targetId === tidM11)) {
+            triggerM11CrossNavOnSave = false;
+            if (lastWatchWs && m11WatchSid) {
+              lastWatchWs.emit('message', Buffer.from(JSON.stringify({
+                method: 'Page.frameStartedNavigating',
+                sessionId: m11WatchSid,
+                params: { frameId: tidM11, url: 'https://evil.example.test/phish' },
+              })));
+            }
+          }
+          return r;
+        },
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 's-5b', ephemeral: false }],
+        leaseCountOf: () => 1,
+        liveFillMaxMs: 60_000,
+        wipeMaxScanPositions: 4000,
+        WebSocketImpl: HookedWebSocket,
+        enableTimeoutMs: 1200,
+        interceptTimeoutMs: 1200,
+        now: () => clock,
+        log: quiet,
+      });
+
+      try {
+        await dialogs.arm(PID);
+
+        // `M10`: `--generate` on `tidM10` (which has 5,200 chars in `#huge` -> `tooMuchText: true` -> `wr = { ok: true, verifiedEmpty: false }`)
+        // when `Input.insertText` returns a CDP error -> MUST keep `tidM10` fenced AND keep `genuser`'s `pending`!
+        relay.state.hook = (m, { sendToClient }) => {
+          if (m.method === 'Input.insertText') {
+            sendToClient({ id: m.id, sessionId: m.sessionId, error: { code: -32000, message: 'synthetic insertText error' } });
+            return true;
+          }
+          return false;
+        };
+        const resM10 = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'mutb29.example.test#genuser/password', generate: true, targetId: tidM10, facts: { conversationKeys: [KEY] } },
+        );
+        relay.state.hook = null;
+        const m10StillFenced = Boolean(dialogs.liveFillOnTarget(PID, tidM10));
+        const m10PendingKept = Boolean((logins.list().entries || []).find((x) => x.user === 'genuser')?.pending);
+        logins.discardPending(`web-login:${ORIGIN}#genuser`, { who: 'owner' });
+
+        // `M11`: synchronous `Page.frameStartedNavigating` right inside `onBeforeInsert` (`saveLoginFenceState`) before `guardBeforeInsert({ stage: 'before-insert' })`!
+        // `attemptedInsert` is `false` (0 chars typed) -> `clearLiveFillOnTab` MUST clear `e.liveFill` so `tidM11` does NOT stay stuck unreadable!
+        const attSetM11 = relay.state.attachedByTarget.get(tidM11);
+        m11WatchSid = attSetM11 && attSetM11.size ? [...attSetM11][0].sessionId : null;
+        triggerM11CrossNavOnSave = true;
+        const resM11 = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'mutb29.example.test#alice/password', targetId: tidM11, facts: { conversationKeys: [KEY] } },
+        );
+        triggerM11CrossNavOnSave = false;
+        const m11FenceCleared = dialogs.liveFillOnTarget(PID, tidM11) === null
+          && !(keeper.loginFenceStateOf(PID).fences || []).some((f) => f.targetId === tidM11);
+
+        // `M2`, `M4`, `M5`, `M6`:
+        // On `tidLock`, fill `alice/password` (`LONG_ALICE` >= 8B -> in `scrubByProfile`, so `svs.length === 1`) AND `bob/password` (`SHORT_BOB` < 8B -> NOT in `scrubByProfile`!).
+        // Evict `tidLock` from `LF` (`LF.clearFilledSecretsForTarget(tidLock)`) and `vault.lock()`!
+        // Now `sigs` = `[sig(LONG_ALICE), sig(SHORT_BOB)]` (`sigs.length === 2 > 0`), `svs` = `[LONG_ALICE]` (`svs.length === 1 > 0`), and `wipeTabTypedInputs` returns `{ ok: true, verifiedEmpty: true }` even while `#echo` holds `Sh!7`!
+        const fLockAlice = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'mutb29.example.test#alice/password', targetId: tidLock, facts: { conversationKeys: [KEY] } },
+        );
+        const fLockBob = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY },
+          { target: '#pw', spec: 'mutb29.example.test#bob/password', targetId: tidLock, facts: { conversationKeys: [KEY] } },
+        );
+        const rawLock = await openCdpWs(WebSocket, relay.wsUrl, tidLock);
+        await rawLock.evalInDom(`(() => { document.querySelector('#echo').textContent = ${JSON.stringify(SHORT_BOB)}; })()`);
+        rawLock.close();
+        LF.clearFilledSecretsForTarget(tidLock);
+        vault.lock();
+
+        // Trigger `M4` (`wipeAfterSameOriginSubmit` while locked with `sigs.length === 2` & `svs.length === 1`):
+        await fk.simulateSubmitRequest(tidLock, {
+          url: `${ORIGIN}/api/login`,
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          postData: `pw=${encodeURIComponent(LONG_ALICE)}`,
+          resourceType: 'Fetch',
+        });
+        await sleep(350);
+        const m2m4Held = Boolean(dialogs.liveFillOnTarget(PID, tidLock));
+
+        // Trigger `M5` (`expireLiveFillCeiling` while locked with `sigs.length === 2` & `svs.length === 1`):
+        // Re-unlock briefly to arm a short-ceiling dialogs or trigger ceiling via `M6` + `M5`:
+        // Wait: `dialogs` has `liveFillMaxMs: 60_000`; let's also test `M5` directly with a 120ms-ceiling `dialogsM5`!
+        // First trigger `M6` (`rearmLoginFences` past ceiling while locked, AND `M13` persisted `holdReason: 'vault_locked'` within ceiling!):
+        const savedBeforeM6 = keeper.loginFenceStateOf(PID);
+        // Seed `tidM13` in persisted state within ceiling (`clock - 1000`) with `holdReason: 'vault_locked'`, while `tidLock` is past ceiling (`clock - 70_000`)!
+        clock += 70_000;
+        keeper.saveLoginFenceState(PID, {
+          fences: [
+            ...savedBeforeM6.fences.filter((f) => f.targetId === tidLock),
+            {
+              targetId: tidM13,
+              urlAtFill: `${ORIGIN}/hold`,
+              origin: ORIGIN,
+              loginId: `web-login:${ORIGIN}#alice`,
+              at: clock - 1000,
+              mode: 'login',
+              browserKey: KEY,
+              holdReason: 'vault_locked',
+              typedSlot: 'current',
+              rev: 1,
+            },
+          ],
+          scrubs: savedBeforeM6.scrubs,
+        });
+        relay.dropClientSockets();
+        await sleep(40);
+        await dialogs.arm(PID);
+        await sleep(120);
+        const m6Held = Boolean(dialogs.liveFillOnTarget(PID, tidLock));
+        const lfM13 = dialogs.liveFillOnTarget(PID, tidM13);
+        const persistedM13 = (keeper.loginFenceStateOf(PID).fences || []).find((f) => f.targetId === tidM13);
+        const m13Held = Boolean(lfM13 && lfM13.holdReason === 'vault_locked' && persistedM13 && persistedM13.holdReason === 'vault_locked');
+
+        // Dedicated `M5` probe (`expireLiveFillCeiling` timer firing while locked with `sigs.length === 2` & `svs.length === 1`!):
+        await vault.unlock('r29-5b-pass');
+        dialogs.shutdown();
+        const dialogsM5 = Dm.create({
+          keeper: keeperWrap,
+          logins,
+          holdersOf: () => [{ browserKey: KEY, sessionId: 's-5b', ephemeral: false }],
+          leaseCountOf: () => 1,
+          liveFillMaxMs: 140,
+          enableTimeoutMs: 1200,
+          interceptTimeoutMs: 1200,
+          now: () => clock,
+          log: quiet,
+        });
+        let m5Held = false;
+        try {
+          keeper.saveLoginFenceState(PID, { fences: [], scrubs: [] });
+          await dialogsM5.arm(PID);
+          await dialogsM5.fillVaultField(
+            { profileId: PID, browserKey: KEY },
+            { target: '#pw', spec: 'mutb29.example.test#alice/password', targetId: tidLock, facts: { conversationKeys: [KEY] } },
+          );
+          await dialogsM5.fillVaultField(
+            { profileId: PID, browserKey: KEY },
+            { target: '#pw', spec: 'mutb29.example.test#bob/password', targetId: tidLock, facts: { conversationKeys: [KEY] } },
+          );
+          LF.clearFilledSecretsForTarget(tidLock);
+          vault.lock();
+          clock += 200;
+          await sleep(240); // `liveFillTimer` fires `expireLiveFillCeiling` while locked (`sigs.length === 2`, `svs.length === 1`)!
+          m5Held = Boolean(dialogsM5.liveFillOnTarget(PID, tidLock));
+        } finally {
+          dialogsM5.shutdown();
+        }
+
+        ok(
+          Boolean(genEntryAfterM8 && genEntryAfterM8.pending === 'change' && genEntryAfterM8.rev === gen2.rev)
+            && resM10.ok === false && m10StillFenced && m10PendingKept
+            && resM11.ok === false && resM11.code === 'login_phishing' && m11FenceCleared
+            && fLockAlice.ok === true && fLockBob.ok === true
+            && m2m4Held && m5Held && m6Held && m13Held,
+          'R29-5b (Reader B mutants M2, M4, M5, M6, M8, M10, M11, M13): partial-sigs lock holds across submit/ceiling/rearm (M2, M4, M5, M6), stale-rev rollback preserves newer pending (M8), unconfirmed-empty post-insert error keeps fence+pending (M10), pre-insert abort clears armed fence (M11), and rearm preserves vault_locked holdReason (M13)',
+          { genEntryAfterM8, resM10, m10StillFenced, m10PendingKept, resM11, m11FenceCleared, m2m4Held, m5Held, m6Held, m13Held },
+        );
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med5b.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF_PATH)) {
+  const repoArg = process.argv.find((a) => a.startsWith('--repo='));
+  const repoDir = repoArg ? path.resolve(repoArg.slice('--repo='.length)) : path.resolve(path.dirname(SELF_PATH), '../..');
+  let pass = 0, fail = 0;
+  const okCli = (c, label, detail) => {
+    if (c) {
+      pass++;
+      console.log(`[PASS] ${label}`);
+    } else {
+      fail++;
+      console.log(`[FAIL] ${label}${detail !== undefined ? ' -> ' + JSON.stringify(detail).slice(0, 4000) : ''}`);
+    }
+    return !!c;
+  };
+  await runR29LoginNails({ repoDir, ok: okCli });
+  console.log(`=== R29 NAILS SUMMARY: ${pass}/${pass + fail} passed, ${fail} failed ===`);
+  process.exit(fail ? 1 : 0);
+}

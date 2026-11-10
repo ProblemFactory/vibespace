@@ -436,6 +436,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     contentsChanged: 'hub-only',   // lane vault-use-grants: THE ONE NOTIFY (a counter broadcast to the owner's pages — never a name or a value)
     editEntryWords: 'hub-only',   // lane vault-entry-description: THE writer of an entry's name and description — the owner's Allow / Edit… doors only (words, never a value)
     maskForms: 'hub-only', masksHeld: 'hub-only',   // lane vault-masker-once: the output belt's ONE compiled set (memory only, dropped at every write and lock) and whether one is held (a gate's question — never a value)
+    batchRecordWrite: 'hub-only', loginRevFloor: 'hub-only',   // lane vault-login r22: single-write batching with afterCommit + monotonic web-login rev floor
     usesOf: 'receipt',   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (closed fields — never a value)   // lane vault-run-door: a mark over the run door's own store under a DEK-derived key — the hub's code only
   };
   const SIBLING_KEYS = new Set(['agentMint', 'agentPut']);
@@ -858,7 +859,7 @@ console.log('⑪ lane passkey-sink: A KERNEL PASSKEY SIGNATURE IS A USE — the 
   } finally { w.shutdown(); await k.close(); eng.close(); fs.rmSync(ROOT11, { recursive: true, force: true }); }
 }
 
-console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A USE — the real route + watch + fake kernel over a REAL vault; the sentinel sweep; a leaking copy is RED');
+console.log('⑫ lane browser-login (r22 pivot): A WEB LOGIN IS A VAULT ENTRY, ITS FILL A USE — the real fill-vault route + watch + fake kernel over a REAL vault; the sentinel sweep; a leaking copy is RED');
 {
   const VE = require(path.join(REPO, 'src/server/vault-engine.js')), BL = require(path.join(REPO, 'src/browser-login.js')), Lm = require(path.join(REPO, 'src/server/browser-logins.js'));
   const Dm = require(path.join(REPO, 'src/server/browser-dialogs.js')), GS = require(path.join(REPO, 'src/server/grants-store.js')), Rm = require(path.join(REPO, 'src/routes/browser.js'));
@@ -871,7 +872,7 @@ console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A US
   // the ONE writer: only browser-logins.js seals a web-login entry (its writeEntry → secretPut), nothing else in src/ names the prefix in a put
   const putters = [...tree.entries()].filter(([rel, t]) => rel !== 'src/server/browser-logins.js' && /secretPut\([^)\n]*web-login/.test(t)).map(([rel]) => rel);
   const wsrc = read('src/server/browser-logins.js');
-  ok(!putters.length && (wsrc.match(/\bvault\.secretPut\(/g) || []).length === 1 && /function writeEntry\([\s\S]{0,500}vault\.secretPut\(name, text, \{ kind: rec\.source/.test(wsrc) && (wsrc.match(/\bvault\.noteUse\(/g) || []).length === 1,
+  ok(!putters.length && (wsrc.match(/\bvault\.secretPut\(/g) || []).length === 1 && /function writeEntry\([\s\S]{0,700}vault\.secretPut\(name, text, \{\s*kind: norm\.source/.test(wsrc) && (wsrc.match(/\bvault\.noteUse\(/g) || []).length === 1,
     'THE ONE WRITER: browser-logins.js seals a web login through ONE secretPut (writeEntry) and notes every use through ONE noteUse — nothing else in src/ writes the prefix', putters);
   const ROOT12 = scratch('vault-law-wl');
   fs.rmSync(ROOT12, { recursive: true, force: true }); fs.mkdirSync(ROOT12, { recursive: true });
@@ -883,7 +884,9 @@ console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A US
   const PW = ['wl', crypto.randomBytes(8).toString('hex'), 'Zz'].join('-');   // built at run time
   const forms = (pw) => [pw, Buffer.from(pw).toString('hex'), Buffer.from(pw).toString('base64'), Buffer.from(pw).toString('base64url')];
   ok(logins.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW }).ok && eng.secretNames().some((x) => x.name === NAME) && !fs.readFileSync(path.join(d, fs.readdirSync(d).find((f) => /vault/.test(f) && f.endsWith('.json')) || 'vault.json'), 'utf8').includes(PW), 'the owner\'s login is sealed under its entry (the record on disk holds no password in the clear)');
+  logins.addOwn({ origin: 'https://other.example.test', username: 'alice', password: PW });
   grants.set('browser-login', 'https://shop.example.test#*', { to: [{ kind: 'conversation', key: 'conv-wl-1' }] });
+  grants.set('browser-login', 'https://other.example.test#*', { to: [{ kind: 'conversation', key: 'conv-wl-1' }] });
   const k = await startFakeKernel({ firstUrl: 'https://shop.example.test/login' });
   const PID = 'bp-e0000c01', KEY = 'bk-0000c10a', TOKEN = 'vsst_vault_law_wl';
   const mkWatch = (Dmod) => Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: quiet, enableTimeoutMs: 300, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-wl' }], leaseCountOf: () => 1, labelOf: () => 'Work', logins, conversationOf: () => ({ cid: 'conv-wl-1', name: 'Chat' }) });
@@ -891,7 +894,7 @@ console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A US
   const stubKeeper = { resolveFor: () => ({ ok: true, kind: 'none', handles: [] }), ensureEphemeral: async () => ({ profile: { id: PID, label: effProfile.label }, browser: { state: 'ready' }, lease: {}, created: false }), socketRootOf: () => ({ socketDir: path.join(ROOT12, 'sock'), runtimeDir: null }), configFileFor: () => path.join(ROOT12, 'cfg.json'), clock: () => Date.now(),
     profile: (id) => (id === PID ? effProfile : null), profileByRef: () => null, setFor: () => ({ attachments: [], handles: [] }), audit() {}, noteLeaseUrl() {}, leasesFor: () => [], inputStateFor: () => ({ input: 'agent', takenAt: 0 }), ephemeralFor: (bk) => (bk === KEY ? { profileId: PID, sessionId: 'sess-wl' } : null), cdpEndpointFor: async (pid) => (pid === PID ? { ok: true, url: k.wsUrl } : { ok: false }), onLease: () => () => {} };
   const sessions = new Map([['sess-wl', { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Chat', cwd: ROOT12, backendSessionId: 'conv-wl-1' }]]);
-  const serve = async (R, w) => { R.setup({ keeper: stubKeeper, activeSessions: sessions, dialogs: w, logins, tasksForSession: () => [] }); const app = express(); app.use(express.json()); app.use(R.router); const srv = http.createServer(app); const port = await freePort(); await new Promise((r) => srv.listen(port, '127.0.0.1', r)); return { srv, url: `http://127.0.0.1:${port}/api/agent/browser/login` }; };
+  const serve = async (R, w) => { R.setup({ keeper: stubKeeper, activeSessions: sessions, dialogs: w, logins, tasksForSession: () => [] }); const app = express(); app.use(express.json()); app.use(R.router); const srv = http.createServer(app); const port = await freePort(); await new Promise((r) => srv.listen(port, '127.0.0.1', r)); return { srv, url: `http://127.0.0.1:${port}/api/agent/browser/fill-vault` }; };
   const ask = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ profile: PID, ...body }) }); return { status: r.status, text: await r.text() }; };
   const MUT = mutantCopies('vault-law-wl', REPO);
   const servers = [];
@@ -900,36 +903,50 @@ console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A US
     const w = mkWatch(Dm); watches.push(w);
     await w.arm(PID);
     const tid = k.targets()[0].targetId;
-    k.detectCredentialForm({ targetId: tid, kind: 'login' });
-    k.detectCredentialForm({ targetId: tid, kind: 'signup', surfaceId: 'surf-cred-signup' });
-    for (let i = 0; i < 100 && w.loginForms(PID).length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    k.setDom(tid, {
+      url: 'https://shop.example.test/login',
+      elements: [
+        { id: 'u', tag: 'input', type: 'email', axRole: 'textbox', axName: 'Email' },
+        { id: 'pw', tag: 'input', type: 'password', axRole: 'textbox', axName: 'Password' },
+        { id: 'npw', tag: 'input', type: 'password', axRole: 'textbox', axName: 'New password' },
+      ],
+    });
+    await w.noteSnapshot({ profileId: PID, browserKey: KEY }, '- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]\n- textbox "New password" [ref=e3]');
     const real = await serve(Rm, w); servers.push(real.srv);
-    const answers = [await ask(real.url, { user: 'alice' }), await ask(real.url, { user: 'alice', submit: true }), await ask(real.url, { user: 'nobody' }), await ask(real.url, { origin: 'https://other.example.test' }), await ask(real.url, { newUser: 'bob', generate: true })];
+    const answers = [
+      await ask(real.url, { target: '@e1', spec: 'shop.example.test#alice/user' }),
+      await ask(real.url, { target: '@e2', spec: 'shop.example.test#alice/password' }),
+      await ask(real.url, { target: '@e2', spec: 'shop.example.test#nobody/password' }),
+      await ask(real.url, { target: '@e2', spec: 'other.example.test#alice/password' }),
+      await ask(real.url, { target: '@e3', spec: 'new:shop.example.test#bob/password', generate: true }),
+    ];
     const bob = eng.secretGet(BL.entryName('https://shop.example.test', 'bob'));
-    const bobPw = bob.ok && bob.value ? BL.recordOf(bob.value.toString('utf8')).password : null;
+    const bobRec = bob.ok && bob.value ? BL.recordOf(bob.value.toString('utf8')) : null;
+    const bobPw = bobRec && bobRec.pending ? bobRec.pending.password : null;
     const sentinels = [...forms(PW), ...(bobPw ? forms(bobPw) : [])];
-    ok(answers[0].status === 200 && answers[4].status === 200 && answers[2].status === 404 && answers[3].status === 403 && bobPw && k.filledCredentials().length >= 3, 'the route answers a fill, a submitted fill, a signup and two refusals (login_no_entry 404 · login_phishing 403)', answers.map((a) => [a.status, a.text.slice(0, 160)]));
+    const domVals = k.readDomValues(tid);
+    ok(answers[0].status === 200 && answers[1].status === 200 && answers[4].status === 200 && answers[2].status === 404 && answers[3].status === 403 && bobPw && domVals.u === 'alice' && domVals.pw === PW && domVals.npw === bobPw,
+      'the route answers user + password fills, a generated registration and two refusals (login_no_entry 404 · login_phishing 403)', answers.map((a) => [a.status, a.text.slice(0, 160)]));
     ok(answers.every((a) => sentinels.every((x) => !a.text.includes(x))), 'THE SENTINEL SWEEP: no answer of the route holds a password (the owner\'s or the one the vault minted) — raw, hex, base64 or base64url');
     const lines = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'browser-login');
-    ok(lines.length >= 3 && lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant') && lines.some((l) => l.purpose === 'sign in at https://shop.example.test' && l.outcome === 'ok') && lines.some((l) => /register an account/.test(l.purpose)) && sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x)),
-      'THE USE LAW: every fill is ONE vault-use line through the engine\'s noteUse (the entry, door browser-login, the conversation, the purpose, a receipt — the closed key set), never a password', lines.map((l) => [l.entry, l.purpose, l.outcome]));
-    // MUTANT: a watch copy that answers the values, a route copy that passes the answer on
+    ok(lines.length >= 3 && lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant') && lines.some((l) => l.outcome === 'filled') && lines.some((l) => l.outcome === 'generated-and-filled') && sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x)),
+      'THE USE LAW: every fill is ONE vault-use line through the engine\'s noteUse (the entry, door browser-login, the conversation, the purpose, outcome filled/generated-and-filled, a receipt — the closed key set), never a password', lines.map((l) => [l.entry, l.purpose, l.outcome]));
+    // MUTANT: a watch copy that answers the value, a route copy that passes the answer on
     const dsrc = read('src/server/browser-dialogs.js'), rsrc = read('src/routes/browser.js');
-    const leakD = dsrc.replace('    plan.values = null; // handed to the kernel — kept by no one here\n', '').replace("return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled,", "return { ok: true, values: plan.values, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled,");
-    const leakR = rsrc.replace("res.json({ ok: true, mode: r.mode, origin: r.origin, user: r.user, filled: r.filled, submitted: !!r.submitted, receipt: r.receipt || null, text });", "res.json({ ok: true, ...r, text });");
+    const leakD = dsrc.replace("        resolved.value = '';\n", '').replace('      receipt,\n    };', '      value: resolved.value,\n      receipt,\n    };');
+    const leakR = rsrc.replace("    res.json({\n      ok: true,\n      entry: r.entry,", "    res.json({\n      ...r,\n      ok: true,\n      entry: r.entry,");
     ok(leakD !== dsrc && leakR !== rsrc, 'the two mutation anchors are found (the watch\'s answer, the route\'s named fields)');
     const DL = MUT.load('src/server/browser-dialogs.js', leakD, 'leakwatch');
     const wl = mkWatch(DL); watches.push(wl);
     await wl.arm(PID);
-    k.detectCredentialForm({ targetId: tid, kind: 'login', surfaceId: 'surf-cred-again' });
-    for (let i = 0; i < 100 && !wl.loginForms(PID).length; i++) await new Promise((r) => setTimeout(r, 10));
+    await wl.noteSnapshot({ profileId: PID, browserKey: KEY }, '- textbox "Password" [ref=e2]');
     const half = await serve(Rm, wl); servers.push(half.srv);
-    const a1 = await ask(half.url, { user: 'alice' });
+    const a1 = await ask(half.url, { target: '@e2', spec: 'shop.example.test#alice/password' });
     ok(a1.status === 200 && forms(PW).every((x) => !a1.text.includes(x)), 'the REAL route over a leaking watch still answers no value — its named fields are a second belt');
     const RL = MUT.load('src/routes/browser.js', leakR, 'leakroute');
     const both = await serve(RL, wl); servers.push(both.srv);
-    const a2 = await ask(both.url, { user: 'alice' });
-    ok(a2.status === 200 && forms(PW).some((x) => a2.text.includes(x)), 'MUTANT RED: a watch copy that answers the values + a route copy that passes the answer on ⇒ the sweep sees the password (the sweep bites)');
+    const a2 = await ask(both.url, { target: '@e2', spec: 'shop.example.test#alice/password' });
+    ok(a2.status === 200 && forms(PW).some((x) => a2.text.includes(x)), 'MUTANT RED: a watch copy that answers the value + a route copy that passes the answer on ⇒ the sweep sees the password (the sweep bites)');
   } finally {
     for (const x of servers) { try { x.close(); } catch {} }
     for (const x of watches) { try { x.shutdown(); } catch {} }

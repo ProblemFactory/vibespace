@@ -87,7 +87,7 @@ const STATUS = Object.freeze({
   bad_answer: 400, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
   totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
-  login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes)
+  login_no_door: 409, login_channel_unmediated: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes + r29 channel law)
 });
 const named = (code, extra = {}) => ({ ok: false, code, words: MORE_WORDS[code] || P.WORDS[code] || code, ...extra });
 const statusOf = (code) => STATUS[code] || 400;
@@ -101,7 +101,9 @@ const statusOf = (code) => STATUS[code] || 400;
  * @param {object} [o.vaultRun]    src/server/vault-run-door.js (grantPasted — the asker may use a NEW free entry in runs)
  * @param {object} [o.logins]      src/server/browser-logins.js (addOwn — THE web-login writer; grant — the 用于… row) — lane login-request-card
  */
-function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, totp = null, runOf = () => null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {   // totp + runOf: lane totp-request-card (src/server/vault-totp.js — addEntry, THE person's two-step writer; grant, the entry's «Use for…»; runOf = the wiring's: a running conversation's run)
+function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, totp = null, runOf = () => null, loginChannel = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {   // totp + runOf: lane totp-request-card (src/server/vault-totp.js — addEntry, THE person's two-step writer; grant, the entry's «Use for…»; runOf = the wiring's: a running conversation's run)
+  let loginChannelFn = typeof loginChannel === 'function' ? loginChannel : null;
+  const setLoginChannel = (fn) => { loginChannelFn = typeof fn === 'function' ? fn : null; };
   // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
   // lane vault-use-grants round 5 (MAJOR item 2): the setting gates the 8-HOUR run grant (via vaultRun.grantPasted) — it no
   // longer needs useGrants (r4's standing member, which did, is gone). Default on; off ⇒ the asker must `request` to use it.
@@ -160,6 +162,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!v.ok) return v;
     if (!userTodos) return named('unfiled');
     if (v.target.kind === P.LOGIN_KIND && !(logins && typeof logins.addOwn === 'function')) return named('login_no_door');   // lane login-request-card
+    if (v.target.kind === P.LOGIN_KIND && loginChannelFn) {
+      const ch = loginChannelFn({ caller, handle: (caller && caller.handle) || '' });
+      if (!ch || !ch.ok) {
+        const c = (ch && ch.code) || 'login_channel_unmediated';
+        return { ok: false, code: c, words: (ch && (ch.error || ch.words)) || MORE_WORDS[c] || P.WORDS[c] || c };
+      }
+    }
     if (v.target.kind === P.TOTP_KIND && !(totp && typeof totp.addEntry === 'function')) return named('totp_no_door');   // lane totp-request-card
     index();
     const conv = String(caller.conversationId), place = placeOf(v.target), target = publicTarget(v.target);
@@ -496,7 +505,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
   function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
-  return { request, answer, addEntry, dropEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen };
+  return { request, answer, addEntry, dropEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
 }
 
 module.exports = { create, MORE_WORDS, STATUS, FROM_NAME };

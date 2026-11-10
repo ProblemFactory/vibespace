@@ -71,7 +71,7 @@ function maskableSecrets(v) {
       const buf = Buffer.isBuffer(g.value) ? g.value : Buffer.from(String(g.value), 'utf8');
       const value = buf.toString('utf8');
       if (Buffer.isBuffer(g.value)) g.value.fill(0);
-      if (/^web-login:/.test(name)) { let r = null; try { r = JSON.parse(value); } catch { r = null; } for (const pw of [r && r.password, r && r.previous && r.previous.password]) if (typeof pw === 'string' && pw) out.push({ label: name, value: pw }); continue; }   // lane browser-login: a web login's PASSWORD (its sealed record is JSON — the value an output could carry is the password, and the one it replaced)
+      if (/^web-login:/.test(name)) { let r = null; try { r = JSON.parse(value); } catch { r = null; } for (const pw of new Set([r && r.password, r && r.current && r.current.password, r && r.pending && r.pending.password, r && r.previous && r.previous.password])) if (typeof pw === 'string' && pw) out.push({ label: name, value: pw }); continue; }   // lane browser-login: a web login's 3 password slots (current, pending, previous)
       if (value) out.push({ label: name, value });
     }
   }

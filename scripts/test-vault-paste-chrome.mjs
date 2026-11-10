@@ -66,8 +66,9 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has)
-if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+const chromeArg = (() => { const i = process.argv.indexOf('--chrome'); return i > 0 ? process.argv[i + 1] : null; })();
+const CHROME = chromeArg || [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has)
+if (!CHROME || !fs.existsSync(CHROME)) { console.error('SKIPPED: no chrome/chromium'); process.exit(2); }
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('vpaste-wt'), PROFILE = scratch('vpaste-chrome'), fakeHome = scratch('vpaste-home'), stubDir = scratch('vpaste-stub');
@@ -361,6 +362,11 @@ try {
     check(`⑧ ${RELOADED} (${rl8.ms} ms)`, rl8.ok, rl8);
     const bad8 = await cli(['request', 'the wiki login', '--purpose', 'read the wiki', '--kind', 'login', '--host', 'http://wiki.example.test'], TOKEN);
     check('a site the add door refuses (plain http) ⇒ refused at the CLI by name, before any card', bad8.code !== 0 && /https site/.test(bad8.out), bad8);
+    const eph8 = await cli(['request', 'the shop login on ephemeral browser', '--purpose', 'order the replacement parts', '--kind', 'login', '--host', 'shop.example.test'], TOKEN);
+    check('a website login request on an unmediated temporary browser ⇒ refused by name before any card is filed', eph8.code !== 0 && /temporary browser|mediated named browser profile/i.test(eph8.out), eph8);
+    const newProf8 = await fetch(`http://127.0.0.1:${PORT}/api/agent/browser/new`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ label: 'Shop' }) }).then((r) => r.json());
+    const pinProf8 = await fetch(`http://127.0.0.1:${PORT}/api/agent/browser/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ profile: 'Shop' }) }).then((r) => r.json());
+    check('local mediated named profile created and pinned for this conversation', !!(newProf8 && newProf8.profile && newProf8.profile.id && pinProf8 && pinProf8.pin && pinProf8.pin.profileId === newProf8.profile.id), { newProf8, pinProf8 });
     const long8 = 'the parts shop login so I can order the replacement parts you listed this morning — '.repeat(4).slice(0, 200);
     const l1 = await ask([long8, '--purpose', 'order the replacement parts', '--kind', 'login', '--host', 'shop.example.test'], TOKEN);
     check('`request "<200 characters>" --purpose … --kind login --host shop.example.test` ⇒ exit 0 — «a website login on https://shop.example.test — only that site is ever filled with it»', l1.code === 0 && !!l1.id && /a website login on https:\/\/shop\.example\.test — only that site is ever filled with it/.test(l1.out), l1);
@@ -419,13 +425,13 @@ try {
     const cn = await evalJs(C(l1.id, ANY));
     check('…and its NAME is in the card\'s field — no retyping; the same box, the other fields kept', !!cn && cn.otp === 'shop-code' && cn.user === 'Owner@Shop.Example' && cn.pw === V_LOGIN && (await evalJs(`document.querySelector(${JSON.stringify(ANY)}) === window.__loginBox`)), cn);
     check('a real click on Save and allow (in the card\'s own window)', (await realClick(ANY + ' .ut-secret-save')) === true);
-    check('stored ⇒ the card resolved (its window closed) and the toast says the agent may sign in with it there, never seeing the password', !!(await until(`!document.querySelector(${JSON.stringify(ANY)})`, { timeout: 10000 })) && !!(await until(`[...document.querySelectorAll('.toast, [class*=toast]')].some((t) => /Saved to the vault — the agent may sign in with it on that site; it never sees the password/.test(t.textContent))`, { timeout: 6000 })));
+    check('stored ⇒ the card resolved (its window closed) and the toast says the agent may sign in with it there; VibeSpace never hands it the password', !!(await until(`!document.querySelector(${JSON.stringify(ANY)})`, { timeout: 10000 })) && !!(await until(`[...document.querySelectorAll('.toast, [class*=toast]')].some((t) => /Saved to the vault — the agent may sign in with it on that site; VibeSpace never hands it the password/.test(t.textContent))`, { timeout: 6000 })));
     const wl = await pageApi('GET', '/api/vault/web-logins');
     const e1 = ((wl.json && wl.json.entries) || []).find((e) => e.name === 'web-login:https://shop.example.test#owner@shop.example');
     const gr = (e1 && e1.grants) || [];
     check('ONE web-login entry (the owner\'s, the add door\'s name) and ONE grant: this conversation on THIS account — nothing wider', !!e1 && e1.source === 'owner' && gr.length === 1 && gr[0].scope === 'this-account' && (gr[0].to || []).length === 1 && gr[0].to[0].kind === 'conversation' && hitsIn(JSON.stringify(wl.json), V_LOGIN) === 0, { e1, grants: gr });
     const turn8 = await nextTurn(TOKEN);
-    check('the agent\'s next turn: STORED for the site with its user (it may fill it), standing, HOW TO USE IT — never the password', /STORED — a website login for https:\/\/shop\.example\.test \(user owner@shop\.example\)/.test(turn8) && /vibespace-browser login https:\/\/shop\.example\.test --user owner@shop\.example signs in/.test(turn8) && /paused since 2\.369\.364/.test(turn8) && hitsIn(turn8, V_LOGIN) === 0, turn8.slice(0, 900));
+    check('the agent\'s next turn: STORED for the site with its user (it may fill it), standing, HOW TO USE IT — never the password', /STORED — a website login for https:\/\/shop\.example\.test \(user owner@shop\.example\)/.test(turn8) && /vibespace-browser fill <@ref> --vault https:\/\/shop\.example\.test#owner@shop\.example\/user/.test(turn8) && /--vault https:\/\/shop\.example\.test#owner@shop\.example\/password/.test(turn8) && /VibeSpace never hands you the password/.test(turn8) && hitsIn(turn8, V_LOGIN) === 0, turn8.slice(0, 900));
 
     // ⑨ (r3, law B) EVERY SURFACE THAT DRAWS THE CARD — the census's legs. On each: type both fields → «Two-step code…» → a press
     // INSIDE the dialog → both fields still hold what was typed → save a code → its name lands in THAT box (the same element)

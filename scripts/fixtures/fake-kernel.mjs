@@ -56,6 +56,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
@@ -97,11 +98,14 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const info = (t) => ({ targetId: t.targetId, type: 'page', title: t.title, url: t.url, attached: t.sessions.size > 0, canAccessOpener: false, browserContextId: 'ctx-1' });
   const send = (ws, o) => { try { ws.send(JSON.stringify(o)); } catch { /* gone */ } };
   const all = (o) => { for (const ws of sockets) send(ws, o); };
-  const newTarget = (url) => { const t = { targetId: 'T' + (++seq).toString(16).padStart(8, '0').toUpperCase(), url: String(url || 'about:blank'), title: String(url || 'about:blank'), sessions: new Set(), held: null }; targets.set(t.targetId, t); return t; };
-  const attach = (ws, t) => { const sid = 'S' + crypto.randomUUID().replace(/-/g, '').slice(0, 24).toUpperCase(); sessions.set(sid, { targetId: t.targetId, ws, page: false, vs: false }); t.sessions.add(sid); send(ws, { method: 'Target.attachedToTarget', params: { sessionId: sid, targetInfo: info(t), waitingForDebugger: false } }); return sid; };
-  let autoAttach = false;
+  const newTarget = (url) => { const t = { targetId: 'T' + (++seq).toString(16).padStart(8, '0').toUpperCase(), url: String(url || 'about:blank'), title: String(url || 'about:blank'), sessions: new Set(), held: null, domOrigin: undefined, frames: new Map(), domNodes: new Map() }; targets.set(t.targetId, t); return t; };
+  const attach = (ws, t) => { const sid = 'S' + crypto.randomUUID().replace(/-/g, '').slice(0, 24).toUpperCase(); sessions.set(sid, { targetId: t.targetId, ws, page: false, vs: false, fetch: false, net: false }); t.sessions.add(sid); send(ws, { method: 'Target.attachedToTarget', params: { sessionId: sid, targetInfo: info(t), waitingForDebugger: false } }); return sid; };
+  let autoAttach = false, ctxSeq = 10, objSeq = 100, reqSeq = 0;
+  const isoContexts = new Map(); // contextId → { targetId, frameId, sandbox }
+  const objMap = new Map();      // objectId → { target, fid, node, ctxId }
+  const pendingFetches = new Map(); // requestId → { targetId, resourceType, resolve }
   newTarget(firstUrl);
-  const frameOf = (t) => ({ id: t.targetId, loaderId: 'L' + t.targetId, url: t.url, domainAndRegistry: '', securityOrigin: 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
+  const frameOf = (t) => ({ id: t.targetId, loaderId: 'L' + t.targetId, url: t.url, domainAndRegistry: '', securityOrigin: originOfUrl(t.url) || 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
   // ── the surface protocol ──
   const onTarget = (tid, fn) => { for (const [sid, s] of sessions) if (s.targetId === tid) fn(sid, s); };
   /** A VibeSpace.* event on every session of the tab that enabled surfaces (Q2: the frame's sessionId + params.targetId). */
@@ -218,8 +222,445 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     closeSurface(entry.surfaceId, { how: ok ? 'answered' : 'dismissed', by: 'vibespace', outcome: { outcome: ok ? 'completed' : 'cancelled' } });
     return { ok: true, surfaceId: entry.surfaceId, requestId: entry.requestId };
   }
-  // ── lane browser-login: the credential legs ──
-  const originOfUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.origin : null; } catch { return null; } };
+  // ── lane browser-login: the credential legs + r22 DOM/Fetch simulation ──
+  function originOfUrl(u) { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.origin : null; } catch { return null; } }
+  function matchSel(node, sel) {
+    if (!node || node.isConnected === false) return false;
+    const parts = String(sel || '').split(',').map((s) => s.trim()).filter(Boolean);
+    return parts.some((p) => {
+      if (p === '*') return true;
+      if (p.startsWith('#')) return node.id === p.slice(1);
+      if (p === '[contenteditable]') return !!node.isContentEditable;
+      if (p === '[role="textbox"]') return node._role === 'textbox';
+      if (node._selector && node._selector === p) return true;
+      return node._tag === p.toLowerCase();
+    });
+  }
+  function ensureFrameDoc(t, fid, url, isTop) {
+    let f = t.frames.get(fid);
+    if (f) return f;
+    const nodes = [];
+    const winListeners = new Map();
+    const emitWin = (type, target) => {
+      const set = winListeners.get(type);
+      if (!set) return;
+      for (const fn of [...set]) {
+        try { fn({ type, target }); } catch { /* page listener threw */ }
+      }
+    };
+    const moObservers = [];
+    const notifyMo = (targetNode, record) => {
+      for (const ob of [...moObservers]) {
+        if (!ob.active || ob.target !== targetNode) continue;
+        if (record.type === 'attributes' && ob.opts && ob.opts.attributes) {
+          if (Array.isArray(ob.opts.attributeFilter) && !ob.opts.attributeFilter.includes(record.attributeName)) continue;
+          queueMicrotask(() => { if (ob.active) { try { ob.cb([record]); } catch {} } });
+        } else if (record.type === 'childList' && ob.opts && ob.opts.childList) {
+          queueMicrotask(() => { if (ob.active) { try { ob.cb([record]); } catch {} } });
+        }
+      }
+    };
+    const parentBox = {
+      nodeType: 1,
+      tagName: 'FORM',
+      appendChild(child) {
+        if (child) {
+          const idx = nodes.indexOf(child);
+          if (idx >= 0) nodes.splice(idx, 1);
+          nodes.push(child);
+          child.parentNode = parentBox;
+          child.parentElement = parentBox;
+          child.isConnected = true;
+          t.domNodes.set(child.backendNodeId, child);
+          notifyMo(parentBox, { type: 'childList', target: parentBox });
+        }
+        return child;
+      },
+    };
+    const doc = {
+      readyState: 'complete',
+      activeElement: null,
+      documentElement: { _isDocRoot: true, _fid: fid },
+      body: { _isDocRoot: true, _fid: fid },
+      createElement(tag) {
+        const tg = String(tag || 'input').toLowerCase();
+        const bid = 90000 + (++objSeq);
+        const mkAttrs = new Map([['type', 'text']]);
+        let mkType = 'text';
+        const n2 = {
+          nodeType: 1,
+          backendNodeId: bid,
+          id: `dyn-${bid}`,
+          _selector: `#dyn-${bid}`,
+          _tag: tg,
+          _role: tg === 'button' ? 'button' : 'textbox',
+          _axName: '',
+          _fid: fid,
+          _inputEvents: [],
+          tagName: tg.toUpperCase(),
+          get type() { return mkType; },
+          set type(v) { mkType = String(v || 'text').toLowerCase(); mkAttrs.set('type', mkType); notifyMo(n2, { type: 'attributes', target: n2, attributeName: 'type' }); },
+          value: '',
+          defaultValue: '',
+          disabled: false,
+          readOnly: false,
+          hidden: false,
+          inert: false,
+          isConnected: false,
+          isContentEditable: false,
+          ownerDocument: doc,
+          parentNode: null,
+          parentElement: null,
+          shadowRoot: null,
+          style: { getPropertyValue: () => '', getPropertyPriority: () => '', setProperty() {}, removeProperty() {} },
+          getAttribute: (k) => (mkAttrs.has(k) ? mkAttrs.get(k) : null),
+          hasAttribute: (k) => mkAttrs.has(k),
+          setAttribute: (k, v) => { mkAttrs.set(String(k), String(v)); notifyMo(n2, { type: 'attributes', target: n2, attributeName: String(k) }); },
+          removeAttribute: (k) => { mkAttrs.delete(String(k)); notifyMo(n2, { type: 'attributes', target: n2, attributeName: String(k) }); },
+          closest: () => null,
+          getBoundingClientRect: () => ({ width: 200, height: 32 }),
+          scrollIntoView() {},
+          focus() {
+            if (n2.inert || n2.disabled || n2.isConnected === false) return;
+            f.doc.activeElement = n2;
+            f.emitWin('focusin', n2);
+            f.emitWin('focus', n2);
+          },
+          select() {
+            n2.focus();
+            if (f.doc.activeElement === n2) { f.emitWin('selectstart', n2); f.emitWin('select', n2); }
+          },
+          click() { n2.focus(); },
+          blur() { if (f.doc.activeElement === n2) f.doc.activeElement = null; },
+          addEventListener() {},
+          removeEventListener() {},
+          dispatchEvent(ev) { if (ev && ev.type === 'input') n2._inputEvents.push({ type: 'input' }); return true; },
+        };
+        return n2;
+      },
+      querySelector(sel) {
+        if (!/^[#a-zA-Z0-9_.*,\s[\]="':-]+$/.test(String(sel || ''))) throw new SyntaxError('Invalid selector');
+        return nodes.find((n) => matchSel(n, sel)) || null;
+      },
+      querySelectorAll(sel) { return nodes.filter((n) => matchSel(n, sel)); },
+    };
+    f = { id: fid, isTop: !!isTop, url: String(url || t.url), nodes, doc, parentBox, moObservers, notifyMo, axPadBytes: 0, winListeners, emitWin, topMarker: isTop ? {} : null, lastCtxId: 0 };
+    t.frames.set(fid, f);
+    return f;
+  }
+  function setDom(targetId, { url, origin, elements = [], childFrames = [], axPadBytes = 0 } = {}) {
+    const t = targets.get(targetId) || [...targets.values()][0];
+    if (!t) return false;
+    if (url) { t.url = String(url); t.title = String(url); }
+    t.domOrigin = origin;
+    t.frames.clear();
+    t.domNodes.clear();
+    const topF = ensureFrameDoc(t, t.targetId, t.url, true);
+    topF.axPadBytes = Number(axPadBytes) || 0;
+    t.childFrameInfos = childFrames.map((cf, i) => {
+      const id = cf.id || `${t.targetId}-CF${i + 1}`;
+      const u = String(cf.url || 'https://frame.example.test/');
+      ensureFrameDoc(t, id, u, false);
+      return { id, parentId: t.targetId, loaderId: `L-${id}`, url: u, securityOrigin: originOfUrl(u) || 'null', mimeType: 'text/html' };
+    });
+    let bseq = 500;
+    for (const raw of elements) {
+      const fid = raw.frameId ? String(raw.frameId) : t.targetId;
+      const f = ensureFrameDoc(t, fid, t.url, fid === t.targetId);
+      const bid = Number(raw.backendNodeId) || (++bseq);
+      const tag = String(raw.tag || 'input').toLowerCase();
+      const type = String(raw.type || 'text').toLowerCase();
+      const attrs = new Map([['type', type], ...(raw.id ? [['id', String(raw.id)]] : [])]);
+      let curType = type;
+      const nodeListeners = new Map();
+      const node = {
+        nodeType: 1,
+        backendNodeId: bid,
+        id: raw.id ? String(raw.id) : '',
+        _selector: raw.selector ? String(raw.selector) : (raw.id ? `#${raw.id}` : ''),
+        _tag: tag,
+        _role: String(raw.role || raw.axRole || (tag === 'button' ? 'button' : 'textbox')),
+        _axName: String(raw.name ?? raw.axName ?? ''),
+        _fid: fid,
+        _focusHijackId: raw.focusHijackId ? String(raw.focusHijackId) : null,
+        _focusHijackMode: raw.focusHijackMode ? String(raw.focusHijackMode) : 'sync',
+        _postPrepareAttack: raw.postPrepareAttack ? String(raw.postPrepareAttack) : null,
+        _hijackOnClear: !!raw.hijackBeforeInsert,
+        _clearOnChange: !!raw.clearOnChange,
+        _zeroBounds: !!raw.zeroBounds,
+        _inputEvents: [],
+        tagName: tag.toUpperCase(),
+        get type() { return curType; },
+        set type(v) { curType = String(v || 'text').toLowerCase(); attrs.set('type', curType); f.notifyMo(node, { type: 'attributes', target: node, attributeName: 'type' }); },
+        value: String(raw.value || ''),
+        defaultValue: String(raw.defaultValue || ''),
+        disabled: !!raw.disabled,
+        readOnly: !!raw.readOnly,
+        hidden: !!raw.hidden,
+        inert: false,
+        isConnected: raw.connected !== false,
+        isContentEditable: false,
+        ownerDocument: f.doc,
+        parentNode: f.parentBox,
+        parentElement: f.parentBox,
+        shadowRoot: null,
+        style: { getPropertyValue: () => '', getPropertyPriority: () => '', setProperty() {}, removeProperty() {} },
+        getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null),
+        hasAttribute: (k) => attrs.has(k),
+        setAttribute: (k, v) => {
+          attrs.set(String(k), String(v));
+          f.notifyMo(node, { type: 'attributes', target: node, attributeName: String(k) });
+          if (String(k) === 'inert' && raw.moStripInert) {
+            queueMicrotask(() => {
+              node.inert = false;
+              attrs.delete('inert');
+              node.focus();
+            });
+          }
+        },
+        removeAttribute: (k) => { attrs.delete(String(k)); f.notifyMo(node, { type: 'attributes', target: node, attributeName: String(k) }); },
+        closest: () => null,
+        getBoundingClientRect: () => (node._zeroBounds ? { width: 0, height: 0 } : { width: 200, height: 32 }),
+        scrollIntoView() {},
+        addEventListener(evType, fn) {
+          const k = String(evType || '');
+          if (!nodeListeners.has(k)) nodeListeners.set(k, new Set());
+          if (typeof fn === 'function') nodeListeners.get(k).add(fn);
+        },
+        removeEventListener(evType, fn) {
+          const s = nodeListeners.get(String(evType || ''));
+          if (s) s.delete(fn);
+        },
+        remove() {
+          node.isConnected = false;
+          node.parentNode = null;
+          node.parentElement = null;
+          const idx = f.nodes.indexOf(node);
+          if (idx >= 0) f.nodes.splice(idx, 1);
+          if (f.doc.activeElement === node) {
+            f.doc.activeElement = null;
+            const bs = nodeListeners.get('blur');
+            if (bs) for (const fn of [...bs]) { try { fn({ type: 'blur', target: node }); } catch {} }
+          }
+          f.notifyMo(f.parentBox, { type: 'childList', target: f.parentBox });
+        },
+        replaceWith(other) {
+          const idx = f.nodes.indexOf(node);
+          node.isConnected = false;
+          node.parentNode = null;
+          node.parentElement = null;
+          if (f.doc.activeElement === node) {
+            f.doc.activeElement = null;
+            const bs = nodeListeners.get('blur');
+            if (bs) for (const fn of [...bs]) { try { fn({ type: 'blur', target: node }); } catch {} }
+          }
+          if (other) {
+            other.isConnected = true;
+            other.parentNode = f.parentBox;
+            other.parentElement = f.parentBox;
+            if (idx >= 0) f.nodes.splice(idx, 1, other);
+            else f.nodes.push(other);
+            t.domNodes.set(other.backendNodeId, other);
+          } else if (idx >= 0) {
+            f.nodes.splice(idx, 1);
+          }
+          f.notifyMo(f.parentBox, { type: 'childList', target: f.parentBox });
+        },
+        click() { node.focus(); },
+        select() {
+          node.focus();
+          if (f.doc.activeElement === node) {
+            f.emitWin('selectstart', node);
+            f.emitWin('select', node);
+          }
+        },
+        focus() {
+          if (node.inert || node.disabled || node.isConnected === false) return;
+          const prevAct = f.doc.activeElement;
+          f.doc.activeElement = node;
+          if (prevAct && prevAct !== node) {
+            const pbs = prevAct._nodeListeners && prevAct._nodeListeners.get('blur');
+            if (pbs) for (const fn of [...pbs]) { try { fn({ type: 'blur', target: prevAct }); } catch {} }
+          }
+          f.emitWin('focusin', node);
+          f.emitWin('focus', node);
+          if (node._focusHijackId) {
+            const steal = () => {
+              const other = f.nodes.find((o) => o.id === node._focusHijackId || o._selector === node._focusHijackId);
+              if (!other) { f.doc.activeElement = null; return; }
+              if (node._postPrepareAttack === 'strip-inert') {
+                other.inert = false;
+                other.removeAttribute('inert');
+                other.focus();
+                return;
+              }
+              if (node._postPrepareAttack === 'click') {
+                other.click();
+                return;
+              }
+              if (node._postPrepareAttack === 'select') {
+                other.inert = false;
+                other.removeAttribute('inert');
+                other.select();
+                return;
+              }
+              if (node._postPrepareAttack === 'move') {
+                f.parentBox.appendChild(node);
+                other.inert = false;
+                other.removeAttribute('inert');
+                other.focus();
+                return;
+              }
+              if (node._postPrepareAttack === 'replace') {
+                const dyn = f.doc.createElement('input');
+                dyn.id = 'dyn-decoy';
+                node.replaceWith(dyn);
+                dyn.focus();
+                return;
+              }
+              if (other.inert || other.disabled || other.isConnected === false) return;
+              f.doc.activeElement = other;
+              f.emitWin('focusin', other);
+              f.emitWin('focus', other);
+            };
+            if (node._focusHijackMode === 'microtask') queueMicrotask(steal);
+            else if (node._focusHijackMode === 'timeout') setTimeout(steal, 0);
+            else if (node._focusHijackMode === 'post-prepare') setTimeout(steal, 15);
+            else steal();
+          }
+        },
+        blur() {
+          if (f.doc.activeElement === node) {
+            f.doc.activeElement = null;
+            const bs = nodeListeners.get('blur');
+            if (bs) for (const fn of [...bs]) { try { fn({ type: 'blur', target: node }); } catch {} }
+          }
+        },
+        _nodeListeners: nodeListeners,
+        dispatchEvent(ev) {
+          if (ev && ev.type === 'input') {
+            node._inputEvents.push({ type: 'input' });
+            if (node._hijackOnClear) f.doc.activeElement = null;
+          }
+          if (ev && ev.type === 'change' && node._clearOnChange) node.value = '';
+          return true;
+        },
+      };
+      f.nodes.push(node);
+      t.domNodes.set(bid, node);
+    }
+    topF.doc.activeElement = null;
+    return true;
+  }
+  function createWorldSandbox(t, fid) {
+    const f = ensureFrameDoc(t, fid, t.url, fid === t.targetId);
+    const topF = ensureFrameDoc(t, t.targetId, t.url, true);
+    const locOrigin = fid === t.targetId
+      ? (t.domOrigin !== undefined ? t.domOrigin : (originOfUrl(f.url) || 'null'))
+      : (originOfUrl(f.url) || 'null');
+    const win = {
+      document: f.doc,
+      location: { origin: locOrigin, href: f.url },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      Event: class Event { constructor(type, init) { this.type = String(type); this.bubbles = !!(init && init.bubbles); } },
+      MutationObserver: class MutationObserver {
+        constructor(cb) { this.cb = cb; this.active = false; this.target = null; this.opts = null; }
+        observe(target, opts = {}) { this.target = target; this.opts = opts; this.active = true; f.moObservers.push(this); }
+        disconnect() { this.active = false; }
+      },
+      setTimeout,
+      clearTimeout,
+      queueMicrotask,
+      addEventListener(type, fn) {
+        const k = String(type || '');
+        if (!f.winListeners.has(k)) f.winListeners.set(k, new Set());
+        if (typeof fn === 'function') f.winListeners.get(k).add(fn);
+      },
+      removeEventListener(type, fn) {
+        const set = f.winListeners.get(String(type || ''));
+        if (set) set.delete(fn);
+      },
+    };
+    win.window = win;
+    win.top = f.isTop ? win : { document: topF.doc };
+    return vm.createContext(win);
+  }
+  function readDomValues(targetId) {
+    const t = targets.get(targetId) || [...targets.values()][0];
+    if (!t) return {};
+    const out = {};
+    for (const node of t.domNodes.values()) {
+      const k = node.id || node._selector || String(node.backendNodeId);
+      out[k] = node.value;
+    }
+    return out;
+  }
+  function readDomInputCounts(targetId) {
+    const t = targets.get(targetId) || [...targets.values()][0];
+    if (!t) return {};
+    const out = {};
+    for (const node of t.domNodes.values()) {
+      const k = node.id || node._selector || String(node.backendNodeId);
+      out[k] = { valueLen: String(node.value || '').length, inputEvents: node._inputEvents.length, type: node.type };
+    }
+    return out;
+  }
+  function simulateSubmitRequest(targetIdOrOpts, opts = {}) {
+    const o = typeof targetIdOrOpts === 'object' && targetIdOrOpts !== null ? targetIdOrOpts : { targetId: targetIdOrOpts, ...opts };
+    const t = targets.get(o.targetId) || [...targets.values()][0];
+    if (!t) return Promise.resolve({ action: 'no_target' });
+    const requestId = `req-${++reqSeq}`;
+    const url = String(o.url || t.url);
+    const method = String(o.method || 'POST');
+    const postData = o.omitInlinePostData ? undefined : (o.postData !== undefined ? String(o.postData) : '');
+    const fullPostData = o.fullPostData !== undefined ? String(o.fullPostData) : (o.postData !== undefined ? String(o.postData) : '');
+    const hasPostData = o.hasPostData !== undefined ? !!o.hasPostData : fullPostData.length > 0;
+    const headers = o.headers && typeof o.headers === 'object' ? { ...o.headers } : {};
+    const resourceType = String(o.resourceType || 'Fetch');
+    return new Promise((resolve) => {
+      let sent = 0;
+      pendingFetches.set(requestId, {
+        targetId: t.targetId,
+        resourceType,
+        postData: fullPostData,
+        fullPostData,
+        getPostDataError: o.getPostDataError ? String(o.getPostDataError) : null,
+        finish: o.finish !== false,
+        resolve,
+      });
+      onTarget(t.targetId, (sid, s) => {
+        if (s.net) {
+          send(s.ws, {
+            method: 'Network.requestWillBeSent',
+            params: { requestId, request: { url, method, headers }, type: resourceType },
+            sessionId: sid,
+          });
+        }
+        const matchFetch = s.fetch && (!Array.isArray(s.fetchPatterns) || !s.fetchPatterns.length || s.fetchPatterns.some((pt) => !pt.resourceType || pt.resourceType === resourceType));
+        if (matchFetch) {
+          sent++;
+          send(s.ws, {
+            method: 'Fetch.requestPaused',
+            params: {
+              requestId,
+              networkId: requestId,
+              request: {
+                url,
+                method,
+                headers,
+                hasPostData,
+                ...(postData !== undefined ? { postData } : {}),
+              },
+              frameId: t.targetId,
+              resourceType,
+            },
+            sessionId: sid,
+          });
+        }
+      });
+      if (!sent) { pendingFetches.delete(requestId); resolve({ action: 'unwatched' }); }
+    });
+  }
   function detectCredentialForm(spec = {}) {
     const t = targets.get(spec.targetId) || [...targets.values()][0];
     if (!t) return null;
@@ -287,11 +728,159 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       case 'Target.detachFromTarget': { const sid = p.sessionId || m.sessionId; const x = targets.get((sessions.get(sid) || {}).targetId); if (x) x.sessions.delete(sid); sessions.delete(sid); return {}; }
       case 'Target.closeTarget': { const x = targets.get(p.targetId); if (!x) return { success: false }; targets.delete(x.targetId); for (const s of [...surfaces.values()]) if (s.targetId === x.targetId) surfaces.delete(s.surfaceId); all({ method: 'Target.targetDestroyed', params: { targetId: x.targetId } }); return { success: true }; }
       case 'Page.enable': if (ss) ss.page = true; if (t && mode.holdEnable && mode.holdEnable.has(t.targetId)) return { __noreply: true }; return {};
-      case 'Page.getFrameTree': return { frameTree: { frame: frameOf(t || [...targets.values()][0]) } };
+      case 'Page.getFrameTree': {
+        const x = t || [...targets.values()][0];
+        return { frameTree: { frame: frameOf(x), ...(x && x.childFrameInfos && x.childFrameInfos.length ? { childFrames: x.childFrameInfos.map((cf) => ({ frame: cf })) } : {}) } };
+      }
+      case 'Page.createIsolatedWorld': {
+        const x = t || [...targets.values()][0];
+        const fid = String(p.frameId || (x ? x.targetId : ''));
+        const cid = ++ctxSeq;
+        const sandbox = x ? createWorldSandbox(x, fid) : vm.createContext({});
+        if (x) ensureFrameDoc(x, fid, x.url, fid === x.targetId).lastCtxId = cid;
+        isoContexts.set(cid, { targetId: x ? x.targetId : null, frameId: fid, sandbox });
+        return { executionContextId: cid };
+      }
+      case 'DOM.enable': return {};
+      case 'Accessibility.getFullAXTree': {
+        const x = t || [...targets.values()][0];
+        const fid = String(p.frameId || (x ? x.targetId : ''));
+        const f = x ? x.frames.get(fid) : null;
+        const els = (f ? f.nodes : []).filter((el) => !el.hidden && el.isConnected !== false);
+        const pad = f && f.axPadBytes > 0 ? 'x'.repeat(f.axPadBytes) : undefined;
+        return {
+          nodes: els.map((el) => ({
+            nodeId: `ax-${el.backendNodeId}`,
+            backendDOMNodeId: el.backendNodeId,
+            ignored: false,
+            role: { type: 'role', value: el._role },
+            name: { type: 'computedString', value: el._axName },
+            ...(pad ? { description: { type: 'computedString', value: pad } } : {}),
+          })),
+        };
+      }
+      case 'Accessibility.queryAXTree': {
+        const x = t || [...targets.values()][0];
+        const refObj = p.objectId ? objMap.get(String(p.objectId)) : null;
+        const refDom = !refObj && p.backendNodeId ? (x && x.domNodes.get(Number(p.backendNodeId))) : null;
+        const fid = String((refObj && refObj.fid) || (refDom && refDom._fid) || p.frameId || (x ? x.targetId : ''));
+        const f = x ? x.frames.get(fid) : null;
+        const wantRole = p.role !== undefined && p.role !== null && String(p.role) !== '' ? String(p.role).toLowerCase() : null;
+        const wantName = p.accessibleName !== undefined && p.accessibleName !== null && String(p.accessibleName) !== '' ? String(p.accessibleName) : null;
+        const els = (f ? f.nodes : []).filter((el) => {
+          if (el.hidden || el.isConnected === false) return false;
+          if (wantRole && String(el._role || '').toLowerCase() !== wantRole) return false;
+          if (wantName !== null && String(el._axName || '') !== wantName) return false;
+          return true;
+        });
+        const pad = f && f.axPadBytes > 0 ? 'x'.repeat(f.axPadBytes) : undefined;
+        return {
+          nodes: els.map((el) => ({
+            nodeId: `ax-${el.backendNodeId}`,
+            backendDOMNodeId: el.backendNodeId,
+            ignored: false,
+            role: { type: 'role', value: el._role },
+            name: { type: 'computedString', value: el._axName },
+            ...(pad ? { description: { type: 'computedString', value: pad } } : {}),
+          })),
+        };
+      }
+      case 'DOM.describeNode': {
+        const x = t || [...targets.values()][0];
+        const el = x ? x.domNodes.get(Number(p.backendNodeId)) : null;
+        if (!el || el.isConnected === false) return { __error: { code: -32000, message: 'Could not find node with given id' } };
+        return { node: { nodeId: el.backendNodeId, backendNodeId: el.backendNodeId, nodeName: el.tagName, localName: el._tag, frameId: el._fid } };
+      }
+      case 'DOM.resolveNode': {
+        const x = t || [...targets.values()][0];
+        const ctxId = Number(p.executionContextId);
+        const ctx = isoContexts.get(ctxId);
+        const wantFid = ctx ? ctx.frameId : (x ? x.targetId : '');
+        const el = x ? x.domNodes.get(Number(p.backendNodeId)) : null;
+        if (!el || el.isConnected === false || el._fid !== wantFid) return { __error: { code: -32000, message: 'Cannot find context or node' } };
+        const oid = `obj-${++objSeq}`;
+        objMap.set(oid, { target: x, fid: wantFid, node: el, ctxId });
+        return { object: { type: 'object', objectId: oid } };
+      }
+      case 'Runtime.releaseObject': objMap.delete(String(p.objectId || '')); return {};
+      case 'Runtime.releaseObjectGroup': return {};
+      case 'Runtime.callFunctionOn': {
+        const ref = objMap.get(String(p.objectId || ''));
+        if (!ref || !ref.node || ref.node.isConnected === false) return { result: { type: 'boolean', value: false } };
+        const ctx = isoContexts.get(ref.ctxId) || (ref.target && isoContexts.get((ref.target.frames.get(ref.fid) || {}).lastCtxId));
+        if (!ctx || !ctx.sandbox) return { result: { type: 'boolean', value: false } };
+        try {
+          const fn = vm.runInContext(`(${p.functionDeclaration})`, ctx.sandbox);
+          const v = fn.apply(ref.node, (p.arguments || []).map((a) => a.value));
+          if (p.awaitPromise && v && typeof v.then === 'function') {
+            return Promise.resolve(v).then(
+              (val) => ({ result: { type: typeof val, value: val } }),
+              (err) => ({ exceptionDetails: { text: String(err && err.message) }, result: { type: 'object', subtype: 'error' } }),
+            );
+          }
+          return { result: { type: typeof v, value: v } };
+        } catch (err) {
+          return { exceptionDetails: { text: String(err && err.message) }, result: { type: 'object', subtype: 'error' } };
+        }
+      }
+      case 'Input.insertText': {
+        const doInsert = () => {
+          if (t) {
+            const topF = t.frames.get(t.targetId);
+            const act = topF && topF.doc ? topF.doc.activeElement : null;
+            if (act && act.isConnected !== false && !act.inert && !act.disabled && !act.readOnly && typeof act.value === 'string') {
+              act.value += String(p.text || '');
+              act._inputEvents.push({ type: 'insertText', len: String(p.text || '').length });
+            }
+          }
+          return {};
+        };
+        if (mode.preInsertDelayMs > 0) {
+          return new Promise((r) => setTimeout(() => r(doInsert()), Number(mode.preInsertDelayMs)));
+        }
+        return doInsert();
+      }
+      case 'Fetch.enable': if (ss) { ss.fetch = true; ss.fetchPatterns = Array.isArray(p.patterns) ? p.patterns : [{ urlPattern: '*' }]; } return {};
+      case 'Fetch.disable': if (ss) { ss.fetch = false; ss.fetchPatterns = []; } return {};
+      case 'Network.enable': if (ss) ss.net = true; return {};
+      case 'Network.disable': if (ss) ss.net = false; return {};
+      case 'Fetch.getRequestPostData': {
+        const pf = pendingFetches.get(String(p.requestId || ''));
+        if (!pf) return { __error: { code: -32000, message: 'No pending request' } };
+        if (pf.getPostDataError) return { __error: { code: -32000, message: pf.getPostDataError } };
+        return { postData: String(pf.fullPostData ?? pf.postData ?? '') };
+      }
+      case 'Fetch.continueResponse':
+      case 'Fetch.continueRequest': {
+        const pf = pendingFetches.get(String(p.requestId || ''));
+        if (pf) {
+          pendingFetches.delete(String(p.requestId));
+          pf.resolve({ action: 'continue' });
+          if (pf.finish && pf.resourceType !== 'Document') {
+            setTimeout(() => onTarget(pf.targetId, (sid, s) => { if (s.net) send(s.ws, { method: 'Network.loadingFinished', params: { requestId: String(p.requestId) }, sessionId: sid }); }), 5);
+          }
+        }
+        return {};
+      }
+      case 'Fetch.failRequest': {
+        const pf = pendingFetches.get(String(p.requestId || ''));
+        if (pf) { pendingFetches.delete(String(p.requestId)); pf.resolve({ action: 'fail', errorReason: p.errorReason || 'Failed' }); }
+        return {};
+      }
       case 'Page.navigate': if (t) {
         t.url = String(p.url || 'about:blank'); t.title = t.url;
         const want = /#vs-surface=([a-z-]+)(?::([a-z]+))?/.exec(t.url);
         const login = /#vs-login=([a-z-]+)/.exec(t.url), typed = /#vs-typed=([^:#]+):([^#]+)/.exec(t.url); // lane browser-login
+        if (login) {
+          setDom(t.targetId, {
+            url: t.url,
+            elements: [
+              { id: 'u', tag: 'input', type: 'email', name: 'Username' },
+              { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
+              { id: 'npw', tag: 'input', type: 'password', name: 'New password' },
+            ],
+          });
+        }
         if (want) setTimeout(() => openSurface(want[1] === 'js-dialog' ? { ...jsDialogSpec(want[2] || 'confirm', { message: 'Leave this page?', origin: 'https://example.test' }), targetId: t.targetId, hold: true } : { kind: want[1], targetId: t.targetId, hold: true }), 30);
         else if (mode.proxy && /^https?:/i.test(t.url)) { const nav = t.url; fetchVia(nav).then((r) => { if (r && t.url === nav) t.title = `egress ${r.status}: ${r.body.trim().split('\n')[0]}`; loaded(t); }); } // lane engine-spi-egress
         else { setTimeout(() => loaded(t), 5); if (login) setTimeout(() => detectCredentialForm({ targetId: t.targetId, kind: login[1] }), 20); if (typed) { const [who, pw] = [typed[1], typed[2]].map(decodeURIComponent); setTimeout(() => submitCredentialForm({ targetId: t.targetId, usernameHint: who, password: pw }), 20); } }
@@ -303,7 +892,30 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         return {};
       }
       case 'Runtime.enable': if (t) setTimeout(() => ev('Runtime.executionContextCreated', { context: { id: 1, origin: '', name: '', uniqueId: 'U' + t.targetId, auxData: { isDefault: true, type: 'default', frameId: t.targetId } } }), 1); return {};
-      case 'Runtime.evaluate': return { result: { type: 'string', value: t ? (/title/.test(String(p.expression)) ? t.title : t.url) : '' } };
+      case 'Runtime.evaluate': {
+        const expr = String(p.expression || '');
+        const ctx = p.contextId != null ? isoContexts.get(Number(p.contextId)) : null;
+        if (ctx && ctx.sandbox) {
+          try {
+            const v = vm.runInContext(expr, ctx.sandbox);
+            if (!p.returnByValue && v && typeof v === 'object' && (v._isDocRoot || v.nodeType === 1)) {
+              const oid = `obj-${++objSeq}`;
+              objMap.set(oid, { target: t, fid: v._fid || ctx.frameId, node: v, ctxId: Number(p.contextId) });
+              return { result: { type: 'object', objectId: oid } };
+            }
+            if (p.awaitPromise && v && typeof v.then === 'function') {
+              return Promise.resolve(v).then(
+                (val) => ({ result: { type: typeof val, value: val } }),
+                (err) => ({ exceptionDetails: { text: String(err && err.message) }, result: { type: 'object', subtype: 'error' } }),
+              );
+            }
+            return { result: { type: typeof v, value: v } };
+          } catch (err) {
+            return { exceptionDetails: { text: String(err && err.message) }, result: { type: 'object', subtype: 'error' } };
+          }
+        }
+        return { result: { type: 'string', value: t ? (/title/.test(expr) ? t.title : t.url) : '' } };
+      }
       case 'VibeSpace.getVersion': return { protocol: 1, kinds: [...KINDS], features: feats() };
       case 'VibeSpace.enable': {
         if (p.expectedProtocol !== undefined && p.expectedProtocol !== null && Number(p.expectedProtocol) !== 1) return { ok: false, code: 'protocol_mismatch', protocol: 1, expectedProtocol: p.expectedProtocol };
@@ -333,11 +945,20 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     ws.on('message', (d) => {
       let m; try { m = JSON.parse(String(d)); } catch { return; }
       const on = m.sessionId ? sessions.get(m.sessionId) : null, tab = on ? on.targetId : !m.sessionId && /^Target\./.test(String(m.method)) && m.params && m.params.targetId ? String(m.params.targetId) : null;
-      calls.push({ seq: ++heard, id: Number.isInteger(m.id) ? m.id : null, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, tab, params: m.params || {} });
-      if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: m.params || {} }) + '\n'); } catch { /* best effort */ } }
+      const safeParams = m.method === 'Input.insertText'
+        ? { textLen: String((m.params && m.params.text) || '').length }
+        : m.method === 'Runtime.evaluate' && m.params && m.params.contextId != null
+          ? { contextId: m.params.contextId, expression: '[isolated-eval]' }
+          : (m.params || {});
+      calls.push({ seq: ++heard, id: Number.isInteger(m.id) ? m.id : null, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, tab, params: safeParams });
+      if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: safeParams }) + '\n'); } catch { /* best effort */ } }
+      const reply = (res) => {
+        if (res && res.__noreply) return;
+        send(ws, res && res.__error ? { id: m.id, error: res.__error, ...(m.sessionId ? { sessionId: m.sessionId } : {}) } : { id: m.id, result: res || {}, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+      };
       const r = answer(ws, m);
-      if (r && r.__noreply) return;
-      send(ws, r && r.__error ? { id: m.id, error: r.__error, ...(m.sessionId ? { sessionId: m.sessionId } : {}) } : { id: m.id, result: r || {}, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+      if (r && typeof r.then === 'function') r.then(reply, (err) => reply({ __error: { code: -32000, message: String((err && err.message) || err) } }));
+      else reply(r);
     });
   }));
   await new Promise((r, j) => { server.once('error', j); server.listen(Number(port) || 0, '127.0.0.1', r); });
@@ -352,7 +973,8 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
-    navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
+    setDom, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
+    navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },
     egress: () => egressLog.slice() }; // lane engine-spi-egress: every navigation's fetch (through the proxy or direct)
 }

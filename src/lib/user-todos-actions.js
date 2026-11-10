@@ -522,10 +522,13 @@ export function inboxModel(app) {
       return false;
     }
     if (rec && rec.action && rec.action.type === 'save-login') {
-      // lane browser-login: a person's own sign-in in the agent browser — Save / Update keeps it in the vault, Not now forgets it;
-      // the digest of what this row showed rides `shown` (a card that changed since saves nothing)
+      // lane browser-login: a person's own sign-in in the agent browser (Save / Update / Not now) OR an agent-generated pending
+      // password awaiting human promotion (Confirm / Discard); the digest of what this row showed rides `shown`.
       const r = await fetchJson(`/api/browser/logins/cards/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'reject' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
-      if (r && r.ok) { showToast(answer === 'reject' ? t('Not saved — the password was forgotten') : r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault')); return true; }
+      if (r && r.ok) {
+        showToast(r.confirmed ? t('Confirmed the password in the vault') : r.discarded ? t('Discarded the pending password') : answer === 'reject' ? t('Not saved — the password was forgotten') : r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault'));
+        return true;
+      }
       showToast(r && r.code === 'card_changed' ? t('That card changed after it was shown — nothing was saved; read it again') : r && r.code === 'card_gone' ? t('That card is no longer open — the password was not kept') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }

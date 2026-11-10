@@ -151,8 +151,8 @@ const vaultTotp = require('./vault-totp.js').create({ dataDir: path.join(rootDir
 // test-msg-cli-groups §2c); a use by such a fork presents another token, so the parent's run-bound grant never covers it
 const totpSessionOf = (cid) => [...activeSessions.values()].find((s) => s && !s.isTmuxView && require('../claude-lock-capture.js').addressableId(s) === cid) || null;
 const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('./vault-totp.js').runOfToken(s.agentToken) : null; };   // THIS run of a running conversation (its token's digest)
-// lane browser-login (P3 of the custom browser kernel): WEB LOGINS — the vault's `web-login:<origin>#<user>` entries (PURE
-// src/browser-login.js; ONE writer src/server/browser-logins.js): the kernel fills them, the agent never sees a value; the
+// lane browser-login (r22–r25 pivot): WEB LOGINS — the vault's `web-login:<origin>#<user>` entries (PURE
+// src/browser-login.js; ONE writer src/server/browser-logins.js): Hub types them over CDP, VibeSpace never hands an agent a value; the
 // `browser-login` grant (the ONE grants store) decides who may, and covers the login's paired two-step code (D3); an account
 // an agent registers is saved automatically, with its provenance, and ONE For-you notice tells the owner (D5 as reversed)
 const browserLogins = require('./browser-logins.js').create({ vault, grants: () => require('./grants-store.js').store(), totpCode: (name, o) => vaultTotp.codeForLogin(name, o),
@@ -1158,6 +1158,47 @@ function createSessionMessages(session, sessionId) {
       persistMeta: (session, patch) => { if (persistSessionMeta && session) persistSessionMeta(session, patch); },
       onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
     });
+    if (vaultPaste && typeof vaultPaste.setLoginChannel === 'function' && browserKeeper && typeof browserKeeper.loginChannelFor === 'function') {
+      vaultPaste.setLoginChannel(({ caller = {}, handle = '' } = {}) => {
+        const B = require('../browser-profiles.js');
+        const { addressableId } = require('../claude-lock-capture.js');
+        let sid = null, s = null;
+        if (caller && caller.scope && activeSessions.has(caller.scope)) {
+          sid = caller.scope;
+          s = activeSessions.get(sid);
+        } else if (caller && (caller.scope || caller.conversationId)) {
+          for (const [id, x] of activeSessions) {
+            if (!x) continue;
+            if (caller.scope && String(x._webuiId || id) === String(caller.scope)) { sid = id; s = x; break; }
+            if (caller.conversationId && String(addressableId(x) || '') === String(caller.conversationId)) { sid = id; s = x; break; }
+          }
+        }
+        const remoteSession = !!(s && (s.hostId || s.host || s._browserVariant === B.VARIANTS.H));
+        let bk = s && B.isBrowserKey(s._browserKey) ? s._browserKey : '';
+        if (!bk && s && !remoteSession && browserKeys && typeof browserKeys.ensureBrowserKey === 'function') {
+          try {
+            const r = browserKeys.ensureBrowserKey(s, { sessionId: sid });
+            const k2 = r && typeof r === 'object' ? r.key : r;
+            if (B.isBrowserKey(k2)) bk = k2;
+          } catch { /* remote or unavailable */ }
+        }
+        let taskIds = [], groupsUnreadable = false;
+        if (s) {
+          try { taskIds = taskIdsFor(s, sid); } catch { taskIds = []; groupsUnreadable = true; }
+        }
+        const cid = s ? addressableId(s) : (caller && caller.conversationId ? caller.conversationId : null);
+        const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(sid ? [`webui:${sid}`] : []), ...(bk ? [String(bk)] : [])])];
+        const subagent = !!(s && s._subNormalizers && s._subNormalizers.size > 0);
+        return browserKeeper.loginChannelFor({
+          browserKey: bk,
+          handle: String(handle || ''),
+          subagent,
+          remoteSession,
+          action: 'request',
+          agentFacts: { browserKey: bk, taskIds, groupsUnreadable, conversationKeys },
+        });
+      });
+    }
     const { router: browserRouter, setup: setupBrowserRoutes } = require('../routes/browser');
     // lane browser-stuck (2026-09-28): THE DIALOG WATCH — one Page-enabled CDP socket per live local browser, armed before
     // a verb runs; a page dialog becomes a fact of the agent's verb, the live view and the browser fact (src/server/browser-dialogs.js)

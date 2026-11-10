@@ -110,6 +110,15 @@ console.log('① the PURE router');
   { const pm = V.classify(['permission', 'geolocation', 'allow']), pd = V.classify(['pdf', 'out.pdf']);
     ok(!census.includes('permission') && V.OURS_PAGE.includes('permission') && pm.kind === 'page' && pm.ours === true && pm.verb === 'permission', '`permission` (decide a page permission) is OURS: the resolve road, never the binary — 0.38.1 has no such verb', JSON.stringify(pm));
     ok(census.includes('pdf') && pd.kind === 'page' && !pd.ours && pd.writeFiles.length === 1, '`pdf <path>` (the print sentence\'s way out) is the binary\'s own page verb, its path a WRITE verdict', JSON.stringify(pd)); }
+  // lane vault-login r22: `login` is retired by name (`login_retired`), `fill --vault` is parsed + refused inside `batch` (`vault_fill_in_batch`), and `parseSnapshotRefs` extracts role+name+nth
+  { const lg = V.classify(['login']), vf = V.classify(['fill', '@e2', '--vault', 'shop.example.test/password']), vfg = V.classify(['fill', '#npw', '--vault', 'new:shop.example.test/password', '--generate', '--user', 'bob']), vfb = V.classify(['batch', 'fill @e2 --vault shop.example.test/password']);
+    const p1 = V.parseFillVaultArgs(vf.argv), p2 = V.parseFillVaultArgs(vfg.argv);
+    const refs = V.parseSnapshotRefs('- textbox "Email" [ref=e1]\n- textbox "Email" [ref=e2]\n- textbox "Password" [ref=e3]');
+    ok(lg.kind === 'refused' && lg.code === 'login_retired' && /snapshot -i/.test(lg.remedy) && /fill @ref --vault/.test(lg.remedy), '`login` is retired (`login_retired`) and teaches `snapshot -i` + `fill @ref --vault <entry>/<field>`', JSON.stringify(lg));
+    ok(vf.kind === 'page' && V.hasVaultFillFlag(vf.argv) && p1.ok && p1.target === '@e2' && p1.spec === 'shop.example.test/password' && !p1.generate, '`fill @ref --vault <entry>/<field>` classifies + parses cleanly', JSON.stringify(p1));
+    ok(vfg.kind === 'page' && p2.ok && p2.target === '#npw' && p2.spec === 'new:shop.example.test/password' && p2.generate === true && p2.user === 'bob', '`fill <sel> --vault new:<site>/password --generate --user <name>` parses cleanly', JSON.stringify(p2));
+    ok(vfb.kind === 'refused' && vfb.code === 'batch_line_refused' && vfb.lineCode === 'vault_fill_in_batch', '`batch` carrying `fill --vault` is refused locally (`vault_fill_in_batch`)', JSON.stringify(vfb));
+    ok(refs.length === 3 && refs[0].ref === '@e1' && refs[0].nth === 0 && refs[1].ref === '@e2' && refs[1].nth === 1 && refs[2].ref === '@e3' && refs[2].name === 'Password', '`parseSnapshotRefs` preserves duplicate role+name `nth` indices', JSON.stringify(refs)); }
   // lane H (2026-09-25): the 0.38.1 re-measure's NEW surface, each decided by name
   {
     ok(census.includes('a11y') && census.includes('webmcp'), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));
