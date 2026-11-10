@@ -874,6 +874,7 @@ export const SUITES = [
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 3.6 s (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
+  { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.4 s (measured under the box\'s thermal cap, 2026-11-10: 8.07–8.40 s alone — not restated at full speed yet) — lane ci-heavy-queue: the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-usage-index-parity', tier: 'fast', why: 'in-process · 3.4 s (restated 2026-10-20, was 2.3 s)' }, // design 011 lane 3, the usage index SHADOW: the REAL worker on a scratch HOME answers the Usage window's aggregate exactly as memory (duplicate rids whose rows differ in account, a torn line, an empty shard, every dimension / filter / pivot, local hour + weekday, a St_Johns DST child, a remote harvest into an old month, a missed push, a repair rewrite); READ-YOUR-WRITES with a tail-only control worker; L0's cursor writer (write on change, dead keys only on proof)
   { name: 'test-usage-exit-hook', tier: 'fast', why: 'in-process · 9.3 s (six child servers in parallel; the controls wait 8 s)' }, // lane usage-fold-worker-exit-hook (.284): a usage fold worker asleep in a read no longer holds the server's exit — src/server/exit-hook.js judges the fold workers at the join (after every 'exit' listener), EXIT_BOUND_MS, then the re-raise; stuck / in flight / merely busy legs on the real UsageHistory in child servers + three scratch-copy controls
@@ -3029,37 +3030,105 @@ export const defaultLockPath = () => path.join(machineTmpDir(), `vibespace-ci-he
 const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { } };
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 
+// THE FAIR QUEUE (lane ci-heavy-queue, 2026-11-10). The lock is one O_EXCL file; with nothing else, after a release the waiter whose
+// next try lands first wins — a 3-s waiter lost every hand-off to a private claimer polling at 50 ms (measured 2026-11-10: the train's
+// 53 self-hosted suites ran 0 in 45 min). So every waiter first writes ONE ticket into `<lock>.q/` — `<ms>-<pid>`, {pid, cmd, sha,
+// startedAt} — and may TRY the lock only while its ticket is the OLDEST LIVE one: oldest first, by name. A ticket whose process is gone
+// (or whose pid now runs something else — pidStillRunning) is reaped by whichever waiter meets it. The head polls every 200 ms, the
+// others every 3 s. The winner removes its ticket once it holds the lock, and the lock record names it (`ticket`); a timeout removes it
+// too. A ticket directory that cannot be used (read-only tmp) leaves the waiter as it was before the queue: it simply tries. The queue
+// binds only those who take tickets — a script that opens the lock path itself goes around it, so the lock is taken ONLY by ci.mjs
+// (test-ci-heavy-queue's census of scripts/ and data/bin), and a wait line names a holder that holds no ticket.
+// ALIVE AND POLLING (r2, 主开发's ruling 2026-11-10 06:22Z): a ticket holds its place only while its waiter shows life — every poll
+// touches the ticket's mtime, and a ticket not touched for `staleMs` (15 s; the slowest poll is 3 s) is reaped like a dead one. A
+// frozen head (SIGSTOP — a lane froze its own claimer so) loses its turn; when it wakes it finds its ticket gone and goes back in line,
+// at the back. The same rule covers a pid recycled into another ci.mjs (its cmd matches, but nothing touches the ticket).
+const LOCK_CMD = path.basename(process.argv[1] || '') || 'ci.mjs';   // the CLI: «ci.mjs» (pidStillRunning reads it in the cmdline)
+export const ticketDirOf = (lockPath) => lockPath + '.q';
+/** the queue in order — [{ name, file, rec }] oldest first; dead tickets (and unreadable ones) are REAPED on the way. */
+export const TICKET_STALE_MS = 15000;
+export function machineQueue(lockPath, { reap = true, staleMs = TICKET_STALE_MS, now = Date.now() } = {}) {
+  const dir = ticketDirOf(lockPath);
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => /^\d{15}-\d+$/.test(n)).sort(); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    const file = path.join(dir, name), rec = readJson(file);
+    let seen = 0; try { seen = fs.statSync(file).mtimeMs; } catch { }
+    if (rec && pidStillRunning(rec) && Math.abs(now - seen) <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)
+    if (reap) { try { fs.unlinkSync(file); } catch { } }
+  }
+  return out;
+}
+function takeTicket(lockPath, sha) {
+  try {
+    const dir = ticketDirOf(lockPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `${String(Date.now()).padStart(15, '0')}-${process.pid}`, file = path.join(dir, name), tmp = path.join(dir, `.${name}.tmp`);
+    // written aside and RENAMED in: a reader never meets a half-written ticket (it would read as dead and be reaped)
+    fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, cmd: LOCK_CMD, sha, startedAt: Date.now() }) + '\n', { flag: 'wx' });
+    fs.renameSync(tmp, file);
+    return { name, file };
+  } catch { return null; }   // no usable queue: the waiter tries as it did before the queue
+}
+/** The wait line: the holder's pid, its cmd and sha / label UNCUT (a lane label cut to eight characters hid which lane held it), its
+ *  suites, whether it came through the queue, and our place in it. */
+export function lockWaitLine(lockPath, h, waitMs, place, free = false) {
+  // the lock is FREE and a waiter ahead of us holds the turn (it may be frozen: then it loses the turn after the staleness bound)
+  if (free) return `[ci:heavy] the machine lock ${lockPath} is FREE — waiting for the waiter ahead of us in the queue (${place || 'its place'}) — up to ${Math.round(waitMs / 60000)} min in all`;
+  const who = h ? `pid ${h.pid}, cmd ${h.cmd || '?'}, sha ${h.sha || '?'}${h.suite ? `, suite ${h.suite}` : ''}` : 'a holder whose record cannot be read';
+  const around = h && !h.ticket ? ' — it took the lock WITHOUT a ticket (not through ci.mjs\'s queue)' : '';
+  return `[ci:heavy] another heavy run holds ${lockPath} (${who})${around} — waiting up to ${Math.round(waitMs / 60000)} min for the machine (the suites share ports and /tmp checkouts)${place ? `; ${place}` : ''}`;
+}
+
 /**
  * Take the machine's heavy-tier lock, waiting up to `waitMs` for the current
- * holder. Returns {ok:true, release()} · {ok:false, timedOut, holder} · or
- * {ok:false, error} when a lock cannot be used at all (read-only tmp) — the
- * caller then runs UNLOCKED and says so in the marker, because a lock that
- * cannot be taken must never be able to stop the gate from running.
+ * holder — in the FAIR QUEUE above. Returns {ok:true, release()} · {ok:false,
+ * timedOut, holder} · or {ok:false, error} when a lock cannot be used at all
+ * (read-only tmp) — the caller then runs UNLOCKED and says so in the marker,
+ * because a lock that cannot be taken must never be able to stop the gate.
  */
-function acquireMachineLock(lockPath, { waitMs, sha, onWait } = {}) {
+export function acquireMachineLock(lockPath, { waitMs, sha, onWait, headPollMs = 200, pollMs = 3000, staleMs = TICKET_STALE_MS } = {}) {
   const deadline = Date.now() + Math.max(0, waitMs || 0);
-  let announced = false;
-  for (;;) {
-    try {
-      const fd = fs.openSync(lockPath, 'wx');
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, sha, root: repo, cmd: 'ci.mjs', startedAt: Date.now() }) + '\n');
-      fs.closeSync(fd);
-      return {
-        ok: true,
-        path: lockPath,
-        release() { const cur = readJson(lockPath); if (!cur || cur.pid === process.pid) { try { fs.unlinkSync(lockPath); } catch { } } },
-      };
-    } catch (e) {
-      if (e.code !== 'EEXIST') return { ok: false, error: e };
-      const holder = readJson(lockPath);
-      // A holder that is gone (reboot, SIGKILL, recycled pid) leaves a file
-      // behind; stealing it is the only way the tier ever runs again.
-      if (!pidStillRunning(holder)) { try { fs.unlinkSync(lockPath); continue; } catch { /* someone else won the race — loop */ } }
+  let ticket = takeTicket(lockPath, sha);
+  const drop = () => { if (ticket) { try { fs.unlinkSync(ticket.file); } catch { } } };
+  let lastKey = null;
+  try {
+    for (;;) {
+      if (ticket) { try { const t = new Date(); fs.utimesSync(ticket.file, t, t); } catch { } }   // a sign of life at every poll
+      let q = ticket ? machineQueue(lockPath, { staleMs }) : [];
+      let at = ticket ? q.findIndex((t) => t.name === ticket.name) : 0;
+      if (ticket && at < 0) { ticket = takeTicket(lockPath, sha); q = ticket ? machineQueue(lockPath, { staleMs }) : []; at = ticket ? q.findIndex((t) => t.name === ticket.name) : 0; }   // ours vanished (reaped while we were frozen): back in line, at the back, never a free try
+      const head = !ticket || at === 0;
+      let holder = null;
+      if (head) {
+        try {
+          const fd = fs.openSync(lockPath, 'wx');
+          fs.writeSync(fd, JSON.stringify({ pid: process.pid, sha, root: repo, cmd: LOCK_CMD, ticket: ticket ? ticket.name : null, startedAt: Date.now() }) + '\n');
+          fs.closeSync(fd);
+          drop();
+          return {
+            ok: true,
+            path: lockPath,
+            ticket: ticket ? ticket.name : null,
+            release() { const cur = readJson(lockPath); if (!cur || cur.pid === process.pid) { try { fs.unlinkSync(lockPath); } catch { } } },
+          };
+        } catch (e) {
+          if (e.code !== 'EEXIST') return { ok: false, error: e };
+        }
+        holder = readJson(lockPath);
+        // A holder that is gone (reboot, SIGKILL, recycled pid) leaves a file
+        // behind; stealing it is the only way the tier ever runs again.
+        if (!pidStillRunning(holder)) { try { fs.unlinkSync(lockPath); continue; } catch { /* someone else won the race — loop */ } }
+      } else holder = readJson(lockPath);
       if (Date.now() >= deadline) return { ok: false, timedOut: true, holder };
-      if (!announced && onWait) { announced = true; onWait(holder); }
-      sleepSync(3000);
+      const free = !holder && !fs.existsSync(lockPath);   // no holder at all: the turn is the waiter's ahead of us, not a holder's
+      const key = free ? 'free' : holder ? `pid ${holder.pid}` : 'unreadable';
+      if (onWait && key !== lastKey) onWait(holder, ticket ? `place ${at + 1} of ${q.length} in the queue` : 'no queue (its directory cannot be used)', free);
+      lastKey = key;
+      sleepSync(head ? headPollMs : pollMs);
     }
-  }
+  } finally { drop(); }
 }
 
 /**
@@ -3587,7 +3656,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
   const waitMs = lockWaitMs === undefined ? 40 * 60 * 1000 : lockWaitMs;
   const held = acquireMachineLock(lockPath, {
     waitMs, sha,
-    onWait: (h) => console.log(`[ci:heavy] another heavy run holds ${lockPath} (pid ${h && h.pid}, ${h && h.sha ? shortSha(h.sha) : '?'}) — waiting up to ${Math.round(waitMs / 60000)} min for the machine (the suites share ports and /tmp checkouts)`),
+    onWait: (h, place, free) => console.log(lockWaitLine(lockPath, h, waitMs, place, free)),   // a line per new holder, its cmd uncut (the fair queue)
   });
   if (!held.ok && held.timedOut) {
     // NOT a verdict. Nothing ran, so nothing is claimed — the note exists so
