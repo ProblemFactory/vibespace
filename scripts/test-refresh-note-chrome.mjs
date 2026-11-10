@@ -10,6 +10,11 @@
 //   phone 390 (zh) · a second client: the same strip on its own view of a live conversation (the existing broadcast);
 //     the ⋯ from the drawer ⇒ the confirm (its buttons ≥ 44 px, inside the viewport) ⇒ an edited note ⇒ it REPLACES
 //     the waiting one (one per conversation, the new words) — the desk strip still counts one
+//   the still press (B-8b8c, lane dialog-press) · every press goes through THE still door (scripts/scratch.mjs stillPresser:
+//     the target still — same rect on two looks, nothing running that moves it — then where it landed is checked). The leg: the
+//     list unfolded ⇒ the form opened mid-slide (#main-wrapper's margin-left transition, slowed to a tenth by CDP
+//     Animation.setPlaybackRate — the page's own, no load) ⇒ 确定 rides the workspace; RED CONTROL a press aimed where 确定 WAS
+//     is a named miss; RED CONTROL the ungated door presses while it moves; the still door waits it out and lands on 确定
 // PNGs: $VIBESPACE_RLS_PNG_DIR/{desk-menu,desk-dialog,desk-strip,desk-toast,phone-menu,phone-dialog,phone-strip}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -17,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, stillLookSource } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -121,20 +126,19 @@ try {
     return { S, ev, ready };
   }
   const shot = async (S, f, clip) => { if (!PNG_DIR) return null; const r = await S('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) }); if (!r.result) return null; fs.mkdirSync(PNG_DIR, { recursive: true }); const out = path.join(PNG_DIR, f); fs.writeFileSync(out, Buffer.from(r.result.data, 'base64')); return out; };
-  const centre = (ev, sel) => ev(`(() => { const e = ${sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`}; if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2, w: q.width, h: q.height }; })()`);
-  // .371 (int361, B-row «the desk 确定 tap was unchecked»): a press that WAITS (≤ 5 s, every 100 ms) until its target is the element at
-  // its own centre — never a retry of the click — then presses once; a target still covered says what covers the point (tag, class,
-  // 40 chars of text) and fails by name; it never returns a silent false.
+  // B-8b8c (lane dialog-press — MEASURED with this suite's own road: the desk 确定 was read while #main-wrapper's 0.2 s
+  // margin-left slide, started by the suite's own sidebar.toggle(true), carried the whole workspace under the form; the press
+  // landed on 取消 — the .390 mirror's row — or the footer — the .373 row): EVERY press of this suite goes through THE still
+  // door (scripts/scratch.mjs stillPresser): the target at its own point, enabled, the same rect on two looks a frame apart,
+  // nothing running that can move it (on it or an ancestor) — then it CHECKS WHERE IT LANDED; a miss is named, never silent.
+  const doorOf = (S, ev) => stillPresser({ evalJs: ev, cdp: S });
   const pressUncovered = async (S, ev, sel) => {
-    const probe = `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return { found: false }; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y); const mine = !!h && (h === e || e.contains(h)); return { found: true, x, y, mine, disabled: !!e.disabled, cover: mine || !h ? null : { tag: h.tagName.toLowerCase(), cls: String(h.className || '').slice(0, 80), text: (h.textContent || '').trim().slice(0, 40) } }; })()`;
-    let last = null; const t0 = Date.now();
-    while (Date.now() - t0 < 5000) { last = await ev(probe); if (last && last.found && last.mine && !last.disabled) break; await new Promise((r) => setTimeout(r, 100)); }
-    if (!last || !last.found || !last.mine || last.disabled) return { ok: false, waitedMs: Date.now() - t0, ...(last || {}), dialog: await ev(`(() => { const o = document.getElementById('refresh-live-dialog'); return o ? { open: true, shown: o.offsetParent !== null, rect: o.getBoundingClientRect().toJSON() } : { open: false }; })()`) };
-    for (const type of ['mousePressed', 'mouseReleased']) await S('Input.dispatchMouseEvent', { type, x: last.x, y: last.y, button: 'left', clickCount: 1 });
-    return { ok: true, waitedMs: Date.now() - t0 };
+    const door = doorOf(S, ev); const ok = await door(sel); const l = door.last || {}, k = l.look || {};
+    return { ok, waitedMs: l.waitedMs, looks: l.looks, verdict: l.verdict, found: !!k.found, disabled: !!k.disabled, cover: { tag: k.under || null, cls: '', text: '' }, movers: k.movers || [], landed: l.landed, seen: l.seen,
+      ...(ok ? {} : { dialog: await ev(`(() => { const o = document.getElementById('refresh-live-dialog'); return o ? { open: true, shown: o.offsetParent !== null, rect: o.getBoundingClientRect().toJSON() } : { open: false }; })()`) }) };
   };
-  const press = async (S, ev, sel) => { const r = await centre(ev, sel); if (!r || r.__err) return false; for (const type of ['mousePressed', 'mouseReleased']) await S('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 }); return true; };
-  const tap = async (S, ev, sel) => { const r = await centre(ev, sel); if (!r || r.__err) return false; await S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] }); await S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); return true; };
+  const press = async (S, ev, sel) => doorOf(S, ev)(sel);
+  const tap = async (S, ev, sel) => doorOf(S, ev)(sel, { touch: true });
   const MENU_ITEM = "JS:[...document.querySelectorAll('.context-menu-item')].find((n) => /刷新所有活着的会话/.test(n.textContent))";
   const winOf = (sid) => `[...app.wm.windows.values()].find((w) => w._openSpec && w._openSpec.backendSessionId === ${JSON.stringify(sid)})`;
   const stripOf = (sid) => `(() => { const w = ${winOf(sid)}; if (!w) return { win: false }; const el = w.element.querySelector('.chat-stash-strip'); const v = app.sessions.get(w.id);
@@ -178,7 +182,7 @@ try {
   check(`desk: an emptied note — 确定 disabled, said inline 「${emptied?.err}」`, !!emptied && emptied.ok === true && emptied.err === '请先写提醒内容', emptied);
   await D.ev(`(() => { const t = document.querySelector('#refresh-live-dialog textarea'); t.value = ${JSON.stringify(NOTE_ZH)}; t.dispatchEvent(new Event('input')); return true; })()`);
   const deskOk = await pressUncovered(D.S, D.ev, '#refresh-live-dialog .btn-create');
-  check(`desk: 确定 is the element at its own centre and is pressed (waited ${deskOk.waitedMs} ms)${deskOk.ok ? '' : ` — NOT pressed: ${deskOk.found === false ? 'no button' : deskOk.disabled ? 'disabled' : `covered by <${deskOk.cover?.tag} class="${deskOk.cover?.cls}"> «${deskOk.cover?.text}»`}`}`, deskOk.ok, deskOk);
+  check(`desk: 确定 is pressed STILL and lands on 确定 (waited ${deskOk.waitedMs} ms, ${deskOk.looks} looks)${deskOk.ok ? '' : ` — NOT pressed: ${deskOk.found === false ? 'no button' : deskOk.disabled ? 'disabled' : deskOk.landed ? `MISSED — ${deskOk.landed.why}` : `${deskOk.verdict} (under its point: ${deskOk.cover?.tag}${deskOk.movers?.length ? `; moving: ${deskOk.movers.join(', ')}` : ''})`}`}`, deskOk.ok, deskOk);
   const toast = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /已排给/.test(x)); return t && !document.getElementById('refresh-live-dialog') ? t : null; })()`), 10000, 150);
   check(`desk: 确定 ⇒ the dialog closes, the toast 「${toast}」`, toast === '已排给 2 个，跳过 1 个已停止的', { toast, all: await D.ev('window.__toastTexts()'), pageErrors, // .371: on a red, WHERE it stopped — the last clicks, the refresh-note request (status, ms) or none, the dialog's state
     after: await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const b = o && o.querySelector('.btn-create'); return { clicks: window.__clicks.slice(-6), fetches: window.__fetches, dialog: !!o, okDisabled: b ? b.disabled : null, err: o ? (o.querySelector('.refresh-live-error') || {}).textContent : null }; })()`) });
@@ -195,6 +199,51 @@ try {
   const det = await until(() => D.ev(`(() => { const f = ${stripOf(SIDS[0])}; return f.detailsOpen && f.rows.length ? f : null; })()`), 5000, 100);
   check(`desk: Details — the note as the session will read it: 「${det?.rows?.[0]}」`, !!det && det.rows.length === 1 && det.rows[0] === `一条 VibeSpace 通知 · ${NOTE_ZH}`, det);
   const pStrip = await shot(D.S, 'desk-strip.png', await winRect(SIDS[0]));
+
+  // ════ B-8b8c — THE STILL PRESS: a form in a SLIDING workspace (lane dialog-press) ════
+  // The slide is the page's own (the list unfolded ⇒ #main-wrapper's margin-left transition), made LONG — CDP
+  // Animation.setPlaybackRate 0.1: a tenth of its speed, no load on the box — so the leg is deterministic: the form stands in a
+  // sliding workspace; a press aimed where 确定 WAS lands elsewhere and the door names it (RED control); the ungated door presses
+  // while it still moves (RED control — the gate is what waits); the still door waits the slide out and lands on 确定.
+  console.log('── the still press (B-8b8c): a form in a sliding workspace ──');
+  const OK_SEL = '#refresh-live-dialog .btn-create';
+  const DOOR = doorOf(D.S, D.ev);
+  const settled = () => until(() => D.ev("(() => { const mw = document.getElementById('main-wrapper'); return mw && mw.getAnimations().length === 0 ? true : null; })()"), 10000, 100);
+  const slideOpen = async () => {   // the list folded and still ⇒ unfolded (the slide starts) ⇒ ⋯ ⇒ the item ⇒ the form, mid-slide
+    await D.ev("(() => { const o = document.getElementById('refresh-live-dialog'); if (o) o.querySelector('.btn-cancel')?.click(); return true; })()");
+    await D.ev('(app.sidebar.toggle(false), true)'); await settled();
+    await D.ev('(app.sidebar.toggle(true), true)');
+    await until(() => D.ev("document.getElementById('session-list-menu')?.offsetParent ? true : null"), 5000, 30);
+    await D.ev("(document.getElementById('session-list-menu').click(), true)");
+    await until(() => D.ev(`(() => { const it = ${MENU_ITEM.slice(3)}; if (!it) return null; it.click(); return true; })()`), 5000, 30);
+    return until(() => D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const mw = document.getElementById('main-wrapper'); return o && o.querySelector('.btn-create') ? { sliding: mw.getAnimations().map((x) => x.transitionProperty).join(',') } : null; })()`), 5000, 30);
+  };
+  await D.S('Animation.enable'); await D.S('Animation.setPlaybackRate', { playbackRate: 0.1 });
+  try {
+    // ① the form opened mid-slide: 确定 rides the workspace
+    const o1 = await slideOpen();
+    const look0 = await D.ev(stillLookSource(OK_SEL));
+    check(`still: the form stands in a SLIDING workspace — 确定 under its point, moving: ${(look0?.movers || []).join(', ')}`, !!o1 && !!look0 && look0.found && look0.hits && (look0.movers || []).some((m) => /^margin-left@div#main-wrapper/.test(m)), { o1, look0 });
+    // ② RED CONTROL — a press aimed where 确定 WAS (it pressed once 确定 had slid ≥ 60 px past that point): a named miss
+    const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left + q.width / 2 - ${look.x} >= 60 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
+    check(`still: RED CONTROL — a press aimed where 确定 WAS (it slid ≥ 60 px since) is a named miss: «${DOOR.last?.landed?.why}»`, red1 === false && !!DOOR.last?.landed && !DOOR.last.landed.ok, DOOR.last);
+    // ③ RED CONTROL — the door WITHOUT its still gate presses while the workspace still moves (the gate is what waits)
+    await slideOpen();
+    const red2 = await DOOR(OK_SEL, { gate: false });
+    const red2Look = DOOR.last && DOOR.last.look;
+    check(`still: RED CONTROL — the ungated door presses at once, while 确定 still moves (moving at its press: ${(red2Look?.movers || []).join(', ') || 'nothing'})`, !!red2Look && (red2Look.movers || []).length > 0, { red2, last: DOOR.last });
+    // ④ THE STILL DOOR — it waits the slide out, then presses 确定 once; it lands; the dialog closes with the toast
+    await slideOpen();
+    await D.ev('(window.__toasts.length = 0, true)');
+    const good = await DOOR(OK_SEL);
+    const g = DOOR.last || {};
+    check(`still: THE STILL DOOR waits the slide out (${g.waitedMs} ms, ${g.looks} looks) and presses 确定 when nothing moves it — it lands on 确定${g.landed && !g.landed.ok ? ` — MISSED: ${g.landed.why}` : ''}`, good === true && !!g.look && (g.look.movers || []).length === 0 && g.landed && g.landed.ok && g.waitedMs >= 500, g);
+    const toast3 = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /已排给/.test(x)); return t && !document.getElementById('refresh-live-dialog') ? t : null; })()`), 10000, 150);
+    check(`still: …the dialog closes with the toast 「${toast3}」`, toast3 === '已排给 2 个，跳过 1 个已停止的', { toast3, all: await D.ev('window.__toastTexts()') });
+  } finally {
+    await D.S('Animation.setPlaybackRate', { playbackRate: 1 }); await D.S('Animation.disable');
+    await D.ev("(() => { const o = document.getElementById('refresh-live-dialog'); if (o) o.querySelector('.btn-cancel')?.click(); return true; })()");
+  }
 
   // ════ phone 390 — a second client ════
   console.log('── phone 390 (zh), a second client ──');

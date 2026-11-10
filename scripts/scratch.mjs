@@ -136,10 +136,21 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) 
   const desc = 'const desc = (h) => (h ? h.tagName + \'.\' + String(h.className).slice(0, 60) : null);';
   const MEASURE = (sel) => `(() => { ${desc} const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
   const UNDER = (x, y) => `(() => { ${desc} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); return { hit: desc(hit), hits: !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)) }; })()`;
-  const realClick = async (sel, { beforePress = null } = {}) => {
-    realClick.lastMiss = null; realClick.reaimed = null;
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  // B-8b8c (lane dialog-press): the same door's two halves — it waits while its target MOVES (THE still verdict: its rect on
+  // two looks a frame apart, a running box-moving transition on it or an ancestor), then checks where the press LANDED. A
+  // disabled or covered target is not waited on (a suite may press one on purpose; the re-aim below handles a cover).
+  const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
+  const realClick = async (sel, { beforePress = null, stillMs = 3000 } = {}) => {
+    realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null;
     let r = await evalJs(MEASURE(sel));
     if (!r || !r.hits) { realClick.lastMiss = r; return false; }
+    {
+      const t0 = Date.now(); let prev = null, look = null, v = 'moving';
+      while (Date.now() - t0 < stillMs) { look = await evalJs(stillLookSource('JS:window.__vsRealClickEl')); v = stillVerdict(prev, look); if (v !== 'moving') break; prev = look; await sleep(40); }
+      if (v === 'moving') { realClick.lastMiss = { ...r, why: `it never held still in ${stillMs} ms${look && look.movers && look.movers.length ? ` (moving: ${look.movers.join(', ')})` : ''}` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} — no press`); return false; }
+      if (look && look.found) r = { ...r, x: look.x, y: look.y };
+    }
     if (beforePress) await beforePress(r);
     for (let aim = 0; ; aim++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
@@ -152,12 +163,106 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) 
       if (!r2 || !r2.hits) { realClick.lastMiss = r2; return false; }
       r = r2;
     }
+    await evalJs(ARM_REAL);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    let seen = null;
+    for (let i = 0; i < 40; i++) { seen = await evalJs('window.__vsStillSeen || null'); if (seen && seen.down) break; await sleep(25); }
+    realClick.landed = landingVerdict(seen, { click: 'any' });
+    if (!realClick.landed.ok) { realClick.lastMiss = { ...r, seen, why: realClick.landed.why }; log(`  [realClick] ${sel}: MISSED — ${realClick.landed.why}`); return false; }
     return true;
   };
-  realClick.lastMiss = null; realClick.reaimed = null;
+  realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null;
   return realClick;
+}
+
+/** THE STILL PRESS (B-8b8c, lane dialog-press — MEASURED on test-refresh-note-chrome, the .390 mirror's red): a form drawn
+ *  21–30 ms after the suite's own sidebar toggle rides #main-wrapper's 0.2 s margin-left slide WITH the whole workspace; 确定's
+ *  centre, read during the slide, was 取消 by the time the press arrived (or the footer: the mousedown on 确定, the release
+ *  after it slid ⇒ the click on their common ancestor). The dialog never moved inside its window — the ground under it did.
+ *  A press lands only on a target that is STILL: the element at its own point, enabled, the same rect on two looks a frame
+ *  apart, and NO running transition / animation that can move it (on it or any ancestor — document.getAnimations by effect
+ *  target, a property that moves a box). Then it CHECKS WHERE IT LANDED (a one-shot capture listener: pointerdown, click): a
+ *  press that lands elsewhere is a named miss, never a silent one.
+ *  PURE parts: STILL_MOVERS, stillVerdict, landingVerdict (scripts/test-still-press.mjs). */
+export const STILL_MOVERS = /^(left|top|right|bottom|inset|margin|padding|transform|translate|scale|rotate|width|height|min-width|min-height|max-width|max-height|flex|grid|gap|border-width|border-left-width|border-top-width|font-size|line-height|zoom)/;
+/** One look → the next: 'gone' (no target / no box) · 'disabled' · 'moving' (a mover runs, or the rect changed since the
+ *  last look, or there is no last look) · 'covered' (another element at its point) · 'press'. */
+export function stillVerdict(prev, now, { epsilon = 0.5 } = {}) {
+  if (!now || !now.found) return 'gone';
+  if (!Array.isArray(now.rect) || !(now.rect[2] > 0 && now.rect[3] > 0)) return 'gone';
+  if (now.disabled) return 'disabled';
+  if (Array.isArray(now.movers) && now.movers.length) return 'moving';
+  if (!prev || !prev.found || !Array.isArray(prev.rect) || prev.rect.some((v, i) => Math.abs(v - now.rect[i]) > epsilon)) return 'moving';
+  if (!now.hits) return 'covered';
+  return 'press';
+}
+/** Where it landed (the capture listener's record {down, up, click}) → {ok, why}. down = the pointerdown's target; up = what
+ *  stood under the RELEASE point (elementFromPoint — a pointer capture retargets the event, never the point; `gone` = the
+ *  target left the page on its press, nothing to judge); click = its target, `anc` = an ancestor of the target (the release
+ *  retargeted by a capture, e.g. a title bar's drag — it lands when the release was over the target). `click: false` = a target
+ *  that acts on its pointerdown (no click owed); `click: 'any'` = none owed, but one that came must land. */
+export function landingVerdict(seen, { click = true } = {}) {
+  if (!seen || !seen.down) return { ok: false, why: 'no pointerdown reached the page' };
+  if (!seen.down.mine) return { ok: false, why: `the press landed on ${seen.down.what}, not on the target` };
+  if (seen.up && !seen.up.gone && !seen.up.mine) return { ok: false, why: `released over ${seen.up.what} — the target moved between the press and the release` };
+  if (!click) return { ok: true };
+  if (!seen.click) return click === 'any' ? { ok: true } : { ok: false, why: 'no click followed the press' };
+  if (!seen.click.mine && !(seen.click.anc && seen.up && seen.up.mine)) return { ok: false, why: `the click went to ${seen.click.what}` };
+  return { ok: true };
+}
+/** The page half (one expression): the target by selector, or `JS:<expression>` → what a look reads. */
+export function stillLookSource(sel) {
+  const target = sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`;
+  return `(() => { const e = ${target}; if (!e || !e.isConnected) return { found: false };
+    const desc = (n) => (n ? n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (typeof n.className === 'string' && n.className.trim() ? '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.') : '') : null);
+    const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y);
+    const MOV = ${STILL_MOVERS};
+    const kebab = (p) => String(p).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+    const movers = (typeof document.getAnimations === 'function' ? document.getAnimations() : []).filter((a) => a.playState === 'running' && a.effect && a.effect.target && typeof a.effect.target.contains === 'function' && a.effect.target.contains(e))
+      .flatMap((a) => (a.transitionProperty ? [a.transitionProperty] : typeof a.effect.getKeyframes === 'function' ? [...new Set(a.effect.getKeyframes().flatMap((k) => Object.keys(k)))] : []).map(kebab).filter((p) => MOV.test(p)).map((p) => p + '@' + desc(a.effect.target)));
+    return { found: true, rect: [q.left, q.top, q.width, q.height], x, y, hits: !!h && (h === e || e.contains(h)), under: desc(h), disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true', movers }; })()`;
+}
+export function stillPresser({ evalJs, cdp, log = (line) => console.log(line), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  const ARM = (sel) => {
+    const target = sel.startsWith('JS:') ? sel.slice(3) : `document.querySelector(${JSON.stringify(sel)})`;
+    return `(() => { const e = ${target}; const desc = (n) => (n ? n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (typeof n.className === 'string' && n.className.trim() ? '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.') : '') : null);
+      const S = window.__vsStillSeen = { down: null, up: null, click: null };
+      const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) };
+      const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); };
+      on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
+  };
+  /** press(sel, {touch, timeoutMs, click, gate, aim}) → true | false (press.last says what it saw); `gate: false` = the
+   *  mutant road (no still gate — a RED control's): it presses the first look that is under its point; `aim(look)` = a test
+   *  hook between the look and the press that may hand back another point (a RED control's stale aim: where it WAS). */
+  const press = async (sel, { touch = false, timeoutMs = 5000, click = true, gate = true, aim = null } = {}) => {
+    const t0 = Date.now();
+    let prev = null, now = null, verdict = 'gone', looks = 0;
+    while (Date.now() - t0 < timeoutMs) {
+      now = await evalJs(stillLookSource(sel)); looks++;
+      verdict = gate ? stillVerdict(prev, now) : (now && now.found && now.hits && !now.disabled ? 'press' : 'gone');
+      if (verdict === 'press') break;
+      prev = now;
+      await sleep(40);   // two frames apart at the least: the next look sees a rect that moved
+    }
+    press.last = { sel, verdict, look: now, looks, waitedMs: Date.now() - t0, seen: null, landed: null };
+    if (verdict !== 'press') {
+      log(`  [stillPress] ${sel}: NOT pressed — ${verdict} after ${press.last.waitedMs} ms, ${looks} looks (under its point: ${now && now.under}${now && now.movers && now.movers.length ? `; moving: ${now.movers.join(', ')}` : ''})`);
+      return false;
+    }
+    await evalJs(ARM(sel));
+    const { x, y } = aim ? ((await aim(now)) || now) : now;
+    if (touch) { await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
+    else { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }); }
+    let seen = null;
+    for (let i = 0; i < 40; i++) { seen = await evalJs('window.__vsStillSeen || null'); if (seen && seen.down && (seen.click || !click)) break; await sleep(25); }
+    const landed = landingVerdict(seen, { click });
+    press.last = { ...press.last, seen, landed };
+    if (!landed.ok) { log(`  [stillPress] ${sel}: MISSED — ${landed.why} (aimed at (${Math.round(x)}, ${Math.round(y)}) after ${press.last.waitedMs} ms)`); return false; }
+    return true;
+  };
+  press.last = null;
+  return press;
 }
 /** A suite that plants a violation ON PURPOSE (a negative control) TAKES its report: waits ≤ `ms` for `want` lines matching
  *  `match` (a parsed line → bool) in this suite's file, removes them and returns them (the hub never writes the same key
