@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The card's tick lets that conversation sign in with it until you remove it in Vault ▸ Web logins ▸ Use for…; «Two-step code…» adds its code there.
 - After a Claude Code update, its new models are in a chat's model list, 1M form included, priced at Claude Code's own rates — no VibeSpace update needed.
 - The price editor in Usage shows where each price comes from: VibeSpace's table, your Claude Code, or you.
+- Antigravity chats can pick Gemini 4 Carbon (medium, high or low), and the low level of Gemini 4 Argon and Gemini 3.8 Flash.
 
 ### Changed
 - An agent no longer mistakes another conversation's scheduled reminder for its own: it is told only of its own background jobs and ones it subscribed to.

@@ -11,6 +11,7 @@
 - 卡片上的勾选允许这个对话用它登录，直到你在「保险库 ▸ 网站登录 ▸ 用于…」中移除；「两步验证码…」可在卡片上直接添加验证码。
 - Claude Code 更新后，它的新模型（含 1M 版本）会出现在对话的模型列表里，按 Claude Code 自己的价格计费——无需更新 VibeSpace。
 - 用量的价格编辑器会标出每个价格的来源：VibeSpace 内置表、你的 Claude Code，或你自己填写。
+- Antigravity 对话可选 Gemini 4 Carbon（medium/high/low）；Gemini 4 Argon 与 3.8 Flash 新增 low 档。
 
 ### 更改
 - agent 不再把别的对话的定时提醒当成自己的：它只会收到自己的后台工作和它订阅的任务的动态。
