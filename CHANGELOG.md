@@ -6,11 +6,17 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - On a phone, the chat's + menu has a Take photo row that opens the camera; the other rows now read Photos, File and Folder.
+- An agent can ask you for a website login: its card in For you has the fields of Vault ▸ Add ▸ Website login…, with the site fixed by the ask.
+- What you type is saved as a website login only that site is ever filled with. The card's first line names the site; a non-Latin address shows both spellings.
+- The card's tick lets that conversation sign in with it until you remove it in Vault ▸ Web logins ▸ Use for…; «Two-step code…» adds its code there.
 
 ### Changed
 - An agent no longer mistakes another conversation's scheduled reminder for its own: it is told only of its own background jobs and ones it subscribed to.
 - When another conversation's background job fails, an agent sees one line saying it is not its own; looking up that job shows whose words it reads.
 - A phone's window list, and the desktop's window lists, show each conversation with the icon of what runs it: Claude Code, Codex, OpenCode or Antigravity.
+
+### Fixed
+- A vault request card's words now show links as the rest of For you does, and say when a secret inside a link is hidden.
 
 ## 2.369.389 — 2026-11-10
 
