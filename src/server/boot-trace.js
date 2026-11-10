@@ -58,7 +58,9 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   // lane hub-fuse-sync-guard: THE WITNESS + THE MOUNT GUARD ride that wrapper from here (src/server/sync-fs-witness.js) —
   // a held loop names its call, and the main thread never waits on a storage mount (server.js wires the canary, the
   // mounts registry and the setting once they exist)
-  try { if (dataDir) require('./sync-fs-witness.js').create({ rootDir: path.dirname(dataDir), dataDir }).start(); } catch (e) { console.warn('[sync-fs] the witness did not start —', e && e.message); }
+  // lane hub-loop-stalls: the hold sampler's OFF switch is read HERE, before anything may be asked (an unreadable settings
+  // file ⇒ not known ⇒ nothing asked until server.js wires the live setting) — a synchronous boot never reaches a beat
+  try { if (dataDir) { const SW = require('./sync-fs-witness.js'); const on = SW.bootSetting(dataDir); SW.create({ rootDir: path.dirname(dataDir), dataDir, samplingOn: () => on }).start(); } } catch (e) { console.warn('[sync-fs] the witness did not start —', e && e.message); }
   if (one) return one;
   const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
   let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone, turns = 0;

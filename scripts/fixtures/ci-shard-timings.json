@@ -51,6 +51,7 @@
   "test-ax-budget": 79180,
   "test-billing-badge-live": 56797,
   "test-boot-loop-hold": 106026,
+  "test-loop-hold-live": 275000,
   "test-boot-reload-ready": 60982,
   "test-boot-sentinel": 33684,
   "test-browser-cli-pin": 34947,

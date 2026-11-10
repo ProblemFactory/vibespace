@@ -666,6 +666,30 @@ console.log('⑧ the attended door — the hand-over through the real gate: the 
     'the hand-over\'s own refusal is the shared pressBearer (any bearer) — not the vsst_/jbt_-only test that let an automation key\'s vsak_ through with sign-in off');
 }
 
+// ── ⑨ WHAT HELD THE LOOP IS THE OWNER'S (lane hub-loop-stalls, law G) ──────────────────────────────────────────────
+// GET /api/loop-holds (the holds, the table, the utilization) and POST /api/loop-holds/profile (a ten-minute profile)
+// behind the REAL gate, per auth mode: the owner's cookie reads / presses; vsst_ / jbt_ / vsak_ are refused — by the
+// gate with sign-in on (401), by the routes themselves with it off (403 agent_forbidden, the shared pressBearer).
+console.log('⑨ the loop-holds routes — the owner\'s cookie only, every bearer refused in both auth modes');
+{
+  const LHB = require(path.join(REPO, 'src/server/loop-holds.js'));
+  const BEARERS = { vsst: 'Bearer vsst_' + 'a'.repeat(32), jbt: 'Bearer jbt_' + 'b'.repeat(32), vsak: 'Bearer vsak_' + 'c'.repeat(43) };
+  for (const mode of ['password', 'none']) {
+    const book = LHB.create({ log: { warn() {} }, observeGc: false, askProfile: () => {} });
+    const I = await instance(mode, { extra: (app) => book.register(app) });
+    const ck = mode === 'password' ? I.cookie : {};
+    const read = await hit(I, '/api/loop-holds', { method: 'GET', headers: { ...ck } });
+    const press = await hit(I, '/api/loop-holds/profile', { headers: { ...ck, ...SAME(I) } });
+    const want = mode === 'password' ? (x) => x.status === 401 : (x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden';
+    const b = {};
+    for (const [k, v] of Object.entries(BEARERS)) { b[k + ' GET'] = await hit(I, '/api/loop-holds', { method: 'GET', headers: { authorization: v } }); b[k + ' POST'] = await hit(I, '/api/loop-holds/profile', { headers: { authorization: v } }); }
+    ok(read.status === 200 && read.json && read.json.elu && Array.isArray(read.json.table) && press.status === 200 && press.json && press.json.running === true && Object.values(b).every(want),
+      `sign-in ${mode === 'password' ? 'ON' : 'OFF'}: the owner reads /api/loop-holds and starts a profile; vsst_ / jbt_ / vsak_ are refused on both (${mode === 'password' ? '401 by the gate' : '403 agent_forbidden by the routes'})`,
+      { read: read.status, press: press.status, bearers: Object.fromEntries(Object.entries(b).map(([k, x]) => [k, `${x.status} ${(x.json && (x.json.code || x.json.error)) || ''}`])) });
+    book.stop(); await I.close();
+  }
+}
+
 console.warn = warn0;
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

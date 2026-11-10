@@ -1515,6 +1515,13 @@ const SETTINGS_SCHEMA = {
     description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.'),
     category: t('Session'), liveApply: true,
   },
+  'telemetry.loopHoldSampling': {   // lane hub-loop-stalls: THE off switch of the hold sampler (src/server/sync-fs-witness.js reads it at every beat)
+    type: 'boolean', default: true,
+    label: t('Name the code that holds the server'),
+    description: t('When the server stops answering for a second or more, a helper thread asks it which of its own functions is running (a few times per hold, at most 20 holds an hour) and writes the answer in the journal and in ⚙ Diagnostics — function names and file lines of VibeSpace’s own code only. Off: nothing interrupts the server; the journal still says how long it was held and whether it was running, waiting in the system or waiting for a processor.'),
+    tier: 'advanced',
+    category: t('Session'), liveApply: true,
+  },
   'telemetry.forwardUrl': {
     type: 'text', default: '',
     label: t('Forward diagnostics to a central collector (URL)'),

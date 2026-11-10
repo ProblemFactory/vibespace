@@ -40,6 +40,8 @@ function _incidentServerState() {
   try { out.sysinfoHistory = sysinfo.history(30 * 60 * 1000); } catch {}
   try { out.hosts = (hosts?.list?.() || []).map((h) => ({ id: h.id, name: h.name, transport: h.dialTokenHash ? 'dial' : 'ssh' })); } catch {}
   out.console = _srvConsoleRing.slice(-400);
+  // lane hub-loop-stalls: what held the main loop — the last holds, the since-start table, the loop's utilization (the formatter's words only)
+  try { out.loopHolds = require('./sync-fs-witness.js').create().holds()?.report({ maxBytes: 64 * 1024 }) || null; } catch { }   // ≤ 64 KB of JSON (LH.boundReport)
   // The "conversation disappeared" class (2.238.1): what the RESUME BREAKER
   // currently blocks and what remote DISCOVERY last believed — both were
   // load-bearing in the userN incident and neither survives anywhere else.

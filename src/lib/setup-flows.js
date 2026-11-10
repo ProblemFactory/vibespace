@@ -563,8 +563,24 @@ export function installSetupFlows(App) {
     if (picked) { picked.classList.add('is-picked'); picked.setAttribute('aria-current', 'true'); picked.closest('.lh-row')?.classList.add('is-picked'); picked.scrollIntoView?.({ block: 'nearest' }); picked.focus?.(); }
   },
 
+  /** lane hub-loop-stalls (law L): ONE profile of the server's main thread — one sample a second for ten minutes, then it
+   *  stops by itself; the result is shown in the Diagnostics report (and carried in an incident bundle). */
+  async _profileServer() {
+    const r = await fetchJson('/api/loop-holds/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    // lane hub-loop-stalls: a refusal is answered AT THE PRESS, by name (never a success toast and «did not run» ten minutes later)
+    const why = { heap_near_limit: t('The profile did not start: the server’s memory is near its limit, and sampling it now could run it out of memory.'),
+      sampling_off: t('The profile did not start: “Name the code that holds the server” is off in Settings.'),
+      debugger_attached: t('The profile did not start: a debugger is attached to the server.'),
+      setting_unknown: t('The profile did not start: the server has not read its settings yet — try again in a moment.'),
+      no_watchdog: t('The profile did not start: the server’s watchdog thread is not running.'),
+      no_inspector: t('The profile did not start: this server’s Node has no inspector.') }[r && r.error];
+    if (why) { showToast(why, { type: 'error' }); return; }
+    if (!r || r.error || !r.ok) { showToast(t('Could not start the profile: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }
+    showToast(t('Profiling the server until {time} — then open ⚙ System → Diagnostics report…', { time: new Date(r.until).toLocaleTimeString() }));
+  },
+
     async _openDiagnostics() {
-    const [d, c, ci, bt, csp, rt, reg, ch] = await Promise.all([
+    const [d, c, ci, bt, csp, rt, reg, ch, lh] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14&drift=1'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
@@ -573,6 +589,7 @@ export function installSetupFlows(App) {
       fetchJson('/api/runtime'), // lane runtime-floor: the node this server runs against THE floor table (src/runtime-floor.js)
       fetchJson('/api/cli-registration'), // lane cli-2-1-308-records: the claude builds seen with no record table in this release
       fetchJson('/api/channels?scope=accounts'), // lane channel-row-notices: the accounts whose push lane is parked or demoted
+      fetchJson('/api/loop-holds'), // lane hub-loop-stalls: what held the main loop since start (src/server/loop-holds.js)
     ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
@@ -651,6 +668,41 @@ export function installSetupFlows(App) {
       ${rows ? `<table><tr><td class="n dim">${esc(t('after start'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of 100 ms or more since this server started.'))}</p>`}
       ${greyed ? `<p class="dim faint">${esc(t('Greyed lines: what the trace saw in that hold — too little of it to name the hold.'))}</p>` : ''}
       ${said.length ? `<ul class="dim">${said.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
+    })()}
+    ${(() => {
+      // lane hub-loop-stalls: WHAT HELD THE MAIN LOOP since this server started — the loop's utilization, the heap, the
+      // since-start table by (verdict, top frame of VibeSpace's own code) and the newest hold lines (the journal's own
+      // words, formatted by src/loop-hold.js — code locations only). Absent on a server older than the route.
+      if (!lh || !lh.elu) return '';
+      const p = (x) => (x == null ? '?' : Math.round(x * 100));
+      const g = (b) => (b == null ? '?' : (b / 1073741824).toFixed(1));
+      const s = (ms) => (ms / 1000).toFixed(1);
+      const rows = (lh.table || []).slice(0, 15).map((r) => `<tr><td class="n"><b>${esc(s(r.totalMs))} s</b></td><td class="n">${esc(String(r.count))}</td><td class="n">${esc(s(r.worstMs))} s</td><td>${esc(r.verdict)} <span class="dim">· ${esc(r.frame)}</span></td></tr>`).join('');
+      const state = lh.sampling && lh.sampling.on === false ? t('Sampling is off in Settings — the holds are still measured.') : lh.sampling && lh.sampling.debugger ? t('A debugger is attached — the sampler stands down while it is.') : '';
+      return `<h2>${esc(t('Main loop held'))}</h2>
+      <p class="dim">${esc(t('When the server stops answering for a second or more, its watchdog says what held it: running JavaScript (with the functions of VibeSpace’s own code that ran), native code or garbage collection, the system, or a wait for a processor.'))}</p>
+      <p>${esc(t('The loop was busy {a} % of the last 10 s, {b} % of the last minute, {c} % since start.', { a: p(lh.elu.last10s), b: p(lh.elu.lastMinute), c: p(lh.elu.sinceStart) }))}${lh.heap ? ' ' + esc(t('Heap {used} of {limit} GB, external {ext} GB.', { used: g(lh.heap.heapUsed), limit: g(lh.heap.heapLimit), ext: g(lh.heap.external) })) : ''}</p>
+      ${state ? `<p class="dim">${esc(state)}</p>` : ''}
+      ${rows ? `<table><tr><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('times'))}</td><td class="n dim">${esc(t('worst'))}</td><td class="dim">${esc(t('what held it'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of a second or more since this server started.'))}</p>`}
+      ${(lh.holds || []).length ? `<details><summary>${esc(t('The latest holds ({n})', { n: lh.holds.length }))}</summary><pre>${(lh.holds || []).slice(0, 20).map((h) => esc(new Date(h.at).toLocaleString() + ' · ' + h.line)).join('\n')}</pre></details>` : ''}
+      ${(() => {
+        const pf = lh.profile || {};
+        if (pf.running) return `<p><b>${esc(t('A profile is running until {time}.', { time: new Date(pf.running.until).toLocaleTimeString() }))}</b></p>`;
+        const l = pf.last;
+        if (!l) return `<p class="dim">${esc(t('⚙ System → Profile the server for 10 minutes: where the main thread’s time goes, by function.'))}</p>`;
+        if (l.refused) return `<p class="dim">${esc(t(l.refusedWords || 'The last profile did not run.'))}</p>`;   // round 4: the table's sentence, never the raw token
+        // lane hub-loop-stalls round 3: why it stopped and why samples were not taken are the server's ONE table of words
+        // (src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED — the journal line says the same; zh / ja by i18n-check's key
+        // tables); a cause the server did not word draws the neutral sentence, never another cause's
+        const top = (l.top || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.frame)}</td></tr>`).join('');
+        return `<h3>${esc(t('Profile — {n} samples, {time}', { n: l.samples, time: new Date(l.endedAt).toLocaleString() }))}</h3>
+        <p>${esc(t('Idle {idle} %, between JavaScript frames (promise jobs) {between} %, no JavaScript frame {nojs} %, not sampled {ns} %, JavaScript {js} %.', { idle: l.idlePct, between: l.betweenPct ?? 0, nojs: l.noJsPct, ns: l.notSampledPct ?? 0, js: l.jsPct }))}</p>
+        ${l.notSampledPct ? `<p class="dim">${esc(t(l.notSampledWords || 'Some samples were not taken: the sampler stood down.'))}</p>` : ''}
+        ${l.stopped ? `<p class="dim">${esc(t(l.stoppedWords || 'It stopped early.'))}</p>` : ''}
+        ${l.tooLarge ? `<p class="dim">${esc(t('Its frames could not be kept (too large); the shares above are complete.'))}</p>` : ''}
+        ${top ? `<table>${top}</table>` : ''}
+        <p class="dim">${esc(t('One sample a second; a sample that does not answer within 50 ms counts as «no JavaScript frame» (native work or a system call).'))}</p>`;
+      })()}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
     ${diagnosticsSection(reg, { t, esc })}
