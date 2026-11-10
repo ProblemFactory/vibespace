@@ -386,7 +386,8 @@ never ask the owner for one.
 
 On standard Chrome `login` is WITHDRAWN in 2.369.364: it answers `login_fill_withdrawn` before anything is read from the
 vault, and nothing is typed (a page could claim another site's origin; a fallback put the secret in a script). Ask the
-owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>"`) or ask a person to take over
+owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host <site>` — one card,
+the login lands as a web login; vault-manual.md) or ask a person to take over
 (`vibespace-browser ask-human "<what you need>"`) — never retry `login` there; it returns when its fix is accepted.
 
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on

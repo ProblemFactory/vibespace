@@ -22,6 +22,26 @@
 //      the Vault row's description + «An agent proposes new words» + Edit…; a real click on Allow ⇒ the row and `list` read
 //      the new words, the agent's next turn says APPLIED; r2: the RUN card of a held `vibespace-vault run` with it says «What it is:
 //      …» (Deny ends the run) (VAULT_WORDS_SHOTS=<dir> keeps the four PNGs)
+//   ⑧ A WEBSITE LOGIN (lane login-request-card, B-a681): a plain-http site refused at the CLI by name; a 200-character ask
+//      `--kind login --host shop.example.test` ⇒ ONE card whose FIRST line says who asks, for which site, typed only there;
+//      its box = the add door's own fields (the site read-only, user name, password, two-step NAME + «Two-step code…»), the
+//      tick «Let <who> sign in to <site> with it» ON by default, its words + the button naming the moment (Save and allow /
+//      Save only); an IDN site in both forms; the user name shown as the vault keeps it (lower case); a pasted trailing line
+//      break never in the field; a two-step name that names no entry refused by name with every field kept; «Two-step code…»
+//      opens THE 两步验证… dialog — the page behind stays usable, the card keeps its fields, the saved name fills the field;
+//      Save and allow ⇒ ONE web-login + ONE this-account row for this conversation; the receipt names the user + how to use it;
+//      THE PHONE over a RESTART (locked at boot): 44 px targets, every text ≥ 16 px, inside the screen; Save while locked ⇒
+//      vault_locked in the box, every field kept; 解锁… then Save only ⇒ stored with no grant; a SECOND client's card resolves
+//      live; the receipt names no user; the passwords in no DOM, frame, log line or receipt
+//   ⑨ (r3, law B) EVERY SURFACE THAT DRAWS THE CARD — the census's legs (scripts/test-vault-paste.mjs ⑬): the tray, the mini
+//      inbox, the chat's needs card, the For-you window, the Vault window's 「需要你」, the phone's page — on each: type both fields
+//      → «Two-step code…» → a press INSIDE the dialog → both fields still hold what was typed → save a code → its name lands in
+//      THAT box. Law C: a typed user name alone (no password) — Escape ASKS before the form closes. r4 tidy (law B(3) — ONE
+//      submittable card): the request's submittable copies in the whole document counted per surface before the press; after
+//      the move the form window holds exactly ONE box for it (THIS one), the surface it came from holds none, and no surface
+//      holds a copy it did not hold (the others named — the product draws an open ask on each surface at once); where a
+//      person's act redraws that surface (the tray, the mini inbox, the phone's sheet reopened) it draws «open in its own
+//      window · Show it», still no new box. Every firm press says which attempt landed when it needed a retry.
 //   ⑦ RED CONTROL (saved by Enter in the box): a mutant hub whose paste door logs the value and files it on an item ⇒ the same checks find it in the server
 //      log, the DOM and a WebSocket frame (they see a leak when there is one)
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
@@ -284,6 +304,306 @@ try {
   check('denied ⇒ the run is refused and ends (nothing ran)', !!ran && ran.code !== 0, ran);
 
 
+
+  console.log('⑧ A WEBSITE LOGIN — one card, the add door\'s own fields, one web-login entry (lane login-request-card)');
+  {
+    const T8 = require(path.join(wt, 'src/totp.js'));
+    const SEED8 = T8.base32Encode(crypto.randomBytes(20));
+    const V_LOGIN = ['typed', 'site', 'password', crypto.randomBytes(8).toString('hex')].join('-');
+    const V_LOGIN2 = ['typed', 'phone', 'password', crypto.randomBytes(8).toString('hex')].join('-');
+    const SITE8 = 'https://shop.example.test';
+    const typeInto = (sel, text) => evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); if (!i) return false; i.focus(); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    const focusType = async (sel, text) => { await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.focus(); i.select && i.select(); return true; })()`); await cdp('Input.insertText', { text }); };
+    const C = (id, sel = boxOf(id)) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; const it = b.closest('.ut-item'); const q = (s) => b.querySelector(s); return { text: it ? it.querySelector('.ut-text').textContent : '', plan: it ? (it.querySelector('.ut-secret-plan') || {}).textContent || '' : '', target: b.dataset.target, site: q('input.vault-login-site').value, ro: q('input.vault-login-site').readOnly, user: q('input.vault-login-user').value, pw: q('input.vault-login-pass').value, pwType: q('input.vault-login-pass').type, otp: q('input.vault-login-otp').value, list: !!q('input.vault-login-otp').list, two: (q('.ut-secret-totp') || {}).textContent, tick: q('input.ut-login-allow-box').checked, says: q('.ut-login-says').textContent, kept: q('.ut-login-kept').textContent, save: q('.ut-secret-save').textContent, words: q('.ut-secret-words').textContent, state: b.dataset.state, labels: [...b.querySelectorAll('.vault-secret-label')].map((x) => x.textContent), hint: /Only the site itself/.test(b.textContent), reply: !!(it && it.querySelector('.ut-reply-btn')), inRow: !!it && !b.closest('[role=dialog]') }; })()`;   // a box moved into its own window has no row
+    await cdp('Page.navigate', { url: URL }); await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone();
+    const bad8 = await cli(['request', 'the wiki login', '--purpose', 'read the wiki', '--kind', 'login', '--host', 'http://wiki.example.test'], TOKEN);
+    check('a site the add door refuses (plain http) ⇒ refused at the CLI by name, before any card', bad8.code !== 0 && /https site/.test(bad8.out), bad8);
+    const long8 = 'the parts shop login so I can order the replacement parts you listed this morning — '.repeat(4).slice(0, 200);
+    const l1 = await ask([long8, '--purpose', 'order the replacement parts', '--kind', 'login', '--host', 'shop.example.test'], TOKEN);
+    check('`request "<200 characters>" --purpose … --kind login --host shop.example.test` ⇒ exit 0 — «a website login on https://shop.example.test — only that site is ever filled with it»', l1.code === 0 && !!l1.id && /a website login on https:\/\/shop\.example\.test — only that site is ever filled with it/.test(l1.out), l1);
+    const l9 = await ask(['the book shop login', '--purpose', 'order the book', '--kind', 'login', '--host', 'https://bücher.example.test'], TOKEN);
+    await realClick('#taskbar-user-todos');
+    check('the tray opens on the login card', !!(await until(visible(boxOf(l1.id)), { timeout: 10000 })));
+    const c1 = await evalJs(C(l1.id));
+    check('its FIRST line: who asks, for which site, typed only there — the agent\'s words below it, with what for', !!c1 && c1.text === `Paste lane asks you for a website login on ${SITE8} — it is typed only on that site` && c1.plan.includes(long8) && /order the replacement parts/.test(c1.plan), c1 && { text: c1.text, plan: c1.plan.slice(0, 300) });
+    check('the box IS the add door\'s form: Site (the ask\'s, read-only) · User name · Password (masked) · Two-step code (the vault\'s names) + «Two-step code…», its «only the site itself» line, inline in the tray row (no popup, no reply box)', !!c1 && c1.target === 'login' && JSON.stringify(c1.labels) === JSON.stringify(['Site', 'User name', 'Password', 'Two-step code']) && c1.site === SITE8 && c1.ro && c1.pwType === 'password' && c1.list && c1.two === 'Two-step code…' && c1.hint && !c1.reply && c1.inRow, c1);
+    check('«Let Paste lane sign in to it» starts TICKED (the setting\'s default) and says what «allowed» IS before the press — it can sign in as you on that site until you remove it, no time limit — and the button names the moment: Save and allow', !!c1 && c1.tick && /^Paste lane can sign in as you on https:\/\/shop\.example\.test with it until you remove it in Vault ▸ Web logins ▸ Use for… — there is no time limit\.$/.test(c1.says) && c1.save === 'Save and allow', c1 && [c1.tick, c1.says, c1.save]);
+    await realClick(boxOf(l1.id) + ' input.ut-login-allow-box');
+    const c1u = await evalJs(C(l1.id));
+    await realClick(boxOf(l1.id) + ' input.ut-login-allow-box');
+    const c1t = await evalJs(C(l1.id));
+    check('unticked ⇒ «Paste lane cannot sign in with it until you allow it…» and «Save only»; ticked again ⇒ back', !c1u.tick && /^Paste lane cannot sign in with it until you allow it in Vault ▸ Web logins ▸ Use for…\.$/.test(c1u.says) && c1u.save === 'Save only' && c1t.tick && c1t.save === 'Save and allow', [c1u.says, c1u.save, c1t.save]);
+    const c9 = await evalJs(C(l9.id));
+    check('an IDN site: the punycode origin the fill compares, its Unicode form beside it — on the first line and in the fixed field', !!c9 && c9.text.includes('https://xn--bcher-kva.example.test (https://bücher.example.test)') && c9.site === 'https://xn--bcher-kva.example.test (https://bücher.example.test)', c9 && [c9.text, c9.site]);
+    await realClick(boxOf(l9.id) + ' .ut-secret-deny');
+    await until(`!document.querySelector(${JSON.stringify(boxOf(l9.id))})`, { timeout: 10000 });
+    // r2 (the rebase onto .388, 主开发's question): a card whose words hold a MASKED link (the door's belt «redacted» inside it) is
+    // drawn by THE row's own rule — the login card exactly as a free-entry paste card with the same words; never the link whole
+    const TOK8 = ['ya29', 'a0' + crypto.randomBytes(20).toString('hex')].join('.');
+    const MW = `sign in from https://shop.example.test/cb?access_token=${TOK8}&state=x`;
+    const lm = await ask([MW, '--purpose', 'sign in for the order', '--kind', 'login', '--host', 'https://masked.example.test'], TOKEN);
+    const fm = await ask([MW, '--purpose', 'sign in for the order', '--kind', 'password', '--name', 'Masked link entry'], TOKEN);
+    await until(`!!document.querySelector(${JSON.stringify(boxOf(lm.id))}) && !!document.querySelector(${JSON.stringify(boxOf(fm.id))})`, { timeout: 10000 });
+    const rowFacts = (id) => evalJs(`(() => { const it = document.querySelector(${JSON.stringify(boxOf(id))}).closest('.ut-item'); const plan = it.querySelector('.ut-secret-plan'); return { planNote: !!(plan && plan.querySelector('.fy-masked + .masked-link-note, .fy-masked ~ .masked-link-note')), notes: it.querySelectorAll('.masked-link-note').length, masked: it.querySelectorAll('.fy-masked').length, links: [...it.querySelectorAll('a')].filter((a) => /access_token/.test(a.href)).length, redacted: /access_token=«redacted»/.test(plan ? plan.textContent : ''), whole: it.textContent.includes(${JSON.stringify(TOK8)}), inPre: !!it.querySelector('pre .masked-link-note') }; })()`);
+    const fl = await rowFacts(lm.id), ff = await rowFacts(fm.id);
+    console.log(`    (the masked link in the tray — login card ${JSON.stringify(fl)} · free-entry card ${JSON.stringify(ff)})`);
+    check('a login card whose words hold a MASKED link draws them by THE For-you rows\' own rule, as a free-entry paste card does: every masked link its words + THE note inline in the prose (the paste plan included), never the link whole, never a live link to it, no note inside a verbatim block', [fl, ff].every((f) => f.planNote && f.masked >= 1 && f.notes === f.masked && !f.whole && f.links === 0 && f.redacted && !f.inPre), { login: fl, free: ff });
+    for (const r of [lm, fm]) { await realClick(boxOf(r.id) + ' .ut-secret-deny'); await until(`!document.querySelector(${JSON.stringify(boxOf(r.id))})`, { timeout: 10000 }); }
+    await focusType(boxOf(l1.id) + ' input.vault-login-user', 'Owner@Shop.Example');
+    const ck = await evalJs(C(l1.id));
+    check('the user name as the vault will keep it — «Saved as «owner@shop.example»» (lower case: what the fill uses)', ck.kept === 'Saved as «owner@shop.example» — the vault keeps user names in lower case', ck.kept);
+    await focusType(boxOf(l1.id) + ' input.vault-login-pass', V_LOGIN + '\n');
+    check('a paste with a trailing line break ⇒ the password field holds none (the page\'s own input strips it — a non-DOM client is refused by name at the door)', (await evalJs(C(l1.id))).pw === V_LOGIN);
+    await focusType(boxOf(l1.id) + ' input.vault-login-otp', 'no-such-code');
+    await realClick(boxOf(l1.id) + ' .ut-secret-save');
+    const cw = await until(`(() => { const c = ${C(l1.id)}; return c && /No two-step code of that name/.test(c.words) ? c : null; })()`, { timeout: 8000 });
+    check('a two-step NAME that names no entry ⇒ refused by name in the box, every field kept (user, password, the name)', !!cw && cw.user === 'Owner@Shop.Example' && cw.pw === V_LOGIN && cw.otp === 'no-such-code' && cw.site === SITE8, cw);
+    await evalJs(`window.__loginBox = document.querySelector(${JSON.stringify(boxOf(l1.id))}); true`);
+    await realClick(boxOf(l1.id) + ' .ut-secret-totp');
+    const D8 = '.vault-totp-add-dialog', ANY = `.vault-paste-dialog .ut-secret[data-req="${l1.id}"]`;   // r3: the card in its own form
+    check('«Two-step code…» opens THE 两步验证… dialog', !!(await until(visible(D8), { timeout: 8000 })));
+    const moved = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(ANY)}); return { same: b === window.__loginBox, inForm: !!(b && b.closest('.vault-paste-dialog')), boxes: document.querySelectorAll(${JSON.stringify(ANY)}).length }; })()`);
+    check('…THIS card moves into its own form window first (the same box — never rebuilt)', moved.same && moved.inForm && moved.boxes === 1, moved);
+    const behind = await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(D8)}).getBoundingClientRect(); const t = document.getElementById('taskbar-user-todos'); const r = t.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const h = document.elementFromPoint(x, y); const inside = x >= d.left && x <= d.right && y >= d.top && y <= d.bottom; const b = document.querySelector(${JSON.stringify(ANY)}); const at = (sel) => { const e = document.querySelector(sel); if (!e) return false; const q = e.getBoundingClientRect(); const z = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!z && (z === e || e.contains(z)); }; return { reach: !!h && (h === t || t.contains(h)), inside, front: at(${JSON.stringify(D8 + ' .vt-name')}), overlay: !!document.querySelector('.dialog-overlay:not(.hidden):not([hidden])'), user: b && b.querySelector('input.vault-login-user').value, pw: b && b.querySelector('input.vault-login-pass').value === ${JSON.stringify(V_LOGIN)} }; })()`);
+    check('…the dialog is in FRONT, blocks nothing behind it (no overlay; the page\'s own controls answer a press outside it) and the card keeps every typed field', behind.reach && !behind.inside && behind.front && !behind.overlay && behind.user === 'Owner@Shop.Example' && behind.pw, behind);
+    await realClick(D8 + ' .vt-way[data-way="seed"]');
+    await typeInto(D8 + ' .vt-seed', SEED8);
+    await typeInto(D8 + ' .vt-name', 'shop-code');
+    await realClick(D8 + ' .vt-preview-b');
+    await until(`(() => { const b = document.querySelector(${JSON.stringify(D8 + ' .vt-save')}); return !!b && !b.hidden; })()`, { timeout: 10000 });
+    await realClick(D8 + ' .vt-save');
+    check('the code saved there ⇒ its dialog closes', !!(await until(`!document.querySelector(${JSON.stringify(D8)})`, { timeout: 10000 })));
+    const cn = await evalJs(C(l1.id, ANY));
+    check('…and its NAME is in the card\'s field — no retyping; the same box, the other fields kept', !!cn && cn.otp === 'shop-code' && cn.user === 'Owner@Shop.Example' && cn.pw === V_LOGIN && (await evalJs(`document.querySelector(${JSON.stringify(ANY)}) === window.__loginBox`)), cn);
+    check('a real click on Save and allow (in the card\'s own window)', (await realClick(ANY + ' .ut-secret-save')) === true);
+    check('stored ⇒ the card resolved (its window closed) and the toast says the agent may sign in with it there, never seeing the password', !!(await until(`!document.querySelector(${JSON.stringify(ANY)})`, { timeout: 10000 })) && !!(await until(`[...document.querySelectorAll('.toast, [class*=toast]')].some((t) => /Saved to the vault — the agent may sign in with it on that site; it never sees the password/.test(t.textContent))`, { timeout: 6000 })));
+    const wl = await pageApi('GET', '/api/vault/web-logins');
+    const e1 = ((wl.json && wl.json.entries) || []).find((e) => e.name === 'web-login:https://shop.example.test#owner@shop.example');
+    const gr = (e1 && e1.grants) || [];
+    check('ONE web-login entry (the owner\'s, the add door\'s name) and ONE grant: this conversation on THIS account — nothing wider', !!e1 && e1.source === 'owner' && gr.length === 1 && gr[0].scope === 'this-account' && (gr[0].to || []).length === 1 && gr[0].to[0].kind === 'conversation' && hitsIn(JSON.stringify(wl.json), V_LOGIN) === 0, { e1, grants: gr });
+    const turn8 = await nextTurn(TOKEN);
+    check('the agent\'s next turn: STORED for the site with its user (it may fill it), standing, HOW TO USE IT — never the password', /STORED — a website login for https:\/\/shop\.example\.test \(user owner@shop\.example\)/.test(turn8) && /vibespace-browser login https:\/\/shop\.example\.test --user owner@shop\.example signs in/.test(turn8) && /paused since 2\.369\.364/.test(turn8) && hitsIn(turn8, V_LOGIN) === 0, turn8.slice(0, 900));
+
+    // ⑨ (r3, law B) EVERY SURFACE THAT DRAWS THE CARD — the census's legs. On each: type both fields → «Two-step code…» → a press
+    // INSIDE the dialog → both fields still hold what was typed → save a code → its name lands in THAT box (the same element)
+    console.log('⑨ every surface that draws the card — what the owner typed is never lost by opening the helper (r3, law B; law C)');
+    const itemOf = async (id) => (((await pageApi('GET', '/api/user-todos')).json || {}).todos?.open || []).find((i) => i.action && i.action.requestId === id) || null;
+    // r4 (the acceptance of r3 — the press is the test's to prove, never a guess): a press lands only on a target that is REALLY
+    // visible (CSS visibility too — a popover is drawn hidden until its first frame repositions it), STILL (the same place on two
+    // reads and again after the press-arm rest) and the element under the point; else it scrolls and tries again; a press that
+    // hits nothing FAILS BY NAME at once (never three assertions later). Typing is proven by reading the value back.
+    // the point to press: the target's centre, else the first point on its first line / its middle (left, centre, right) where the
+    // target ITSELF is under the point — a row partly under a sticky bar or the screen's edge is still pressed where it shows
+    let lastSpot = null;   // what the last look saw (a miss says it)
+    const spotOf = (sel) => evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); const vis = typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true; const ys = [r.top + r.height / 2, r.top + Math.min(r.height / 2, 22)], xs = [r.left + r.width / 2, r.left + r.width * 0.25, r.left + r.width * 0.75]; let at = null, under = null; for (const y of ys) { for (const x of xs) { if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue; const h = document.elementFromPoint(x, y); if (!under) under = h ? (h.id ? '#' + h.id : h.className ? String(h.className).slice(0, 60) : h.tagName) : null; if (h && (h === e || e.contains(h))) { at = { x, y }; break; } } if (at) break; } return { x: at ? at.x : r.left + r.width / 2, y: at ? at.y : r.top + r.height / 2, w: r.width, h: r.height, top: Math.round(r.top), vh: innerHeight, vis, hits: !!at, under }; })()`).then((v) => { lastSpot = v; return v; });
+    const firm = async (sel, timeout = 4000) => { const t0 = Date.now(); let prev = null; while (Date.now() - t0 < timeout) { const p = await spotOf(sel); if (p && p.vis && p.hits && p.w > 0 && p.h > 0) { if (prev && Math.abs(prev.x - p.x) < 1 && Math.abs(prev.y - p.y) < 1) return p; prev = p; } else prev = null; await sleep(150); } return null; };
+    // r4 tidy (#3): every firm press's attempt is kept, and a press that needed a retry is SAID in the log at once (which attempt,
+    // which scroll, what the earlier looks saw) — a silent retry is how a real reach problem would hide. → the attempt (1–5) | 0
+    const PRESSES = [];
+    const firmPress = async (sel, touch = false) => {
+      const BLOCKS = ['center', 'end', 'nearest', 'start', 'center'];   // each retry scrolls the target in another way (a row at a list's edge, or under what stands above it, comes into the open); a control covered at EVERY position still fails. (r4's 12:00Z miss was the phone PAGE's copy lying under the open tray sheet — no bar of the tray is sticky)
+      const misses = [];
+      for (let i = 0; i < 5; i++) {
+        await evalJs(`document.querySelector(${JSON.stringify(sel)})?.scrollIntoView({ block: ${JSON.stringify(BLOCKS[i])} }); true`);
+        await sleep(300);
+        const p = await firm(sel, 2500);
+        if (!p) { misses.push(lastSpot ? { at: i + 1, vis: lastSpot.vis, hits: lastSpot.hits, under: lastSpot.under } : { at: i + 1, gone: true }); continue; }
+        await sleep(400);   // the press-arm rest: what just came to rest under the pointer is pressed once it has rested
+        const q = await spotOf(sel);
+        if (!q || !q.vis || !q.hits || Math.abs(q.x - p.x) > 1 || Math.abs(q.y - p.y) > 1) { misses.push({ at: i + 1, moved: true, under: q && q.under }); continue; }   // it moved (a list scrolled back to its tail): again
+        if (touch) { await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: q.x, y: q.y }] }); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
+        else { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: q.x, y: q.y }); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: q.x, y: q.y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: q.x, y: q.y, button: 'left', clickCount: 1 }); }
+        await sleep(250);
+        PRESSES.push({ sel, at: i + 1 });
+        if (i > 0) console.log(`    ↻ ${sel} — pressed at attempt ${i + 1} of 5 (scrollIntoView «${BLOCKS[i]}»); the looks before it: ${JSON.stringify(misses)}`);
+        return i + 1;
+      }
+      PRESSES.push({ sel, at: 0 });
+      console.log(`    ✗ ${sel} — no attempt of 5 landed: ${JSON.stringify(misses)}`);
+      return 0;
+    };
+    const firmType = async (sel, text, touch = false) => { if (!(await firmPress(sel, touch))) return false; await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.focus(); if (i.select) i.select(); return true; })()`); await cdp('Input.insertText', { text }); return (await evalJs(`document.querySelector(${JSON.stringify(sel)})?.value`)) === text; };
+    /** the ONE copy of a request's box that is really visible on this surface (a hidden copy may stand elsewhere — the phone's
+     *  home, a folded row): marked, and its selector handed back | null */
+    const pickVisible = async (sid, reqId, scope, timeout = 12000) => (await until(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(`${scope} .ut-secret[data-req="${reqId}"]`)})].find((x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (typeof x.checkVisibility !== 'function' || x.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })); }); if (!e) return null; e.dataset.legPick = ${JSON.stringify(sid)}; return true; })()`, { timeout })) ? `.ut-secret[data-leg-pick="${sid}"]` : null;
+    const boxesOf = (reqId) => evalJs(`[...document.querySelectorAll('.ut-secret[data-req="${reqId}"]')].map((e) => { const r = e.getBoundingClientRect(); return { where: (e.closest('#user-todos-popup, #phone-home, .ut-mini-popover, .cn-card, .chat-attn-dock, .vault-paste-dialog') || {}).className || (e.closest('#user-todos-popup, #phone-home') || {}).id || '?', w: Math.round(r.width), h: Math.round(r.height), vis: typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkVisibilityCSS: true }) : null }; })`);
+    /** r4 tidy (law B(3)): the request's SUBMITTABLE copies (a Save) in the WHOLE document other than THIS box, counted per
+     *  surface — {place: n}; the product draws an open ask on each surface at once, each its own box */
+    const PLACES = `((id) => { const m = {}; for (const x of document.querySelectorAll('.ut-secret[data-req="' + id + '"]')) { if (x === window.__sBox || !x.querySelector('.ut-secret-save')) continue; const s = x.closest('.vault-paste-dialog, #user-todos-popup, #phone-home, .ut-mini-popover, .cn-card, .chat-attn-dock'); const p = s ? (s.id ? '#' + s.id : '.' + String(s.className).split(' ')[0]) : '?'; m[p] = (m[p] || 0) + 1; } return m; })`;
+    /** …and where THIS box stands (in a form, the only box the forms hold for it) and what the row it came from still holds */
+    const B3 = (reqId) => evalJs(`(() => { const S = '.ut-secret[data-req="${reqId}"]'; const b = window.__sBox, o = window.__sOrigin; return { others: (${PLACES})(${JSON.stringify(reqId)}), forms: document.querySelectorAll('.vault-paste-dialog ' + S).length, thisInForm: !!b && b.isConnected && !!b.closest('.vault-paste-dialog') && !!b.querySelector('.ut-secret-save'), origin: !!o, originHolds: o ? [...o.querySelectorAll(S)].filter((x) => !!x.querySelector('.ut-secret-save')).length : 0 }; })()`);
+    /** the surfaces that hold MORE submittable copies than they held before the press → ['<place> +n'] */
+    const addedOf = (pre, now) => Object.entries(now || {}).filter(([p, n]) => n > ((pre || {})[p] || 0)).map(([p, n]) => `${p} +${n - ((pre || {})[p] || 0)}`);
+    const placesSaid = (m) => Object.entries(m || {}).map(([p, n]) => (n > 1 ? `${p} ×${n}` : p)).join(', ') || 'none';
+    /** (iv): a person's act that redraws the surface a card came from — the tray / the phone's sheet closed and opened again by its
+     *  own button, the mini inbox by its badge (the button's own click: what is checked is the product's redraw; reach is the
+     *  leg's own presses') */
+    const toggleTray = async (open) => { if ((await trayOpen()) !== open) await evalJs(`document.getElementById('taskbar-user-todos').click(); true`); await until(`${open ? '!' : ''}document.getElementById('user-todos-popup').classList.contains('hidden')`, { timeout: 5000 }); };
+    const trayRedraw = (how) => ({ where: TRAY, how, open: async () => { await toggleTray(false); await toggleTray(true); }, close: () => toggleTray(false) });
+    const surfaceLeg = async (sid, reqId, scope, touch = false, redraw = null) => {
+      const U = `${sid}-user@example.test`, PW9 = ['surface', sid, 'pw', crypto.randomBytes(4).toString('hex')].join('-'), CODE = `code-${sid}`;
+      const fail = async (what, detail) => { check(`[surface:${sid}] ${what}`, false, { detail, lastSpot }); await pageApi('POST', `/api/vault/secret-requests/${reqId}/answer`, { answer: 'deny' }); return false; };   // fail BY NAME at once; the ask closed so nothing cascades
+      const sel = await pickVisible(sid, reqId, scope);
+      if (!sel) return fail('the login card is drawn there, really visible', await boxesOf(reqId));
+      check(`[surface:${sid}] the login card is drawn there (really visible)`, true);
+      const tu = await firmType(sel + ' input.vault-login-user', U, touch), tp = await firmType(sel + ' input.vault-login-pass', PW9, touch);
+      if (!tu || !tp) return fail('both fields take what is typed (read back)', { user: tu, password: tp, spot: await spotOf(sel + ' input.vault-login-user') });
+      await evalJs(`window.__sBox = document.querySelector(${JSON.stringify(sel)}); true`);
+      // law B(3): every SUBMITTABLE copy of the request in the whole document, marked before the press (the product draws an open
+      // ask on each surface at once — each its own box); the row THIS box stands in (none when it was born in its form)
+      const pre = await evalJs(`(() => { const b = window.__sBox; window.__sOrigin = b.closest('.vault-paste-dialog') ? null : (b.closest('.ut-item') || b.parentElement); return (${PLACES})(${JSON.stringify(reqId)}); })()`);
+      if (!(await firmPress(sel + ' .ut-secret-totp', touch))) return fail('the press on «Two-step code…» lands on it', await spotOf(sel + ' .ut-secret-totp'));
+      if (!(await firm(D8, 8000))) return fail('«Two-step code…» opens the 两步验证… dialog', await boxesOf(reqId));
+      if (!(await firmPress(D8 + ' .vt-name', touch))) return fail('a press INSIDE the 两步验证… dialog lands on it', await spotOf(D8 + ' .vt-name'));
+      await sleep(400);
+      const held = await evalJs(`(() => { const b = window.__sBox; return { on: !!b && b.isConnected, inForm: !!(b && b.closest('.vault-paste-dialog')), user: b ? b.querySelector('input.vault-login-user').value : null, pw: b ? b.querySelector('input.vault-login-pass').value === ${JSON.stringify(PW9)} : false }; })()`);
+      check(`[surface:${sid}] «Two-step code…» opens the 两步验证… dialog; after a press INSIDE it both fields still hold what was typed (THIS box, in the card's own form)`, held.on && held.inForm && held.user === U && held.pw, held);
+      const b3 = await B3(reqId), added = addedOf(pre, b3.others);
+      check(`[surface:${sid}] law B(3) after the move: the form window holds exactly ONE box for the request — THIS one; ${b3.origin ? 'the surface it came from holds none' : 'born in its form (the window draws no box of its own)'}; no surface holds a submittable copy it did not hold before the press (the others, each surface's own: ${placesSaid(b3.others)})`,
+        b3.forms === 1 && b3.thisInForm && b3.originHolds === 0 && added.length === 0, { pre, added, ...b3 });
+      if (!(await firmPress(D8 + ' .vt-way[data-way="seed"]', touch))) return fail('the dialog\'s «Type the seed» press lands', null);
+      if (!(await firmType(D8 + ' .vt-seed', T8.base32Encode(crypto.randomBytes(20)), touch))) return fail('the dialog\'s seed field takes what is typed (read back)', await spotOf(D8 + ' .vt-seed'));
+      if (!(await firmType(D8 + ' .vt-name', CODE, touch))) return fail('the dialog\'s name field takes what is typed (read back)', await spotOf(D8 + ' .vt-name'));
+      if (!(await firmPress(D8 + ' .vt-preview-b', touch))) return fail('the dialog\'s Preview press lands', null);
+      if (!(await firm(D8 + ' .vt-save', 10000))) return fail('the dialog draws Save after its preview', null);
+      if (!(await firmPress(D8 + ' .vt-save', touch))) return fail('the dialog\'s Save press lands', null);
+      await until(`!document.querySelector(${JSON.stringify(D8)})`, { timeout: 10000 });
+      const landed = await evalJs(`(() => { const b = window.__sBox; return { on: !!b && b.isConnected, otp: b ? b.querySelector('input.vault-login-otp').value : null, user: b ? b.querySelector('input.vault-login-user').value : null, pw: b ? b.querySelector('input.vault-login-pass').value === ${JSON.stringify(PW9)} : false }; })()`);
+      check(`[surface:${sid}] the saved code's name lands in THAT box (on the page, its typed fields kept — the password too)`, landed.on && landed.otp === CODE && landed.user === U && landed.pw, landed);
+      // law B(3) (iv): where a person's act redraws the surface the card came from, it draws the away line — never a new box
+      if (redraw && typeof redraw === 'object') {
+        await redraw.open();
+        const drawn = await until(`(() => { const s = document.querySelector(${JSON.stringify(redraw.where)}); if (!s) return null; const x = [...s.querySelectorAll('.ut-secret[data-req="${reqId}"]')]; return x.length ? x.map((e) => (e.classList.contains('ut-secret-away') && !!e.querySelector('.ut-secret-show') && !e.querySelector('input, .ut-secret-save, .ut-secret-deny') ? 'away' : e.querySelector('.ut-secret-save') ? 'a submittable box' : 'other')) : null; })()`, { timeout: 10000 });
+        const words = await evalJs(`(() => { const a = document.querySelector(${JSON.stringify(`${redraw.where} .ut-secret-away[data-req="${reqId}"]`)}); return a ? [...a.children].map((c) => c.textContent).join(' · ') : ''; })()`);
+        const b3r = await B3(reqId), addedR = addedOf(pre, b3r.others);
+        check(`[surface:${sid}] law B(3) — ${redraw.how}: the surface the card came from draws «${words || 'This login card is open in its own window · Show it'}», never a second box; no surface holds a submittable copy it did not hold before the press (${placesSaid(b3r.others)})`,
+          Array.isArray(drawn) && drawn.length === 1 && drawn[0] === 'away' && addedR.length === 0 && b3r.thisInForm && b3r.forms === 1, { drawn, added: addedR, ...b3r });
+        await redraw.close();
+      } else if (redraw) console.log(`    · [surface:${sid}] law B(3) (iv): ${redraw}`);
+      if (!(await firmPress(`.vault-paste-dialog .ut-secret[data-req="${reqId}"] .ut-secret-deny`, touch))) return fail('Refuse in the card\'s own form lands', null);   // done: its answer closes the form
+      await until(`!document.querySelector('.vault-paste-dialog .ut-secret[data-req="${reqId}"]')`, { timeout: 10000 });
+      return true;
+    };
+    const askS = async (sid) => { const r = await ask([`the ${sid} login`, '--purpose', `the ${sid} leg`, '--kind', 'login', '--host', `https://${sid}.example.test`], TOKEN); check(`[surface:${sid}] asked (${r.id || 'no id'})`, r.code === 0 && !!r.id, r); return r.id; };
+    // the tray
+    if (await trayOpen()) await realClick('#taskbar-user-todos');
+    const sT = await askS('tray');
+    await realClick('#taskbar-user-todos');
+    await surfaceLeg('tray', sT, TRAY, false, trayRedraw('the tray closed and opened again'));
+    if (await trayOpen()) await realClick('#taskbar-user-todos');
+    // the conversation's chat window: its needs card, and its title-bar mini inbox
+    // the HUB's session id (the `created` frame of ①'s create — what attachSession and the window's session know), never the CLI's
+    const HUB_SID = (frames0.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m && m.type === 'created' && m.reqId === 'vp1') || {}).sessionId || null;
+    const CHATW = `[...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${JSON.stringify(HUB_SID)})`;
+    await evalJs(`(() => { if (!${CHATW}) app.attachSession(${JSON.stringify(HUB_SID)}, 'Paste lane', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+    check('the asking conversation\'s chat window is open (attached by the hub\'s session id)', !!HUB_SID && !!(await until(`!!${CHATW}`, { timeout: 15000 })), HUB_SID);
+    const sC = await askS('chat-card');
+    await surfaceLeg('chat-card', sC, ':is(.cn-card, .chat-attn-dock)', false, 'not here — no act short of closing the conversation\'s window redraws its needs card\'s row while the form is open (the card patches its rows in place); the redraw road is test-vault-paste ⑬b\'s');   // the chat's card: at its record when on screen, else its attention dock (a stub conversation has no transcript record)
+    const sM = await askS('mini-inbox');
+    await until(`(() => { const w = ${CHATW}; return !!(w && w.titleBar.querySelector(':scope > .win-inbox-badge')); })()`, { timeout: 12000 });
+    const badge = await evalJs(`(() => { const w = ${CHATW}; app.wm.focusWindow(w.id); const b = w.titleBar.querySelector(':scope > .win-inbox-badge'); b.id = 'vs-test-mini-badge'; return true; })()`);
+    check('[surface:mini-inbox] the press on the title bar\'s inbox badge lands', await firmPress('#vs-test-mini-badge'));
+    const BADGE = `(${CHATW})?.titleBar.querySelector(':scope > .win-inbox-badge')`, MINI_OPEN = `!!document.querySelector('.ut-mini-popover')`;
+    await surfaceLeg('mini-inbox', sM, '.ut-mini-popover', false, { where: '.ut-mini-popover', how: 'the title bar\'s inbox badge pressed again',
+      open: async () => { if (await evalJs(MINI_OPEN)) { await evalJs(`${BADGE}?.click(); true`); await until(`!${MINI_OPEN}`, { timeout: 5000 }); } await evalJs(`${BADGE}?.click(); true`); await until(MINI_OPEN, { timeout: 5000 }); },
+      close: async () => { if (await evalJs(MINI_OPEN)) { await evalJs(`${BADGE}?.click(); true`); await until(`!${MINI_OPEN}`, { timeout: 5000 }); } } });
+    // the For-you window: its «Paste and save…» opens the card's own form — and LAW C there: a typed user name alone asks on Escape
+    const sF = await askS('foryou-window');
+    const itF = await itemOf(sF);
+    await evalJs(`app.openInbox({ itemId: ${JSON.stringify(itF && itF.id)} }); true`);
+    check('[surface:foryou-window] the press on «Paste and save…» lands', await firmPress('.iw-act[data-act="secret-paste"]'));
+    const FSEL = `.vault-paste-dialog .ut-secret[data-req="${sF}"]`;
+    await until(visible(FSEL), { timeout: 10000 });
+    check('law C: a typed user name lands (read back)', await firmType(FSEL + ' input.vault-login-user', 'only-a-name'));
+    for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    const asked = await until(`(() => { const s = document.querySelector('.vault-paste-dialog .dialog-unsaved'); return s && s.getClientRects().length ? true : null; })()`, { timeout: 5000 });
+    check('law C: a typed user name ALONE (no password) — Escape ASKS before the form closes («unsaved changes»: Save / Discard / Keep editing)', !!asked);
+    check('law C: the press on Keep editing lands', await firmPress('.vault-paste-dialog .dialog-unsaved-keep'));
+    check('law C: Keep editing ⇒ the form stays, the typed name kept', (await evalJs(`document.querySelector(${JSON.stringify(FSEL + ' input.vault-login-user')})?.value`)) === 'only-a-name');
+    await surfaceLeg('foryou-window', sF, '.vault-paste-dialog', false, 'born in its form — the window\'s «Paste and save…» draws no box; pressed again it raises THE form (test-vault-paste ⑬b)');
+    // the Vault window's 「需要你」: its «Paste and save…» opens the same form
+    const sV = await askS('vault-window');
+    await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+    const vb = await until(`(() => { const b = [...document.querySelectorAll('[data-door="paste"]')].find((x) => /vault-window\.example\.test/.test((x.closest('.vw-band-item, .vw-band-row, li, .vw-band > *') || x.parentElement || x).textContent)); if (!b) return null; b.id = 'vs-test-vw-paste'; return true; })()`, { timeout: 15000 });
+    check('[surface:vault-window] the Vault window\'s 「需要你」 offers «Paste and save…» for the login ask', !!vb);
+    if (vb && (await firmPress('#vs-test-vw-paste'))) await surfaceLeg('vault-window', sV, '.vault-paste-dialog', false, 'born in its form — the band\'s «Paste and save…» draws no box; pressed again it raises THE form (test-vault-paste ⑬b)');
+    else { check('[surface:vault-window] the press on «Paste and save…» lands', false); await pageApi('POST', `/api/vault/secret-requests/${sV}/answer`, { answer: 'deny' }); }
+
+    // THE PHONE over a RESTART (locked at boot — no lock act); a SECOND client sees the card resolve live
+    const l2 = await ask(['the forum login', '--purpose', 'read the thread you sent', '--kind', 'login', '--host', 'https://forum.example.test'], TOKEN);
+    check('a second login ask, filed while unlocked', l2.code === 0 && !!l2.id, l2);
+    if (await trayOpen()) await realClick('#taskbar-user-todos');
+    await stopServer(); startServer();
+    check('the hub is back (LOCKED at boot — the ask waits)', await ready());
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 2, mobile: true });
+    await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await cdp('Page.navigate', { url: URL });
+    await until(visible('#vault-unlock-dialog'), { timeout: 30000 }); await splashGone();
+    await evalJs(`document.querySelector('#vault-unlock-dialog .vault-later').click(); true`);
+    await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 5000 });
+    await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
+    const ROW8 = `${TRAY} .ut-item:has(.ut-secret[data-req="${l2.id}"])`;
+    await until(`!!document.querySelector(${JSON.stringify(ROW8)})`, { timeout: 10000 });
+    await tap(ROW8);
+    check('the phone\'s tray sheet shows the login card kept over the restart', !!(await until(visible(boxOf(l2.id)), { timeout: 10000 })));
+    const t2 = await cdp('Target.createTarget', { url: 'about:blank' });
+    let tg2 = null; for (let i = 0; i < 40 && !tg2; i++) { tg2 = ((await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()) || []).find((t) => t.id === t2.targetId); if (!tg2) await sleep(200); }
+    const ws2 = new WebSocket(tg2.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 }); await new Promise((r) => ws2.on('open', r));
+    let seq2 = 0; const pend2 = new Map(); ws2.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend2.has(m.id)) { pend2.get(m.id)(m); pend2.delete(m.id); } });
+    const cdp2 = (method, params = {}) => new Promise((res, rej) => { const id = ++seq2; pend2.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws2.send(JSON.stringify({ id, method, params })); });
+    const until2 = async (expr, timeout = 20000) => { const t0 = Date.now(); for (;;) { let v = null; try { const r = await cdp2('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); v = r.result && r.result.value; } catch { } if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(150); } };
+    await cdp2('Page.enable'); await cdp2('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp2('Page.navigate', { url: URL });
+    await until2(`!!(window.app && app.wm && document.getElementById('taskbar-user-todos')) && !document.getElementById('loading-screen')`, 30000);
+    await until2(`(() => { const d = document.getElementById('vault-unlock-dialog'); if (d) d.querySelector('.vault-later')?.click(); return true; })()`);
+    await until2(`(() => { const p = document.getElementById('user-todos-popup'); if (p && p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return !!document.querySelector(${JSON.stringify(boxOf(l2.id))}); })()`, 15000);
+    check('a SECOND client (another tab) shows the same card', !!(await until2(`!!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, 5000)));
+    await cdp('Page.bringToFront');   // the phone's page takes the input again (a background tab's input waits for it to be shown)
+    await focusType(boxOf(l2.id) + ' input.vault-login-user', 'forum-user');
+    await focusType(boxOf(l2.id) + ' input.vault-login-pass', V_LOGIN2);
+    await tap(boxOf(l2.id) + ' .ut-login-allow');
+    const cp = await evalJs(C(l2.id));
+    check('the phone card: locked said by name with 解锁… inline; unticked by a tap on its words ⇒ «Save only»', cp.state === 'locked' && /vault_locked/.test(cp.words) && !cp.tick && cp.save === 'Save only', cp);
+    const fit8 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(l2.id))}); const vw = innerWidth; const H = (s) => { const e = b.querySelector(s); return e ? Math.round(e.getBoundingClientRect().height) : 0; }; const inputs = [...b.querySelectorAll('input.vault-pw')].map((i) => [Math.round(i.getBoundingClientRect().height), parseFloat(getComputedStyle(i).fontSize)]); const texts = [...b.querySelectorAll('*')].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getBoundingClientRect().height > 0).map((e) => [String(e.className || e.tagName), parseFloat(getComputedStyle(e).fontSize)]); const right = Math.max(...[...b.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => e.getBoundingClientRect().right)); return { vw, right: Math.round(right), inputs, small: texts.filter(([, f]) => f < 16), save: H('.ut-secret-save'), deny: H('.ut-secret-deny'), totp: H('.ut-secret-totp'), allow: H('.ut-login-allow'), unlock: H('.ut-secret-unlock') }; })()`);
+    check('the phone card: every field ≥ 44 px with 16 px text (no zoom), every target ≥ 44 px, EVERY text ≥ 16 px, all inside the screen', fit8.inputs.length === 4 && fit8.inputs.every(([h, f]) => h >= 44 && f >= 16) && fit8.small.length === 0 && fit8.save >= 44 && fit8.deny >= 44 && fit8.totp >= 44 && fit8.allow >= 44 && fit8.unlock >= 44 && fit8.right <= fit8.vw, fit8);
+    check('a tap on Save only while LOCKED', (await tap(boxOf(l2.id) + ' .ut-secret-save')) === true);
+    const cl = await until(`(() => { const c = ${C(l2.id)}; return c && c.words && /unlock/i.test(c.words) && c.state === 'locked' ? c : null; })()`, { timeout: 8000 });
+    check('…the box says the vault is locked and where to unlock (解锁… inline), EVERY field kept — nothing stored', !!cl && cl.user === 'forum-user' && cl.pw === V_LOGIN2 && !cl.tick, cl);
+    check('a tap on 解锁… opens THE unlock dialog', (await tap(boxOf(l2.id) + ' .ut-secret-unlock')) === true && !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
+    await evalJs(`(() => { const i = document.getElementById('vault-unlock-pw'); i.focus(); i.value = ${JSON.stringify(SECOND)}; document.querySelector('#vault-unlock-dialog .vault-unlock-go').click(); return true; })()`);
+    const cr = await until(`(() => { const c = ${C(l2.id)}; return c && c.state === 'ready' ? c : null; })()`, { timeout: 15000 });
+    check('unlocked ⇒ the box is ready, its fields as typed', !!cr && cr.user === 'forum-user' && cr.pw === V_LOGIN2, cr);
+    check('a tap on Save only', (await tap(boxOf(l2.id) + ' .ut-secret-save')) === true);
+    check('stored ⇒ the phone\'s card resolved', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, { timeout: 10000 })));
+    check('…and the SECOND client\'s card resolved LIVE (no reload)', !!(await until2(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, 10000)));
+    const wl2 = await pageApi('GET', '/api/vault/web-logins');
+    const e2 = ((wl2.json && wl2.json.entries) || []).find((e) => e.name === 'web-login:https://forum.example.test#forum-user');
+    check('stored with NO grant (Save only)', !!e2 && (e2.grants || []).length === 0, e2);
+    const turn9 = await nextTurn(TOKEN);
+    check('the agent\'s next turn: STORED, not allowed yet (where the owner allows it) — and it names NO user', /STORED — a website login for https:\/\/forum\.example\.test is in the vault/.test(turn9) && /did not let this conversation sign in with it/.test(turn9) && !turn9.includes('forum-user') && hitsIn(turn9, V_LOGIN2) === 0, turn9.slice(0, 900));
+    await sleep(600);
+    check('the two passwords are in no DOM, WebSocket frame or server log line', [V_LOGIN, V_LOGIN2].every((v) => WS_FRAMES.every((f) => hitsIn(f, v) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), v) === 0) && hitsIn(await pageText(), V_LOGIN2) === 0, WS_FRAMES.length);
+    try { ws2.close(); await cdp('Target.closeTarget', { targetId: t2.targetId }); } catch { }
+    // ⑨ the phone's page — the same leg by taps
+    const sP = await askS('phone-page');
+    // r4 (the 12:00Z miss line, read again: no band bar is sticky — the row the leg took was the phone PAGE's copy, LYING UNDER the
+    // open tray SHEET, whose band bar was what sat at that point): the row is taken on the surface that is ON TOP — the tray
+    // sheet when it is open, else the phone's page
+    const sheetOpen = `(() => { const p = document.getElementById('user-todos-popup'); return !!p && !p.classList.contains('hidden') && p.getBoundingClientRect().height > 0; })()`;
+    if (!(await evalJs(sheetOpen))) await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);   // the tray (its own door): a row of the page may stand hidden or folded under it
+    await until(sheetOpen, { timeout: 8000 });
+    const SURF = (await evalJs(sheetOpen)) ? '#user-todos-popup' : '#phone-home';
+    const ROWP = `${SURF} .ut-item:has(.ut-secret[data-req="${sP}"])`;
+    const visRow = `[...document.querySelectorAll(${JSON.stringify(ROWP)})].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (typeof e.checkVisibility !== 'function' || e.checkVisibility({ checkVisibilityCSS: true })); })`;
+    const rowShown = await until(`(() => { const r = ${visRow}; if (!r) return null; r.dataset.legRow = 'phone'; return true; })()`, { timeout: 10000 });
+    check('[surface:phone-page] a VISIBLE row of the ask stands on the phone', !!rowShown, await boxesOf(sP));
+    const boxShown = await evalJs(`(() => { const b = document.querySelector('.ut-item[data-leg-row="phone"] .ut-secret[data-req="${sP}"]'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`);
+    if (rowShown && !boxShown) check('[surface:phone-page] a tap on the folded row opens it', await firmPress('.ut-item[data-leg-row="phone"]', true), lastSpot);   // the ROW is the tap (⑥'s and ⑧'s phone legs tap it): a folded row opens in place — a miss says what the look saw
+    await surfaceLeg('phone-page', sP, '.ut-item[data-leg-row="phone"]', true, SURF === TRAY ? trayRedraw('the For-you sheet closed and opened again') : 'the row stood on the phone\'s page (no sheet open): the page redraws on its own schedule — the redraw road is test-vault-paste ⑬b\'s');
+    const retried = PRESSES.filter((x) => x.at > 1), missed = PRESSES.filter((x) => x.at === 0);
+    console.log(`    (⑨'s firm presses: ${PRESSES.length} — ${PRESSES.filter((x) => x.at === 1).length} at the first look, ${retried.length} after a retry${retried.length ? ': ' + retried.map((x) => `${x.sel} @${x.at}`).join(', ') : ''}, ${missed.length} missed)`);
+    await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  }
 
   console.log('⑦ RED CONTROL — a mutant paste door that logs the value and files it on an item');
   const doorFile = path.join(wt, 'src/server/vault-paste-door.js');

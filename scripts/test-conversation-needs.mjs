@@ -188,6 +188,7 @@ const FIX = {
   'vault: a grant': it({ sessionKey: ME, origin: 'vault', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) } }),
   'vault: an automation key': it({ sessionKey: ME, origin: 'vault', action: { type: 'automation-ask', askId: 'd'.repeat(32) } }),
   'vault: a secret to paste': it({ sessionKey: ME, origin: 'vault', action: { type: 'secret-request', requestId: 'sr-0000aa', into: null, kind: 'api-key' } }),
+  'vault: a website login to type': it({ sessionKey: ME, origin: 'vault', action: { type: 'secret-request', requestId: 'sr-0000ab', into: '', kind: 'login', hosts: 'https://shop.example.test', grant: true } }),   // lane login-request-card: the same road, a new target
   'apps: an install proposal': it({ sessionKey: ME, origin: 'apps', action: { type: 'app-install', id: 'ap-00aa11', host: '', kind: 'install' } }),
   'browser: a takeover': it({ sessionKey: ME, origin: 'browser', action: { type: 'browser-takeover', requestId: 'tk-1', profileId: 'p1' } }),
   'browser: a plain ask': it({ sessionKey: ME, origin: 'browser', text: 'A --confirm-actions prompt waits' }),
@@ -215,6 +216,7 @@ for (const [name, item] of Object.entries(NOT)) ok(!got.has(item.id), `not a car
 eq(needs.map((e) => e.item.createdAt), needs.map((e) => e.item.createdAt).slice().sort((a, b) => a - b), 'oldest first');
 const kinds = Object.fromEntries(Object.entries(FIX).map(([k, i]) => [k, (needs.find((e) => e.item.id === i.id) || {}).kind]));
 eq([kinds['agents: an ask'], kinds['channels: a watch request (the owner\'s)'], kinds['vault: a secret to paste'], kinds['browser: a takeover'], kinds['agents: an unexpected exit (the hub\'s words)'], kinds['machines: ask me each time']], ['question', 'approval', 'secret', 'browser', 'check', 'approval'], 'each card names its kind: an agent\'s ask a question, a watch request an approval, a paste a secret, a takeover a browser step, the hub\'s own words something to check');
+eq(kinds['vault: a website login to type'], 'secret', 'lane login-request-card: a website login asked for is a card of the paste road\'s own kind (secret) — the same item, a new target');
 ok(CN.recordsOf([{ ...FIX['agents: an ask'], status: 'done' }, { ...NOT['a notice'], status: 'done' }], KEYS).length === 1, 'recordsOf: a resolved card is a quiet record; a resolved notice is not');
 ok(CN.needsOf(ALL, []).length === 0 && CN.needsOf(null, KEYS).length === 0, 'no keys / no items ⇒ no cards');
 { // RED: the base's match — sessionKey only (the store had no `about`): the owner's watch request is no card in its chat

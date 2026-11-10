@@ -127,16 +127,16 @@ export function showLoginGrantPicker(entry, data, { refresh } = {}) {
   body.parentNode.append(f);
 }
 
-/** 添加 → 网站登录…: the owner's own login (by: owner). The password field is taken off the body by the route (`loginPassword`). */
-export function showLoginAddDialog({ refresh = () => {} } = {}) {
-  let saveNow = () => {};
-  // one subject: one website login being added
-  const { dialog, body, close, raised } = createModalShell({ id: 'vault-login-add', title: t('Add a website login'), dialogClass: 'vault-login-add-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => !!(site.value || user.value || pw.value), save: () => saveNow(), discard: () => { pw.value = ''; } }, kind: 'form' });
-  if (raised) return null;   // raised: the same subject's form, as it was
+/** THE ADD DOOR'S FIELDS — ONE form module (lane login-request-card, B-a681): the Vault window's 添加 ▸ 网站登录… dialog AND the
+ *  login card an agent's ask files in For you (src/lib/vault-paste-box.js) draw THESE fields, and one validator stands behind both
+ *  (src/server/browser-logins.js addOwn). `fixed` = the card's: the site the ask names, shown and not editable. → the inputs, the
+ *  labelled `fields` in order, the add door's `hint`, the datalist, `values()` (the body the add door posts) and `field()`. */
+let otpListSeq = 0;
+export function loginFields({ site = '', fixed = false } = {}) {
   const field = (label, control) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), control); return l; };
   const input = (cls, type, ph) => { const i = el('input', `vault-pw ${cls}`); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
-  const site = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));
+  const s = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));
+  if (fixed) { s.value = String(site || ''); s.readOnly = true; s.setAttribute('aria-readonly', 'true'); }   // the card's: the ask fixed it
   const user = input('vault-login-user', 'text', t('The user name or email you sign in with'));
   const pw = input('vault-login-pass', 'password', t('Its password'));
   pw.autocomplete = 'new-password';
@@ -144,26 +144,43 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
   // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp; a code added in
   // 添加… ▸ 两步验证… is listed at once)
   const otpNames = el('datalist');
-  otpNames.id = 'vault-login-otp-names';
+  otpNames.id = fixed ? `vault-login-otp-names-${++otpListSeq}` : 'vault-login-otp-names';   // a card and the dialog may be open at once
   otp.setAttribute('list', otpNames.id);
   loadTotp().then((d) => { for (const e of (d && d.entries) || []) { const o = el('option'); o.value = e.name; otpNames.append(o); } }).catch(() => {});
+  const hint = el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.'));
+  const values = () => ({ origin: s.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
+  return { site: s, user, pw, otp, otpNames, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otp)] };
+}
+/** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
+export function loginRefusalWords(code, r) {
+  return code === 'login_bad_origin' ? t('Give the site\'s address over https (http only for this machine\'s localhost)') : code === 'login_bad_user' ? t('Give the user name (no spaces, no #)') : code === 'value_required' ? t('Type its password') : code === 'bad_totp' ? t('The two-step code\'s name, as it is listed in this vault') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save')
+    : code === 'login_totp_unknown' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again') : failWords(r);   // lane login-request-card
+}
+
+/** 添加 → 网站登录…: the owner's own login (by: owner). The password field is taken off the body by the route (`loginPassword`). */
+export function showLoginAddDialog({ refresh = () => {} } = {}) {
+  let saveNow = () => {}, f = null;
+  // one subject: one website login being added
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-login-add', title: t('Add a website login'), dialogClass: 'vault-login-add-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!(f && (f.site.value || f.user.value || f.pw.value)), save: () => saveNow(), discard: () => { if (f) f.pw.value = ''; } }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
+  f = loginFields();
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const foot = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create', t('Save to vault'));
   cancel.type = save.type = 'button';
   foot.append(cancel, save);
-  body.append(field(t('Site'), site), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otp), el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.')), err, otpNames);
+  body.append(...f.fields, f.hint, err, f.otpNames);
   dialog.append(foot);
-  cancel.onclick = () => { pw.value = ''; close(); };
+  cancel.onclick = () => { f.pw.value = ''; close(); };
   save.onclick = saveNow = async () => {
     save.disabled = true;
-    const r = await post('/api/vault/web-logins', { origin: site.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
+    const r = await post('/api/vault/web-logins', f.values());
     save.disabled = false;
-    if (r && r.ok) { pw.value = ''; close(); showToast(r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault')); try { refresh(); } catch { } return; }
-    const code = r && r.code;
-    err.textContent = code === 'login_bad_origin' ? t('Give the site\'s address over https (http only for this machine\'s localhost)') : code === 'login_bad_user' ? t('Give the user name (no spaces, no #)') : code === 'value_required' ? t('Type its password') : code === 'bad_totp' ? t('The two-step code\'s name, as it is listed in this vault') : code === 'vault_locked' ? t('The vault is locked (vault_locked) — unlock it, then save') : failWords(r);
+    if (r && r.ok) { f.pw.value = ''; close(); showToast(r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault')); try { refresh(); } catch { } return; }
+    err.textContent = loginRefusalWords(r && r.code, r);
   };
-  setTimeout(() => site.focus(), 0);
+  setTimeout(() => f.site.focus(), 0);
   return { dialog, close };
 }

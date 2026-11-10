@@ -908,6 +908,7 @@
 - (2026-11-10) THE HEAVY LOCK HAD NO QUEUE: A 50-MS PRIVATE CLAIMER HELD THE BOX WHILE THE TRAIN'S 53 SUITES WAITED (lane ci-heavy-queue) — 不变量 = heavy waiters are served oldest first, and the machine lock is taken only by ci.mjs
 - (2026-11-09) A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (jobs-addressed-push) — 不变量 = push is addressed: a job's line or row reaches only its owner lineage and subscribers, inside view; others get an id-less «not yours» count ⇒ kb-bugfix-invariants
 - (2026-11-09) A PHONE COULD NOT TAKE A PHOTO FROM THE CHAT (owner, Android Chrome) — 不变量 = a sheet that offers pictures on a finger device offers the camera through its OWN capture input, never the gallery's; the shot rides the picked image's road ⇒ kb-bugfix-invariants
+- (2026-11-09) A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681) — 不变量 = an ask lands in the kind it is for, through that kind's ONE writer; the site the owner reads is the site the fill compares (kb-bugfix-invariants)
 
 ## A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (2026-11-09; the owner said yes to the fix 2026-11-10; lane jobs-addressed-push, .389)
 
@@ -9234,6 +9235,26 @@ Gates:
 **The tests.** test-pricing-tiers §2d (the rows, a control on the table without them), §4 (the census + four controls), §5 (the unknown-id road); test-record-shape's 2.1.321 pin; test-cli-caps ⑥, test-account-pool, test-oat-materialize (the 2.1.321 record); test-cli-registration ②c.
 
 **Not closed.** Fast mode is unpriced: the ledger keeps no `usage.speed`, so a fast turn would show at half its list cost (none on this box yet). The census covers the Fable family only: today Opus, Sonnet and Haiku disagree across tables (no `claude-opus-5-5` picker row; Haiku 5.5 priced as Haiku 4.5; Sonnet 5.5's cache hit at $0.20 against $0.10), and making them agree is its own lane.
+
+## A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681; the owner 2026-11-09 «agent 自助登录浏览器网站什么时候上线？»; lane login-request-card, 2.369.389)
+
+**What happened.** The agent's standing instruction on a sign-in page is to ask through the vault first and use a takeover last. But the vault's ask had only free-entry targets (`--kind api-key|password|secret` ⇒ `secret:<10 hex>`, run-only).
+- An owner who pasted a site password and its two-step seed on an agent's ask got two free entries that no browser road can fill (userW's assistant, 2026-11-03).
+- So every agent went to a takeover anyway.
+
+**不变量 = an ask lands in the kind it is for, through that kind's ONE writer; the site the owner reads is the site the fill compares.**
+- A website login asked for is the paste road's third target: one card, one `web-login:<origin>#<user>` written by the add door's `addOwn`. The card draws the add door's own fields (`loginFields`), and the site is judged by the add door's own rule (`originOf` + `secureOrigin`) before any card exists.
+- The card's first line names the site in the spelling the fill compares, with its Unicode form beside a punycode host.
+- What the agent may then do is the owner's press on the card: a standing this-account row through `logins.grant`, said as standing, because master's grant has no time grain.
+- What the agent learns is the receipt: the site, its user only if allowed, and how to use it in ONE constant.
+
+**The tests.** scripts/test-vault-paste.mjs ⑩b (refusals by name, the first line, IDN, the writer, no free entry, the grant's exact row, the receipt both ways, update, quiet, lock, restart, bounds) and its two login mutants. scripts/test-vault-paste-chrome.mjs ⑧ (the real card on desktop and phone, the 两步验证… dialog, a second client). scripts/test-vault-kinds-census.mjs CHECK.request with four RED controls.
+
+**Not closed.**
+- The grant is standing, not 8 hours: that waits on the pivot chain's time grain.
+- `addOwn` itself still accepts a two-step name that names no entry (the card refuses it first).
+- `fillVerdict`'s `login_ambiguous` lists an origin's users before its grant check.
+
 
 ## A PHONE COULD NOT TAKE A PHOTO FROM THE CHAT (the owner, 2026-11-09 14:14 PT, Android Chrome; lane phone-take-photo, 2.369.390)
 

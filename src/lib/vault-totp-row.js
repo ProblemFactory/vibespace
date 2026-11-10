@@ -406,7 +406,7 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
         st.saved = true;
         close();
         showToast(t('Added “{name}” — View code shows its current code', { name: p.name }));   // the name the dialog sent (the hub stored it under exactly that)
-        try { refresh(); } catch { /* the window is gone */ }
+        try { refresh({ name: p.name }); } catch { /* the window is gone */ }   // lane login-request-card: the name it saved (a login card fills its field with it)
         return true;
       }
       if (r && r.code === 'exists') { stale(); say(r, { name: p.name }); return false; }

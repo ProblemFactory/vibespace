@@ -25,6 +25,10 @@
  *     `--vault`) or { system } (VibeSpace uses it itself, in words); `delete` = { method, path } (the
  *     row's 删除, src/vault-inventory.js doorsOf) or { open } or { module, route }; `cli` = { bin, verbs } (in that CLI's
  *     usage); `route` = the person's routes ('METHOD /path', mounted); `doc` = the words of its docs/kb-features.md line;
+ *     `request` (lane login-request-card, B-a681) = an AGENT ASKS THE OWNER for a value of this kind on ONE card
+ *     (`vibespace-vault request "<what>" --purpose "<why>" …` — src/vault-paste.js / src/server/vault-paste-door.js): { route (the
+ *     ask), answer (the owner's door), lands ('entry' a free entry · 'field' an Integrations field · 'login' a website login),
+ *     kinds? (the `--kind` words that land it), into? (a sample `<row>.<field>`), site? (a sample site) } — or NONE(why);
  *     `words` (lane vault-entry-description) = the entry's OWN name and description — { create: [<CLI verbs that write them
  *     at creation>], propose: '<the agent's route>', owner: '<the owner's route>' } (the words rule src/vault-paste.js wordsOf,
  *     the ONE writer vault-engine editEntryWords, `vibespace-vault list` prints them) — or NONE(why): its card, its site or
@@ -42,7 +46,7 @@
 /** An extraction marker (scripts/i18n-extract.mjs): the rail's words, worded by the page with t(). */
 const i18nKey = (s) => s;
 const NONE = (why) => Object.freeze({ none: why });
-const SURFACES = Object.freeze(['list', 'row', 'add', 'reveal', 'use', 'delete', 'cli', 'route', 'doc', 'words']);
+const SURFACES = Object.freeze(['list', 'row', 'add', 'reveal', 'use', 'delete', 'cli', 'route', 'doc', 'words', 'request']);   // request: lane login-request-card
 
 /** THE RAIL (lane vault-window-v2, design q-047 §3.1 — the owner's decision ④: grouped by what a secret is FOR). `Other`
  *  shows only when something lands in it. */
@@ -65,61 +69,63 @@ const CATEGORY_IDS = Object.freeze(CATEGORIES.map((c) => c.id));
 const SYSTEM = (why) => Object.freeze({ system: why });
 /** lane vault-entry-description: THE WORDS surface of the two kinds an agent creates or asks for — the doors that write them. */
 const WORDS = (create) => Object.freeze({ create: Object.freeze(create), propose: 'POST /api/agent/vault/words', owner: 'POST /api/vault/entry-words' });
+/** lane login-request-card: THE REQUEST surface of a kind an agent may ask the owner for — the ONE road's two doors + what it lands. */
+const REQUEST = (o) => Object.freeze({ route: 'POST /api/agent/vault/secret-request', answer: 'POST /api/vault/secret-requests/:id/answer', ...o, ...(o.kinds ? { kinds: Object.freeze([...o.kinds]) } : {}) });
 const fam = (row) => Object.freeze({ ...row, surfaces: Object.freeze(row.surfaces),
   deferred: Object.freeze(Object.fromEntries(Object.entries(row.deferred || {}).map(([k, d]) => [k, Object.freeze({ ...d })]))) });
 
 /** THE KIND FAMILIES, in matching order. */
 const FAMILIES = Object.freeze([
   fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample',
-    surfaces: { list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
+    surfaces: { request: NONE('an agent puts its own (vibespace-vault mint / put) — it never asks the user for one'), list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
       use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },   // lane vault-job-road: + a Background Work job (--vault, its own conversation's)
       route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' },
     // found by this registry's census; no lane holds it yet (the coordinator took the backlog item, 2026-10-26)
     deferred: { delete: { lane: 'unscheduled', backlog: 'B-3fb5', why: 'design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet' } } }),
   fam({ id: 'account', label: 'An account\'s API key or long-lived token', category: 'accounts', stores: ['accounts'], entryRe: null, sample: 'acc-census', confirmKey: 'account',
-    surfaces: { list: true, row: 'base', add: { door: 'account', order: 10 }, reveal: true, use: SYSTEM('VibeSpace hands it to the CLI it starts — never to an agent'),
+    surfaces: { request: NONE('an account signs in on its own card (Accounts) — an agent asks for no account key'), list: true, row: 'base', add: { door: 'account', order: 10 }, reveal: true, use: SYSTEM('VibeSpace hands it to the CLI it starts — never to an agent'),
       delete: { method: 'DELETE', path: '/api/accounts/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/accounts', 'DELETE /api/accounts/:id'], words: NONE('its account card names it (the account\'s own name) — no words of the vault\'s'), doc: 'API keys and tokens (accounts)' } }),
   fam({ id: 'integration-machine', label: 'An integration\'s per-machine key', category: 'machines', stores: ['integrations'], entryRe: /\//, sample: 'llm/host-census',
-    surfaces: { list: true, row: 'base', add: NONE('written by the Integrations card of that machine'), reveal: true, use: SYSTEM('the integration uses it on that machine'),
+    surfaces: { request: NONE('kept per paired machine on that machine\'s card — a request names a card\'s own field, and row_per_machine refuses this one'), list: true, row: 'base', add: NONE('written by the Integrations card of that machine'), reveal: true, use: SYSTEM('the integration uses it on that machine'),
       delete: NONE('cleared in Integrations… with the machine\'s row'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['GET /api/integrations/:id'], words: NONE('the Integrations registry names the row and the machine'), doc: 'per-machine row (`<row>/<host>`)' } }),
   fam({ id: 'integration', label: 'An integration\'s key', category: 'integrations', stores: ['integrations'], entryRe: null, sample: 'llm', confirmKey: 'integration',
-    surfaces: { list: true, row: 'base', add: { door: 'integration', order: 20 }, reveal: true, use: SYSTEM('the integration uses it — never handed to an agent'),
+    surfaces: { request: REQUEST({ lands: 'field', into: 'llm.apiKey' }), list: true, row: 'base', add: { door: 'integration', order: 20 }, reveal: true, use: SYSTEM('the integration uses it — never handed to an agent'),
       delete: { method: 'DELETE', path: '/api/integrations/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['GET /api/integrations/:id', 'DELETE /api/integrations/:id'], words: NONE('the Integrations registry names the row and its field'), doc: 'integration keys' } }),
   fam({ id: 'channel', label: 'A channel account\'s sign-in', category: 'integrations', stores: ['channels'], entryRe: null, sample: 'lark-census',
-    surfaces: { list: true, row: 'base', add: { door: 'channel', order: 30 }, reveal: true, use: SYSTEM('the channel engine reads and sends with it'),
+    surfaces: { request: NONE('a channel account signs in on its own card in Channels'), list: true, row: 'base', add: { door: 'channel', order: 30 }, reveal: true, use: SYSTEM('the channel engine reads and sends with it'),
       delete: { open: 'channel-remove' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['GET /api/channels'], words: NONE('the channel account names it (its own name in Channels)'), doc: 'channel tokens' } }),
   fam({ id: 'mount', label: 'A storage mount\'s secret', category: 'storage', stores: ['mounts'], entryRe: null, sample: 'mount-census', confirmKey: 'mount',
-    surfaces: { list: true, row: 'base', add: NONE('added in the Storage window — a mount\'s own form, with its provider\'s fields'), reveal: true, use: SYSTEM('rclone gets it when it mounts'),
+    surfaces: { request: NONE('a storage mount\'s secret is typed in the Storage window, with its provider\'s fields'), list: true, row: 'base', add: NONE('added in the Storage window — a mount\'s own form, with its provider\'s fields'), reveal: true, use: SYSTEM('rclone gets it when it mounts'),
       delete: { method: 'DELETE', path: '/api/mounts/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/mounts', 'DELETE /api/mounts/:id'], words: NONE('the Storage window names the mount'), doc: 'mount secrets' } }),
   fam({ id: 'app-login', label: 'A desktop app\'s stored login', category: 'app-logins', stores: ['app-secrets'], entryRe: null, sample: 'app-census', confirmKey: 'app-logins',
-    surfaces: { list: true, row: 'base', add: NONE('the app\'s own sign-in keeps it — VibeSpace asks nobody to type it here'), reveal: true, use: SYSTEM('VibeSpace fills the app\'s login for it'),
+    surfaces: { request: NONE('the desktop app\'s own sign-in keeps it'), list: true, row: 'base', add: NONE('the app\'s own sign-in keeps it — VibeSpace asks nobody to type it here'), reveal: true, use: SYSTEM('VibeSpace fills the app\'s login for it'),
       delete: { method: 'POST', path: '/api/desktop/apps/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['GET /api/desktop/apps/:id/secrets', 'POST /api/desktop/apps/:id/secrets/forget'], words: NONE('the desktop app names its own login'), doc: 'a desktop app\'s stored logins' } }),
   fam({ id: 'passkey', label: 'A browser passkey', category: 'passkeys', stores: ['passkeys'], entryRe: null, sample: 'work/census', confirmKey: 'passkey',
-    surfaces: { list: true, row: 'base', add: NONE('a site makes it at sign-up (WebAuthn) — nobody types one in'), reveal: true, use: SYSTEM('the browser kernel signs a site\'s sign-in with it'),
+    surfaces: { request: NONE('a site makes it at sign-up (WebAuthn) — nobody types one in'), list: true, row: 'base', add: NONE('a site makes it at sign-up (WebAuthn) — nobody types one in'), reveal: true, use: SYSTEM('the browser kernel signs a site\'s sign-in with it'),
       delete: { method: 'DELETE', path: '/api/browser/passkeys/' }, cli: NONE('no agent verb — the browser kernel uses it itself'), route: ['GET /api/browser/passkeys', 'DELETE /api/browser/passkeys/:profile/:id'], words: NONE('the site and its user name it — a site made it'), doc: 'browser passkeys' } }),
   fam({ id: 'automation-key', label: 'A VibeSpace automation key', category: 'automation', stores: ['automation', 'secrets'], entryRe: /^apikey:/, sample: 'apikey:ak-census',
-    surfaces: { list: true, row: { module: 'src/lib/vault-automation.js', exports: ['automationExtras'] }, add: { door: 'automation', order: 40 }, reveal: true,
+    surfaces: { request: NONE('VibeSpace mints it for an outside system — nobody pastes one'), list: true, row: { module: 'src/lib/vault-automation.js', exports: ['automationExtras'] }, add: { door: 'automation', order: 40 }, reveal: true,
       use: SYSTEM('an outside system presents it to the automation API — agents inside use their grants'), delete: { module: 'src/lib/vault-automation.js', route: 'POST /api/automation/keys/:id/revoke' },
       cli: NONE('no agent verb — a key is handed to an outside system'), route: ['POST /api/automation/keys', 'POST /api/automation/keys/:id/revoke'], words: NONE('an automation key has its own name and grants in its row (vault-automation.js)'), doc: '**Automation keys**' } }),
   fam({ id: 'machine-link', label: 'A machine\'s link token', category: 'machines', stores: ['secrets'], entryRe: /^host:/, sample: 'host:census',
-    surfaces: { list: true, row: 'base', add: NONE('pairing the machine makes it'), reveal: false, use: SYSTEM('the hub reaches the machine with it'),
+    surfaces: { request: NONE('pairing the machine makes it'), list: true, row: 'base', add: NONE('pairing the machine makes it'), reveal: false, use: SYSTEM('the hub reaches the machine with it'),
       delete: NONE('unpairing the machine forgets it'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: NONE('listed by the Vault window only — never shown, no door of its own'), words: NONE('the paired machine names it'), doc: 'the hub\'s `host:` / `frp:` entries' } }),
   fam({ id: 'relay-token', label: 'The relay token', category: 'machines', stores: ['secrets'], entryRe: /^frp:/, sample: 'frp:token',
-    surfaces: { list: true, row: 'base', add: NONE('the relay\'s own setup writes it'), reveal: true, use: SYSTEM('the relay client signs in with it'),
+    surfaces: { request: NONE('the relay\'s own setup writes it'), list: true, row: 'base', add: NONE('the relay\'s own setup writes it'), reveal: true, use: SYSTEM('the relay client signs in with it'),
       delete: NONE('the relay\'s own setup replaces it'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: NONE('listed by the Vault window only — no door of its own'), words: NONE('VibeSpace\'s relay — one token, named by what it is'), doc: 'the hub\'s `host:` / `frp:` entries' } }),
   fam({ id: 'web-login', label: 'A website login', category: 'web-logins', stores: ['secrets'], entryRe: /^web-login:/, sample: 'web-login:https://census.example.test#census-user', confirmKey: 'web-login',
-    surfaces: { list: true, row: { module: 'src/lib/vault-login-row.js', exports: ['loginExtras'] }, add: { door: 'web-login', order: 45 }, reveal: true,
+    surfaces: { request: REQUEST({ lands: 'login', kinds: ['login'], site: 'https://census.example.test' }), list: true, row: { module: 'src/lib/vault-login-row.js', exports: ['loginExtras'] }, add: { door: 'web-login', order: 45 }, reveal: true,
       use: { route: 'POST /api/agent/browser/login' }, delete: { method: 'DELETE', path: '/api/vault/web-logins/' }, cli: { bin: 'vibespace-browser', verbs: ['login'] },
       route: ['GET /api/vault/web-logins', 'POST /api/vault/web-logins', 'DELETE /api/vault/web-logins/:name'], words: NONE('the site and the user name it (web-login:<origin>#<user>)'), doc: '`web-login:<origin>#<user>`' } }),
   fam({ id: 'totp', label: 'A two-step code (TOTP)', category: 'two-step', stores: ['secrets'], entryRe: /^totp:/, sample: 'totp:census', confirmKey: 'totp',
-    surfaces: { list: true, row: { module: 'src/lib/vault-totp-row.js', exports: ['totpExtras', 'showTotpAddDialog'] }, add: { door: 'totp', order: 35 }, reveal: true,
+    surfaces: { request: NONE('a two-step seed is added in 添加… ▸ 两步验证… — a login card names one by its name and opens that dialog'), list: true, row: { module: 'src/lib/vault-totp-row.js', exports: ['totpExtras', 'showTotpAddDialog'] }, add: { door: 'totp', order: 35 }, reveal: true,
       use: { route: 'GET /api/agent/vault/totp/:name' }, delete: { method: 'DELETE', path: '/api/vault/totp/' }, cli: { bin: 'vibespace-vault', verbs: ['totp'] },
       route: ['GET /api/vault/totp', 'POST /api/vault/totp', 'GET /api/vault/totp/:name', 'DELETE /api/vault/totp/:name', 'POST /api/vault/totp/:name/grants'], words: NONE('named for its site when it is added (totp:<name>) — the two-step code is what it is for'), doc: '**Two-step codes (TOTP)**' } }),
   fam({ id: 'free-secret', label: 'A key or password no card holds', category: 'keys', stores: ['secrets'], entryRe: /^secret:/, sample: 'secret:census', confirmKey: 'secret',
-    surfaces: { list: true, row: 'base', add: { door: 'secret', order: 50 }, reveal: true, use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] },   // lane vault-job-road: + a Background Work job (--vault, the owner approves it)
+    surfaces: { request: REQUEST({ lands: 'entry', kinds: ['api-key', 'password', 'secret'] }), list: true, row: 'base', add: { door: 'secret', order: 50 }, reveal: true, use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] },   // lane vault-job-road: + a Background Work job (--vault, the owner approves it)
       delete: { method: 'DELETE', path: '/api/vault/secrets/' }, cli: { bin: 'vibespace-vault', verbs: ['run', 'request'] }, route: ['POST /api/vault/secrets', 'DELETE /api/vault/secrets/:id'], words: WORDS(['request']), doc: '**「其他密钥或密码…」' } }),
   fam({ id: 'sealed-file-key', label: 'A sealed file\'s key', category: 'other', stores: ['secrets'], entryRe: /^file:/, sample: 'file:census',
-    surfaces: { list: true, row: 'base', add: NONE('VibeSpace makes it when it seals the file'), reveal: false, use: SYSTEM('VibeSpace opens the file with it'),
+    surfaces: { request: NONE('VibeSpace makes it when it seals the file'), list: true, row: 'base', add: NONE('VibeSpace makes it when it seals the file'), reveal: false, use: SYSTEM('VibeSpace opens the file with it'),
       delete: NONE('it goes with its file'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: NONE('listed by the Vault window only — never shown, no door of its own'), words: NONE('VibeSpace names it after its file'), doc: 'a sealed file\'s key' } }),
 ]);
 const FAMILY_IDS = Object.freeze(FAMILIES.map((f) => f.id));

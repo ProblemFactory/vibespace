@@ -54,6 +54,7 @@ const STATUS = Object.freeze({
   invalid_value: 400, store_failed: 500, value_too_long: 400, unfiled: 503, request_quiet: 429, too_many_requests: 429, value_in_request: 400, job_no_use: 403,
   name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
   login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
+  login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -436,7 +437,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
-  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined }); }));   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value, loginPassword] = take(req, 'value', 'loginPassword'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, login: { username: b.username, password: loginPassword, totpName: b.totpName, allow: b.allow === true } }); }));   // login: lane login-request-card — a website login's fields (the password off the body, as the add door's route takes it)   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
   // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and the owner's own edit of them

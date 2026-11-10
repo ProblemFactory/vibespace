@@ -12,7 +12,12 @@
  *     value has no need to ask). The TARGET is either a REGISTRY FIELD — a card row's `secret: true` field (`llm.apiKey`;
  *     an account-bound or a per-machine row is no card and is refused by name), written by the integration store's ONE
  *     writer and validated there by the field's own `validate` — or a FREE ENTRY: a new vault entry `secret:<10 hex>`
- *     (the HUB picks the id — an agent never names a vault entry) with its label, its kind and its note.
+ *     (the HUB picks the id — an agent never names a vault entry) with its label, its kind and its note — or (lane
+ *     login-request-card, B-a681 — the owner 2026-11-09 「agent 自助登录浏览器网站什么时候上线？」) A WEBSITE LOGIN: `--kind login
+ *     --host <site>` — ONE site by THE add door's rule (src/browser-login.js originOf + secureOrigin: scheme + host + port as the
+ *     fill compares them, https or this machine's localhost), the owner types the user name, the password and an optional
+ *     two-step code's NAME into the add door's own fields on the card, and the web-login door's ONE writer lands ONE
+ *     `web-login:<origin>#<user>` entry (src/server/browser-logins.js addOwn) — never a free entry beside it.
  *   · THE ITEM IS THE RECORD: the For-you item's action { type: 'secret-request', requestId, into, kind, conv, scope } — ids
  *     and the place only; the agent's words, purpose and a new entry's label are the item's own words (its i18n lines —
  *     wordsOfItem reads them back; "Clear content…" takes them with the rest). No value ever (the value rides the owner's
@@ -41,6 +46,7 @@ const HC = require('./hidden-chars.js');
 const SS = require('./secret-shapes.js');
 const PT = require('./peer-text.js');
 const GM = require('./grant-model.js');   // lane vault-use-grants: ONE spelling of a host (hostListOf)
+const BL = require('./browser-login.js');   // lane login-request-card: THE site rule of a website login (originOf + secureOrigin — the add door's own)
 
 const ACTION_TYPE = 'secret-request';
 const REQUEST_ID_RE = /^sr-[0-9a-f]{12}$/;
@@ -58,6 +64,9 @@ const QUIET_MS = 10 * 60e3;
 /** A free entry's kinds (src/vault-inventory.js KINDS spells them; the CLI's `apikey` is `api-key`). */
 const ENTRY_KINDS = Object.freeze(['api-key', 'password', 'secret']);
 const KIND_ALIASES = Object.freeze({ apikey: 'api-key', 'api-key': 'api-key', key: 'api-key', password: 'password', secret: 'secret' });
+/** lane login-request-card: A WEBSITE LOGIN — the request's third target (the action's `kind`; its site rides the action's `hosts`). */
+const LOGIN_KIND = 'login';
+const LOGIN_ALIASES = Object.freeze({ login: LOGIN_KIND, 'web-login': LOGIN_KIND });
 /** A DECLARED human-visible string is a KEY (the registry's rule — scripts/i18n-extract.mjs collects i18nKey(…) beside t(…)):
  *  the card's lines are filed as `{key, params}` and the client says them in its language. */
 const i18nKey = (s) => s;
@@ -101,7 +110,15 @@ const WORDS = Object.freeze({
   words_same: 'nothing changes — that is already its name and description',
   words_not_here: 'that entry has no name or description of its own to change — its card, its site or VibeSpace names it',
   words_later: 'that entry already exists — a later change of its name or description waits for the user: vibespace-vault describe <its vault:// reference> --note "…" (a rotation without --note keeps its words)',   // r2 (MAJOR 2)
+  // lane login-request-card: A WEBSITE LOGIN (`--kind login --host <site>`) — the site by the add door's rule, refused BY NAME before any card
+  login_site_required: 'name the site the login is typed on: --kind login --host https://<host>[:port]',
+  login_one_site: 'a login is typed on ONE site: --host https://<host>[:port] — one address, no list',
+  login_bad_origin: 'a website address (https://host[:port])',
+  login_words: 'a website login is named by its site and the user name the user types — no --name or --note',
+  login_password_lines: 'a password holds no line break — a copied line\'s newline is not part of it; type or paste it again',
 });
+/** lane login-request-card: the add door's own words for a site that is not https (src/server/browser-logins.js addOwn). */
+const LOGIN_INSECURE = 'a login is kept for an https site (plain http on this machine\'s localhost only)';
 /** A text that holds a secret's SHAPE (a token's: PEM, JWT, a vendor prefix, key material — src/secret-shapes.js hasTokenShape;
  *  never the keyword rules, which read «the router password for 192.168.1.1» as one) — never a name or a description. */
 const secretShaped = (s) => SS.hasTokenShape(s);
@@ -162,6 +179,7 @@ function lineOf(raw, max, what) {
 function targetOf({ into = null, kind = null, name = null, words = '', hosts = null } = {}) {
   const hasInto = into != null && String(into).trim() !== '', hasKind = kind != null && String(kind).trim() !== '';
   if (hasInto && hasKind) return refuse('bad_target');
+  if (hasKind && LOGIN_ALIASES[String(kind).trim().toLowerCase()]) return loginTargetOf({ name, hosts });   // lane login-request-card
   const hs = hostsOf(hosts);   // lane vault-use-grants
   if (hs === false) return refuse('bad_host');
   if (hasInto && hs) return refuse('hosts_with_into');
@@ -187,6 +205,21 @@ function targetOf({ into = null, kind = null, name = null, words = '', hosts = n
   return { ok: true, target: { kind: 'entry', entryKind: k, label: l.text, hosts: hs || [] } };
 }
 
+/** lane login-request-card: A WEBSITE LOGIN's target — the ONE site it is typed on, by THE add door's rule (BL.originOf: scheme
+ *  + host + port as the fill compares them, a non-ASCII host in its punycode form; BL.secureOrigin: https, or plain http on this
+ *  machine's localhost only). A web-login is named by its site and the user the owner types (the registry's `words` is NONE) —
+ *  a --name is refused by name. → { ok, target: { kind: 'login', origin } } | a refusal. */
+function loginTargetOf({ name = null, hosts = null } = {}) {
+  if (name != null && String(name).trim() !== '') return refuse('login_words');
+  const list = (Array.isArray(hosts) ? hosts : String(hosts == null ? '' : hosts).split(/[\s,]+/)).map((h) => String(h == null ? '' : h).trim()).filter(Boolean);
+  if (!list.length) return refuse('login_site_required');
+  if (list.length > 1) return refuse('login_one_site');
+  const origin = BL.originOf(list[0]);
+  if (!origin) return refuse('login_bad_origin');
+  if (!BL.secureOrigin(origin)) return refuse('login_bad_origin', { words: LOGIN_INSECURE });
+  return { ok: true, target: { kind: LOGIN_KIND, origin } };
+}
+
 /** THE ASK as the agent sent it → { ok, words, purpose, target } | a refusal (its code + its words). */
 function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) {
   const w = lineOf(words, LIMITS.words, 'words');
@@ -198,6 +231,7 @@ function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) 
   // lane vault-entry-description: a NEW entry's description (`--note`), the words rule's — '' / absent = none given
   const hasNote = note != null && String(note).trim() !== '';
   if (hasNote && t.target.kind === 'field') return refuse('note_with_into');
+  if (hasNote && t.target.kind === LOGIN_KIND) return refuse('login_words');   // lane login-request-card
   const n = hasNote ? wordsOf({ note }) : { ok: true };
   if (!n.ok) return n;
   return { ok: true, words: w.text, purpose: p.text, target: hasNote ? { ...t.target, note: n.note } : t.target };
@@ -219,7 +253,7 @@ function wordsOfItem(it) {
  *  → target | null (a cleared entry request has no label left: no target). */
 function targetOfAction(a, { label = '' } = {}) {
   if (!a || a.type !== ACTION_TYPE || !REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
-  const t = a.into ? targetOf({ into: a.into }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar)
+  const t = a.into ? targetOf({ into: a.into }) : a.kind === LOGIN_KIND ? targetOf({ kind: LOGIN_KIND, hosts: a.hosts || '' }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar) — lane login-request-card: a login's ONE site, re-judged by today's rule
   return t.ok ? t.target : null;
 }
 /** lane vault-entry-description: the request's target with the description its words carry (wordsOfItem's `note`). */
@@ -228,7 +262,8 @@ const withNote = (target, note) => (target && target.kind === 'entry' && note ? 
 /** THE CARD: the item's text (the English dedupe key) + its words as lines (i18n keys; a row's / a field's / a kind's
  *  label rides as WORDS `{key}` — the client says it in its language). `replaces` = the field holds a value of the
  *  owner's now (the paste replaces it — said). */
-function cardOf({ who, words, purpose, target, replaces = false, grant = null }) {
+function cardOf({ who, words, purpose, target, replaces = false, grant = null, site = null }) {
+  if (target.kind === LOGIN_KIND) return loginCardOf({ who, words, purpose, target, site });   // lane login-request-card
   const where = target.kind === 'field'
     ? { key: i18nKey('Where it goes: {row} › {field} on the Integrations card ({id})'), params: { row: { key: target.rowLabel }, field: { key: target.fieldLabel }, id: intoOf(target) } }
     : { key: ENTRY_LINE, params: { label: target.label, kind: { key: KIND_WORDS[target.entryKind] || 'Secret' } } };
@@ -253,6 +288,36 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null })
     text: `${who} asks you for a secret: ${words}`,
     detail: lines.map(fill).join('\n'),
     i18n: { text: { key: i18nKey('{who} asks you for a secret: {words}'), params: { who, words } }, detail: lines },
+  };
+}
+
+/** lane login-request-card: THE SITE as the owner reads it — the origin the fill compares, and for a non-ASCII host (its punycode
+ *  `xn--` labels) its Unicode form beside it, so a look-alike host never hides behind the letters it imitates. `toUnicode(host)` =
+ *  the host's Unicode spelling (the ORCH door hands node's url.domainToUnicode — PURE takes the function). → string. */
+function siteWords(origin, toUnicode = null) {
+  const o = String(origin == null ? '' : origin), h = BL.hostOf(o);
+  if (!h || !/(?:^|\.)xn--/.test(h) || typeof toUnicode !== 'function') return o;
+  let u = ''; try { u = String(toUnicode(h) || ''); } catch { u = ''; }
+  return u && u !== h ? `${o} (${o.replace(h, () => u)})` : o;
+}
+/** lane login-request-card: THE LOGIN CARD — its FIRST line says who asks, for which site, and that the login is typed only
+ *  there (actor + verb + object: the conversation's name and the site's canonical spelling — never the agent's free words, which
+ *  ride the lines below). The fields are the add door's own (src/lib/vault-login-row.js loginFields) in the box; `site` = siteWords. */
+const LOGIN_HEAD = i18nKey('{who} asks you for a website login on {site} — it is typed only on that site');
+const LOGIN_ONLY = i18nKey('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.');   // the add door's own line (src/lib/vault-login-row.js)
+function loginCardOf({ who, words, purpose, target, site = null }) {
+  const s = site || target.origin;
+  const lines = [
+    { key: i18nKey('What: {words}'), params: { words } },
+    { key: PURPOSE_LINE, params: { purpose } },
+    { key: LOGIN_ONLY },
+    { key: i18nKey('Type its user name and password below — they go straight into the vault. The agent is told that it is stored and for which site, never the password.') },
+  ];
+  const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : String(v); });
+  return {
+    text: `${who} asks you for a website login on ${s} — it is typed only on that site`,
+    detail: lines.map(fill).join('\n'),
+    i18n: { text: { key: LOGIN_HEAD, params: { who, site: s } }, detail: lines },
   };
 }
 
@@ -336,6 +401,7 @@ function receiptText(o = {}) {
   const piece = (s, max = 200) => PT.toAgentText(String(s == null ? '' : s), { max, kind: 'line' });
   const head = `[Vault] Your request ${piece(o.requestId, 20)} (vibespace-vault request)`;
   const t = o.target || {};
+  if (o.outcome === 'stored' && t.kind === LOGIN_KIND) return loginReceiptText(head, o, piece);   // lane login-request-card
   if (o.outcome === 'stored') {
     const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
     if (t.kind === 'field') return `${head}: STORED — «${piece(o.words)}» is saved in ${piece(intoOf(t), 200)} (${piece(t.rowLabel, 80)} › ${piece(t.fieldLabel, 80)}) for: ${piece(o.purpose)}. VibeSpace uses it there itself; you never see the value — never ask for it in the chat.${rc}`;
@@ -352,6 +418,42 @@ function receiptText(o = {}) {
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request («${piece(o.words)}»). Nothing was stored. Ask again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;
   return `${head}: REFUSED — ${REFUSED_WHY[o.why] || REFUSED_WHY.denied} («${piece(o.words)}»). Do not ask for it again in the next ${QUIET_MS / 60e3} minutes; carry on without it, or ask the user in the chat what they prefer.`;
 }
+
+/** lane login-request-card: HOW AN AGENT USES A STORED WEBSITE LOGIN — today's words in ONE constant (the pivot chain «vault-login
+ *  r24» changes it when its fill lands): a custom-kernel profile signs in with it; on standard Chrome the vault sign-in is paused
+ *  since 2.369.364 (src/browser-login.js ROADS), so the next road is a person in the live view. {origin} / {user} filled per receipt. */
+const LOGIN_USE = 'On a custom-kernel browser profile: vibespace-browser login {origin}{user} signs in (the browser types it — you never see it). On standard Chrome the vault sign-in is paused since 2.369.364: ask a person to sign in in the live view — vibespace-browser ask-human "<what you need>".';
+/** lane login-request-card: the STORED receipt of a login — the site, the user name ONLY when this conversation may sign in with it
+ *  (an agent that may fill a login reads its user in the login answer; one that may not never learns it), the grant in words
+ *  (standing — master's browser-login grant has no end), and LOGIN_USE. `o.login` = { user, updated, allowed, asked } (the door's;
+ *  `asked` = the owner ticked the grant — r3, law D). */
+function loginReceiptText(head, o, piece) {
+  const t = o.target || {}, l = o.login || {};
+  const origin = piece(t.origin, 300), user = l.allowed && l.user ? piece(l.user, 160) : '';
+  const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
+  const on = `${origin}${user ? ` (user ${user})` : ''}`;
+  const what = l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
+  const use = LOGIN_USE.replace('{origin}', () => origin).replace('{user}', () => (user ? ` --user ${user}` : ''));
+  // r3 (law D): THREE outcomes, three sentences — granted · not ticked · ticked but the permission could not be written
+  const may = l.allowed
+    ? `The user allowed THIS conversation to sign in with it on ${origin} — standing, until they remove it in Vault ▸ Web logins ▸ Use for…. ${use}`
+    : l.asked
+      ? `The user ticked «Let this conversation sign in with it», but the permission could not be written — the login is stored, and they can allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser login answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`
+      : `The user did not let this conversation sign in with it — they allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser login answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`;
+  return `${head}: ${what} for: ${piece(o.purpose)}. You never see the password. ${may}${rc}`;
+}
+/** lane login-request-card: THE OWNER'S ANSWER to a login ask, BEFORE the web-login door's own validator (addOwn — the site, the
+ *  user name, the password's bound, the two-step name's shape): the password is required and holds NO line break — a copied
+ *  line's newline is refused BY NAME, never stripped silently (a page's password input cannot hold one: only a non-DOM client
+ *  sends it); the two-step code is a NAME ('' = none). → { ok, username, password, totpName } | a refusal. */
+function loginAnswerOf({ username, password, totpName } = {}) {
+  if (typeof password !== 'string' || !password) return refuse('value_required', { words: 'type its password' });
+  if (/[\r\n\u2028\u2029]/.test(password)) return refuse('login_password_lines');
+  const tn = typeof totpName === 'string' ? totpName.trim() : '';
+  return { ok: true, username: typeof username === 'string' ? username : '', password, totpName: tn || null };
+}
+/** lane login-request-card: a stored login's user (its entry name's — lower-cased by the add door's rule) | ''. */
+const loginUserOf = (name) => { const p = BL.parseName(name); return p ? p.user : ''; };
 
 /** A FREE ENTRY's facts (the paste box's, and 「其他密钥或密码…」's in the Vault window) → { ok, label, note, kind } | a
  *  refusal: its words by THE words rule (wordsOf — a name, a one-paragraph description; lane vault-entry-description: was
@@ -379,4 +481,5 @@ module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
   WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
+  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf,   // lane login-request-card
 };

@@ -40,12 +40,22 @@
  *     lock withdraws it), the words on the item's own lines (old → new); the owner's Allow writes them through the engine's ONE writer
  *     (editEntryWords — proposedBy the agent, approvedBy the owner) and the agent reads a receipt at its next turn. The owner's own
  *     Edit… in the Vault window goes through the same writer (ownerWords). The creator has no later right of its own.
+ *   · A WEBSITE LOGIN (lane login-request-card, B-a681): `--kind login --host <site>` is the same request on the same road — the
+ *     same item, limits, quiet period and receipt road; its place is the site (`login:<origin>`), the action's `hosts` carries it.
+ *     The owner types the add door's own fields on the card (src/lib/vault-login-row.js loginFields: the site fixed by the ask,
+ *     the user name, the password, an optional two-step code's NAME — one that names no entry refused HERE by name, the add door
+ *     checks its shape only); the answer goes to THE web-login door's ONE writer and validator (src/server/browser-logins.js
+ *     addOwn — the site from the REQUEST, never the body) and lands ONE `web-login:<origin>#<user>` entry, no free entry. «Let it
+ *     sign in» (ticked by default when `vault.requestGrantsRequester` is on) writes ONE STANDING grant row through the grants
+ *     store's ONE writer (logins.grant: `conversation:<this conversation>` on `<origin>#<user>`, nothing wider) — master's
+ *     browser-login grant has no time grain, so the card says «until you remove it» (revisited when the pivot lands one).
  */
 const crypto = require('crypto');
 const P = require('../vault-paste.js');   // PURE: the ask's rules, the card's words, the receipt, a free entry's facts
 const VK = require('../vault-kinds.js');   // PURE (lane vault-entry-description): which kinds carry words (the `words` surface)
 const VI = require('../vault-inventory.js');   // PURE: an entry's row (the name the window shows, its description)
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
+const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
 
 const FROM_NAME = 'Vault';
 const SETTLED_MAX = 256;
@@ -66,11 +76,15 @@ const MORE_WORDS = Object.freeze({
   entry_unknown_id: 'that stored value is not there any more',
   entry_unknown: 'no entry this conversation may use has that reference — `vibespace-vault list` names them',   // lane vault-entry-description
   words_pending: 'a change of that entry\'s words already waits on the user — wait for their answer',
+  // lane login-request-card
+  login_no_door: 'this server keeps no website logins — nothing was asked',
+  login_totp_unknown: 'no two-step code of that name is in the vault — pick one from its list, or add it with «Two-step code…»',
 });
 const STATUS = Object.freeze({
   unauthorized: 401, job_no_use: 403, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
   bad_answer: 400, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
+  login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes)
 });
 const named = (code, extra = {}) => ({ ok: false, code, words: MORE_WORDS[code] || P.WORDS[code] || code, ...extra });
 const statusOf = (code) => STATUS[code] || 400;
@@ -82,8 +96,9 @@ const statusOf = (code) => STATUS[code] || 400;
  * @param {object} [o.userTodos]   the For-you store (the item IS the request)
  * @param {object} [o.deliver]     the delivery ladder (stashFor — the receipt rides the asking conversation's next turn)
  * @param {object} [o.vaultRun]    src/server/vault-run-door.js (grantPasted — the asker may use a NEW free entry in runs)
+ * @param {object} [o.logins]      src/server/browser-logins.js (addOwn — THE web-login writer; grant — the 用于… row) — lane login-request-card
  */
-function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {
+function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {
   // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
   // lane vault-use-grants round 5 (MAJOR item 2): the setting gates the 8-HOUR run grant (via vaultRun.grantPasted) — it no
   // longer needs useGrants (r4's standing member, which did, is gone). Default on; off ⇒ the asker must `request` to use it.
@@ -95,7 +110,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   const settling = new Set();  // item ids this door resolves itself (its own onStatus is not a refusal)
   let indexed = false;
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
-  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : `entry:${String(t.label).toLowerCase()}`);
+  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : t.kind === P.LOGIN_KIND ? `login:${t.origin}` : `entry:${String(t.label).toLowerCase()}`);   // login: lane login-request-card (its ONE site)
   const recordOf = (it) => {
     const a = it && it.action;
     if (!a || a.type !== P.ACTION_TYPE || !P.REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
@@ -141,6 +156,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const v = P.requestVerdict({ words, purpose, into, kind, name, hosts, note });   // note: lane vault-entry-description (`--note`)
     if (!v.ok) return v;
     if (!userTodos) return named('unfiled');
+    if (v.target.kind === P.LOGIN_KIND && !(logins && typeof logins.addOwn === 'function')) return named('login_no_door');   // lane login-request-card
     index();
     const conv = String(caller.conversationId), place = placeOf(v.target), target = publicTarget(v.target);
     for (const q of open.values()) if (q.conv === conv && q.place === place) return { ok: true, already: 'open', requestId: q.requestId, target };
@@ -149,30 +165,30 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if ([...open.values()].filter((q) => q.conv === conv).length >= P.LIMITS.openPerConversation || open.size >= P.LIMITS.openHubWide) return named('too_many_requests');
     const requestId = `sr-${crypto.randomBytes(6).toString('hex')}`;
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
-    const grant = v.target.kind === 'entry' && grantsAsker();   // lane vault-use-grants round 5: the paste gives the asker an 8-hour run grant (not a standing host-scoped member) — the card says so
-    const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target), grant: grant ? { hosts: v.target.hosts } : null });
+    const grant = (v.target.kind === 'entry' || v.target.kind === P.LOGIN_KIND) && grantsAsker();   // lane vault-use-grants round 5: the paste gives the asker an 8-hour run grant (not a standing host-scoped member) — the card says so · lane login-request-card: a login's «Let it sign in» tick starts ticked (the owner's press decides)
+    const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target), grant: grant ? { hosts: v.target.hosts } : null, site: v.target.kind === P.LOGIN_KIND ? P.siteWords(v.target.origin, URL_.domainToUnicode) : null });
     const scope = String(caller.scope || conv);
     let it;
     try {
       it = userTodos.add(caller.sessionKey || 'vault', {
         origin: 'vault', kind: 'action', urgency: 'high', by: 'agent', sessionName: who,   // NO expiresAt: it waits for the owner (a restart keeps it)
         text: card.text, detail: card.detail, i18n: card.i18n,
-        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}) },   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
+        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : v.target.kind === P.LOGIN_KIND ? P.LOGIN_KIND : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}), ...(v.target.kind === P.LOGIN_KIND ? { hosts: v.target.origin, grant } : {}) },   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
       });
     } catch (e) { log(`${who}: the paste request could not be filed in For you: ${e.message}`); return named('unfiled'); }
     if (!it || !it.id) return named('unfiled');
     open.set(requestId, { requestId, todoId: it.id, conv, scope, sessionKey: caller.sessionKey || null, who, words: v.words, purpose: v.purpose, target: v.target, place, grant });
-    audit('vault-secret-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, place: v.target.kind === 'field' ? P.intoOf(v.target) : `a new ${v.target.entryKind} entry`, purpose: v.purpose, requestId });
+    audit('vault-secret-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, place: v.target.kind === 'field' ? P.intoOf(v.target) : v.target.kind === P.LOGIN_KIND ? `a website login on ${v.target.origin}` : `a new ${v.target.entryKind} entry`, purpose: v.purpose, requestId });
     return { ok: true, requestId, target };
   }
   /** The target as an answer says it (no label of the owner's: the agent's own words and the registry's names). */
-  function publicTarget(t) { return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
+  function publicTarget(t) { if (t.kind === P.LOGIN_KIND) return { login: t.origin }; return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
 
   /**
    * THE OWNER ANSWERS (the route: a person on this page; the value already taken off the request body).
    * answer 'store' + value ⇒ the ONE writer of the place · 'deny' ⇒ refused. → { ok: true, outcome, … } | a refusal.
    */
-  function answer(requestId, { answer: a, value = null, by = 'user', person = false, name, note } = {}) {
+  function answer(requestId, { answer: a, value = null, by = 'user', person = false, name, note, login = null } = {}) {   // login: lane login-request-card — { username, password, totpName, allow } (the password taken off the body by the route)
     const id = String(requestId || '');
     index();
     const q = open.get(id);
@@ -183,6 +199,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!it || it.status !== 'open' || !it.action || it.action.type !== P.ACTION_TYPE || it.action.requestId !== id) { forget(q); return named('ask_settled'); }
     if (a === 'deny') { mark(); settle(q, 'refused', { why: 'denied' }); audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
     if (a !== 'store') return named('bad_answer');
+    if (q.target && q.target.kind === P.LOGIN_KIND) return answerLogin(q, id, login || {}, { by, mark });   // lane login-request-card
     const vv = P.valueOf(value);
     if (!vv.ok) return vv;
     if (!q.target) { settle(q, 'refused', { why: 'gone' }); return named('ask_unknown'); }   // its place left the registry since it was filed
@@ -226,6 +243,43 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     mark();
     settle(q, 'stored', { ref, grantHours, receipt });
     return { ok: true, outcome: 'stored', ...(q.target.kind === 'field' ? { into: P.intoOf(q.target) } : { entry, ref }) };
+  }
+
+  /** lane login-request-card: THE OWNER TYPES A WEBSITE LOGIN on the card → THE web-login door's ONE writer and validator
+   *  (logins.addOwn — the site from the REQUEST, never the body; the add door's own refusals by name). First, here: the vault's
+   *  state, the password's line rule (P.loginAnswerOf) and a two-step NAME that names no entry (the add door checks its shape
+   *  only). With «Let it sign in» ticked (`allow`): ONE standing grant row through the grants store's ONE writer (logins.grant
+   *  — `session:<the asking conversation>` on this account of this site, nothing wider); a grant that cannot be written leaves
+   *  the login stored and says so (the receipt names no user). Every refusal keeps the item open — the box keeps its fields. */
+  function answerLogin(q, id, l, { by, mark }) {
+    if (!logins || typeof logins.addOwn !== 'function') return named('login_no_door');
+    const st = vault.state();
+    if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    const v = P.loginAnswerOf(l);
+    if (!v.ok) return v;
+    if (v.totpName) { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } if (!names.some((s) => s && s.name === `totp:${v.totpName}`)) return named('login_totp_unknown'); }
+    let r = null;
+    try { r = logins.addOwn({ origin: q.target.origin, username: v.username, password: v.password, totpName: v.totpName }, { who: String(by).slice(0, 40) }); }
+    catch (e) { log(`${q.requestId}: the website login could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
+    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    const entry = String(r.name), user = P.loginUserOf(entry);
+    let allowed = false;
+    if (l.allow === true && q.conv && typeof logins.grant === 'function') {
+      try { const g = logins.grant(entry, 'this-account', `session:${q.conv}`, { by: String(by).slice(0, 40) }); allowed = !!(g && g.ok); if (!allowed) log(`${q.requestId}: the sign-in grant was not written (${(g && g.code) || 'error'}) — the login is stored`); }   // the request's id only — never the entry's name (its user)
+      catch (e) { log(`${q.requestId}: the sign-in grant was not written (${(e && e.code) || 'error'}) — the login is stored`); }
+    }
+    try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }   // every open Vault window re-reads (its Web logins)
+    // THE USE LAW FOR A LOGIN (r3, law A — the user name reaches the asker ONLY with the grant, on every road it can read):
+    // storing a login is the OWNER's act; the asking conversation has USED nothing. So NO use line is written for it — a use
+    // line names its entry (`web-login:<origin>#<user>`) and `vibespace-vault uses` reads it back to that conversation, the
+    // user included. The asker learns the user from the receipt alone, and only when the grant was written; its first USE
+    // of the login is its first fill, which the fill road notes itself. The owner-side audit (below, and the add door's own
+    // `vault-web-login-saved`) names the entry as the add door always has — the owner's record, never an agent's road.
+    // Every agent-readable answer is a census: scripts/test-vault-paste.mjs ⑩c.
+    audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: entry, allowed });
+    mark();
+    settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });   // asked: the owner's tick (law D — granted / not ticked / ticked but not written)
+    return { ok: true, outcome: 'stored', entry, updated: !!r.updated, allowed };
   }
 
   // THE ITEM AND THE REQUEST ARE ONE STATE: the item leaving 'open' by another door is a refusal the agent is told
@@ -400,7 +454,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   function proposalsOpen() { index(); return [...wopen.values()].map((w) => ({ proposalId: w.proposalId, entry: w.entry, todoId: w.todoId })); }
 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
-  function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
+  function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
   return { request, answer, addEntry, dropEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen };
 }

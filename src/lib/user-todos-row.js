@@ -353,7 +353,7 @@ export function armDeadlines() {
 /** lane vault-paste-request: an agent's REQUEST FOR A SECRET — its words (what, what for, where it goes, what the paste does)
  *  shown whole ABOVE its paste box (the exit-ask lesson: never folded below the answer); the box itself is DOM nodes the
  *  row appends (renderRow / patchRow — never markup: it holds a field the owner pastes into). */
-const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-proposal-plan ut-secret-plan">${escHtml(detail || '')}</div>` : '');
+const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-proposal-plan ut-secret-plan">${wordsHtml(detail || '')}</div>` : '');   // lane login-request-card r2: THE item's words renderer (a masked link = its words + THE note, inline in prose) — a login card's agent words ride only here
 
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button

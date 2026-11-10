@@ -3,7 +3,7 @@
 // 这种不是应该有个统一的注册表之类的吗」, after 「我似乎不能添加两步验证在vault里」 — 两步验证 had a rail category, a row and a route,
 // and no 添加… door). src/vault-kinds.js holds ONE row per kind family; this suite walks it and FAILS a family whose declared
 // surface is absent in the tree:
-//   ① THE REGISTRY'S SHAPE: every family declares all ten surfaces (lane vault-entry-description: + `words`) — in `surfaces` or in `deferred`, never both; a NONE
+//   ① THE REGISTRY'S SHAPE: every family declares every surface (lane vault-entry-description: + `words`; lane login-request-card: + `request`) — in `surfaces` or in `deferred`, never both; a NONE
 //      has its words; its category is the rail's; ids, doors and door orders unique; `stores` is a list of the inventory's
 //      stores, or null WITH an entry shape; a deferred surface is { lane, backlog } — the lane's name (^[a-z][a-z0-9-]{2,}$)
 //      or 'unscheduled', and its backlog id (B-xxxx), both required — printed below (⏳), never silently green
@@ -13,7 +13,8 @@
 //      app|router.<method>('<path>')) · delete (doorsOf's door for the sample, its route mounted; a { method, path } door asks
 //      in the words of the family's `confirmKey` — doorsOf hands it on, the window's CONFIRM_WORDS words it; an { open } door
 //      is one the window's 删除 opens; a { module } door asks its own confirm) · cli (the verb in that CLI's usage) · doc (a
-//      docs/kb-features.md line names it)
+//      docs/kb-features.md line names it) · request (lane login-request-card: the ask's door and the owner's answer door mounted,
+//      each `--kind` / `--into` in vibespace-vault's usage, and THE PURE verdict landing the family's own target)
 //   ③ THE REVERSE: every door registered in the tree is a registry door; every store of the inventory is LISTED in some
 //      family's `stores` (a stores-null family holds rows by their entry shape, never a store) and every head of the engine's
 //      SECRET_RE (+ the agent namespace) is held by a family; every key of the window's CONFIRM_WORDS is a family's
@@ -38,6 +39,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VK = require(path.join(REPO, 'src/vault-kinds.js'));
 const VI = require(path.join(REPO, 'src/vault-inventory.js'));
+const PASTE = require(path.join(REPO, 'src/vault-paste.js'));   // lane login-request-card: THE request verdict (what an ask lands)
 const acorn = require('acorn');
 
 let passed = 0, failed = 0;
@@ -137,7 +139,7 @@ function census(families, facts) {
     for (const s of VK.SURFACES) {
       const inS = Object.prototype.hasOwnProperty.call(sur, s), inD = Object.prototype.hasOwnProperty.call(def, s);
       if (inS && inD) { cell(f, s, '✗', 'declared AND deferred'); continue; }
-      if (!inS && !inD) { cell(f, s, '✗', 'not declared (every family declares all ten surfaces, or defers one with its lane and backlog id)'); continue; }
+      if (!inS && !inD) { cell(f, s, '✗', 'not declared (every family declares every surface, or defers one with its lane and backlog id)'); continue; }
       if (inD) { const d = deferralOf(def[s]); if (d.words) cell(f, s, '⏳', d.words); else cell(f, s, '✗', `deferred ${JSON.stringify(def[s])}: ${d.bad}`); continue; }
       const v = sur[s];
       if (v && typeof v === 'object' && 'none' in v) { if (NONE_OK(v)) cell(f, s, '—', v.none); else cell(f, s, '✗', 'NONE without its words'); continue; }
@@ -268,6 +270,27 @@ const CHECK = {
     const row = VI.secretRowOf({ name: f.sample, at: 1, label: 'census', note: 'census words', noteShared: true });
     return row && row.note === 'census words' ? null : `secretRowOf carries no description for «${f.sample}» (its row's note)`;
   },
+  // lane login-request-card: THE REQUEST — an agent asks the owner for a value of this kind (`vibespace-vault request "<what>"
+  // --purpose "<why>" …`): the ask's door and the owner's answer door mounted, each kind's shape in the CLI's usage, and the PURE
+  // verdict landing THIS family's target (a free entry · an Integrations field · a website login)
+  request(f, v, { facts, mounted }) {
+    if (!v || typeof v.route !== 'string' || typeof v.answer !== 'string' || !['entry', 'field', 'login'].includes(v.lands)) return 'request is { route, answer, lands, kinds? | into? } or NONE(why)';
+    const gone = [v.route, v.answer].find((r) => !routeParts(r) || !mounted(r));
+    if (gone) return `the request door «${gone}» is not mounted`;
+    const usage = facts.read('data/bin/vibespace-vault') || '';
+    if (!/\bvibespace-vault request "/.test(usage)) return 'vibespace-vault\'s usage names no request "<what>"';
+    const samples = v.lands === 'field' ? (typeof v.into === 'string' ? [{ into: v.into }] : []) : (Array.isArray(v.kinds) ? v.kinds : []).map((k) => ({ kind: k, ...(v.site ? { hosts: v.site } : {}) }));
+    if (!samples.length) return 'request names no `kinds` (or no `into` sample)';
+    for (const sm of samples) {
+      if (sm.kind && !new RegExp(`--kind [a-z|-]*\\b${sm.kind}\\b`).test(usage)) return `vibespace-vault's usage names no «--kind ${sm.kind}»`;
+      if (sm.into && !/--into <row>\.<field>/.test(usage)) return 'vibespace-vault\'s usage names no «--into <row>.<field>»';
+      const r = PASTE.requestVerdict({ words: 'census', purpose: 'census', ...sm });
+      if (!r.ok) return `the request verdict refuses ${JSON.stringify(sm)} (${r.code})`;
+      const lands = r.target.kind;
+      if (lands !== v.lands) return `a request of ${JSON.stringify(sm)} lands «${lands}», not «${v.lands}»`;
+    }
+    return null;
+  },
   route(f, v, { mounted }) {
     if (!Array.isArray(v) || !v.length) return 'route is [\'METHOD /path\', …] or NONE(why)';
     const bad = v.filter((r) => !routeParts(r) || !mounted(r));
@@ -380,6 +403,16 @@ console.log('④ RED CONTROLS (in memory)');
   const noWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/entry-words',", "app.post('/api/vault/entry-words-gone',") })));
   ok(noWords.problems.length === 2 && noWords.problems.every((p) => /^(agent|free)-secret·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p)), 'the owner\'s words door unmounted ⇒ RED on both kinds that carry words', noWords.problems);
   const usage = realRead('data/bin/vibespace-vault');
+  // lane login-request-card: THE REQUEST surface — its doors mounted, its kind in the CLI's usage, the verdict landing the family's own target
+  const noAnswer = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/secret-requests/:id/answer',", "app.post('/api/vault/secret-requests/:id/answer-gone',") })));
+  ok(noAnswer.problems.length === 3 && noAnswer.problems.every((p) => /^(free-secret|integration|web-login)·request: the request door «POST \/api\/vault\/secret-requests\/:id\/answer» is not mounted$/.test(p)), 'the owner\'s answer door unmounted ⇒ RED on every kind an agent may ask for (free entry, Integrations field, website login)', noAnswer.problems);
+  const noLoginKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind login').join('--kind site').split('|login]').join(']') })));
+  ok(noLoginKind.problems.length === 1 && /^web-login·request: vibespace-vault's usage names no «--kind login»$/.test(noLoginKind.problems[0]), 'the login kind gone from the CLI\'s usage ⇒ RED naming web-login·request', noLoginKind.problems);
+  const wlf = VK.FAMILIES.find((f) => f.id === 'web-login');
+  const misLanded = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: { ...wlf.surfaces, request: { ...wlf.surfaces.request, kinds: ['password'], site: undefined } } } : f)), real);
+  ok(misLanded.problems.length === 1 && /^web-login·request: a request of .* lands «entry», not «login»$/.test(misLanded.problems[0]), 'a family whose request lands another kind\'s target (web-login asking for a password lands a free entry) ⇒ RED', misLanded.problems);
+  const noRequest = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: Object.fromEntries(Object.entries(wlf.surfaces).filter(([k]) => k !== 'request')) } : f)), real);
+  ok(noRequest.problems.some((p) => /^web-login·request: not declared/.test(p)), 'a family that leaves the request surface undeclared ⇒ RED', noRequest.problems);
   const noVerb = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('vibespace-vault describe').join('vibespace-vault propose') })));
   ok(noVerb.problems.some((p) => /^free-secret·words: vibespace-vault's usage names no «describe»$/.test(p)), 'the agent\'s verb gone from the usage ⇒ RED', noVerb.problems);
   const wordsLess = census(swap({ ...totp, surfaces: { ...totp.surfaces, words: { create: ['totp'], propose: 'POST /api/agent/vault/words', owner: 'POST /api/vault/entry-words' } } }), real);

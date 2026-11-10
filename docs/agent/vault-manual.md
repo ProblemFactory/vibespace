@@ -35,6 +35,8 @@ vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,
                                     ask ONCE for a STANDING grant — the same as the user setting «Who may use it…» on its row
 vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--note "<what it is for>"] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
+vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host https://<site>
+                                    ask the user for a WEBSITE LOGIN on ONE site — the Vault's own login form on one card
 vibespace-vault uses                your grants (standing ones too), your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
 
@@ -176,6 +178,32 @@ Name no host and the grant admits nothing — every command shows the user its c
 label gives a new id). If the user turned the setting off, the paste grants nothing: your receipt tells you to `request` the
 secret, and the user opens the entry in the Vault window. `vibespace-vault
 list` shows an entry you may use as yours «with no card for <hosts>».
+
+## A website login you do not have — `request "<what>" --kind login --host <site>`
+
+On a sign-in page, ask through the vault first and use a takeover last:
+
+    vibespace-vault request "the parts shop login" --purpose "order the replacement parts" --kind login --host https://shop.example.com
+
+**One** card in the user's For you tray. Its first line says who asks, for which site, and that the login is typed only on
+that site. Its fields are the Vault window's own 网站登录… form: the site (fixed by your ask), the user name, the password
+and an optional two-step code's name.
+
+- **The site.** `--host` is ONE website address: https, or plain http on this machine's localhost only. A bare host
+  means https. Anything else is refused by name before any card (`login_site_required`, `login_one_site`,
+  `login_bad_origin`). A login has no `--name` or `--note`: its site and its user name it.
+- **What lands.** One web login, `web-login:<origin>#<user>`, and nothing else.
+- **The tick.** «Let <this conversation> sign in to <site> with it» is ticked unless the user turned
+  `vault.requestGrantsRequester` off. With it ticked, this conversation may fill that login, for that account on that
+  site, until the user removes it in Vault ▸ Web logins ▸ Use for… — there is no time limit.
+- **The receipt** at your next turn says STORED (or UPDATED) for the site.
+  - It names the user only when this conversation may sign in with it, and it says how:
+    `vibespace-browser login <site> --user <user>` on a custom-kernel profile.
+  - On standard Chrome the vault sign-in is paused since 2.369.364, so ask a person to sign in in the live view:
+    `vibespace-browser ask-human "<what you need>"`.
+  - Unticked, it says the user has not allowed it yet. Never ask for the login in the chat.
+- **REFUSED and WITHDRAWN** work as for a paste box: do not ask again for 10 minutes after a refusal; after a withdrawal,
+  ask again once the vault is unlocked.
 
 ## Using a stored secret in a command — `run`
 
