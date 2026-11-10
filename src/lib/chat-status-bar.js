@@ -26,6 +26,8 @@ import { attachDictation, voiceField } from './voice-input.js'; // lane voice-ev
 import { enterSubmits } from './chat-enter-keys.js';
 import { MENU_EMPTY, resolvePick, sourceOf } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
 import { openAccountModelsDialog } from './account-models.js';
+import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
+import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper, in the device's words
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
@@ -2097,6 +2099,7 @@ export class ChatStatusBar {
       // q-053 §3 (lane models-at-session): THIS conversation's provider's list — its account's (a pooled one: the member it
       // bills now). The head names the provider and where its rows come from; a pick is RE-RESOLVED against that provider
       // (an alias lands on its row's id; an id it does not serve is refused by name, never sent); none ⇒ ONE line + its door.
+      let repaintLine = null; // the drawn menu's report line (lane agy-models-report): an unchanged answer repaints it alone
       const providerItems = (data) => {
         const p = data.provider;
         if (p) {
@@ -2115,11 +2118,53 @@ export class ChatStatusBar {
           dropdown.appendChild(none);
           return;
         }
+        // lane agy-models-report: a CLI that reports its own models — ONE line says whose list this is (and a failure's door)
+        const rep = data.report;
+        const by = rep ? (rep.by || data.backend) : '';
+        let repLine = null;
+        const paintLine = (r) => {
+          const line = reportLine(r, { t, ago: (ts) => agoWords(ts, t), harness: by, machine: r.host || '' });
+          if (!line) return;
+          if (!repLine) { repLine = document.createElement('div'); dropdown.appendChild(repLine); }
+          repLine.className = 'chat-status-dropdown-item chat-status-dim chat-status-models-src' + (line.tone === 'warn' ? ' chat-status-models-src-warn' : '');
+          repLine.textContent = line.text;
+          return line;
+        };
+        repaintLine = (r) => { if (dropdown.isConnected) paintLine(r); };
+        if (rep && paintLine(rep)?.door === 'sign-in') {
+          const si = document.createElement('div');
+          si.className = 'chat-status-dropdown-item chat-status-models-signin-row';
+          si.textContent = signInLabel(t, by);
+          si.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); window.dispatchEvent(new CustomEvent('vs-cli-models-sign-in', { detail: { backend: data.backend, account: rep.account } })); };
+          dropdown.appendChild(si);
+        }
+        // round 2 law E, the chat's half: the conversation's model that the report does not list is KEPT, marked, said — the same
+        // words as the New Session field; pressing it changes nothing
+        if (rep && rep.source === 'reported' && opensFor(rep) && this._statusModel && !data.models.some((m) => m.id === this._statusModel)) {
+          const held = document.createElement('div');
+          held.className = 'chat-status-dropdown-item active chat-status-models-held';
+          held.textContent = notInReport(t, by, this._statusModel);
+          held.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); };
+          dropdown.appendChild(held);
+        }
         addModelItems(data.models.filter(m => m.id), (want) => {
           const r = resolvePick(p, want);
           if (!r.ok) { showToast(t('{provider} does not serve the model “{model}”', { provider: t(p.label), model: want }), { type: 'error' }); return; }
           pick(r.model);
         });
+        if (opensFor(rep)) { // the explicit row — the menu stays open: the CLI's answer redraws it (the dirty re-read below)
+          const rf = document.createElement('div');
+          rf.className = 'chat-status-dropdown-item chat-status-models-refresh';
+          rf.textContent = refreshLabel(t, by);
+          rf.onclick = async (ev) => {
+            ev.stopPropagation();
+            let r = null;
+            try { r = await fetch('/api/cli-models/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backend: data.backend, account: rep.account }) }).then((x) => x.json()); } catch { r = null; }
+            if (!r || !r.ok) { showToast(refusalText(r, t, by), { type: 'error' }); return; }
+            if (dropdown.isConnected) paintLine({ ...rep, listing: true });
+          };
+          dropdown.appendChild(rf);
+        }
       };
       // #6 model LOCK v2: record a TARGET model — the server re-pins it at
       // every turn end where the served model drifted, so a safety-reroute
@@ -2154,13 +2199,40 @@ export class ChatStatusBar {
       loading.className = 'chat-status-dropdown-item chat-status-dim';
       loading.textContent = t('Loading\u2026');
       dropdown.appendChild(loading);
-      fetch(`/api/available-models?session=${encodeURIComponent(this._sessionId || '')}`).then(r => r.json()).then(async data => {
+      // lane agy-models-report (E1, round 2 law G): the menu's GET first (it never lists), THEN — only for a report of THIS
+      // machine's CLI (opensFor: another machine's is not read, nothing is sent; any other harness has no report) — THIS
+      // OPENING, the person's act: ONE POST, the server's door keeps the floors; a listing it started reads «Asking …». The
+      // re-read after the CLI answered (the dirty push) rebuilds the rows only when a row changed — the field's rule.
+      const menuUrl = `/api/available-models?session=${encodeURIComponent(this._sessionId || '')}`;
+      let rowEls = [], drawnSig = null;
+      const sigOf = (d) => `${rowsSig(d)}|${this._statusModel || ''}|${d?.report?.lastError?.code === 'signed-out' ? 'door' : ''}`;
+      const drawRows = (data) => { const before = new Set(dropdown.children); providerItems(data); rowEls = [...dropdown.children].filter((c) => !before.has(c)); drawnSig = sigOf(data); };
+      fetch(menuUrl).then(r => r.json()).then(async data => {
         // not a running conversation of this hub (or an older one): the harness's whole list, as before
         if (!Array.isArray(data?.models)) data = await fetch('/api/available-models').then(r => r.json());
         if (!dropdown.isConnected) return;
         loading.remove();
-        if (Array.isArray(data?.models)) return providerItems(data);
-        addModelItems((data?.[backend] || []).filter(m => m.id));
+        if (Array.isArray(data?.models) && data.report) {
+          if (this._modelMenuDirty) window.removeEventListener('vs-available-models-dirty', this._modelMenuDirty);
+          const onDirty = (ev) => {
+            if (!dropdown.isConnected) { window.removeEventListener('vs-available-models-dirty', onDirty); return; }
+            if (ev.detail?.backend !== data.backend) return;
+            fetch(menuUrl).then(r => r.json()).then((d2) => {
+              if (!dropdown.isConnected || !Array.isArray(d2?.models)) return;
+              if (sigOf(d2) === drawnSig) { if (d2.report) repaintLine?.(d2.report); return; } // no row changed: the line only
+              for (const c of rowEls) c.remove();
+              drawRows(d2);
+            }).catch(() => { });
+          };
+          this._modelMenuDirty = onDirty;
+          window.addEventListener('vs-available-models-dirty', onDirty);
+        }
+        if (!Array.isArray(data?.models)) return addModelItems((data?.[backend] || []).filter(m => m.id));
+        drawRows(data);
+        if (opensFor(data.report)) {
+          fetch('/api/cli-models/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: this._sessionId || '' }) })
+            .then((x) => x.json()).then((o) => { if (o && o.listing) repaintLine?.({ ...data.report, listing: true }); }).catch(() => { });
+        }
       }).catch(() => {
         if (!dropdown.isConnected) return;
         loading.remove();

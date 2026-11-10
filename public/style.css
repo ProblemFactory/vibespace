@@ -6064,6 +6064,16 @@ button.am-cap { cursor: pointer; }
 .chat-status-provider { font-size: 11px; border-bottom: 1px solid var(--border); }
 .chat-status-models-none { color: var(--yellow); cursor: pointer; }
 @media (max-width: 600px) { #row-model .ns-models-none, .am-refresh { min-height: 36px; } }
+/* lane agy-models-report: the ONE line under the model field / atop a chat's model menu for a CLI that reports its own models
+   («As reported by Antigravity 5min ago», «VibeSpace's list — …», a failure in amber with its «Sign in to …» door) */
+#row-model .ns-models-src { font-size: 10.5px; font-weight: 400; color: var(--text-dim); line-height: 1.35; overflow-wrap: anywhere; }
+#row-model .ns-models-src.hidden { display: none; }
+#row-model .ns-models-src-warn { color: var(--yellow); }
+#row-model .ns-models-signin { font: inherit; padding: 0; background: none; border: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.chat-status-models-src { font-size: 11px; white-space: normal; max-width: 300px; line-height: 1.35; border-bottom: 1px solid var(--border); }
+.chat-status-models-src-warn { color: var(--yellow); }
+.chat-status-models-signin-row, .chat-status-models-refresh { color: var(--accent); }
+@media (max-width: 600px) { #row-model .ns-models-signin { min-height: 36px; } }
 @media (max-width: 600px) {
   .am-head { display: none; }
   .am-row, .am-editable .am-row { grid-template-columns: 1fr 1fr; }

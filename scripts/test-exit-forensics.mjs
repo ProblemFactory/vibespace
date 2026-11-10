@@ -1306,6 +1306,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/dial-pairing.js': [1, 'device: a pairing handle'],
     'src/hosts.js': [1, 'device: an install child on a timeout'],
     'src/server/cli-usage-door.js': [1, "not respawned: the Re-check usage read's OWN `agy -p /usage` child (lane antigravity-card-fixes; int332 seam — the lane forked before this census's row set), SIGKILL at the read's timeout — a bounded one-shot a person pressed for; its exit is the read's answer (a named refusal), never a session's"],
+    'src/server/cli-models-door.js': [2, "not respawned: the models listing's OWN `agy models` child, the leader of its own process group (lane agy-models-report, rounds 2–3) — its group SIGKILLed before the leader's exit is seen (the 20 s timeout, the 64 KiB cap), and after it only on proof a member of ours is alive (the number not reused; the pipe held or a /proc member started since the child); a bounded one-shot a person's opening / press asked for; its exit is the listing's verdict, no session"],
     'src/opencode-serve.js': [5, 'not respawned: OpenCode serve (backend ≠ claude)'],
     'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],

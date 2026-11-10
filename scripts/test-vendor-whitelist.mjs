@@ -581,6 +581,51 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   ok(planted !== wall && callsIn(planted) === 2 && /setInterval/.test(planted), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
 }
 
+// ── 5d: THE CLI MODELS DOOR'S CALLERS (lane agy-models-report; the owner 2026-11-10, rulings R1 / E1, round 2 law A) ──
+// src/server/cli-models-door.js spawns a harness CLI's own model listing (antigravity: `agy models` — a request to the vendor
+// under the account's subscription sign-in; a local spawn, so the HTTP census above never sees it). BY CONSTRUCTION it lists
+// only when handed a PRESS that its ONE person gate minted — and (round 3 law 2) the MINT does not travel with the door: the
+// maker returns { door, mint } once, the mint goes to the ONE route registrar; a press is bound to (backend, account, kind)
+// and its age — test-agy-models-door drives the refusals. THIS row counts EVERY reference to the mint (`modelsMint`, the
+// maker's file 2 + the registrar 2), refuses any `.press(` / a destructured press in server code, pins the registrar's
+// cliDoor minting before its one ask, mounted for the OPENING of a model menu and the explicit «Refresh from …» row (POST,
+// never a GET); `modelsReport` read by the door alone; the door's timers its child's two, no setInterval; the row bounded.
+{
+  const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
+  const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
+  const callsIn = (t) => (strip(t).match(/\bmodelsDoor\.ask\(/g) || []).length;
+  const mintsIn = (t) => (strip(t).match(/\bmodelsMint\b/g) || []).length;
+  const pressIn = (f, t) => (f.startsWith('src/lib/') ? 0 : (strip(t).match(/\.press\(|\{[^}\n]*\bpress\b[^}\n]*\}\s*=\s*[\w.]+/g) || []).length);
+  const found = {}, makers = [], mints = {}, readers = [], presses = [];
+  for (const f of [...srcFiles('src'), 'server.js']) {
+    const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
+    if (f === 'src/server/cli-models-door.js') continue;
+    if (callsIn(t)) found[f] = callsIn(t);
+    if (mintsIn(t)) mints[f] = mintsIn(t);
+    if (pressIn(f, t)) presses.push(f);
+    if (/createCliModelsDoor\(/.test(t)) makers.push(f);
+    if (/\bmodelsReport\b/.test(strip(t)) && f !== 'src/harnesses/antigravity.js') readers.push(f);
+  }
+  ok(JSON.stringify(found) === JSON.stringify({ 'src/routes/provider-models.js': 1 }) && mints['src/routes/provider-models.js'] === 2 && mints['src/server/account-usage-routes.js'] === 2 && Object.keys(mints).length === 2
+    && JSON.stringify(makers) === JSON.stringify(['src/server/account-usage-routes.js']) && !readers.length && !presses.length,
+    '5d: the models door is made ONCE (account-usage-routes), its MINT referenced only there (2) and by the ONE registrar (2), no `.press(` anywhere, asked ONCE (provider-models cliDoor), modelsReport read by the door alone', JSON.stringify({ found, mints, makers, readers, presses }));
+  const pm = fs.readFileSync(path.join(REPO, 'src/routes/provider-models.js'), 'utf-8'), door = fs.readFileSync(path.join(REPO, 'src/server/cli-models-door.js'), 'utf-8');
+  const body = (pm.match(/const cliDoor = \(kind\) => async \(req, res\) => \{[\s\S]*?\n {2}\};/) || [''])[0];
+  ok(/const m = modelsMint\(req, [^\n]*\);\s*\n\s*if \(!m\.ok\) return res\.status\(403\)/.test(body) && /modelsDoor\.ask\([^\n]*\{ press: m\.press, kind \}\)/.test(body)
+    && (pm.match(/app\.post\('\/api\/cli-models\/(open|refresh)', cliDoor\('(open|refresh)'\)\)/g) || []).length === 2 && !/app\.get\([^\n]*cliDoor/.test(pm),
+    '5d: the one caller is the POST door that MINTS first (the registrar\'s mint: the person gate, the press bound to this menu) and hands that press to its ask — mounted twice, the opening and the explicit row, never on a GET');
+  ok(/const presses = new WeakSet\(\);/.test(door) && /if \(!press \|\| typeof press !== 'object' \|\| !presses\.has\(press\)\) return \{ ok: false, status: 403, code: 'no-press'/.test(door) && /presses\.delete\(press\);/.test(door)
+    && /return \{ door, mint \};/.test(door) && /code: 'press-not-for-this'/.test(door) && /code: 'press-expired'/.test(door)
+    && /if \(t - last < paceMs\) return \{ ok: false, status: 429, code: 'throttled'/.test(door) && /if \(asks\.length >= dailyMax\) return \{ ok: false, status: 429, code: 'daily-bound'/.test(door) && /const DAILY_MAX = 24;/.test(door) && /failFloorMs/.test(door) && /floorMs/.test(door),
+    '5d: the DOOR lists only on a press its mint made (a WeakSet, used once, bound to its menu and age — a caller\'s flag is refused 403 no-press), the maker returns the mint APART from the door, the floors kept, the explicit row bounded (a minute, 24 a day, persisted)');
+  ok(!/setInterval/.test(door) && (strip(door).match(/setTimeout\(/g) || []).length === 2 && !/Sync\(/.test(door),
+    '5d: never a timer — the door holds only its own child\'s two (the 20 s kill, the drain after exit), and no synchronous fs call');
+  const planted = pm.replace("  app.post('/api/cli-models/open', cliDoor('open'));", "  setInterval(() => modelsDoor.ask('antigravity', 'machine', { press: modelsMint({ headers: {} }, { backend: 'antigravity', account: 'machine', kind: 'refresh' }).press, kind: 'refresh' }), 6 * 3600e3);\n  app.post('/api/cli-models/open', cliDoor('open'));");
+  const aliasPlant = "const d = modelsDoor; setInterval(() => d.ask('antigravity', 'machine', { press: d.press({ headers: {} }, 'refresh').press }), 61000);";
+  ok(planted !== pm && callsIn(planted) === 2 && mintsIn(planted) === 3 && pressIn('src/server/planted.js', aliasPlant) === 1,
+    'CONTROL 5d: a timer-driven listing planted beside the doors is a second call AND a third mint reference; an alias minting through `.press(` is a press call (RED by the rows)', String([callsIn(planted), mintsIn(planted), pressIn('src/server/planted.js', aliasPlant)]));
+}
+
 // ── 6: LOCAL ORACLES (owner ruling 6 of docs/design-harness-features.md §5.1) ──
 // "用（逐条附「不发 vendor 请求」证据进白名单豁免；人触发/已有节拍）", with §4.2's
 // hard gate: the zero-network property must be MEASURED per command, never

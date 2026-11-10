@@ -21,6 +21,8 @@ import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
+import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
+import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
 import { installManageAgents } from './manage-agents.js';
 import { openAccountModelsDialog } from './account-models.js'; // q-053 §3 (lane models-at-session): a provider with no models — the door to its account's models
 import { MENU_EMPTY } from '../model-providers.js'; // PURE: the one line an empty menu says
@@ -451,6 +453,16 @@ class App {
     // panel → This VibeSpace): every link helper reads it live, no reload
     this.ws.onGlobal((msg) => { if (msg.type === 'instance-url') setInstanceUrl(msg.status?.effectiveUrl || null); });
     this.ws.onGlobal((msg) => { if (msg.type === 'available-models-dirty') refreshAvailableModels(); }); // one signal = one re-read
+    // lane agy-models-report: a CLI that reported its own models for an account — every OPEN menu re-reads ONCE, with no
+    // `list` (that re-read can never start another listing): the New Session field here, a chat's menu (chat-status-bar)
+    this.ws.onGlobal((msg) => {
+      if (msg.type !== 'available-models-dirty' || !msg.backend) return;
+      if ((document.getElementById('input-backend')?.value || 'claude') === msg.backend) this._refreshModelMenu?.();
+      try { window.dispatchEvent(new CustomEvent('vs-available-models-dirty', { detail: { backend: msg.backend, account: msg.account || null } })); } catch { }
+    });
+    // …and its «Sign in to …» door (the New Session field's line, a chat's menu): a named account's own «Sign in again»; the
+    // machine's own login — the resume bar's re-login door (Manage agents, where that login's button is)
+    window.addEventListener('vs-cli-models-sign-in', (e) => { const d = e.detail || {}; if (d.account && d.account !== 'machine') this._signInHomeAccount?.(d.backend, d.account); else this.openResumeAccountDoor?.({ kind: 'relogin', accountId: null }); });
     // S9: a harness capability verified at runtime (opencode fork = the serve
     // OpenAPI evidence, probed lazily AFTER this client's /api/home) reaches
     // every open client — the sidebar's Fork row reads BACKEND_META caps
@@ -1723,6 +1735,8 @@ class App {
     const currentEffort = effortSel?.value || '';
 
     modelSel.innerHTML = '';
+    this._modelMenuSig = null; // the harness's seed list is drawn: the account's answer below draws over it
+    delete modelSel.dataset.touched; // a new harness: nothing picked yet
     const modelIds = [];
     for (const m of cfg.models) {
       const opt = document.createElement('option');
@@ -1746,6 +1760,10 @@ class App {
 
     // Wire custom model toggle
     modelSel.onchange = () => {
+      // lane agy-models-report: «Refresh from …» is an ACT, not a pick — the field keeps the model it had
+      if (modelSel.value === '__refresh__') { modelSel.value = modelSel.dataset.prev || ''; this._askCliModels?.(); return; }
+      modelSel.dataset.prev = modelSel.value;
+      modelSel.dataset.touched = '1'; // the person's own pick: a report's redraw keeps it (round 2 law E)
       const isCustom = modelSel.value === '__custom__';
       customModelRow.classList.toggle('hidden', !isCustom);
       if (isCustom && customModelInput) customModelInput.focus();
@@ -1800,8 +1818,46 @@ class App {
       const ans = await fetchJson(`/api/available-models?backend=${encodeURIComponent(be)}&account=${encodeURIComponent(id)}${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}`);
       if (seq !== this._modelMenuSeq || !ans || !Array.isArray(ans.models)) return; // a newer ask, or an older server: the harness's list stays
       if ((document.getElementById('input-backend')?.value || 'claude') !== ans.backend) return;
+      this._modelMenuAns = ans;
+      // an answer that changes no row never rebuilds the field (the person may be holding it open): its line only
+      if (this._modelMenuSig && rowsSig(ans) === this._modelMenuSig) { this._paintModelReport(be, ans); return; }
       this._drawModelMenu(be, ans);
     }, 0);
+  }
+
+  // lane agy-models-report: THE LINE under the model field for a CLI that reports its own models — «As reported by Antigravity
+  // 5min ago» / «VibeSpace's list — Antigravity has not reported yet» / a failure and its door («Sign in to Antigravity»)
+  _paintModelReport(be, ans) {
+    const row = document.getElementById('row-model');
+    if (!row) return;
+    let el = row.querySelector('.ns-models-src');
+    const hostSel = document.getElementById('input-host');
+    const line = reportLine(ans && ans.report, { t, ago: (ts) => agoWords(ts, t), harness: (ans && ans.report && ans.report.by) || be, machine: hostSel && hostSel.value ? (hostSel.selectedOptions?.[0]?.textContent || hostSel.value) : '' });
+    if (!line) { el?.classList.add('hidden'); return; }
+    if (!el) { el = document.createElement('small'); el.className = 'ns-models-src'; row.appendChild(el); }
+    el.classList.remove('hidden');
+    el.classList.toggle('ns-models-src-warn', line.tone === 'warn');
+    el.textContent = line.text;
+    if (line.door === 'sign-in') {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ns-models-signin'; b.textContent = signInLabel(t, ans.report.by || be);
+      const acct = ans.report.account;
+      b.onclick = (e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('vs-cli-models-sign-in', { detail: { backend: be, account: acct } })); };
+      el.append(' ', b);
+    }
+  }
+
+  // lane agy-models-report: ask the CLI that reports its own models for the drawn menu's account — `explicit` = the row «Refresh
+  // from …» (a press: the floors set aside, once a minute, a refusal said), else THE OPENING of the field (E1: under the
+  // floors, silent). The listing's end re-reads the menu (available-models-dirty) — that re-read never lists.
+  async _askCliModels({ explicit = true } = {}) {
+    const ans = this._modelMenuAns;
+    const be = document.getElementById('input-backend')?.value || 'claude';
+    if (!ans || !opensFor(ans.report) || ans.backend !== be) return; // another machine's CLI: nothing is asked
+    let r = null;
+    try { r = await fetch(explicit ? '/api/cli-models/refresh' : '/api/cli-models/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backend: be, account: ans.report.account }) }).then((x) => x.json()); } catch { r = null; }
+    if (!r || !r.ok) { if (explicit) showToast(refusalText(r, t, ans.report.by || be), { type: 'error' }); return; }
+    if (r.listing && this._modelMenuAns === ans) this._paintModelReport(be, { ...ans, report: { ...ans.report, listing: true } });
   }
 
   _drawModelMenu(be, ans) {
@@ -1841,10 +1897,35 @@ class App {
       o.textContent = t('Custom…');
       sel.appendChild(o);
     }
+    if (ans.report && !ans.report.host) { // lane agy-models-report: the explicit row — ask the CLI now (the onchange keeps the pick)
+      const o = document.createElement('option');
+      o.value = '__refresh__';
+      o.textContent = refreshLabel(t, ans.report.by || be);
+      sel.appendChild(o);
+    }
     const want = this._getBackendSessionDefaults(be).model;
-    sel.value = ids.includes(prev) || (prev === '__custom__' && ans.open) ? prev
+    // round 2 law E — A REPORT NEVER DROPS A PERSON'S CHOICE: the model they chose (their pick, once they touched the field;
+    // untouched, the saved default) that the CLI's report does not list STAYS selected, said as not in the report — never a
+    // silent fall to «Default». Only a real report of this machine's CLI; every other menu keeps its rule below.
+    const touched = sel.dataset.touched === '1';
+    let chosen = null;
+    if (ans.report && ans.report.source === 'reported' && opensFor(ans.report)) {
+      chosen = touched ? prev : (prev && prev !== '__custom__' && prev !== '__refresh__' ? prev : want);
+      if (chosen && chosen !== '__custom__' && chosen !== '__refresh__' && !ids.includes(chosen)) {
+        const o = document.createElement('option');
+        o.value = chosen;
+        o.textContent = notInReport(t, ans.report.by || be, chosen);
+        sel.insertBefore(o, sel.firstChild ? sel.firstChild.nextSibling : null); // right under Default
+        ids.push(chosen);
+      } else if (!ids.includes(chosen)) chosen = null;
+    }
+    sel.value = chosen && !touched ? chosen
+      : ids.includes(prev) || (prev === '__custom__' && ans.open) ? prev
       : ans.open ? (ids.includes(want) ? want : '') : (ans.defaultId && ids.includes(ans.defaultId) ? ans.defaultId : ids[0]);
+    sel.dataset.prev = sel.value;
     if (sel.value !== '__custom__') customRow?.classList.add('hidden');
+    this._modelMenuSig = rowsSig(ans);
+    this._paintModelReport(be, ans);
   }
 
   // lane new-session-form: THE New Session door of the ONE path field (lane path-field's contract §4): the picked groups in
@@ -2084,6 +2165,12 @@ class App {
       document.getElementById('input-host')?.addEventListener('change', () => this._refillNewSessionRows()); // identity r3: a host pick hides the profile row
       document.getElementById('input-host')?.addEventListener('change', () => { this._nsHostPicked = true; }); // ci-355-red: a programmatic set fires no `change` — this is the person's pick
       document.getElementById('input-account')?.addEventListener('change', () => this._refreshModelMenu?.()); // q-053 §3: the menu follows the account's provider
+      // lane agy-models-report (E1): THE OPENING of the model field — a pointer press or an opening key — is the one act here
+      // that may ask a CLI that reports its own models (only when the drawn answer says the harness does: `report`)
+      const modelSel = document.getElementById('input-model');
+      const opened = () => this._askCliModels?.({ explicit: false });
+      modelSel?.addEventListener('pointerdown', opened);
+      modelSel?.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === ' ' || e.key === 'Enter' || e.key === 'F4') opened(); });
     }
     this.applyBackend(b, { why: 'open' }); // THIS open's backend: the session options, the account row, the profile row, the model menu
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)

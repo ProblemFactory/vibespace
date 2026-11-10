@@ -55,7 +55,17 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // (GET /api/available-models?session= | ?backend=&account=), and the listed-provider refresh — a person's press, the vault
   // open, once a minute, cached on the record (src/server/provider-models.js: THE one new vendor request)
   const refresher = require('./provider-models.js').create({ providers, vaultState: () => { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return v ? v.state() : 'not_set_up'; }, keyOf: require('./provider-models.js').vaultKeyOf({ getIntegrations }) });
-  require('../routes/provider-models.js').registerProviderModelRoutes(app, { accounts, providers, activeSessions, catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; }, refreshModels, refresher });
+  // THE CLI'S OWN MODEL LIST (lane agy-models-report): `agy models` for ONE account on a person's act — a model menu OPENED or
+  // «Refresh from Antigravity» — never a timer, never at boot, never per spawn (src/server/cli-models-door.js); its completion
+  // re-reads every open menu once (available-models-dirty — that re-read carries no `list`, so it cannot list again)
+  // the maker returns the door AND its mint, once: the mint goes to the ONE route registrar below, never anywhere else
+  const { door: modelsDoor, mint: modelsMint } = require('./cli-models-door.js').createCliModelsDoor({
+    accounts, harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
+    cliCmds: { check: (...a) => (getCliCmds() ? getCliCmds().check(...a) : Promise.resolve(null)), current: (be) => (getCliCmds() ? getCliCmds().current(be) : null) },
+    dataDir: path.join(rootDir, 'data'), agentEnv: () => require('../ws-handler').agentEnv(),
+    onListed: ({ backend, account }) => { try { broadcastAll({ type: 'available-models-dirty', backend, account }); } catch { } },
+  });
+  require('../routes/provider-models.js').registerProviderModelRoutes(app, { accounts, providers, activeSessions, catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; }, refreshModels, refresher, modelsDoor, modelsMint });
 // A SUCCESSFUL LOGIN is the one moment the login-expiry watch's picture is
 // stale by construction: the deadline it warned about no longer exists. Its
 // poll is 5 min, which is a long time to keep staring at a red chip and an
@@ -387,6 +397,7 @@ app.delete('/api/accounts/:id', (req, res) => {
       chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
       chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
     }); // throws for unknown ids → only real (shape-safe) ids continue
+    try { modelsDoor.forget(req.params.id); } catch { } // the models its CLI reported go with it (lane agy-models-report, E2)
     // (lane pool-provider-latents, q-055 M2) a conversation the deletion left UNPLACED (nobody of its provider left) is decided
     // NOW — onto its own provider when one can serve, else the owner's card — not at the pool's next tick
     if (typeof engine.maybePoolAutoSwitchForPool === 'function') for (const pid of accounts.unplacedPools()) { try { engine.maybePoolAutoSwitchForPool(pid, { force: true }); } catch { } }

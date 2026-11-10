@@ -21,6 +21,7 @@ const { AgyAdapter, AGY_EFFORTS } = require('../adapters/agy');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
 const AGY_USAGE = require('./antigravity-usage');
+const AGY_MODELS_REPORT = require('./antigravity-models'); // PURE: `agy models` parsed as data (the door reads stdout only)
 const AGY_WALL = require('./antigravity-wall');
 const { AGY_SLASH_COMMANDS } = require('./antigravity-slash');
 const { HARNESS_SETTINGS } = require('../harness-settings');
@@ -35,9 +36,10 @@ const AGY_BACKFILL = require('../agy-backfill'); // a sub that ALREADY RAN under
  *  (headless never falls back), so a stale row costs a refusal with words while dropping it costs a person on an older plan
  *  a row. The non-Gemini slugs agy offers (claude-opus-5-5-*, claude-sonnet-5-5-*, gpt-oss-120b-medium) are NOT rows —
  *  their windows through agy are not documented, and the bar may never guess — but they are typeable through Custom…
- *  (no validator on the way refuses them: test-agy-harness pins the road). THE ROOT, named not built: this list is a copy
- *  of what `agy models` answers for a signed-in account; reading it from the CLI at a person's press (never a timer — it is
- *  a vendor call under a subscription sign-in) is a later lane. */
+ *  (no validator on the way refuses them: test-agy-harness pins the road). THE ROOT (lane agy-models-report): this list is
+ *  only the answer BEFORE agy has reported — `modelsReport` below: `agy models` read for ONE account when a person opens a
+ *  model menu or presses «Refresh from Antigravity» (src/server/cli-models-door.js; never a timer — it is a vendor call under
+ *  a subscription sign-in); the menu then offers exactly what agy reported for that account, labels and order its own. */
 const AGY_MODEL_ROWS = [
   ['gemini-4-carbon-medium', 'measured'], ['gemini-4-carbon-high', 'measured'], ['gemini-4-carbon-low', 'measured'],
   ['gemini-4-argon-high', 'docs'], ['gemini-4-argon-medium', 'docs'], ['gemini-4-argon-low', 'measured'],
@@ -153,6 +155,11 @@ const AGY_QUOTA = Object.freeze({
   signalFromStream: AGY_WALL.signalFromStream,
   onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true }),
 });
+/** THE MODELS AGY REPORTS FOR AN ACCOUNT (lane agy-models-report, the owner 2026-11-10): `agy models` — MEASURED on agy 1.5.5:
+ *  «Fetching available models...» then `<id>\t<label>` per model the sign-in may use; signed out «Please sign in …», rc 0.
+ *  Run by src/server/cli-models-door.js on a person's act only (a model menu OPENED, or «Refresh from Antigravity»), in the
+ *  account's own HOME root (cwd = its empty login dir, as for `-p /usage`), at most once per 6 h per account (a failure: 15 min). */
+const AGY_MODELS_REPORT_DOOR = Object.freeze({ argv: Object.freeze(['models']), parse: AGY_MODELS_REPORT.parseModelsAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), by: 'Antigravity' }); // `by`: who reports, in the menu's words
 
 /** BILLING IDENTITY of a live agy session: a named Google account (its own HOME root) or the machine's own login. */
 function agyBillingIdentity(s, { accounts, withHost }) {
@@ -284,6 +291,8 @@ module.exports = {
   settings: HARNESS_SETTINGS.antigravity,
   configFiles: {},
   models,
+  // the models agy reports for an account (the menu's rows once it has; `models` above = the answer before) — a person's act only
+  modelsReport: AGY_MODELS_REPORT_DOOR,
   artifactTools: require('./artifacts-of.js').AGY_ARTIFACT_TOOLS,
   // the journal's tool records carry agy's tool_info (no `diff` content): agy's OWN reader (lane agy-status-bar-facts —
   // MEASURED: write_file / edit_file with an absolute `Path`) reads the parent's writes (agyArtifactsOf below), and a

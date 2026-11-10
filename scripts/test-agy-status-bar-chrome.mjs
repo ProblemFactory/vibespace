@@ -21,7 +21,15 @@
 //     status saying `permissionModes: []` leaves the declared list; then the page's own restart (kill → resume with the
 //     conversation's saved config — none for the mode) ⇒ the resumed chat says bypassPermissions, says why in one line,
 //     and agy replies under always-proceed (--dangerously-skip-permissions).
-// PNG: $VS_AGY_BAR_PNG (the bar after ①); $VS_READ_CARDS_DIR ⇒ agy-read.png, claude-read-open.png, agy-read-control.png (④). Run: node scripts/test-agy-status-bar-chrome.mjs   (SKIPs without chrome)
+//   ⑥ THE MODELS ANTIGRAVITY REPORTED (lane agy-models-report — the owner 2026-11-10: «不应该从 Antigravity 自己汇报吗？»):
+//     data/cli-models.json planted before the server started = the machine's own login reported 16 rows (Gemini, Claude,
+//     GPT-OSS — agy's order) 5 min ago, so the floor holds. The New Session model field draws EXACTLY those rows under
+//     Default, then «Custom…» and «Refresh from Antigravity», with ONE line «As reported by Antigravity Nmin ago»; a REAL
+//     press on the field sends ONE POST /api/cli-models/open (answered «floor» — agy is not asked) and no GET carries a
+//     list; at 1280 and 390 px the line wraps inside the dialog, nothing sideways; a chat's model menu (a real press on
+//     its model chip) says the same line over the reported rows and offers the Refresh row. Round 2 law E: a SAVED default the
+//     report does not list stays selected under Default, said «… — not in Antigravity’s report».
+// PNG: $VS_AGY_BAR_PNG (the bar after ①); $VS_READ_CARDS_DIR ⇒ agy-read.png, claude-read-open.png, agy-read-control.png (④); $VS_AGY_MODELS_PNG_DIR ⇒ ns-1280.png, ns-390.png, chat-menu.png (⑥). Run: node scripts/test-agy-status-bar-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,6 +58,14 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'scripts/fixtures/antigravity-agy', 'scripts/fixtures/antigravity-cli-1.4.3.json']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(path.join(wt, f))} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// ⑥ the machine's own login reported these 5 min ago (src/server/cli-models-door.js's cache shape): the floor holds, agy is never asked
+const REPORTED = [['gemini-4-carbon-medium', 'Gemini 4 Carbon (Medium)'], ['gemini-4-carbon-high', 'Gemini 4 Carbon (High)'], ['gemini-4-carbon-low', 'Gemini 4 Carbon (Low)'],
+  ['gemini-4-argon-high', 'Gemini 4 Argon (High)'], ['gemini-4-argon-medium', 'Gemini 4 Argon (Medium)'], ['gemini-4-argon-low', 'Gemini 4 Argon (Low)'],
+  ['gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'], ['gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)'], ['gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)'],
+  ['claude-opus-5-5-high', 'Claude Opus 5.5 (High)'], ['claude-opus-5-5-medium', 'Claude Opus 5.5 (Medium)'], ['claude-opus-5-5-low', 'Claude Opus 5.5 (Low)'],
+  ['claude-sonnet-5-5-high', 'Claude Sonnet 5.5 (High)'], ['claude-sonnet-5-5-medium', 'Claude Sonnet 5.5 (Medium)'], ['claude-sonnet-5-5-low', 'Claude Sonnet 5.5 (Low)'],
+  ['gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)']];
+fs.writeFileSync(path.join(wt, 'data', 'cli-models.json'), JSON.stringify({ schema: 1, harnesses: { antigravity: { machine: { rows: REPORTED.map(([id, label]) => ({ id, label })), listedAt: Date.now() - 5 * 60000, cli: null, lastError: null } } } }), { mode: 0o600 });
 
 // the agy: the FAKE agy itself (the measured stream + usage semantics + agy's own transcript under its HOME)
 const agyPath = path.join(stubDir, 'agy');
@@ -317,6 +333,65 @@ try {
   check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
   check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/));
   check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000));
+  console.log('⑥ the models Antigravity reported (the New Session field + a chat\'s model menu)');
+  const PNGD = process.env.VS_AGY_MODELS_PNG_DIR || null;
+  const shotTo = async (name) => { if (!PNGD) return; fs.mkdirSync(PNGD, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNGD, name), Buffer.from(r.data, 'base64')); };
+  await evalJs(`(() => { window.__cm = []; const of = window.fetch; window.fetch = (u, o) => { const url = String(u && u.url || u); const p = of(u, o); if (/\\/api\\/(cli-models|available-models)/.test(url)) p.then((r) => r.clone().json().then((j) => window.__cm.push({ url, method: (o && o.method) || 'GET', status: r.status, code: j && j.code, keys: j && typeof j === 'object' ? Object.keys(j).slice(0, 10).join(',') : typeof j, models: Array.isArray(j && j.models) ? j.models.length : -1 }))).catch(() => { }); return p; }; return true; })()`);
+  // the CHAT's menu first, at the desktop width: a viewport-class switch (the 390 → 1500 px return below) removes every
+  // [data-popover] by design (src/lib/viewport-switch.js) — a menu read after it would be measuring the switch, not the menu
+  await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); window.__cm.length = 0; true`);
+  // the Antigravity chat on screen (⑤'s resumed one is in front by now; ①'s may be off screen): its window raised, its model
+  // chip the topmost thing at its own centre — the press is a person's, where they would press
+  const mc = await evalJs(`(() => { for (const sv of ['__agyr', '__agym', '__agy']) { const v = window[sv] && ${viewOf('__SV__')}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="model"]'); if (!c) continue;
+    for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; }
+    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const at = document.elementFromPoint(x, y);
+    if (r.width && at && c.contains(at)) return { sv, x, y, w: r.width }; } return null; })()`.replace("window.__SV__", "window[sv]"));
+  check('an Antigravity chat\'s model chip is on screen and topmost at its centre (the press lands on it)', !!(mc && mc.w), mc);
+  // the dropdown's life, as the page lives it (an added / removed panel, when) — a red says which happened
+  await evalJs(`(() => { window.__dd = []; const t0 = performance.now(); new MutationObserver((ms) => { for (const m of ms) { for (const n of m.addedNodes) if (n.classList && n.classList.contains('chat-status-dropdown')) window.__dd.push(['+', Math.round(performance.now() - t0)]); for (const n of m.removedNodes) if (n.classList && n.classList.contains('chat-status-dropdown')) window.__dd.push(['-', Math.round(performance.now() - t0), n.textContent.slice(0, 120)]); } }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
+  if (mc && mc.w) await press(mc.x, mc.y);
+  await waitFor(`!!document.querySelector('.chat-status-dropdown .chat-status-models-src')`, 6000);
+  const menu = await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => i.textContent.trim()) : null; })()`);
+  await shotTo('chat-menu.png');
+  const cm2 = await evalJs(`window.__cm.slice()`);
+  const at = (menu || []).findIndex((x) => /^As reported by Antigravity \d+min ago$/.test(x));
+  check('a chat\'s model menu (a real press on its chip): the same line, then EXACTLY the reported rows, Custom… and «Refresh from Antigravity»; its opening = ONE POST open (floor), then ONE GET', at >= 0 && JSON.stringify(menu.slice(at + 1, at + 1 + REPORTED.length)) === JSON.stringify(REPORTED.map((r) => r[1])) && menu.includes('Custom\u2026') && menu.at(-1) === 'Refresh from Antigravity'
+    && cm2.filter((c) => /cli-models\/open/.test(c.url) && c.code === 'floor').length === 1 && cm2.filter((c) => /available-models\?session=/.test(c.url)).length === 1, { menu, cm2, dd: await evalJs('window.__dd'), sv: mc && mc.sv, direct: await evalJs(`fetch('/api/available-models?session=' + encodeURIComponent(window[${JSON.stringify((mc && mc.sv) || '__agyr')}])).then((r) => r.json()).then((j) => ({ keys: Object.keys(j).join(','), models: Array.isArray(j.models) ? j.models.length : -1, report: j.report || null, err: j.error || null })).catch((e) => String(e))`) });
+  await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
+  await evalJs(`app.showNewSessionDialog({ backend: 'antigravity' }); true`);
+  const want = JSON.stringify(['Default', ...REPORTED.map((r) => r[1]), 'Custom\u2026', 'Refresh from Antigravity']);
+  await waitFor(`JSON.stringify([...document.querySelectorAll('#input-model option')].map((o) => o.textContent)) === ${JSON.stringify(want)}`, 15000);
+  const ns = await evalJs(`(() => { const sel = document.getElementById('input-model'); const src = document.querySelector('#row-model .ns-models-src'); return { opts: [...sel.options].map((o) => [o.value, o.textContent]), line: src && !src.classList.contains('hidden') ? src.textContent : null, warn: !!(src && src.classList.contains('ns-models-src-warn')) }; })()`);
+  check(`the New Session field for Antigravity = EXACTLY the reported rows (agy's order and labels) under Default, then Custom… and «Refresh from Antigravity»`, JSON.stringify(ns.opts.map((o) => o[1])) === want && ns.opts[0][0] === '' && ns.opts.at(-1)[0] === '__refresh__' && ns.opts.at(-2)[0] === '__custom__' && ns.opts[10][0] === 'claude-opus-5-5-high', ns.opts.map((o) => o[0]));
+  check(`…under ONE line «${ns.line}» — as reported by Antigravity, the moment by the client's relative-time helper`, /^As reported by Antigravity \d+min ago$/.test(ns.line || '') && !ns.warn, ns);
+  const fr = await evalJs(`(() => { const sel = document.getElementById('input-model'); sel.scrollIntoView({ block: 'center' }); const r = sel.getBoundingClientRect(); window.__cm.length = 0; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await press(fr.x, fr.y);
+  for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await waitFor(`window.__cm.some((c) => /cli-models\\/open/.test(c.url))`, 5000);
+  await sleep(300);
+  const cm = await evalJs(`window.__cm.slice()`);
+  check('a REAL press on the field = THE OPENING: ONE POST /api/cli-models/open, answered «floor» (agy not asked — reported 5 min ago); no GET carries a list', cm.filter((c) => /cli-models\/open/.test(c.url)).length === 1 && cm.find((c) => /cli-models\/open/.test(c.url)).method === 'POST' && cm.find((c) => /cli-models\/open/.test(c.url)).code === 'floor' && !cm.some((c) => /list=/.test(c.url)), cm);
+  // round 2 law E: a SAVED default the report does not list stays selected, said — never a silent fall to «Default»
+  await evalJs(`app.hideDialogs(); app.settings.set('antigravity.defaultModel', 'gemini-9-saved-high'); app.showNewSessionDialog({ backend: 'antigravity' }); true`);
+  await waitFor(`!!document.querySelector('#input-model option[value="gemini-9-saved-high"]')`, 15000);
+  const sv = await evalJs(`(() => { const sel = document.getElementById('input-model'); const o = sel.querySelector('option[value="gemini-9-saved-high"]'); return { value: sel.value, text: o && o.textContent, index: o ? [...sel.options].indexOf(o) : -1 }; })()`);
+  check('E: a SAVED default the report does not list STAYS selected, right under Default, said «gemini-9-saved-high — not in Antigravity’s report» — never a silent fall to «Default»', sv.value === 'gemini-9-saved-high' && sv.text === 'gemini-9-saved-high — not in Antigravity’s report' && sv.index === 1, sv);
+  await evalJs(`app.hideDialogs(); app.settings.reset('antigravity.defaultModel'); app.showNewSessionDialog({ backend: 'antigravity' }); true`);
+  await waitFor(`JSON.stringify([...document.querySelectorAll('#input-model option')].map((o) => o.textContent)) === ${JSON.stringify(want)}`, 15000);
+  const fit = (w) => evalJs(`(() => { const src = document.querySelector('#row-model .ns-models-src'); const body = document.querySelector('#dialog-new-session .dialog-body') || document.getElementById('dialog-new-session'); const r = src.getBoundingClientRect(); return { w: ${w}, right: Math.round(r.right), height: Math.round(r.height), docW: document.documentElement.scrollWidth, bodyOver: body.scrollWidth - body.clientWidth }; })()`);
+  await shotTo('ns-1280.png');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  const f1280 = await fit(1280);
+  await shotTo('ns-1280.png');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(600);
+  const f390 = await fit(390);
+  await shotTo('ns-390.png');
+  check(`at 1280 and 390 px the line stays inside the dialog (right ${f1280.right} / ${f390.right}), nothing sideways (page ${f1280.docW} / ${f390.docW})`, f1280.right <= 1280 && f1280.docW <= 1280 && f1280.bodyOver <= 1 && f390.right <= 390 && f390.docW <= 390 && f390.bodyOver <= 1, { f1280, f390 });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1500, height: 900, deviceScaleFactor: 1, mobile: false });
+  await evalJs(`app.hideDialogs(); true`); // the app's own close: the overlay goes with the dialog (a press must reach the chat)
+  await waitFor(`document.getElementById('dialog-overlay').classList.contains('hidden')`, 3000);
   check('no page error on the way', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

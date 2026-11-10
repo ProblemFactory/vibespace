@@ -184,6 +184,7 @@ export const BACKEND_META = {
     brandColor: '#4285F4',
     fallbackModels: ['gemini-4-argon-high', 'gemini-3.8-flash-medium'],
     modelsFromAgent: true,
+    modelsReported: true, // lane agy-models-report: `agy models` per account — a chat's model menu OPENING asks for it (POST /api/cli-models/open)
     caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: true, resume: null, supported: false }, accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
