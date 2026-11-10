@@ -25,6 +25,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Group messages, Task Group updates and job or status notices now count as seen only once the agent's turn has really received them.
 - A turn that began while VibeSpace was too busy, or that you stopped, used to lose them; now the next turn brings them, marked "sent again".
 - An agent waiting for a reply that has arrived but not reached it yet is told "1 reply waiting" the next time it uses vibespace-msg.
+- In a conversation locked to a model, the model in the status bar no longer turns amber or names an older model when you scroll up; it shows the one answering.
+- Locking, unlocking or changing the locked model on one device now shows at once on your other open devices.
 
 ## 2.369.389 — 2026-11-10
 
