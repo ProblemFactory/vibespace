@@ -27,6 +27,12 @@
  *     · the main-module evaluation (before the first loop turn) is witnessed, never refused: a throw there would stop
  *       the boot on every restart — the boot's own law (kb-design-lessons §19) keeps sync work out of it.
  * The roots are re-read every ROOTS_EVERY_MS and on refresh() (the mounts registry changed): procfs never hangs.
+ *
+ * LANE HUB-LOOP-STALLS — THE HOLD IS NAMED: the beat is every BEAT_MS (ONE unref'd timer; its first bump at the first loop
+ * turn, so the boot — no beat yet — is a hold timed from the process's start) and carries the flags the watchdog thread
+ * reads (sampling on by `telemetry.loopHoldSampling`, a debugger port open ⇒ the sampler stands down, said once). The
+ * watchdog thread names the hold (src/server/sync-fs-witness-worker.js) and hands its facts back at the resume; the book
+ * (src/server/loop-holds.js) adds the collections, the memory and the utilization and writes the [loop-hold] line.
  */
 const fs = require('fs');
 const os = require('os');
@@ -34,6 +40,7 @@ const path = require('path');
 const MPC = require('../mount-path-class.js');
 const SP = require('../storage-path.js');
 const LB = require('./loop-blame.js');
+const LH = require('../loop-hold.js');
 const TS = require('../timed-sync.js'); // lane ledger-dedup-law r8: the store a call is made for, armed before it (timedSync)
 
 const RING_KEEP = 32;
@@ -49,9 +56,23 @@ const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'linkSync', 's
 const FD_FNS = new Set(['readSync', 'writeSync', 'closeSync', 'fstatSync', 'fsyncSync', 'fdatasyncSync', 'ftruncateSync', 'futimesSync', 'fchmodSync', 'fchownSync', 'readvSync', 'writevSync']);
 const REFUSAL = 'refused: a synchronous fs call on a storage mount from the main thread';
 
-// the live slot's SharedArrayBuffer: Int32 [0 seq, 1 fn index, 2 path bytes, 3 heartbeat, 4 in flight, 5 store index + 1] · Float64 startedAt · path
-const SLOT_INTS = 8, SLOT_PATH = 1024;
-const slotBytes = () => SLOT_INTS * 4 + 8 + SLOT_PATH;
+// the live slot's SharedArrayBuffer: Int32 [0 seq, 1 fn index, 2 path bytes, 3 heartbeat, 4 in flight, 5 store index + 1,
+// 6 flags (1 sampling on, 2 a debugger port open, 4 heap used past PROFILE_HEAP_SHARE of its limit, 8 the setting KNOWN
+// — all read HERE, on the main thread: inspector.url() in a worker is always undefined), 7 the watchdog's acknowledgement
+// of the largest beat gap] · Float64 [startedAt, the last beat's time, the main thread's OWN largest beat gap since the
+// watchdog last acknowledged (a hold exists only when the main thread's own beats say so)] · path
+const SLOT_INTS = 8, SLOT_FLOATS = 3, SLOT_PATH = 1024;
+const FLAG_SAMPLING = 1, FLAG_DEBUGGER = 2, FLAG_HEAP_HIGH = 4, FLAG_KNOWN = 8;
+const NOTE_BYTES = 16 * 1024, PROFILE_BYTES = 64 * 1024, GAPS = 16;
+/** EVERY LENGTH FROM A CLOCK THAT CANNOT STEP: the process's monotonic clock (uv_hrtime — the SAME clock on the watchdog
+ *  thread); the wall clock only dates a hold when it is said (lane hub-loop-stalls round 3: a +2 s step of the date with an
+ *  idle loop was a 2 s «hold»). */
+const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
+const slotBytes = () => SLOT_INTS * 4 + SLOT_FLOATS * 8 + SLOT_PATH;
+const SAMPLING_SETTING = 'telemetry.loopHoldSampling';
+/** a debugger port this process opened (--inspect, SIGUSR1) — the sampler never interrupts a person's debugger */
+let inspectorMod;   // required once (a build without an inspector ⇒ null: no debugger port can be open)
+const debuggerOpen = () => { if (inspectorMod === undefined) { try { inspectorMod = require('inspector'); } catch { inspectorMod = null; } } try { return !!(inspectorMod && inspectorMod.url()); } catch { return false; } };
 
 const hubFrames = (stack, root, k = STACK_FRAMES) => String(stack || '').split('\n').slice(1)
   .filter((l) => !/loop-blame\.js|sync-fs-witness\.js/.test(l) && (!root || l.includes(root)) && !l.includes('node_modules'))
@@ -83,7 +104,9 @@ function guardError(fn, p, root) {
 let one = null;
 function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = process.cwd(), log = console, record = () => {},
   readMountinfo = () => fs.readFileSync('/proc/self/mountinfo', 'utf8'), registry = () => [], guardOn = () => true,
-  now = () => Date.now(), armed = null, live = true, liveMs = LIVE_MS, ringMs = RING_MS, heldMs = HELD_MS, fresh = false } = {}) {
+  now = mono, armed = null, live = true, liveMs = LIVE_MS, ringMs = RING_MS, heldMs = HELD_MS, fresh = false,
+  beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, capPerHour = LH.CAP_PER_HOUR, samplesPerHold = LH.SAMPLES_PER_HOLD,
+  samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc' } = {}) {
   if (one && !fresh) return one;
   let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed;
   const ring = [], fdPaths = new Map(), saidSites = new Map();
@@ -107,7 +130,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
 
   // the live slot, mirrored for the watchdog thread
   const sab = new SharedArrayBuffer(slotBytes());
-  const I = new Int32Array(sab, 0, SLOT_INTS), T = new Float64Array(sab, SLOT_INTS * 4, 1), P = new Uint8Array(sab, SLOT_INTS * 4 + 8, SLOT_PATH);
+  const I = new Int32Array(sab, 0, SLOT_INTS), T = new Float64Array(sab, SLOT_INTS * 4, SLOT_FLOATS), P = new Uint8Array(sab, SLOT_INTS * 4 + SLOT_FLOATS * 8, SLOT_PATH);
   const FNS = [...LB.SYNC_FNS, 'realpathSync.native', 'Dir.readSync'];
   const fnIndex = new Map(FNS.map((f, i) => [f, i]));
   const enc = new TextEncoder();
@@ -203,34 +226,115 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     return best;
   }
 
-  let timer = null, beat = null, worker = null;
+  let timer = null, beat = null, worker = null, holds = null, dbgSaid = false, beats = 0, heapHigh = false, started = false, workerGone = false, inBeat = false;
+  // the main thread's side of the sample (src/loop-hold.js HOOK_KEY), installed ONCE here: `dbg()` (a debugger port open
+  // NOW — the sample checks it on the main thread, also inside a hold the beat cannot see), `note(out)` (THE way an answer
+  // leaves: the watchdog closed its session as it posted), `z` (the sample's ENTERED cell + the beat count then — plain
+  // stores, no call) and `b` (this slot: the beat count at I[3])
+  // the note slot: [seqlock, count, bytes, beat (−1 = written inside the beat itself), ENTERED, beat at entry, -, -] +
+  // the monotonic time of the sample's first instruction + the bytes; THIS thread is its ONE writer, one sample at a time (the watchdog keeps ONE ask
+  // in flight; a sample never runs inside another — the inspector drains its queue one message after another)
+  const noteSab = new SharedArrayBuffer(40 + NOTE_BYTES), NI = new Int32Array(noteSab, 0, 8), NF = new Float64Array(noteSab, 32, 1), NB = new Uint8Array(noteSab, 40);
+  const Z = new Int32Array(noteSab, 16, 2);
+  const profileSab = new SharedArrayBuffer(16 + PROFILE_BYTES), PI = new Int32Array(profileSab, 0, 4), PB = new Uint8Array(profileSab, 16);
+  // THE MAIN THREAD'S OWN GAPS ≥ hold − beat, a ring the beat writes ([count] + {end, gap} pairs): the watchdog reads every
+  // one however late it runs — a hold it could not watch is dated at the beat that ended it, and a seen hold's range is its own gap's
+  const gapSab = new SharedArrayBuffer(8 + 16 * GAPS), GI = new Int32Array(gapSab, 0, 2), GF = new Float64Array(gapSab, 8, 2 * GAPS);
+  // `t0` = the sample's OWN FIRST INSTRUCTION (its `H.now()` before anything else): the watchdog judges by it whether the
+  // thread answered at JavaScript speed (round 4 — the note's own time came after the stack was built)
+  const note = (out, t0) => {
+    if (typeof out !== 'string') return;
+    const w0 = NI[0];
+    Atomics.store(NI, 0, w0 + 1);   // odd = being written
+    try {
+      NI[2] = enc.encodeInto(out.length > NOTE_BYTES / 4 ? out.slice(0, NOTE_BYTES / 4) : out, NB).written;
+      NI[3] = inBeat ? -1 : I[3]; NF[0] = typeof t0 === 'number' && t0 >= 0 ? t0 : mono(); NI[1] = NI[1] + 1;
+    } catch { } finally { Atomics.store(NI, 0, w0 + 2); }   // ALWAYS even again (a throw inside leaves no odd slot behind)
+    try { Atomics.notify(NI, 1); } catch { }
+  };
+  const hookObject = Object.freeze({ dbg: () => debuggerOpen() === true, note, now: mono, z: Z, b: I });
+  let profSeen = 0;
+  /** the profile's result the watchdog wrote into the shared slot — read only when someone asks (the end costs nothing) */
+  function readProfile() {
+    const s1 = Atomics.load(PI, 0);
+    if (s1 % 2 || PI[1] === profSeen) return null;
+    const seq = PI[1], len = Math.min(PB.length, Math.max(0, PI[2]));
+    let r = null; try { r = JSON.parse(new TextDecoder().decode(PB.slice(0, len))); } catch { r = null; }
+    if (Atomics.load(PI, 0) !== s1) return null;
+    profSeen = seq;
+    return r;
+  }
+  /** the flags (the setting read here, before anything may be asked: null / a throw = NOT known ⇒ nothing is asked) */
+  function writeFlags() {
+    let flags = 0, on = null;
+    try { on = samplingOn(); } catch { on = null; }
+    if (on === true || on === false) flags |= FLAG_KNOWN;
+    if (on === true) flags |= FLAG_SAMPLING;
+    if (debuggerOpen()) {
+      flags |= FLAG_DEBUGGER;
+      if (!dbgSaid) { dbgSaid = true; try { log.warn?.('[loop-hold] a debugger port is open — the hold sampler stands down while it is (holds are still measured and said)'); } catch { } }
+    } else dbgSaid = false;
+    if (beats++ % 4 === 0) { try { const h = heapStats(); heapHigh = h.used_heap_size >= LH.PROFILE_HEAP_SHARE * h.heap_size_limit; } catch { } }   // every 4th beat (a second)
+    if (heapHigh) flags |= FLAG_HEAP_HIGH;
+    Atomics.store(I, 6, flags);
+  }
+  /** ONE beat: the flags, the main thread's OWN beat gap (into the ring when it could be a hold), its time, the counter */
+  function beatOnce() {
+    inBeat = true;
+    try {
+      writeFlags();
+      const t = now(), g = T[1] ? t - T[1] : 0;
+      // ONLY a hold enters the ring (the one bar, src/loop-hold.js isGapHold): a gap that is not one never evicts one
+      if (LH.isGapHold(g, beatMs, holdMs)) { const k = GI[0] % GAPS; GF[2 * k] = t; GF[2 * k + 1] = g; Atomics.store(GI, 0, GI[0] + 1); }   // before the beat moves
+      T[1] = t; bump(3);
+    } finally { inBeat = false; }
+  }
   function start({ installHook = true } = {}) {
     refresh();
     if (installHook) LB.setHook(hook);
     if (armed === null) setImmediate(() => { isArmed = true; }); // the first loop turn: the main-module evaluation is over
     timer = setInterval(refresh, ROOTS_EVERY_MS); timer.unref?.();
     if (live) {
-      beat = setInterval(() => bump(3), 1000); beat.unref?.();
+      try { Object.defineProperty(globalThis, LH.HOOK_KEY, { value: hookObject, configurable: true, enumerable: false, writable: false }); } catch { }
+      try {
+        const st = () => { const f = Atomics.load(I, 6); return { known: (f & FLAG_KNOWN) !== 0, on: (f & FLAG_SAMPLING) !== 0, debugger: (f & FLAG_DEBUGGER) !== 0, heapHigh: (f & FLAG_HEAP_HIGH) !== 0, capPerHour, holdMs, watchdog: !!worker && !workerGone }; };
+        holds = require('./loop-holds.js').create({ log, record: (ev) => record(ev), askProfile: (ms) => worker.postMessage({ ev: 'profile', ms, everyMs: profileEveryMs }), samplingState: st, readProfile, debuggerNow: () => debuggerOpen() === true, ...holdsOptions });
+      } catch (e) { try { log.warn?.(`[loop-hold] no book of holds (${e && e.message})`); } catch { } }
+      writeFlags();             // the boot's hold reads the flags before any beat (the setting read BEFORE anything is asked)
+      started = true;
+      setImmediate(beatOnce);   // the first loop turn: the boot's hold ends here (no beat before it)
+      beat = setInterval(beatOnce, beatMs); beat.unref?.();
       try {
         const { Worker } = require('worker_threads');
-        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir }, env: process.env, stdout: false, stderr: false });
+        // THE BOOT: started before the loop's first turn (server.js's 6th line — nodeTiming.loopStart is −1 until then), the
+        // hold before the first beat is the boot's, timed from the process's start; started later (a suite, a REPL), it is an
+        // ordinary hold timed from now — never minutes of «boot» a process spent before the witness existed
+        const beforeLoop = (() => { try { return require('perf_hooks').performance.nodeTiming.loopStart < 0; } catch { return false; } })();
+        const startedAt = now(), bootAt = beforeLoop ? startedAt - process.uptime() * 1000 : null;
+        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, noteSab, profileSab, gapSab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir, beatMs, holdMs, noAnswerMs, capPerHour, samplesPerHold, bootAt, startedAt, procRoot, internals: (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)) }, env: process.env, stdout: false, stderr: false });
         require('../worker-memory').trackWorker('sync-fs-witness', worker);
-        worker.on('message', (m) => { if (m && m.ev === 'memory') return; });   // the census's answer; the watchdog says nothing else
-        worker.on('error', (e) => { try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
+        worker.on('message', (m) => {   // the census's answer, or a hold the watchdog measured (one turn later: the collections are in)
+          if (m && m.ev === 'memory') return;
+          if (m && m.ev === 'hold' && holds) setImmediate(() => { try { holds.onHold(m.hold); } catch { } });
+          if (m && m.ev === 'holdsLost' && holds && typeof holds.onLost === 'function') { try { holds.onLost(m.n); } catch { } }
+        });
+        worker.on('error', (e) => { workerGone = true; try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
+        worker.on('exit', () => { workerGone = true; });
         worker.unref();
       } catch (e) { try { log.warn?.(`[sync-fs] no watchdog thread (${e && e.message}) — the witness keeps its post-mortem`); } catch { } }
     }
     return api;
   }
-  function stop() { clearInterval(timer); clearInterval(beat); try { worker && worker.terminate(); } catch { } LB.setHook(null); }
+  function stop() { clearInterval(timer); clearInterval(beat); try { worker && worker.terminate(); } catch { } try { holds && holds.stop(); } catch { } LB.setHook(null); }
 
   const api = {
     start, stop, refresh, heldIn, hook, counts,
     roots: () => roots.slice(),
     arm: (v = true) => { isArmed = !!v; },
     /** server.js, once telemetry / the settings / the mounts registry exist (the boot trace started the witness earlier). */
-    wire({ record: r, guardOn: g, registry: reg, onHeld: h } = {}) {
+    wire({ record: r, guardOn: g, registry: reg, onHeld: h, samplingOn: so } = {}) {
       if (typeof r === 'function') record = r;
+      if (typeof so === 'function') { samplingOn = so; if (started) writeFlags(); }   // the setting applies NOW — a synchronous boot never reaches a beat
       if (typeof g === 'function') guardOn = g;
       if (typeof reg === 'function') registry = reg;
       if (typeof h === 'function') onHeld = h;
@@ -244,9 +348,20 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     inflight: () => (cur ? { ...cur, root: cur.root ? cur.root.root : null } : null),
     sites: () => Object.fromEntries(saidSites),
     slot: sab,
+    /** the book of holds (src/server/loop-holds.js) — null without the watchdog thread */
+    holds: () => holds,
   };
   if (!fresh) one = api;
   return api;
 }
 
-module.exports = { create, callWords, heldLine, guardError, REFUSAL, SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, SLOT_INTS, SLOT_PATH };
+/** the setting as the boot can read it BEFORE anything may be asked (boot-trace's start, the main module's own first lines):
+ *  data/settings.json's `telemetry.loopHoldSampling` — absent file or key ⇒ its default, ON; an unreadable file ⇒ null
+ *  (not known ⇒ nothing is asked until server.js wires the live setting). */
+function bootSetting(dataDir, readFile = (p) => fs.readFileSync(p, 'utf8')) {
+  let text;
+  try { text = readFile(path.join(dataDir, 'settings.json')); } catch (e) { return e && e.code === 'ENOENT' ? true : null; }
+  try { const v = JSON.parse(text)[SAMPLING_SETTING]; return v === false ? false : true; } catch { return null; }
+}
+
+module.exports = { create, bootSetting, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };

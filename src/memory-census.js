@@ -99,11 +99,23 @@ function censusEvent(c) {
   return { kind: 'event', name: 'srv-mem-census', value: mb(c.rss), detail };
 }
 
-/** The boot journal line — the parts of the number the owner reads right after a start. */
-function bootLine(c) {
+/** The boot journal line — the parts of the number the owner reads right after a start. Lane hub-loop-stalls: the SAME
+ *  parts every hour (`label` 'census, up N h'), so a heap that grows with uptime is on the record. */
+function bootLine(c, label = 'boot census') {
   const unknown = c.workersUnknown ? ` (${c.workersUnknown} unknown)` : '';
   const base = c.basis === 'anon' ? ` (anonymous ${mb(c.base)} MB = the parts)` : ' (no smaps: the parts add up to RSS)';
-  return `[memory] boot census: main heap ${mb(c.main.heap)} MB, ${c.workerCount} workers ${mb(c.workerHeap)} MB${unknown}, external ${mb(c.external)} MB, native ${mb(c.native)} MB, RSS ${mb(c.rss)} MB${base}${cachesText(c)}`;
+  return `[memory] ${label}: main heap ${mb(c.main.heap)} MB, ${c.workerCount} workers ${mb(c.workerHeap)} MB${unknown}, external ${mb(c.external)} MB, native ${mb(c.native)} MB, RSS ${mb(c.rss)} MB${base}${cachesText(c)}`;
+}
+const HEAP_HIGH = 0.8;
+/** PURE (lane hub-loop-stalls): the hourly line, the census's own cost on the loop beside it. */
+function hourLine(c, upH, loopMs) {
+  return `${bootLine(c, `census, up ${upH} h`)}; the census held the loop ${loopMs == null ? '?' : Math.round(loopMs)} ms`;
+}
+/** PURE: the heap past HEAP_HIGH of its limit — «the heap is at 3.4 of 4.1 GB — collections get long», else null. */
+function heapHighLine(heapUsed, heapLimit) {
+  if (!(heapUsed > 0 && heapLimit > 0) || heapUsed < HEAP_HIGH * heapLimit) return null;
+  const g = (b) => (b / 1073741824).toFixed(1);
+  return `[memory] the heap is at ${g(heapUsed)} of ${g(heapLimit)} GB — collections get long (the process stops when it reaches the limit)`;
 }
 /** `; in the main heap: usage ledger window 61/96 MB (120345 rows), …; in ArrayBuffers (part of external):
  *  usage ledger cold columns 95/256 MB (…)` — each bounded cache by name, against its ceiling in ITS unit; a
@@ -147,4 +159,4 @@ function censusRows(c) {
   };
 }
 
-module.exports = { MB, mb, parseSmapsRollup, memoryCensus, censusMetrics, censusEvent, EVENT_DETAIL_MAX, bootLine, cachesText, WORDS, censusRows };
+module.exports = { MB, mb, parseSmapsRollup, memoryCensus, censusMetrics, censusEvent, EVENT_DETAIL_MAX, bootLine, hourLine, heapHighLine, HEAP_HIGH, cachesText, WORDS, censusRows };

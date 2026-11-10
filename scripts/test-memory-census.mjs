@@ -136,6 +136,23 @@ function fakeWorker(answer) {
   ok(metrics.length === 6 && events.length === 1 && events[0].name === 'srv-mem-census', `10 samples (10 min): ${metrics.length} metric rows (samples 0 and 5) + ${events.length} event (sample 0)`);
   ok(logs.length === 1, 'the boot line is said once, never per sample');
 }
+// lane hub-loop-stalls (law K): the SAME census every hour with what it held the loop; the heap past 80 % of its limit
+// said ONCE an hour (a hub's memory grew six times over a day on no record)
+console.log('§3b the hourly census line + the heap-high line');
+{
+  const T = fakeTimers(), logs = [], warns = [];
+  let heapUsed = 1 * 1024 * MB, hrT = 0;
+  const s = SAMPLER.create({ log: { log: (l) => logs.push(l), warn: (l) => warns.push(l) }, now: T.now, timers: T, hourEvery: 6, uptimeH: () => 1.25, hr: () => (hrT += 1.5),
+    readMainMemory: () => ({ rss: 2048 * MB, heapTotal: 1100 * MB, heapUsed, external: 5 * MB, arrayBuffers: 1 * MB, heapLimit: 1200 * MB }),
+    readSmapsText: () => null, ask: () => [] });
+  for (let i = 0; i < 13; i++) { await s.sample(); T.advance(60000); if (i === 3) heapUsed = 1000 * MB; }
+  const hours = logs.filter((l) => l.startsWith('[memory] census, up'));
+  ok(hours.length === 2 && /^\[memory\] census, up 1\.3 h: main heap 1100 MB, 0 workers 0 MB, external 5 MB, native \d+ MB, RSS 2048 MB \(no smaps: the parts add up to RSS\); the census held the loop 3 ms$/.test(hours[0]),
+    `the census line every hourEvery samples (an hour), the boot census's parts + what the census held the loop (its synchronous part, measured): ${hours[0]}`);
+  ok(warns.length === 1 && /^\[memory\] the heap is at 1\.0 of 1\.2 GB — collections get long/.test(warns[0]), `heap past 80 % of its limit: ONE line, not one per sample (${warns.length}: ${warns[0]})`);
+  T.advance(3600000); await s.sample();
+  ok(warns.length === 2, 'an hour later, still high: said once more');
+}
 
 // ── §4 REAL THREADS ──
 console.log('§4 real worker threads answer by name');

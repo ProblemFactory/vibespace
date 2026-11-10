@@ -245,6 +245,7 @@
   "/api/jobs/:id",
   "/api/layout-history",
   "/api/layouts",
+  "/api/loop-holds",
   "/api/machine-mounts",
   "/api/maintenance",
   "/api/mount-tokens",
