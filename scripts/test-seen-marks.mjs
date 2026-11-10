@@ -48,22 +48,23 @@ const mkMeta = () => {
   const m = new Map(); let writes = 0;
   return { m, writes: () => writes, readSessionMeta: (k) => (m.has(k) ? JSON.parse(JSON.stringify(m.get(k))) : null), writeSessionMeta: (k, v) => { writes++; m.set(k, JSON.parse(JSON.stringify(v))); } };
 };
-function mkRig({ tasks, meta, settings = {}, userState = {}, jobs = null, routesMod = ROUTES }) {
+function mkRig({ tasks, meta, settings = {}, userState = {}, jobs = null, routesMod = ROUTES, ssm = null, SSM = null, carryDir = null, statusKey = null }) {
   const routes = {};
   const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; }, put: () => {}, patch: () => {}, delete: () => {}, use: () => {} };
   const activeSessions = new Map();
   routesMod.setupAgentRoutes({
     app, activeSessions, tasks,
-    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => {}, rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
-    SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
+    sessionStatus: ssm || { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => {}, rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+    SessionStatusManager: SSM || { renderNotice: () => '', renderNotices: () => '' },   // lane report-mark-on-ack r2: §7b drives the REAL manager
     userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
-    sessionStatusKey: (s, id) => `claude:${id}`,
+    sessionStatusKey: statusKey || ((s, id) => `claude:${id}`),   // lane report-mark-on-ack r3: a key that changes with the id
     serverSetting: (k) => settings[k],
     scheduleCtxSync: () => {},
     remoteCtxBaseFor: () => null,
     readUserState: () => userState,
     getJobs: () => jobs,
     getSessionMetaStore: () => meta,
+    carryDir,   // lane report-mark-on-ack r3: the outstanding deliveries by conversation (a restart is said from it)
   });
   const call = (route, id, query = {}) => {
     let out = null;
@@ -308,7 +309,7 @@ const loadPatched = (rel, cuts) => {
   return require(f);
 };
 {
-  const noPersist = loadPatched('src/agent-routes.js', [['    persistSeenMarks(s, key);   // B-86d3: the marks this answer moved, written as it is sent\n', '']]);
+  const noPersist = loadPatched('src/agent-routes.js', [['carry.close(ctx, () => persistSeenMarks(s, key));', 'carry.close(ctx, () => {});']]);   // lane report-mark-on-ack: the persist rides the carry's close
   const { tasks, ids } = mkStore('r3', { cwd: work, sessionKeys: PEERS });
   const run = (routesMod) => {
     const meta = mkMeta();
@@ -323,8 +324,8 @@ const loadPatched = (rel, cuts) => {
   ok(base.includes('<vibespace-task-context>') && ids.every((g) => base.includes(g)) && B(base) > 5000, `CONTROL: without the persist call a restart re-sends the full context (${B(base)} B — the base behaviour)`);
   ok(!now.includes('<vibespace-task-context>') && B(now) < 700, `…and with it, ${B(now)} B`);
   const src = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  ok((src.match(/\n    persistSeenMarks\(s, key\);   \/\/ B-86d3: the marks this answer moved, written as it is sent\n    res\.json\(/g) || []).length === 2,
-    'WIRING PIN: both hook routes persist the marks on the line before their answer (task-context and prompt-context)');
+  ok((src.match(/\n    const delivery = carry\.close\(ctx, \(\) => persistSeenMarks\(s, key\)\);[^\n]*\n    res\.json\(\{ success: true, context: ctx, \.\.\.\(delivery \? \{ delivery \} : \{\}\) \}\);/g) || []).length === 2,
+    'WIRING PIN: both hook routes persist the marks once they MOVED — the carry\'s close (at the confirm; at once for a caller that does not confirm), on the line before their answer (task-context and prompt-context)');
 }
 
 // ════════ §4 the budget table ════════
@@ -540,6 +541,382 @@ console.log('§6 the Context read off the main thread (lane task-group-fanout): 
     'SessionStart on a read that missed its bound tells no group (nothing marked seen) — the first prompt tells both whole', { start: nS.slice(0, 160), first: nP.slice(0, 160) });
   fs.readdirSync = realReaddir;
   pool.close();
+}
+
+// ════════ §7 confirm, then mark (lane report-mark-on-ack) ════════
+// 2026-11-09, the owner: «我看它不是回你了吗？» … «没送进你上下文，那不是你的问题吗？自己看一看。» — a reply was stamped «read by» a
+// conversation whose turn never carried it: the hook routes moved every mark AS THEY COMPOSED. Now every mark is STAGED
+// (src/turn-carry.js) and moves when the caller that handed the answer to the turn returns its delivery id.
+console.log('§7 confirm, then mark (lane report-mark-on-ack): the census, the door, the repeat line');
+{
+  const TC = require('../src/turn-carry.js');
+  const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  // ── the census (law 2): every state write in the two hook routes (and the drain / preamble helpers they call) is staged
+  // through a RIDERS kind, or is on THIS list with the reason it tells the agent nothing ──
+  const NOT_TOLD = [
+    [/s\._(groupSeenAt|ctxSig|groupSnap) = s\._\1 \|\| \{\};/g, 'an empty map made before it is read'],
+    [/s\._ctxSig\[g\.id\] = SEEN\.liveSig\(/g, 'a restored mark turned into the live signature (B-86d3) — the same mark, read'],
+    [/else if \(!hadSig\) \{[\s\S]{0,260}?s\._ctxSig\[g\.id\] = sig;/g, 'the baseline set WITHOUT injecting — nothing told'],
+    [/if \(!u\.text\) s\._jobsEventsSeenTs = u\.lastTs;/g, 'the jobs marker with nothing to say'],
+    [/else s\._marksRestored = false;   \/\/ nothing told/g, 'the restart flag when no unchanged line rides'],
+    [/for \(const k of \[sessionStatusKey\(s0, id0\), `webui:\$\{id0\}`\]\) sessionStatus\.consumeNotices\(k\);/g, 'integration OFF: consumed AND dropped by design (a stale notice is never injected)'],
+    [/if \(stage\) STAGED; else sessionObj\._preambleSeen = hash;/g, 'the helper called with NO stage (a direct caller; both hook routes pass theirs — pinned below)'],
+  ];
+  const WRITE = /\bs\._\w+(?:\[[^\]\n]*\])? = (?!=)|sessionStatus\.consumeNotices\(|\.drainStash\(|\.drainNotifs\(|\.retryTake\(|\.commitReports\(|sessionObj\._preambleSeen = /g;
+  const bodyOf = (from, to) => { const i = ar.indexOf(from); return ar.slice(i, ar.indexOf(to, i)); };
+  const regions = {
+    'task-context': bodyOf("app.get('/api/agent/task-context'", "app.get('/api/agent/prompt-context'"),
+    'prompt-context': bodyOf("app.get('/api/agent/prompt-context'", '// THE CONFIRM DOOR'),
+    drainStashUnderCap: bodyOf('function drainStashUnderCap(', '\n}\n'),
+    drainNotifsUnderCap: bodyOf('function drainNotifsUnderCap(', '\n}\n'),
+    withPreamble: bodyOf('function withPreamble(', '\n}\n'),
+  };
+  /** a region with every staged closure blanked: `stage('<kind>', …)` up to its balanced paren */
+  const unstaged = (src0, kinds) => {
+    let src = src0, out = '', i = 0;
+    // a closure written first and handed over by name (`const take = () => {…}; … stage('msg-stash', take)`) is staged too
+    for (const m of src.matchAll(/\bstage\('([\w-]+)', (\w+)(?:\)|, \{)/g)) {
+      kinds.push(m[1]);
+      const k = src.indexOf(`const ${m[2]} = () => {`);
+      if (k >= 0) { let depth = 0, j = src.indexOf('{', k); const j0 = j; do { const ch = src[j]; if (ch === '{') depth++; else if (ch === '}') depth--; j++; } while (depth && j < src.length); src = src.slice(0, j0) + '{ STAGED }' + src.slice(j); }
+    }
+    for (const m of src.matchAll(/\bstage\((?:'([\w-]+)'|\w+ \? '([\w-]+)' : '([\w-]+)'), (?!\w+(?:\)|, \{))/g)) {
+      if (m.index < i) continue;
+      kinds.push(...[m[1], m[2], m[3]].filter(Boolean));
+      let depth = 1, j = m.index + m[0].length - 1;
+      while (depth && ++j < src.length) { const c = src[j]; if (c === '(') depth++; else if (c === ')') depth--; }
+      out += src.slice(i, m.index) + 'STAGED'; i = j + 1;
+    }
+    return out + src.slice(i);
+  };
+  const census = (rg) => {
+    const kinds = [], loose = [];
+    for (const [name, body] of Object.entries(rg)) {
+      let rest = unstaged(body, kinds);
+      for (const [re] of NOT_TOLD) rest = rest.replace(re, 'NOT_TOLD');
+      for (const m of rest.matchAll(WRITE)) loose.push(`${name}: …${rest.slice(Math.max(0, m.index - 50), m.index + 40).replace(/\s+/g, ' ')}…`);
+    }
+    return { kinds: [...new Set(kinds)], loose };
+  };
+  const c = census(regions);
+  ok((ar.match(/withPreamble\(s, [^\n]*?, carry\.stage\)/g) || []).length === 2 && (ar.match(/UnderCap\([^\n]*?, console\.log, carry\)/g) || []).length === 4, 'both hook routes hand their stage to the preamble and their CARRY to the four drains (stage + claim; a helper with no carry marks at once — only a direct caller)');
+  ok(c.loose.length === 0, `THE CENSUS: every state write in the two hook routes and their drain / preamble helpers is STAGED through a rider kind (${c.kinds.length} kinds staged) or on the not-told list with its reason (${NOT_TOLD.length} rows)`, c.loose);
+  const rows = Object.keys(TC.RIDERS);
+  ok(rows.every((k) => c.kinds.includes(k)) && c.kinds.every((k) => rows.includes(k)) && rows.every((k) => TC.RIDERS[k].mark && TC.RIDERS[k].lost),
+    `…every census row (${rows.length}: ${rows.join(', ')}) is staged somewhere and every staged kind has a row — what it marks and what a dropped injection lost`, { rows, staged: c.kinds });
+  // CONTROLS: a new rider written the old way, and a staged kind with no row, are both caught
+  const planted = { ...regions, 'prompt-context': regions['prompt-context'].replace('const parts = [];', 'const parts = []; s._newRiderSeen = true;') };
+  const cp = census(planted);
+  ok(cp.loose.length === 1 && /_newRiderSeen/.test(cp.loose[0]), 'CONTROL a rider that marks as it composes (s._newRiderSeen = true): the census names it', cp.loose);
+  const said7 = []; let applied = 0;
+  const c7 = TC.open({}, { owner: 'k', route: 'UserPromptSubmit', confirm: true, log: (l) => said7.push(l) }); c7.stage('new-rider', () => { applied++; });
+  const id7 = c7.close('some text', null);
+  ok(said7.some((l) => /no census row for the rider "new-rider"/.test(l) && /composed and marked at send/.test(l)) && id7 === null && applied === 1, 'CONTROL a rider kind with no census row breaks the carry BY NAME — the answer falls back to the legacy answer (marked at send, no delivery id), never fails', said7);
+  ok(rows.every((k) => /^(append-only|by identity): .{12,}/.test(TC.RIDERS[k].store || '')) && /^by identity/.test(TC.RIDERS.notices.store) && /^by identity/.test(TC.RIDERS['msg-stash'].store) && /^by identity/.test(TC.RIDERS['jobs-stash'].store),
+    'acceptance r1 law A: every census row says whether its store is append-only (and why) or consumed BY IDENTITY — the notices and both stashes by identity', Object.fromEntries(rows.map((k) => [k, (TC.RIDERS[k].store || '').slice(0, 40)])));
+  ok(TC.LEGACY && /without X-VibeSpace-Confirm/.test(TC.LEGACY.who), 'the LEGACY row: a caller without the header keeps mark-on-send, named (an older hook on a remote host until its helper refresh)');
+
+  // ── the REAL routes: staged until the confirm; a turn that never confirmed is composed again under the repeat line ──
+  const { tasks, ids } = mkStore('r7', { cwd: work, sessionKeys: PEERS });
+  const meta = mkMeta();
+  const rig = mkRig({ tasks, meta });
+  const S = mkSession('S', work); rig.activeSessions.set('S', S); seedMeta(meta, S);
+  const O = mkSession('O', work); rig.activeSessions.set('O', O); seedMeta(meta, O);
+  const ask = (route, id, { confirm = true } = {}) => { let out = null; const req = { headers: { authorization: 'Bearer ' + rig.activeSessions.get(id).agentToken, ...(confirm ? { 'x-vibespace-confirm': '1', 'x-vibespace-hook-sent': String(Date.now()) } : {}) }, query: {}, body: {} }; hush(() => rig.routes[`GET ${route}`](req, { json: (o) => { out = o; }, status: () => ({ json: (o) => { out = o; } }) })); return out || {}; };
+  const carried = (id, delivery) => { let out = null, code = 200; const req = { headers: { authorization: 'Bearer ' + rig.activeSessions.get(id).agentToken }, query: {}, body: { delivery } }; const res = { json: (o) => { out = o; }, status: (c2) => { code = c2; return res; } }; hush(() => rig.routes[`POST ${TC.CONFIRM_ROUTE}`](req, res)); return { ...(out || {}), status: code }; };
+  const none = (x) => !x._groupSeenAt || !Object.keys(x._groupSeenAt).length;   // nothing marked seen (an empty map is made before it is read)
+  const w0 = meta.writes();
+  routeLog.length = 0;
+  const a1 = ask('/api/agent/prompt-context', 'S');
+  ok(a1.context.includes('<vibespace-task-context>') && /^dl_[\w-]{24}$/.test(a1.delivery || '') && none(S) && meta.writes() === w0 && JSON.stringify(TC.pendingOf(S).kinds) === '["task-full"]',
+    'a confirming caller: the full context rides with a delivery id — and NOTHING moved yet (no seen mark, no meta write; one delivery staged: task-full)', { delivery: a1.delivery, pending: TC.pendingOf(S) });
+  const a2 = ask('/api/agent/prompt-context', 'S');
+  ok(a2.context.startsWith(TC.AGAIN_LINE + '\n\n') && a2.context.includes('<vibespace-task-context>') && ids.every((g) => a2.context.includes(g)) && a2.delivery && a2.delivery !== a1.delivery,
+    'the next call before any confirm: the SAME content composed again, under ONE «sent again — the previous turn did not confirm it» line (addition a), with a fresh id', a2.context.slice(0, 260));
+  ok(routeLog.some((l) => /^\[inject\] not carried: claude:S — the person turn's UserPromptSubmit answer \(\d+ B: task-full\) was not confirmed before the next call/.test(l)) && !routeLog.some((l) => /CTX|vibespace-task-context>/.test(l)),
+    'the drop is COUNTED in the hub journal — «[inject] not carried» with the turn kind, the reason, the riders and the bytes; never the content (ruling 4)', routeLog.filter((l) => /not carried/.test(l)));
+  // THE DOOR (addition b)
+  ok(carried('S', a1.delivery).status === 409 && carried('S', a1.delivery).code === 'replaced' && /composed again/.test(carried('S', a1.delivery).error), 'the door: the replaced id is refused by name (409 replaced) — it moves nothing', carried('S', a1.delivery));
+  ok(carried('O', a2.delivery).status === 403 && carried('O', a2.delivery).code === 'not-yours' && none(S) && none(O), "the door: ANOTHER conversation's bearer with this id is refused by name (403 not-yours) — no mark moves on either", carried('O', a2.delivery));
+  ok(carried('S', 'dl_' + 'x'.repeat(24)).status === 404 && carried('S', 'nope').status === 400 && carried('S', undefined).status === 400, 'the door: an unknown id 404, a malformed or missing one 400');
+  const ok1 = carried('S', a2.delivery);
+  ok(ok1.status === 200 && ok1.success === true && JSON.stringify(ok1.carried) === '["task-full"]' && ids.every((g) => typeof S._groupSeenAt[g] === 'number') && meta.writes() === w0 + 1 && (meta.readSessionMeta('sock-S').seenMarks || {}).groupSeenAt,
+    'the confirm moves exactly the staged marks of THAT delivery (task-full) and persists them (one meta write)', ok1);
+  ok(carried('S', a2.delivery).code === 'already' && /single-use/.test(carried('S', a2.delivery).error), 'the door: a delivery id is single-use (409 already)');
+  const a3 = ask('/api/agent/prompt-context', 'S');
+  ok(!a3.context.includes('<vibespace-task-context>') && !a3.context.includes('sent again') && !a3.delivery, 'after the confirm: a quiet turn — nothing repeated, no line, nothing staged (no id)', a3);
+  // a caller that does not confirm (LEGACY): marks at once, as before
+  const L = mkSession('L', work); rig.activeSessions.set('L', L); seedMeta(meta, L);
+  const l1 = ask('/api/agent/prompt-context', 'L', { confirm: false });
+  ok(l1.context.includes('<vibespace-task-context>') && !('delivery' in l1) && ids.every((g) => typeof L._groupSeenAt[g] === 'number') && !TC.pendingOf(L), 'a caller without the header (LEGACY): no delivery id, the marks move as the answer is composed — as before');
+  // SessionStart rides the same helper (ruling 1)
+  const N = mkSession('N', work); rig.activeSessions.set('N', N); seedMeta(meta, N);
+  const t1 = ask('/api/agent/task-context', 'N');
+  ok(t1.context.includes('<vibespace-task-context>') && t1.delivery && none(N) && JSON.stringify(TC.pendingOf(N, 'SessionStart').kinds) === '["task-full"]', 'SessionStart (ruling 1): its full context staged under a delivery id, nothing marked yet', TC.pendingOf(N, 'SessionStart'));
+  const t2 = ask('/api/agent/prompt-context', 'N');
+  ok(t2.context.includes('<vibespace-task-context>') && t2.context.startsWith(TC.AGAIN_LINE) && TC.pendingOf(N, 'SessionStart'), "…a SessionStart answer still unconfirmed: the first prompt tells the groups whole again under the repeat line — and the SessionStart delivery stays confirmable (one route never cancels the other's)", t2.context.slice(0, 200));
+  // RED CONTROL: the base's law (every caller marks as it composes) — the confirming caller's marks move at compose
+  const Base = loadPatched('src/agent-routes.js', [["confirm: TC.confirmable(req)", "confirm: false"]]);
+  const rigB = mkRig({ tasks, meta: mkMeta(), routesMod: Base });
+  const SB = mkSession('S', work); rigB.activeSessions.set('S', SB);
+  let bo = null; hush(() => rigB.routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + SB.agentToken, 'x-vibespace-confirm': '1' }, query: {}, body: {} }, { json: (o) => { bo = o; }, status: () => ({ json: () => {} }) }));
+  ok(bo && bo.context.includes('<vibespace-task-context>') && !bo.delivery && ids.every((g) => typeof SB._groupSeenAt[g] === 'number'), 'RED CONTROL mark-on-send (the confirm switch off): the marks move as the answer is composed — a turn that never carries it loses it (the incident)');
+}
+
+// ════════ §7b the acceptance's four laws (lane report-mark-on-ack r2, 主开发's verdict 2026-11-10) ════════
+console.log('§7b acceptance r1: by identity, a repeat is always said, the told snapshot');
+{
+  const TC = require('../src/turn-carry.js');
+  const clearAfter0 = TC.LIMITS.clearAfterMs; TC.LIMITS.clearAfterMs = 10;   // the durable-row delay, shortened for the suite
+  const { SessionStatusManager: SSM } = require('../src/session-status.js');
+  const { tasks, ids } = mkStore('r7b', { cwd: work, sessionKeys: PEERS });
+  const ssDir = fs.mkdtempSync(path.join(tmp, 'ss-'));
+  const ssm = new SSM({ dataDir: ssDir });
+  const meta = mkMeta();
+  const mk = (routesMod = ROUTES) => mkRig({ tasks, meta, routesMod, ssm, SSM });
+  const mk2 = (o = {}) => mkRig({ tasks, meta: mkMeta(), ssm, SSM, ...o });
+  const rig = mk();
+  const add = (r, id, extra = {}) => { const x = Object.assign(mkSession(id, work), extra); r.activeSessions.set(id, x); seedMeta(meta, x); return x; };
+  const askOn = (r, route, id, confirm = true) => { let out = null; const req = { headers: { authorization: 'Bearer ' + r.activeSessions.get(id).agentToken, ...(confirm ? { 'x-vibespace-confirm': '1' } : {}) }, query: {}, body: {} }; hush(() => r.routes[`GET ${route}`](req, { json: (o) => { out = o; }, status: () => ({ json: (o) => { out = o; } }) })); return out || {}; };
+  const confirmOn = (r, id, delivery) => { let out = null, code = 200; const res = { json: (o) => { out = o; }, status: (c) => { code = c; return res; } }; hush(() => r.routes[`POST ${TC.CONFIRM_ROUTE}`]({ headers: { authorization: 'Bearer ' + r.activeSessions.get(id).agentToken }, query: {}, body: { delivery } }, res)); return { ...(out || {}), status: code }; };
+  const P = '/api/agent/prompt-context', T = '/api/agent/task-context';
+  const warm = (r, id) => { const a = askOn(r, P, id); confirmOn(r, id, a.delivery); };   // the first full context, told and confirmed
+  // ── LAW A: the notices consumed by IDENTITY — the two measured sequences ──
+  add(rig, 'NA'); warm(rig, 'NA');
+  const keyA = 'claude:NA';
+  ssm.pushNotice(keyA, { kind: 'browser-dialog', dialog: { type: 'confirm', message: 'DIALOG-5' } }, { replaceKind: true });
+  const a1 = askOn(rig, P, 'NA');
+  ssm.pushNotice(keyA, { kind: 'browser-dialog', dialog: { type: 'confirm', message: 'DIALOG-6' } }, { replaceKind: true });   // replaces #5 before the confirm
+  confirmOn(rig, 'NA', a1.delivery);
+  const a2 = askOn(rig, P, 'NA');
+  ok((a1.context || '').includes('DIALOG-5') && !(a1.context || '').includes('DIALOG-6') && ssm.pendingNotices(keyA).length === 1 && (a2.context || '').includes('DIALOG-6'),
+    'LAW A (replace): dialog #5 told, #6 REPLACES it before the confirm — the confirm removes only what it rendered (#5, gone already), #6 stays queued and the next turn tells it', { told: /DIALOG-\d/.exec(a1.context || '')?.[0], next: /DIALOG-\d/.exec(a2.context || '')?.[0] });
+  confirmOn(rig, 'NA', a2.delivery);
+  ssm.pushNotice(keyA, { kind: 'browser-proposal', text: 'PROPOSAL-A told' });
+  const b1 = askOn(rig, P, 'NA');
+  ssm.dropNotices(keyA, (x) => x.kind === 'browser-proposal'); ssm.pushNotice(keyA, { kind: 'browser-proposal', text: 'PROPOSAL-B never told' });   // a withdraw, then a push
+  confirmOn(rig, 'NA', b1.delivery);
+  const b2 = askOn(rig, P, 'NA');
+  ok((b1.context || '').includes('PROPOSAL-A told') && (b2.context || '').includes('PROPOSAL-B never told'),
+    'LAW A (withdraw + push): A told, A withdrawn and B pushed before the confirm — the confirm consumes nothing it did not render, B rides the next turn', { pending: ssm.pendingNotices(keyA).map((n) => n.text || n.kind) });
+  confirmOn(rig, 'NA', b2.delivery);
+  {
+    const RedCount = loadPatched('src/agent-routes.js', [["if (typeof sessionStatus.dropNotices === 'function') { for (const k of keys) if (byKey.get(k)) sessionStatus.dropNotices(k, (x) => toldNotices.has(x)); }", 'if (false) { }']]);
+    const r2 = mk(RedCount); add(r2, 'NR'); warm(r2, 'NR');
+    ssm.pushNotice('claude:NR', { kind: 'browser-proposal', text: 'PROPOSAL-A told' });
+    const x1 = askOn(r2, P, 'NR');
+    ssm.dropNotices('claude:NR', () => true); ssm.pushNotice('claude:NR', { kind: 'browser-proposal', text: 'PROPOSAL-B never told' });
+    confirmOn(r2, 'NR', x1.delivery);
+    ok(ssm.pendingNotices('claude:NR').length === 0 && !(askOn(r2, P, 'NR').context || '').includes('PROPOSAL-B'), 'RED CONTROL «consume the first n» (r1\'s form): the confirm consumes B, which no turn ever carried — it is never told');
+  }
+  // ── LAW B (1): one route's delivery never silently cancels the other's ──
+  const Q = add(rig, 'NQ');
+  const q1 = askOn(rig, P, 'NQ');                 // the prompt's delivery, unconfirmed (a slow inject, a hook in flight)
+  const q2 = askOn(rig, T, 'NQ');                 // SessionStart composed meanwhile (a /clear, a compact)
+  ok(q1.delivery && q2.delivery && TC.pendingOf(Q, 'UserPromptSubmit') && TC.pendingOf(Q, 'UserPromptSubmit').id === q1.delivery && (q2.context || '').startsWith(TC.AGAIN_LINE),
+    'LAW B: SessionStart composed while the prompt\'s delivery is unconfirmed — the prompt\'s delivery STAYS confirmable, and the SessionStart answer (the same groups again) says «sent again»', { q2: (q2.context || '').slice(0, 120) });
+  const c1 = confirmOn(rig, 'NQ', q1.delivery), c2 = confirmOn(rig, 'NQ', q2.delivery);
+  const q3 = askOn(rig, P, 'NQ');
+  ok(c1.status === 200 && c2.status === 200 && !(q3.context || '').includes('<vibespace-task-context>') && !(q3.context || '').includes('sent again'), '…both confirms land (200, either order) and the next turn repeats nothing', { c1: c1.status, c2: c2.status });
+  // ── r3 item 2: THE RESTART IS A FACT ABOUT THE CONVERSATION — the outstanding deliveries persisted by conversation ──
+  const carryDir = fs.mkdtempSync(path.join(tmp, 'carry-'));
+  const away = fs.mkdtempSync(path.join(tmp, 'away-'));   // a cwd in no Task Group: SessionStart has nothing to stage there
+  const quiet = { cwd: away, _toolsIntroSeen: true, _mgrIntroSeen: true };
+  const oldHub = mk2({ carryDir });
+  add(oldHub, 'NS', quiet); add(oldHub, 'NC', quiet); add(oldHub, 'NL', quiet);
+  for (const id of ['NS', 'NC', 'NL']) ssm.pushNotice('claude:' + id, { kind: 'browser-proposal', text: `OLD-${id}` });
+  const o1 = askOn(oldHub, P, 'NS');                         // told, handed out — and the hub dies before its confirm
+  confirmOn(oldHub, 'NC', askOn(oldHub, P, 'NC').delivery);  // confirmed before the restart: nothing outstanding
+  askOn(oldHub, P, 'NL');                                    // outstanding — the new hub's caller of it is a LEGACY one
+  ok((o1.context || '').includes('OLD-NS') && o1.delivery && fs.existsSync(path.join(carryDir, 'turn-carry-outstanding.json')), 'the old hub: a notice told, its delivery outstanding, written by conversation (data/turn-carry-outstanding.json)');
+  await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 50));   // NC's row retired once its stores are durable (r4 item 4)
+  TC._newProcess();                                          // the hub dies: nothing of the old process stays in memory
+  const newHub = mk2({ carryDir });                          // a NEW process on the same data dir
+  add(newHub, 'NS', { ...quiet, createdAt: Date.now() });    // a RESUMED record: a new session object, created now, the same conversation
+  routeLog.length = 0;
+  const ss = askOn(newHub, T, 'NS');                         // its first call: a SessionStart with nothing to stage (a compaction, a /clear)
+  const r1 = askOn(newHub, P, 'NS');
+  ok(!ss.context && !ss.delivery && (r1.context || '').startsWith(TC.RESTART_LINE + '\n\n') && (r1.context || '').includes('OLD-NS') && routeLog.some((l) => /^\[inject\] claude:NS: the first UserPromptSubmit answer from this hub process that carries anything \(notices\) — said «the hub restarted»/.test(l)),
+    'r3 item 1 + 2: a RESUMED record of a conversation the dead process left outstanding — its empty SessionStart does not spend the line; the first answer that CARRIES something (the notice, again) says «the hub restarted …» and the journal says so', { ss: ss.context, r1: (r1.context || '').slice(0, 140) });
+  confirmOn(newHub, 'NS', r1.delivery);
+  ssm.pushNotice('claude:NS', { kind: 'browser-proposal', text: 'NEW-NS' });
+  const r2b = askOn(newHub, P, 'NS');
+  ok((r2b.context || '').includes('NEW-NS') && !(r2b.context || '').includes('hub restarted') && !(r2b.context || '').includes('sent again'), '…said once: the next answer carries new content with no line');
+  add(newHub, 'NC', quiet); add(newHub, 'NW', quiet); add(newHub, 'NL', quiet);
+  ssm.pushNotice('claude:NC', { kind: 'browser-proposal', text: 'NEW-NC' }); ssm.pushNotice('claude:NW', { kind: 'browser-proposal', text: 'NEW-NW' });
+  const c1n = askOn(newHub, P, 'NC'), w1 = askOn(newHub, P, 'NW'), l1 = askOn(newHub, P, 'NL', false);
+  ok(!(c1n.context || '').includes('hub restarted') && !(w1.context || '').includes('hub restarted') && (l1.context || '').includes('OLD-NL') && !(l1.context || '').includes('hub restarted'),
+    'r3 item 2, the other side: a conversation whose delivery was confirmed before the restart, one made in this process, and a LEGACY caller (no confirm header — nothing can repeat for it) get no line', { NC: (c1n.context || '').slice(0, 60), NW: (w1.context || '').slice(0, 60), NL: (l1.context || '').slice(0, 60) });
+  // ── r3 item 3a: an unconfirmed SessionStart never poisons later prompts — «sent again» only when its content IS composed again ──
+  const X = mk2({});
+  add(X, 'NX', { cwd: away });                                // intros NOT seen: SessionStart stages the tools intro
+  const sx = askOn(X, T, 'NX');                              // its hook gave up: never confirmed
+  const px1 = askOn(X, P, 'NX');                             // the prompt composes the intro AGAIN ⇒ said, the debt retired
+  confirmOn(X, 'NX', px1.delivery);
+  ssm.pushNotice('claude:NX', { kind: 'browser-proposal', text: 'FRESH-1' });
+  const px2 = askOn(X, P, 'NX'); confirmOn(X, 'NX', px2.delivery);
+  ssm.pushNotice('claude:NX', { kind: 'browser-proposal', text: 'FRESH-2' });
+  const px3 = askOn(X, P, 'NX');
+  ok(sx.delivery && (px1.context || '').startsWith(TC.AGAIN_LINE) && (px2.context || '').includes('FRESH-1') && !(px2.context || '').includes('sent again') && !(px3.context || '').includes('sent again'),
+    'r3 item 3a: an unconfirmed SessionStart delivery — the prompt that composes its content again says «sent again» ONCE (the debt retired); later prompts carrying NEW content say nothing', { px1: (px1.context || '').slice(0, 80), px2: (px2.context || '').slice(0, 80) });
+  // ── r3 item 3b: a late SessionStart confirm never rolls the preamble back ──
+  const settingsY = { 'agents.injectPreamble': 'PRE-ONE' };
+  const Y = mk2({ settings: settingsY });
+  add(Y, 'NY', quiet);
+  const sy = askOn(Y, T, 'NY');                              // the preamble (PRE-ONE) staged, not confirmed yet
+  settingsY['agents.injectPreamble'] = 'PRE-TWO';
+  const py1 = askOn(Y, P, 'NY'); confirmOn(Y, 'NY', py1.delivery);   // PRE-TWO told and confirmed
+  const late = confirmOn(Y, 'NY', sy.delivery);              // the old SessionStart confirm lands late
+  const py2 = askOn(Y, P, 'NY');
+  ok((sy.context || '').includes('PRE-ONE') && (py1.context || '').includes('PRE-TWO') && late.status === 200 && !(py2.context || '').includes('PRE-TWO'), 'r3 item 3b: a late SessionStart confirm lands (200) and never rolls the preamble\'s seen hash back — the standing instructions are not told again', { late: late.status, py2: (py2.context || '').slice(0, 80) });
+  {
+    const NoGuard = loadPatched('src/agent-routes.js', [["if (!((preambleToldOf.get(sessionObj) || 0) > toldAt)) { sessionObj._preambleSeen = hash; preambleToldOf.set(sessionObj, toldAt); }", 'sessionObj._preambleSeen = hash;']]);
+    const settingsZ = { 'agents.injectPreamble': 'PRE-ONE' };
+    const Z = mk2({ settings: settingsZ, routesMod: NoGuard }); add(Z, 'NZ', quiet);
+    const sz = askOn(Z, T, 'NZ'); settingsZ['agents.injectPreamble'] = 'PRE-TWO';
+    const pz1 = askOn(Z, P, 'NZ'); confirmOn(Z, 'NZ', pz1.delivery); confirmOn(Z, 'NZ', sz.delivery);
+    ok((askOn(Z, P, 'NZ').context || '').includes('PRE-TWO'), 'RED CONTROL the preamble apply without its forward guard: the late confirm rolls the hash back and the instructions are told again with no line');
+  }
+  // ── r3 item 3c: the owner is the conversation under either key — a key that changes before the confirm ──
+  const K = mk2({ statusKey: (s, id) => (s.claudeSessionId ? `claude:${s.claudeSessionId}` : `webui:${id}`) });
+  const KS = add(K, 'NK', quiet);
+  ssm.pushNotice('webui:NK', { kind: 'browser-proposal', text: 'BEFORE-THE-ID' });
+  const k1 = askOn(K, P, 'NK');
+  KS.claudeSessionId = 'cccccccc-0000-4000-8000-00000000000c';   // the conversation id arrives between the stage and the confirm
+  const kc = confirmOn(K, 'NK', k1.delivery);
+  ok((k1.context || '').includes('BEFORE-THE-ID') && kc.status === 200 && kc.success === true, 'r3 item 3c: the conversation\'s own confirm lands (200) though its status key changed between the stage and the confirm — the owner is the session, never its key', kc);
+  // ── the TOLD snapshot (the verifier's M2a / M2c): an edit between the stage and the confirm is told next ──
+  const told = (r, id) => {
+    add(r, id);
+    const e1 = askOn(r, P, id); tasks.addProgress(ids[0], { note: `EDITED-AFTER-TOLD-${id}`, session: 'claude:P1' }); confirmOn(r, id, e1.delivery);
+    const e2 = askOn(r, P, id); confirmOn(r, id, e2.delivery);
+    tasks.addProgress(ids[0], { note: `DELTA-ONE-${id}`, session: 'claude:P2' });
+    const e3 = askOn(r, P, id); tasks.addProgress(ids[0], { note: `DELTA-TWO-${id}`, session: 'claude:P3' }); confirmOn(r, id, e3.delivery);
+    const e4 = askOn(r, P, id); confirmOn(r, id, e4.delivery);
+    return { full: (e1.context || '').includes('<vibespace-task-context>'), editTold: (e2.context || '').includes(`EDITED-AFTER-TOLD-${id}`), d1: (e3.context || '').includes(`DELTA-ONE-${id}`), d2Told: (e4.context || '').includes(`DELTA-TWO-${id}`) };
+  };
+  const st = told(rig, 'NT');
+  ok(st.full && st.editTold, 'THE TOLD SNAPSHOT (a first full context): a group edited between the stage and the confirm — the confirm marks what was TOLD, so the next turn tells the edit', st);
+  ok(st.d1 && st.d2Told, 'THE TOLD SNAPSHOT (a delta): a second edit between a delta\'s stage and its confirm is told next turn', st);
+  {
+    const M2c = loadPatched('src/agent-routes.js', [['              s._groupSeenAt[g.id] = g.at;\n              s._ctxSig[g.id] = g.sig;   // lane task-group-fanout: as read this turn\n              s._groupSnap[g.id] = g.snap;', '              s._groupSeenAt[g.id] = Date.now() + 1e9; s._ctxSig[g.id] = g.sig; s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);']]);
+    const M2a = loadPatched('src/agent-routes.js', [['() => { if (Number(s._groupSeenAt[g.id]) > contentAt) return; s._groupSeenAt[g.id] = contentAt; s._ctxSig[g.id] = sig; s._groupSnap[g.id] = snap; }', '() => { s._groupSeenAt[g.id] = Date.now() + 1e9; s._ctxSig[g.id] = sig; s._groupSnap[g.id] = tasks.snapshotForDiff(g.id); }']]);
+    const rc = told(mk(M2c), 'NC'), ra = told(mk(M2a), 'ND');
+    ok(!rc.editTold, 'RED CONTROL (M2c) the first context\'s marks taken at the CONFIRM: the edit made after the stage is never told', rc);
+    ok(!ra.d2Told, 'RED CONTROL (M2a) a delta\'s marks taken at the CONFIRM: the second edit is never told', ra);
+  }
+  // ════════ §7c acceptance r3 — THE CARRY MAY FAIL; THE ANSWER MAY NOT (item 2) · THE FILE IS BOUNDED (3) · DURABLE (4) ════════
+  console.log('§7c acceptance r3: a throw at every door falls back to the legacy answer; the file takes a table only, bounded; its row retires when durable');
+  for (const door of ['open', 'stage', 'close']) {
+    const F = mk2({});
+    add(F, 'NF' + door, quiet);
+    ssm.pushNotice('claude:NF' + door, { kind: 'browser-proposal', text: `FAULT-${door}` });
+    routeLog.length = 0;
+    TC._fault.at = door;
+    let f1; try { f1 = askOn(F, P, 'NF' + door); } finally { TC._fault.at = null; }
+    const failLines = routeLog.filter((l) => /carry failed/.test(l));
+    ok((f1.context || '').includes(`FAULT-${door}`) && !f1.delivery && ssm.pendingNotices('claude:NF' + door).length === 0 && failLines.length === 1 && failLines[0].includes(`planted at ${door}`),
+      `r4 item 2b: a throw planted at the carry's «${door}» — the answer is WHOLE (the notice rides), composed and marked at send as for a caller that does not confirm (no delivery id, the notice consumed), and ONE journal line names the cause`, { ctx: (f1.context || '').slice(0, 80), lines: failLines });
+  }
+  {
+    const wDir = fs.mkdtempSync(path.join(tmp, 'carry-w-'));
+    const F = mk2({ carryDir: wDir });
+    add(F, 'NFW', quiet);
+    ssm.pushNotice('claude:NFW', { kind: 'browser-proposal', text: 'FAULT-write' });
+    routeLog.length = 0;
+    TC._fault.at = 'write';
+    let w1, w2; try { w1 = askOn(F, P, 'NFW'); confirmOn(F, 'NFW', w1.delivery); ssm.pushNotice('claude:NFW', { kind: 'browser-proposal', text: 'FAULT-write-2' }); w2 = askOn(F, P, 'NFW'); } finally { TC._fault.at = null; }
+    const said = routeLog.filter((l) => /could not be written/.test(l));
+    ok((w1.context || '').includes('FAULT-write') && w1.delivery && (w2.context || '').includes('FAULT-write-2') && said.length === 1,
+      'r4 items 2b + 3: a throw planted at the FILE\'s write — the answer is whole AND keeps its confirm law (a delivery id): the file only serves the restart line, whose loss is said ONCE (not per answer)', said);
+  }
+  for (const [label, bytes, word] of [['a number', '5', 'a number'], ['a string', '"x"', 'a string'], ['true', 'true', 'a boolean'], ['an array', '[1,2]', 'an array'], ['broken JSON', '{"a":', 'is not JSON']]) {
+    const bDir = fs.mkdtempSync(path.join(tmp, 'carry-b-'));
+    fs.writeFileSync(path.join(bDir, 'turn-carry-outstanding.json'), bytes);
+    routeLog.length = 0;
+    const F = hush(() => mk2({ carryDir: bDir }));   // the load speaks as the routes are set up
+    add(F, 'NB', quiet); ssm.pushNotice('claude:NB', { kind: 'browser-proposal', text: 'BAD-FILE' });
+    const b1 = askOn(F, P, 'NB');
+    const lines = routeLog.filter((l) => /outstanding-deliveries file/.test(l));
+    ok(lines.length === 1 && lines[0].includes(word) && /started empty/.test(lines[0]) && (b1.context || '').includes('BAD-FILE') && b1.delivery, `r4 item 2a: the file holding ${label} is an EMPTY table, SAID once — the answer is whole with its delivery id`, lines);
+    confirmOn(F, 'NB', b1.delivery);
+  }
+  {
+    const nDir = fs.mkdtempSync(path.join(tmp, 'carry-n-'));
+    const old = Date.now() - TC.OUTSTANDING_MAX_AGE_MS - 60000, rows = {};
+    for (let n = 0; n < 1200; n++) rows[`claude:R${n}`] = { at: n < 200 ? old : Date.now() - n, route: 'UserPromptSubmit', kinds: ['notices'] };
+    fs.writeFileSync(path.join(nDir, 'turn-carry-outstanding.json'), JSON.stringify(rows));
+    const trimSaid = [];
+    const st = TC.createOutstanding(nDir, { log: (l) => trimSaid.push(l) });
+    ok(st.size() === TC.OUTSTANDING_MAX_ROWS && !st.fromBefore('claude:R5') && st.fromBefore('claude:R200') && st.fromBefore('claude:R1199'),
+      `r4 item 3: the table is BOUNDED — rows older than ${TC.OUTSTANDING_MAX_AGE_MS / 3600000} h leave, then the newest ${TC.OUTSTANDING_MAX_ROWS} stay (1200 written, 200 of them old)`, { size: st.size() });
+    ok(trimSaid.length === 1 && /held 1200 row\(s\) — 200 past its bound/.test(trimSaid[0]), 'the tidy after r4 (item 3): rows the load\'s bound drops are SAID, once (a cut is never silent)', trimSaid);
+    // the size FIRST: a file beyond its byte bound is refused by name and never parsed (a planted 56 MB file held setup 1.2 s)
+    const zDir = fs.mkdtempSync(path.join(tmp, 'carry-z-'));
+    fs.writeFileSync(path.join(zDir, 'turn-carry-outstanding.json'), JSON.stringify({ 'claude:NBIG': { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] } }) + ' '.repeat(TC.OUTSTANDING_MAX_BYTES));
+    const bigSaid = [];
+    const big = TC.createOutstanding(zDir, { log: (l) => bigSaid.push(l) });
+    ok(!big.fromBefore('claude:NBIG') && big.size() === 0 && bigSaid.length === 1 && new RegExp(`is \\d+ B, beyond its ${TC.OUTSTANDING_MAX_BYTES} B bound .* not read; started empty`).test(bigSaid[0]),
+      `the tidy after r4 (item 3): a file past its ${TC.OUTSTANDING_MAX_BYTES} B bound is REFUSED BY NAME before it is read — never parsed (its valid row is not taken), said once`, bigSaid);
+  }
+  {
+    // ════ the tidy after acceptance r4 (item 1): EVERY CLAIM HAS ITS BOUND FROM THE INSTANT IT IS STAMPED; a failing claim is SAID ════
+    const said = [], bound0 = TC.LIMITS.claimBoundMs;
+    TC.LIMITS.claimBoundMs = 40;
+    const open = (sObj, owner) => TC.open(sObj, { owner, route: 'UserPromptSubmit', turn: 'person', confirm: true, log: (l) => said.push(l) });
+    // (a) an answer that claims and NEVER CLOSES (its route threw on the way): the claim ends at its bound, said
+    const r1 = { text: 'NEVER-CLOSED' };
+    const c1 = open({}, 'claude:NCL1');
+    c1.claim('msg-stash', () => { r1.ho = TC.CLAIM_TAG; return () => { if (r1.ho === TC.CLAIM_TAG) delete r1.ho; }; }, [r1]);
+    // (b) a claim call that throws AFTER its stamp (its release never returned): said, the carry breaks to the legacy answer,
+    // the record is UNSTAMPED by its own tag at the close — and the take still runs (marked at send)
+    const r2 = { text: 'THROWN-AFTER' };
+    const c2 = open({}, 'claude:NCL2');
+    let took = 0;
+    const rel2 = c2.claim('jobs-stash', () => { r2.ho = TC.CLAIM_TAG; throw new Error('planted after the stamp'); }, [r2]);
+    c2.stage('jobs-stash', () => { took++; }, { release: rel2 });
+    const d2 = c2.close(c2.wrap('THROWN-AFTER'), null);
+    // (c) the legacy carry (a caller without the header, or a failed open) books its claims too
+    const r3 = { text: 'LEGACY-NEVER-CLOSED' };
+    TC.legacyCarry({ owner: 'claude:NCL3', route: 'UserPromptSubmit', log: (l) => said.push(l) }).claim('msg-stash', () => { r3.ho = TC.CLAIM_TAG; return null; }, [r3]);
+    const heldAt0 = r1.ho === TC.CLAIM_TAG && r3.ho === TC.CLAIM_TAG;
+    await new Promise((r) => setTimeout(r, 120));
+    TC.LIMITS.claimBoundMs = bound0;
+    const failed = said.filter((l) => /claude:NCL2: the UserPromptSubmit carry failed \(claim: planted after the stamp\)/.test(l));
+    ok(heldAt0 && !('ho' in r1) && said.filter((l) => /claude:NCL1: an unconfirmed answer's claim on stashed records ended at its \d+-minute bound/.test(l)).length === 1,
+      'the tidy after r4 (item 1): a claim\'s BOUND RUNS FROM ITS STAMP — an answer that claimed and never closed (its route threw on the way) releases at the bound, said once', said);
+    ok(d2 === null && took === 1 && !('ho' in r2) && failed.length === 1,
+      'the tidy after r4 (item 1): a claim call that THROWS after its stamp is SAID (one line) and breaks the carry — the legacy answer takes at send, the record is unstamped by its own tag (its release never came back)', { d2, took, ho: r2.ho, failed });
+    ok(!('ho' in r3), 'the tidy after r4 (item 1): the LEGACY carry books its claims too — a claim no close ended is released at its bound', r3);
+  }
+  {
+    const dDir = fs.mkdtempSync(path.join(tmp, 'carry-d-'));
+    const F = mk2({ carryDir: dDir });
+    add(F, 'ND', quiet); ssm.pushNotice('claude:ND', { kind: 'browser-proposal', text: 'DURABLE' });
+    const read = () => { try { return JSON.parse(fs.readFileSync(path.join(dDir, 'turn-carry-outstanding.json'), 'utf8')); } catch { return {}; } };
+    const d1 = askOn(F, P, 'ND'); confirmOn(F, 'ND', d1.delivery);
+    const rightAfter = 'claude:ND' in read();
+    await new Promise((r) => setTimeout(r, TC.LIMITS.clearAfterMs + 40));
+    const later = 'claude:ND' in read();
+    ok(rightAfter && !later, `r4 item 4: the confirm retires the row only once what it guards is durable — still there at the confirm, gone ${TC.LIMITS.clearAfterMs} ms later (production: 2 s, above the notice store's 500 ms write)`, { rightAfter, later });
+  }
+  {
+    // the unverified drift (verdict r3): a row written under the page key follows the conversation once its id arrives
+    const rDir = fs.mkdtempSync(path.join(tmp, 'carry-r-'));
+    const keyOf = (x, id) => (x.claudeSessionId ? `claude:${x.claudeSessionId}` : `webui:${id}`);
+    const Kr = mk2({ carryDir: rDir, statusKey: keyOf });
+    const KR = add(Kr, 'NR2', quiet);
+    ssm.pushNotice('webui:NR2', { kind: 'browser-proposal', text: 'DRIFT-1' });
+    askOn(Kr, P, 'NR2');                                         // staged under webui:NR2 — never confirmed
+    KR.claudeSessionId = 'dddddddd-0000-4000-8000-00000000000d';  // the conversation id arrives
+    const cid = 'claude:' + KR.claudeSessionId;
+    ssm.pushNotice(cid, { kind: 'browser-proposal', text: 'DRIFT-2' });
+    askOn(Kr, T, 'NR2');                                         // the next answer of this conversation (another route): the row follows
+    const rows = JSON.parse(fs.readFileSync(path.join(rDir, 'turn-carry-outstanding.json'), 'utf8'));
+    ok(cid in rows && !('webui:NR2' in rows), 'the unverified drift: a row written under the PAGE key follows the conversation key at its next answer (rekey) — a later process can match it', Object.keys(rows));
+  }
+  TC.LIMITS.clearAfterMs = clearAfter0;
+
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

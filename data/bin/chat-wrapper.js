@@ -925,6 +925,10 @@ function processLine(line) {
       if (stopping && stopping.held > 0 && !turnBusy) log(`the CLI is running a follow-up turn's prompt hook for what it held at Stop — the window waits for its init`);
     } else if (msg.subtype === 'hook_response') {
       if (!promptHooks.delete(hid)) { answeredHooks.add(hid); if (answeredHooks.size > 16) answeredHooks.delete(answeredHooks.values().next().value); }
+      // lane report-mark-on-ack: a turn the hub's context did not reach SAYS why here — the product hook's stderr line (measured
+      // on 2.1.321: never in the model's context) or the CLI's cancel; the hub composes what it staged again next turn
+      const noCtx = typeof msg.stderr === 'string' ? (msg.stderr.match(/vibespace-hook: no hub context this turn — ([^\n]{1,240})/) || [])[1] : null;
+      if (noCtx || msg.outcome === 'cancelled') log(`this turn carries no hub context: ${noCtx || 'the CLI cancelled the prompt hook (a Stop, or its timeout)'} — what the hub composed for it is composed again next turn`);
       armHookBound();
       armBound();
     }

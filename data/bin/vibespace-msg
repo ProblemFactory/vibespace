@@ -120,8 +120,14 @@ async function call(method, p, body, cc = {}) {
   let j = {};
   try { j = await res.json(); } catch { }
   if (j.error || !res.ok) refused(j, res.status);
+  if (typeof j.waiting === 'string' && j.waiting) waitingSaid = j.waiting;
   return j;
 }
+// lane report-mark-on-ack (law 4): what waits for THIS conversation's next turn — a reply the hub has not yet seen a turn
+// carry — is the last line of every answer that names it (the hub's words, judged at its door), so «no answer yet» is never
+// what an asker that checks reads
+let waitingSaid = '';
+process.on('exit', (code) => { if (!code && waitingSaid) process.stdout.write(waitingSaid + '\n'); });
 
 const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Group scoped reach)
   vibespace-msg list                              ← sessions you can see/message (name · id · state)

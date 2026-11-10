@@ -280,7 +280,7 @@ class JobManager {
         // process killed mid-post
         const ids = new Set();
         for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
-        if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); this.d.log(`[jobs] ${cid}: a hand-over (${[...ids].join(', ')}) was in flight when the previous server stopped — its job results wait again`); }
+        if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); const ho = [...ids].filter((x) => x !== 'carry'), both = ids.has('carry') && ho.length > 0; this.d.log(`[jobs] ${cid}: ${[ids.has('carry') ? 'an unconfirmed answer\'s claim (carry)' : '', ho.length ? `a hand-over (${ho.join(', ')})` : ''].filter(Boolean).join(' and ')} ${both ? 'were' : 'was'} in flight when the previous server stopped — ${both ? 'their' : 'its'} job results wait again`); }   // lane report-mark-on-ack: a carry claim is an unconfirmed answer's, named apart from a hand-over
         this.pendingNotifs.set(cid, list);
       }
       if (this.releasedAtBoot.length && !this.readOnly) this._saveNotifs();

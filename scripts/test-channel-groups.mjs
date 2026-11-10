@@ -2216,5 +2216,173 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   ok(S2.calls === O2.calls && S2.calls >= 5 && S2.maxGap * 2 < O2.maxGap, `SLICED SWEEP: it hands the loop back between members — its longest loop gap ${S2.maxGap} ms vs ${O2.maxGap} ms for the one-tick sweep over the same ${S2.calls} members`);
 }
 
+// ── lane report-mark-on-ack (2026-11-09, the owner: «我看它不是回你了吗？» … «没送进你上下文，那不是你的问题吗？»): a peer's reply was
+// stamped «read by» the conversation whose turn never carried it. THE REPORT'S MARKER AND CARDS MOVE WHEN THE TURN CARRIED IT —
+// the hook route stages them, the caller's confirm (src/turn-carry.js) moves them; until then the sender reads «waiting» and
+// the asker's message tool says «1 reply waiting — not yet shown to you» (law 4 + addition c).
+console.log('§R confirm, then mark — the group report, through the REAL prompt-context route (lane report-mark-on-ack)');
+{
+  const TC = require(path.join(REPO, 'src/turn-carry.js'));
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const f = fixture('rmoa');
+  const pair = await f.eng.sendToAgent({ from: A, to: B, text: 'the answer to your question' });
+  const gid = pair.group.id, at = pair.message.at;
+  const routes = {};
+  const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+  const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+  Object.assign(f.sessions.get(wB), { agentToken: 'vsst_beta', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  const wA = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === A);
+  Object.assign(f.sessions.get(wA), { agentToken: 'vsst_alpha', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  AR.setupAgentRoutes({ app, activeSessions: f.sessions,
+    tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null, getGroups: () => f.eng });
+  const quietLog = (fn) => { const l = console.log, w = console.warn; const said = []; console.log = (...a) => said.push(a.join(' ')); console.warn = console.log; return Promise.resolve(fn()).finally(() => { console.log = l; console.warn = w; }).then((v) => ({ v, said })); };
+  const ask = (tok, confirm = true) => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + tok, ...(confirm ? { 'x-vibespace-confirm': '1' } : {}) }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+  const carried = (tok, delivery) => new Promise((resolve) => { let st = 200; const res = { json: (o) => resolve({ ...o, status: st }), status(c) { st = c; return res; } }; routes['POST ' + TC.CONFIRM_ROUTE]({ headers: { authorization: 'Bearer ' + tok }, query: {}, body: { delivery } }, res); });
+  const msgGet = (p, tok, query = {}) => new Promise((resolve) => { let st = 200; const res = { json: (o) => resolve({ ...o, status: st }), status(c) { st = c; return res; } }; routes['GET ' + p]({ headers: { authorization: 'Bearer ' + tok }, query }, res); });
+  const marker = () => G.memberOf(f.eng.get(gid), B).reportedUpTo;
+  const stateOfB = () => G.deliveryOf(f.eng.get(gid), { at, author: { id: A } }, { log: f.store.readTail('groups', gid, { limit: 50 }) }).find((x) => x.member === B).state;
+  const cards0 = f.cards.length;
+  const { v: r1, said } = await quietLog(() => ask('vsst_beta'));
+  await new Promise((r) => setTimeout(r, 30));
+  ok(r1.context.includes('the answer to your question') && /^dl_/.test(r1.delivery || '') && marker() === null && f.cards.length === cards0 && stateOfB() === 'waiting',
+    'a confirming caller: the reply rides — its marker does NOT move and no card is drawn; the sender still reads «waiting» for beta', { marker: marker(), cards: f.cards.length - cards0, state: stateOfB() });
+  const g1 = await msgGet('/api/agent/msg/groups', 'vsst_beta');
+  ok(/^1 reply waiting — not yet shown to you: alpha in "[^"]+" \(g-[0-9a-f]+\)/.test(g1.waiting || ''), "law 4 + addition c: the asker's next message-tool call (its group list) says «1 reply waiting — not yet shown to you», naming who and where", g1.waiting);
+  const s1 = await msgGet('/api/agent/msg/read', 'vsst_beta', { group: gid });
+  ok(!s1.waiting && s1.records.some((x) => /the answer to your question/.test(x.text)), '…a read of THAT group shows the reply itself and adds no waiting line for it');
+  const { v: r2, said: said2 } = await quietLog(() => ask('vsst_beta'));
+  ok(r2.context.startsWith(TC.AGAIN_LINE) && r2.context.includes('the answer to your question') && said2.some((l) => /^\[inject\] not carried: claude:bbbbbbbb.* \(\d+ B: group-report\) was not confirmed before the next call/.test(l)) && marker() === null,
+    'never confirmed: the next turn carries the reply AGAIN under «sent again — the previous turn did not confirm it», the hub journal says «[inject] not carried» (no content) — the marker still unmoved', said2.filter((l) => /inject/.test(l)));
+  const bad = await carried('vsst_alpha', r2.delivery);
+  ok(bad.status === 403 && bad.code === 'not-yours' && marker() === null, "the door: the sender's bearer cannot confirm the receiver's delivery (403 not-yours)", bad);
+  const good = await carried('vsst_beta', r2.delivery);
+  await new Promise((r) => setTimeout(r, 30));
+  ok(good.success && JSON.stringify(good.carried) === '["group-report"]' && marker() === at && f.cards.length === cards0 + 1 && f.cards[f.cards.length - 1].group && f.cards[f.cards.length - 1].group.id === gid && stateOfB() === 'handed',
+    'the confirm: THEN the marker moves to the reply and its card is drawn — the sender reads «read by beta»', { marker: marker(), at, cards: f.cards.length - cards0, state: stateOfB() });
+  const g2 = await msgGet('/api/agent/msg/groups', 'vsst_beta');
+  ok(!g2.waiting, '…and the waiting line is gone from the asker\'s message tool');
+  const r3 = await ask('vsst_beta');
+  ok(!r3.context.includes('the answer to your question') && !r3.delivery, '…the next turn: nothing repeated, nothing staged');
+  // a caller that does not confirm keeps the old law (LEGACY), and the RED control is that law under the header
+  await f.eng.post({ group: gid, from: A, text: 'a second note' });
+  const r4 = await ask('vsst_beta', false);
+  await new Promise((r) => setTimeout(r, 30));
+  ok(r4.context.includes('a second note') && !r4.delivery && marker() > at, 'a caller without the header (LEGACY): the marker moves as the answer is composed, as before');
+  f.close();
+}
+console.log('§R2 the claims on the REAL ladder and jobs engine — a claim belongs to the conversation and always ends (lane report-mark-on-ack r4)');
+{
+  const TC = require(path.join(REPO, 'src/turn-carry.js'));
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const f = fixture('rmoa2');
+  const jm = new JobManager({ dataDir: path.join(f.dataDir, 'jobs'), broadcast: () => {}, notifyUser: () => {}, log: () => {} });
+  jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+  const routes = {};
+  const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+  Object.assign(f.sessions.get(wB), { agentToken: 'vsst_beta', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  AR.setupAgentRoutes({ app: { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} }, activeSessions: f.sessions,
+    tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, deliver: f.deliver, getGroups: () => null });
+  const quiet = (fn) => { const l = console.log, w = console.warn; console.log = () => {}; console.warn = () => {}; try { return fn(); } finally { console.log = l; console.warn = w; } };
+  const ask = (tok) => quiet(() => { let out = null; routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + tok, 'x-vibespace-confirm': '1' }, query: {} }, { json: (o) => { out = o; }, status() { return this; } }); return out || {}; });
+  const carried = (tok, delivery) => { let st = 200, out = null; const res = { json: (o) => { out = o; }, status(c) { st = c; return res; } }; routes['POST ' + TC.CONFIRM_ROUTE]({ headers: { authorization: 'Bearer ' + tok }, query: {}, body: { delivery } }, res); return { ...(out || {}), status: st }; };
+  const stash = (t) => f.deliver.stashFor(B, { source: 'agent', kind: 'peer', fromName: 'alpha', text: t });
+  const entry = (t) => f.deliver.stashEntries(B).find((e) => String(e.text || '').includes(t));
+  const cardsOf = (t) => f.cards.filter((c) => String(c.text || '').includes(t)).length;
+  // F1 — a staged entry is CLAIMED: a hand-over passes it by; the confirm takes it, one card
+  stash('CLAIM-F1');
+  const a1 = ask('vsst_beta');
+  ok(a1.context.includes('CLAIM-F1') && entry('CLAIM-F1') && entry('CLAIM-F1').ho === 'carry' && !f.deliver.stashEntries(B).some((e) => !e.ho && /CLAIM-F1/.test(e.text || '')), 'F1 the staged stash entry is CLAIMED (ho = carry) — a hand-over sees nothing it may take', entry('CLAIM-F1'));
+  carried('vsst_beta', a1.delivery);
+  ok(!entry('CLAIM-F1') && cardsOf('CLAIM-F1') === 1, 'F1 …its confirm takes it: one card');
+  // F2 — the CLI dies before the confirm and the conversation is RESUMED (a new session object, the same conversation)
+  stash('CLAIM-F2');
+  const b1 = ask('vsst_beta');   // claimed by the first session object; never confirmed
+  f.sessions.set('w-resumed', { claudeSessionId: B, name: 'beta', mode: 'chat', agentToken: 'vsst_b2', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  const b2 = ask('vsst_b2');
+  const k2 = carried('vsst_b2', b2.delivery);
+  ok(b1.context.includes('CLAIM-F2') && b2.context.startsWith(TC.AGAIN_LINE) && b2.context.includes('CLAIM-F2') && k2.status === 200 && !entry('CLAIM-F2') && cardsOf('CLAIM-F2') === 1,
+    'F2 a RESUMED record of the conversation: its answer releases what the dead session object claimed and carries it again under «sent again»; its confirm takes it — one card', { b2: b2.context.slice(0, 80), cards: cardsOf('CLAIM-F2') });
+  ok(carried('vsst_beta', b1.delivery).status === 200 && cardsOf('CLAIM-F2') === 1, 'F2 …the dead session\'s late confirm takes nothing more and draws no second card');
+  // F3 — a claim nobody touches again ends at its own bound
+  const bound0 = TC.LIMITS.claimBoundMs; TC.LIMITS.claimBoundMs = 40;
+  stash('CLAIM-F3');
+  const c1 = ask('vsst_b2');
+  const held = entry('CLAIM-F3') && entry('CLAIM-F3').ho === 'carry';
+  await new Promise((r) => setTimeout(r, 120));
+  const freed = entry('CLAIM-F3') && !entry('CLAIM-F3').ho;
+  TC.LIMITS.claimBoundMs = bound0;
+  const c2 = ask('vsst_b2'); carried('vsst_b2', c2.delivery);
+  ok(c1.delivery && held && freed && c2.context.startsWith(TC.AGAIN_LINE) && c2.context.includes('CLAIM-F3') && cardsOf('CLAIM-F3') === 1, 'F3 a claim nobody touches again is RELEASED at its own bound (production 5 min) — the next answer carries it under «sent again», one card', { held, freed });
+  // J — the jobs stash on the REAL engine: claimed while staged, taken by the confirm, one card
+  const q = jm.pendingNotifs.get(B) || []; q.push({ jobId: 'jb-nightly', jobName: 'nightly', text: 'CLAIM-J', ts: Date.now(), urgency: 'low' }); jm.pendingNotifs.set(B, q);
+  const j1 = ask('vsst_b2');
+  const jn = (jm.pendingNotifs.get(B) || []).find((n) => n.text === 'CLAIM-J');
+  ok(j1.context.includes('CLAIM-J') && jn && jn.ho === 'carry', 'J the staged job notification is CLAIMED in the real jobs engine (ho = carry)');
+  carried('vsst_b2', j1.delivery);
+  ok(!(jm.pendingNotifs.get(B) || []).some((n) => n.text === 'CLAIM-J') && cardsOf('CLAIM-J') === 1, 'J …its confirm drains it: one card');
+  // T — the tidy after acceptance r4 (item 1, the verifier's four planted throws): a claim call that THROWS — before or after
+  // its stamp, on the msg stash or the jobs stash, on either hook route — is SAID (one journal line) and the answer falls back
+  // to the legacy one: WHOLE (both sections ride), marked at send (no delivery id; both taken, one card each), nothing left
+  // claimed, nothing told again. Before the tidy: the section was silently missing and a claim-then-throw stayed claimed.
+  for (const route of ['/api/agent/prompt-context', '/api/agent/task-context']) {
+    for (const fault of ['stash', 'stashafter', 'notifs', 'notifsafter']) {
+      const tag = `PT-${route.slice(11, 15)}-${fault}`;
+      stash(tag + '-M');
+      const qT = jm.pendingNotifs.get(B) || []; qT.push({ jobId: 'jb-pt', jobName: 'pt', text: tag + '-J', ts: Date.now(), urgency: 'low' }); jm.pendingNotifs.set(B, qT);
+      const origStash = f.deliver.claimStash;
+      const origNotifs = jm.claimNotifs;
+      if (fault === 'stash') f.deliver.claimStash = () => { throw new Error('planted before the stamp'); };
+      if (fault === 'stashafter') f.deliver.claimStash = (...a) => { origStash(...a); throw new Error('planted after the stamp'); };
+      if (fault === 'notifs') jm.claimNotifs = () => { throw new Error('planted before the stamp'); };
+      if (fault === 'notifsafter') jm.claimNotifs = (...a) => { origNotifs.apply(jm, a); throw new Error('planted after the stamp'); };
+      const said = [];
+      const l0 = console.log, w0 = console.warn;
+      console.log = (...a) => said.push(a.join(' ')); console.warn = () => {};
+      let out = null;
+      try { routes['GET ' + route]({ headers: { authorization: 'Bearer vsst_b2', 'x-vibespace-confirm': '1' }, query: {} }, { json: (o) => { out = o; }, status() { return this; } }); }
+      finally { console.log = l0; console.warn = w0; f.deliver.claimStash = origStash; delete jm.claimNotifs; }
+      out = out || {};
+      const failLines = said.filter((l) => /carry failed \(claim: planted (before|after) the stamp\)/.test(l));
+      const claimedLeft = [f.deliver.stashEntries(B).filter((e) => e.ho).length, (jm.pendingNotifs.get(B) || []).filter((n) => n.ho).length];
+      ok(String(out.context || '').includes(tag + '-M') && String(out.context || '').includes(tag + '-J') && !out.delivery && failLines.length === 1 && !entry(tag + '-M') && !(jm.pendingNotifs.get(B) || []).some((n) => n.text === tag + '-J') && cardsOf(tag + '-M') === 1 && cardsOf(tag + '-J') === 1 && claimedLeft.join() === '0,0',
+        `T ${route.slice(11)} · a claim that throws ${/after/.test(fault) ? 'AFTER' : 'BEFORE'} its stamp (${fault.startsWith('stash') ? 'claimStash' : 'claimNotifs'}): SAID once, the legacy answer — whole, marked at send, one card each, nothing left claimed`, { ctx: String(out.context || '').length, delivery: out.delivery || null, failLines, claimedLeft, cards: [cardsOf(tag + '-M'), cardsOf(tag + '-J')] });
+      const again = ask('vsst_b2');
+      if (again.delivery) carried('vsst_b2', again.delivery);
+      ok(!String(again.context || '').includes(tag), `T ${route.slice(11)} · ${fault}: …and nothing is told again on the next answer`, String(again.context || '').slice(0, 120));
+    }
+  }
+  // BOOT — the tidy after acceptance r4 (item 2): the boot journal's release line is TRUE END TO END. A `carry` stamp is an
+  // unconfirmed answer's claim: it posts no frame, so its line names no hand-over and no frame to look for; a hand-over's keeps
+  // its words; both on one conversation are named apart. Real conversation-deliver over a stash file a dead process left.
+  {
+    const bootDir = path.join(f.dataDir, 'boot-words');
+    fs.mkdirSync(bootDir, { recursive: true });
+    fs.writeFileSync(path.join(bootDir, 'msg-stash.json'), JSON.stringify({
+      'cid-carry': [{ id: 'm1', text: 'x', ho: 'carry' }],
+      'cid-ho': [{ id: 'm2', text: 'y', ho: 'ho-dead-9' }],
+      'cid-both': [{ id: 'm3', text: 'z', ho: 'carry' }, { id: 'm4', text: 'w', ho: 'ho-dead-8' }],
+    }));
+    const bootSaid = [];
+    const d0 = DELIVER.create({ dataDir: bootDir, activeSessions: new Map(), serverSetting: () => undefined, log: (...a) => bootSaid.push(a.join(' ')),
+      peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => {}, authorizeSpend: () => ({ ok: false }), noteSpend() {}, releaseSpend() {} });
+    try { d0.flush(); } catch { }
+    try { d0.closeRetries && d0.closeRetries(); } catch { }
+    const lineOf = (cid) => bootSaid.find((l) => l.startsWith(`[deliver] ${cid}:`)) || '';
+    const lc = lineOf('cid-carry'), lh = lineOf('cid-ho'), lb = lineOf('cid-both');
+    ok(/an unconfirmed answer's claim \(carry\) was in flight when the previous server stopped — its entries wait again \(an answer's claim posts no frame/.test(lc) && !/hand-over|frame landed/.test(lc),
+      'BOOT a carry claim\'s release line names an ANSWER\'s claim end to end — no hand-over and no frame to look for', lc);
+    ok(/a hand-over \(ho-dead-9\) was in flight .* check the conversation for "hand-over ho-dead-9"/.test(lh) && !/carry/.test(lh), 'BOOT …a hand-over\'s line keeps its words', lh);
+    ok(/an unconfirmed answer's claim \(carry\) and a hand-over \(ho-dead-8\) were in flight .* their entries wait again .*"hand-over ho-dead-8"/.test(lb) && !/hand-over carry/.test(lb), 'BOOT …both on one conversation are named apart (never «hand-over carry»)', lb);
+  }
+  f.close();
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

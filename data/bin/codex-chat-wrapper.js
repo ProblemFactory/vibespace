@@ -1556,12 +1556,21 @@ async function startThread() {
 // its next turn with no respawn), so we do NOT gate on a task-id env var; we call
 // every turn and let the server decide (it returns '' when there's nothing new).
 // Best-effort — never blocks or breaks a turn.
+// lane report-mark-on-ack: the hub moves an injection's marks (a group message «read by», a delta seen, a notice
+// consumed) only when the turn CARRIED it — this wrapper returns the answer's delivery id once its own write put it there
+let ctxDelivery = null;
+function contextCarried(d) {
+  const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  if (!d || !api || !token) return;
+  fetch(api + '/api/agent/prompt-context/carried', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ delivery: d }), signal: AbortSignal.timeout(10000) })
+    .catch((e) => log(`prompt-context confirm not sent: ${e.message} — the hub composes it again next turn`));
+}
 async function injectTaskContextForTurn() {
   const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
   if (!api || !token || !meta.threadId) return;
   try {
     const res = await fetch(api + '/api/agent/prompt-context', {
-      headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000),
+      headers: { Authorization: 'Bearer ' + token, 'X-VibeSpace-Confirm': '1' }, signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return;
     const data = await res.json();
@@ -1571,6 +1580,7 @@ async function injectTaskContextForTurn() {
         items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: data.context }] }],
       }, 10000);
       log(`injected task context (${data.context.length} chars) via thread/inject_items`);
+      if (typeof data.delivery === 'string') contextCarried(data.delivery);   // lane report-mark-on-ack: the thread holds it
     }
   } catch (e) { log(`task context inject skipped: ${e.message}`); }
 }

@@ -331,13 +331,24 @@ let markReady = null, markReadyFailed = null;
 const readyPromise = new Promise((resolve, reject) => { markReady = resolve; markReadyFailed = reject; });
 readyPromise.catch(() => {});
 
+// lane report-mark-on-ack: the hub moves an injection's marks (a group message «read by», a delta seen, a notice
+// consumed) only when the turn CARRIED it — this wrapper returns the answer's delivery id once its own write put it there
+let ctxDelivery = null;
+function contextCarried(d) {
+  const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  if (!d || !api || !token) return;
+  fetch(api + '/api/agent/prompt-context/carried', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ delivery: d }), signal: AbortSignal.timeout(10000) })
+    .catch((e) => log(`prompt-context confirm not sent: ${e.message} — the hub composes it again next turn`));
+}
 async function fetchContextPrefix() {
   const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  ctxDelivery = null;
   if (!api || !token) return '';
   try {
-    const res = await fetch(api + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000) });
+    const res = await fetch(api + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + token, 'X-VibeSpace-Confirm': '1' }, signal: AbortSignal.timeout(3000) });
     if (!res.ok) return '';
     const data = await res.json();
+    ctxDelivery = data && typeof data.delivery === 'string' && data.context ? data.delivery : null;
     return data && typeof data.context === 'string' ? data.context : '';
   } catch (e) { log(`prompt-context skipped: ${e.message}`); return ''; }
 }
@@ -547,8 +558,10 @@ async function runPrompt(blocks, opts = {}) {
   activePrompt = mine;
   meta.streaming = true; meta.activePromptId = promptId; scheduleMeta();
   const prompt = [...blocks];
+  let carriedId = null;
   if (!opts.nudge && !opts.peer) {
     const ctx = await fetchContextPrefix();
+    carriedId = ctxDelivery; ctxDelivery = null;   // this turn's own (a prompt Stopped before dispatch confirms nothing)
     if (ctx) prompt.unshift({ type: 'text', text: '<vibespace-context>\n' + ctx + '\n</vibespace-context>' });
   }
   // The turn is CLAIMED synchronously (so a second message queues) but the
@@ -563,7 +576,10 @@ async function runPrompt(blocks, opts = {}) {
   let stopReason = 'end_turn', error = null;
   try {
     mine.dispatched = true;
-    const r = await request('session/prompt', { sessionId: meta.sessionId, prompt }, 0);
+    const writable = !!child?.stdin?.writable;   // send()'s own test: the prompt carrying the context reaches the agent
+    const pr = request('session/prompt', { sessionId: meta.sessionId, prompt }, 0);
+    if (writable && carriedId) contextCarried(carriedId);
+    const r = await pr;
     stopReason = r?.stopReason || 'end_turn';
   } catch (e) {
     stopReason = mine.cancelled ? 'cancelled' : 'error';

@@ -59,7 +59,14 @@
 //   $STAND_IN_PROMPT_HOOK_WEDGED=1  a FOLLOW-UP's prompt hook (the turn the CLI starts for what it held at an interrupt) says
 //                      hook_started and then NOTHING, ever (a lost hook_response — the shape a window must end by name); an
 //                      interrupt during it is answered and changes nothing
-// Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯ and scripts/test-claude-steer-chrome.mjs.
+//   $STAND_IN_PROMPT_HOOK_CMD  the prompt hook phase RUNS this command (lane report-mark-on-ack, measured on claude 2.1.321
+//                      with the product's own hook — measure/probe-cli.mjs): through /bin/sh, its stdin the UserPromptSubmit input
+//                      ({session_id, transcript_path, cwd, hook_event_name, prompt}), the turn's init after it EXITS; hook_response
+//                      says `success` with its exit_code / stdout / stderr / output (stderr + stdout) — an aborted hook that printed
+//                      nothing is `success` with stdout '' too; the additionalContext its stdout names is what the turn CARRIES
+//                      ($STAND_IN_DELIVERED {how:'context', text}; a hook's stderr never is); an interrupt during it SIGTERMs it
+//                      (`cancelled`, exit_code 1 — measured +45 ms)
+// Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯, scripts/test-claude-steer-chrome.mjs and scripts/test-turn-carry.mjs.
 // Never a vendor call: no network at all.
 const fs = require('fs');
 const CAP = process.env.STUB_CAPTURE || '';
@@ -78,12 +85,13 @@ const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
 const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
 const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
 const PROMPT_HOOK_MS = Number(process.env.STAND_IN_PROMPT_HOOK_MS || 0);
+const PROMPT_HOOK_CMD = process.env.STAND_IN_PROMPT_HOOK_CMD || '';
 const HOOK_WEDGED = process.env.STAND_IN_PROMPT_HOOK_WEDGED === '1';
 const SAYS_HOOKS = atLeast('2.1.312') && process.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1';
 const INIT_UUIDS = atLeast('2.1.307');
 const uuidsOf = (f) => (f && Array.isArray(f._uuids) ? f._uuids : (f && typeof f.uuid === 'string' ? [f.uuid] : []));
 let hookSeq = 0;
-const hookWord = (subtype, id, outcome) => { if (SAYS_HOOKS) out({ type: 'system', subtype, hook_id: id, hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', ...(outcome ? { output: '', stdout: '', stderr: '', exit_code: outcome === 'success' ? 0 : undefined, outcome } : {}), session_id: SID }); };
+const hookWord = (subtype, id, outcome, ran = null) => { if (SAYS_HOOKS) out({ type: 'system', subtype, hook_id: id, hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', ...(outcome ? { output: ran ? ran.stderr + ran.stdout : '', stdout: ran ? ran.stdout : '', stderr: ran ? ran.stderr : '', exit_code: ran ? ran.code : (outcome === 'success' ? 0 : undefined), outcome } : {}), session_id: SID }); };
 const argv = process.argv.slice(2);
 const argAfter = (flag) => { const i = argv.indexOf(flag); return i >= 0 && argv[i + 1] ? argv[i + 1] : null; };
 const SID = argAfter('--session-id') || argAfter('--resume') || '00000000-0000-4000-8000-00000000c0de';
@@ -128,6 +136,28 @@ function end(subtype) {
   if (!helper) setState('idle');
 }
 function start(f, { follow = false } = {}) {
+  if (PROMPT_HOOK_CMD) {
+    const id = 'hook-' + (++hookSeq);
+    busy = { text: textOf(f), timer: null, follow, hook: id, frame: f };
+    setState('running');
+    hookWord('hook_started', id);
+    const child = require('child_process').spawn('/bin/sh', ['-c', PROMPT_HOOK_CMD], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+    busy.hookChild = child;
+    let so = '', se = '';
+    child.stdout.on('data', (d) => { so += d; }); child.stderr.on('data', (d) => { se += d; });
+    child.stdin.on('error', () => { });
+    child.stdin.end(JSON.stringify({ session_id: SID, transcript_path: '', cwd: process.cwd(), hook_event_name: 'UserPromptSubmit', prompt: textOf(f) }));
+    child.on('close', (code) => {
+      const b = busy;
+      if (!b || b.hook !== id) return;   // cancelled: its answer is dropped (measured)
+      b.hook = null; b.hookChild = null;
+      hookWord('hook_response', id, 'success', { code: code == null ? 1 : code, stdout: so, stderr: se });
+      let ctx = ''; try { ctx = JSON.parse(so).hookSpecificOutput.additionalContext || ''; } catch { }
+      if (ctx) delivered('context', ctx);
+      begin(b.frame, { follow: b.follow });
+    });
+    return;
+  }
   if (PROMPT_HOOK_MS > 0) {
     // the prompt hook runs first (the turn has no init yet); an interrupt now cancels the hook — see the stdin handler
     const id = 'hook-' + (++hookSeq);
@@ -146,7 +176,8 @@ function cancelHook() {
   const b = busy;
   if (HOOK_WEDGED && b.follow) return;
   clearTimeout(b.timer);
-  hookWord('hook_response', b.hook, 'cancelled');
+  if (b.hookChild) { try { b.hookChild.kill('SIGTERM'); } catch { } b.hookChild = null; }   // measured: the CLI SIGTERMs a cancelled hook
+  hookWord('hook_response', b.hook, 'cancelled', PROMPT_HOOK_CMD ? { code: 1, stdout: '', stderr: '' } : null);
   b.hook = null;
   if (b.follow) delivered('dropped', b.text); // the frame the CLI held is gone from the conversation (measured)
   begin(b.frame, { follow: true });

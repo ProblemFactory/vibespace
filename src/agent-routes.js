@@ -48,6 +48,9 @@ const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./not
 const { toAgentText: agentText } = require('./peer-text.js');
 const { hooksLateStale } = require('./hooks-late.js'); // lane hooks-create: a late-hooks note queued for another process of the conversation is dropped unread (PURE)
 const SEEN = require('./seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks, persisted when an injection is SENT
+const TC = require('./turn-carry.js'); // lane report-mark-on-ack: every hook-route mark moves when the turn CARRIED the answer (stage → the caller's confirm)
+// r4 (acceptance r3, item 2b): no failure inside the carry empties or fails a hook answer — open's own throw falls back to the legacy answer
+const openCarry = (s, o) => { try { return TC.open(s, o); } catch (e) { return TC.legacyCarry({ owner: o.owner, route: o.route, why: `open: ${(e && e.message) || e}` }); } };
 const BUILD_VERSION = (() => { try { return require('../package.json').version; } catch { return ''; } })(); // the build an intro's seen mark names
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
@@ -83,6 +86,28 @@ const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentTe
 // the answer leaves the store — the same shape as the three answers above; the census names both doors.
 const msgName = (v) => agentText(v == null ? '' : v, { kind: 'line', max: 200 });
 const msgNames = (xs) => (xs || []).map((w) => msgName(w && typeof w === 'object' ? w.name : w));
+// lane report-mark-on-ack (law 4 + addition c): what waits for THIS conversation's next turn — a reply staged for a turn that
+// never confirmed it, or one not yet handed out — is said on its next message-tool call (`vibespace-msg` prints `waiting`),
+// so an asker that checks never reads «unanswered». The engine's own preview list (the composer strip's), every name and
+// group name through the belt. `except` = the group this answer just printed (its records are on screen).
+function waitingWords(ge, cid, except = null) {
+  let pend = [];
+  try { pend = ((ge && cid && ge.reportsForTurn(cid, { preview: true }).pending) || []).filter((p) => p && p.groupId !== except); } catch { return ''; }
+  if (!pend.length) return '';
+  const byGroup = new Map();
+  for (const p of pend) {
+    const g = byGroup.get(p.groupId) || { id: p.groupId, name: p.groupName, from: new Set(), pair: false };
+    g.from.add(p.self ? 'the user' : (p.from || 'someone'));
+    byGroup.set(p.groupId, g);
+  }
+  for (const g of byGroup.values()) { try { const v = ge.get(g.id); g.pair = !!(v && v.pair); } catch { } }
+  const n = pend.length, replies = [...byGroup.values()].every((g) => g.pair);
+  const noun = replies ? (n === 1 ? 'reply' : 'replies') : (n === 1 ? 'message' : 'messages');
+  const named = [...byGroup.values()].slice(0, 2).map((g) => `${[...g.from].map(msgName).join(', ')} in "${msgName(g.name)}" (${g.id})`);
+  const more = byGroup.size - named.length;
+  return `${n} ${noun} waiting — not yet shown to you: ${named.join('; ')}${more > 0 ? ` +${more} more group(s)` : ''} (vibespace-msg read <group> shows it now; your next turn's report carries it)`;
+}
+const withWaiting = (ge, cid, o, except = null) => { const w = waitingWords(ge, cid, except); return w ? { ...o, waiting: w } : o; };
 const msgRefusals = (xs) => (xs || []).map((w) => ({ name: msgName(w.name), reason: w.reason, ...(w.parked ? { parked: true, retryInMs: w.retryInMs, retryAt: w.retryAt } : {}) }));   // lane paced-wake-retry: a paced wake is parked — «sent in N s»
 // lane peer-census verify r4 F1: THE TASK ANSWERS' DOORS. A Task Group's backlog items and progress entries are ANOTHER
 // SESSION's words (any agent of the group writes them through vibespace-task; a manager agent's audit line; a TASK.md file
@@ -263,7 +288,7 @@ function armOrWait(deliver, cid, why) {
 function parkedOf(deliver, cid, jobsOnly) {
   try { return typeof deliver.retryEntries === 'function' ? deliver.retryEntries(cid).filter((e) => e && !e.ho && e._retry && ((e._retry.producer === 'jobs') === jobsOnly)) : []; } catch { return []; }
 }
-function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
+function drainStashUnderCap(deliver, cid, ahead, log = console.log, carry = null) {
   if (!deliver || !cid || typeof deliver.stashEntries !== 'function') return '';
   const parked = parkedOf(deliver, cid, false);   // a parked delivery of any producer but the jobs engine (whose own digest carries its)
   const waiting = [...parked, ...deliver.stashEntries(cid).filter((e) => e && typeof e === 'object' && !e.ho)];   // a claimed entry is a hand-over's, never this drain's
@@ -292,15 +317,24 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
     return '';
   }
   const shownParked = pm.shown.filter((e) => e._retry);
-  deliver.drainStash(cid, new Set(pm.shown.filter((e) => !e._retry)));
-  if (shownParked.length && typeof deliver.retryTake === 'function') deliver.retryTake(cid, new Set(shownParked), { via: 'prompt' });
-  // a stash drain enters the AGENT's context invisibly — emit the same card the live lanes render so the user sees
-  // what arrived (2.363.0); the entry's PATH (S3 verify F3), never its name
-  for (const e of pm.shown) deliver.emitPeerCard(cid, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) });
+  // lane report-mark-on-ack: taken (and drawn) when the turn carried it — `carry` = the hook route's turn-carry
+  const take = () => {
+    const took = new Set(deliver.drainStash(cid, new Set(pm.shown.filter((e) => !e._retry))) || []);
+    const tookParked = new Set((shownParked.length && typeof deliver.retryTake === 'function' ? deliver.retryTake(cid, new Set(shownParked), { via: 'prompt' }) : []) || []);
+    // a stash drain enters the AGENT's context invisibly — emit the same card the live lanes render so the user sees
+    // what arrived (2.363.0); the entry's PATH (S3 verify F3), never its name. r3: a card for what THIS drain took only
+    for (const e of pm.shown) if (took.has(e) || tookParked.has(e._retry || e)) deliver.emitPeerCard(cid, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) });
+  };
+  // r3: what an unconfirmed answer staged is CLAIMED meanwhile (a hand-over, a retry wake or the cap passes it by). The tidy
+  // after acceptance r4: THROUGH THE CARRY (carry.claim) — the claim's bound runs from its stamp, a claim call that throws is
+  // said and the answer falls back to the legacy one (the section rides, marked at send), what it stamped is unstamped
+  const told = pm.shown.filter((e) => !e._retry);
+  const claims = carry ? [typeof deliver.claimStash === 'function' ? carry.claim('msg-stash', () => deliver.claimStash(cid, told, TC.CLAIM_TAG), told) : null, shownParked.length && typeof deliver.claimRetry === 'function' ? carry.claim('msg-stash', () => deliver.claimRetry(cid, shownParked, TC.CLAIM_TAG), shownParked) : null] : [];
+  if (carry) carry.stage('msg-stash', take, { release: () => { for (const r of claims) if (typeof r === 'function') r(); } }); else take();
   return pm.text;
 }
 /** The jobs notification digest for ONE injection, or '' — drained only when its whole budget fits. */
-function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
+function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log, carry = null) {
   if (!jm || !cid) return '';
   const stashed = typeof jm.peekNotifs === 'function' ? jm.peekNotifs(cid).filter((n) => n && !n.ho) : [];
   // the jobs engine's PARKED notifications (the ladder's retry park) ride this digest too, in the store's own shape
@@ -316,13 +350,24 @@ function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
     log(`[jobs] ${cid}: ${waiting.length} stashed notification(s) ${armed ? 'will arrive as a message when this turn ends' : 'wait for the next prompt'} — the ${JOBS_DIGEST_BUDGET} B digest does not fit the ${Math.max(0, room)} B left under the inline cap`);
     return '';
   }
-  const drained = [...(stashed.length ? jm.drainNotifs(cid, new Set(stashed)) : []), ...(parked.length && typeof deliver.retryTake === 'function' ? (deliver.retryTake(cid, new Set(parked), { via: 'prompt' }).length ? parkedItems : []) : [])].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+  const take = () => {
+    const got = [...(stashed.length ? jm.drainNotifs(cid, new Set(stashed)) : []), ...(parked.length && typeof deliver.retryTake === 'function' ? (deliver.retryTake(cid, new Set(parked), { via: 'prompt' }).length ? parkedItems : []) : [])].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+    // drained job notifications enter the agent's context invisibly — render the same card the live lane shows (2.363.0)
+    try { if (deliver) for (const e of got) deliver.emitPeerCard(cid, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
+    return got;
+  };
+  const drained = carry ? waiting : take();   // lane report-mark-on-ack: staged = told from what waits, drained when carried
   if (!drained.length) return '';
-  // drained job notifications enter the agent's context invisibly — render the same card the live lane shows (2.363.0)
-  try { if (deliver) for (const e of drained) deliver.emitPeerCard(cid, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
   // >2 entries: also spill the untruncated history to a file the agent can Read — the injected block elides its middle under budget
   const spillPath = drained.length > 2 ? jm.spillNotifs(cid, drained) : null;
-  return require('./job-model.js').renderNotifStash(drained, { spillPath, budget: JOBS_DIGEST_BUDGET });   // module scope: `jobModel` is a binding INSIDE setupAgentRoutes (the lost-binding class, 2.340.2)
+  const text = require('./job-model.js').renderNotifStash(drained, { spillPath, budget: JOBS_DIGEST_BUDGET });   // module scope: `jobModel` is a binding INSIDE setupAgentRoutes (the lost-binding class, 2.340.2)
+  // lane report-mark-on-ack: claimed and staged only once the text exists; THROUGH THE CARRY (the tidy after acceptance r4) —
+  // the bound runs from the stamp, a claim call that throws is said and the answer falls back to the legacy one
+  if (carry) {
+    const claims = [typeof jm.claimNotifs === 'function' && stashed.length ? carry.claim('jobs-stash', () => jm.claimNotifs(cid, stashed, TC.CLAIM_TAG), stashed) : null, parked.length && deliver && typeof deliver.claimRetry === 'function' ? carry.claim('jobs-stash', () => deliver.claimRetry(cid, parked, TC.CLAIM_TAG), parked) : null];
+    carry.stage('jobs-stash', take, { release: () => { for (const r of claims) if (typeof r === 'function') r(); } });
+  }
+  return text;
 }
 /**
  * THE STOP NUDGE'S WORDS (2.79.0; lane S3 rewording, naive-user study 2). The
@@ -346,7 +391,9 @@ function stopNudgeReason(T = {}, extra = '') {
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null, getSessionMetaStore = () => null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null, getSessionMetaStore = () => null, carryDir = null }) {
+// lane report-mark-on-ack r3: deliveries handed out and not yet confirmed, by CONVERSATION — a restart is said from it
+const carryOutstanding = TC.createOutstanding(carryDir);
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
   // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
   // mutating verb run LATER (`backlog-done 3`) must mean the item that was
@@ -549,13 +596,16 @@ function preambleBlock(text) {
 }
 // Prepend the preamble to an outgoing delivery when unseen/changed; returns the
 // (possibly unchanged) parts array. sessionObj carries the seen-hash.
-function withPreamble(sessionObj, parts) {
+let preambleTold = 0;   // lane report-mark-on-ack r3: the order answers were composed in (the preamble's forward guard)
+const preambleToldOf = new WeakMap();   // session → the order of the preamble it was last marked as told (no session field)
+function withPreamble(sessionObj, parts, stage = null) {
   const text = customPreamble();
   if (!text) return parts;
   const hash = require('crypto').createHash('sha1').update(text).digest('hex').slice(0, 12);
   if (sessionObj._preambleSeen === hash) return parts;
   // Deliver with (or without) other content — the preamble alone still counts.
-  sessionObj._preambleSeen = hash;
+  const toldAt = ++preambleTold;   // lane report-mark-on-ack r3: a late confirm of an OLDER answer never rolls the hash back (a sequence: two answers in one ms are still ordered)
+  if (stage) stage('preamble', () => { if (!((preambleToldOf.get(sessionObj) || 0) > toldAt)) { sessionObj._preambleSeen = hash; preambleToldOf.set(sessionObj, toldAt); } }); else sessionObj._preambleSeen = hash;   // lane report-mark-on-ack
   return [preambleBlock(text), ...parts];
 }
 /** The bytes `withPreamble` WILL prepend on this delivery (0 once seen) — the budget of a drain rendered before it
@@ -597,33 +647,40 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
     // injectContext toggle stays the finer-grained instrument.
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     if (readTurnSigs(req, res, taskContextRoute, s, injectGroups)) return;   // lane task-group-fanout: the Context read, off the loop
+    // lane report-mark-on-ack: every mark this answer would move is STAGED and moves when the hook confirms it carried it
+    const carry = openCarry(s, { owner: key, route: 'SessionStart', turn: 'session start', confirm: TC.confirmable(req), sent: TC.sentAt(req), store: carryOutstanding });
     let context = '';
     const B = (t) => Buffer.byteLength(String(t), 'utf-8');
     // r7: a once-per-session teaching rides only when it fits WHOLE beside what is committed (the pending preamble
     // rides above it) — else it waits for the first prompt-context and is NOT stamped seen
-    const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) <= INLINE_CAP - INLINE_TAIL_MARGIN;
+    const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) + carry.againBytes <= INLINE_CAP - INLINE_TAIL_MARGIN;
     // lane task-group-fanout: a group whose Context read did not land in time is not delivered at SessionStart — every
     // group waits whole for the first prompt (renderMultiContext states the WHOLE membership; nothing is marked seen)
     const turnFacts = new Map(injectGroups.map((g) => [g.id, turnSig(s, g)]));
     if (injectGroups.length && [...turnFacts.values()].some((f) => f.stale)) console.log(`[inject] ${key}: the Context read of ${[...turnFacts].filter(([, f]) => f.stale).map(([gid]) => gid).join(', ')} did not land in time — the groups wait for the first prompt`);
     else if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: toolsFor(s, id, { fresh: true }), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), cap: Math.max(1, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s)) });   // lane channels-teach: + the session's channel reach (asked fresh)
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: toolsFor(s, id, { fresh: true }), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), cap: Math.max(1, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s) - carry.againBytes) });   // lane channels-teach: + the session's channel reach (asked fresh)
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
       if (context && honoursSessionStart(s)) {
-        s._groupSeenAt = s._groupSeenAt || {};
-        s._ctxSig = s._ctxSig || {};
-        s._groupSnap = s._groupSnap || {};
-        for (const g of injectGroups) {
-          s._groupSeenAt[g.id] = tasks.contentAtOf(g);   // lane task-group-context: + a referenced group's table instant
-          s._ctxSig[g.id] = turnFacts.get(g.id).sig;   // every told row's files (the Context table), '' = none — as read this turn
-          // Snapshot what was just delivered — later updates diff against it
-          // instead of re-injecting the whole group (2.113.0).
-          s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
-        }
-        s._marksRestored = false;   // B-86d3: this delivery carried every group whole — nothing left to name as unrepeated
+        // what was told, captured NOW (lane report-mark-on-ack): the marks move to exactly this when the turn carried it
+        const told = injectGroups.map((g) => ({ id: g.id, at: tasks.contentAtOf(g), sig: turnFacts.get(g.id).sig, snap: tasks.snapshotForDiff(g.id) }));
+        carry.stage('task-full', () => {
+          s._groupSeenAt = s._groupSeenAt || {};
+          s._ctxSig = s._ctxSig || {};
+          s._groupSnap = s._groupSnap || {};
+          for (const g of told) {
+            if (Number(s._groupSeenAt[g.id]) > g.at) continue;   // lane report-mark-on-ack r2: only forward (a later delivery's confirm landed first)
+            s._groupSeenAt[g.id] = g.at;   // lane task-group-context: + a referenced group's table instant
+            s._ctxSig[g.id] = g.sig;   // every told row's files (the Context table), '' = none — as read this turn
+            // Snapshot what was just delivered — later updates diff against it
+            // instead of re-injecting the whole group (2.113.0).
+            s._groupSnap[g.id] = g.snap;
+          }
+          s._marksRestored = false;   // B-86d3: this delivery carried every group whole — nothing left to name as unrepeated
+        });
       }
     } else if (honoursSessionStart(s) && !s._toolsIntroSeen) {
       // No INJECTABLE group (none at all, or every belonged group has
@@ -635,18 +692,18 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
       // r7: beside a 3 000-char preamble the 6.4 KB intro crossed the cap — its tail (the last tools' teaching) was
       // cut and it was stamped seen; now it waits for the first prompt when it does not fit whole.
       const intro = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s), fileTools: fileToolsOf(s) });
-      if (intro && fitsHere(intro)) { context = intro; s._toolsIntroSeen = true; }
+      if (intro && fitsHere(intro)) { context = intro; carry.stage('tools-intro', () => { s._toolsIntroSeen = true; }); }
       else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the first prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s))} B left under the inline cap beside the user's preamble`);
     }
     // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
     // delivers first wins (s._mgrIntroSeen shared with prompt-context). r7: only when it fits whole — a two-group
     // context left no room, the intro was cut mid-verb and stamped seen (the manager never learned its powers).
     if (honoursSessionStart(s) && !s._mgrIntroSeen && isManagerSession(key)) {
-      if (fitsHere(MANAGER_INTRO)) { context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO; s._mgrIntroSeen = true; }
+      if (fitsHere(MANAGER_INTRO)) { context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO; carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }
       else console.log(`[inject] ${key}: the manager intro (${B(MANAGER_INTRO)} B) waits for the next prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - B(context) - pendingPreambleBytes(s))} B left under the inline cap`);
     }
     if (honoursSessionStart(s)) { // a harness that ignores SessionStart output must not burn the seen-gate
-      const withPre = withPreamble(s, context ? [context] : []);
+      const withPre = withPreamble(s, context ? [context] : [], carry.stage);
       context = withPre.length ? withPre.join('\n\n') : context;
     }
     // Background jobs digest (2.342.x, design-background-work §6.3b): rides the
@@ -664,9 +721,9 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
         // same accepted-lost stance as _jobsEventsSeenTs). UNDER THE ROOM LEFT
         // (verify r5): the digest is drained only when its budget fits ahead
         // of capInline's cut — else it waits for the next prompt, said in the log.
-        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, Buffer.byteLength(context || '', 'utf-8'));
+        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, Buffer.byteLength(context || '', 'utf-8') + carry.againBytes, console.log, carry);
         if (missed) context = context ? context + '\n\n' + missed : missed;
-        const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8'));
+        const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8') + carry.againBytes);
         if (dig) context = context ? context + '\n\n' + dig : dig;
       }
     } catch { }
@@ -680,12 +737,13 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
         carryParkedFor(caller2.conversationId);
-        const pmText = drainStashUnderCap(deliver, caller2.conversationId, Buffer.byteLength(context || '', 'utf-8'));
+        const pmText = drainStashUnderCap(deliver, caller2.conversationId, Buffer.byteLength(context || '', 'utf-8') + carry.againBytes, console.log, carry);
         if (pmText) context = context ? context + '\n\n' + pmText : pmText;
       }
     } catch { }
-    persistSeenMarks(s, key);   // B-86d3: the marks this answer moved, written as it is sent
-    res.json({ success: true, context: capInline(context, injectGroups.length > 1) });
+    const ctx = capInline(carry.wrap(context), injectGroups.length > 1);
+    const delivery = carry.close(ctx, () => persistSeenMarks(s, key));   // B-86d3 + lane report-mark-on-ack: the marks persisted once they MOVED (at the confirm; at once for a legacy caller)
+    res.json({ success: true, context: ctx, ...(delivery ? { delivery } : {}) });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 // UserPromptSubmit hook payload — delivered through the harness's own prompt
@@ -726,6 +784,9 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     // lane task-group-fanout: the Context read FIRST (off the loop, bounded) — the route is entered again once it settled,
     // and nothing above this line consumed anything
     if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
+    // lane report-mark-on-ack: every mark this answer would move is STAGED (carry.stage) and moves when the caller confirms the
+    // turn carried it (TC.CONFIRM_ROUTE) — a previous answer never confirmed is dropped here, said in the journal, and composed again
+    const carry = openCarry(s, { owner: key, route: 'UserPromptSubmit', turn: turnIsUserInitiated(s) ? 'person' : 'machine', confirm: TC.confirmable(req), sent: TC.sentAt(req), store: carryOutstanding });
     const parts = [];
     // Recreated-cwd safety notice (B-7812, user-mandated defense): a resume
     // whose working directory was DELETED got it recreated EMPTY on explicit
@@ -734,7 +795,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     // so a restart before the first prompt re-arms it (duplicate on that rare
     // edge is the SAFE direction).
     if (s._cwdRecreated) {
-      s._cwdRecreated = false;
+      carry.stage('cwd-notice', () => { s._cwdRecreated = false; });
       parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
     }
     const toolFlags = toolsFor(s, id);   // lane channels-teach: + `channels` (the session's reach), asked once per call
@@ -758,7 +819,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     const extraBlock = (() => { const x = customExtra('agents.perTurnExtra', 500); return x ? `<vibespace-reminder>${x}</vibespace-reminder>` : ''; })();
     const rescueLine = tasks._persistRescueLine();
     const rescueReserve = () => (parts.some((p) => p.includes('persisted-output')) ? 0 : B(rescueLine) + 2);
-    let tailHeld = 0;   // bytes of the tail producers decided so far and not yet in `parts`
+    let tailHeld = carry.againBytes;   // bytes of the tail producers decided so far and not yet in `parts` (+ the «sent again» line's, lane report-mark-on-ack)
     const committed = () => B(parts.join('\n\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + rescueReserve() + tailHeld;
     const roomLeft = () => Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - committed());
     const fits = (text) => B(text) + 2 <= INLINE_CAP - INLINE_TAIL_MARGIN - committed();
@@ -846,9 +907,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
           } else {
             updatedFulls.push(g);
           }
-          s._groupSeenAt[g.id] = contentAt;
-          s._ctxSig[g.id] = sig;
-          s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
+          { const snap = tasks.snapshotForDiff(g.id); carry.stage(changes ? 'task-delta' : 'task-full', () => { if (Number(s._groupSeenAt[g.id]) > contentAt) return; s._groupSeenAt[g.id] = contentAt; s._ctxSig[g.id] = sig; s._groupSnap[g.id] = snap; }); }   // lane report-mark-on-ack: the snapshot as told
         } else if (!hadSig) {
           // Meta already seen (e.g. claude's SessionStart set _groupSeenAt) but
           // no contextDir baseline recorded yet — set it now WITHOUT re-injecting.
@@ -898,11 +957,15 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
           for (const g of firstGroups) fullCovered.add(g.id);
-          for (const g of firstGroups) {
-            s._groupSeenAt[g.id] = tasks.contentAtOf(g);
-            s._ctxSig[g.id] = turnFacts.get(g.id).sig;   // lane task-group-fanout: as read this turn
-            s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
-          }
+          const told = firstGroups.map((g) => ({ id: g.id, at: tasks.contentAtOf(g), sig: turnFacts.get(g.id).sig, snap: tasks.snapshotForDiff(g.id) }));
+          carry.stage('task-full', () => {
+            for (const g of told) {
+              if (Number(s._groupSeenAt[g.id]) > g.at) continue;   // only forward (lane report-mark-on-ack r2)
+              s._groupSeenAt[g.id] = g.at;
+              s._ctxSig[g.id] = g.sig;   // lane task-group-fanout: as read this turn
+              s._groupSnap[g.id] = g.snap;
+            }
+          });
         }
       }
       const blocks = [...(diffBlock ? [diffBlock] : []), ...fullBlocks];
@@ -926,9 +989,9 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       // ONE line names them, decided BEFORE the blocks (a re-delivery beside it may take the cut, never this line); a
       // session whose meta held no marks has none here and gets the full context, as before
       if (s._marksRestored) {
-        s._marksRestored = false;
         const note = restoredSame.length ? tasks.renderUnchangedNote(restoredSame.map((g) => g.id), { multi }) : '';
-        if (note && fits(note)) parts.push(note);
+        if (note && fits(note)) { parts.push(note); carry.stage('task-unchanged', () => { s._marksRestored = false; }); }
+        else s._marksRestored = false;   // nothing told: nothing to carry
       }
       // THE BLOCKS FIT THE ROOM LEFT (F1, lane injection-relevance): over it, each block — the last (the biggest full
       // context) first — is RE-RENDERED under a smaller cap, its activity re-picked (the oldest lines go, never the newest)
@@ -943,13 +1006,13 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
       const intro = sessionToolsIntro(toolFlags, { browserVariant: s._browserVariant, browserSet: browserSetFacts(s), browserDisplay: browserDisplayFacts(s), fileTools: fileToolsOf(s) });
-      if (intro && fits(intro)) { parts.push(intro); s._toolsIntroSeen = true; }   // r7: whole or it waits (a 3 000-char preamble rides above it)
+      if (intro && fits(intro)) { parts.push(intro); carry.stage('tools-intro', () => { s._toolsIntroSeen = true; }); }   // r7: whole or it waits (a 3 000-char preamble rides above it)
       else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
     }
     // Designated Group MANAGER: teach the admin verbs once (this route is
     // codex's ONLY delivery path; claude usually gets it via task-context). r7: whole or it waits, unstamped.
     if (!s._mgrIntroSeen && isManagerSession(key)) {
-      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }
+      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }
       else console.log(`[inject] ${key}: the manager intro (${B(MANAGER_INTRO)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
     }
     // Background jobs: NEW events since this session's last delivery (view-
@@ -972,7 +1035,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
         const u = jm.updatesFor(caller, s._jobsEventsSeenTs || 0);
         if (u.text && typeof u.plain === 'string' && !fits(u.text)) u.text = u.plain;   // lane jobs-addressed-push r3: the own lines never wait for the count
         if (!u.text) s._jobsEventsSeenTs = u.lastTs;   // nothing to say: the marker moves as it always did
-        else if (fits(u.text)) { jobsUpdate = u.text; tailHeld += B(u.text) + 2; s._jobsEventsSeenTs = u.lastTs; }
+        else if (fits(u.text)) { jobsUpdate = u.text; tailHeld += B(u.text) + 2; carry.stage('jobs-update', () => { if (!(Number(s._jobsEventsSeenTs) > u.lastTs)) s._jobsEventsSeenTs = u.lastTs; }); }
         else console.log(`[jobs] ${caller.conversationId || key}: the jobs update (${B(u.text)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
       }
     } catch { jobsUpdate = ''; }
@@ -1009,7 +1072,13 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       if (taken) {
         const byKey = new Map();
         for (const q of queue.slice(0, taken)) byKey.set(q.k, (byKey.get(q.k) || 0) + 1);
-        for (const k of keys) if (byKey.get(k)) sessionStatus.consumeNotices(k, byKey.get(k));
+        // lane report-mark-on-ack r2 (law A): the queue is not append-only (a replace-of-the-same-kind push, a withdraw, the cap
+        // reorder its head) — the confirm removes the VERY records rendered, by identity, never «the first n»
+        const toldNotices = new Set(timeline.slice(0, taken).map((r) => r.n));
+        carry.stage('notices', () => {
+          if (typeof sessionStatus.dropNotices === 'function') { for (const k of keys) if (byKey.get(k)) sessionStatus.dropNotices(k, (x) => toldNotices.has(x)); }
+          else for (const k of keys) if (byKey.get(k)) sessionStatus.consumeNotices(k, byKey.get(k));   // a manager without dropNotices (an old stub): only at compose
+        });
         const t = SessionStatusManager.renderNotices(timeline.slice(0, taken).map((r) => r.n));
         if (t) { noticeTexts.push(t); tailHeld += B(t) + 2; }
       }
@@ -1033,7 +1102,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       if (jm && jm.ready && caller) {
         // stashed offline notifications (a resume that skipped SessionStart —
         // codex — or entries stashed since it): drain here too, under the room left
-        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, aheadOfDrains());
+        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, aheadOfDrains(), console.log, carry);
         if (missed) parts.push(missed);
       }
     } catch { }
@@ -1043,7 +1112,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
         carryParkedFor(caller2.conversationId);
-        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains());
+        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains(), console.log, carry);
         if (pmText) parts.push(pmText);
       }
     } catch { }
@@ -1067,7 +1136,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     // agents.perTurnToolReminder setting (default on).
     // User preamble rides on top of whatever this prompt delivers (or alone,
     // when newly set/changed) — codex's only delivery path is this route.
-    const outParts = withPreamble(s, parts);
+    const outParts = withPreamble(s, parts, carry.stage);
     const extra = customExtra('agents.perTurnExtra', 500);
     // "Per turn" means per turn: on prompts that already carry a bigger
     // delivery the extra still rides at the very top as its own block.
@@ -1093,22 +1162,33 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     // groups that fit are marked; the rest wait for the next turn and are NAMED.
     try {
       if (rep) {
-        const used = Buffer.byteLength(outParts.join('\n\n'), 'utf-8');
+        const used = Buffer.byteLength(outParts.join('\n\n'), 'utf-8') + carry.againBytes;   // + the «sent again» line above it (lane report-mark-on-ack)
         // the section goes in WHOLE or not at all: its markers move only when
         // it is handed out uncut (2026-09-23 verifier — capInline trimmed a
         // section whose markers had already moved, and those reports were lost)
         const fits = !rep.text || used + 2 + Buffer.byteLength(rep.text, 'utf-8') <= INLINE_CAP - 64;
         if (fits) {
           if (rep.text) outParts.push(rep.text);
-          if (rep.marks.length) ge.commitReports(myCid, rep.marks).catch((e) => console.warn('[groups] report marker not stamped:', e && e.message));
+          if (rep.marks.length) carry.stage('group-report', () => ge.commitReports(myCid, rep.marks).catch((e) => console.warn('[groups] report marker not stamped:', e && e.message)));   // lane report-mark-on-ack: cards + markers when the turn carried it
         } else console.warn(`[groups] next-turn report (${Buffer.byteLength(rep.text, 'utf-8')} B) did not fit the ${INLINE_CAP - 64 - used} B left — it waits for the next turn`);
       }
     } catch (e) { console.warn('[groups] next-turn report skipped:', e && e.message); }
     // Stay INLINE — capInline (module scope; the one cap both hook payloads use)
-    const ctx = capInline(outParts.join('\n\n'), injectGroups.length > 1);
-    persistSeenMarks(s, key);   // B-86d3: the marks this answer moved, written as it is sent
-    res.json({ success: true, context: ctx });
+    const ctx = capInline(carry.wrap(outParts.join('\n\n')), injectGroups.length > 1);
+    const delivery = carry.close(ctx, () => persistSeenMarks(s, key));   // B-86d3 + lane report-mark-on-ack: the marks persisted once they MOVED (at the confirm; at once for a legacy caller)
+    res.json({ success: true, context: ctx, ...(delivery ? { delivery } : {}) });
   } catch (e) { res.json({ success: true, context: '' }); }
+});
+// THE CONFIRM DOOR (lane report-mark-on-ack, addition b): the caller that handed a hook route's answer to the turn returns its
+// delivery id — the session's OWN bearer, an unguessable single-use id staged on THAT session (another conversation's id is
+// refused by name); it moves the marks staged for that exact delivery and nothing else (src/turn-carry.js confirm).
+app.post('/api/agent/prompt-context/carried', (req, res) => {   // = TC.CONFIRM_ROUTE (spelled: the route censuses read the literal)
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const [s, id] = hit;
+  const r = TC.confirm(s, sessionStatusKey(s, id), req.body && req.body.delivery);
+  if (!r.ok) return res.status(r.status).json({ error: r.error, code: r.code });
+  res.json({ success: true, carried: r.kinds });
 });
 // Sessions we have already announced the nudge exit condition for — one
 // journal line per session per boot (the refusal itself repeats every stop).
@@ -1677,7 +1757,8 @@ app.get('/api/agent/msg/peers', (req, res) => {
     const st = sessionStatus.get(sessionStatusKey(ep.t, ep.id)) || sessionStatus.get(`webui:${ep.id}`) || {};
     peers.push(msgPeerRow(ep, st, lv));   // lane peer-census verify r1: a peer's name and its own status reason take the belt
   }
-  res.json({ peers });
+  let ge = null; try { ge = groupsEngine(); } catch { }
+  res.json(withWaiting(ge, who.cid, { peers }));
 });
 const groupsEngine = () => { try { const g = getGroups(); return g && typeof g.post === 'function' ? g : null; } catch { return null; } };
 convOps.provide({ groupsEngine }); // an automation's groups.invite reaches the same engine (the route hands its own `ge`)
@@ -1806,8 +1887,8 @@ app.post('/api/agent/msg/send', async (req, res) => {
     if (!r || !r.ok) return groupAnswer(res, r);
     _msgRate.set(floorKey, { ts: Date.now(), h: _msgDigest(text) });
     if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
-    if (handItems.length) return res.json({ ...msgSendAnswer(r), handover: handoverAfterSend({ ge, r, tgt, myCid, s, items: handItems }) });
-    return res.json(msgSendAnswer(r));   // verify r2 (lane peer-census): every name in the echo through the belt (the door)
+    if (handItems.length) return res.json(withWaiting(ge, myCid, { ...msgSendAnswer(r), handover: handoverAfterSend({ ge, r, tgt, myCid, s, items: handItems }) }));
+    return res.json(withWaiting(ge, myCid, msgSendAnswer(r)));   // verify r2 (lane peer-census): every name in the echo through the belt (the door)
   }
   // the legacy direct lane — ONLY when this instance has no groups engine; it speaks as a SESSION only
   if (who.job) return res.status(503).json({ error: 'agent groups are not available on this instance, and a job token has no direct lane — send from the conversation', code: 'job-token' });
@@ -1905,14 +1986,14 @@ function groupCaller(req, res) {
 app.get('/api/agent/msg/groups', (req, res) => {
   const c = groupCaller(req, res);
   if (!c) return;
-  res.json({ groups: msgGroupsAnswer(c.ge.listFor(c.cid)) });   // lane peer-census verify r1: every group and member name through the belt
+  res.json(withWaiting(c.ge, c.cid, { groups: msgGroupsAnswer(c.ge.listFor(c.cid)) }));   // lane peer-census verify r1: every group and member name through the belt
 });
 app.get('/api/agent/msg/read', (req, res) => {
   const c = groupCaller(req, res);
   if (!c) return;
   const r = c.ge.read({ by: c.cid, group: req.query.group, before: req.query.before !== undefined && req.query.before !== '' ? Number(req.query.before) : null, limit: Number(req.query.limit) || 50 });
   if (!r.ok) return groupAnswer(res, r);
-  res.json(msgReadAnswer(r));   // lane peer-census verify r1: the group's name, each record's author and text through the belt (judged where they leave the store)
+  res.json(withWaiting(c.ge, c.cid, msgReadAnswer(r), r.group && r.group.id));   // lane peer-census verify r1: the group's name, each record's author and text through the belt (judged where they leave the store)
 });
 app.post('/api/agent/msg/group', async (req, res) => {
   const c = groupCaller(req, res);

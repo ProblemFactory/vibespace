@@ -684,13 +684,24 @@ function resolveSoftDeny(msg) {
 let promptSeq = 0, activePrompt = null, nudgeTurnActive = false, stopEpoch = 0, stopCheckAbort = null, queueSeq = 0;
 let lastTurn = null; // the last DISPATCHED prompt + its tool steps (key → completed) — kept past its result (bug 4: stderr lags stdout)
 const promptQueue = [];
+// lane report-mark-on-ack: the hub moves an injection's marks (a group message «read by», a delta seen, a notice
+// consumed) only when the turn CARRIED it — this wrapper returns the answer's delivery id once its own write put it there
+let ctxDelivery = null;
+function contextCarried(d) {
+  const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  if (!d || !api || !token) return;
+  fetch(api + '/api/agent/prompt-context/carried', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ delivery: d }), signal: AbortSignal.timeout(10000) })
+    .catch((e) => log(`prompt-context confirm not sent: ${e.message} — the hub composes it again next turn`));
+}
 async function fetchContextPrefix() {
   const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  ctxDelivery = null;
   if (!api || !token) return '';
   try {
-    const res = await fetch(api + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000) });
+    const res = await fetch(api + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + token, 'X-VibeSpace-Confirm': '1' }, signal: AbortSignal.timeout(3000) });
     if (!res.ok) return '';
     const d = await res.json();
+    ctxDelivery = d && typeof d.delivery === 'string' && d.context ? d.delivery : null;
     return d && typeof d.context === 'string' ? d.context : '';
   } catch (e) { log(`prompt-context skipped: ${e.message}`); return ''; }
 }
@@ -801,7 +812,8 @@ async function runPrompt(text, opts = {}) {
   activePrompt = mine;
   meta.streaming = true; meta.activePromptId = promptId; scheduleMeta();
   let body = text;
-  if (!opts.nudge && !opts.peer) { const ctx = await fetchContextPrefix(); if (ctx) body = '<vibespace-context>\n' + ctx + '\n</vibespace-context>\n' + body; }
+  let carriedId = null;
+  if (!opts.nudge && !opts.peer) { const ctx = await fetchContextPrefix(); carriedId = ctxDelivery; ctxDelivery = null; if (ctx) body = '<vibespace-context>\n' + ctx + '\n</vibespace-context>\n' + body; }
   const stopped = { mode: null, reason: 'stopped before it reached Antigravity' };
   if (mine.cancelled) { endPrompt(mine, 'cancelled', null, opts); return stopped; }
   if (!(await authGate()) || mine.cancelled) {
@@ -814,6 +826,7 @@ async function runPrompt(text, opts = {}) {
   mine.dispatched = true;
   mine.tools = new Map(); lastTurn = mine;
   child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\n');
+  if (carriedId) contextCarried(carriedId);   // lane report-mark-on-ack: the turn's text carries the context
   return { mode: 'turn' };
 }
 

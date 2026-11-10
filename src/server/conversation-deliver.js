@@ -124,7 +124,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (ids.size) releasedAtBoot.push({ cid, ids: [...ids], n: q.length });
   }
   if (releasedAtBoot.length) { try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
-  for (const r of releasedAtBoot) log(`[deliver] ${r.cid}: a hand-over (${r.ids.join(', ')}) was in flight when the previous server stopped — its entries wait again (a duplicate is possible if the frame landed; check the conversation for "hand-over ${r.ids[0]}")`);
+  // lane report-mark-on-ack: a `carry` claim is an UNCONFIRMED ANSWER's (src/turn-carry.js) — it posts no frame, so its line
+  // names no hand-over to look for; a hand-over's keeps its words; both on one conversation are named apart
+  const claimedWords = (ids) => {
+    const ho = ids.filter((x) => x !== 'carry'), carry = ho.length < ids.length, both = carry && ho.length > 0;
+    const who = [carry ? 'an unconfirmed answer\'s claim (carry)' : '', ho.length ? `a hand-over (${ho.join(', ')})` : ''].filter(Boolean).join(' and ');
+    const why = [carry ? 'an answer\'s claim posts no frame — the answer that told them may have reached the conversation, so the next one may tell them again' : '', ho.length ? `a duplicate is possible if the frame landed; check the conversation for "hand-over ${ho[0]}"` : ''].filter(Boolean).join('; ');
+    return `${who} ${both ? 'were' : 'was'} in flight when the previous server stopped — ${both ? 'their' : 'its'} entries wait again (${why})`;
+  };
+  for (const r of releasedAtBoot) log(`[deliver] ${r.cid}: ${claimedWords(r.ids)}`);
   let stashTimer = null;
   // `true` when the file holds what memory holds; a failed write is logged AND answered (verify r4: a ref'd entry's
   // producer must hear the truth — see stashFor)
@@ -534,7 +542,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // park entry nobody released was invisible to every door — the timer, the turn end, the bound, the hand-over's view
         // all skip a claimed one — and sat in the file for ever, counted as "being retried". It joins its stash siblings:
         // handed to the stash at the first sweep as may-have-landed, never posted by the park again
-        if (e.ho) { notes.push(`${cid}: ${e.id} was claimed by hand-over ${e.ho} when the previous server stopped — its frame may have landed, so it is handed to the stash at the first sweep (its siblings wait there) and never posted again`); delete e.ho; e.maybeDelivered = true; e.nextAt = 0; }
+        if (e.ho) { notes.push(`${cid}: ${e.id} was claimed by ${e.ho === 'carry' ? 'an unconfirmed answer (carry) when the previous server stopped — the answer that told it may have reached the conversation' : `hand-over ${e.ho} when the previous server stopped — its frame may have landed`}, so it is handed to the stash at the first sweep (its siblings wait there) and never posted again`); delete e.ho; e.maybeDelivered = true; e.nextAt = 0; }
       }
     }
     if (Object.keys(retry).length) writeRetryNow();

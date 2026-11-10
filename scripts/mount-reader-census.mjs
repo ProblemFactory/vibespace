@@ -200,6 +200,7 @@ export const ROWS = [
   ['src/task-groups.js', 'user-path', 14, 'DOOR\\.blocked\\(', 'the TASK.md writer (contextDir) + a session cwd realpath: skipped / not cached, said once; lane task-group-context: the Context table — a row\'s stat (_kindOf / _stat), a told file\'s read (_readText behind _stat) and a listed folder\'s walk (_walk) each ask the door first: a blocked row is told as "its storage is not answering"'],
   ['src/telemetry.js', 'own-tree', 5, null, DATA],
   ['src/transcript-service.js', 'own-tree', 5, null, CLI],
+  ['src/turn-carry.js', 'own-tree', 2, null, `${DATA}; lane report-mark-on-ack r3: the outstanding deliveries by conversation (data/turn-carry-outstanding.json), read once when the routes are set up — the tidy after r4: opened, its size checked, read only under its 1 MiB bound`],
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],
   ['src/usage-cache-write.js', 'own-tree', 2, null, CLI],
   ['src/usage-estimator.js', 'own-tree', 3, null, CLI],

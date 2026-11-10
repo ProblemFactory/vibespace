@@ -1261,7 +1261,7 @@ function introFill(backend, first, routesMod = AR) {
 function producerCensus(src) {
   const i0 = src.indexOf("app.get('/api/agent/prompt-context'"), i1 = src.indexOf("app.get('/api/agent/stop-check'", i0);
   const body = src.slice(i0, i1);
-  const drainAt = body.indexOf('drainNotifsUnderCap(jm, deliver, caller.conversationId, aheadOfDrains())');
+  const drainAt = body.indexOf('drainNotifsUnderCap(jm, deliver, caller.conversationId, aheadOfDrains()');   // lane report-mark-on-ack: + the turn's stage
   const decided = new Set([...body.matchAll(/\bfits\((\w+(?:\.\w+)?)\)/g)].map((m) => m[1]));   // what has a fit-or-wait decision
   const sites = [];
   for (const m of body.matchAll(/\b(parts|outParts)\.(push|unshift)\(([\s\S]*?)\);/g)) {
@@ -1293,16 +1293,16 @@ function producerCensus(src) {
   const pc = ar.slice(ar.indexOf("app.get('/api/agent/prompt-context'"), ar.indexOf("app.get('/api/agent/stop-check'"));
   const tc = ar.slice(ar.indexOf("app.get('/api/agent/task-context'"), ar.indexOf("app.get('/api/agent/prompt-context'"));
   ok((pc.match(/sessionStatus\.consumeNotices\(k\)/g) || []).length === 1 && (pc.match(/sessionStatus\.consumeNotices\(k, byKey\.get\(k\)\)/g) || []).length === 1 && /if \(taken\) \{/.test(pc) && /sessionStatus\.pendingNotices\(k\)/.test(pc) && /consumeNotices\(key, count = null\)/.test(read('src/session-status.js'))
-    && (pc.match(/s\._jobsEventsSeenTs = u\.lastTs/g) || []).length === 2 && /if \(!u\.text\) s\._jobsEventsSeenTs = u\.lastTs;/.test(pc) && /else if \(fits\(u\.text\)\) \{ jobsUpdate = u\.text; tailHeld \+= B\(u\.text\) \+ 2; s\._jobsEventsSeenTs = u\.lastTs; \}/.test(pc)
-    && /if \(fits\(MANAGER_INTRO\)\) \{ parts\.push\(MANAGER_INTRO\); s\._mgrIntroSeen = true; \}/.test(pc) && /if \(intro && fits\(intro\)\) \{ parts\.push\(intro\); s\._toolsIntroSeen = true; \}/.test(pc)
-    && /if \(intro && fitsHere\(intro\)\) \{ context = intro; s\._toolsIntroSeen = true; \}/.test(tc) && /if \(fitsHere\(MANAGER_INTRO\)\) \{ context = context \? context \+ '\\n\\n' \+ MANAGER_INTRO : MANAGER_INTRO; s\._mgrIntroSeen = true; \}/.test(tc)
+    && (pc.match(/s\._jobsEventsSeenTs = u\.lastTs/g) || []).length === 2 && /if \(!u\.text\) s\._jobsEventsSeenTs = u\.lastTs;/.test(pc) && /else if \(fits\(u\.text\)\) \{ jobsUpdate = u\.text; tailHeld \+= B\(u\.text\) \+ 2; carry\.stage\('jobs-update', \(\) => \{ if \(!\(Number\(s\._jobsEventsSeenTs\) > u\.lastTs\)\) s\._jobsEventsSeenTs = u\.lastTs; \}\); \}/.test(pc)
+    && /if \(fits\(MANAGER_INTRO\)\) \{ parts\.push\(MANAGER_INTRO\); carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(pc) && /if \(intro && fits\(intro\)\) \{ parts\.push\(intro\); carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(pc)
+    && /if \(intro && fitsHere\(intro\)\) \{ context = intro; carry\.stage\('tools-intro', \(\) => \{ s\._toolsIntroSeen = true; \}\); \}/.test(tc) && /if \(fitsHere\(MANAGER_INTRO\)\) \{ context = context \? context \+ '\\n\\n' \+ MANAGER_INTRO : MANAGER_INTRO; carry\.stage\('manager-intro', \(\) => \{ s\._mgrIntroSeen = true; \}\); \}/.test(tc)
     && (pc.match(/s\._mgrIntroSeen = true/g) || []).length === 1 && (tc.match(/s\._mgrIntroSeen = true/g) || []).length === 1 && (pc.match(/s\._toolsIntroSeen = true/g) || []).length === 1 && (tc.match(/s\._toolsIntroSeen = true/g) || []).length === 1,
     'CONSUMERS: the notices are PEEKED and the fitting PREFIX consumed by count (the master switch\'s consume-and-drop is the other site); the jobs marker moves only when the update rides (or says nothing); the manager intro and the tools intro are stamped only inside fits()/fitsHere() — on both routes');
   ok(/if \(!honoursSessionStart\(s\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(tc) && /if \(hookOriginated\(req\) && !hookOutputHonoured\(hit\[0\]\)\) return res\.json\(\{ success: true, context: '' \}\);/.test(pc) && pc.indexOf('hookOriginated(req)') < pc.indexOf('integrationOnMaster()'),
     'THE DOORS: task-context answers empty for a harness that ignores SessionStart output; prompt-context answers empty to a hook-originated call on a session the wrapper delivers to — before the master switch (which consumes-and-drops)');
   // the task-context route's own appends: the intro / manager (fitsHere), the preamble (first), the drains (fit-or-wait), the digest (fitDigest)
   const tcSites = [...tc.matchAll(/context = context \? context \+ '\\n\\n' \+ (\w+) : (\w+);/g)].map((m) => m[1]);
-  ok(JSON.stringify(tcSites) === JSON.stringify(['MANAGER_INTRO', 'missed', 'dig', 'pmText']) && /context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc) && /drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\)\)/.test(tc) && /jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\)\)/.test(tc) && /drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\)\)/.test(tc),
+  ok(JSON.stringify(tcSites) === JSON.stringify(['MANAGER_INTRO', 'missed', 'dig', 'pmText']) && /context = withPre\.length \? withPre\.join\('\\n\\n'\) : context;/.test(tc) && /drainNotifsUnderCap\(jm, deliver, caller\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc) && /jm\.digestFor\(caller, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes\)/.test(tc) && /drainStashUnderCap\(deliver, caller2\.conversationId, Buffer\.byteLength\(context \|\| '', 'utf-8'\) \+ carry\.againBytes, console\.log, carry\)/.test(tc),
     `CENSUS task-context: the appends are the manager intro (fitsHere), the two drains (fit-or-wait) and the digest (fitDigest yields) — each against the context so far; the preamble is prepended first`, tcSites);
 }
 {
@@ -1498,7 +1498,7 @@ function producerCensus(src) {
   const MUT7 = mutantCopies('stash-strip-r7', REPO);
   const ar = read('src/agent-routes.js');
   // (i) an UNCOUNTED producer after the drains: the census goes red AND the sweep trims
-  const a1 = "        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains());\n        if (pmText) parts.push(pmText);\n";
+  const a1 = "        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains(), console.log, carry);\n        if (pmText) parts.push(pmText);\n";
   if (!ar.includes(a1)) throw new Error('mutation anchor missing: stash push');
   const extraSrc = ar.replace(a1, a1 + "        parts.push('<vibespace-r7-uncounted>' + 'u'.repeat(700) + '</vibespace-r7-uncounted>');\n");
   const c = producerCensus(extraSrc);
@@ -1514,9 +1514,9 @@ function producerCensus(src) {
   try { H.notice('status-override'); H.notice('browser-takeover'); H.events(8); const c1 = H.get('/api/agent/prompt-context'); const c2 = H.get('/api/agent/prompt-context');
     ok(/context trimmed/.test(c1) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser/.test(c1) && !/took over your browser/.test(c2), 'CONTROL the notices consumed before their fit: the restart\'s first prompt is trimmed, the takeover notice is consumed and gone from both prompts (②h can go red)'); } finally { H.done(); }
   // (iii) the manager intro stamped before its fit
-  const a3 = "      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }";
+  const a3 = "      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }";
   if (!ar.includes(a3)) throw new Error('mutation anchor missing: manager fit');
-  const Mgr = MUT7.load('src/agent-routes.js', ar.replace(a3, "      if (true) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }"), 'manager-unfit');
+  const Mgr = MUT7.load('src/agent-routes.js', ar.replace(a3, "      if (true) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }"), 'manager-unfit');
   const M = rigR7({ groups: 2, n: 25, manager: true, settings: managerSettings('/api/agent/prompt-context'), routesMod: Mgr });
   try { const c1 = M.get('/api/agent/prompt-context'); const c2 = M.get('/api/agent/prompt-context'); ok(/context trimmed/.test(c1) && !c1.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !c2.includes('<vibespace-group-manager>'), 'CONTROL the manager intro stamped before its fit: cut mid-verb on the first prompt, never again (②h can go red)'); } finally { M.done(); }
   // (iv) the codex SessionStart door removed: the stash drains into the dropped answer
