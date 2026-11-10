@@ -927,7 +927,7 @@
 
 **Pins.** test-status-bar-chips ⑦ (fast, fake DOM over the real bar): the owner's scene, (c) a drawn 5-1 init and an opus echo after the served fact, (e) a real fallback amber naming the lock target and its clearing, (d) an unlock reads no stale target, a reload names the target, nothing reported credits no CLI, (b) the [1m] form held / a full-id lock exact, (a) a target-less lock as before; two clients through the REAL set-model case and chat-view's model-lock line (pick, fallback, unlock, relock, fallback, a served fact older than the move); a census of every server writer of the lock. test-mobile-gaps (heavy): the 5-1 scene live on the phone at 390×844.
 
-## A REPLY WAS «READ BY» A CONVERSATION WHOSE TURN NEVER CARRIED IT (the coordinator's record, 2026-11-09 23:14–23:24Z; lane report-mark-on-ack, .389)
+## A REPLY WAS «READ BY» A CONVERSATION WHOSE TURN NEVER CARRIED IT (the coordinator's record, 2026-11-09 23:14–23:24Z; lane report-mark-on-ack, .390)
 
 **Symptom.** The owner, 2026-11-09: «我看它不是回你了吗？» … «没送进你上下文，那不是你的问题吗？自己看一看。» The coordinator had asked the device-operations conversation with a wake (23:14Z); the reply was in their direct group at 23:17:31Z and the log said «read by VibeSpace 主开发 23:18Z». The coordinator's turn that began 23:18:20Z (a background-task notification) carried NO hook context — nor did four other turns that day (5 of 19). The next injection (23:24:32Z) did not carry the reply: the hub counted it handed over. For six minutes the coordinator told the owner «no answer yet», until it read the group by hand.
 
@@ -947,7 +947,7 @@
 9. (round 4) A claim belongs to the conversation and always ends (any session object's next answer, its bound, the boot); no failure inside the carry empties an answer (the legacy answer + one line); the outstanding file takes a table only, is bounded, says its failures once, and retires a row only when what it guards is durable.
 10. (the tidy after round 4) A claim's bound is a property of its STAMP, never of the path that staged it; a claim call is a door of the carry (a throw is said, the answer whole, what it stamped unstamped); a file beyond its byte bound is refused by name before it is read.
 
-## EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (the owner, 2026-11-09; lane cli-update-needs-nothing, .389)
+## EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (the owner, 2026-11-09; lane cli-update-needs-nothing, .390)
 
 **The requirement it broke.** The owner's founding requirement, 2026-03-22 item 7: «使用原生claude code，确保claude code更新不需要重新更新本项目代码（除非claude code有breaking change）». On 2026-11-09: «每次更新都要重新测量也太弱智了» · «现在 fable 5.2 可以更新后直接用了吗？userW 想要更新了» · «你准备以后怎么彻底解决这个问题？».
 
@@ -959,7 +959,7 @@
 
 **不变量.** A fact the installed CLI states about itself is read at runtime, never re-typed — a new hand row is a correction that competes by date, not the way a model becomes usable. Gated by test-claude-update-needs-nothing (every scene with its RED control: the shipped tables alone) and its census: a model-keyed site in src/ with no row in scripts/fixtures/cli-update-census.json is RED.
 
-## A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (2026-11-09; the owner said yes to the fix 2026-11-10; lane jobs-addressed-push, .389)
+## A CONVERSATION RAN ANOTHER CONVERSATION'S REMINDER (2026-11-09; the owner said yes to the fix 2026-11-10; lane jobs-addressed-push, .390)
 
 **Symptom.** A coordinator's turn carried `- jb-… <name>: cron fired: notify — vibespace-job poll jb-…` for a notify cron that ANOTHER conversation of its Task Group owned. Nothing on the line said whose it was. The coordinator read it as its own, ran the suggested poll — the cron's text, «check the shared inbox…», printed raw with no owner — and did it; the owner conversation did it too. Measured on that conversation's own records: in 14 days 558 of 2043 turns carried a jobs update, 760 event lines — 4 its own, 708 from 25 other conversations, 48 of jobs since gone; the 708 were 288 announces, 269 normal ends, 56 cron fires, 55 interruptions and 14 failures. In the last 24 h: 29 lines, 0 its own.
 
@@ -9285,7 +9285,7 @@ Gates:
 
 **Not closed.** Fast mode is unpriced: the ledger keeps no `usage.speed`, so a fast turn would show at half its list cost (none on this box yet). The census covers the Fable family only: today Opus, Sonnet and Haiku disagree across tables (no `claude-opus-5-5` picker row; Haiku 5.5 priced as Haiku 4.5; Sonnet 5.5's cache hit at $0.20 against $0.10), and making them agree is its own lane.
 
-## A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681; the owner 2026-11-09 «agent 自助登录浏览器网站什么时候上线？»; lane login-request-card, 2.369.389)
+## A LOGIN ASKED FOR THROUGH THE VAULT LANDED AS TWO FREE ENTRIES NO BROWSER COULD FILL (B-a681; the owner 2026-11-09 «agent 自助登录浏览器网站什么时候上线？»; lane login-request-card, 2.369.390)
 
 **What happened.** The agent's standing instruction on a sign-in page is to ask through the vault first and use a takeover last. But the vault's ask had only free-entry targets (`--kind api-key|password|secret` ⇒ `secret:<10 hex>`, run-only).
 - An owner who pasted a site password and its two-step seed on an agent's ask got two free entries that no browser road can fill (userW's assistant, 2026-11-03).
